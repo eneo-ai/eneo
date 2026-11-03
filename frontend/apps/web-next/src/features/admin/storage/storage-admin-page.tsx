@@ -1,11 +1,9 @@
-"use client";
-
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CircleAlert, Database, HardDrive, Info, RefreshCw } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
-import { useRouter } from "next/navigation";
+import { useLocale, useTranslations } from "use-intl";
+import { revealProblems } from "@/components/composites/field-problem";
 import { useCallback, useState } from "react";
-import { flushSync } from "react-dom";
+import { LoadingState } from "@/components/composites/loading-state";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { PageHeader } from "@/components/composites/page-header";
 import { SettingsGroup } from "@/components/composites/settings-rows";
@@ -13,7 +11,6 @@ import { useAppContext } from "@/components/providers/app-context";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError, unwrap } from "@/lib/api/errors";
 import { toast } from "@/lib/toast";
@@ -69,14 +66,14 @@ export function StorageAdminPage() {
   });
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 pb-16">
-      <PageHeader title={t("storage_settings_title")} tour="admin-storage" />
+    <div className="flex w-full flex-col gap-6 pb-16">
+      <PageHeader
+        title={t("storage_settings_title")}
+        description={t("storage_settings_description")}
+        tour="admin-storage"
+      />
       {policy.isPending ? (
-        <div className="space-y-4" aria-busy="true">
-          <Skeleton className="h-5 w-56" />
-          <Skeleton className="h-40 w-full" />
-          <span className="sr-only">{t("storage_settings_loading")}</span>
-        </div>
+        <LoadingState rows={2} label={t("storage_settings_loading")} />
       ) : policy.isError ? (
         <Alert variant="destructive" role="alert">
           <CircleAlert className="size-4" />
@@ -103,7 +100,6 @@ function StoragePolicyEditor({
   canEdit: boolean;
 }) {
   const t = useTranslations();
-  const router = useRouter();
   const queryClient = useQueryClient();
   const locale = useLocale();
   const [baseline, setBaseline] = useState(initialPolicy);
@@ -196,9 +192,7 @@ function StoragePolicyEditor({
     if (saving || saveBlocked) return;
     const invalid = LIMIT_FIELDS.find(({ field }) => !isValidByteLimit(draft[field]));
     if (invalid) {
-      // Rendered before focus moves, so the field is read with its problem.
-      flushSync(() => setSubmitted(true));
-      document.getElementById(invalid.id)?.focus();
+      revealProblems(() => setSubmitted(true), invalid.id);
       return;
     }
     if (targetChanged) setConfirmOpen(true);
@@ -223,9 +217,16 @@ function StoragePolicyEditor({
       toast.success(t("storage_settings_save_success"));
     } catch (error) {
       if (error instanceof EneoApiError && error.status === 403) setAuthorityRevoked(true);
-      else if (error instanceof EneoApiError && error.code === 9046) setStale(true);
-      else if (error instanceof EneoApiError && error.code === 9047) setTargetUnavailable(true);
-      else setSaveOutcomeUnknown(true);
+      else if (error instanceof EneoApiError && error.code === 9046) {
+        setStale(true);
+        toast.error(t("storage_settings_stale_title"));
+      } else if (error instanceof EneoApiError && error.code === 9047) {
+        setTargetUnavailable(true);
+        toast.error(t("storage_settings_target_unavailable_title"));
+      } else {
+        setSaveOutcomeUnknown(true);
+        toast.error(t("storage_settings_save_outcome_unknown_title"));
+      }
     } finally {
       setSaving(false);
       setConfirmOpen(false);
@@ -243,10 +244,7 @@ function StoragePolicyEditor({
   return (
     <>
       <div className="flex flex-wrap items-end justify-between gap-4">
-        <div className="max-w-3xl space-y-1">
-          <p className="text-muted-foreground text-sm leading-6">
-            {t("storage_settings_description")}
-          </p>
+        <div className="max-w-3xl">
           <p className="text-muted-foreground text-xs">
             {t("storage_settings_last_changed", {
               date: new Intl.DateTimeFormat(locale, {
@@ -303,10 +301,7 @@ function StoragePolicyEditor({
         capability={objectStoreCapability}
         canEdit={canEdit}
         onAuthorityRevoked={revokeAuthority}
-        onConnectionChanged={async () => {
-          await reload(dirty);
-          router.refresh();
-        }}
+        onConnectionChanged={() => reload(dirty)}
       />
 
       {(stale || loadError || targetUnavailable || saveOutcomeUnknown) && (
@@ -381,7 +376,7 @@ function StoragePolicyEditor({
               return (
                 <label
                   key={target}
-                  className={`flex cursor-pointer items-start gap-3 rounded-lg border p-4 ${selected ? "border-primary bg-accent" : ""} ${unavailable ? "opacity-60" : ""}`}
+                  className={`flex cursor-pointer items-start gap-3 rounded-lg border p-4 ${selected ? "border-primary bg-accent" : ""}`}
                 >
                   <input
                     type="radio"
@@ -397,10 +392,15 @@ function StoragePolicyEditor({
                   {target === "postgres_inline" ? (
                     <Database className="mt-0.5 size-5 shrink-0" />
                   ) : (
-                    <HardDrive className="mt-0.5 size-5 shrink-0" />
+                    <HardDrive
+                      className={`mt-0.5 size-5 shrink-0 ${unavailable ? "opacity-60" : ""}`}
+                    />
                   )}
                   <span className="space-y-1">
-                    <span className="flex flex-wrap items-center gap-2 font-medium">
+                    {/* An option that cannot be chosen is muted, by colour, not opacity. */}
+                    <span
+                      className={`flex flex-wrap items-center gap-2 font-medium ${unavailable ? "text-muted-foreground" : ""}`}
+                    >
                       {targetLabel(target)}
                       {baseline.policy.new_write_storage_target === target && (
                         <Badge variant="outline">{t("storage_overview_active")}</Badge>

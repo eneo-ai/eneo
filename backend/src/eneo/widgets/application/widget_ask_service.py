@@ -10,7 +10,6 @@ from uuid import UUID
 from zoneinfo import ZoneInfo
 
 import sqlalchemy as sa
-from anyio import CancelScope
 
 from eneo.ai_models.completion_models.completion_model import Completion
 from eneo.assistants.api.assistant_models import AssistantResponse
@@ -22,6 +21,7 @@ from eneo.database.tables.questions_table import Questions
 from eneo.main.config import Settings, get_settings
 from eneo.main.exceptions import NotFoundException, UnauthorizedException
 from eneo.main.logging import get_logger
+from eneo.main.stream_lifecycle import finalizing
 from eneo.sessions.session import SessionFeedback, SessionInDB
 from eneo.widgets.application.visitor_view import VisitorView
 from eneo.widgets.application.widget_limits import (
@@ -102,7 +102,7 @@ class WidgetAnswer(AsyncIterator[Completion]):
         if self._closed:
             return
         self._closed = True
-        with CancelScope(shield=True):
+        with finalizing("widget answer settlement"):
             try:
                 if isinstance(self._answer, _AsyncClosable):
                     await self._answer.aclose()
@@ -297,7 +297,7 @@ class WidgetAskService:
         except BaseException:
             # No stream owns the reservation yet. Cleanup must also run on a
             # disconnected client, without hiding the original provider error.
-            with CancelScope(shield=True):
+            with finalizing("widget reservation release"):
                 try:
                     await self.budget.release(reservation)
                 except Exception:

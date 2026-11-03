@@ -117,7 +117,7 @@ if not os.getenv("CRAWL_MAX_LENGTH"):
     os.environ["CRAWL_MAX_LENGTH"] = "1800"  # 30 minutes
 
 import contextlib
-from typing import AsyncGenerator, Generator
+from typing import Any, AsyncGenerator, Generator
 from unittest.mock import patch
 
 import psycopg2
@@ -138,6 +138,7 @@ from eneo.server.main import get_application
 from init_db import add_tenant_user, create_salt_and_hashed_password
 from tests.database_reset import reset_populated_tables
 from tests.fixtures import mint_v2_api_key
+from tests.integration import safe_method_tripwire
 
 # Detect if we're in a devcontainer environment
 # If POSTGRES_HOST is set to 'db', we're likely in the devcontainer
@@ -656,6 +657,12 @@ async def app(setup_database):
     # We DON'T use lifespan_context because it would close the sessionmanager
     # on exit, which we need for cleanup_database fixture.
     application = get_application()
+    # Every GET the tests send must be side-effect free or declare its effect.
+    get_violations: list[str] = []
+    application.add_middleware(
+        safe_method_tripwire.SafeMethodTripwire, violations=get_violations
+    )
+    stop_recording = safe_method_tripwire.install()
 
     # Manually trigger startup only (not shutdown)
     # Import here because it needs to be after settings are configured
@@ -678,7 +685,10 @@ async def app(setup_database):
         # Full shutdown closes the session manager needed by cleanup_database.
         # Release the new process-owned byte-plane clients independently so
         # every function-scoped application gets a fresh runtime without leaks.
+        stop_recording()
         await object_content_runtime.stop()
+    if get_violations:
+        pytest.fail("\n".join(get_violations), pytrace=False)
 
 
 @pytest.fixture
@@ -1067,7 +1077,10 @@ def oidc_mock(monkeypatch):
         *,
         discovery: dict[str, tuple[dict, int] | dict] | None = None,
         tokens: dict[tuple[str, str | None], tuple[dict, int] | dict] | None = None,
-    ) -> Callable[[], dict[str, list[tuple[str, str]]]]:
+        clients: dict[str, str] | None = None,
+    ) -> Callable[[], dict[str, list[Any]]]:
+        """``clients`` maps client_id to secret: a token request with other
+        credentials gets the IdP's 401 invalid_client, as a real IdP answers."""
         discovery_map: dict[str, tuple[dict, int]] = {}
         for url, payload in (discovery or {}).items():
             if isinstance(payload, tuple):
@@ -1082,6 +1095,7 @@ def oidc_mock(monkeypatch):
             else:
                 token_map[key] = (payload, 200)
         request_log: list[tuple[str, str]] = []
+        token_clients: list[str | None] = []
 
         class _FakeResponse:
             def __init__(self, payload: dict, status: int = 200):
@@ -1115,6 +1129,11 @@ def oidc_mock(monkeypatch):
                 code = None
                 if isinstance(data, dict):
                     code = data.get("code") or data.get("authorization_code")
+                    if clients is not None:
+                        client_id = data.get("client_id")
+                        token_clients.append(client_id)
+                        if clients.get(client_id) != data.get("client_secret"):
+                            return _FakeResponse({"error": "invalid_client"}, 401)
                 key = (url, code)
                 if key not in token_map:
                     raise AssertionError(f"Unmocked token request: {url} code={code}")
@@ -1139,8 +1158,8 @@ def oidc_mock(monkeypatch):
             raising=False,
         )
 
-        def _summary() -> dict[str, list[tuple[str, str]]]:
-            return {"requests": request_log}
+        def _summary() -> dict[str, list[Any]]:
+            return {"requests": request_log, "token_clients": token_clients}
 
         return _summary
 

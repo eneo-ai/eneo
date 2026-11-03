@@ -104,11 +104,13 @@ curl -w "%{http_code}" -s -o /dev/null http://localhost:8123/api/healthz
 ### Browser calls from another origin are refused with `disallowed_cors_origin`
 
 The backend accepts a request that carries an `Origin` header only when that
-origin is registered in the `allowed_origins` table (or is `localhost`, the
-API's own origin, or the request authenticates with an active secret API
-key). Anything else is answered with `400` and the code
-`disallowed_cors_origin` before routing, so the backend log shows no attempt
-for the endpoint and the response has no trace id.
+origin is registered in the `allowed_origins` table (or is the API's own
+origin, or the request authenticates with an active secret API key). A page on
+`localhost`, `127.0.0.1` or `[::1]` passes without an entry only with
+`ENVIRONMENT=development`; elsewhere register it, for example
+`http://localhost:*` for any port. Anything else is answered with `400` and the
+code `disallowed_cors_origin` before routing, so the backend log shows no
+attempt for the endpoint and the response has no trace id.
 
 Up to Eneo 2.2 the web app's own server-side calls carried the browser
 `Origin` as well, so an unregistered public URL also broke username/password

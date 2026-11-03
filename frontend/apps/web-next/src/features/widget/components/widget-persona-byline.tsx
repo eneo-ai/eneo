@@ -1,4 +1,4 @@
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useState } from "react";
 import type { PersonaView } from "../persona";
 import "../persona.css";
@@ -24,8 +24,6 @@ export function WidgetPersonaByline({ persona }: { persona: PersonaView }) {
         aria-hidden="true"
       >
         {showImage ? (
-          // The proxy under this origin serves the upload; nothing else fits next/image.
-          // eslint-disable-next-line @next/next/no-img-element
           <img
             className="size-full object-cover"
             src={persona.avatarUrl ?? undefined}

@@ -1,7 +1,7 @@
 "use client";
 
 import { Button } from "@astryxdesign/core/Button";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useEffect, useId, useRef, useState } from "react";
 import { toastApiError } from "@/lib/api/toast";
 import type { Widget } from "./autosave";

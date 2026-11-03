@@ -2,7 +2,7 @@
 
 import { Button } from "@astryxdesign/core/Button";
 import { ToggleButton, ToggleButtonGroup } from "@astryxdesign/core/ToggleButton";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useEffect, useId, useRef, useState } from "react";
 import { toastApiError } from "@/lib/api/toast";
 import { previewEmbedPath } from "../preview";

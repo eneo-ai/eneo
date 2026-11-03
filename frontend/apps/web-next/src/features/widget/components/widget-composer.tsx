@@ -1,5 +1,5 @@
 import { SendHorizontal } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { forwardRef, useCallback, useImperativeHandle, useRef, type KeyboardEvent } from "react";
 
 export type WidgetComposerHandle = {

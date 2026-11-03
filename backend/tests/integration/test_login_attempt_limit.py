@@ -5,8 +5,8 @@ from uuid import uuid4
 
 import pytest
 
-from eneo.audit.infrastructure.rate_limiting import RateLimitServiceUnavailableError
 from eneo.authentication.login_attempts import LOGIN_ATTEMPT_LIMIT
+from eneo.redis.rate_limit import RateLimitServiceUnavailableError
 from eneo.users import user_router
 
 PASSWORD = "OriginalPassword1!"

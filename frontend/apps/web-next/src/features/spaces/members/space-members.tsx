@@ -1,13 +1,27 @@
-"use client";
-
+import { Avatar } from "@astryxdesign/core/Avatar";
+import { BottomSheet } from "@astryxdesign/core/BottomSheet";
 import { Button as AstryxButton } from "@astryxdesign/core/Button";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Trash2, UserPlus, Users } from "lucide-react";
-import { useTranslations } from "next-intl";
-import { useId, useRef, useState } from "react";
-import { flushSync } from "react-dom";
-import { ConfirmDialog } from "@/components/composites/confirm-dialog";
-import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
+import { useCollator } from "@astryxdesign/core/i18n";
+import { IconButton } from "@astryxdesign/core/IconButton";
+import { List, ListItem } from "@astryxdesign/core/List";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Check, ChevronRight, Trash2, UserPlus, Users, X } from "lucide-react";
+import { useTranslations } from "use-intl";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { ConfirmDialog, ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
+import { DockedActions } from "@/components/shell/docked-actions";
+import { revealProblems } from "@/components/composites/field-problem";
+import { RadioList, RadioListItem } from "@astryxdesign/core/RadioList";
+import { Token } from "@astryxdesign/core/Token";
+import { Selector } from "@astryxdesign/core/Selector";
+import { TextInput } from "@/components/astryx/text-input";
+import {
+  LoadMore,
+  QueryStateBoundary,
+  blockingError,
+  ListError,
+  RefreshError
+} from "@/components/composites/query-state";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { useAppContext } from "@/components/providers/app-context";
 import { Button } from "@/components/ui/button";
@@ -19,7 +33,6 @@ import {
   DialogTitle,
   DialogTrigger
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -32,10 +45,26 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { toastApiError } from "@/lib/api/toast";
+import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
+import { flattenPages } from "@/lib/api/pagination";
+import {
+  memberCandidatesQueryOptions,
+  userGroupsQueryOptions
+} from "@/features/admin/user-groups/user-groups";
+import { useFocusRescue } from "@/lib/focus-rescue";
+import { usePhoneScreen } from "@/lib/hooks/use-media-match";
+import { toast } from "@/lib/toast";
 import { RemovalFocusScope, useRemovalMutation } from "@/features/spaces/removal";
 import type { SpaceMember, SpaceRoleValue } from "@/features/spaces/space";
 import { useSpace } from "@/features/spaces/use-space";
 import { PageHeader } from "@/components/composites/page-header";
+import {
+  personToneClass,
+  SPACE_ROLE_DESCRIPTION_KEYS,
+  SPACE_ROLE_LABEL_KEYS,
+  sortMembersByRole
+} from "./member-avatar";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
 function useInvalidateSpace() {
   const { routeId } = useSpace();
@@ -67,7 +96,7 @@ function RoleSelect({
       <SelectContent>
         {roles.map((role) => (
           <SelectItem key={role.value} value={role.value}>
-            {role.label}
+            {t(SPACE_ROLE_LABEL_KEYS[role.value])}
           </SelectItem>
         ))}
       </SelectContent>
@@ -75,34 +104,67 @@ function RoleSelect({
   );
 }
 
-function MemberRow({ member }: { member: SpaceMember }) {
+type GroupMember = Schema<"SpaceGroupMember">;
+
+/** A user or a user group in the space. */
+type Membership = { kind: "member"; member: SpaceMember } | { kind: "group"; group: GroupMember };
+
+/** Changing a membership's role and removing it from the space. */
+function useMembership(membership: Membership) {
   const t = useTranslations();
-  const { space, can } = useSpace();
-  const { user } = useAppContext();
+  const { space } = useSpace();
   const invalidate = useInvalidateSpace();
-  const isSelf = member.id === user.id;
 
   const updateRole = useMutation({
-    mutationFn: (role: SpaceRoleValue) =>
-      unwrap(
-        browserApi.PATCH("/api/v1/spaces/{id}/members/{user_id}/", {
-          params: { path: { id: space.id, user_id: member.id } },
-          body: { role }
-        })
-      ),
+    mutationFn: async (role: SpaceRoleValue) => {
+      if (membership.kind === "member") {
+        await unwrap(
+          browserApi.PATCH("/api/v1/spaces/{id}/members/{user_id}/", {
+            params: { path: { id: space.id, user_id: membership.member.id } },
+            body: { role }
+          })
+        );
+      } else {
+        await unwrap(
+          browserApi.PATCH("/api/v1/spaces/{id}/group-members/{group_id}/", {
+            params: { path: { id: space.id, group_id: membership.group.id } },
+            body: { role }
+          })
+        );
+      }
+    },
     onSuccess: invalidate,
     onError: (error) => toastApiError(error, t)
   });
 
-  const removeMember = useRemovalMutation({
-    mutationFn: () =>
-      unwrap(
-        browserApi.DELETE("/api/v1/spaces/{id}/members/{user_id}/", {
-          params: { path: { id: space.id, user_id: member.id } }
-        })
-      ),
+  const remove = useRemovalMutation({
+    mutationFn: async () => {
+      if (membership.kind === "member") {
+        await unwrap(
+          browserApi.DELETE("/api/v1/spaces/{id}/members/{user_id}/", {
+            params: { path: { id: space.id, user_id: membership.member.id } }
+          })
+        );
+      } else {
+        await unwrap(
+          browserApi.DELETE("/api/v1/spaces/{id}/group-members/{group_id}/", {
+            params: { path: { id: space.id, group_id: membership.group.id } }
+          })
+        );
+      }
+    },
     refresh: invalidate
   });
+
+  return { updateRole, remove };
+}
+
+function MemberRow({ member }: { member: SpaceMember }) {
+  const t = useTranslations();
+  const { space, can } = useSpace();
+  const { user } = useAppContext();
+  const isSelf = member.id === user.id;
+  const { updateRole, remove: removeMember } = useMembership({ kind: "member", member });
 
   return (
     <div className="border-border flex items-center justify-between gap-4 border-b py-3">
@@ -132,7 +194,9 @@ function MemberRow({ member }: { member: SpaceMember }) {
           />
         </div>
       ) : (
-        <span className="text-muted-foreground text-sm capitalize">{member.role}</span>
+        <span className="text-muted-foreground text-sm">
+          {t(SPACE_ROLE_LABEL_KEYS[member.role])}
+        </span>
       )}
     </div>
   );
@@ -143,33 +207,27 @@ function MemberRow({ member }: { member: SpaceMember }) {
  * shows it as its primary action; `variant="header"` is the quieter button in
  * the space header on the other tabs (same name, same dialog).
  */
-/** Adds a member: a user picked from the search, and a role. A missing pick shows on add. */
 export function AddMemberDialog({ variant = "page" }: { variant?: "page" | "header" }) {
   const t = useTranslations();
   const roleId = useId();
   const { space } = useSpace();
   const invalidate = useInvalidateSpace();
   const [open, setOpen] = useState(false);
-  const [filter, setFilter] = useState("");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Schema<"UserSparse"> | null>(null);
   const [role, setRole] = useState<SpaceRoleValue>(space.available_roles[0]?.value ?? "editor");
   const [submitted, setSubmitted] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
-  const userProblem = submitted && !selectedId ? t("form_problem_choose_user") : null;
+  const [searchInput, setSearchInput] = useState("");
+  const userProblem = submitted && !selected ? t("form_problem_choose_user") : null;
 
-  const memberIds = new Set(space.members.items.map((member) => member.id));
-  const { data: candidates } = useQuery({
-    queryKey: ["users", "search", filter],
-    queryFn: async () => {
-      const page = await unwrap(
-        browserApi.GET("/api/v1/users/", {
-          params: { query: { email: filter || null, limit: 10 } }
-        })
-      );
-      return page.items;
-    },
+  const email = useDebouncedValue(searchInput.trim());
+  const candidates = useInfiniteQuery({
+    ...memberCandidatesQueryOptions(browserApi, email),
     enabled: open
   });
+  const users = flattenPages(candidates.data?.pages);
+  const total = candidates.data?.pages.at(-1)?.total_count ?? users.length;
+  const memberIds = new Set(space.members.items.map((member) => member.id));
 
   const addMember = useMutation({
     mutationFn: (body: { id: string; role: SpaceRoleValue }) =>
@@ -182,23 +240,20 @@ export function AddMemberDialog({ variant = "page" }: { variant?: "page" | "head
     onSuccess: () => {
       invalidate();
       setOpen(false);
-      setSelectedId(null);
-      setFilter("");
+      setSelected(null);
+      setSearchInput("");
     },
     onError: (error) => toastApiError(error, t)
   });
 
-  const selectable = (candidates ?? []).filter((user) => !memberIds.has(user.id));
-
   function add() {
     if (addMember.isPending) return;
-    if (!selectedId) {
-      // Rendered before focus moves, so the field is read with its error.
-      flushSync(() => setSubmitted(true));
-      searchRef.current?.focus();
+    if (!selected || memberIds.has(selected.id)) {
+      setSelected(null);
+      revealProblems(() => setSubmitted(true), searchRef.current);
       return;
     }
-    addMember.mutate({ id: selectedId, role });
+    addMember.mutate({ id: selected.id, role });
   }
 
   return (
@@ -225,40 +280,53 @@ export function AddMemberDialog({ variant = "page" }: { variant?: "page" | "head
           <DialogTitle>{t("add_member")}</DialogTitle>
         </DialogHeader>
         <div className="flex flex-col gap-4">
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="member-search">{t("email")}</Label>
-            <Input
-              ref={searchRef}
-              id="member-search"
-              value={filter}
-              placeholder={t("member_search_placeholder")}
-              onChange={(event) => {
-                setFilter(event.target.value);
-                setSelectedId(null);
-              }}
-              {...fieldProblemProps("member-search", userProblem)}
-            />
-            <FieldProblem id="member-search" problem={userProblem} />
-            <div className="flex max-h-48 flex-col overflow-y-auto rounded-md border">
-              {selectable.length === 0 ? (
-                <p className="text-muted-foreground p-3 text-sm">{t("no_results")}</p>
-              ) : (
-                selectable.map((user) => (
-                  <button
-                    key={user.id}
-                    type="button"
-                    onClick={() => setSelectedId(user.id)}
-                    aria-pressed={selectedId === user.id}
-                    className={`hover:bg-muted px-3 py-2 text-left text-sm ${
-                      selectedId === user.id ? "bg-muted font-medium" : ""
-                    }`}
-                  >
-                    {user.email}
-                  </button>
-                ))
-              )}
-            </div>
-          </div>
+          <TextInput
+            ref={searchRef}
+            label={t("email")}
+            {...KEYBOARD.email}
+            placeholder={t("member_search_placeholder")}
+            value={searchInput}
+            onChange={setSearchInput}
+            autoComplete="off"
+            hasClear
+            status={userProblem ? { type: "error", message: userProblem } : undefined}
+            width="100%"
+          />
+          {selected && <Token label={selected.email} onRemove={() => setSelected(null)} />}
+          <QueryStateBoundary query={candidates} rows={3}>
+            {() => (
+              <>
+                {users.length === 0 ? (
+                  <p className="text-ax-text-secondary text-sm">{t("no_users_found")}</p>
+                ) : (
+                  <div className="max-h-60 overflow-y-auto">
+                    <RadioList
+                      label={t("users")}
+                      value={selected?.id ?? ""}
+                      onChange={(id) => {
+                        const user = users.find((candidate) => candidate.id === id);
+                        if (user && !memberIds.has(user.id)) setSelected(user);
+                      }}
+                    >
+                      {users.map((user) => (
+                        <RadioListItem
+                          key={user.id}
+                          value={user.id}
+                          label={user.email}
+                          isDisabled={memberIds.has(user.id)}
+                          description={memberIds.has(user.id) ? t("already_added") : user.username}
+                        />
+                      ))}
+                    </RadioList>
+                  </div>
+                )}
+                <LoadMore
+                  query={candidates}
+                  label={t("load_more_users", { current: users.length, total })}
+                />
+              </>
+            )}
+          </QueryStateBoundary>
           <div className="flex flex-col gap-2">
             <Label htmlFor={roleId}>{t("role")}</Label>
             <Select value={role} onValueChange={(next) => setRole(next as SpaceRoleValue)}>
@@ -268,7 +336,7 @@ export function AddMemberDialog({ variant = "page" }: { variant?: "page" | "head
               <SelectContent>
                 {space.available_roles.map((availableRole) => (
                   <SelectItem key={availableRole.value} value={availableRole.value}>
-                    {availableRole.label}
+                    {t(SPACE_ROLE_LABEL_KEYS[availableRole.value])}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -289,32 +357,10 @@ export function AddMemberDialog({ variant = "page" }: { variant?: "page" | "head
   );
 }
 
-function GroupMemberRow({ group }: { group: Schema<"SpaceGroupMember"> }) {
+function GroupMemberRow({ group }: { group: GroupMember }) {
   const t = useTranslations();
   const { space, can } = useSpace();
-  const invalidate = useInvalidateSpace();
-
-  const updateRole = useMutation({
-    mutationFn: (role: SpaceRoleValue) =>
-      unwrap(
-        browserApi.PATCH("/api/v1/spaces/{id}/group-members/{group_id}/", {
-          params: { path: { id: space.id, group_id: group.id } },
-          body: { role }
-        })
-      ),
-    onSuccess: invalidate,
-    onError: (error) => toastApiError(error, t)
-  });
-
-  const removeGroup = useRemovalMutation({
-    mutationFn: () =>
-      unwrap(
-        browserApi.DELETE("/api/v1/spaces/{id}/group-members/{group_id}/", {
-          params: { path: { id: space.id, group_id: group.id } }
-        })
-      ),
-    refresh: invalidate
-  });
+  const { updateRole, remove: removeGroup } = useMembership({ kind: "group", group });
 
   return (
     <div className="border-border flex items-center justify-between gap-4 border-b py-3">
@@ -322,7 +368,7 @@ function GroupMemberRow({ group }: { group: Schema<"SpaceGroupMember"> }) {
         <Users className="text-muted-foreground size-4" />
         <span className="font-medium">{group.name}</span>
         <span className="text-muted-foreground">
-          {group.user_count} {group.user_count === 1 ? t("user") : t("users")}
+          {t("space_group_user_count", { count: group.user_count ?? 0 })}
         </span>
       </span>
       {can("edit", "group_member") ? (
@@ -347,7 +393,9 @@ function GroupMemberRow({ group }: { group: Schema<"SpaceGroupMember"> }) {
           />
         </div>
       ) : (
-        <span className="text-muted-foreground text-sm capitalize">{group.role}</span>
+        <span className="text-muted-foreground text-sm">
+          {t(SPACE_ROLE_LABEL_KEYS[group.role])}
+        </span>
       )}
     </div>
   );
@@ -356,7 +404,6 @@ function GroupMemberRow({ group }: { group: Schema<"SpaceGroupMember"> }) {
 /** Adds a user group with a role. A missing group shows on add. */
 function AddGroupMemberDialog() {
   const t = useTranslations();
-  const groupId = useId();
   const roleId = useId();
   const { space } = useSpace();
   const invalidate = useInvalidateSpace();
@@ -364,18 +411,12 @@ function AddGroupMemberDialog() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [role, setRole] = useState<SpaceRoleValue>(space.available_roles[0]?.value ?? "editor");
   const [submitted, setSubmitted] = useState(false);
-  const groupRef = useRef<HTMLButtonElement>(null);
+  const groupRef = useRef<HTMLDivElement>(null);
   const groupProblem = submitted && !selectedId ? t("form_problem_choose_user_group") : null;
 
   const groupMemberIds = new Set((space.group_members?.items ?? []).map((group) => group.id));
-  const { data: groups } = useQuery({
-    queryKey: ["user-groups"],
-    queryFn: async () => {
-      const result = await unwrap(browserApi.GET("/api/v1/user-groups/"));
-      return result.items;
-    },
-    enabled: open
-  });
+  const groupsQuery = useQuery({ ...userGroupsQueryOptions(browserApi), enabled: open });
+  const groups = groupsQuery.data;
 
   const addGroup = useMutation({
     mutationFn: (body: { id: string; role: SpaceRoleValue }) =>
@@ -398,9 +439,7 @@ function AddGroupMemberDialog() {
   function add() {
     if (addGroup.isPending) return;
     if (!selectedId) {
-      // Rendered before focus moves, so the field is read with its error.
-      flushSync(() => setSubmitted(true));
-      groupRef.current?.focus();
+      revealProblems(() => setSubmitted(true), groupRef.current?.querySelector("button"));
       return;
     }
     addGroup.mutate({ id: selectedId, role });
@@ -422,26 +461,43 @@ function AddGroupMemberDialog() {
           <DialogTitle>{t("add_group")}</DialogTitle>
         </DialogHeader>
         <div className="flex flex-col gap-4">
-          <div className="flex flex-col gap-2">
-            <Label htmlFor={groupId}>{t("user_groups")}</Label>
-            <Select value={selectedId ?? ""} onValueChange={setSelectedId}>
-              <SelectTrigger
-                ref={groupRef}
-                id={groupId}
-                className="w-full"
-                {...fieldProblemProps(groupId, groupProblem)}
-              >
-                <SelectValue placeholder={t("user_groups")} />
-              </SelectTrigger>
-              <SelectContent>
-                {selectable.map((group) => (
-                  <SelectItem key={group.id} value={group.id}>
-                    {group.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <FieldProblem id={groupId} problem={groupProblem} />
+          <RefreshError queries={[groupsQuery]} />
+          {blockingError(groupsQuery) && (
+            <ListError
+              error={groupsQuery.error}
+              isRetrying={groupsQuery.isFetching}
+              onRetry={() => void groupsQuery.refetch()}
+            />
+          )}
+          <div ref={groupRef}>
+            <Selector
+              label={t("user_groups")}
+              aria-label={
+                selectedId
+                  ? t("admin_user_groups_picker_trigger", {
+                      label: t("user_groups"),
+                      group: selectable.find((group) => group.id === selectedId)?.name ?? ""
+                    })
+                  : t("user_groups")
+              }
+              value={selectedId ?? undefined}
+              onChange={setSelectedId}
+              options={selectable.map((group) => ({ value: group.id, label: group.name }))}
+              hasSearch
+              placeholder={t("select_user_group")}
+              searchPlaceholder={t("select_user_group")}
+              emptyText={
+                groupsQuery.isError
+                  ? t("request_failed")
+                  : (groups?.length ?? 0) > 0
+                    ? t("admin_user_groups_all_assigned")
+                    : t("no_user_groups_configured")
+              }
+              emptySearchText={t("no_results_found")}
+              isLoading={groupsQuery.isPending}
+              status={groupProblem ? { type: "error", message: groupProblem } : undefined}
+              width="100%"
+            />
           </div>
           <div className="flex flex-col gap-2">
             <Label htmlFor={roleId}>{t("role")}</Label>
@@ -452,7 +508,7 @@ function AddGroupMemberDialog() {
               <SelectContent>
                 {space.available_roles.map((availableRole) => (
                   <SelectItem key={availableRole.value} value={availableRole.value}>
-                    {availableRole.label}
+                    {t(SPACE_ROLE_LABEL_KEYS[availableRole.value])}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -473,10 +529,350 @@ function AddGroupMemberDialog() {
   );
 }
 
+/** The name, the line under it and the role a phone row and the role sheet show. */
+function useMembershipLabels(membership: Membership) {
+  const t = useTranslations();
+  if (membership.kind === "member") {
+    const { member } = membership;
+    // The API has no display name: a username names the row when there is one.
+    const username = member.username?.trim();
+    return {
+      key: `member-${member.id}`,
+      name: username || member.email,
+      detail: username && username !== member.email ? member.email : null,
+      role: member.role
+    };
+  }
+  const { group } = membership;
+  return {
+    key: `group-${group.id}`,
+    name: group.name,
+    detail: t("space_group_user_count", { count: group.user_count ?? 0 }),
+    role: group.role
+  };
+}
+
+/**
+ * A member or group as a phone row (decision 25): avatar, name, the e-mail or
+ * user count, and "Roll: …" under them, so the e-mail keeps the row's width
+ * and does not break mid-address. A chevron at the end where tapping opens the
+ * role sheet; your own row, or one you may not change, only reads.
+ */
+function PhoneMembershipRow({
+  membership,
+  onOpen
+}: {
+  membership: Membership;
+  onOpen: (() => void) | null;
+}) {
+  const t = useTranslations();
+  const { user } = useAppContext();
+  const { key, name, detail, role } = useMembershipLabels(membership);
+  const isSelf = membership.kind === "member" && membership.member.id === user.id;
+  const roleLabel = t(SPACE_ROLE_LABEL_KEYS[role]);
+  return (
+    <ListItem
+      data-membership={key}
+      label={
+        <span className="block font-semibold break-words">
+          {name}
+          {isSelf ? ` (${t("you")})` : ""}
+        </span>
+      }
+      description={
+        <>
+          {detail ? <span className="block [overflow-wrap:anywhere]">{detail}</span> : null}
+          <span className="block">{`${t("role")}: ${roleLabel}`}</span>
+        </>
+      }
+      startContent={
+        membership.kind === "member" ? (
+          <Avatar
+            name={name}
+            size="md"
+            tooltip={false}
+            className={personToneClass(membership.member.id)}
+            aria-hidden="true"
+          />
+        ) : (
+          <span
+            aria-hidden="true"
+            className="bg-ax-muted text-ax-text-secondary flex size-9 shrink-0 items-center justify-center rounded-full"
+          >
+            <Users className="size-4" />
+          </span>
+        )
+      }
+      endContent={
+        onOpen ? (
+          <ChevronRight aria-hidden="true" className="text-ax-text-secondary size-4" />
+        ) : undefined
+      }
+      onClick={onOpen ?? undefined}
+    />
+  );
+}
+
+/** A role's rows under its heading and count (the list says its own count). */
+function MembershipSection({
+  title,
+  count,
+  children
+}: {
+  title: string;
+  count: number;
+  children: ReactNode;
+}) {
+  const id = useId();
+  return (
+    <section aria-labelledby={id} className="flex flex-col">
+      <h3 className="flex min-h-11 items-center justify-between gap-3 font-semibold">
+        <span id={id}>{title}</span>
+        <span
+          aria-hidden="true"
+          className="text-ax-text-secondary text-sm font-normal tabular-nums"
+        >
+          {count}
+        </span>
+      </h3>
+      <List hasDividers edge="outset" aria-labelledby={id}>
+        {children}
+      </List>
+    </section>
+  );
+}
+
+/**
+ * A member's or group's role sheet (decision 25): the roles to pick from and
+ * "Ta bort från ytan" behind a confirmation. A role applies when it is picked
+ * (tap, Enter or Space), so the roles are buttons, not radios: moving through
+ * radios with the arrow keys would pick each one on the way (WCAG 3.2.2).
+ * While a pick saves, the others wait. Focus goes back to the row, wherever
+ * a new role put it (WCAG 2.4.3). Kept mounted while it closes, so it slides
+ * away and leaves the dialog stack.
+ */
+function RoleSheet({
+  membership,
+  isOpen,
+  onClose
+}: {
+  membership: Membership;
+  isOpen: boolean;
+  onClose: () => void;
+}) {
+  const t = useTranslations();
+  const { space } = useSpace();
+  const { key, name, detail, role } = useMembershipLabels(membership);
+  const { updateRole, remove } = useMembership(membership);
+  const [confirming, setConfirming] = useState(false);
+  const [picked, setPicked] = useState<SpaceRoleValue | null>(null);
+  const current = picked ?? role;
+
+  function close() {
+    onClose();
+    requestAnimationFrame(() =>
+      document.querySelector<HTMLElement>(`[data-membership="${key}"] button`)?.focus()
+    );
+  }
+
+  function pick(next: SpaceRoleValue) {
+    if (updateRole.isPending) return;
+    if (next === role) return close();
+    setPicked(next);
+    updateRole.mutate(next, {
+      onSuccess: () => {
+        toast.success(t("role_changed"));
+        close();
+      },
+      onSettled: () => setPicked(null)
+    });
+  }
+
+  return (
+    <>
+      <BottomSheet
+        isOpen={isOpen && !confirming}
+        onOpenChange={(open) => {
+          if (!open) close();
+        }}
+        label={name}
+        height="hug"
+        padding={0}
+      >
+        <div className="flex items-start gap-2 ps-4 pe-2 pt-4">
+          <h2 className="min-w-0 flex-1 pt-2 text-lg font-semibold text-balance break-words">
+            {name}
+          </h2>
+          <IconButton
+            label={t("close")}
+            icon={<X className="size-5" />}
+            variant="ghost"
+            onClick={close}
+          />
+        </div>
+        <div className="flex flex-col gap-5 px-4 pt-1 pb-[calc(1rem+env(safe-area-inset-bottom,0px))]">
+          {detail ? (
+            <p className="text-ax-text-secondary [overflow-wrap:anywhere]">{detail}</p>
+          ) : null}
+          <List
+            header={t("role")}
+            hasDividers
+            edge="outset"
+            aria-busy={updateRole.isPending || undefined}
+          >
+            {space.available_roles.map((available) => {
+              const selected = available.value === current;
+              return (
+                <ListItem
+                  key={available.value}
+                  isSelected={selected}
+                  onClick={() => pick(available.value)}
+                  label={
+                    <span className="block">
+                      {t(SPACE_ROLE_LABEL_KEYS[available.value])}
+                      {selected ? (
+                        <span className="sr-only">{`, ${t("space_role_current")}`}</span>
+                      ) : null}
+                    </span>
+                  }
+                  description={t(SPACE_ROLE_DESCRIPTION_KEYS[available.value])}
+                  endContent={
+                    selected ? (
+                      <Check aria-hidden="true" className="text-ax-text-accent size-5" />
+                    ) : (
+                      <span className="size-5" />
+                    )
+                  }
+                />
+              );
+            })}
+          </List>
+          <div className="border-ax-border border-t pt-4">
+            <AstryxButton
+              variant="destructive"
+              size="lg"
+              width="100%"
+              label={t("space_remove_from_space")}
+              icon={<Trash2 aria-hidden="true" />}
+              onClick={() => setConfirming(true)}
+            />
+          </div>
+        </div>
+      </BottomSheet>
+      {/* Cancelling goes back to the sheet; removing ends with focus where
+          RemovalFocusScope puts it. */}
+      <ConfirmDialogControlled
+        open={confirming}
+        onOpenChange={(open) => {
+          if (!open) setConfirming(false);
+        }}
+        title={membership.kind === "member" ? t("remove_member") : t("remove_group")}
+        description={
+          membership.kind === "member"
+            ? t("confirm_remove_member", { memberEmail: membership.member.email })
+            : t("confirm_remove_group", { groupName: membership.group.name })
+        }
+        confirmLabel={t("remove")}
+        pending={remove.isPending}
+        onConfirm={() =>
+          remove.mutate(undefined, {
+            onSuccess: () => {
+              toast.success(t("member_removed"));
+              setConfirming(false);
+              onClose();
+            }
+          })
+        }
+      />
+    </>
+  );
+}
+
+/** Members and groups on a phone: rows by role, a role sheet on tap. */
+function PhoneMembers() {
+  const t = useTranslations();
+  const { space, can } = useSpace();
+  const { user } = useAppContext();
+  const collator = useCollator();
+  // The last sheet opened stays mounted while it closes.
+  const [sheet, setSheet] = useState<{ membership: Membership; isOpen: boolean } | null>(null);
+
+  const members = sortMembersByRole(space.members.items, collator.compare);
+  const editors = members.filter((member) => member.role !== "viewer");
+  const viewers = members.filter((member) => member.role === "viewer");
+  const groups = space.group_members?.items ?? [];
+  const opener = (membership: Membership) => {
+    const editable =
+      membership.kind === "member"
+        ? can("edit", "member") && membership.member.id !== user.id
+        : can("edit", "group_member");
+    return editable ? () => setSheet({ membership, isOpen: true }) : null;
+  };
+  const rows = (memberships: Membership[]) =>
+    memberships.map((membership) => (
+      <PhoneMembershipRow
+        key={membership.kind === "member" ? membership.member.id : membership.group.id}
+        membership={membership}
+        onOpen={opener(membership)}
+      />
+    ));
+
+  return (
+    <div className="flex flex-col gap-4">
+      {editors.length > 0 ? (
+        <MembershipSection title={t("admins_editors")} count={editors.length}>
+          {rows(editors.map((member) => ({ kind: "member", member })))}
+        </MembershipSection>
+      ) : null}
+      {viewers.length > 0 ? (
+        <MembershipSection title={t("viewers")} count={viewers.length}>
+          {rows(viewers.map((member) => ({ kind: "member", member })))}
+        </MembershipSection>
+      ) : null}
+      {groups.length > 0 ? (
+        <MembershipSection title={t("group_members")} count={groups.length}>
+          {rows(groups.map((group) => ({ kind: "group", group })))}
+        </MembershipSection>
+      ) : null}
+      {sheet ? (
+        <RoleSheet
+          key={
+            sheet.membership.kind === "member"
+              ? sheet.membership.member.id
+              : sheet.membership.group.id
+          }
+          membership={sheet.membership}
+          isOpen={sheet.isOpen}
+          onClose={() => setSheet((current) => current && { ...current, isOpen: false })}
+        />
+      ) : null}
+    </div>
+  );
+}
+
 export function SpaceMembers() {
   const t = useTranslations();
   const { space, can } = useSpace();
+  const phone = usePhoneScreen();
   const headingRef = useRef<HTMLHeadingElement>(null);
+
+  // Changing between a phone's layout and a tablet's (a phone turned)
+  // replaces the member controls with the other layout's. A control that had
+  // the focus goes with them, and focus goes to the title (WCAG 2.4.3). The
+  // rescue moves focus only if it was lost, so a button elsewhere keeps it.
+  const controls = useRef<HTMLDivElement>(null);
+  const focusWasInControls = useRef(false);
+  const rescue = useFocusRescue();
+  useEffect(() => {
+    const onFocusIn = (event: FocusEvent) => {
+      focusWasInControls.current = !!controls.current?.contains(event.target as Node);
+    };
+    document.addEventListener("focusin", onFocusIn);
+    return () => document.removeEventListener("focusin", onFocusIn);
+  }, []);
+  useEffect(() => {
+    if (focusWasInControls.current) rescue(() => headingRef.current);
+  }, [phone, rescue]);
 
   const editors = space.members.items.filter(
     (member) => member.role === "admin" || member.role === "editor"
@@ -484,59 +880,74 @@ export function SpaceMembers() {
   const viewers = space.members.items.filter((member) => member.role === "viewer");
   const viewerRoleAvailable = space.available_roles.some((role) => role.value === "viewer");
   const groupMembers = space.group_members?.items ?? [];
+  const canAdd = can("add", "group_member") || can("add", "member");
 
   return (
     // Removing a member or group takes its row (and remove button) away: focus goes to the title.
     <RemovalFocusScope target={headingRef}>
-      <div className="flex w-full flex-col gap-8">
+      <div className="phone:gap-4 flex w-full flex-col gap-8">
         <PageHeader
           headingLevel={2}
           headingRef={headingRef}
           title={t("members")}
           actions={
-            can("add", "group_member") || can("add", "member") ? (
-              <>
+            canAdd ? (
+              // Docked at the bottom on a phone.
+              <DockedActions label={t("space_members_actions")}>
                 {can("add", "group_member") && <AddGroupMemberDialog />}
                 {can("add", "member") && <AddMemberDialog />}
-              </>
+              </DockedActions>
             ) : undefined
           }
         />
 
-        <SettingsGroup title={t("current_members")}>
-          <SettingsRow title={t("admins_editors")} description={t("admins_editors_description")}>
-            <div className="flex flex-col">
-              {editors.map((member) => (
-                <MemberRow key={member.id} member={member} />
-              ))}
-            </div>
-          </SettingsRow>
-          {viewerRoleAvailable && (
-            <SettingsRow title={t("viewers")} description={t("viewers_description")}>
-              <div className="flex flex-col">
-                {viewers.length === 0 ? (
-                  <p className="text-muted-foreground py-3 text-sm">{t("no_viewers_in_space")}</p>
-                ) : (
-                  viewers.map((member) => <MemberRow key={member.id} member={member} />)
+        <div ref={controls} className="contents">
+          {phone ? (
+            <PhoneMembers />
+          ) : (
+            <div className="flex flex-col gap-8">
+              <SettingsGroup title={t("current_members")}>
+                <SettingsRow
+                  title={t("admins_editors")}
+                  description={t("admins_editors_description")}
+                >
+                  <div className="flex flex-col">
+                    {editors.map((member) => (
+                      <MemberRow key={member.id} member={member} />
+                    ))}
+                  </div>
+                </SettingsRow>
+                {viewerRoleAvailable && (
+                  <SettingsRow title={t("viewers")} description={t("viewers_description")}>
+                    <div className="flex flex-col">
+                      {viewers.length === 0 ? (
+                        <p className="text-muted-foreground py-3 text-sm">
+                          {t("no_viewers_in_space")}
+                        </p>
+                      ) : (
+                        viewers.map((member) => <MemberRow key={member.id} member={member} />)
+                      )}
+                    </div>
+                  </SettingsRow>
                 )}
-              </div>
-            </SettingsRow>
-          )}
-        </SettingsGroup>
+              </SettingsGroup>
 
-        <SettingsGroup title={t("group_members")}>
-          <SettingsRow title={t("user_groups")} description={t("user_groups_description")}>
-            <div className="flex flex-col">
-              {groupMembers.length === 0 ? (
-                <p className="text-muted-foreground py-3 text-sm">
-                  {t("no_group_members_in_space")}
-                </p>
-              ) : (
-                groupMembers.map((group) => <GroupMemberRow key={group.id} group={group} />)
-              )}
+              <SettingsGroup title={t("group_members")}>
+                <SettingsRow title={t("user_groups")} description={t("user_groups_description")}>
+                  <div className="flex flex-col">
+                    {groupMembers.length === 0 ? (
+                      <p className="text-muted-foreground py-3 text-sm">
+                        {t("no_group_members_in_space")}
+                      </p>
+                    ) : (
+                      groupMembers.map((group) => <GroupMemberRow key={group.id} group={group} />)
+                    )}
+                  </div>
+                </SettingsRow>
+              </SettingsGroup>
             </div>
-          </SettingsRow>
-        </SettingsGroup>
+          )}
+        </div>
       </div>
     </RemovalFocusScope>
   );

@@ -6,7 +6,7 @@ import { renderInApp } from "@/test/render";
 import { overview, overviewItem, policy, template } from "./fixtures";
 
 const api = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn(), PATCH: vi.fn(), DELETE: vi.fn() }));
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 
 import { router } from "@/test/navigation";

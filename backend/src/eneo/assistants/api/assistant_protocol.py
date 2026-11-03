@@ -1,9 +1,8 @@
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional, Protocol, cast
 
 from sse_starlette import EventSourceResponse, ServerSentEvent
-from starlette.background import BackgroundTask
 
 from eneo.ai_models.completion_models.completion_model import (
     Completion,
@@ -22,6 +21,7 @@ from eneo.questions.question import (
     McpToolReferencePublic,
     UseTools,
 )
+from eneo.server.protocol.sse import ClosingEventSourceResponse, closing
 from eneo.sessions.session import (
     AskChatResponse,
     AskResponse,
@@ -386,20 +386,23 @@ async def to_response(
 
         async def event_stream():
             assert not isinstance(response.answer, str)
-            async for chunk in response.answer:
-                if chunk.response_type == ResponseType.TEXT:
-                    yield to_ask_response(
-                        question=response.question,
-                        files=response.files,
-                        session=response.session,
-                        answer=chunk.text or "",
-                        info_blobs=chunk.reference_chunks or [],
-                        completion_model=response.completion_model,
-                        show_pricing=show_pricing,
-                        tools=response.tools,
-                    ).model_dump_json()
+            async with closing(response.answer, "answer stream") as answer:
+                async for chunk in answer:
+                    if chunk.response_type == ResponseType.TEXT:
+                        yield to_ask_response(
+                            question=response.question,
+                            files=response.files,
+                            session=response.session,
+                            answer=chunk.text or "",
+                            info_blobs=chunk.reference_chunks or [],
+                            completion_model=response.completion_model,
+                            show_pricing=show_pricing,
+                            tools=response.tools,
+                        ).model_dump_json()
 
-        return EventSourceResponse(event_stream(), ping=15)
+        return ClosingEventSourceResponse(
+            event_stream(), ping=15, closes=[response.answer]
+        )
 
     assert isinstance(response.answer, str)
     return to_ask_response(
@@ -421,45 +424,36 @@ async def to_conversation_response(
     stream: bool,
     *,
     show_pricing: bool = True,
-    on_close: Callable[[], Awaitable[None]] | None = None,
 ) -> EventSourceResponse | AskChatResponse:
     if stream:
 
         async def event_stream():
-            try:
-                data = SSEFirstChunk(
-                    **to_ask_conversation_response(
-                        question=response.question,
-                        files=response.files,
-                        session=response.session,
-                        answer="",
-                        info_blobs=response.info_blobs,
-                        tools=response.tools,
-                        completion_model=response.completion_model,
-                        show_pricing=show_pricing,
-                        question_id=response.question_id,
-                        created_at=response.created_at,
-                        updated_at=response.updated_at,
-                    ).model_dump()
-                )
-                yield ServerSentEvent(
-                    data.model_dump_json(), event=ResponseType.FIRST_CHUNK.value
-                )
+            data = SSEFirstChunk(
+                **to_ask_conversation_response(
+                    question=response.question,
+                    files=response.files,
+                    session=response.session,
+                    answer="",
+                    info_blobs=response.info_blobs,
+                    tools=response.tools,
+                    completion_model=response.completion_model,
+                    show_pricing=show_pricing,
+                    question_id=response.question_id,
+                    created_at=response.created_at,
+                    updated_at=response.updated_at,
+                ).model_dump()
+            )
+            yield ServerSentEvent(
+                data.model_dump_json(), event=ResponseType.FIRST_CHUNK.value
+            )
 
-                assert not isinstance(response.answer, str)
-                async for chunk in response.answer:
+            assert not isinstance(response.answer, str)
+            async with closing(response.answer, "answer stream") as answer:
+                async for chunk in answer:
                     yield to_sse_response(chunk=chunk, session_id=response.session.id)
-            finally:
-                if on_close is not None:
-                    await on_close()
 
-        # EventSourceResponse runs the background task after a normal client
-        # disconnect too. The generator's finally cannot run if it was never
-        # started, for example when sending the first event was cancelled.
-        return EventSourceResponse(
-            event_stream(),
-            ping=15,
-            background=BackgroundTask(on_close) if on_close is not None else None,
+        return ClosingEventSourceResponse(
+            event_stream(), ping=15, closes=[response.answer]
         )
 
     assert isinstance(response.answer, str)

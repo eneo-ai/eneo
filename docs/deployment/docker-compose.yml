@@ -5,7 +5,7 @@
 #
 # BEFORE DEPLOYING:
 #   1. Replace "your-email@domain.com" with your email (1 line, marked CHANGE THIS)
-#   2. Replace "your-domain.com" with your domain (4 lines, marked CHANGE THIS)
+#   2. Replace "your-domain.com" with your domain (marked CHANGE THIS)
 #   3. Configure environment files (env_backend.env, env_frontend.env, env_db.env)
 #   4. Create external network: docker network create proxy_tier
 #
@@ -103,7 +103,8 @@ services:
       - "traefik.http.routers.eneo-frontend-secure.tls.certresolver=letsencrypt"
       - "traefik.http.routers.eneo-frontend-secure.service=eneo-frontend-svc"
       - "traefik.http.services.eneo-frontend-svc.loadbalancer.server.port=3000"
-      - "traefik.http.routers.eneo-frontend-secure.priority=1"
+      # Set 7 in the deployment .env to route pages back to Svelte; API stays at 10.
+      - "traefik.http.routers.eneo-frontend-secure.priority=${FRONTEND_ROUTER_PRIORITY:-1}"
     depends_on:
       - backend
 
@@ -112,6 +113,12 @@ services:
     container_name: eneo_backend
     restart: unless-stopped
     environment:
+      # The React app on the main host. It signs in only through the browser
+      # session, so the backend refuses WEB_APP_ENABLED without it. To serve
+      # Svelte, set WEB_APP_ENABLED=false and FRONTEND_ROUTER_PRIORITY=7 in the
+      # deployment .env.
+      - WEB_APP_ENABLED=${WEB_APP_ENABLED:-true}
+      - BROWSER_SESSION_ENABLED=${BROWSER_SESSION_ENABLED:-true}
       - TOOL_RUNTIME_URL=${TOOL_RUNTIME_URL:-http://tool-runtime:3010}
       - TOOL_RUNTIME_TOKEN=${TOOL_RUNTIME_TOKEN:-}
       - FILE_REFERENCE_BASE_URL=${FILE_REFERENCE_BASE_URL:-http://backend:8000}
@@ -147,6 +154,12 @@ services:
       - "traefik.http.routers.eneo-backend-secure.service=eneo-backend-svc"
       - "traefik.http.services.eneo-backend-svc.loadbalancer.server.port=8000"
       - "traefik.http.routers.eneo-backend-secure.priority=10"
+      - "traefik.http.routers.eneo-web-app-main-secure.rule=Host(`your-domain.com`) && !(Path(`/internal-mcp`) || PathPrefix(`/internal-mcp/`))"  # CHANGE THIS
+      - "traefik.http.routers.eneo-web-app-main-secure.entrypoints=websecure"
+      - "traefik.http.routers.eneo-web-app-main-secure.tls=true"
+      - "traefik.http.routers.eneo-web-app-main-secure.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.eneo-web-app-main-secure.service=eneo-backend-svc"
+      - "traefik.http.routers.eneo-web-app-main-secure.priority=5"
     healthcheck:
       # Module containers (docker-compose.modules.yml) gate their startup on
       # this check. /api/healthz exists on released images too, where the

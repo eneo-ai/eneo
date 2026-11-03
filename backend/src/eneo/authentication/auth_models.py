@@ -45,6 +45,10 @@ class JWTMeta(BaseModel):
     exp: float
 
 
+# A browser session id: 256 random bits, as secrets.token_urlsafe(32) writes them.
+SESSION_ID_PATTERN = r"^[A-Za-z0-9_-]{43}$"
+
+
 class JWTCreds(BaseModel):
     """Immutable Eneo session identity, shared by API, MCP and module tokens."""
 
@@ -59,6 +63,20 @@ class JWTCreds(BaseModel):
     # Retained as descriptive claims for clients; never used to resolve a user.
     sub: EmailStr
     username: Optional[str] = None
+    # The server-side browser session (eneo.authentication.
+    # browser_session_service). Only a browser sign-in adds it to a token, so
+    # minting never dumps it. A present claim is a session id: null or any
+    # other value is refused, never read as a token without one.
+    sid: Optional[str] = Field(
+        default=None, exclude=True, strict=True, pattern=SESSION_ID_PATTERN
+    )
+
+    @field_validator("sid", mode="before")
+    @classmethod
+    def _refuse_null_sid(cls, value: object) -> object:
+        if value is None:
+            raise ValueError("sid must not be null")
+        return value
 
 
 class JWTPayload(JWTMeta, JWTCreds):
@@ -70,6 +88,17 @@ class JWTPayload(JWTMeta, JWTCreds):
 class AccessToken(BaseModel):
     access_token: str
     token_type: str
+
+
+class BrowserSessionExtension(BaseModel):
+    """The renewed browser session; its token travels only in the cookie."""
+
+    generation: str = Field(
+        description="The session's `Eneo-Session-Generation`, which a renewal keeps."
+    )
+    expires_in: int = Field(
+        ge=0, description="Whole seconds until the renewed session ends."
+    )
 
 
 class ApiKeyOwnership(str, Enum):
@@ -646,8 +675,9 @@ class ApiKeyListCursor(BaseModel):
 
 
 class ApiKeyCreationConstraints(BaseModel):
-    """Fields relevant to key creation UX, from tenant policy."""
+    """Tenant policy limits for key forms and notification preferences."""
 
+    notification_policy: ApiKeyNotificationPolicyResponse
     require_expiration: bool = False
     max_expiration_days: Optional[int] = None
     max_rate_limit: Optional[int] = None
@@ -750,15 +780,24 @@ class FederatedIdentity(BaseModel):
             raise ValueError("Email claim not found in ID token")
         if email_claim == "email" and claims.get("email_verified") is False:
             raise ValueError("Email is not verified by the identity provider")
+        # Entra ID omits email_verified for organisational accounts and sends
+        # xms_edov ("email domain owner verified") instead. A domain the
+        # tenant owner has verified is as authoritative for the address as the
+        # standard flag, and the mandatory domain allowlist still applies.
+        # xms_edov is only a fallback for a missing email_verified: any value
+        # the IdP does send, negative or unrecognised, keeps its own verdict.
+        email_verified = claims.get("email_verified")
+        verified = (
+            _is_verified_claim(email_verified)
+            if email_verified is not None
+            else _is_verified_claim(claims.get("xms_edov"))
+        )
         try:
             return cls(
                 email=email,
-                # The standard verification claim verifies the standard email,
-                # not an unrelated address selected by a custom claims mapping.
-                email_verified=(
-                    _is_verified_claim(claims.get("email_verified"))
-                    and claims.get("email") == email
-                ),
+                # The verification claims verify the standard email, not an
+                # unrelated address selected by a custom claims mapping.
+                email_verified=verified and claims.get("email") == email,
             )
         except ValueError as exc:
             raise ValueError(

@@ -1,5 +1,3 @@
-"use client";
-
 import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
 import { Pagination } from "@astryxdesign/core/Pagination";
@@ -11,14 +9,16 @@ import { TextInput } from "@/components/astryx/text-input";
 import { ToggleButton, ToggleButtonGroup } from "@astryxdesign/core/ToggleButton";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ArrowRight, Globe, RefreshCw } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { useId, useState } from "react";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
 import { EmptyState } from "@/components/composites/empty-state";
 import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
-import { ListError } from "@/components/composites/query-state";
+import { blockingError, ListError } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
+import { hasAnswered } from "@/lib/api/query";
+import { formatCalendarDate } from "@/lib/calendar-date";
 import { crawlRunState, crawlRunStateLabelKey } from "@/features/knowledge/crawl-run-state";
 import { CrawlRunCounts, CrawlRunStatusLabel } from "@/features/knowledge/crawl-run-ui";
 import { CrawlDetailsDialog } from "./crawl-details-dialog";
@@ -202,7 +202,10 @@ function DayCards({
                     {t(PERIOD_KEYS[day])}
                   </h2>
                   <span className="text-ax-text-secondary text-sm">
-                    <ClientTime value={`${data.calendar[day].date}T00:00:00Z`} format="date_long" />
+                    {formatCalendarDate(data.calendar[day].date, locale, {
+                      day: "numeric",
+                      month: "long"
+                    })}
                   </span>
                 </div>
                 <div className="grid grid-cols-3 gap-2">
@@ -210,15 +213,15 @@ function DayCards({
                     <ToggleButton
                       key={outcome.status}
                       value={`${day}:${outcome.status}`}
-                      label={t("admin_crawler_show_day_status", {
-                        status: statusLabel(t, outcome.status),
+                      label={t("admin_crawler_day_card_name", {
+                        shown: `${count(data.calendar[day], outcome.count)} ${statusLabel(t, outcome.status)}`,
                         day: t(PERIOD_KEYS[day])
                       })}
                     >
                       <span className="flex min-w-0 flex-col items-start gap-1 text-start">
                         <span className="text-xl font-semibold tabular-nums">
                           {count(data.calendar[day], outcome.count)}
-                        </span>
+                        </span>{" "}
                         <span className="text-ax-text-secondary text-xs leading-5 whitespace-normal">
                           {statusLabel(t, outcome.status)}
                         </span>
@@ -230,8 +233,10 @@ function DayCards({
                   <ToggleButton
                     size="sm"
                     value={`${day}:cancelled`}
-                    label={t("admin_crawler_show_day_status", {
-                      status: statusLabel(t, "cancelled"),
+                    label={t("admin_crawler_day_card_name", {
+                      shown: t("admin_crawler_cancelled_count", {
+                        count: count(data.calendar[day], "cancelled")
+                      }),
                       day: t(PERIOD_KEYS[day])
                     })}
                   >
@@ -309,6 +314,13 @@ export function CrawlerPage() {
   });
 
   const data = overview.data;
+  // The tabs, filters and runs show with the first overview read, and stay: shown first,
+  // they were pushed off the screen when the summary, the scheduler and the day cards (or
+  // the empty state) arrived above them (layout shift on a phone). A first read that failed,
+  // also while it is retried, shows them with its error; a later view's read, even one
+  // without data, keeps them.
+  const [listReady, setListReady] = useState(false);
+  if (!listReady && hasAnswered(overview)) setListReady(true);
   const fetchedAt = useClientTimeText(data?.as_of, "date_time");
   const rows = isSchedule ? schedule : overview;
   const nextCursor = isSchedule ? schedule.data?.next_cursor : data?.next_cursor;
@@ -400,7 +412,7 @@ export function CrawlerPage() {
     {
       key: "result",
       header: t("admin_crawler_result"),
-      width: pixel(260),
+      width: pixel(400),
       renderCell: (item) => <CrawlRunCounts run={item.run} />
     },
     {
@@ -468,11 +480,14 @@ export function CrawlerPage() {
               {t("admin_crawler_queued")}
               <strong className="ms-2 tabular-nums">{data.summary.queued}</strong>
             </p>
-            <div className="sm:ms-auto">
+            {/* Wrapped under the counts on a phone: the ghost button's own inset is
+                pulled back so its text starts on the gutter with the lines above. */}
+            <div className="max-sm:-ms-3 sm:ms-auto">
               <Button
                 variant="ghost"
                 size="sm"
-                label={t("admin_crawler_show_issues")}
+                // The name starts with what the button shows (2.5.3), then says what it does.
+                label={`${t("admin_crawler_issues")} · ${t("admin_crawler_last_day")} ${data.summary.issues}. ${t("admin_crawler_show_issues")}`}
                 endContent={<ArrowRight aria-hidden="true" />}
                 onClick={showIssues}
               >
@@ -507,180 +522,185 @@ export function CrawlerPage() {
         </>
       ) : null}
 
-      <div className="flex flex-col gap-4">
-        <TabList
-          role="tablist"
-          aria-label={t("admin_crawler_title")}
-          value={view}
-          onChange={(value) => changeView(value as CrawlerView)}
-          hasDivider
-        >
-          {views.map((item) => (
-            <Tab
-              key={item.id}
-              id={tabId(item.id)}
-              value={item.id}
-              label={item.label}
-              panelId={panelId}
-            />
-          ))}
-        </TabList>
-        <div
-          role="tabpanel"
-          id={panelId}
-          aria-labelledby={tabId(view)}
-          className="flex flex-col gap-4"
-        >
-          {view === "all" ? (
-            <p className="text-ax-text-secondary text-xs">{t("admin_crawler_all_help")}</p>
-          ) : isSchedule ? (
-            <p className="text-ax-text-secondary text-xs">{t("admin_crawler_schedule_help")}</p>
-          ) : null}
-
-          <form
-            className="flex flex-wrap items-end gap-3"
-            onSubmit={(event) => {
-              event.preventDefault();
-              patch({ search: searchInput.trim() });
-            }}
+      {listReady && (
+        <div className="flex flex-col gap-4">
+          <TabList
+            role="tablist"
+            aria-label={t("admin_crawler_title")}
+            value={view}
+            onChange={(value) => changeView(value as CrawlerView)}
+            hasDivider
           >
-            <TextInput
-              label={t("admin_crawler_search")}
-              placeholder={t("admin_crawler_search_hint")}
-              value={searchInput}
-              onChange={setSearchInput}
-              width="18rem"
-            />
-            {view !== "active" && !isSchedule ? (
-              <Selector
-                label={t("admin_crawler_period")}
-                options={PERIODS.map((option) => ({
-                  value: option,
-                  label: t(PERIOD_KEYS[option])
-                }))}
-                value={period}
-                onChange={(value) => patch({ period: value as CrawlerPeriod })}
-                width="11rem"
+            {views.map((item) => (
+              <Tab
+                key={item.id}
+                id={tabId(item.id)}
+                value={item.id}
+                label={item.label}
+                panelId={panelId}
               />
+            ))}
+          </TabList>
+          <div
+            role="tabpanel"
+            id={panelId}
+            aria-labelledby={tabId(view)}
+            className="flex flex-col gap-4"
+          >
+            {view === "all" ? (
+              <p className="text-ax-text-secondary text-xs">{t("admin_crawler_all_help")}</p>
+            ) : isSchedule ? (
+              <p className="text-ax-text-secondary text-xs">{t("admin_crawler_schedule_help")}</p>
             ) : null}
-            {isSchedule ? (
-              <>
+
+            <form
+              className="flex flex-wrap items-end gap-3"
+              onSubmit={(event) => {
+                event.preventDefault();
+                patch({ search: searchInput.trim() });
+              }}
+            >
+              <TextInput
+                label={t("admin_crawler_search")}
+                placeholder={t("admin_crawler_search_hint")}
+                value={searchInput}
+                onChange={setSearchInput}
+                width="17rem"
+              />
+              {view !== "active" && !isSchedule ? (
                 <Selector
-                  label={t("admin_crawler_interval")}
-                  options={SCHEDULE_INTERVALS.map((option) => ({
+                  label={t("admin_crawler_period")}
+                  options={PERIODS.map((option) => ({
                     value: option,
-                    label:
-                      option === "all"
-                        ? t("admin_crawler_all_scheduled")
-                        : t(intervalLabelKey(option))
+                    label: t(PERIOD_KEYS[option])
                   }))}
-                  value={interval}
-                  onChange={(value) => patch({ interval: value as "all" | ScheduleInterval })}
+                  value={period}
+                  onChange={(value) => patch({ period: value as CrawlerPeriod })}
                   width="11rem"
                 />
+              ) : null}
+              {isSchedule ? (
+                <>
+                  <Selector
+                    label={t("admin_crawler_interval")}
+                    options={SCHEDULE_INTERVALS.map((option) => ({
+                      value: option,
+                      label:
+                        option === "all"
+                          ? t("admin_crawler_all_scheduled")
+                          : t(intervalLabelKey(option))
+                    }))}
+                    value={interval}
+                    onChange={(value) => patch({ interval: value as "all" | ScheduleInterval })}
+                    width="11rem"
+                  />
+                  <Selector
+                    label={t("status")}
+                    options={SCHEDULE_STATES.map((option) => ({
+                      value: option,
+                      label:
+                        option === "all"
+                          ? t("admin_crawler_all_states")
+                          : t(SCHEDULE_STATE_KEYS[option])
+                    }))}
+                    value={scheduleState}
+                    onChange={(value) =>
+                      patch({ scheduleState: value as "all" | ScheduleStateFilter })
+                    }
+                    width="11rem"
+                  />
+                </>
+              ) : (
                 <Selector
                   label={t("status")}
-                  options={SCHEDULE_STATES.map((option) => ({
+                  options={statuses.map((option) => ({
                     value: option,
-                    label:
-                      option === "all"
-                        ? t("admin_crawler_all_states")
-                        : t(SCHEDULE_STATE_KEYS[option])
+                    label: statusLabel(t, option)
                   }))}
-                  value={scheduleState}
-                  onChange={(value) =>
-                    patch({ scheduleState: value as "all" | ScheduleStateFilter })
-                  }
-                  width="11rem"
+                  value={status}
+                  onChange={(value) => patch({ status: value as "all" | CrawlerStatusFilter })}
+                  width="14rem"
                 />
-              </>
-            ) : (
-              <Selector
-                label={t("status")}
-                options={statuses.map((option) => ({
-                  value: option,
-                  label: statusLabel(t, option)
-                }))}
-                value={status}
-                onChange={(value) => patch({ status: value as "all" | CrawlerStatusFilter })}
-                width="14rem"
-              />
-            )}
-            <Button type="submit" label={t("search")} />
-            {searchInput || filtered ? (
-              <Button
-                variant="ghost"
-                label={t("admin_crawler_clear_filters")}
-                onClick={clearFilters}
+              )}
+              <Button type="submit" label={t("search")} />
+              {searchInput || filtered ? (
+                <Button
+                  variant="ghost"
+                  label={t("admin_crawler_clear_filters")}
+                  onClick={clearFilters}
+                />
+              ) : null}
+            </form>
+
+            {/* The page's own copy for a failed poll (data kept) and a failed first read;
+              blockingError keeps the retry under focus while a first read retries. */}
+            {rows.isError || blockingError(rows) ? (
+              <ListError
+                error={rows.error}
+                title={data ? t("admin_crawler_refresh_error") : t("admin_crawler_error")}
+                isRetrying={rows.isFetching}
+                onRetry={() => void rows.refetch()}
               />
             ) : null}
-          </form>
 
-          {rows.isError ? (
-            <ListError
-              error={rows.error}
-              title={data ? t("admin_crawler_refresh_error") : t("admin_crawler_error")}
-              isRetrying={rows.isFetching}
-              onRetry={() => void rows.refetch()}
-            />
-          ) : null}
-
-          {rows.isPending && !rows.isError ? (
-            <LoadingState rows={3} />
-          ) : isSchedule && schedule.data ? (
-            <ScheduleTable
-              items={schedule.data.items}
-              asOf={schedule.data.as_of}
-              sort={sort}
-              filtered={filtered}
-              onSort={(next) => patch({ sort: next })}
-              onSelect={openRun}
-            />
-          ) : !isSchedule && data ? (
-            data.items.length === 0 ? (
-              <EmptyState title={emptyTitle} headingLevel={3} isCompact />
-            ) : (
-              <Table
-                data={items}
-                columns={columns}
-                idKey="id"
-                aria-labelledby={tabId(view)}
-                className="min-w-[960px]"
+            {rows.isPending && !blockingError(rows) ? (
+              <LoadingState rows={3} />
+            ) : isSchedule && schedule.data ? (
+              <ScheduleTable
+                items={schedule.data.items}
+                asOf={schedule.data.as_of}
+                sort={sort}
+                filtered={filtered}
+                onSort={(next) => patch({ sort: next })}
+                onSelect={openRun}
               />
-            )
-          ) : null}
-
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-ax-text-secondary text-xs">
-              {isSchedule && schedule.data
-                ? `${t("admin_crawler_scheduled_count", {
-                    count: schedule.data.total_count.toLocaleString(locale)
-                  })} · `
-                : ""}
-              {data ? t("admin_crawler_fetched", { time: fetchedAt ?? "—" }) : ""}
-            </p>
-            {cursors.length > 1 || nextCursor ? (
-              <Pagination
-                variant="none"
-                size="sm"
-                page={cursors.length}
-                hasMore={Boolean(nextCursor)}
-                isDisabled={rows.isFetching}
-                onChange={(page) =>
-                  setCursors((current) =>
-                    page < current.length
-                      ? current.slice(0, page)
-                      : nextCursor
-                        ? [...current, nextCursor]
-                        : current
-                  )
-                }
-                label={views.find((item) => item.id === view)?.label ?? t("admin_crawler_title")}
-              />
+            ) : !isSchedule && data ? (
+              data.items.length === 0 ? (
+                <EmptyState title={emptyTitle} headingLevel={3} isCompact />
+              ) : (
+                <Table
+                  data={items}
+                  columns={columns}
+                  idKey="id"
+                  aria-labelledby={tabId(view)}
+                  pinnedColumn="website"
+                  className="min-w-[960px] [--table-sticky-background:var(--color-ax-surface)]"
+                />
+              )
             ) : null}
+
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-ax-text-secondary text-xs">
+                {isSchedule && schedule.data
+                  ? `${t("admin_crawler_scheduled_count", {
+                      count: schedule.data.total_count.toLocaleString(locale)
+                    })} · `
+                  : ""}
+                {data ? t("admin_crawler_fetched", { time: fetchedAt ?? "—" }) : ""}
+              </p>
+              {cursors.length > 1 || nextCursor ? (
+                <Pagination
+                  variant="none"
+                  size="sm"
+                  page={cursors.length}
+                  hasMore={Boolean(nextCursor)}
+                  isDisabled={rows.isFetching}
+                  onChange={(page) =>
+                    setCursors((current) =>
+                      page < current.length
+                        ? current.slice(0, page)
+                        : nextCursor
+                          ? [...current, nextCursor]
+                          : current
+                    )
+                  }
+                  label={views.find((item) => item.id === view)?.label ?? t("admin_crawler_title")}
+                />
+              ) : null}
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {selectedRunId ? (
         <CrawlDetailsDialog

@@ -1,6 +1,6 @@
 ---
 title: Eneo – AI för offentlig sektor
-translationSource: index.mdx@fdf1705332da
+translationSource: index.mdx@429294e9ea30
 ---
 
 # AI på era villkor
@@ -23,6 +23,12 @@ granskningsloggar och stöd för era godkända AI-leverantörer.
 
 - **Webbansvarig:** [Bädda in en chattwidget på webbplatsen](/guides/embed-widget#for-the-website-team).
   Guiden beskriver skriptet, tillåtna webbplatser och hur du testar installationen.
+
+I referensinstallationen serveras React-appen från backend på huvuddomänen.
+Svelte-tjänsten finns kvar för [återställning av webbgränssnittet](/guides/deployment#main-host-and-ui-rollback),
+styrd av `FRONTEND_ROUTER_PRIORITY=7` i installationens `.env`. Vid bytet från
+Svelte behöver användarna logga in igen. En återställning av gränssnittet
+ångrar inte ändringar i data.
 
 ## Från kunskap till assistent
 

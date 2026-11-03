@@ -82,6 +82,77 @@ existing session to another account, including one with the same username.
 The identity contract belongs to Eneo session tokens. Identity-provider tokens
 are validated separately during OIDC login and exchanged for an Eneo session.
 
+#### Backend browser sessions
+
+The backend-served web app remains disabled by default. With
+`BROWSER_SESSION_ENABLED`, an authenticated cookie response includes
+`Eneo-Session-Generation`, a fingerprint of the selected session: of its
+server-side session id for a browser sign-in, which staying signed in keeps, and
+of the credential itself otherwise. It is neither an authentication credential
+nor a CSRF token.
+
+A document must remember its initial generation and send it on subsequent
+cookie-authenticated requests. Only GET and HEAD may omit it for bootstrap;
+a supplied mismatch on any method returns HTTP 401 with `eneo_error_code: 9090`
+before authentication or domain work. Cookie writes without the header are
+also refused. This prevents a tab from acting as another account after a
+different tab replaces the shared cookie. Bearer and API-key authentication
+retain their existing precedence and do not use this check.
+
+Password and federation login establish a new session and must end with a new
+document. Logout requires the expected generation whenever a session cookie
+is present, including an expired cookie; without a cookie it still returns 204
+and clears any remaining authentication cookies.
+A document must never adopt a replacement generation to retry a refused write.
+
+Each browser sign-in also records a server-side session in PostgreSQL, which
+its token names in a `sid` claim. A token with `sid` authenticates, as the
+cookie or as Bearer, only while that session exists. Logout deletes it before
+clearing the cookie, so a copy of the cookie stops working at once; when the
+deletion cannot be confirmed within 5 seconds, logout returns 503 and keeps the
+cookie for a retry. Requests admitted before logout may finish. The job-event stream
+(`GET /api/v1/jobs/events/`) is the exception, since it stays open until the
+client leaves: for a browser session it authenticates the token again every
+30 seconds (each check waits at most 5 seconds) and ends at the token's
+expiry, so after logout, a password change, signing out everywhere or the
+account's deactivation it closes at the next check. A browser session's token cannot open a WebSocket. Logout does not
+end the identity provider's session, and a password change still ends every
+session of the user. Other Eneo tokens carry no `sid`.
+
+The Vite transport binds the document through `GET /api/v1/auth/session/`
+before rendering. Typed requests, raw fetches, job events and uploads share
+that binding. Resuming a hidden or cached page checks the session before more
+authenticated work. A changed session aborts active work, clears cached data
+and requests a new document; if the user cancels navigation, a blocking screen
+offers an explicit reload. A temporary network failure preserves the binding
+and unsaved form state, blocking new requests until a session check succeeds.
+Signed downloads use their resource token instead of adopting the current cookie.
+
+The session check also answers `Eneo-Session-Expires-In`, the whole seconds the
+session has left, and `Eneo-Session-Lifetime`, the whole seconds its token was
+issued for. Two minutes before the end (half the lifetime for a session shorter
+than four minutes, never less than 20 seconds) the web app asks whether to stay
+signed in. `POST /api/v1/auth/session/extend/`, sent from the site's own page
+with the current generation, renews the same session: the cookie gets a new
+token with the same `sid`, user, organisation and sign-in method, valid for
+`JWT_EXPIRY_TIME` again. The body answers the generation, which a renewal keeps
+because it is derived from the `sid`, and the seconds the new token has left;
+the token stays in the cookie. The server-side session now ends with the new
+token, and a renewal recorded after a later one never moves that end earlier.
+Each renewal writes a `session_extended` audit entry. The token carries the
+original sign-in time (`auth_time`), so renewal never reaches past
+`BROWSER_SESSION_MAX_AGE` (by default 30 days) after sign-in. Bearer tokens and API keys cannot renew a session. Other open tabs of
+the same session follow the new end through a `BroadcastChannel` message that
+carries only the generation and that end (`{generation, expiresAt}`). A lost
+renewal answer is harmless: the cookie still names the same session, so the
+page keeps working and can renew again, and a tab that misses the message
+learns the new end at its next session check. Because the session stays the
+same, logout with the token a renewal replaced still ends it, provided that
+token expired no longer ago than it was valid for.
+
+The retained Next frontend does not use this transport. The Vite route migration
+must still be completed before enabling the backend-served app in production.
+
 #### Deploying the identity contract
 
 The transition requires users to sign in again. Pre-upgrade Eneo and module
@@ -458,6 +529,7 @@ uv run python -m eneo.cli.generate_encryption_key
 | `nonce` | **No** | Not validated in ID token |
 | `at_hash` | Conditional | If present, must match access token hash |
 | `email_verified` | Conditional | For the standard `email`, explicit `false` rejects login before account lookup; omission is allowed for existing active members, while JIT requires `true` |
+| `xms_edov` | Conditional | Entra ID's "email domain owner verified" claim; a positive value verifies the standard `email` for JIT when `email_verified` is absent |
 
 **Clock skew tolerance:** 120 seconds (2 minutes) - configurable via `oidc_clock_leeway_seconds`
 
@@ -503,7 +575,7 @@ Global OIDC uses `OIDC_ALLOWED_DOMAINS` (JSON array, default `[]`); per-tenant f
 | No account, `tenant.provisioning: false` (default) | `403`; provision through SCIM or administration. |
 | No account, `tenant.provisioning: true` | Creation requires a non-empty domain allowlist, a matching domain and the ID token's `email_verified: true` for the selected address. |
 
-`FederatedIdentity.from_claims` receives validated token claims and preserves only a valid email address and its verification status. OIDC defines `email_verified` as a boolean; as a compatibility deviation for IdPs that can only emit text claims, the strings `"true"` (case-insensitive) and `"1"` and the number `1` also count as verification. Missing claims and all other values do not. When email is selected through a custom claims mapping, standard `email_verified` only authorizes JIT if the selected address equals the standard `email` claim.
+`FederatedIdentity.from_claims` receives validated token claims and preserves only a valid email address and its verification status. OIDC defines `email_verified` as a boolean; as a compatibility deviation for IdPs that can only emit text claims, the strings `"true"` (case-insensitive) and `"1"` and the number `1` also count as verification. Microsoft Entra ID omits `email_verified` for organisational accounts and can emit `xms_edov` (email domain owner verified) instead; when the token carries no `email_verified` at all, a positive `xms_edov`, in the same forms, verifies the standard `email` instead, because the mandatory domain allowlist already restricts which domains may be admitted. `xms_edov` is only that fallback: any `email_verified` value the IdP does send keeps its own verdict, so a negative or unrecognised value is never overridden, and an explicit boolean `false` still rejects the login. Missing claims and all other values do not verify. When email is selected through a custom claims mapping, neither claim authorizes JIT unless the selected address equals the standard `email` claim.
 
 Provisioning is a per-tenant flag set through the sysadmin API (`POST /api/v1/sysadmin/tenants/{id}/`). Keep it `false` when SCIM manages membership. A SCIM token does not implicitly change this setting. SCIM or an administrator can restore an account; login cannot.
 
@@ -645,6 +717,7 @@ Enable debug logging via the observability API (`POST /api/v1/sysadmin/observabi
     **Common issues:**
     - Multi-tenant apps: Use `organizations` or `common` instead of specific tenant ID
     - Missing email: Ensure `email` scope and user has email set in Azure AD
+    - JIT refused with "requires a verified email address": add `xms_edov` as an optional ID-token claim; Entra ID does not send `email_verified` for organisational accounts
   </Tabs.Tab>
 
   <Tabs.Tab>

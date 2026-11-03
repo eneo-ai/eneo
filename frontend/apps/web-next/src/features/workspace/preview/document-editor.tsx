@@ -1,5 +1,3 @@
-"use client";
-
 import { Button } from "@astryxdesign/core/Button";
 import type { Editor } from "@tiptap/core";
 import { TextSelection } from "@tiptap/pm/state";
@@ -7,7 +5,7 @@ import { CellSelection } from "@tiptap/pm/tables";
 import { EditorContent, useEditor } from "@tiptap/react";
 import { BubbleMenu } from "@tiptap/react/menus";
 import { TextQuote } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import {
   useCallback,
   useEffect,
@@ -20,6 +18,7 @@ import {
 import { signedFileUrl } from "@/features/files/signed-file-url";
 import { browserApi } from "@/lib/api/browser";
 import { ANSWER_TEXT_CLASS } from "@/components/ai-elements/message";
+import { useNonce } from "@/components/providers/nonce";
 import { cn } from "@/lib/utils";
 import { changesBetween } from "./editor/changes";
 import { replaceContent } from "./editor/content";
@@ -126,6 +125,7 @@ export function DocumentEditor({
   ref
 }: DocumentEditorProps) {
   const t = useTranslations();
+  const nonce = useNonce();
   // The reader's edits win over a `markdown` update until they are saved or dropped.
   const dirty = useRef(false);
   // The Markdown the editor last took, so the same text is not parsed again.
@@ -186,6 +186,7 @@ export function DocumentEditor({
     {
       // The editor is made in the browser: the page is served without it.
       immediatelyRender: false,
+      injectNonce: nonce,
       extensions: documentExtensions({
         resolveImage,
         pageBreakLabel: t("file_preview_page_break")

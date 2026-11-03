@@ -1,11 +1,8 @@
 // @vitest-environment jsdom
-import { fireEvent, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { renderHookInApp } from "@/test/render";
-
-vi.mock("next/navigation", () => import("@/test/navigation"));
-
-import { router } from "@/test/navigation";
+import { createBrowserHistory, createRoute, type AnyRootRoute } from "@tanstack/react-router";
+import { act, waitFor } from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
+import { renderWithRouter } from "@/test/router";
 import { useAutosaveNavigationGuard, type GuardedAutosave } from "./use-autosave-navigation-guard";
 
 function store(overrides: Partial<GuardedAutosave> = {}) {
@@ -27,92 +24,83 @@ function store(overrides: Partial<GuardedAutosave> = {}) {
   };
   return autosave;
 }
-
-function link(href: string, attributes: Record<string, string> = {}) {
-  const anchor = document.createElement("a");
-  anchor.href = href;
-  anchor.textContent = href;
-  for (const [name, value] of Object.entries(attributes)) anchor.setAttribute(name, value);
-  document.body.append(anchor);
-  return anchor;
+function Guard({ autosave }: { autosave: GuardedAutosave }) {
+  useAutosaveNavigationGuard(autosave);
+  return null;
 }
+const routes = (root: AnyRootRoute) =>
+  ["/editor", "/elsewhere"].map((path) => createRoute({ getParentRoute: () => root, path }));
+afterEach(() => vi.restoreAllMocks());
 
-/**
- * Whether the guard stopped a click. jsdom would try to navigate on a click
- * nobody prevented, so the test's own listener (after the guard's capturing
- * one) records the guard's decision and then prevents the default itself.
- */
-function guardStopped(anchor: HTMLAnchorElement, init: MouseEventInit = {}): boolean {
-  let stopped = false;
-  const record = (event: Event) => {
-    stopped = event.defaultPrevented;
-    event.preventDefault();
-  };
-  document.addEventListener("click", record);
-  anchor.dispatchEvent(
-    new MouseEvent("click", { bubbles: true, cancelable: true, button: 0, ...init })
-  );
-  document.removeEventListener("click", record);
-  return stopped;
-}
-
-afterEach(() => {
-  document.body.innerHTML = "";
-  vi.restoreAllMocks();
+it("holds a route transition until the pending save lands, preserving its fragment", async () => {
+  const autosave = store();
+  const { router } = await renderWithRouter(<Guard autosave={autosave} />, {
+    route: "/editor",
+    routes
+  });
+  act(() => {
+    void router.navigate({ href: "/elsewhere#details" });
+  });
+  await waitFor(() => expect(autosave.flush).toHaveBeenCalledTimes(1));
+  expect(router.state.location.pathname).toBe("/editor");
+  await act(() => autosave.settle(true));
+  await waitFor(() => expect(router.state.location.href).toBe("/elsewhere#details"));
 });
 
-describe("useAutosaveNavigationGuard", () => {
-  it("holds an internal link until the pending save lands, then navigates", async () => {
-    const autosave = store();
-    renderHookInApp(() => useAutosaveNavigationGuard(autosave), { route: "/admin/widgets" });
-    expect(guardStopped(link("/admin/widgets/templates/t1"))).toBe(true);
-    expect(autosave.flush).toHaveBeenCalledTimes(1);
-    expect(router.push).not.toHaveBeenCalled();
-
-    autosave.settle(true);
-    await waitFor(() => expect(router.push).toHaveBeenCalledWith("/admin/widgets/templates/t1"));
+it("keeps the editor and its draft when saving fails", async () => {
+  const autosave = store();
+  const { router } = await renderWithRouter(<Guard autosave={autosave} />, {
+    route: "/editor",
+    routes
   });
-
-  it("keeps the editor open when the save fails", async () => {
-    const autosave = store();
-    renderHookInApp(() => useAutosaveNavigationGuard(autosave), { route: "/admin/widgets" });
-    fireEvent.click(link("/admin"));
-    autosave.settle(false);
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(router.push).not.toHaveBeenCalled();
+  act(() => {
+    void router.navigate({ href: "/elsewhere" });
   });
+  await waitFor(() => expect(autosave.flush).toHaveBeenCalled());
+  await act(() => autosave.settle(false));
+  expect(router.state.location.pathname).toBe("/editor");
+});
 
-  it("asks before dropping edits that cannot be saved by waiting", () => {
-    const autosave = store({ stranded: true });
-    renderHookInApp(() => useAutosaveNavigationGuard(autosave), { route: "/admin/widgets" });
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
-    fireEvent.click(link("/admin"));
-    expect(confirm).toHaveBeenCalledTimes(1);
-    expect(autosave.flush).not.toHaveBeenCalled();
-    expect(router.push).not.toHaveBeenCalled();
-
-    confirm.mockReturnValue(true);
-    fireEvent.click(link("/admin/users"));
-    expect(router.push).toHaveBeenCalledWith("/admin/users");
+it("asks before abandoning edits that cannot be saved", async () => {
+  const autosave = store({ stranded: true });
+  const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+  const { router } = await renderWithRouter(<Guard autosave={autosave} />, {
+    route: "/editor",
+    routes
   });
-
-  it("lets everything through while nothing is unsaved", () => {
-    const autosave = store({ unsaved: false });
-    renderHookInApp(() => useAutosaveNavigationGuard(autosave), { route: "/admin/widgets" });
-    expect(guardStopped(link("/admin"))).toBe(false);
-    expect(autosave.flush).not.toHaveBeenCalled();
+  await act(async () => {
+    void router.navigate({ href: "/elsewhere" });
   });
-
-  it("ignores links the router would not handle", () => {
-    const autosave = store();
-    // The guard compares against the real location, which the route mock does not set.
-    window.history.replaceState(null, "", "/admin/widgets");
-    renderHookInApp(() => useAutosaveNavigationGuard(autosave), { route: "/admin/widgets" });
-    expect(guardStopped(link("https://docs.eneo.ai/guide"))).toBe(false);
-    expect(guardStopped(link("/admin", { target: "_blank" }))).toBe(false);
-    expect(guardStopped(link("/admin", { download: "" }))).toBe(false);
-    expect(guardStopped(link("/admin/widgets#policy"))).toBe(false);
-    expect(guardStopped(link("/admin"), { metaKey: true })).toBe(false);
-    expect(autosave.flush).not.toHaveBeenCalled();
+  expect(confirm).toHaveBeenCalledTimes(1);
+  expect(router.state.location.pathname).toBe("/editor");
+  expect(autosave.flush).not.toHaveBeenCalled();
+  confirm.mockReturnValue(true);
+  await act(async () => {
+    void router.navigate({ href: "/elsewhere" });
   });
+  await waitFor(() => expect(router.state.location.pathname).toBe("/elsewhere"));
+});
+
+it("preserves browser back instead of adding a replacement history entry", async () => {
+  const autosave = store({ unsaved: false });
+  window.history.replaceState(null, "", "/elsewhere");
+  const history = createBrowserHistory();
+  const view = await renderWithRouter(<Guard autosave={autosave} />, { history, routes });
+  try {
+    await act(() => view.router.navigate({ href: "/editor" }));
+    autosave.unsaved = true;
+    view.rerender(<Guard autosave={autosave} />);
+    const entries = history.length;
+    await act(async () => history.back());
+    await waitFor(() => expect(autosave.flush).toHaveBeenCalled());
+    expect(view.router.state.location.pathname).toBe("/editor");
+    await act(() => autosave.settle(true));
+    await waitFor(() => expect(view.router.state.location.pathname).toBe("/elsewhere"));
+    expect(history.length).toBe(entries);
+    await act(async () => history.forward());
+    await waitFor(() => expect(view.router.state.location.pathname).toBe("/editor"));
+  } finally {
+    view.unmount();
+    history.destroy();
+  }
 });

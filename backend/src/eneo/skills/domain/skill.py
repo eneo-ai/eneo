@@ -5,16 +5,25 @@ import binascii
 import hashlib
 import json
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, TypeAlias
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from eneo.main.exceptions import BadRequestException
+from eneo.mcp_servers.domain.model_tool_identity import ModelToolIdentity
 from eneo.model_providers.domain.model_route import MAX_MODEL_ROUTE_LENGTH
+from eneo.skills.domain.instruction_references import (
+    InstructionTarget,
+    SkillInstructionReference,
+    parse_instruction_references,
+    render_instruction_references,
+    target_matches_tool,
+)
 
 if TYPE_CHECKING:
     from eneo.completion_models.domain.skill_activation import (
@@ -123,6 +132,8 @@ class AssistantPinAdvanceOutcome(str, Enum):
 class AssistantPinAdvanceIncompatibleReason(str, Enum):
     ACTIVATION_UNAVAILABLE = "activation_unavailable"
     CONTEXT_WINDOW = "context_window"
+    ATTACHMENT_LIMIT = "attachment_limit"
+    CONFLICTING_REVISIONS = "conflicting_revisions"
 
 
 @dataclass(frozen=True)
@@ -197,6 +208,8 @@ class AppPinAdvanceOutcome(str, Enum):
 
 class AppPinAdvanceIncompatibleReason(str, Enum):
     CONTEXT_WINDOW = "context_window"
+    ATTACHMENT_LIMIT = "attachment_limit"
+    CONFLICTING_REVISIONS = "conflicting_revisions"
 
 
 @dataclass(frozen=True)
@@ -730,6 +743,10 @@ class SkillHasBindingsError(Exception):
         super().__init__()
 
 
+class SkillHasReferencesError(Exception):
+    """Retained revisions must keep their approved helper content available."""
+
+
 class SkillHasActiveAppRunsError(Exception):
     def __init__(self, *, skill_ids: list[UUID] | None = None) -> None:
         self.details = {"skill_ids": [str(skill_id) for skill_id in skill_ids or []]}
@@ -927,6 +944,58 @@ class ResolvedSkillBinding:
     attachable_revision_id: UUID | None = None
     attachable_revision_number: int | None = None
     activation_mode: SkillActivationMode = SkillActivationMode.ALWAYS
+    # Flat, immutable approved closure. Helpers inherit this root's activation;
+    # they are not additional choices in the activation catalogue.
+    dependencies: tuple[ResolvedSkillBinding, ...] = ()
+
+
+class SkillBindingRevisionConflictError(BadRequestException):
+    pass
+
+
+class SkillAttachmentLimitError(BadRequestException):
+    pass
+
+
+def effective_skill_bindings(
+    bindings: Sequence[ResolvedSkillBinding],
+    *,
+    configured_order: tuple[UUID, ...] = (),
+) -> tuple[ResolvedSkillBinding, ...]:
+    """Deduplicate approved helpers while preserving root and closure order."""
+    effective: dict[UUID, ResolvedSkillBinding] = {}
+    roots = sorted(bindings, key=lambda binding: binding.position)
+    for root in roots:
+        for binding in (root, *root.dependencies):
+            existing = effective.get(binding.skill_id)
+            if existing and existing.skill_revision_id != binding.skill_revision_id:
+                raise SkillBindingRevisionConflictError(
+                    "Selected Skills include conflicting revisions of a helper Skill"
+                )
+            effective.setdefault(binding.skill_id, binding)
+    root_order = dict.fromkeys((*configured_order, *(root.skill_id for root in roots)))
+    by_root = {root.skill_id: root for root in roots}
+    ordered: dict[UUID, ResolvedSkillBinding] = {}
+    for skill_id in root_order:
+        if skill_id not in effective:
+            continue
+        root = by_root.get(skill_id, effective[skill_id])
+        ordered.setdefault(skill_id, root)
+        for helper in root.dependencies:
+            if helper.skill_id not in root_order:
+                ordered.setdefault(helper.skill_id, helper)
+    return tuple(ordered.values())
+
+
+def validate_skill_binding_group(
+    bindings: Sequence[ResolvedSkillBinding], *, max_attached_skills: int | None
+) -> None:
+    """Admit the complete saved configuration, including retained blocked roots."""
+    effective = effective_skill_bindings(bindings)
+    if max_attached_skills is not None and len(effective) > max_attached_skills:
+        raise SkillAttachmentLimitError(
+            f"Selected Skills and their helpers exceed the limit of {max_attached_skills} Skills"
+        )
 
 
 @dataclass(frozen=True)
@@ -941,6 +1010,11 @@ class SkillBindingIntent:
 class AssistantSkillBindingReplacement:
     bindings: tuple[ResolvedSkillBinding, ...]
     on_demand_skill_ids_requiring_validation: frozenset[UUID]
+    # True when the new set only drops existing bindings (no addition, mode,
+    # revision or order change); the personal chat always accepts such a save.
+    removal_only: bool = False
+    # True when the submitted list is exactly what is already stored.
+    unchanged: bool = False
 
 
 @dataclass(frozen=True)
@@ -959,6 +1033,10 @@ class AssistantSkillRuntimeProjection:
 class AssistantSkillConfigurationProjection:
     bindings: tuple[SkillBindingProjection, ...]
     runtime: AssistantSkillRuntimeProjection | None
+    # Personal chat only: the organisation layer (read-only) and whether the
+    # person's own Skills (``bindings``) run.
+    organisation_bindings: tuple[SkillBindingProjection, ...] = ()
+    personal_layer: PersonalSkillLayerDecision | None = None
 
 
 @dataclass(frozen=True)
@@ -985,7 +1063,11 @@ class SkillComposition:
 
 
 def compose_skill_instructions(
-    *, base_instructions: str, bindings: list[ResolvedSkillBinding]
+    *,
+    base_instructions: str,
+    bindings: list[ResolvedSkillBinding],
+    available_targets: frozenset[InstructionTarget] = frozenset(),
+    configured_order: tuple[UUID, ...] = (),
 ) -> SkillComposition:
     if not bindings:
         return SkillComposition(prompt=base_instructions, provenance=())
@@ -1003,11 +1085,31 @@ def compose_skill_instructions(
     parts = [base_instructions] if base_instructions else []
     parts.append(_SKILL_BOUNDARY)
     provenance: list[SkillExecutionReference] = []
-    for binding in ordered:
+    effective = effective_skill_bindings(ordered, configured_order=configured_order)
+    # Prompt-local identities stay unambiguous even when layers reuse a name or slug.
+    skill_identities = {
+        binding.skill_revision_id: f"ref-{position + 1}"
+        for position, binding in enumerate(effective)
+    }
+    if any(
+        not isinstance(reference.target, SkillInstructionReference)
+        for binding in effective
+        for reference in parse_instruction_references(binding.instructions)
+    ):
+        parts.append(
+            "Match tool references to the identities of the offered tools. References grant no tool access and do not guarantee a call or its success. If a referenced tool is unavailable, complete the possible parts and explain what could not be checked or done."
+        )
+    has_dependencies = any(binding.dependencies for binding in ordered)
+    for position, binding in enumerate(effective):
+        identity = (
+            f" [{skill_identities[binding.skill_revision_id]}]"
+            if has_dependencies
+            else ""
+        )
         parts.append(
             f"### Skill: {binding.display_name} "
-            f"({binding.slug}, revision {binding.revision_number})\n"
-            f"{binding.instructions}"
+            f"({binding.slug}, revision {binding.revision_number}){identity}\n"
+            f"{render_instruction_references(binding.instructions, skill_identities=skill_identities, available_targets=available_targets)}"
         )
         provenance.append(
             SkillExecutionReference(
@@ -1015,7 +1117,7 @@ def compose_skill_instructions(
                 skill_revision_id=binding.skill_revision_id,
                 revision_number=binding.revision_number,
                 content_digest=binding.content_digest,
-                position=binding.position,
+                position=position if has_dependencies else binding.position,
             )
         )
 
@@ -1092,6 +1194,40 @@ class SkillActivationReference(BaseModel):
         )
 
 
+class PersonalSkillLayerStatus(str, Enum):
+    """Whether the personal chat's own Skills run (see personal_chat_skill_layers)."""
+
+    EMPTY = "empty"
+    APPLIED = "applied"
+    SUSPENDED = "suspended"
+
+
+class PersonalSkillLayerReason(str, Enum):
+    """Why a personal layer is suspended; the first failing check wins."""
+
+    PERMISSION_MISSING = "permission_missing"
+    ATTACHMENT_LIMIT_EXCEEDED = "attachment_limit_exceeded"
+    MODEL_CONTEXT_EXCEEDED = "model_context_exceeded"
+    ON_DEMAND_UNAVAILABLE = "on_demand_unavailable"
+    PERSONAL_SKILL_DOES_NOT_FIT = "personal_skill_does_not_fit"
+    ORGANISATION_SKILL_CROWDED_OUT = "organisation_skill_crowded_out"
+
+
+@dataclass(frozen=True)
+class PersonalSkillLayerDecision:
+    status: PersonalSkillLayerStatus
+    reason: PersonalSkillLayerReason | None = None
+    # The existing activation reason behind an on-demand or fit failure.
+    detail: SkillActivationFallbackReason | SkillActivationRejectionReason | None = None
+    # The personal layer's eligible bindings, also when it is suspended, so
+    # evidence and configuration can name what did not run.
+    bindings: tuple[ResolvedSkillBinding, ...] = ()
+
+    @property
+    def applies(self) -> bool:
+        return self.status is PersonalSkillLayerStatus.APPLIED
+
+
 class SkillActivationRejection(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -1099,12 +1235,47 @@ class SkillActivationRejection(BaseModel):
     reason: SkillActivationRejectionReason
 
 
-class SkillActivationEvidenceV1(BaseModel):
-    """Strict, versioned, body-free facts retained with one Question."""
+_PERSONAL_SKILL_LAYER_MESSAGES = {
+    PersonalSkillLayerReason.PERMISSION_MISSING: (
+        "Your role does not allow your own Skills in the personal chat"
+    ),
+    PersonalSkillLayerReason.ATTACHMENT_LIMIT_EXCEEDED: (
+        "Together with the organisation's Skills, your Skills exceed the "
+        "number of Skills allowed"
+    ),
+    PersonalSkillLayerReason.MODEL_CONTEXT_EXCEEDED: (
+        "Your Skills and the organisation's do not fit this model's context window"
+    ),
+    PersonalSkillLayerReason.ON_DEMAND_UNAVAILABLE: (
+        "Skills on demand are not available with this model or policy; "
+        "choose Always or another model"
+    ),
+    PersonalSkillLayerReason.PERSONAL_SKILL_DOES_NOT_FIT: (
+        "One of your on-demand Skills is too large to activate with this model"
+    ),
+    PersonalSkillLayerReason.ORGANISATION_SKILL_CROWDED_OUT: (
+        "Your Skills would leave no room for one of the organisation's on-demand Skills"
+    ),
+}
+
+
+class PersonalSkillLayerRejectedError(Exception):
+    """A personal chat save whose own Skills would not run as configured."""
+
+    def __init__(self, decision: PersonalSkillLayerDecision) -> None:
+        assert decision.reason is not None
+        self.details = {
+            "reason": decision.reason.value,
+            "detail": decision.detail.value if decision.detail is not None else None,
+        }
+        super().__init__(_PERSONAL_SKILL_LAYER_MESSAGES[decision.reason])
+
+
+class _SkillActivationEvidenceFields(BaseModel):
+    """Strict, body-free facts retained with one Question; versions below."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    version: Literal[1] = 1
     effective_mode: SkillTurnEffectiveMode
     fallback_reason: SkillActivationFallbackReason | None = None
     available: tuple[SkillActivationReference, ...]
@@ -1125,7 +1296,7 @@ class SkillActivationEvidenceV1(BaseModel):
     selection_latency_ms: int = Field(default=0, ge=0, strict=True)
 
     @model_validator(mode="after")
-    def validate_reference_catalogue(self) -> "SkillActivationEvidenceV1":
+    def validate_reference_catalogue(self) -> "_SkillActivationEvidenceFields":
         available_revision_ids = [
             reference.skill_revision_id for reference in self.available
         ]
@@ -1171,6 +1342,122 @@ class SkillActivationEvidenceV1(BaseModel):
         return self
 
 
+class SkillActivationEvidenceV1(_SkillActivationEvidenceFields):
+    version: Literal[1] = 1
+
+
+class PersonalSkillLayerEvidence(BaseModel):
+    """What happened to the personal chat's own Skills on one turn."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    status: Literal[
+        PersonalSkillLayerStatus.APPLIED, PersonalSkillLayerStatus.SUSPENDED
+    ]
+    reason: PersonalSkillLayerReason | None = None
+    detail: SkillActivationFallbackReason | SkillActivationRejectionReason | None = None
+    references: tuple[SkillActivationReference, ...]
+
+    @model_validator(mode="after")
+    def validate_reason(self) -> "PersonalSkillLayerEvidence":
+        if (self.status is PersonalSkillLayerStatus.SUSPENDED) != (
+            self.reason is not None
+        ):
+            raise ValueError("Only a suspended personal layer carries a reason")
+        if not self.references:
+            raise ValueError("A recorded personal layer names its Skills")
+        return self
+
+
+class SkillActivationEvidenceV2(_SkillActivationEvidenceFields):
+    """V1 plus the personal layer; written only for turns that have one."""
+
+    version: Literal[2] = 2
+    personal_layer: PersonalSkillLayerEvidence
+
+    @model_validator(mode="after")
+    def validate_personal_layer(self) -> "SkillActivationEvidenceV2":
+        _validate_personal_layer(self.available, self.personal_layer)
+        return self
+
+
+def _validate_personal_layer(
+    available_references: tuple[SkillActivationReference, ...],
+    personal_layer: PersonalSkillLayerEvidence,
+) -> None:
+    available = {
+        reference.skill_revision_id: reference.activation_key
+        for reference in available_references
+    }
+    for reference in personal_layer.references:
+        offered = reference.skill_revision_id in available
+        if personal_layer.status is PersonalSkillLayerStatus.APPLIED:
+            if (
+                not offered
+                or reference.activation_key != available[reference.skill_revision_id]
+            ):
+                raise ValueError("An applied personal Skill must be available")
+        elif offered or reference.activation_key is not None:
+            raise ValueError("A suspended personal Skill cannot be available")
+
+
+class SkillInstructionReferenceEvidence(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    source_revision_id: UUID
+    label: str = Field(min_length=1)
+    target: InstructionTarget
+
+
+class SkillActivationEvidenceV3(_SkillActivationEvidenceFields):
+    """Reference provenance and the actual offered tool identities, without bodies."""
+
+    version: Literal[3] = 3
+    personal_layer: PersonalSkillLayerEvidence | None = None
+    helpers: tuple[SkillActivationReference, ...] = ()
+    instruction_references: tuple[SkillInstructionReferenceEvidence, ...] = ()
+    reference_tools: tuple[ModelToolIdentity, ...] = ()
+    references_prepared: bool = False
+
+    @model_validator(mode="after")
+    def validate_reference_evidence(self) -> "SkillActivationEvidenceV3":
+        if self.personal_layer is not None:
+            _validate_personal_layer(self.available, self.personal_layer)
+        active_keys = set((*self.initially_active, *self.accepted))
+        active_revisions = {
+            reference.skill_revision_id
+            for reference in self.available
+            if reference.activation_key in active_keys
+        }
+        helper_revisions = [reference.skill_revision_id for reference in self.helpers]
+        if len(helper_revisions) != len(
+            set(helper_revisions)
+        ) or active_revisions.intersection(helper_revisions):
+            raise ValueError("Activated helper revisions must be unique")
+        if any(reference.activation_key is not None for reference in self.helpers):
+            raise ValueError("Helpers do not have activation catalogue keys")
+        active_revisions.update(helper_revisions)
+        if any(
+            reference.source_revision_id not in active_revisions
+            for reference in self.instruction_references
+        ):
+            raise ValueError("Instruction reference sources must be active")
+        names = [tool.model_name for tool in self.reference_tools]
+        if len(names) != len(set(names)):
+            raise ValueError("Model tool identities must be unique")
+        if self.reference_tools and not self.references_prepared:
+            raise ValueError("Tool identities require a prepared registry")
+        return self
+
+
+# A plain union on purpose: each version forbids extra fields and fixes its
+# version value, so each payload matches exactly one. OpenAPI keeps `version`
+# an integer (a discriminator would publish it as a string key).
+SkillActivationEvidence: TypeAlias = (
+    SkillActivationEvidenceV1 | SkillActivationEvidenceV2 | SkillActivationEvidenceV3
+)
+
+
 @dataclass(frozen=True)
 class SkillTurnBinding:
     activation_key: str
@@ -1187,6 +1474,8 @@ class SkillTurnPlan:
     blocked: tuple[SkillTurnBinding, ...]
     initially_active_keys: tuple[str, ...]
     composition: SkillComposition
+    # Set for the personal chat only: whether its own Skills run this turn.
+    personal_layer: PersonalSkillLayerDecision | None = None
 
     @classmethod
     def create(
@@ -1195,6 +1484,7 @@ class SkillTurnPlan:
         base_instructions: str,
         resolution: SkillRuntimeResolution,
         policy: SkillRuntimePolicy,
+        personal_layer: PersonalSkillLayerDecision | None = None,
     ) -> "SkillTurnPlan":
         ordered = tuple(
             sorted(resolution.eligible, key=lambda binding: binding.position)
@@ -1229,7 +1519,9 @@ class SkillTurnPlan:
             composition=compose_skill_instructions(
                 base_instructions=base_instructions,
                 bindings=[binding.binding for binding in initially_active],
+                configured_order=tuple(binding.skill_id for binding in ordered),
             ),
+            personal_layer=personal_layer,
         )
 
     def for_full_save_validation(self) -> "SkillTurnPlan":
@@ -1254,6 +1546,7 @@ class SkillTurnPlan:
                 blocked=(),
             ),
             policy=self.policy,
+            personal_layer=self.personal_layer,
         )
 
     def to_activation_runtime(
@@ -1294,6 +1587,7 @@ class SkillTurnPlan:
         active_keys = set(snapshot.active)
         return compose_skill_instructions(
             base_instructions=self.base_instructions,
+            configured_order=tuple(item.binding.skill_id for item in self.available),
             bindings=[
                 binding.binding
                 for binding in self.available
@@ -1307,7 +1601,7 @@ class SkillTurnPlan:
         selected_model_id: UUID,
         selected_model_route: str,
         snapshot: "SkillActivationSnapshot",
-    ) -> SkillActivationEvidenceV1:
+    ) -> SkillActivationEvidence:
         available = tuple(
             SkillActivationReference.from_binding(
                 binding.binding,
@@ -1315,7 +1609,7 @@ class SkillTurnPlan:
             )
             for binding in self.available
         )
-        return SkillActivationEvidenceV1(
+        evidence = SkillActivationEvidenceV1(
             effective_mode=snapshot.effective_mode,
             fallback_reason=snapshot.fallback_reason,
             available=available,
@@ -1343,4 +1637,74 @@ class SkillTurnPlan:
             token_count_source=snapshot.measurement.source.value,
             activation_rounds=snapshot.activation_rounds,
             selection_latency_ms=snapshot.selection_latency_ms,
+        )
+        personal_layer = self._personal_layer_evidence()
+        active_keys = set(snapshot.active)
+        active_roots = [
+            item.binding
+            for item in self.available
+            if item.activation_key in active_keys
+        ]
+        effective = effective_skill_bindings(active_roots)
+        instruction_references = tuple(
+            SkillInstructionReferenceEvidence(
+                source_revision_id=binding.skill_revision_id,
+                label=reference.label,
+                target=reference.target,
+            )
+            for binding in effective
+            for reference in parse_instruction_references(binding.instructions)
+        )
+        if instruction_references or snapshot.references_prepared:
+            root_ids = {binding.skill_revision_id for binding in active_roots}
+            return SkillActivationEvidenceV3(
+                **evidence.model_dump(exclude={"version"}),
+                personal_layer=personal_layer,
+                helpers=tuple(
+                    SkillActivationReference.from_binding(binding)
+                    for binding in effective
+                    if binding.skill_revision_id not in root_ids
+                ),
+                instruction_references=instruction_references,
+                reference_tools=tuple(
+                    tool
+                    for tool in snapshot.reference_tools
+                    if any(
+                        target_matches_tool(reference.target, tool)
+                        for reference in instruction_references
+                    )
+                ),
+                references_prepared=snapshot.references_prepared,
+            )
+        if personal_layer is None:
+            return evidence
+        return SkillActivationEvidenceV2(
+            **evidence.model_dump(exclude={"version"}),
+            personal_layer=personal_layer,
+        )
+
+    def _personal_layer_evidence(self) -> PersonalSkillLayerEvidence | None:
+        decision = self.personal_layer
+        if decision is None or decision.status is PersonalSkillLayerStatus.EMPTY:
+            return None
+        personal_ids = {binding.skill_id for binding in decision.bindings}
+        if decision.applies:
+            # Applied Skills run under their composed position and key.
+            references = tuple(
+                SkillActivationReference.from_binding(
+                    binding.binding, activation_key=binding.activation_key
+                )
+                for binding in self.available
+                if binding.binding.skill_id in personal_ids
+            )
+        else:
+            references = tuple(
+                SkillActivationReference.from_binding(binding)
+                for binding in decision.bindings
+            )
+        return PersonalSkillLayerEvidence(
+            status=decision.status,
+            reason=decision.reason,
+            detail=decision.detail,
+            references=references,
         )

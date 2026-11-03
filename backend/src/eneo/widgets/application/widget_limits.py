@@ -12,14 +12,14 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.exc import SQLAlchemyError
 
-from eneo.audit.infrastructure.rate_limiting import (
+from eneo.database.database import sessionmanager
+from eneo.main.config import Settings, get_settings
+from eneo.main.logging import get_logger
+from eneo.redis.rate_limit import (
     RateLimitConfig,
     RateLimitServiceUnavailableError,
     check_rate_limit,
 )
-from eneo.database.database import sessionmanager
-from eneo.main.config import Settings, get_settings
-from eneo.main.logging import get_logger
 from eneo.widgets.domain.exceptions import (
     WidgetBudgetExhaustedError,
     WidgetProtectionUnavailableError,
@@ -134,7 +134,7 @@ class WidgetLimiter:
             raise WidgetProtectionUnavailableError() from exc
         if not result.allowed:
             raise WidgetRateLimitedError(
-                code, retry_after=result.window_seconds, message=message
+                code, retry_after=result.retry_after_seconds, message=message
             )
 
 

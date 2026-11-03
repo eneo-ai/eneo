@@ -1,13 +1,9 @@
 // @vitest-environment jsdom
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, screen, within } from "@testing-library/react";
-import { NextIntlClientProvider } from "next-intl";
-import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AstryxProvider } from "@/components/providers/astryx-provider";
-import messages from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
+import { PHONE_VIEWPORT, setViewport } from "@/test/setup-dom";
 import { CrawlRunsTable } from "./crawl-runs";
 import type { CrawlRun } from "./knowledge";
 
@@ -69,12 +65,87 @@ function statusColumn() {
 }
 
 describe("CrawlRunsTable", () => {
+  it("is a block per run on a phone, newest first, with the result and the duration in view", () => {
+    setViewport(PHONE_VIEWPORT);
+    renderInApp(<CrawlRunsTable runs={RUNS} />);
+
+    expect(screen.queryByRole("table")).toBeNull();
+    const rows = within(screen.getByRole("list", { name: "Indexeringar" })).getAllByRole(
+      "listitem"
+    );
+    expect(rows).toHaveLength(3);
+    // Three runs need no filter on a phone (useFilterShown).
+    expect(screen.queryByRole("textbox", { name: "Filtrera indexeringar" })).toBeNull();
+    // The newest first, as the table's default order.
+    expect(within(rows[0]!).getByRole("button", { name: /5 mars 2024|2024-03-05/ })).toBeTruthy();
+    // The date starts on the row's 16 px line: the ghost button's padding is pulled back.
+    expect(
+      within(rows[0]!).getByRole("button", { name: /5 mars 2024|2024-03-05/ }).className
+    ).toContain("-ms-3");
+    // No "—" line: a run without a result says nothing about it.
+    expect(rows.map((row) => row.textContent?.includes("—"))).toEqual([false, false, false]);
+    // A finished run says how long it took; the unfinished one says when it started.
+    expect(rows[0]!.textContent).toMatch(/Varaktighet: \d/);
+    expect(rows[1]!.textContent).not.toMatch(/Varaktighet/);
+    expect(rows[1]!.textContent).toMatch(/Startad/);
+  });
+
+  it("starts a failed run's lone Visa detaljer on the same line as its date", () => {
+    setViewport(PHONE_VIEWPORT);
+    renderInApp(<CrawlRunsTable runs={RUNS} />);
+    const rows = within(screen.getByRole("list", { name: "Indexeringar" })).getAllByRole(
+      "listitem"
+    );
+    // The middle row is the failed run: no counts, so the button is the line's first thing.
+    const errors = within(rows[1]!).getByRole("button", { name: "Visa detaljer" });
+    expect(errors.parentElement!.className).toContain("-ms-3");
+    // A run whose line starts with a label ("Ej indexerade") is not pulled back.
+    expect(
+      within(rows[0]!).getByRole("button", { name: /Sidor: 1, visa de som inte kunde indexeras/ })
+        .parentElement!.className
+    ).not.toContain("-ms-3");
+  });
+
+  it("leaves a queued run's empty result line out on a phone", () => {
+    setViewport(PHONE_VIEWPORT);
+    renderInApp(
+      <CrawlRunsTable
+        runs={[run({ id: "q", phase: "queued", finished_at: null, pages_crawled: 0 })]}
+      />
+    );
+    const row = within(screen.getByRole("list", { name: "Indexeringar" })).getByRole("listitem");
+    // The date and state, then when it started: no line for a result it does not have yet.
+    expect(row.children).toHaveLength(2);
+  });
+
   it("lists runs newest first with their state as a status dot and text", async () => {
     const { container } = renderInApp(<CrawlRunsTable runs={RUNS} />);
 
     // Named like the website page's tab it fills.
     expect(screen.getByRole("table", { name: "Indexeringar" })).toBeTruthy();
     expect(statusColumn()).toEqual(["Delvis klar", "Misslyckades", "Klar"]);
+    // On a phone the start time stays in view while the run scrolls sideways
+    // (Astryx offsets pinned cells); an iPad held upright (682 px beside the
+    // icon rail) shows it whole.
+    const table = screen.getByRole("table");
+    expect(
+      within(table)
+        .getAllByRole("columnheader")
+        .filter((cell) => cell.style.insetInlineStart)
+        .map((cell) => cell.textContent)
+    ).toEqual(["Startad"]);
+    // The date's text starts on its header's line: the ghost button's padding shrinks to
+    // 4 px and is pulled back by as much, so its focus ring stays inside the cell.
+    const date = screen.getByRole("button", { name: /5 mars 2024|2024-03-05/ });
+    expect(date.className).toContain("-ms-1");
+    expect(date.className).toContain("px-1");
+    // The widest English date and a running crawl's "Startad för 59 minuter sedan" each
+    // fit one line, also at a touch screen's 15 px, and the four columns fit 682 px (an
+    // upright iPad beside the icon rail).
+    const width = (name: string) =>
+      within(table).getByRole("columnheader", { name: new RegExp(name) }).style.width;
+    expect([width("Startad"), width("Varaktighet")]).toEqual(["184px", "224px"]);
+    expect(Number.parseFloat(table.style.minWidth)).toBeLessThanOrEqual(682);
     expect(
       screen.getByRole("button", { name: "Sortera efter Startad, sorterat fallande" })
     ).toBeTruthy();
@@ -103,7 +174,7 @@ describe("CrawlRunsTable", () => {
 
     // The failed count is a link to the run's failed addresses of that kind.
     fireEvent.click(
-      within(cell).getByRole("button", { name: "Visa sidor som inte kunde indexeras (1)" })
+      within(cell).getByRole("button", { name: "Sidor: 1, visa de som inte kunde indexeras" })
     );
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByRole("radio", { name: "Sidor" }).getAttribute("aria-checked")).toBe(
@@ -117,20 +188,7 @@ describe("CrawlRunsTable", () => {
     expect(within(dialog).getByText(/Öppna länken och kontrollera/)).toBeTruthy();
   });
 
-  it("renders dates only after hydration, in the viewer's time zone", () => {
-    const html = renderToString(
-      <QueryClientProvider client={new QueryClient()}>
-        <NextIntlClientProvider locale="sv" messages={messages} timeZone="Europe/Stockholm">
-          <AstryxProvider>
-            <CrawlRunsTable runs={[run({ id: "old", created_at: "2024-03-01T10:00:00Z" })]} />
-          </AstryxProvider>
-        </NextIntlClientProvider>
-      </QueryClientProvider>
-    );
-    // The server does not know the viewer's zone: no date in its HTML to mismatch.
-    expect(html).not.toContain("2024");
-    expect(html).not.toContain("<time");
-
+  it("renders dates in the viewer's time zone", () => {
     renderInApp(<CrawlRunsTable runs={[run({ id: "old", created_at: "2024-03-01T10:00:00Z" })]} />);
     const started = within(screen.getByRole("table")).getAllByRole("row")[1]!;
     expect(within(started).getAllByRole("cell")[0]!.querySelector("time")).toBeTruthy();

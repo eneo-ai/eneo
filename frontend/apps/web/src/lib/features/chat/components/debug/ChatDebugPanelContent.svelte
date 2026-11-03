@@ -215,7 +215,10 @@
     {/if}
     <TurnDiagnosticsSummary details={panel.turnDetails} />
     {#if panel.diagnostics.skill_activation}
-      <SkillActivationDiagnostics evidence={panel.diagnostics.skill_activation} />
+      <SkillActivationDiagnostics
+        evidence={panel.diagnostics.skill_activation}
+        toolCalls={panel.selectedMessage?.tool_calls ?? []}
+      />
     {:else}
       <section class="flex flex-col gap-1 px-5 py-5" aria-labelledby="{idPrefix}-legacy-skills">
         <h2 id="{idPrefix}-legacy-skills" class="text-sm font-semibold">

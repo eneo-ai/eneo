@@ -1,7 +1,6 @@
-"use client";
-
 import { Heading } from "@astryxdesign/core/Heading";
-import Link from "next/link";
+import Link from "@/lib/link";
+import { Plus } from "lucide-react";
 import { useRef } from "react";
 import { cn } from "@/lib/utils";
 import { RemovalFocusScope } from "../removal";
@@ -64,5 +63,26 @@ export function OverviewSection({
         {children}
       </section>
     </RemovalFocusScope>
+  );
+}
+
+/**
+ * Dashed card that starts a create flow: its hint and the flow's own control
+ * (a split button or a button), so the card itself needs no click handling.
+ * Where a screen is narrow the control moves into the section's heading
+ * instead (a phone): a card as tall as an assistant is not worth the room.
+ */
+export function OverviewCreateCard({ hint, action }: { hint: string; action: React.ReactNode }) {
+  return (
+    <div className="border-ax-border-strong rounded-ax-container flex h-full min-h-40 flex-col items-center justify-center gap-3 border border-dashed p-4 text-center">
+      <span
+        aria-hidden="true"
+        className="bg-ax-muted text-ax-text flex size-9 items-center justify-center rounded-full"
+      >
+        <Plus className="size-4.5" />
+      </span>
+      <p className="text-ax-text-secondary text-sm">{hint}</p>
+      {action}
+    </div>
   );
 }

@@ -19,12 +19,6 @@ from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.domain.outcome import Outcome
-from eneo.audit.infrastructure.rate_limiting import (
-    RateLimitConfig,
-    RateLimitExceededError,
-    RateLimitServiceUnavailableError,
-    enforce_rate_limit,
-)
 from eneo.authentication.auth_dependencies import (
     require_resource_permission_for_method,
     require_user_for_creation,
@@ -77,8 +71,16 @@ from eneo.mcp_servers.infrastructure.tool_approval import (
     get_approval_manager,
 )
 from eneo.questions.question import MessageFeedback
+from eneo.redis.rate_limit import (
+    RateLimitConfig,
+    RateLimitExceededError,
+    RateLimitServiceUnavailableError,
+    enforce_rate_limit,
+    raise_rate_limited,
+)
 from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
+from eneo.server.exception_handlers import extract_request_id
 from eneo.server.protocol import responses
 from eneo.server.protocol.downloads import content_disposition_header
 from eneo.sessions.session import (
@@ -117,6 +119,12 @@ _CHAT_ACCESS_REASON = "Chat access is checked against the selected assistant, gr
 
 logger = get_logger(__name__)
 
+_BUNDLED_CATALOG_ON_GET = (
+    "Resolving the file-creation provider stores the bundled runtime's live tool "
+    "catalog when the stored rows differ (once per catalog and process, audited as "
+    "the system). The catalog comes from the runtime, not from the request."
+)
+
 router = APIRouter()
 
 RECENT_CONVERSATIONS_DEFAULT_LIMIT = 20
@@ -124,9 +132,7 @@ RECENT_CONVERSATIONS_MAX_LIMIT = 50
 
 
 def _raise_conversation_scope_denied(http_request: Request, message: str) -> NoReturn:
-    request_id = http_request.headers.get(
-        "x-correlation-id"
-    ) or http_request.headers.get("x-request-id")
+    request_id = extract_request_id(http_request)
     detail: dict[str, object] = {
         "code": "insufficient_scope",
         "message": message,
@@ -540,15 +546,8 @@ async def preflight_tokens(
             ),
         )
     except RateLimitExceededError as exc:
-        retry_after = exc.result.window_seconds
-        raise HTTPException(
-            status_code=429,
-            detail={
-                "code": "rate_limit_exceeded",
-                "message": "Too many preflight requests. Please retry shortly.",
-                "retry_after_seconds": retry_after,
-            },
-            headers={"Retry-After": str(retry_after)},
+        raise_rate_limited(
+            exc.result, "Too many preflight requests. Please retry shortly."
         )
     except RateLimitServiceUnavailableError:
         # Fail-open: preflight is best-effort UX, not a security-critical path.
@@ -823,15 +822,8 @@ async def call_tool_from_app_view(
             ),
         )
     except RateLimitExceededError as exc:
-        retry_after = exc.result.window_seconds
-        raise HTTPException(
-            status_code=429,
-            detail={
-                "code": "rate_limit_exceeded",
-                "message": "Too many tool calls from views. Please retry shortly.",
-                "retry_after_seconds": retry_after,
-            },
-            headers={"Retry-After": str(retry_after)},
+        raise_rate_limited(
+            exc.result, "Too many tool calls from views. Please retry shortly."
         )
     except RateLimitServiceUnavailableError:
         # Fail-closed: a view runs a server's code, and nothing else bounds
@@ -972,6 +964,7 @@ async def call_tool_from_app_view(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
     reason=_CONVERSATION_SERVICE_ACCESS_REASON,
+    effect_on_get=_BUNDLED_CATALOG_ON_GET,
 )
 async def get_document_export_availability(
     session_id: UUID,
@@ -1464,15 +1457,8 @@ async def approve_tools(
             ),
         )
     except RateLimitExceededError as exc:
-        retry_after = exc.result.window_seconds
-        raise HTTPException(
-            status_code=429,
-            detail={
-                "code": "rate_limit_exceeded",
-                "message": "Too many tool approval submissions. Please retry shortly.",
-                "retry_after_seconds": retry_after,
-            },
-            headers={"Retry-After": str(retry_after)},
+        raise_rate_limited(
+            exc.result, "Too many tool approval submissions. Please retry shortly."
         )
     except RateLimitServiceUnavailableError:
         # Fail-open on limiter outages to avoid breaking approval flows.

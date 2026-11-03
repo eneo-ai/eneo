@@ -1,10 +1,9 @@
 import json
-import secrets
 import time
 import traceback
 from typing import Annotated, Optional, Protocol, cast
 from urllib.parse import urlparse
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import aiohttp
 import jwt
@@ -19,12 +18,6 @@ from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.domain.outcome import Outcome
-from eneo.audit.infrastructure.rate_limiting import (
-    RateLimitConfig,
-    RateLimitExceededError,
-    RateLimitServiceUnavailableError,
-    enforce_rate_limit,
-)
 from eneo.authentication import auth_dependencies
 from eneo.authentication.auth_dependencies import (
     require_api_key_permission,
@@ -48,12 +41,19 @@ from eneo.authentication.login_attempts import (
 )
 from eneo.main import config
 from eneo.main.aiohttp_client import aiohttp_client
-from eneo.main.config import validate_public_origin
+from eneo.main.config import serialize_origin, validate_public_origin
 from eneo.main.container.container import Container
 from eneo.main.exceptions import AuthenticationException, FederatedLoginDenied
 from eneo.main.logging import get_logger, redact_values
 from eneo.main.models import CursorPaginatedResponse
-from eneo.main.request_context import get_request_context, set_request_context
+from eneo.main.request_context import ensure_correlation_id, get_request_context
+from eneo.redis.rate_limit import (
+    RateLimitConfig,
+    RateLimitExceededError,
+    RateLimitServiceUnavailableError,
+    enforce_rate_limit,
+    raise_rate_limited,
+)
 from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
 from eneo.server.exception_handlers import has_registered_handler
@@ -196,18 +196,7 @@ async def _resolve_single_tenant_redirect_uri(
     if not parsed_redirect.scheme or not parsed_redirect.hostname:
         return redirect_uri
 
-    default_port = 443 if parsed_redirect.scheme == "https" else 80
-    parsed_port = (
-        f":{parsed_redirect.port}"
-        if parsed_redirect.port and parsed_redirect.port != default_port
-        else ""
-    )
-    canonical_origin = (
-        f"{parsed_redirect.scheme}://{parsed_redirect.hostname}{parsed_port}".rstrip(
-            "/"
-        )
-    )
-    if normalized_request_origin == canonical_origin:
+    if normalized_request_origin == serialize_origin(redirect_uri):
         return redirect_uri
 
     if not settings.oidc_tenant_id:
@@ -263,40 +252,19 @@ def _login_form_location(loc: tuple[int | str, ...]) -> tuple[int | str, ...]:
     return ("body", _LOGIN_FORM_FIELDS.get(str(first), first), *rest)
 
 
-@router.post(
-    "/login/token/",
-    response_model=AccessToken,
-    name="Login",
-    description="Authenticate with email and password (OAuth2 password flow).",
-    responses=responses.get_responses([401, 403, 429, 500]),
-)
-@endpoint_access(
-    authentication=Authentication.PUBLIC,
-    authorization=Authorization.PUBLIC,
-    reason="Login or provisioning entry point; the authentication service validates supplied credentials before granting a session.",
-)
-async def user_login_with_email_and_password(
-    request: Request,
-    form_data: Annotated[OAuth2PasswordRequestForm, Depends(OAuth2PasswordRequestForm)],
-    container: Annotated[Container, Depends(get_container())],
+async def login_with_password(
+    *, request: Request, email: str, password: str, container: Container
 ) -> AccessToken:
-    """OAuth2 Login with comprehensive error handling and logging"""
+    """The password login flow: validation, the failed-attempt limiter, logging
+    and the public error contract (401 invalid_credentials with
+    attempts_remaining, 429 too_many_login_attempts with retry_after_seconds and
+    Retry-After, 403 account states, 422 form locations, login_unavailable).
+    Every password login endpoint calls it."""
 
-    # Logs, the correlation header and support lookups share one id: the
-    # request context's (the trace id when a span is active, otherwise the
-    # caller's legacy header). Generate one only when the middleware had none.
-    correlation_id = cast(
-        str | None, get_request_context().get("correlation_id")
-    ) or secrets.token_hex(8)
-    set_request_context(correlation_id=correlation_id)
-
-    # Capture source IP (proxy-aware)
-    source_ip = request.headers.get(
-        "x-forwarded-for", request.client.host if request.client else None
-    )
-
-    email = form_data.username
-    password = form_data.password
+    correlation_id = ensure_correlation_id()
+    # Trusted-proxy-aware, resolved once by RequestContextMiddleware; a raw
+    # X-Forwarded-For is whatever the caller wrote.
+    source_ip = cast(str | None, get_request_context().get("ip_address"))
 
     # The shared request-validation handler owns the public 422 contract.
     # Do not pass credentials into its exception or into structured logs.
@@ -463,6 +431,32 @@ async def user_login_with_email_and_password(
 
 
 @router.post(
+    "/login/token/",
+    response_model=AccessToken,
+    name="Login",
+    description="Authenticate with email and password (OAuth2 password flow).",
+    responses=responses.get_responses([401, 403, 429, 500]),
+)
+@endpoint_access(
+    authentication=Authentication.PUBLIC,
+    authorization=Authorization.PUBLIC,
+    reason="Login or provisioning entry point; the authentication service validates supplied credentials before granting a session.",
+)
+async def user_login_with_email_and_password(
+    request: Request,
+    form_data: Annotated[OAuth2PasswordRequestForm, Depends(OAuth2PasswordRequestForm)],
+    container: Annotated[Container, Depends(get_container())],
+) -> AccessToken:
+    """OAuth2 Login with comprehensive error handling and logging"""
+    return await login_with_password(
+        request=request,
+        email=form_data.username,
+        password=form_data.password,
+        container=container,
+    )
+
+
+@router.post(
     "/login/openid-connect/mobilityguard/",
     response_model=AccessToken,
     description="Authenticate via OpenID Connect (MobilityGuard / generic OIDC provider).",
@@ -479,7 +473,7 @@ async def login_with_mobilityguard(
     container: Annotated[Container, Depends(get_container())],
 ):
     """OpenID Connect Login (generic OIDC provider)."""
-    correlation_id = str(uuid4())
+    correlation_id = ensure_correlation_id()
     start_time = time.time()
 
     logger.debug(
@@ -1020,16 +1014,9 @@ async def change_current_user_password(
             success=False,
             failure_reason="rate_limit_exceeded",
         )
-        retry_after = exc.result.window_seconds
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail={
-                "code": "rate_limit_exceeded",
-                "message": "Too many password change attempts. Try again later.",
-                "retry_after_seconds": retry_after,
-            },
-            headers={"Retry-After": str(retry_after)},
-        ) from exc
+        raise_rate_limited(
+            exc.result, "Too many password change attempts. Try again later."
+        )
     except RateLimitServiceUnavailableError as exc:
         logger.warning("Password-change rate limiter unavailable", exc_info=True)
         raise HTTPException(

@@ -41,6 +41,7 @@
   import WidgetPublishedNotice from "$lib/features/widget/admin/WidgetPublishedNotice.svelte";
   import { hasPermission } from "$lib/core/hasPermission.js";
   import { localizeHref } from "$lib/paraglide/runtime";
+  import { skillReferenceCatalog } from "$lib/features/skills/skillReferenceCatalog";
   import {
     loadSkillBindingCatalogPage,
     loadSkillBindingPreview
@@ -350,7 +351,7 @@
           ></textarea>
         </Settings.Row>
 
-        {#if data.supportsDirectSkills && $currentSpace.hasPermission("read", "skill")}
+        {#if data.supportsDirectSkills && data.canUseSkills}
           <div id="skills" class="scroll-mt-20">
             <Settings.Row
               title={m.skills()}
@@ -358,6 +359,10 @@
               hasChanges={$currentChanges.diff.skill_bindings !== undefined}
             >
               <SkillBindingsEditor
+                referenceCatalog={skillReferenceCatalog(data.eneo, {
+                  type: "space",
+                  spaceId: $currentSpace.id
+                })}
                 bind:bindings={$update.skill_bindings}
                 initialCatalogPage={data.skills}
                 bindingSummaries={data.skillBindings}

@@ -1,15 +1,16 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { expectNoAxeViolations } from "@/test/axe";
+import { PHONE_SCREEN_QUERY } from "@/lib/hooks/use-media-match";
+import { expectNameToHoldVisibleText, expectNoAxeViolations } from "@/test/axe";
 import { router, setRoute } from "@/test/navigation";
-import { renderInApp, renderToHtml, testAppContext, testQueryClient } from "@/test/render";
+import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
 import { setViewport } from "@/test/setup-dom";
 import { AppShellFrame } from "./app-shell";
 import { OPEN_NAV_EVENT } from "./routes";
-import { useOwnMobileHeader } from "./shell-context";
+import { OWN_MOBILE_HEADER } from "./shell-context";
 
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 // Stand-ins that show where the bells are placed (they have their own tests).
 vi.mock("@/features/jobs/job-indicator", () => ({
   JobIndicator: () => <button type="button">Jobbklockan</button>
@@ -20,7 +21,12 @@ vi.mock("@/features/api-keys/expiring-keys-notification", () => ({
 vi.mock("@/features/whats-new/whats-new-provider", () => ({
   useWhatsNew: () => ({ enabled: false, hasUnseen: false })
 }));
-vi.mock("@/lib/i18n/actions", () => ({ setLocale: vi.fn() }));
+// The real palette, with a spy on when its module is first imported.
+const paletteImported = vi.hoisted(() => vi.fn());
+vi.mock("./command-palette", async (importOriginal) => {
+  paletteImported();
+  return importOriginal();
+});
 
 function seededClient() {
   const queryClient = testQueryClient();
@@ -40,16 +46,22 @@ function renderShell() {
   return renderShellWith(<h1>Sidinnehåll</h1>);
 }
 
-/** Stands in for the chat's header, which replaces the phone top bar. */
-function OwnHeaderPage() {
-  useOwnMobileHeader();
-  return <h1>Chatt</h1>;
-}
-
 beforeEach(() => setRoute("/spaces/list"));
 afterEach(cleanup);
 
 describe("AppShellFrame", () => {
+  // First in the file: a test that opens the palette loads its module for the rest.
+  it("loads the command palette module only when it first opens", async () => {
+    renderShell();
+    expect(paletteImported).not.toHaveBeenCalled();
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }));
+    });
+    expect(await screen.findByRole("dialog", { name: "Sök i Eneo" })).toBeTruthy();
+    expect(paletteImported).toHaveBeenCalledOnce();
+  });
+
   it("puts the skip link first and the page in main#main-content", async () => {
     const { container } = renderShell();
     const focusable = container.querySelectorAll<HTMLElement>(
@@ -131,45 +143,46 @@ describe("AppShellFrame", () => {
   });
 });
 
+describe("AppShellFrame breakpoint", () => {
+  it("switches to the phone's navigation on a phone's layout, the shell's CSS `phone:` variant", () => {
+    const matchMedia = vi.spyOn(window, "matchMedia");
+    renderShell();
+    expect(matchMedia.mock.calls.map(([query]) => query)).toContain(PHONE_SCREEN_QUERY);
+    matchMedia.mockRestore();
+  });
+
+  it("gives a phone turned sideways the top bar's menu and the drawer, not the icon rail", async () => {
+    setViewport("phone-landscape");
+    renderShell();
+    fireEvent.click(screen.getByRole("button", { name: "Öppna menyn" }));
+    const drawer = await screen.findByRole("dialog", { name: "Meny" });
+    expect(within(drawer).getByRole("navigation", { name: "Huvudmeny" })).toBeTruthy();
+  });
+});
+
 describe("AppShellFrame on a phone", () => {
   beforeEach(() => setViewport("phone"));
 
-  it("hides the top bar only while the page's own header is mounted", () => {
-    setRoute("/spaces/personal/chat");
-    const { rerender } = renderShellWith(<OwnHeaderPage />);
-    expect(screen.queryByRole("button", { name: "Öppna menyn" })).toBeNull();
-
-    // The chat failed (error boundary) or is still loading: no header of its
-    // own, so the shell keeps its menu.
-    rerender(
-      <AppShellFrame>
-        <h1>Något gick fel</h1>
-      </AppShellFrame>
-    );
-    expect(screen.getByRole("button", { name: "Öppna menyn" })).toBeTruthy();
-
-    rerender(
-      <AppShellFrame>
-        <OwnHeaderPage />
-      </AppShellFrame>
-    );
-    expect(screen.queryByRole("button", { name: "Öppna menyn" })).toBeNull();
-  });
-
-  it("leaves the top bar out of the server render on chat routes only", () => {
-    // Before hydration no header has registered: the route decides, so a chat
-    // does not flash the bar on first paint.
-    const serverHtml = () =>
-      renderToHtml(
-        <AppShellFrame>
-          <h1>Sidinnehåll</h1>
-        </AppShellFrame>,
-        { queryClient: seededClient() }
-      );
+  it("gives way to a page's own header in CSS", () => {
+    // No state and no route list: the top bar is in every render and the
+    // frame's :has() hides it while the page carries OWN_MOBILE_HEADER, so it
+    // is right before hydration, while a page streams in and when a chat
+    // fails. jsdom applies no stylesheet; tests/shell-headers.spec.ts checks
+    // what users see.
     setRoute("/spaces/s1/chat");
-    expect(serverHtml()).not.toContain("<header");
-    setRoute("/spaces/list");
-    expect(serverHtml()).toContain("<header");
+    const { container } = renderInApp(
+      <AppShellFrame>
+        <div {...OWN_MOBILE_HEADER} />
+      </AppShellFrame>,
+      { queryClient: seededClient() }
+    );
+    const topBar = container.querySelector("header");
+    expect(topBar?.className).toContain("group-has-[[data-own-mobile-header]]/shell:hidden");
+    // A space's header replaces it on phones only (OWN_PHONE_HEADER).
+    expect(topBar?.className).toContain("phone:group-has-[[data-own-phone-header]]/shell:hidden");
+    expect(
+      topBar?.closest('[class~="group/shell"]')?.querySelector("[data-own-mobile-header]")
+    ).toBeTruthy();
   });
 
   it("opens the drawer from the top bar and closes it with Escape", async () => {
@@ -188,6 +201,27 @@ describe("AppShellFrame on a phone", () => {
     await waitFor(() => expect(menuButton.getAttribute("aria-expanded")).toBe("false"));
   });
 
+  it("opens Konto from the drawer's profile row, a link and not a menu on a menu (decision 22)", async () => {
+    setRoute("/account");
+    renderShell();
+    const menuButton = screen.getByRole("button", { name: "Öppna menyn" });
+    fireEvent.click(menuButton);
+    const drawer = await screen.findByRole("dialog", { name: "Meny" });
+
+    const name = "Anna Lind, Sundsvalls kommun: konto och inställningar";
+    const profile = within(drawer).getByRole("link", { name });
+    expect(profile.getAttribute("href")).toBe("/account");
+    expectNameToHoldVisibleText(profile, name);
+    expect(within(drawer).queryByRole("button", { name: /konto och inställningar/ })).toBeNull();
+    // Already on Konto, so no new path closes the drawer: the row does. (jsdom
+    // cannot follow the link itself.)
+    const stay = (event: Event) => event.preventDefault();
+    window.addEventListener("click", stay);
+    fireEvent.click(profile);
+    window.removeEventListener("click", stay);
+    await waitFor(() => expect(menuButton.getAttribute("aria-expanded")).toBe("false"));
+  });
+
   it("opens the drawer when the chat's header asks for it, with the bells in it", async () => {
     setRoute("/spaces/s1/chat");
     renderShell();
@@ -200,6 +234,26 @@ describe("AppShellFrame on a phone", () => {
     );
     const drawer = screen.getByRole("dialog", { name: "Meny" });
     expect(within(drawer).getByRole("button", { name: "Jobbklockan" })).toBeTruthy();
+  });
+
+  it("keeps the home link a 44 px target when only the mark shows", () => {
+    // Below 360px the link holds the 24 px mark alone; without min-w-11 it was
+    // 32 px wide. jsdom applies no CSS, so the class is what is checked;
+    // tests/responsive-contract.spec.ts measures it at 320px.
+    renderShell();
+    const home = within(screen.getByRole("banner")).getByRole("link", {
+      name: "Eneo, till startsidan"
+    });
+    expect(home.className).toMatch(/(^| )h-11( |$)/);
+    expect(home.className).toMatch(/(^| )min-w-11( |$)/);
+    expect(home.className).toMatch(/(^| )shrink-0( |$)/);
+  });
+
+  it("opens search from the top bar", async () => {
+    renderShell();
+    const topBar = screen.getByRole("banner");
+    fireEvent.click(within(topBar).getByRole("button", { name: "Sök" }));
+    expect(await screen.findByRole("dialog", { name: "Sök i Eneo" })).toBeTruthy();
   });
 
   it("closes the drawer when the palette opens a result on the same page", async () => {
@@ -217,5 +271,36 @@ describe("AppShellFrame on a phone", () => {
     // Same path, so no pathname change closes the drawer: the palette does.
     expect(router.push).toHaveBeenCalledWith("/spaces/personal/chat");
     await waitFor(() => expect(menuButton.getAttribute("aria-expanded")).toBe("false"));
+  });
+});
+
+describe("AppShellFrame on an iPad", () => {
+  it.each(["tablet-portrait", "tablet-landscape"] as const)(
+    "shows the side navigation as an icon rail, without a menu button (%s)",
+    (viewport) => {
+      setViewport(viewport);
+      renderShell();
+      expect(screen.queryByRole("button", { name: "Öppna menyn" })).toBeNull();
+      expect(screen.getByRole("navigation", { name: "Huvudmeny" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Fäll ut sidomenyn" })).toBeTruthy();
+    }
+  );
+
+  it("closes the open drawer when a phone's window widens to a tablet's and hands focus to the page", async () => {
+    setViewport("phone");
+    renderShell();
+    fireEvent.click(screen.getByRole("button", { name: "Öppna menyn" }));
+    const drawer = await screen.findByRole("dialog", { name: "Meny" });
+    within(drawer).getByRole("link", { name: "Alla ytor" }).focus();
+
+    act(() => setViewport("tablet-portrait"));
+    expect(screen.queryByRole("dialog", { name: "Meny" })).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("main"));
+  });
+
+  it("leaves focus alone on first paint", () => {
+    setViewport("tablet-landscape");
+    renderShell();
+    expect(document.activeElement).toBe(document.body);
   });
 });

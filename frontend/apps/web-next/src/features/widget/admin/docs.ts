@@ -1,4 +1,4 @@
-import { latestRelease, type Release } from "@eneo/whats-new";
+import { releases, type Release } from "@eneo/whats-new";
 
 /**
  * The docs version this build is documented in: its release line once that
@@ -14,6 +14,8 @@ export function docsVersionPath(release: Pick<Release, "version" | "date"> | und
 /** Public docs keep English at existing URLs; Swedish is a sibling route. */
 export function docsUrl(page: "guides/embed-widget", locale: string, anchor?: string): string {
   const languagePrefix = locale === "sv" ? "/sv" : "";
-  const version = docsVersionPath(latestRelease());
+  const version = docsVersionPath(
+    releases.find((release) => release.entries.some((entry) => entry.id === "web-widgets"))
+  );
   return `https://docs.eneo.ai${version}${languagePrefix}/${page}${anchor ? `#${anchor}` : ""}`;
 }

@@ -1,7 +1,7 @@
 "use client";
 
-import { useSearchParams } from "next/navigation";
-import { useCallback, useState } from "react";
+import { replaceUrl, useSearchParams } from "@/lib/navigation";
+import { useCallback } from "react";
 
 /**
  * A tab selection mirrored in `?tab=` so a tab can be linked to and survives
@@ -14,14 +14,13 @@ export function useUrlTab<Tab extends string>(
 ): [Tab, (tab: Tab) => void] {
   const params = useSearchParams();
   const initial = params.get("tab");
-  const [tab, setTab] = useState<Tab>(tabs.includes(initial as Tab) ? (initial as Tab) : fallback);
+  const tab = tabs.includes(initial as Tab) ? (initial as Tab) : fallback;
   const select = useCallback(
     (next: Tab) => {
-      setTab(next);
       const url = new URL(window.location.href);
       if (next === fallback) url.searchParams.delete("tab");
       else url.searchParams.set("tab", next);
-      window.history.replaceState(window.history.state, "", url);
+      replaceUrl(url, { ignoreBlocker: true });
     },
     [fallback]
   );

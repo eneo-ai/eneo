@@ -1,6 +1,6 @@
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { Check, ChevronRight, Copy, ExternalLink, FileText } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { PersonaView } from "../persona";
 import { linkHost } from "../urls";

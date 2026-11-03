@@ -18,7 +18,7 @@ const website = (latestCrawl: Partial<CrawlRun> | null, overrides: Record<string
     ...overrides
   }) as unknown as Website;
 
-// ICU-style stand-in for next-intl: enough to see which forms are chosen.
+// ICU-style stand-in for use-intl: enough to see which forms are chosen.
 const t = (key: string, values: Record<string, string | number> = {}) =>
   `${key}(${Object.entries(values)
     .map(([name, value]) => `${name}=${value}`)

@@ -24,7 +24,6 @@ from eneo.server.dependencies.widget_auth import (
 from eneo.server.protocol import responses
 from eneo.sessions.session import AskChatResponse, SessionFeedback, SessionPublic
 from eneo.sessions.session_protocol import to_session_public
-from eneo.widgets.application.widget_ask_service import WidgetAnswer
 from eneo.widgets.domain.exceptions import (
     ChallengeInvalidError,
     VisitorTokenInvalidError,
@@ -225,10 +224,8 @@ async def ask_widget(request: Request, body: WidgetAsk, container: VisitorContai
     )
     # Conversation-protocol events (first_chunk/text/...) so the embed page can
     # drive the same ChatService as the rest of the app.
-    answer = response.answer
-    assert isinstance(answer, WidgetAnswer)
     return await assistant_protocol.to_conversation_response(
-        response=response, stream=True, show_pricing=False, on_close=answer.aclose
+        response=response, stream=True, show_pricing=False
     )
 
 

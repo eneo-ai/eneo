@@ -35,10 +35,14 @@ from eneo.prompts.prompt_service import PromptService
 from eneo.skills.domain.skill import (
     AppPinAdvanceIncompatibleReason,
     ResolvedSkillBinding,
+    SkillAttachmentLimitError,
     SkillBindingReference,
+    SkillBindingRevisionConflictError,
     SkillComposition,
     SkillExecutionReference,
+    SkillRuntimePolicy,
     compose_skill_instructions,
+    validate_skill_binding_group,
 )
 from eneo.spaces.api.space_models import WizardType
 from eneo.spaces.space import Space
@@ -197,6 +201,7 @@ class AppService:
         from_revision_id: UUID,
         candidate_binding: ResolvedSkillBinding,
         completion_prompt_files: Sequence[File],
+        runtime_policy: SkillRuntimePolicy,
     ) -> AppPinAdvanceIncompatibleReason | None:
         current_binding = next(
             (
@@ -213,12 +218,21 @@ class AppService:
             position=current_binding.position,
             activation_mode=current_binding.activation_mode,
         )
+        candidate_bindings = [
+            resolved_candidate if binding is current_binding else binding
+            for binding in bindings
+        ]
+        try:
+            validate_skill_binding_group(
+                candidate_bindings,
+                max_attached_skills=runtime_policy.max_attached_skills,
+            )
+        except SkillAttachmentLimitError:
+            return AppPinAdvanceIncompatibleReason.ATTACHMENT_LIMIT
+        except SkillBindingRevisionConflictError:
+            return AppPinAdvanceIncompatibleReason.CONFLICTING_REVISIONS
         composition = compose_skill_instructions(
-            base_instructions=validation_input.prompt_text,
-            bindings=[
-                resolved_candidate if binding is current_binding else binding
-                for binding in bindings
-            ],
+            base_instructions=validation_input.prompt_text, bindings=candidate_bindings
         )
         model = validation_input.completion_model
         if model is None:

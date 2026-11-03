@@ -2,7 +2,7 @@
 
 import { ToggleButton, ToggleButtonGroup } from "@astryxdesign/core/ToggleButton";
 import { SendHorizontal } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId, useState } from "react";
 import type { Schema } from "@/lib/api/models";
 import { WidgetPersonaByline } from "../../components/widget-persona-byline";
@@ -131,7 +131,7 @@ export function WidgetMockPreview({
           >
             <div className="min-w-0">
               <p className="truncate text-base font-semibold">{texts.title || name}</p>
-              <p className={`text-xs ${header ? "opacity-85" : "text-ax-text-secondary"}`}>
+              <p className={`text-xs ${header ? "" : "text-ax-text-secondary"}`}>
                 {texts.subtitle}
               </p>
             </div>
@@ -183,7 +183,6 @@ export function WidgetMockPreview({
           // The avatar as the launcher: ringed in the accent, with the chat
           // glyph as a badge so it still reads as a chat.
           <span className="relative inline-block size-14 shrink-0" aria-hidden="true">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               className="size-14 rounded-full object-cover shadow"
               style={{ border: `2px solid ${accent}` }}

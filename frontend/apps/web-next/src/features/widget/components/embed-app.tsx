@@ -12,8 +12,7 @@ import "../widget.css";
 type Scheme = "light" | "dark" | "auto";
 
 /**
- * The visitor API is proxied under this page's own origin (the browser
- * never reaches the backend). The client wants an absolute base, which the
+ * FastAPI serves the visitor API under this page's own origin. The client wants an absolute base, which the
  * server does not know for sure (a reverse proxy may front the app) and the
  * page must not guess: requests are made relative, against the origin the
  * page actually runs on, by taking this placeholder off again.
@@ -38,8 +37,8 @@ function sessionHolder() {
 /**
  * Boots the chat for one widget: the widget client, the colour scheme and
  * the widget's own colours. Rendered by the embed page once the
- * configuration is known (from the server for active widgets, client-side
- * with a preview token for drafts).
+ * configuration is known (loaded by the route for active widgets, or with a
+ * preview token from the browser fragment for drafts).
  */
 export function EmbedApp({
   config,
@@ -59,8 +58,7 @@ export function EmbedApp({
   // closure over a ref would read it during render).
   const [holder] = useState(() => sessionHolder());
 
-  // The same client on the server and in the browser, so the page hydrates
-  // as rendered; it only ever makes requests in the browser.
+  // The visitor client always omits cookies and uses its own bearer token.
   const client = useMemo(
     () =>
       createWidgetClient({
@@ -78,9 +76,12 @@ export function EmbedApp({
   const pinnedScheme = config.theme.color_scheme ?? "auto";
   const { setMode } = useEmbedScheme();
   const systemQuery = useRef<MediaQueryList | null>(null);
+  const effectiveScheme = useRef<Scheme>(
+    pinnedScheme === "auto" ? (hostScheme ?? "auto") : pinnedScheme
+  );
 
   // Whether the panel is dark right now, so the widget's own colours can
-  // switch with it. Starts from what the server rendered.
+  // switch with it. Starts from the scheme FastAPI selected.
   const [dark, setDark] = useState(
     () => (pinnedScheme === "auto" ? hostScheme : pinnedScheme) === "dark"
   );
@@ -88,6 +89,7 @@ export function EmbedApp({
   const applyScheme = useCallback(
     (scheme: Scheme) => {
       const effective = pinnedScheme === "auto" ? scheme : pinnedScheme;
+      effectiveScheme.current = effective;
       setMode(effective === "auto" ? "system" : effective);
       setDark(
         effective === "auto" ? (systemQuery.current?.matches ?? false) : effective === "dark"
@@ -100,7 +102,7 @@ export function EmbedApp({
     const query = matchMedia("(prefers-color-scheme: dark)");
     systemQuery.current = query;
     const followSystem = () => {
-      if (!document.documentElement.hasAttribute("data-theme")) setDark(query.matches);
+      if (effectiveScheme.current === "auto") setDark(query.matches);
     };
     query.addEventListener("change", followSystem);
     applyScheme(hostScheme ?? "auto");

@@ -2,9 +2,10 @@
 
 import { Button } from "@astryxdesign/core/Button";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId, useRef, useState } from "react";
 import { TextInput } from "@/components/astryx/text-input";
+import { PageFrame, PAGE_COLUMN } from "@/components/composites/page-frame";
 import { PageHeader } from "@/components/composites/page-header";
 import { SaveStatusIndicator, SaveStatusProvider } from "@/components/composites/save-status";
 import { SettingsGroup } from "@/components/composites/settings-rows";
@@ -95,9 +96,11 @@ export function WidgetAdminPage({
     <SaveStatusProvider>
       <div data-space-full-bleed className="flex shrink-0 flex-col">
         <header className="bg-ax-surface border-ax-border sticky top-0 z-30 border-b">
-          <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-1 px-6">{header}</div>
+          <div className="wide:px-6 px-4">
+            <div className={`${PAGE_COLUMN} flex flex-col gap-1`}>{header}</div>
+          </div>
         </header>
-        <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-6 px-6 py-8">
+        <PageFrame className="gap-6">
           {widget ? (
             <WidgetEditor
               key={widget.id}
@@ -120,7 +123,7 @@ export function WidgetAdminPage({
                 <p
                   ref={archivedNote}
                   tabIndex={-1}
-                  className="bg-ax-muted mx-auto w-full max-w-3xl rounded-lg px-4 py-3 text-sm"
+                  className="bg-ax-muted w-full max-w-3xl rounded-lg px-4 py-3 text-sm"
                 >
                   {t("widget_admin_archived_note")}
                 </p>
@@ -144,7 +147,7 @@ export function WidgetAdminPage({
               />
             </>
           )}
-        </div>
+        </PageFrame>
       </div>
     </SaveStatusProvider>
   );
@@ -194,7 +197,7 @@ function CreateWidgetForm({
   }
 
   return (
-    <div className="mx-auto w-full max-w-3xl">
+    <div className="w-full max-w-3xl">
       <SettingsGroup
         title={unsupportedSpace ? t("widget_admin_title") : t("widget_admin_create_title")}
         description={unsupportedSpace ?? t("widget_admin_create_description")}

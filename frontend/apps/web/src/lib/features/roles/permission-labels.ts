@@ -31,6 +31,11 @@ export function getPermissionCopy(name: string, fallbackDescription: string): En
         label: m.permission_personal_chat(),
         description: m.permission_personal_chat_description()
       };
+    case "personal_skills":
+      return {
+        label: m.permission_personal_skills(),
+        description: m.permission_personal_skills_description()
+      };
     case "group_chats":
       return {
         label: m.permission_group_chats(),

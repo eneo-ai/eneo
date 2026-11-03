@@ -1,9 +1,9 @@
 "use client";
 
 import { NumberInput } from "@astryxdesign/core/NumberInput";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { useEffect, useState } from "react";
-import { Switch } from "@/components/astryx/switch";
+import { Switch } from "@astryxdesign/core/Switch";
 import { SettingsGroup } from "@/components/composites/settings-rows";
 import { Autosave } from "../autosave";
 import { toastWidgetError } from "../errors";

@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
+from starlette.types import Message
 
 from eneo.ai_models.completion_models.completion_model import (
     Completion,
@@ -518,19 +519,19 @@ async def test_retention_zero_deletes_when_client_leaves_after_first_sse_event()
     )
     answer = response.answer
     assert not isinstance(answer, str)
-    stream = await assistant_protocol.to_conversation_response(
-        response, stream=True, on_close=answer.aclose
-    )
-    await anext(stream.body_iterator)
-    deps.usage.delete_session.assert_not_awaited()
+    stream = await assistant_protocol.to_conversation_response(response, stream=True)
 
-    assert stream.background is not None
-    await stream.background()
+    async def disconnect_after_first_event(message: Message) -> None:
+        if message["type"] == "http.response.body":
+            raise OSError("visitor disconnected")
+
+    with pytest.raises(OSError, match="visitor disconnected"):
+        await stream.stream_response(disconnect_after_first_event)
     deps.usage.delete_session.assert_awaited_once_with(deps.session.id)
     deps.budget.settle.assert_not_awaited()
 
-    # A response finalizer can also close the SSE generator; settlement is once.
-    await stream.body_iterator.aclose()
+    # Closing the answer again must not settle its reservation twice.
+    await answer.aclose()
     deps.usage.delete_session.assert_awaited_once()
 
 

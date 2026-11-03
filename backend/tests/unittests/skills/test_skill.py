@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
 from eneo.completion_models.domain.skill_activation import (
     SKILL_ACTIVATION_TOOL_NAME,
@@ -22,11 +22,18 @@ from eneo.skills import (
     validate_skill_slug,
 )
 from eneo.skills.application.skill_service import SkillService
+from eneo.skills.domain.personal_chat_skill_layers import compose_layers
 from eneo.skills.domain.skill import (
     AssistantFleetAdvanceCursor,
     NormalizedSkillContent,
+    PersonalSkillLayerDecision,
+    PersonalSkillLayerReason,
+    PersonalSkillLayerStatus,
     Skill,
+    SkillActivationEvidence,
     SkillActivationEvidenceV1,
+    SkillActivationEvidenceV2,
+    SkillActivationFallbackReason,
     SkillActivationMode,
     SkillBindingReference,
     SkillBindingSource,
@@ -634,6 +641,168 @@ def test_composition_rejects_duplicate_positions():
         )
 
 
+def test_referenced_helpers_activate_with_the_root_and_are_injected_once():
+    helper = _binding(position=0, name="Klartext")
+    first = replace(_binding(position=0), dependencies=(helper,))
+    second = replace(_binding(position=1, name="Communication"), dependencies=(helper,))
+
+    composition = compose_skill_instructions(
+        base_instructions="Base", bindings=[first, second]
+    )
+
+    assert composition.prompt.count("Instructions for Klartext") == 1
+    assert [item.skill_id for item in composition.provenance] == [
+        first.skill_id,
+        helper.skill_id,
+        second.skill_id,
+    ]
+    assert [item.position for item in composition.provenance] == [0, 1, 2]
+
+
+def test_references_identify_the_exact_helper_section_despite_labels_and_shared_names():
+    first = _binding(position=0, name="Klartext")
+    second = _binding(position=0, name="Klartext")
+    root = replace(
+        _binding(position=0, name="Communication"),
+        instructions=(
+            f"Use [old label](eneo-skill:{first.skill_id}@{first.skill_revision_id})."
+        ),
+        dependencies=(first,),
+    )
+    other_root = replace(
+        _binding(position=1, name="Other guide"),
+        instructions=f"Use [another label](eneo-skill:{second.skill_id}@{second.skill_revision_id}).",
+        dependencies=(second,),
+    )
+
+    prompt = compose_skill_instructions(
+        base_instructions="", bindings=[root, other_root]
+    ).prompt
+
+    for helper, identity in [(first, "ref-2"), (second, "ref-4")]:
+        assert f"### Skill: Klartext (klartext, revision 1) [{identity}]\n" in prompt
+        assert f"({identity})" in prompt
+        assert str(helper.skill_revision_id) not in prompt
+        assert str(helper.skill_id) not in prompt
+
+
+def test_referenced_helper_versions_cannot_conflict_across_roots():
+    helper = _binding(position=0, name="Klartext")
+    other_version = replace(helper, skill_revision_id=uuid4())
+    roots = [
+        replace(_binding(position=0), dependencies=(helper,)),
+        replace(_binding(position=1), dependencies=(other_version,)),
+    ]
+
+    with pytest.raises(BadRequestException, match="conflicting revisions"):
+        compose_skill_instructions(base_instructions="Base", bindings=roots)
+
+
+def test_helper_keeps_its_explicit_position_even_when_its_own_choice_is_on_demand():
+    helper = replace(
+        _binding(position=2, name="Klartext"),
+        activation_mode=SkillActivationMode.ON_DEMAND,
+    )
+    first = replace(_binding(position=0, name="Communication"), dependencies=(helper,))
+    second = _binding(position=1, name="Formatting")
+    plan = SkillTurnPlan.create(
+        base_instructions="Base",
+        resolution=SkillRuntimeResolution(eligible=(first, second, helper), blocked=()),
+        policy=SkillRuntimePolicy(
+            selective_activation_enabled=True,
+            max_attached_skills=100,
+            context_share_percent=10,
+            max_activations_per_turn=10,
+        ),
+    )
+
+    assert [item.skill_id for item in plan.composition.provenance] == [
+        first.skill_id,
+        second.skill_id,
+        helper.skill_id,
+    ]
+
+
+def test_on_demand_root_does_not_inject_its_helper_before_activation():
+    helper = _binding(position=0, name="Klartext")
+    root = replace(
+        _binding(position=0),
+        dependencies=(helper,),
+        activation_mode=SkillActivationMode.ON_DEMAND,
+    )
+    plan = SkillTurnPlan.create(
+        base_instructions="Base",
+        resolution=SkillRuntimeResolution(eligible=(root,), blocked=()),
+        policy=SkillRuntimePolicy(
+            selective_activation_enabled=True,
+            max_attached_skills=100,
+            context_share_percent=10,
+            max_activations_per_turn=10,
+        ),
+    )
+
+    assert plan.composition.prompt == "Base"
+    assert len(plan.available) == 1
+
+
+def test_reference_evidence_records_helper_cause_and_offered_tools_without_bodies():
+    from pydantic import TypeAdapter
+
+    from eneo.mcp_servers.domain.model_tool_identity import ModelToolIdentity
+    from eneo.skills.domain.skill import (
+        SkillActivationEvidence,
+        SkillActivationEvidenceV3,
+    )
+
+    helper = replace(
+        _binding(position=0, name="Klartext"),
+        instructions="Private guidance: use [Search](eneo-function:web_search).",
+    )
+    root = replace(
+        _binding(position=0),
+        instructions=f"Use [Klartext](eneo-skill:{helper.skill_id}@{helper.skill_revision_id}).",
+        dependencies=(helper,),
+    )
+    plan = SkillTurnPlan.create(
+        base_instructions="Base",
+        resolution=SkillRuntimeResolution(eligible=(root,), blocked=()),
+        policy=SkillRuntimePolicy(
+            selective_activation_enabled=True,
+            max_attached_skills=100,
+            context_share_percent=10,
+            max_activations_per_turn=10,
+        ),
+    )
+    runtime = plan.to_activation_runtime(
+        selected_model_route="openai/gpt-4o",
+        max_input_tokens=128_000,
+        supports_tool_calling=True,
+    )
+    tool = ModelToolIdentity("search__search", uuid4(), "search", "web_search")
+    runtime.prepare_reference_tools((tool,), rendered_prompt=runtime.prompt)
+
+    evidence = plan.activation_evidence(
+        selected_model_id=uuid4(),
+        selected_model_route="openai/gpt-4o",
+        snapshot=runtime.snapshot(),
+    )
+
+    assert isinstance(evidence, SkillActivationEvidenceV3)
+    assert [item.skill_revision_id for item in evidence.helpers] == [
+        helper.skill_revision_id
+    ]
+    assert {item.source_revision_id for item in evidence.instruction_references} == {
+        root.skill_revision_id,
+        helper.skill_revision_id,
+    }
+    assert evidence.reference_tools == (tool,)
+    assert "Private guidance" not in evidence.model_dump_json()
+    assert (
+        TypeAdapter(SkillActivationEvidence).validate_json(evidence.model_dump_json())
+        == evidence
+    )
+
+
 def test_composition_rejects_duplicate_skill_identity():
     binding = _binding(position=0)
     duplicate = ResolvedSkillBinding(
@@ -780,6 +949,33 @@ async def test_batch_assistant_runtime_resolution_matches_single_resolution():
         assistant_ids=[first_id, second_id, empty_id]
     )
     batch_repo.list_active_execution_blocks.assert_awaited_once()
+
+
+async def test_blocking_a_helper_stops_only_roots_that_pin_that_helper():
+    helper = _binding(position=0, name="Helper")
+    root = replace(_binding(position=0), dependencies=(helper,))
+    older_root = replace(root, skill_revision_id=uuid4(), dependencies=())
+    first_id, second_id = uuid4(), uuid4()
+    tenant_id = uuid4()
+    repo = AsyncMock()
+    repo.list_assistant_bindings_batch.return_value = {
+        first_id: [root],
+        second_id: [older_root],
+    }
+    repo.list_active_execution_blocks.return_value = {
+        helper.skill_id: _execution_block(tenant_id=tenant_id, binding=helper),
+    }
+    service = _service(repo)
+    service.user.tenant_id = tenant_id
+
+    resolutions = await service.resolve_assistant_bindings_for_runtime_batch(
+        [first_id, second_id]
+    )
+
+    assert resolutions[first_id] == SkillRuntimeResolution(eligible=(), blocked=(root,))
+    assert resolutions[second_id] == SkillRuntimeResolution(
+        eligible=(older_root,), blocked=()
+    )
 
 
 async def test_runtime_composition_keeps_all_bindings_without_execution_blocks():
@@ -1050,3 +1246,154 @@ def test_runtime_policy_bounds_are_enforced_by_the_domain(field: str, value: int
             context_share_percent=int(values["context_share_percent"]),
             max_activations_per_turn=int(values["max_activations_per_turn"]),
         )
+
+
+def _layered_policy() -> SkillRuntimePolicy:
+    return SkillRuntimePolicy(
+        selective_activation_enabled=True,
+        max_attached_skills=100,
+        context_share_percent=10,
+        max_activations_per_turn=10,
+    )
+
+
+def test_a_plan_without_a_personal_layer_still_records_v1():
+    plan = SkillTurnPlan.create(
+        base_instructions="Base",
+        resolution=SkillRuntimeResolution(eligible=(_binding(position=0),), blocked=()),
+        policy=_layered_policy(),
+    )
+
+    assert isinstance(_activation_evidence(plan), SkillActivationEvidenceV1)
+
+
+def test_an_applied_personal_layer_records_v2_with_its_catalogue_keys():
+    organisation = SkillRuntimeResolution(
+        eligible=(_binding(position=4, name="Klarsprak"),), blocked=()
+    )
+    personal = SkillRuntimeResolution(
+        eligible=(_binding(position=0, name="Svar"),), blocked=()
+    )
+    plan = SkillTurnPlan.create(
+        base_instructions="Base",
+        resolution=compose_layers(organisation=organisation, personal=personal),
+        policy=_layered_policy(),
+        personal_layer=PersonalSkillLayerDecision(
+            status=PersonalSkillLayerStatus.APPLIED, bindings=personal.eligible
+        ),
+    )
+
+    evidence = _activation_evidence(plan)
+
+    assert isinstance(evidence, SkillActivationEvidenceV2)
+    [reference] = evidence.personal_layer.references
+    assert reference.skill_id == personal.eligible[0].skill_id
+    assert reference.activation_key == "skill-2"
+    assert reference.position == 1
+    adapter = TypeAdapter(SkillActivationEvidence)
+    assert adapter.validate_json(evidence.model_dump_json()) == evidence
+
+
+def test_a_suspended_personal_layer_records_its_skills_outside_the_catalogue():
+    personal = (_binding(position=0, name="Svar"),)
+    plan = SkillTurnPlan.create(
+        base_instructions="Base",
+        resolution=SkillRuntimeResolution(
+            eligible=(_binding(position=0, name="Klarsprak"),), blocked=()
+        ),
+        policy=_layered_policy(),
+        personal_layer=PersonalSkillLayerDecision(
+            status=PersonalSkillLayerStatus.SUSPENDED,
+            reason=PersonalSkillLayerReason.ON_DEMAND_UNAVAILABLE,
+            detail=SkillActivationFallbackReason.MODEL_LACKS_TOOL_CALLING,
+            bindings=personal,
+        ),
+    )
+
+    evidence = _activation_evidence(plan)
+
+    assert isinstance(evidence, SkillActivationEvidenceV2)
+    layer = evidence.personal_layer
+    assert layer.reason is PersonalSkillLayerReason.ON_DEMAND_UNAVAILABLE
+    assert layer.detail == SkillActivationFallbackReason.MODEL_LACKS_TOOL_CALLING
+    assert [r.skill_id for r in layer.references] == [personal[0].skill_id]
+    assert all(r.activation_key is None for r in layer.references)
+    assert personal[0].skill_id not in {r.skill_id for r in evidence.available}
+
+    dumped = evidence.model_dump(mode="json")
+    available_key = dumped["available"][0]
+    tampered = {
+        **dumped,
+        "personal_layer": {**dumped["personal_layer"], "references": [available_key]},
+    }
+    with pytest.raises(ValidationError):
+        SkillActivationEvidenceV2.model_validate(tampered)
+
+
+@pytest.mark.parametrize("other_server", [False, True])
+def test_refresh_cannot_reassign_an_offered_key_or_break_final_evidence(other_server):
+    from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
+    from eneo.mcp_servers.infrastructure.proxy.mcp_proxy_session import MCPProxySession
+
+    server_id = uuid4()
+    first = MCPServerTool(
+        mcp_server_id=server_id, name="search.foo", input_schema={"type": "object"}
+    )
+    second = MCPServerTool(
+        mcp_server_id=server_id, name="search_foo", input_schema={"type": "object"}
+    )
+    server = MCPServer(
+        id=server_id,
+        tenant_id=uuid4(),
+        name="Search",
+        http_url="http://localhost/mcp",
+        tools=[first, second],
+    )
+    replacement_server = (
+        MCPServer(
+            id=uuid4(),
+            tenant_id=server.tenant_id,
+            name=server.name,
+            http_url=server.http_url,
+            tools=[second],
+        )
+        if other_server
+        else server
+    )
+    root = replace(
+        _binding(position=0), instructions=f"Use [Search](eneo-mcp:{server_id})."
+    )
+    plan = SkillTurnPlan.create(
+        base_instructions="Base",
+        resolution=SkillRuntimeResolution(eligible=(root,), blocked=()),
+        policy=SkillRuntimePolicy(
+            selective_activation_enabled=True,
+            max_attached_skills=100,
+            context_share_percent=10,
+            max_activations_per_turn=10,
+        ),
+    )
+    runtime = plan.to_activation_runtime(
+        selected_model_route="openai/gpt-4o",
+        max_input_tokens=128_000,
+        supports_tool_calling=True,
+    )
+    proxy = MCPProxySession([server])
+    offered = proxy.get_model_tool_identities()
+    runtime.prepare_reference_tools(offered, rendered_prompt=runtime.prompt)
+    messages = [{"role": "system", "content": runtime.prompt}]
+    proxy._rebuild_server_tools(server, [])
+    proxy._rebuild_server_tools(replacement_server, [{"name": "search_foo"}])
+    runtime.refresh_reference_tools(
+        proxy.get_model_tool_identities(), messages=messages
+    )
+    evidence = plan.activation_evidence(
+        selected_model_id=uuid4(),
+        selected_model_route="openai/gpt-4o",
+        snapshot=runtime.snapshot(),
+    )
+    assert evidence.reference_tools == offered
+    assert proxy.get_tools_for_llm() == []
+    assert "unavailable for this turn" in runtime.prompt
+    proxy._rebuild_server_tools(server, [{"name": "search.foo"}])
+    assert proxy.get_model_tool_identities() == offered

@@ -1,7 +1,5 @@
-"use client";
-
 import { ChevronRight, LockKeyhole } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { useAutosave } from "@/components/composites/use-autosave";
@@ -9,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { modelSupportsToolCalling, readinessKey } from "@/features/capabilities/capabilities";
+import Link from "@/lib/link";
+import { getCapability } from "@/features/capabilities/capabilities";
 import { useSpace } from "@/features/spaces/use-space";
 import { assistantToolModel, isMcpEnforced, policyMcpServers } from "./effective-config";
 import {
@@ -37,14 +37,15 @@ const sortedToolKey = (settings: AssistantMcpToolSetting[]) =>
  */
 export function McpSection({ assistant }: { assistant: Assistant }) {
   const t = useTranslations();
-  const { space } = useSpace();
+  const { space, routeId, can } = useSpace();
   const update = useUpdateAssistant(assistant.id);
   const autosave = useAutosave("mcp");
 
   const mcpEnforced = isMcpEnforced(assistant.effective_config);
   const policyServers = policyMcpServers(assistant.effective_config);
   const available = availableAssistantMcpServers(
-    assistantMcpServersFromApi(mcpEnforced ? policyServers : (space.mcp_servers ?? []))
+    assistantMcpServersFromApi(mcpEnforced ? policyServers : (space.mcp_servers ?? [])),
+    assistantMcpServersFromApi(assistant.mcp_servers ?? [])
   );
   const savedIds = useMemo(
     () => (assistant.mcp_servers ?? []).map((server) => server.id),
@@ -81,8 +82,6 @@ export function McpSection({ assistant }: { assistant: Assistant }) {
     0;
   const disabledByKnowledge = hasKnowledge && selected.size === 0;
 
-  if (!mcpEnforced && available.length === 0) return null;
-
   function persist(
     nextSelected: Set<string>,
     nextToolSettings: AssistantMcpToolSetting[],
@@ -110,7 +109,7 @@ export function McpSection({ assistant }: { assistant: Assistant }) {
   function toggleServer(server: AssistantMcpServer) {
     const previousSelected = selected;
     const previousToolSettings = toolSettings;
-    const next = toggleMcpServerSelection(selected, toolSettings, server);
+    const next = toggleMcpServerSelection(selected, toolSettings, server, available);
     setSelected(next.selectedIds);
     setToolSettings(next.settings);
     persist(next.selectedIds, next.settings, previousSelected, previousToolSettings);
@@ -134,7 +133,7 @@ export function McpSection({ assistant }: { assistant: Assistant }) {
               {t("model_does_not_support_tools")}
             </p>
           )}
-          {disabledByKnowledge && (
+          {available.length > 0 && disabledByKnowledge && (
             <p className="border-warning/30 bg-warning/10 text-warning rounded-md border px-3 py-2 text-sm">
               <span className="font-semibold">{t("warning")}:</span>{" "}
               {t("mcp_disabled_when_knowledge_active")}
@@ -146,8 +145,12 @@ export function McpSection({ assistant }: { assistant: Assistant }) {
                 <div className="divide-border divide-y rounded-lg border">
                   {policyServers.map((server) => (
                     <div key={server.id} className="flex flex-col gap-0.5 px-3 py-2">
-                      <p className="text-sm font-medium">{server.name}</p>
-                      {server.description && (
+                      <p className="text-sm font-medium">
+                        {getCapability(server.purpose)
+                          ? t(getCapability(server.purpose)!.purpose)
+                          : server.name}
+                      </p>
+                      {!getCapability(server.purpose) && server.description && (
                         <p className="text-muted-foreground line-clamp-1 text-xs">
                           {server.description}
                         </p>
@@ -164,6 +167,18 @@ export function McpSection({ assistant }: { assistant: Assistant }) {
                 {t("governance_assistant_mcp_provided_by_policy")}
               </p>
             </>
+          ) : available.length === 0 ? (
+            <div className="flex flex-col gap-2">
+              <p className="text-muted-foreground text-sm">{t("no_mcp_servers_available")}</p>
+              {can("edit", "space") && (
+                <Link
+                  href={`/spaces/${routeId}/settings?section=tools`}
+                  className="text-primary focus-visible:outline-ring inline-flex min-h-11 items-center underline focus-visible:outline-2"
+                >
+                  {t("enable_mcp_in_space_settings")}
+                </Link>
+              )}
+            </div>
           ) : (
             <fieldset
               className="flex flex-col gap-2"
@@ -352,7 +367,7 @@ function McpServerRow({
                   key={tool.id}
                   className="hover:bg-muted/70 flex items-center gap-3 border-b px-3 py-2.5 font-normal last:border-b-0"
                 >
-                  <span className={toolEnabled ? "min-w-0 flex-1" : "min-w-0 flex-1 opacity-50"}>
+                  <span className="min-w-0 flex-1">
                     <span className="block truncate font-mono text-xs font-medium">
                       {tool.title ?? tool.name}
                     </span>

@@ -1,11 +1,9 @@
-"use client";
-
 import { Button as AstryxButton } from "@astryxdesign/core/Button";
 import { Dialog as AstryxDialog } from "@astryxdesign/core/Dialog";
 import { useMergedRefs } from "@astryxdesign/core/hooks";
 import { useControllableState } from "@radix-ui/react-use-controllable-state";
 import { XIcon } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Portal, Slot } from "radix-ui";
 import * as React from "react";
 
@@ -23,10 +21,13 @@ import { cn } from "@/lib/utils";
  * close. alert-dialog.tsx builds on the same parts, so the whole app has one
  * dialog implementation.
  *
- * The call sites' classes (`sm:max-w-2xl`, `max-h-[90vh] overflow-y-auto`,
+ * The call sites' classes (`sm:max-w-2xl`, `overflow-y-auto`,
  * `p-0`, `flex flex-col`, …) style the <dialog> itself, as they styled
  * shadcn's content box. Astryx wraps the children in one layout div; it is
  * flattened (`display: contents`) so those classes lay the children out.
+ * Height is capped here at the dynamic viewport minus 2rem (dvh follows
+ * Safari's toolbar and Android's keyboard): a call site's own `max-h-[90vh]`
+ * would beat that cap, and eslint rejects vh in class names.
  */
 
 type DialogContextValue = {

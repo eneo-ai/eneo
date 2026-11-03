@@ -1,6 +1,6 @@
 "use client";
 
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { useSetSaveStatus } from "@/components/composites/save-status";
 import type { Schema } from "@/lib/api/models";

@@ -7,7 +7,7 @@ import type { WidgetTemplate } from "../autosave";
 import { template, texts } from "./fixtures";
 
 const api = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn(), PATCH: vi.fn() }));
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 
 import { WidgetTemplatePage } from "./widget-template-page";

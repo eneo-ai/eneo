@@ -130,6 +130,7 @@ class TestCategoryMappings:
             ActionType.MODULE_AUTH_TICKET_ISSUED,
             ActionType.MODULE_AUTH_TOKEN_EXCHANGED,
             ActionType.MODULE_AUTH_TOKEN_REFRESHED,
+            ActionType.SESSION_EXTENDED,
         ]
 
         for action_type in security_actions:

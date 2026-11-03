@@ -28,6 +28,7 @@ from eneo.authentication.auth_models import (
     ApiKeyScopeType,
 )
 from eneo.conversations.conversations_router import _validate_conversation_scope
+from eneo.main.request_context import clear_request_context, set_request_context
 from eneo.roles.permissions import Permission
 from eneo.users.user import UserState
 from tests.unit.api_key_test_utils import (
@@ -1169,6 +1170,25 @@ class TestScopeBodyDriven:
         assert "app" in exc_info.value.detail["message"].lower()
         assert exc_info.value.detail["request_id"] == "req-scope-1"
         assert exc_info.value.detail["context"]["auth_layer"] == "api_key_scope"
+
+    @pytest.mark.asyncio
+    async def test_scope_denial_without_caller_header_carries_the_context_id(self):
+        """The request context's id is the one every log line carries."""
+        request = self._make_http_request(scope_type="app", scope_id=uuid4())
+        set_request_context(correlation_id="ctx-scope-1")
+        try:
+            with pytest.raises(HTTPException) as exc_info:
+                await _validate_conversation_scope(
+                    http_request=request,
+                    container=self._make_container(),
+                    assistant_id=uuid4(),
+                    group_chat_id=None,
+                    session_id=None,
+                )
+        finally:
+            clear_request_context()
+
+        assert exc_info.value.detail["request_id"] == "ctx-scope-1"
 
     @pytest.mark.asyncio
     async def test_assistant_scope_matching_assistant_passes(self):

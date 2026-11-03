@@ -1,4 +1,4 @@
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 
 /**
  * The visitor's own message, right-aligned in the widget's accent colour.

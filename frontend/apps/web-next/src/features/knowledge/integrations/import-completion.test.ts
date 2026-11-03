@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createTranslator } from "next-intl";
+import { createTranslator } from "use-intl";
 import en from "@/lib/i18n/messages/en.json";
 import sv from "@/lib/i18n/messages/sv.json";
 import { makeSpace, makeIntegration } from "@/features/spaces/testing/space-fixture";

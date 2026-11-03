@@ -1,10 +1,12 @@
-"use client";
-
+import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
+import { Button as ActionButton } from "@astryxdesign/core/Button";
+import { saveUrl } from "@/features/files/signed-file-url";
 import { Spinner } from "@astryxdesign/core/Spinner";
 import { ImagePlus, Trash2 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { API_BASE, apiFetch } from "@/lib/api/base";
 import { browserApi } from "@/lib/api/browser";
 import { toast } from "@/lib/toast";
 
@@ -12,14 +14,46 @@ import { toast } from "@/lib/toast";
 export async function uploadIcon(file: File): Promise<{ id: string }> {
   const form = new FormData();
   form.append("file", file);
-  const response = await fetch("/api/eneo/api/v1/icons/", { method: "POST", body: form });
-  if (!response.ok) throw new Error(`icon upload failed: ${response.status}`);
+  const url = `${API_BASE}/api/v1/icons/`;
+  const response = await apiFetch(url, { method: "POST", body: form });
+  if (!response.ok) {
+    throw new Error(`icon upload failed: ${response.status}`);
+  }
   return (await response.json()) as { id: string };
 }
 
-/** Icon uploads are served through the auth-injecting proxy. */
+/** Icon uploads are served under the API base, which authenticates the request. */
 export function iconUrl(iconId: string | null | undefined): string | null {
-  return iconId ? `/api/eneo/api/v1/icons/${iconId}/` : null;
+  return iconId ? `${API_BASE}/api/v1/icons/${encodeURIComponent(iconId)}/` : null;
+}
+
+const MAX_ICON_BYTES = 256 * 1024;
+const ICON_TYPES = ["image/png", "image/jpeg", "image/webp"];
+
+function IconPreview({ url }: { url: string }) {
+  const t = useTranslations();
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        className="focus-visible:outline-ring size-full focus-visible:outline-2 focus-visible:-outline-offset-2"
+        aria-label={t("upload_view_avatar")}
+        onClick={() => setOpen(true)}
+      >
+        <img src={url} alt="" className="size-full object-cover" />
+      </button>
+      <Dialog isOpen={open} onOpenChange={setOpen} width={560}>
+        <DialogHeader title={t("upload_avatar_alt")} onOpenChange={setOpen} />
+        <img
+          src={url}
+          alt={t("upload_avatar_preview_alt")}
+          className="rounded-ax-inner mx-auto my-4 h-64 max-h-[60dvh] w-full object-contain"
+        />
+        <ActionButton label={t("download")} onClick={() => saveUrl(url, "icon")} />
+      </Dialog>
+    </>
+  );
 }
 
 /**
@@ -45,6 +79,14 @@ export function IconField({
 
   async function replaceIcon(file: File) {
     if (busy) return;
+    if (!ICON_TYPES.includes(file.type)) {
+      toast.error(t("avatar_invalid_type"));
+      return;
+    }
+    if (file.size > MAX_ICON_BYTES) {
+      toast.error(t("avatar_too_large"));
+      return;
+    }
     setBusy("upload");
     let uploaded: string | undefined;
     try {
@@ -83,9 +125,7 @@ export function IconField({
         {busy ? (
           <Spinner />
         ) : icon ? (
-          // Auth-proxied backend upload; next/image cannot optimize it.
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={icon} alt="" className="size-full object-cover" />
+          <IconPreview key={icon} url={icon} />
         ) : (
           <ImagePlus className="size-6" />
         )}
@@ -94,7 +134,7 @@ export function IconField({
         ref={fileInput}
         type="file"
         aria-label={t("upload")}
-        accept="image/png,image/jpeg,image/webp"
+        accept={ICON_TYPES.join(",")}
         className="hidden"
         onChange={(event) => {
           const file = event.target.files?.[0];

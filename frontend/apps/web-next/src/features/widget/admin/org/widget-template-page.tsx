@@ -9,9 +9,9 @@ import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { useQuery } from "@tanstack/react-query";
 import { FileText, Palette } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { useId, useState } from "react";
-import { Switch } from "@/components/astryx/switch";
+import { Switch } from "@astryxdesign/core/Switch";
 import { TextInput } from "@/components/astryx/text-input";
 import { PageHeader } from "@/components/composites/page-header";
 import { SaveStatusIndicator, SaveStatusProvider } from "@/components/composites/save-status";
@@ -195,7 +195,7 @@ function TemplateEditor({ template: initial }: { template: WidgetTemplate }) {
 
   return (
     <SaveStatusProvider>
-      <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-6">
+      <div className="flex w-full flex-col gap-6">
         <PageHeader
           title={template.name}
           breadcrumbs={[

@@ -17,18 +17,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-import sqlalchemy as sa
-from sqlalchemy.orm import selectinload
-
-from eneo.database.tables.mcp_server_table import (
-    MCPServers as MCPServersTable,
-)
-from eneo.database.tables.mcp_server_table import (
-    MCPServerToolSettings,
-)
-from eneo.database.tables.security_classifications_table import (
-    SecurityClassification as SecurityClassificationDBModel,
-)
 from eneo.mcp_servers.domain.capabilities import (
     CapabilityAvailability,
     CapabilityPurpose,
@@ -39,31 +27,16 @@ from eneo.mcp_servers.domain.entities.mcp_server import (
 )
 from eneo.mcp_servers.infrastructure.mappers.mcp_server_mapper import MCPServerMapper
 from eneo.mcp_servers.infrastructure.repo_impl.mcp_server_repo_impl import (
-    backing_model_options,
+    MCPServerRepoImpl,
 )
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from eneo.mcp_servers.domain.entities.mcp_server import (
-        MCPServer,
-        MCPServerTool,
-    )
+    from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
     from eneo.security_classifications.domain.entities.security_classification import (
         SecurityClassification,
     )
-
-
-def usable_capability_tools(server: "MCPServer") -> list["MCPServerTool"]:
-    """Tools the proxy would actually expose: enabled, still on the remote,
-    and with an admin-approved definition."""
-    return [
-        tool
-        for tool in server.tools
-        if tool.is_enabled_by_default
-        and not tool.removed_from_remote
-        and (tool.description is not None or tool.input_schema is not None)
-    ]
 
 
 async def get_active_capability_servers(
@@ -71,51 +44,14 @@ async def get_active_capability_servers(
 ) -> list["MCPServer"]:
     """Return every active provider for ``purpose`` in the tenant.
 
-    Tools carry the tenant-level enablement overlay so downstream consumers
-    (the MCP proxy, usability checks) see effective enablement. Audience
-    groups, security classification and the backing model (built-in
-    providers) are loaded for resolution.
+    Read through the server repository like every other server read, so the
+    tools carry the tenant's tool settings and audience groups, security
+    classification and backing model (built-in providers) are loaded for
+    resolution.
     """
-    query = (
-        sa.select(MCPServersTable)
-        .where(
-            MCPServersTable.tenant_id == tenant_id,
-            MCPServersTable.purpose == purpose,
-            MCPServersTable.is_enabled == True,  # noqa: E712
-        )
-        .options(
-            selectinload(MCPServersTable.tools),
-            selectinload(MCPServersTable.user_groups),
-            selectinload(MCPServersTable.security_classification).selectinload(
-                SecurityClassificationDBModel.tenant
-            ),
-            *backing_model_options(),
-        )
-        .order_by(MCPServersTable.created_at, MCPServersTable.id)
+    return await MCPServerRepoImpl(session, MCPServerMapper()).query(
+        tenant_id=tenant_id, purpose=purpose, is_enabled=True
     )
-    records = (await session.scalars(query)).all()
-    if not records:
-        return []
-
-    servers = [MCPServerMapper.to_entity(record) for record in records]
-
-    tool_ids = [tool.id for server in servers for tool in server.tools]
-    if tool_ids:
-        settings_stmt = sa.select(
-            MCPServerToolSettings.mcp_server_tool_id,
-            MCPServerToolSettings.is_enabled,
-        ).where(
-            MCPServerToolSettings.tenant_id == tenant_id,
-            MCPServerToolSettings.mcp_server_tool_id.in_(tool_ids),
-        )
-        settings_rows = (await session.execute(settings_stmt)).all()
-        tenant_settings = {tool_id: enabled for tool_id, enabled in settings_rows}
-        for server in servers:
-            for tool in server.tools:
-                if tool.id in tenant_settings:
-                    tool.is_enabled_by_default = tenant_settings[tool.id]
-
-    return servers
 
 
 def select_provider_for_user(
@@ -220,7 +156,7 @@ async def resolve_capability_servers(
             if (
                 provider is not None
                 and provider.is_backing_model_available
-                and usable_capability_tools(provider)
+                and provider.usable_tools
                 and meets_security_classification(
                     provider, space_security_classification
                 )

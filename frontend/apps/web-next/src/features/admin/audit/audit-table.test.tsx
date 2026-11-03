@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
@@ -37,20 +37,70 @@ afterEach(() => {
   toast.error.mockReset();
 });
 
+/** Opens the event's full details from its pinned cell; returns the dialog. */
 function openDetails() {
   renderInApp(<AuditTable logs={[log]} />);
-  fireEvent.click(screen.getAllByRole("button", { name: "Fullständiga detaljer" })[0]!);
+  fireEvent.click(screen.getByRole("button", { name: /^Användare skapad/ }));
+  return screen.getByRole("dialog", { name: "Användare skapad" });
 }
 
 describe("AuditTable", () => {
-  it("shows when it happened in the viewer's locale and the metadata as a scrollable region", async () => {
-    openDetails();
+  it("shows enriched actor names and emails as text in the table and details", () => {
+    const actor = { name: "<script>Testperson</script>", email: "testperson@example.se" };
+    renderInApp(<AuditTable logs={[{ ...log, metadata: { actor } }]} />);
+    const table = screen.getByRole("table");
+    expect(within(table).getByText(actor.name)).toBeTruthy();
+    expect(within(table).getByText(actor.email)).toBeTruthy();
+    expect(table.querySelector("script")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /^Användare skapad/ }));
+    const dialog = screen.getByRole("dialog", { name: "Användare skapad" });
+    expect(within(dialog).getByText(actor.name)).toBeTruthy();
+    expect(within(dialog).getByText(actor.email)).toBeTruthy();
+  });
 
-    // Named like the tab and page it sits in.
-    expect(screen.getByRole("table", { name: "Granskningsloggar" })).toBeTruthy();
+  it("distinguishes system events from user events with missing or malformed actor metadata", () => {
+    renderInApp(
+      <AuditTable
+        logs={[
+          { ...log, id: "system", actor_type: "system", actor_id: null },
+          { ...log, id: "missing", metadata: { actor: { name: 123, email: ["invalid"] } } }
+        ]}
+      />
+    );
+    const table = screen.getByRole("table");
+    expect(within(table).getByText("System")).toBeTruthy();
+    expect(within(table).getByText("Användare")).toBeTruthy();
+    expect(within(table).getByText(log.actor_id.slice(0, 8))).toBeTruthy();
+    expect(within(table).queryByText("invalid")).toBeNull();
+  });
+  it("holds each event in view where the table scrolls sideways (decision 9)", async () => {
+    renderInApp(<AuditTable logs={[log, { ...log, id: "log-9", outcome: "failure" }]} />);
+    // Named like the tab and page it sits in, and so is its scroll region.
+    const table = screen.getByRole("table", { name: "Granskningsloggar" });
+    expect(screen.getByRole("group", { name: "Granskningsloggar" })).toBeTruthy();
+    const pinned = within(table)
+      .getAllByRole("columnheader")
+      .filter((cell) => cell.style.insetInlineStart);
+    expect(pinned.map((cell) => cell.textContent)).toEqual(["Händelse"]);
+    // An iPad held upright leaves it 682 px beside the icon rail: it fits whole.
+    expect(Number.parseFloat(table.style.minWidth)).toBeLessThanOrEqual(682);
+    // What happened, to what, and a failure: all in the pinned cell.
+    const [, ok, failed] = within(table).getAllByRole("row");
+    const event = within(ok!).getByRole("button", { name: /^Användare skapad/ });
+    expect(event.getAttribute("aria-haspopup")).toBe("dialog");
+    expect(event.textContent).toContain("Användaren anna.lind@kommun.se skapades");
+    expect(within(failed!).getAllByText("Misslyckades")).toHaveLength(2);
+    await expectNoAxeViolations(document.body);
+  });
 
-    expect(screen.getByText(/^25 sep\. 2026/)).toBeTruthy();
-    const json = screen.getByRole("region", { name: "Metadata (JSON)" });
+  it("shows the full details in a dialog: when, who, what, and the metadata", async () => {
+    const dialog = openDetails();
+
+    expect(within(dialog).getAllByText(/^25 sep\. 2026/).length).toBeGreaterThan(0);
+    // The kind of actor with its id.
+    expect(within(dialog).getByText("Användare")).toBeTruthy();
+    expect(within(dialog).getByText(log.actor_id)).toBeTruthy();
+    const json = within(dialog).getByRole("region", { name: "Metadata (JSON)" });
     expect(json.tabIndex).toBe(0);
     await expectNoAxeViolations(document.body);
   });
@@ -101,4 +151,11 @@ describe("AuditTable", () => {
     );
     expect(screen.getByRole("button", { name: "Kopiera" })).toBeTruthy();
   });
+});
+
+it("says a system event's actor is the system, not that it was not recorded", () => {
+  renderInApp(<AuditTable logs={[{ ...log, actor_type: "system", actor_id: null }]} />);
+  fireEvent.click(screen.getByRole("button", { name: /^Användare skapad/ }));
+  const dialog = screen.getByRole("dialog", { name: "Användare skapad" });
+  expect(within(dialog).getByText("System")).toBeTruthy();
 });

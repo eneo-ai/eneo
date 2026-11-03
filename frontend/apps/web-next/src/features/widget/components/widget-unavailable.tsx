@@ -1,7 +1,7 @@
 "use client";
 
 import { X } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import { createEmbedBridge, type EmbedBridge } from "../embed-bridge";
 

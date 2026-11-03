@@ -1,5 +1,20 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
+import { API_BASE } from "@/lib/api/base";
+import { EneoApiError } from "@/lib/api/errors";
 import { startPromptGuideRun, updateHelperRunStatus, type HelperRun } from "./helper-runs";
+
+// The selected transport may inspect an error without consuming the body.
+const transportFetch = vi.hoisted(() =>
+  vi.fn<typeof fetch>(async (input, init) => {
+    const response = await fetch(input, init);
+    if (!response.ok) await response.clone().text();
+    return response;
+  })
+);
+vi.mock("@/lib/api/base", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/base")>()),
+  apiFetch: transportFetch
+}));
 
 function helperRun(overrides: Partial<HelperRun> = {}): HelperRun {
   return {
@@ -33,6 +48,7 @@ function eventStream(events: unknown[]): ReadableStream<Uint8Array> {
 describe("helper run transport", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    transportFetch.mockClear();
   });
 
   test("starts a streamed prompt-guide run and accumulates answer chunks", async () => {
@@ -57,7 +73,7 @@ describe("helper run transport", () => {
     expect(result.answer).toBe("Hello");
     expect(chunks).toEqual(["Hel", "lo"]);
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/eneo/api/v1/help-assistants/runs/",
+      `${API_BASE}/api/v1/help-assistants/runs/`,
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({ accept: "text/event-stream" }),
@@ -80,11 +96,63 @@ describe("helper run transport", () => {
 
     await expect(updateHelperRunStatus("run-1", "completed")).resolves.toEqual(completed);
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/eneo/api/v1/help-assistants/runs/run-1/",
+      `${API_BASE}/api/v1/help-assistants/runs/run-1/`,
       expect.objectContaining({
         method: "PATCH",
         body: JSON.stringify({ status: "completed" })
       })
     );
   });
+
+  const refusals = [
+    [401, 9001],
+    [403, 9070]
+  ] as const;
+
+  test.each(refusals)(
+    "reports a refused %i run through the shared transport once, then throws its own error",
+    async (status, code) => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        Response.json({ message: "Refused", eneo_error_code: code }, { status })
+      );
+
+      const error = await startPromptGuideRun({
+        targetId: "assistant-target",
+        question: "Hi"
+      }).then(
+        () => null,
+        (reason: unknown) => reason
+      );
+
+      expect(transportFetch).toHaveBeenCalledTimes(1);
+      expect(transportFetch).toHaveBeenCalledWith(
+        `${API_BASE}/api/v1/help-assistants/runs/`,
+        expect.anything()
+      );
+      expect(error).toBeInstanceOf(EneoApiError);
+      expect(error).toMatchObject({ status, code, message: "Refused" });
+    }
+  );
+
+  test.each(refusals)(
+    "reports a refused %i status update through the shared transport once, then throws its own error",
+    async (status, code) => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        Response.json({ message: "Refused", eneo_error_code: code }, { status })
+      );
+
+      const error = await updateHelperRunStatus("run-1", "completed").then(
+        () => null,
+        (reason: unknown) => reason
+      );
+
+      expect(transportFetch).toHaveBeenCalledTimes(1);
+      expect(transportFetch).toHaveBeenCalledWith(
+        `${API_BASE}/api/v1/help-assistants/runs/run-1/`,
+        expect.anything()
+      );
+      expect(error).toBeInstanceOf(EneoApiError);
+      expect(error).toMatchObject({ status, code, message: "Refused" });
+    }
+  );
 });

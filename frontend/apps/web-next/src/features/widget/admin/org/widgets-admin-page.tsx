@@ -4,7 +4,7 @@ import { Badge } from "@astryxdesign/core/Badge";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { useQuery } from "@tanstack/react-query";
 import { LayoutGrid, ShieldCheck, SwatchBook } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { useId } from "react";
 import { PageHeader } from "@/components/composites/page-header";
 import { SaveStatusIndicator, SaveStatusProvider } from "@/components/composites/save-status";
@@ -64,7 +64,7 @@ export function WidgetsAdminPage() {
 
   return (
     <SaveStatusProvider>
-      <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-6">
+      <div className="flex w-full flex-col gap-6">
         <PageHeader title={t("widget_admin_nav")} actions={<SaveStatusIndicator />} />
 
         <TabList

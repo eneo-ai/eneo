@@ -3,9 +3,9 @@
 import { NumberInput } from "@astryxdesign/core/NumberInput";
 import { Selector } from "@astryxdesign/core/Selector";
 import { TextArea } from "@astryxdesign/core/TextArea";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { useEffect, useState } from "react";
-import { Switch } from "@/components/astryx/switch";
+import { Switch } from "@astryxdesign/core/Switch";
 import { SettingsGroup } from "@/components/composites/settings-rows";
 import type { AutosaveSnapshot, Widget, WidgetAutosave } from "./autosave";
 import { blockerLabel } from "./blockers";

@@ -2,9 +2,9 @@
 
 import { Button } from "@astryxdesign/core/Button";
 import { useQuery } from "@tanstack/react-query";
-import Link from "next/link";
-import { useTranslations } from "next-intl";
-import { QuietBanner } from "@/components/astryx/banner";
+import Link from "@/lib/link";
+import { useTranslations } from "use-intl";
+import { Banner } from "@astryxdesign/core/Banner";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
@@ -27,7 +27,7 @@ export function AssistantWidgetSection({ assistantId }: { assistantId: string })
   return (
     <SettingsGroup title={t("widget_admin_title")}>
       {status.data?.serves_active_widget && (
-        <QuietBanner
+        <Banner
           status="warning"
           title={t("widget_admin_assistant_notice_title")}
           description={t("widget_admin_assistant_notice_body")}

@@ -1,5 +1,5 @@
 import { Check, ChevronRight, X } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useState } from "react";
 import { creditedServers, groupToolSteps, type WidgetToolStep } from "../widget-tool-steps";
 import { cn } from "@/lib/utils";

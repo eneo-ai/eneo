@@ -1,21 +1,34 @@
-"use client";
-
 import { createWidgetClient, EneoError, type WidgetPublicConfig } from "@eneo/eneo-js";
-import { useTranslations } from "next-intl";
-import { useEffect, useMemo, useState } from "react";
+import { useTranslations } from "use-intl";
+import { useEffect, useState } from "react";
 import { readPreviewToken } from "../preview";
-import { useHydrated } from "@/lib/hooks/use-hydrated";
 import { EmbedApp } from "./embed-app";
 import { WidgetNotice } from "./widget-unavailable";
 
 type Scheme = "light" | "dark" | "auto";
 
-/**
- * The client side of the embed page: the chat for a configuration the
- * server loaded, the notice for a widget that is not available, or, for the
- * admin page's live preview of a draft, the configuration fetched here with
- * the token from the URL fragment (which never reaches a server log).
- */
+/** Load visitor configuration directly from FastAPI, without browser-session cookies. */
+export async function loadEmbedConfig(
+  publicId: string,
+  signal?: AbortSignal
+): Promise<WidgetPublicConfig | null> {
+  const timeout = AbortSignal.timeout(8000);
+  const requestSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
+  const client = createWidgetClient({
+    baseUrl: location.origin,
+    publicId,
+    fetch: (input, init) =>
+      fetch(input, { ...init, signal: requestSignal, credentials: "omit", cache: "no-store" })
+  });
+  try {
+    return await client.config();
+  } catch (error) {
+    if (error instanceof EneoError && error.status === 404) return null;
+    throw error;
+  }
+}
+
+/** The token for a draft stays in the browser's URL fragment. */
 export function EmbedPage({
   config: loaded,
   unavailable,
@@ -32,46 +45,38 @@ export function EmbedPage({
   preview: boolean;
 }) {
   const t = useTranslations();
-  // The fragment exists in the browser only; before hydration the page shows
-  // that it is loading, and without a token afterwards that it cannot.
-  const hydrated = useHydrated();
-  const wantsPreview = preview && !loaded && !unavailable;
-  const previewToken = useMemo(
-    () => (wantsPreview && hydrated ? readPreviewToken(location.hash) : null),
-    [wantsPreview, hydrated]
-  );
+  const previewToken = preview ? readPreviewToken(location.hash) : null;
   const [previewConfig, setPreviewConfig] = useState<WidgetPublicConfig | null>(null);
   const [fetchFailed, setFetchFailed] = useState(false);
-  const previewFailed = fetchFailed || (wantsPreview && hydrated && previewToken === null);
 
   useEffect(() => {
     if (!previewToken) return;
-    // The public config is cacheable for a minute; a preview must always
-    // show what was just saved.
+    const controller = new AbortController();
     const client = createWidgetClient({
       baseUrl: location.origin,
       publicId,
       getToken: () => previewToken,
-      fetch: (input, init) => fetch(input, { ...init, cache: "no-store", credentials: "omit" })
+      fetch: (input, init) =>
+        fetch(input, {
+          ...init,
+          signal: AbortSignal.any([controller.signal, AbortSignal.timeout(8000)]),
+          cache: "no-store",
+          credentials: "omit"
+        })
     });
-    let cancelled = false;
-    client
+    void client
       .config()
-      .then((fetched) => {
-        if (!cancelled) setPreviewConfig(fetched);
+      .then((config) => {
+        if (!controller.signal.aborted) setPreviewConfig(config);
       })
-      .catch((error: unknown) => {
-        if (cancelled) return;
-        setFetchFailed(true);
-        if (!(error instanceof EneoError)) console.error(error);
+      .catch(() => {
+        if (!controller.signal.aborted) setFetchFailed(true);
       });
-    return () => {
-      cancelled = true;
-    };
+    return () => controller.abort();
   }, [previewToken, publicId]);
 
   const config = loaded ?? previewConfig;
-  if (config) {
+  if (config)
     return (
       <EmbedApp
         config={config}
@@ -81,17 +86,11 @@ export function EmbedPage({
         previewToken={previewToken}
       />
     );
-  }
-  if (unavailable) return <WidgetNotice hostOrigin={hostOrigin} />;
+  if (unavailable || fetchFailed || (preview && !previewToken))
+    return <WidgetNotice hostOrigin={hostOrigin} />;
   return (
     <main className="bg-ax-surface text-ax-text-secondary fixed inset-0 flex items-center justify-center p-6">
-      {previewFailed ? (
-        <p className="text-center text-sm" role="alert">
-          {t("widget_preview_unavailable")}
-        </p>
-      ) : (
-        <p className="text-sm">{t("widget_preview_loading")}</p>
-      )}
+      <p className="text-sm">{t("widget_preview_loading")}</p>
     </main>
   );
 }

@@ -1,5 +1,5 @@
 import type { SkillBindingSummary, SkillPublic, SkillSparse } from "@eneo/eneo-js";
-import { page } from "@vitest/browser/context";
+import { page, userEvent } from "vitest/browser";
 import { render } from "vitest-browser-svelte";
 import { describe, expect, test, vi } from "vitest";
 import { m } from "$lib/paraglide/messages";
@@ -784,6 +784,49 @@ describe("SkillBindingsEditor", () => {
     await page.getByRole("combobox", { name: m.skills_add_existing() }).click();
     await expect.element(page.getByText(m.skills_no_available())).toBeVisible();
     await expect.element(page.getByText(m.skills_all_attached())).not.toBeInTheDocument();
+  });
+
+  test("Escape closes only the inline reference picker and preserves the create draft", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(SkillBindingsEditor, {
+      bindings: [],
+      initialCatalogPage: makePage([]),
+      bindingSummaries: [],
+      canEditBindings: true,
+      canCreateSkills: true,
+      onListCatalog: vi.fn(),
+      onGetSkillPreview: getPreview,
+      onCreateSkill: vi.fn(),
+      referenceCatalog: {
+        key: "space",
+        skills: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
+        servers: vi.fn(),
+        tools: vi.fn(),
+        preview: vi.fn()
+      }
+    });
+    try {
+      await page.getByRole("button", { name: m.skills_create_new() }).click();
+      await page.getByLabelText(m.skills_display_name_label()).fill("Keep this draft");
+      await page.getByRole("button", { name: m.skills_reference_insert() }).click();
+      await expect
+        .element(page.getByRole("combobox", { name: m.skills_reference_search() }))
+        .toHaveFocus();
+      await userEvent.keyboard("{Escape}");
+      expect(confirm).not.toHaveBeenCalled();
+      await expect.element(page.getByRole("dialog")).toBeVisible();
+      await expect
+        .element(page.getByLabelText(m.skills_display_name_label()))
+        .toHaveValue("Keep this draft");
+      await expect
+        .element(page.getByRole("combobox", { name: m.skills_reference_search() }))
+        .not.toBeInTheDocument();
+      await expect
+        .element(page.getByRole("textbox", { name: m.skills_instructions_label() }))
+        .toHaveFocus();
+    } finally {
+      confirm.mockRestore();
+    }
   });
 
   test("keeps a populated create dialog open until discard is confirmed", async () => {

@@ -1,19 +1,21 @@
-"use client";
-
-import { IconTile, type IconTileHue } from "@/components/composites/icon-tile";
+import { List, ListItem } from "@astryxdesign/core/List";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronRight, FileText, ListChecks, PenLine, type LucideIcon } from "lucide-react";
-import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { MessageSquare } from "lucide-react";
+import Link from "@/lib/link";
+import { useTranslations } from "use-intl";
 import { useId, type ReactNode } from "react";
+import { ClientTime } from "@/components/composites/client-time";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { iconUrl } from "@/components/composites/icon-field";
 import { useAppContext } from "@/components/providers/app-context";
+import { conversationContext } from "@/components/shell/conversation-context";
+import { conversationHref } from "@/components/shell/routes";
 import { chatPartnerHref } from "@/features/assistants/assistants";
 import { spaceRouteId } from "@/features/spaces/space";
 import { spaceDisplayName } from "@/features/spaces/space-name";
 import { WhatsNewBanner } from "@/features/whats-new/release-banner";
 import { browserApi } from "@/lib/api/browser";
+import { recentConversationsQueryOptions, type RecentConversation } from "@/lib/api/conversations";
 import { unwrap } from "@/lib/api/errors";
 import { displayPartnerName } from "@/lib/chat/partner-name";
 import type { ChatPartner } from "@/lib/chat/types";
@@ -37,35 +39,13 @@ export function BrandMark({ className }: { className?: string }) {
   );
 }
 
-type Starter = {
-  key: "summarize" | "draft" | "plan";
-  icon: LucideIcon;
-  hue: IconTileHue;
-};
+/** Section headings of the start state: 18 px, in a 44 px row so "Visa alla" beside one is a full target. */
+const SECTION_HEADING = "text-lg leading-tight font-semibold text-balance";
 
-const STARTERS: Starter[] = [
-  { key: "summarize", icon: FileText, hue: "blue" },
-  { key: "draft", icon: PenLine, hue: "purple" },
-  { key: "plan", icon: ListChecks, hue: "teal" }
-];
-
-const STARTER_TEXT = {
-  summarize: {
-    label: "personal_assistant_suggestion_summarize",
-    description: "chat_starter_summarize_description",
-    prompt: "personal_assistant_prompt_summarize"
-  },
-  draft: {
-    label: "personal_assistant_suggestion_draft",
-    description: "chat_starter_draft_description",
-    prompt: "personal_assistant_prompt_draft"
-  },
-  plan: {
-    label: "personal_assistant_suggestion_plan",
-    description: "chat_starter_plan_description",
-    prompt: "personal_assistant_prompt_plan"
-  }
-} as const;
+/** The conversations "Fortsätt" offers: two, so "Dina assistenter" stays in view on a 320 px phone. */
+const CONTINUE_COUNT = 2;
+/** The assistants "Dina assistenter" offers: enough to pick from, the catalog is one tap away. */
+const ASSISTANTS_SHOWN = 3;
 
 type QuickAssistant = {
   id: string;
@@ -75,57 +55,108 @@ type QuickAssistant = {
   href: string;
 };
 
-/** Up to four assistants from the user's shared spaces (the dashboard query, shared cache). */
-function useQuickAssistants(enabled: boolean): QuickAssistant[] {
+/** Up to three assistants from the user's shared spaces (the dashboard query, shared cache). */
+function useQuickAssistants(): { items: QuickAssistant[]; isPending: boolean } {
   const t = useTranslations();
-  const { data } = useQuery({
+  const { data, isPending } = useQuery({
     queryKey: ["dashboard"],
-    enabled,
     queryFn: () => unwrap(browserApi.GET("/api/v1/dashboard/"))
   });
-  if (!data) return [];
-  const result: QuickAssistant[] = [];
-  for (const space of data.spaces.items) {
+  const items: QuickAssistant[] = [];
+  for (const space of data?.spaces.items ?? []) {
     if (space.personal) continue;
     for (const assistant of space.applications?.assistants.items ?? []) {
-      result.push({
+      items.push({
         id: assistant.id,
         name: assistant.name,
         iconId: assistant.icon_id ?? null,
         spaceName: spaceDisplayName(space, t),
         href: chatPartnerHref(spaceRouteId(space), { type: "assistant", id: assistant.id })
       });
-      if (result.length === 4) return result;
+      if (items.length === ASSISTANTS_SHOWN) return { items, isPending };
     }
   }
-  return result;
+  return { items, isPending };
 }
 
-function QuickAssistants() {
+const firstFew = (conversations: RecentConversation[]) => conversations.slice(0, CONTINUE_COUNT);
+
+/** The latest conversations: the list the navigation's "Senaste" and the ⌘K palette share (one cache entry). */
+function useContinueConversations() {
+  return useQuery({ ...recentConversationsQueryOptions(browserApi), select: firstFew });
+}
+
+/**
+ * "Fortsätt": the latest conversations as rows, each saying when it was last
+ * used and, unless it is the personal chat, whom it is with. A row opens the
+ * conversation where it lives.
+ */
+function Continue({ conversations }: { conversations: RecentConversation[] }) {
   const t = useTranslations();
   const headingId = useId();
-  const assistants = useQuickAssistants(true);
-  if (assistants.length === 0) return null;
   return (
-    <section aria-labelledby={headingId} className="flex w-full flex-col gap-2.5">
-      <div className="flex items-center justify-between gap-2">
-        <h2 id={headingId} className="text-ax-text-secondary text-[13px] font-semibold">
+    <section aria-labelledby={headingId} className="flex w-full flex-col">
+      <div className="flex min-h-11 items-center">
+        <h2 id={headingId} className={SECTION_HEADING}>
+          {t("chat_continue")}
+        </h2>
+      </div>
+      <List hasDividers edge="outset">
+        {conversations.map((conversation) => {
+          const context = conversationContext(conversation, t);
+          return (
+            <ListItem
+              key={conversation.id}
+              href={conversationHref(conversation)}
+              label={conversation.name.trim() || t("shell_untitled_conversation")}
+              description={
+                <>
+                  <ClientTime value={conversation.last_activity_at} format="auto" />
+                  {context ? ` · ${context}` : null}
+                </>
+              }
+              startContent={
+                <span className="flex size-9 shrink-0 items-center justify-center">
+                  <MessageSquare aria-hidden="true" className="text-ax-text-secondary size-5" />
+                </span>
+              }
+            />
+          );
+        })}
+      </List>
+    </section>
+  );
+}
+
+/**
+ * "Dina assistenter": up to three of the user's assistants with their space,
+ * and "Visa alla" to the catalog. A row opens a chat, so no chevron (as in
+ * the catalog and the switcher).
+ */
+function QuickAssistants({ assistants }: { assistants: QuickAssistant[] }) {
+  const t = useTranslations();
+  const headingId = useId();
+  return (
+    <section aria-labelledby={headingId} className="flex w-full flex-col">
+      <div className="flex min-h-11 items-center justify-between gap-2">
+        <h2 id={headingId} className={SECTION_HEADING}>
           {t("chat_your_assistants")}
         </h2>
         <Link
           href="/dashboard"
-          className="text-ax-text-accent focus-visible:outline-ring rounded-ax-inner inline-flex min-h-6 items-center text-[13px] font-semibold underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11"
+          className="text-ax-text-accent focus-visible:outline-ring rounded-ax-inner -me-2 inline-flex min-h-11 items-center px-2 text-sm font-semibold underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:-outline-offset-2"
         >
           {t("chat_show_all_assistants")}
         </Link>
       </div>
-      <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+      <List hasDividers edge="outset">
         {assistants.map((assistant) => (
-          <li key={assistant.id}>
-            <Link
-              href={assistant.href}
-              className="border-ax-border hover:bg-ax-hover focus-visible:outline-ring flex min-h-[58px] items-center gap-3 rounded-[0.875rem] border py-2 ps-2.5 pe-3 focus-visible:outline-2 focus-visible:outline-offset-2"
-            >
+          <ListItem
+            key={assistant.id}
+            href={assistant.href}
+            label={assistant.name}
+            description={assistant.spaceName}
+            startContent={
               <EntityAvatar
                 id={assistant.id}
                 name={assistant.name}
@@ -133,35 +164,64 @@ function QuickAssistants() {
                 size="lg"
                 className="size-9"
               />
-              <span className="flex min-w-0 flex-1 flex-col leading-tight">
-                <span className="truncate font-semibold">{assistant.name}</span>
-                <span className="text-ax-text-secondary truncate text-[12.5px]">
-                  {assistant.spaceName}
-                </span>
-              </span>
-              <ChevronRight aria-hidden="true" className="text-ax-text-secondary size-4 shrink-0" />
-            </Link>
-          </li>
+            }
+          />
         ))}
-      </ul>
+      </List>
     </section>
   );
 }
 
 /**
- * The empty conversation: a greeting (personal assistant) or the partner's
- * name and description, the composer centred, and for the personal assistant
- * three starter cards (they fill the composer) plus quick links to the user's
- * assistants.
+ * What the personal chat offers under its greeting: "Fortsätt" and "Dina
+ * assistenter", or, for someone with no conversations yet, one quiet line on
+ * how to begin. Shown once both lists have arrived: one that came later above
+ * the other would push it down.
+ */
+function PersonalLists() {
+  const t = useTranslations();
+  const recent = useContinueConversations();
+  const assistants = useQuickAssistants();
+  if (recent.isPending || assistants.isPending) return null;
+  const conversations = recent.data ?? [];
+  const noHistory = recent.isSuccess && conversations.length === 0;
+  const hasLists = conversations.length > 0 || assistants.items.length > 0;
+  if (!noHistory && !hasLists) return null;
+  return (
+    <div className="flex w-full flex-col gap-6">
+      {noHistory && (
+        <p className="text-ax-text-secondary max-w-xl text-sm sm:self-center sm:text-center">
+          {t("chat_start_guidance")}
+        </p>
+      )}
+      {hasLists && (
+        // Side by side where the column has room for both (not the window: a
+        // side panel narrows it); a lone section takes the width.
+        <div className="grid w-full grid-cols-1 gap-x-6 gap-y-6 @2xl:grid-cols-2 @2xl:[&>:only-child]:col-span-2">
+          {conversations.length > 0 && <Continue conversations={conversations} />}
+          {assistants.items.length > 0 && <QuickAssistants assistants={assistants.items} />}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The empty conversation: a greeting (a space's own assistant, or the personal
+ * chat) or the partner's name and description; the composer, centred under it
+ * (on phones and touch screens the view docks it at the bottom, where it
+ * stays: decision 5); and in the personal chat "Fortsätt" and "Dina assistenter".
+ * A space's own assistant leaves other assistants to its header's switcher,
+ * which lists the space's own: a shortcut to assistants of other spaces does
+ * not belong inside one.
  */
 export function StartState({
   partner,
-  composer,
-  onPickStarter
+  composer
 }: {
   partner: ChatPartner;
-  composer: ReactNode;
-  onPickStarter: (prompt: string) => void;
+  /** The centred composer; absent where the view docks it. */
+  composer?: ReactNode;
 }) {
   const t = useTranslations();
   const { user } = useAppContext();
@@ -174,11 +234,25 @@ export function StartState({
   return (
     // Auto margins centre the content vertically but, unlike justify-center,
     // never push it above the scroll edge when it is taller (zoom, short phones).
-    <div className="flex w-full flex-1 flex-col items-center px-4 py-8 sm:py-10">
-      <div className="my-auto flex w-full max-w-[720px] flex-col items-center gap-7">
-        <div className="flex flex-col items-center gap-2.5 text-center">
+    // The personal start leads with its greeting, start-aligned above its
+    // lists, where the composer is docked; another assistant's has only its
+    // introduction, centred at every width.
+    <div className="short:py-3 flex w-full flex-1 flex-col items-center px-4 pt-6 pb-4 sm:py-10">
+      <div
+        className={cn(
+          "short:gap-4 @container flex w-full max-w-[720px] flex-col gap-7 sm:gap-8",
+          personal ? cn("sm:items-center", composer && "sm:my-auto") : "my-auto items-center"
+        )}
+      >
+        <div
+          className={cn(
+            "flex flex-col gap-2.5",
+            personal ? "sm:items-center sm:text-center" : "items-center text-center"
+          )}
+        >
           {personal ? (
-            <BrandMark className="size-[38px]" />
+            // The mark only where there is room; on a phone the greeting leads.
+            <BrandMark className="short:hidden size-[38px] max-sm:hidden" />
           ) : (
             <EntityAvatar
               id={partner.id}
@@ -187,7 +261,7 @@ export function StartState({
               size="xl"
             />
           )}
-          <h1 className="mt-1 text-[1.625rem] leading-tight font-semibold tracking-[-0.015em] sm:text-[1.9375rem]">
+          <h1 className="text-[1.625rem] leading-tight font-semibold tracking-[-0.015em] text-balance sm:mt-1 sm:text-[1.9375rem]">
             {personal
               ? (greeting ?? (
                   <span className="invisible">{t("hi_firstname", { firstName: name })}</span>
@@ -202,38 +276,12 @@ export function StartState({
           </p>
         </div>
 
-        {/* The one-time release notice sits above the composer, never over it. */}
+        {/* The one-time release notice sits above the composer (where it is docked,
+            above the lists, the composer under them), never over it. */}
         {personal && <WhatsNewBanner />}
         {composer}
 
-        {personal && (
-          <>
-            <ul className="grid w-full grid-cols-1 gap-2.5 sm:grid-cols-3">
-              {STARTERS.map((starter) => {
-                const text = STARTER_TEXT[starter.key];
-                const Icon = starter.icon;
-                return (
-                  <li key={starter.key} className="flex">
-                    <button
-                      type="button"
-                      onClick={() => onPickStarter(t(text.prompt))}
-                      className="border-ax-border hover:bg-ax-hover focus-visible:outline-ring flex w-full items-start gap-3 rounded-[0.875rem] border p-3.5 text-start focus-visible:outline-2 focus-visible:outline-offset-2"
-                    >
-                      <IconTile icon={<Icon />} hue={starter.hue} size="sm" />
-                      <span className="flex flex-col gap-0.5">
-                        <span className="font-semibold">{t(text.label)}</span>
-                        <span className="text-ax-text-secondary text-[12.5px] leading-snug">
-                          {t(text.description)}
-                        </span>
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-            <QuickAssistants />
-          </>
-        )}
+        {partner.personalSpace && <PersonalLists />}
       </div>
     </div>
   );

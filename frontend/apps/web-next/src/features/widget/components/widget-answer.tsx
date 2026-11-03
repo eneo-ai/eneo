@@ -1,4 +1,4 @@
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useMemo, type ComponentProps } from "react";
 import { citationNumber, useCitationRemarkPlugins } from "@/components/ai-elements/citation";
 import { MessageResponse } from "@/components/ai-elements/message";

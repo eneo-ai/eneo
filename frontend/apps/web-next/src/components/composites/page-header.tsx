@@ -31,7 +31,7 @@ export type PageHeaderProps = {
    */
   headingRef?: React.Ref<HTMLHeadingElement>;
   /** One-line summary under the title. */
-  description?: string;
+  description?: React.ReactNode;
   /**
    * Ancestor trail above the title, root first. Crumbs with `href` are links,
    * crumbs without one are plain labels; only a crumb with `current` is
@@ -44,8 +44,22 @@ export type PageHeaderProps = {
   children?: React.ReactNode;
   /** `data-tour` anchor for the guided tour. */
   tour?: string;
+  /**
+   * A space tab on a phone, where the active tab of the space's strip already
+   * names the page: on a phone's layout (`phone:`) the title and description
+   * stay for screen readers only and the header takes no room in the page. Its actions are
+   * expected to be `DockedActions`, fixed at the bottom there.
+   */
+  isTitleHiddenOnPhone?: boolean;
   className?: string;
 };
+
+/**
+ * Astryx draws the crumb link 25 px tall; a thumb needs the full touch size.
+ * The text stays at the start, on the title's line; a short crumb's spare width
+ * falls after it.
+ */
+export const CRUMB_TOUCH = "pointer-coarse:[&>a]:min-h-11 pointer-coarse:[&>a]:min-w-11";
 
 /**
  * Page title block: optional breadcrumbs, h1 (or h2), optional description
@@ -70,28 +84,46 @@ export function PageHeader({
   actions,
   children,
   tour,
+  isTitleHiddenOnPhone = false,
   className
 }: PageHeaderProps) {
   const actionSlot = actions ?? children;
+  // A pushed screen's page bar says the same ("‹ Administration"): it replaces the trail
+  // below 1024 px, or on a phone's layout on a space's pages.
 
   return (
-    <div data-tour={tour} className={cn("flex flex-col gap-2", className)}>
+    <div
+      data-tour={tour}
+      className={cn("flex flex-col gap-2", isTitleHiddenOnPhone && "phone:contents", className)}
+    >
       {breadcrumbs && breadcrumbs.length > 0 ? (
-        <Breadcrumbs variant="supporting">
+        <Breadcrumbs
+          variant="supporting"
+          className="phone:group-has-[[data-own-phone-header]]/shell:hidden group-has-[[data-own-mobile-header]]/shell:max-lg:hidden"
+        >
           {breadcrumbs.map((crumb, index) => (
             <BreadcrumbItem
               key={`${index}-${crumb.href ?? crumb.label}`}
               href={crumb.current ? undefined : crumb.href}
               // Explicit false: Astryx would otherwise mark the last crumb current.
               isCurrent={crumb.current ?? false}
+              className={CRUMB_TOUCH}
             >
               {crumb.label}
             </BreadcrumbItem>
           ))}
         </Breadcrumbs>
       ) : null}
-      <div className="flex min-h-9 flex-wrap items-center justify-between gap-x-4 gap-y-2">
-        <div className="flex min-w-0 flex-col gap-1">
+      <div
+        className={cn(
+          "flex min-h-9 flex-wrap justify-between gap-x-4 gap-y-2",
+          // Under a description the actions stand on the title's line, not halfway
+          // down the paragraph (a three-line one put "Skapa roll" beside its middle).
+          description ? "items-start" : "items-center",
+          isTitleHiddenOnPhone && "phone:contents"
+        )}
+      >
+        <div className={cn("flex min-w-0 flex-col gap-1", isTitleHiddenOnPhone && "phone:sr-only")}>
           <Heading
             level={headingLevel}
             id={headingId}
@@ -105,12 +137,21 @@ export function PageHeader({
             {title}
           </Heading>
           {description ? (
-            <Text as="p" type="body" color="secondary">
+            <Text as="p" type="body" color="secondary" className="max-w-prose">
               {description}
             </Text>
           ) : null}
         </div>
-        {actionSlot ? <div className="flex flex-wrap items-center gap-2">{actionSlot}</div> : null}
+        {actionSlot ? (
+          <div
+            className={cn(
+              "flex flex-wrap items-center gap-2",
+              isTitleHiddenOnPhone && "phone:contents"
+            )}
+          >
+            {actionSlot}
+          </div>
+        ) : null}
       </div>
     </div>
   );

@@ -3,7 +3,7 @@ from uuid import uuid4
 
 import pytest
 
-from eneo.audit.infrastructure.rate_limiting import (
+from eneo.redis.rate_limit import (
     RateLimitResult,
     RateLimitServiceUnavailableError,
 )
@@ -49,6 +49,7 @@ class CountingRateLimit:
             current_count=self.counts[key],
             max_requests=config.max_requests,
             window_seconds=config.window_seconds,
+            retry_after_seconds=config.window_seconds,
         )
 
 

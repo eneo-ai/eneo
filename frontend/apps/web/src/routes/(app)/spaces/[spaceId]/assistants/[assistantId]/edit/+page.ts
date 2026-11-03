@@ -1,6 +1,7 @@
 import { redirect } from "@sveltejs/kit";
 import { resolve } from "$app/paths";
 import {
+  canAttachSkills,
   emptySkillBindingCatalogPage,
   loadSkillBindingCatalogPage
 } from "$lib/features/skills/skillBindingCatalog";
@@ -8,10 +9,10 @@ import {
 export const load = async (event) => {
   event.depends("space:skills");
   event.depends("organization:skills");
-  const { eneo, currentSpace } = await event.parent();
-  const canReadSkills = currentSpace.skill_permissions?.includes("read") ?? false;
+  const { eneo, currentSpace, user } = await event.parent();
   const supportsDirectSkills =
     !currentSpace.personal || currentSpace.default_assistant?.id !== event.params.assistantId;
+  const canUseSkills = canAttachSkills(currentSpace, user);
   const [
     assistant,
     mcpServers,
@@ -31,14 +32,14 @@ export const load = async (event) => {
     eneo.helpAssistants.runs
       .availability({ kind: "prompt_guide", target_id: event.params.assistantId })
       .catch(() => null),
-    canReadSkills && supportsDirectSkills
+    canUseSkills && supportsDirectSkills
       ? loadSkillBindingCatalogPage({
           eneo,
           spaceId: currentSpace.id,
           organizationSpace: currentSpace.organization === true
         })
       : Promise.resolve(emptySkillBindingCatalogPage()),
-    canReadSkills && supportsDirectSkills
+    canUseSkills && supportsDirectSkills
       ? eneo.skills.getAssistantConfiguration({
           spaceId: currentSpace.id,
           assistantId: event.params.assistantId
@@ -67,6 +68,7 @@ export const load = async (event) => {
     skillBindings: skillConfiguration.bindings,
     skillRuntime: skillConfiguration.runtime,
     supportsDirectSkills,
+    canUseSkills,
     documentTemplates: documentTemplates.items,
     // Visitors get the assistant as configured, tools included.
     servesActiveWidget: widgetStatus?.serves_active_widget ?? false,

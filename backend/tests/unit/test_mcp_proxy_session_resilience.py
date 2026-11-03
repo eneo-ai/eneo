@@ -9,11 +9,23 @@ from uuid import UUID, uuid4
 import pytest
 
 import eneo.mcp_servers.infrastructure.proxy.mcp_proxy_session as proxy_module
+from eneo.main import stream_lifecycle
 from eneo.main.exceptions import MCPAuthenticationError, MCPClientError
+from eneo.main.stream_lifecycle import (
+    finalization_deadline,
+    finalization_owner,
+    finalizing,
+)
 from eneo.mcp_servers.application.mcp_server_service import MCPServerService
 from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
-from eneo.mcp_servers.infrastructure.client.mcp_client import MCPClient
-from eneo.mcp_servers.infrastructure.proxy.mcp_proxy_session import MCPProxySession
+from eneo.mcp_servers.infrastructure.client.mcp_client import (
+    MCPClient,
+    MCPInsecureCredentialTransportError,
+)
+from eneo.mcp_servers.infrastructure.proxy.mcp_proxy_session import (
+    INSECURE_CREDENTIAL_TRANSPORT_NOTICE,
+    MCPProxySession,
+)
 from eneo.roles.permissions import Permission
 
 
@@ -33,6 +45,54 @@ def _make_server(name: str = "server") -> MCPServer:
         http_url="http://localhost:8080/mcp",
         tools=[tool],
     )
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_tool_exposure_uses_override_without_replacing_the_default(enabled):
+    server = _make_server()
+    tool = server.tools[0]
+    tool.is_enabled_by_default = not enabled
+    tool.enabled_override = enabled
+
+    proxy = MCPProxySession([server])
+
+    assert bool(proxy.get_tool_info("server__tool")) is enabled
+    assert tool.is_enabled_by_default is not enabled
+
+
+def test_reference_identity_labels_do_not_offer_disabled_or_view_only_tools():
+    server = _make_server("Renamed server")
+    server.tools.extend(
+        [
+            MCPServerTool(
+                mcp_server_id=server.id,
+                name="disabled",
+                description="Off",
+                input_schema={"type": "object"},
+                is_enabled_by_default=False,
+            ),
+            MCPServerTool(
+                mcp_server_id=server.id,
+                name="view_only",
+                description="View",
+                input_schema={"type": "object"},
+                meta={"ui": {"visibility": ["app"]}},
+            ),
+        ]
+    )
+    proxy = MCPProxySession([server])
+    before = proxy.get_tools_for_llm()
+
+    proxy.include_reference_identities()
+    identities = proxy.get_model_tool_identities()
+    after = proxy.get_tools_for_llm()
+
+    assert [(item.server_id, item.tool_name) for item in identities] == [
+        (server.id, "tool")
+    ]
+    assert len(after) == len(before) == 1
+    assert after[0]["function"]["parameters"] == before[0]["function"]["parameters"]
+    assert f"MCP {server.id}, tool tool" in after[0]["function"]["description"]
 
 
 def _make_identity_scoped_server(name: str = "identity-server") -> MCPServer:
@@ -74,6 +134,7 @@ class _FakeMCPClient:
         self.exit_task = None
         self.connect_task = None
         self.disconnect_task = None
+        self.disconnect_requested = False
         self.assigned_mcp_session_id = None
         self.supports_tools_list_changed = False
         type(self).instances.append(self)
@@ -87,6 +148,9 @@ class _FakeMCPClient:
 
     async def connect(self) -> None:
         self.connect_task = asyncio.current_task()
+
+    def request_disconnect(self) -> None:
+        self.disconnect_requested = True
 
     async def disconnect(self) -> None:
         self.disconnect_task = asyncio.current_task()
@@ -798,7 +862,6 @@ async def test_identity_scoped_catalog_fails_closed_when_live_discovery_fails(
     assert proxy.get_tools_for_llm() == []
     assert proxy.get_allowed_tool_names() == set()
     assert proxy._clients == {}
-    assert proxy._owner_task is None
 
 
 @pytest.mark.asyncio
@@ -817,7 +880,6 @@ async def test_unscoped_server_keeps_lazy_connection_without_preflight(
     assert proxy.get_allowed_tool_names() == {"server__tool"}
     assert _FakeMCPClient.instances == []
     assert proxy._clients == {}
-    assert proxy._owner_task is None
 
 
 @pytest.mark.asyncio
@@ -843,9 +905,11 @@ async def test_identity_scoped_catalog_fails_closed_when_staging_is_unavailable(
 
 
 @pytest.mark.asyncio
-async def test_identity_discovery_does_not_claim_the_streaming_owner_task(
+async def test_identity_discovery_uses_a_connection_of_its_own(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Discovery opens and closes its own client; the turn's tool calls open
+    another, which close() releases with the rest."""
     _install_fake_client(
         monkeypatch,
         live_tools_by_user={"user": [{"name": "shared"}]},
@@ -856,29 +920,21 @@ async def test_identity_discovery_does_not_claim_the_streaming_owner_task(
     discovery_task = asyncio.create_task(proxy.prepare_tools_for_context())
     await discovery_task
 
-    assert proxy._owner_task is None
     assert proxy._clients == {}
     [discovery_client] = _FakeMCPClient.instances
     assert discovery_client.enter_task is discovery_client.exit_task
 
-    async def run_streaming_phase():
-        current_task = asyncio.current_task()
-        result = await proxy.call_tools_parallel(
-            [("identity-server__shared", {"query": "hello"})]
-        )
-        await proxy.close()
-        return current_task, result
-
-    streaming_task = asyncio.create_task(run_streaming_phase())
-    owner_task, [result] = await streaming_task
+    [result] = await proxy.call_tools_parallel(
+        [("identity-server__shared", {"query": "hello"})]
+    )
+    await proxy.close()
 
     assert result["is_error"] is False
-    assert owner_task is streaming_task
     assert len(_FakeMCPClient.instances) == 2
     runtime_client = _FakeMCPClient.instances[1]
-    assert discovery_client.enter_task is not streaming_task
-    assert runtime_client.connect_task is streaming_task
-    assert runtime_client.disconnect_task is streaming_task
+    assert runtime_client.connect_task is not None
+    assert runtime_client.disconnect_task is not None
+    assert proxy._clients == {}
 
 
 @pytest.mark.asyncio
@@ -1091,13 +1147,34 @@ async def test_transport_authentication_failure_returns_actionable_error():
 
 
 @pytest.mark.asyncio
-async def test_call_tool_returns_error_when_no_client_cached():
-    """call_tool must NOT trigger a connect (it runs under asyncio.gather, on a
-    task other than the proxy's owner task). When no pre-connected client is
-    in the cache, return an error result."""
+async def test_call_tool_connects_on_first_use(monkeypatch: pytest.MonkeyPatch):
+    """A tool call opens its server's connection itself, from whatever task
+    runs it; close() releases it with the rest."""
+    _install_fake_client(monkeypatch, live_tools_by_user={"": []})
     server = _make_server()
     proxy = MCPProxySession([server])
-    # No pre-connect happened — _clients is empty.
+
+    [result] = await asyncio.gather(proxy.call_tool("server__tool", {"q": "x"}))
+    await proxy.close()
+
+    assert result["is_error"] is False
+    [client] = _FakeMCPClient.instances
+    assert client.connect_task is not None
+    assert client.disconnect_task is not None
+    assert proxy._clients == {}
+
+
+@pytest.mark.asyncio
+async def test_call_tool_marks_a_server_failed_when_connecting_fails(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    class _RefusingClient(_FakeMCPClient):
+        async def connect(self) -> None:
+            raise MCPClientError("connection refused")
+
+    monkeypatch.setattr(proxy_module, "MCPClient", _RefusingClient)
+    server = _make_server()
+    proxy = MCPProxySession([server])
 
     result = await proxy.call_tool("server__tool", {"q": "x"})
 
@@ -1805,3 +1882,87 @@ async def test_handle_from_another_request_is_not_an_authorization_grant():
     result = await second.call_tool("files__tool", {"url": file_handle(file_id)})
     assert result["is_error"]
     client_call.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_close_asks_every_connection_to_end_before_it_waits(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A close cut off at its first await (finalization budget spent) must
+    still end the connections: the stop requests go out synchronously."""
+    _install_fake_client(monkeypatch, live_tools_by_user={"": []})
+    proxy = MCPProxySession([_make_server("first"), _make_server("second")])
+    await asyncio.gather(
+        proxy.call_tool("first__tool", {}), proxy.call_tool("second__tool", {})
+    )
+
+    monkeypatch.setattr(stream_lifecycle, "FINALIZATION_BUDGET_SECONDS", 0.01)
+    with finalization_owner():
+        with finalizing("earlier cleanup"):
+            await asyncio.sleep(0.1)
+        deadline = finalization_deadline()
+        assert deadline is not None and deadline <= asyncio.get_running_loop().time()
+        with finalizing("mcp proxy"):
+            assert finalization_deadline() == deadline
+            await proxy.close()
+
+    assert [client.disconnect_requested for client in _FakeMCPClient.instances] == [
+        True,
+        True,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_parallel_calls_to_an_unreachable_server_connect_once(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    attempts = 0
+
+    class _RefusingClient(_FakeMCPClient):
+        async def connect(self) -> None:
+            nonlocal attempts
+            attempts += 1
+            await asyncio.sleep(0)  # the other callers queue on the lock
+            raise MCPClientError("connection refused")
+
+    monkeypatch.setattr(proxy_module, "MCPClient", _RefusingClient)
+    server = _make_server()
+    proxy = MCPProxySession([server])
+
+    results = await proxy.call_tools_parallel(
+        [("server__tool", {}), ("server__tool", {}), ("server__tool", {})]
+    )
+
+    assert attempts == 1
+    assert all(result["is_error"] for result in results)
+
+
+@pytest.mark.asyncio
+async def test_parallel_calls_to_an_insecure_server_all_get_the_notice(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """The callers queued behind the failed connect answer like the first one:
+    with the insecure-transport notice, not the generic unavailable result."""
+    attempts = 0
+
+    class _InsecureClient(_FakeMCPClient):
+        async def connect(self) -> None:
+            nonlocal attempts
+            attempts += 1
+            await asyncio.sleep(0)  # the other callers queue on the lock
+            raise MCPInsecureCredentialTransportError()
+
+    monkeypatch.setattr(proxy_module, "MCPClient", _InsecureClient)
+    server = _make_server()
+    proxy = MCPProxySession([server])
+
+    results = await proxy.call_tools_parallel(
+        [("server__tool", {}), ("server__tool", {}), ("server__tool", {})]
+    )
+
+    assert attempts == 1
+    assert all(result["is_error"] for result in results)
+    assert [result["content"][0]["text"] for result in results] == [
+        INSECURE_CREDENTIAL_TRANSPORT_NOTICE
+    ] * 3
+    assert server.id in proxy._insecure_transport_server_ids

@@ -1,32 +1,37 @@
-"use client";
-
 import { Button } from "@astryxdesign/core/Button";
+import { useMediaMatch } from "@/lib/hooks/use-media-match";
 import { ChatComposer, ChatComposerDrawer, useChatComposerContext } from "@astryxdesign/core/Chat";
+import { useAnnounce, useMergedRefs } from "@astryxdesign/core/hooks";
+import { Kbd } from "@astryxdesign/core/Kbd";
 import { Popover } from "@astryxdesign/core/Popover";
+import { isImeKeyEvent } from "@astryxdesign/core/utils";
 import {
   ArrowUp,
   BookOpen,
   ChevronDown,
+  CircleAlert,
   Folder,
   Globe,
   Plus,
   ShieldCheck,
   Square,
   TextQuote,
+  TriangleAlert,
   X
 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import {
   useId,
   useRef,
   useState,
   type ClipboardEvent,
-  type DragEvent,
   type KeyboardEvent,
   type ReactNode,
   type Ref
 } from "react";
-import type { KnowledgeOrigin } from "@/lib/chat/types";
+import { useFileDrop } from "@/features/files/use-file-drop";
+import { revealProblems } from "@/components/composites/field-problem";
+import type { ChatPartner, KnowledgeOrigin } from "@/lib/chat/types";
 import { cn } from "@/lib/utils";
 import { ComposerAttachments } from "./attachments";
 import { tableQuoteSummary } from "./side-panel/question-quote";
@@ -41,38 +46,48 @@ const PILL_ACTIVE_CLASS = "bg-ax-accent-muted text-ax-text-accent";
 
 /**
  * The composer's text field. A real <textarea> (e2e and assistive tech rely
- * on it) wired to Astryx ChatComposer's context: Enter sends, Shift+Enter adds
- * a line (the hint is in its description), IME composition is respected,
- * pasted files become attachments and Backspace in an empty field removes the
- * last attachment.
+ * on it) wired to Astryx ChatComposer's context. Where there is a keyboard
+ * (`returnSends`) Return sends and Shift+Return adds a line, as in other
+ * chats; on a touch screen Return adds a line, as in any text field. ⌘ or
+ * Ctrl+Return sends everywhere; the hint is in its description. Return that
+ * commits an input method's word never sends, pasted files become attachments
+ * and Backspace in an empty field removes the last attachment.
  */
 function ComposerTextarea({
   label,
-  hintId,
+  describedBy,
+  invalid,
   placeholder,
-  onEnter,
+  onSend,
   onPasteFiles,
   onBackspaceEmpty,
   rows,
+  returnSends,
   ref
 }: {
   label: string;
-  hintId: string;
+  describedBy: string;
+  invalid: boolean;
   placeholder: string;
-  onEnter: () => void;
+  onSend: () => void;
   onPasteFiles: (files: File[]) => void;
   onBackspaceEmpty: () => void;
   rows: number;
+  returnSends: boolean;
   ref?: Ref<HTMLTextAreaElement>;
 }) {
   const composer = useChatComposerContext();
   const [composing, setComposing] = useState(false);
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === "Enter" && !event.shiftKey) {
-      if (composing || event.nativeEvent.isComposing) return;
+    if (
+      event.key === "Enter" &&
+      (event.metaKey || event.ctrlKey || (returnSends && !event.shiftKey))
+    ) {
+      // keyCode 229: Safari's Return that commits a word, after compositionend.
+      if (composing || isImeKeyEvent(event.nativeEvent)) return;
       event.preventDefault();
-      onEnter();
+      onSend();
       return;
     }
     if (event.key === "Backspace" && event.currentTarget.value === "") {
@@ -106,60 +121,29 @@ function ComposerTextarea({
       onCompositionStart={() => setComposing(true)}
       onCompositionEnd={() => setComposing(false)}
       aria-label={label}
-      aria-describedby={hintId}
+      aria-describedby={describedBy}
+      aria-invalid={invalid || undefined}
       placeholder={placeholder}
       // The Astryx ChatComposer around this textarea draws the 3:1 focus ring
       // (focus-within), so the field itself has none.
       // eslint-disable-next-line eneo/no-weak-focus-indicator -- ring drawn by ChatComposer
-      className="text-ax-text placeholder:text-ax-text-secondary block [field-sizing:content] max-h-48 min-h-[46px] w-full resize-none bg-transparent px-1.5 py-0.5 text-[15px] leading-normal focus:outline-none"
+      className="text-ax-text placeholder:text-ax-text-secondary block [field-sizing:content] max-h-[min(12rem,30dvh)] min-h-[46px] w-full resize-none bg-transparent px-1.5 py-0.5 text-base leading-normal focus:outline-none"
     />
   );
 }
 
-/** Tracks a file drag over the composer for drop feedback. */
-function useFileDrop(onFiles: (files: File[]) => void, enabled: boolean) {
-  const [dragging, setDragging] = useState(false);
-  const depth = useRef(0);
-  const hasFiles = (event: DragEvent) => event.dataTransfer?.types?.includes("Files") ?? false;
-
-  return {
-    dragging: enabled && dragging,
-    handlers: enabled
-      ? {
-          onDragEnter: (event: DragEvent) => {
-            if (!hasFiles(event)) return;
-            event.preventDefault();
-            depth.current += 1;
-            setDragging(true);
-          },
-          onDragOver: (event: DragEvent) => {
-            if (hasFiles(event)) event.preventDefault();
-          },
-          onDragLeave: (event: DragEvent) => {
-            if (!hasFiles(event)) return;
-            depth.current = Math.max(0, depth.current - 1);
-            if (depth.current === 0) setDragging(false);
-          },
-          onDrop: (event: DragEvent) => {
-            if (!hasFiles(event)) return;
-            event.preventDefault();
-            depth.current = 0;
-            setDragging(false);
-            const files = Array.from(event.dataTransfer.files ?? []);
-            if (files.length > 0) onFiles(files);
-          }
-        }
-      : {}
-  };
-}
-
 /**
  * "Kunskap: <källa>" pill for partners with knowledge attached. Knowledge is
- * always searched (there is no per-message switch in the backend), so this is
- * not a toggle: it opens a list of the collections and websites the answer
- * draws on.
+ * read-only per conversation: the popover explains the configured search
+ * timing and lists the collections and websites the assistant can use.
  */
-function KnowledgePill({ knowledge }: { knowledge: KnowledgeOrigin[] }) {
+function KnowledgePill({
+  knowledge,
+  mode
+}: {
+  knowledge: KnowledgeOrigin[];
+  mode?: ChatPartner["knowledgeMode"];
+}) {
   const t = useTranslations();
   const [open, setOpen] = useState(false);
   const first = knowledge[0];
@@ -175,14 +159,24 @@ function KnowledgePill({ knowledge }: { knowledge: KnowledgeOrigin[] }) {
       width={288}
       content={
         <div className="flex flex-col gap-2 p-1">
-          <p className="text-ax-text-secondary text-xs">{t("chat_knowledge_popover_hint")}</p>
+          <p className="text-ax-text-secondary text-xs">
+            {t(
+              mode === "inject"
+                ? "knowledge_mode_inject_hint"
+                : mode === "tool"
+                  ? "knowledge_mode_tool_hint"
+                  : "chat_knowledge_popover_hint"
+            )}
+          </p>
           <ul className="flex flex-col gap-1">
             {knowledge.map((origin) => {
               const Icon = origin.kind === "website" ? Globe : Folder;
               return (
                 <li key={origin.id} className="flex min-w-0 items-center gap-2 text-[13px]">
                   <Icon aria-hidden="true" className="text-ax-text-secondary size-3.5 shrink-0" />
-                  <span className="truncate">{origin.name}</span>
+                  <span className="truncate pointer-coarse:break-words pointer-coarse:whitespace-normal">
+                    {origin.name}
+                  </span>
                 </li>
               );
             })}
@@ -210,9 +204,20 @@ function KnowledgePill({ knowledge }: { knowledge: KnowledgeOrigin[] }) {
 export type ComposerProps = {
   value: string;
   onChange: (value: string) => void;
-  /** Sends the current value (the caller validates and clears). */
+  /** Sends the current value (the caller clears it). Never called with an empty draft. */
   onSubmit: () => void;
-  canSubmit: boolean;
+  /**
+   * Why the question cannot be sent now, besides an empty draft (the context
+   * is full). Shown at the field and announced when the user tries; Send
+   * stays enabled (ACCESSIBILITY.md, forms).
+   */
+  sendBlocked?: string | null;
+  /**
+   * Nobody can answer here (no usable AI model): said under the field from
+   * the start and read with it, and the reason every send stops. The field
+   * and the footer stay usable, so a model can still be picked.
+   */
+  unavailable?: string | null;
   busy: boolean;
   onStop: () => void;
   /** Persistent accessible name of the text field. */
@@ -221,8 +226,11 @@ export type ComposerProps = {
   attachments: Attachments;
   onOpenFileDialog: () => void;
   knowledge?: KnowledgeOrigin[];
+  knowledgeMode?: ChatPartner["knowledgeMode"];
   /** Verktyg pill: the popover with a switch per capability and MCP server. */
   tools?: ReactNode;
+  /** Personal chat: the Skills pill beside Verktyg. */
+  skills?: ReactNode;
   /** Group chats: @-mention picker. */
   mention?: ReactNode;
   /** Personal assistant: model picker on the right. */
@@ -234,6 +242,13 @@ export type ComposerProps = {
   /** A passage quoted from a file or a view, sent as the opening lines of the question. */
   quote?: ComposerQuote | null;
   variant?: "docked" | "start";
+  /**
+   * No answer in the conversation yet: the advice to check an answer against its
+   * sources has nothing to apply to, so one line on where the data stays is enough
+   * (the centred start composer says it that way at every width, and a phone's
+   * docked one, which stays where it is, now does the same).
+   */
+  beforeAnswer?: boolean;
   textareaRef?: Ref<HTMLTextAreaElement>;
 };
 
@@ -296,7 +311,8 @@ export function Composer({
   value,
   onChange,
   onSubmit,
-  canSubmit,
+  sendBlocked = null,
+  unavailable = null,
   busy,
   onStop,
   label,
@@ -304,26 +320,59 @@ export function Composer({
   attachments,
   onOpenFileDialog,
   knowledge = [],
+  knowledgeMode,
   tools,
+  skills,
   mention,
   modelSelector,
   partnerToken,
   contextBar,
   quote = null,
   variant = "docked",
+  beforeAnswer = false,
   textareaRef
 }: ComposerProps) {
   const t = useTranslations();
+  // A touch screen has no Shift, Ctrl or Enter key to point at, and its
+  // Return adds a line.
+  const coarse = useMediaMatch("(pointer: coarse)");
+  const announce = useAnnounce();
   const hintId = useId();
+  const problemId = useId();
+  const unavailableId = useId();
+  const field = useRef<HTMLTextAreaElement>(null);
+  const fieldRef = useMergedRefs(field, textareaRef);
+  // What stopped the last send, shown at the field until the draft changes.
+  const [problem, setProblem] = useState<string | null>(null);
   const canAttach = attachments.maxFiles !== 0;
-  const { dragging, handlers } = useFileDrop(
-    (files) => void attachments.addFiles(files),
-    canAttach && attachments.canAddMore
-  );
+  const { dragging, handlers } = useFileDrop((files) => void attachments.addFiles(files), {
+    enabled: canAttach && attachments.canAddMore
+  });
   const hasAttachments = attachments.attachments.length > 0;
 
+  const change = (next: string) => {
+    setProblem(null);
+    onChange(next);
+  };
+
+  // Send is never disabled (decision 44): an attempt that cannot go says why
+  // at the field, out loud, and leaves focus there to fix it.
   const send = () => {
-    if (busy || !canSubmit) return;
+    if (busy) return;
+    if (unavailable) {
+      // Already said at the field: said again out loud, with focus kept there.
+      field.current?.focus();
+      announce(unavailable);
+      return;
+    }
+    const missing = value.trim() === "" ? t("chat_composer_empty") : sendBlocked;
+    if (missing) {
+      // Rendered first, so the field is read with its new description.
+      revealProblems(() => setProblem(missing), field.current);
+      announce(missing);
+      return;
+    }
+    setProblem(null);
     onSubmit();
   };
 
@@ -334,9 +383,9 @@ export function Composer({
       <div className="relative" {...handlers}>
         <ChatComposer
           value={value}
-          onChange={onChange}
-          // Submission runs through `send` (the textarea's Enter and the send
-          // button) so a blocked send never clears the field.
+          onChange={change}
+          // Submission runs through `send` (the textarea's Return keys and
+          // the send button) so a blocked send never clears the field.
           onSubmit={send}
           onStop={onStop}
           isStopShown={busy}
@@ -357,12 +406,16 @@ export function Composer({
           }
           input={
             <ComposerTextarea
-              ref={textareaRef}
+              ref={fieldRef}
               label={label}
-              hintId={hintId}
+              describedBy={[problem && problemId, unavailable && unavailableId, hintId]
+                .filter(Boolean)
+                .join(" ")}
+              invalid={problem !== null}
               placeholder={placeholder}
               rows={variant === "start" ? 2 : 1}
-              onEnter={send}
+              returnSends={!coarse}
+              onSend={send}
               onPasteFiles={(files) => void attachments.addFiles(files)}
               onBackspaceEmpty={() => {
                 const last = attachments.attachments.at(-1);
@@ -372,7 +425,9 @@ export function Composer({
           }
           footerActions={
             <div className="flex min-w-0 flex-wrap items-center gap-1">
-              {partnerToken}
+              {/* Not on a phone: its header already carries this switcher, and the pill only
+                  took footer width the other controls need. */}
+              {partnerToken && <span className="contents max-md:hidden">{partnerToken}</span>}
               {canAttach && (
                 <button
                   type="button"
@@ -387,12 +442,34 @@ export function Composer({
                   <Plus aria-hidden="true" className="size-4" />
                 </button>
               )}
-              <KnowledgePill knowledge={knowledge} />
+              <KnowledgePill knowledge={knowledge} mode={knowledgeMode} />
               {tools}
+              {skills}
               {mention}
             </div>
           }
-          sendActions={modelSelector}
+          sendActions={
+            <>
+              {modelSelector}
+              {/* The keys beside the button they stand for, where there is a keyboard
+                  to press them and room for them: not on a touch screen, nor in a phone-width
+                  window, where they only crowd the send button. The field's description says
+                  it in words. */}
+              <span
+                aria-hidden="true"
+                className="text-ax-text-secondary hidden items-center gap-2 text-xs whitespace-nowrap md:pointer-fine:inline-flex"
+              >
+                <span className="inline-flex items-center gap-1">
+                  <Kbd keys="enter" />
+                  {t("send")}
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <Kbd keys="shift+enter" />
+                  {t("chat_composer_key_newline")}
+                </span>
+              </span>
+            </>
+          }
           sendButton={
             <Button
               label={busy ? t("stop_generating") : t("send_message")}
@@ -405,7 +482,6 @@ export function Composer({
                   <ArrowUp aria-hidden="true" className="size-[17px]" strokeWidth={2.3} />
                 )
               }
-              isDisabled={!busy && !canSubmit}
               onClick={busy ? onStop : send}
               className="size-[34px] shrink-0 rounded-full pointer-coarse:size-11"
             />
@@ -420,13 +496,30 @@ export function Composer({
           </div>
         )}
       </div>
+      {problem && (
+        <p id={problemId} className="text-ax-error flex items-center gap-1.5 px-1 text-xs">
+          <CircleAlert aria-hidden="true" className="size-3.5 shrink-0" />
+          {problem}
+        </p>
+      )}
+      {unavailable && (
+        <p
+          id={unavailableId}
+          className="text-ax-text-secondary flex items-center gap-1.5 px-1 text-xs"
+        >
+          <TriangleAlert aria-hidden="true" className="size-3.5 shrink-0" />
+          {unavailable}
+        </p>
+      )}
       <span id={hintId} className="sr-only">
-        {t("chat_composer_hint")}
+        {t(coarse ? "chat_composer_hint_touch" : "chat_composer_hint")}
       </span>
       {contextBar}
       <p className="text-ax-text-secondary flex items-center justify-center gap-1.5 text-center text-xs">
         <ShieldCheck aria-hidden="true" className="size-3.5 shrink-0" />
-        {variant === "start" ? t("chat_sovereignty_hint") : t("chat_sovereignty_hint_full")}
+        {variant === "start" || beforeAnswer
+          ? t("chat_sovereignty_hint")
+          : t("chat_sovereignty_hint_full")}
       </p>
     </div>
   );

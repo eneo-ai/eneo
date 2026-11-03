@@ -167,10 +167,8 @@ export function migrateModelUsage(
   api: EneoClient,
   kind: MigratableModelKind,
   modelId: string,
-  toModelId: string,
-  forceOverride: boolean
+  body: Schema<"ModelMigrationRequest">
 ) {
-  const body = { to_model_id: toModelId, confirm_migration: true, force_override: forceOverride };
   if (kind === "transcription") {
     return unwrap(
       api.POST("/api/v1/transcription-models/{model_id}/migrate", {
@@ -205,27 +203,27 @@ export function createTenantModel(
   api: EneoClient,
   kind: "completion",
   body: TenantCompletionModelCreate
-): Promise<unknown>;
+): Promise<Schema<"CompletionModelPublic">>;
 export function createTenantModel(
   api: EneoClient,
   kind: "embedding",
   body: TenantEmbeddingModelCreate
-): Promise<unknown>;
+): Promise<Schema<"EmbeddingModelPublic">>;
 export function createTenantModel(
   api: EneoClient,
   kind: "transcription",
   body: TenantTranscriptionModelCreate
-): Promise<unknown>;
+): Promise<Schema<"TranscriptionModelPublic">>;
 export function createTenantModel(
   api: EneoClient,
   kind: "image",
   body: TenantImageModelCreate
-): Promise<unknown>;
+): Promise<Schema<"ImageModelPublic">>;
 export function createTenantModel(
   api: EneoClient,
   kind: "rerank",
   body: TenantRerankModelCreate
-): Promise<unknown>;
+): Promise<Schema<"RerankModelPublic">>;
 export function createTenantModel(
   api: EneoClient,
   kind: ModelKind,

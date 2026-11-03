@@ -1,13 +1,12 @@
 "use client";
 
 import { Button } from "@astryxdesign/core/Button";
-import { useClipboard } from "@astryxdesign/core/hooks";
+import { useCopy } from "@/lib/hooks/use-copy";
 import { Check, Copy, ExternalLink } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { useId, useState } from "react";
-import { Switch } from "@/components/astryx/switch";
+import { Switch } from "@astryxdesign/core/Switch";
 import { TextInput } from "@/components/astryx/text-input";
-import { toast } from "@/lib/toast";
 import type { Widget } from "./autosave";
 import { docsUrl } from "./docs";
 import {
@@ -20,7 +19,7 @@ import {
 
 function CopyButton({ text, label }: { text: string | null; label: string }) {
   const t = useTranslations();
-  const { copy, isCopied } = useClipboard({ announce: t("copied_to_clipboard") });
+  const { copy, isCopied } = useCopy();
   return (
     <Button
       label={isCopied ? t("copied_to_clipboard") : label}
@@ -34,7 +33,7 @@ function CopyButton({ text, label }: { text: string | null; label: string }) {
       isDisabled={!text}
       isInterruptible
       clickAction={async () => {
-        if (text && !(await copy(text))) toast.error(t("chat_copy_failed"));
+        if (text) await copy(text);
       }}
     />
   );

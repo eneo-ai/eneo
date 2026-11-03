@@ -4,6 +4,7 @@ import {
   buildSelectionKey,
   dedupeNestedSelection,
   normalizeSharePointPath,
+  selectImportItems,
   type SelectedImportItem,
   type SelectedTreeItem
 } from "./selection";
@@ -28,6 +29,24 @@ describe("normalizeSharePointPath", () => {
     expect(normalizeSharePointPath("docs//reports/")).toBe("/docs/reports");
     expect(normalizeSharePointPath("/")).toBe("/");
     expect(normalizeSharePointPath(null)).toBe("/");
+  });
+});
+
+describe("selectImportItems", () => {
+  it("replaces selected descendants immediately when their parent is selected", () => {
+    const child = makeEntry({ id: "c", path: "/docs/report.pdf" });
+    const parent = makeEntry({ id: "p", name: "Docs", type: "folder", path: "/docs" });
+    expect(selectImportItems([child], [parent.item])).toEqual([parent]);
+    expect(selectImportItems([parent], [child.item])).toEqual([parent]);
+  });
+
+  it("preserves custom names and adds each uncovered match once", () => {
+    const existing = makeEntry({ id: "a", path: "/a" }, "Our name");
+    const next = makeEntry({ id: "b", path: "/b" });
+    expect(selectImportItems([existing], [existing.item, next.item, next.item])).toEqual([
+      existing,
+      next
+    ]);
   });
 });
 

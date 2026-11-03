@@ -1,5 +1,3 @@
-"use client";
-
 import { Button } from "@astryxdesign/core/Button";
 import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
@@ -8,11 +6,10 @@ import { Link } from "@astryxdesign/core/Link";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId, useState } from "react";
 import { useClientTimeText } from "@/components/composites/client-time";
-import { LoadingState } from "@/components/composites/loading-state";
-import { ListError } from "@/components/composites/query-state";
+import { LoadMore, QueryStateBoundary } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
 import { flattenPages } from "@/lib/api/pagination";
 import {
@@ -45,6 +42,8 @@ export type CrawlRunDetailsContentProps = {
   run: CrawlRun;
   /** Which failures to show first: pages, files or all (`null`). */
   initialKind?: CrawlFailureKind | null;
+  /** Group the website Problems view by cause; historical dialogs keep a flat list. */
+  grouped?: boolean;
   /** Where the failures come from; the admin page reads them from its own endpoint. */
   failuresQuery?: CrawlFailuresQuery;
   /** Refreshes the caller's run too (the admin dialog's metadata); the failures reload regardless. */
@@ -62,6 +61,7 @@ export type CrawlRunDetailsContentProps = {
 export function CrawlRunDetailsContent({
   run,
   initialKind = null,
+  grouped = false,
   failuresQuery = defaultFailuresQuery,
   onRefresh,
   onRunUpdate
@@ -80,6 +80,12 @@ export function CrawlRunDetailsContent({
   const total = lastPage?.total_count ?? 0;
   const detailsAvailable = lastPage?.details_available ?? true;
   const summary = Object.entries(displayedRun.failure_summary ?? {});
+  const reasons = [
+    ...new Set([
+      ...(kind ? [] : summary.map(([reason]) => reason)),
+      ...items.map((item) => item.reason)
+    ])
+  ];
   const failureMessageKey = crawlRunFailureMessageKey(displayedRun);
   const loading = failures.isPending || failures.isFetchingNextPage;
   const refreshing = failures.isRefetching;
@@ -141,7 +147,7 @@ export function CrawlRunDetailsContent({
         </SegmentedControl>
       </div>
 
-      {summary.length > 0 ? (
+      {!grouped && summary.length > 0 ? (
         <Collapsible trigger={t("crawl_failure_help_title")} defaultIsOpen={false}>
           <ul className="flex flex-col gap-3 text-sm">
             {summary.map(([reason, count]) => {
@@ -161,64 +167,112 @@ export function CrawlRunDetailsContent({
         </Collapsible>
       ) : null}
 
-      {items.length > 0 ? (
-        <ul aria-labelledby={headingId} className="divide-ax-border divide-y text-sm">
-          {items.map((failure) => {
-            const href = resourceLink(failure.url);
-            return (
-              <li key={failure.id} className="flex flex-col gap-1.5 py-3">
-                <p className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                  <span className="text-ax-text-secondary text-xs">
-                    {failure.kind === "page" ? t("page") : t("crawl_failure_file")}
-                  </span>
-                  <span className="text-ax-error break-words">
-                    {crawlFailureReasonLabel(t, failure.reason)}
-                  </span>
-                </p>
-                {href ? (
-                  <Link href={href} isExternalLink hasUnderline>
-                    <span className="break-all">{failure.url}</span>
-                  </Link>
-                ) : (
-                  <span className="break-all">{failure.url}</span>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      ) : failures.isPending ? (
-        <LoadingState rows={3} />
-      ) : failures.isError ? null : (
-        <p className="text-ax-text-secondary py-4 text-sm">
-          {detailsAvailable
-            ? kind
-              ? t("crawl_failures_filter_empty")
-              : t("crawl_failures_empty")
-            : t("crawl_failures_unavailable")}
-        </p>
-      )}
-
-      {failures.isError ? (
-        <ListError
-          error={failures.error}
-          title={t("crawl_failures_load_failed")}
-          isRetrying={loading}
-          onRetry={() => void (pages ? failures.fetchNextPage() : failures.refetch())}
-        />
-      ) : null}
-      {failures.hasNextPage && !failures.isError ? (
-        <div>
-          <Button
-            label={t("crawl_failures_load_more", { current: items.length, total })}
-            isLoading={failures.isFetchingNextPage}
-            isInterruptible
-            onClick={() => {
-              if (!failures.isFetchingNextPage) void failures.fetchNextPage();
-            }}
-          />
-        </div>
-      ) : null}
+      <QueryStateBoundary query={failures} rows={3} errorTitle={t("crawl_failures_load_failed")}>
+        {() =>
+          grouped && reasons.length > 0 ? (
+            <div className="divide-ax-border divide-y">
+              {reasons.map((reason, index) => {
+                const matching = items.filter((item) => item.reason === reason);
+                const reasonTotal = kind ? undefined : displayedRun.failure_summary?.[reason];
+                const help = crawlFailureReasonHelp(t, reason);
+                const groupHeadingId = `${headingId}-${index}`;
+                return (
+                  <section
+                    key={reason}
+                    aria-labelledby={groupHeadingId}
+                    className="flex flex-col gap-2 py-4"
+                  >
+                    <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                      <h4 id={groupHeadingId} className="text-sm font-semibold">
+                        {crawlFailureReasonLabel(t, reason)}
+                      </h4>
+                      <p className="text-ax-text-secondary text-xs tabular-nums">
+                        {reasonTotal === undefined
+                          ? t("website_source_problem_shown", { shown: matching.length })
+                          : t("website_source_problem_count", {
+                              shown: matching.length,
+                              total: reasonTotal
+                            })}
+                      </p>
+                    </div>
+                    {help && <p className="text-ax-text-secondary max-w-prose text-sm">{help}</p>}
+                    {matching.length > 0 ? (
+                      <FailureList
+                        items={matching}
+                        labelledBy={groupHeadingId}
+                        showReason={false}
+                      />
+                    ) : (
+                      <p className="text-ax-text-secondary text-sm">
+                        {t(
+                          detailsAvailable
+                            ? "website_source_problem_not_loaded"
+                            : "crawl_failures_unavailable"
+                        )}
+                      </p>
+                    )}
+                  </section>
+                );
+              })}
+            </div>
+          ) : items.length > 0 ? (
+            <FailureList items={items} labelledBy={headingId} />
+          ) : (
+            <p className="text-ax-text-secondary py-4 text-sm">
+              {detailsAvailable
+                ? kind
+                  ? t("crawl_failures_filter_empty")
+                  : t("crawl_failures_empty")
+                : t("crawl_failures_unavailable")}
+            </p>
+          )
+        }
+      </QueryStateBoundary>
+      <LoadMore
+        query={failures}
+        label={t("crawl_failures_load_more", { current: items.length, total })}
+      />
     </div>
+  );
+}
+
+function FailureList({
+  items,
+  labelledBy,
+  showReason = true
+}: {
+  items: CrawlFailurePage["items"];
+  labelledBy: string;
+  showReason?: boolean;
+}) {
+  const t = useTranslations();
+  return (
+    <ul aria-labelledby={labelledBy} className="divide-ax-border divide-y text-sm">
+      {items.map((failure) => {
+        const href = resourceLink(failure.url);
+        return (
+          <li key={failure.id} className="flex flex-col gap-1.5 py-3">
+            <p className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+              <span className="text-ax-text-secondary text-xs">
+                {failure.kind === "page" ? t("page") : t("crawl_failure_file")}
+              </span>
+              {showReason && (
+                <span className="text-ax-error break-words">
+                  {crawlFailureReasonLabel(t, failure.reason)}
+                </span>
+              )}
+            </p>
+            {href ? (
+              <Link href={href} isExternalLink hasUnderline>
+                <span className="break-all">{failure.url}</span>
+              </Link>
+            ) : (
+              <span className="break-all">{failure.url}</span>
+            )}
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 

@@ -9,7 +9,7 @@ from eneo.audit.application.audit_config_service import (
     AUDIT_CONFIG_CACHE_TTL,
     AuditConfigService,
 )
-from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.action_types import ALWAYS_AUDITED_ACTIONS, ActionType
 from eneo.audit.domain.category_mappings import (
     CATEGORY_MAPPINGS,
 )
@@ -509,7 +509,9 @@ class TestGetActionConfig:
         result = await config_service.get_action_config(tenant_id)
 
         for action_config in result.actions:
-            if action_config.category == "admin_actions":
+            if action_config.action in ALWAYS_AUDITED_ACTIONS:
+                assert action_config.enabled is True
+            elif action_config.category == "admin_actions":
                 assert action_config.enabled is False
             elif action_config.category == "user_actions":
                 assert action_config.enabled is True
@@ -634,10 +636,10 @@ class TestAllCategoriesHaveCorrectActionCounts:
         count = sum(1 for cat in CATEGORY_MAPPINGS.values() if cat == "user_actions")
         assert count == EXPECTED_CATEGORY_COUNTS["user_actions"]
 
-    def test_security_events_has_12_actions(self):
-        """Verify security_events has 12 action types."""
+    def test_security_events_has_13_actions(self):
+        """Verify security_events has 13 action types."""
         count = sum(1 for cat in CATEGORY_MAPPINGS.values() if cat == "security_events")
-        assert count == 12
+        assert count == 13
 
     def test_file_operations_has_8_actions(self):
         """Verify file_operations has 8 action types."""

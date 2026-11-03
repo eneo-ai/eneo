@@ -62,7 +62,12 @@ The repository uses GitHub security features and CI to prevent regressions:
 - The reusable `Security` workflow audits the complete runtime Python lock and
   frontend lock, runs Semgrep security-audit/GitHub Actions rules, and scans the
   added Git history with Gitleaks. It is included in the required CI aggregate
-  and runs before image publication. Reports are retained as CI artifacts.
+  and runs before image publication. The dependency gate blocks `high` and
+  `critical` findings, including those without a fix; lower severities emit
+  warnings. Exact, unexpired exceptions are retained. Unknown severities,
+  failed scans, invalid reports and expired exceptions still fail the check.
+  Python severity ratings come from the GitHub Advisory Database and are
+  retained alongside the raw audit reports as CI artifacts.
 - Temporary dependency mitigations belong in `frontend/patches/SECURITY.md`, with
   an owner, exact advisory, regression tests and review expiry. The audit retains
   the raw finding and only accepts the named mitigation after its tests pass.
@@ -77,7 +82,7 @@ The repository uses GitHub security features and CI to prevent regressions:
   setup that gives developers useful feedback without high false-positive noise.
   Re-enable code scanning only after the query set and triage process are tuned
   enough that alerts are actionable for maintainers.
-- Release SBOMs are generated from the published backend, Svelte frontend, Next frontend, and bundled
+- Release SBOMs are generated from the published backend (including the React web build), Svelte frontend, tools runtime, and bundled
   SeaweedFS container
   image digests and attached to GitHub Releases as CycloneDX JSON, SPDX JSON,
   and human-readable table files. The backend release also includes a narrower

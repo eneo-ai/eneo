@@ -1,7 +1,7 @@
 "use client";
 
 import { TextArea } from "@astryxdesign/core/TextArea";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useState } from "react";
 import { TextInput } from "@/components/astryx/text-input";
 import type { Schema } from "@/lib/api/models";

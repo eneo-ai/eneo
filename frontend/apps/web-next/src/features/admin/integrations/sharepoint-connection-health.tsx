@@ -1,14 +1,14 @@
-"use client";
-
 import { Badge } from "@astryxdesign/core/Badge";
 import { Button } from "@astryxdesign/core/Button";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Circle, TriangleAlert, X } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId, useRef, useState, type ReactNode } from "react";
 import { useClientTimeText } from "@/components/composites/client-time";
+import { blockingError, RefreshError } from "@/components/composites/query-state";
+import { integrationCallbackUrl } from "@/features/integrations/callback-message";
 import { browserApi } from "@/lib/api/browser";
 import { getErrorMessage, unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
@@ -120,9 +120,42 @@ function HealthCheck({
   );
 }
 
-function signInHealth(config: SharePointApp): HealthState {
+function signInHealth(config: Pick<SharePointApp, "auth_status">): HealthState {
   if (config.auth_status === "ok") return "ok";
   return config.auth_status === "error" ? "error" : "unknown";
+}
+
+export function SharePointAuthBadge({ config }: { config: Pick<SharePointApp, "auth_status"> }) {
+  const t = useTranslations();
+  const state = signInHealth(config);
+  return (
+    <Badge
+      variant={BADGE_VARIANTS[state]}
+      label={t(`sharepoint_auth_status_${config.auth_status ?? "unknown"}`)}
+    />
+  );
+}
+
+export function MicrosoftAuthErrorGuidance({ message }: { message?: string | null }) {
+  const t = useTranslations();
+  const guidance = classifyMicrosoftAuthError(message);
+  return guidance ? (
+    <p className="text-ax-text-secondary text-sm">{t(`sharepoint_auth_guidance_${guidance}`)}</p>
+  ) : null;
+}
+
+export function useServiceAccountReauthentication() {
+  const t = useTranslations();
+  return useMutation({
+    mutationFn: () =>
+      unwrap(
+        browserApi.POST("/api/v1/admin/sharepoint/service-account/auth/reauth", {
+          body: { redirect_uri: integrationCallbackUrl() }
+        })
+      ),
+    onSuccess: (start) => followServiceAccountSignIn(start, t),
+    onError: (error) => toastSignInError(error, t)
+  });
 }
 
 function SignInCheck({ config, onEdit }: { config: SharePointApp; onEdit: () => void }) {
@@ -132,16 +165,7 @@ function SignInCheck({ config, onEdit }: { config: SharePointApp; onEdit: () => 
   const errorAt = useClientTimeText(config.last_auth_error_at, "date_time");
   const successAt = useClientTimeText(config.last_auth_success_at, "date_time");
 
-  const reauth = useMutation({
-    mutationFn: () =>
-      unwrap(
-        browserApi.POST("/api/v1/admin/sharepoint/service-account/auth/reauth", {
-          body: { redirect_uri: window.location.origin + "/integrations/callback/token/" }
-        })
-      ),
-    onSuccess: (start) => followServiceAccountSignIn(start, t),
-    onError: (error) => toastSignInError(error, t)
-  });
+  const reauth = useServiceAccountReauthentication();
   // Stays busy after success: the browser is on its way to Microsoft.
   const redirecting = reauth.isPending || reauth.isSuccess;
 
@@ -214,10 +238,10 @@ function WatchCheck({ watch }: { watch: ReturnType<typeof useWatchHealth> }) {
   const rescue = useFocusRescue();
   const { query, total, expired, failing, active } = watch;
 
-  const description = query.isPending
-    ? t("loading")
-    : query.isError && !query.data
-      ? t("sharepoint_subscriptions_load_error")
+  const description = blockingError(query)
+    ? t("sharepoint_subscriptions_load_error")
+    : query.isPending
+      ? t("loading")
       : total === 0
         ? t("sharepoint_health_watch_none")
         : failing === 0 && expired > 0
@@ -272,11 +296,12 @@ function WatchCheck({ watch }: { watch: ReturnType<typeof useWatchHealth> }) {
       }
     >
       <p className="text-ax-text-secondary text-sm">{description}</p>
+      <RefreshError queries={[query]} />
     </HealthCheck>
   );
 }
 
-function ConnectionTestCheck() {
+export function useStoredSharePointConnectionTest() {
   const t = useTranslations();
   const queryClient = useQueryClient();
   const announce = useAnnounce();
@@ -302,6 +327,12 @@ function ConnectionTestCheck() {
     onSettled: () => queryClient.invalidateQueries({ queryKey: SHAREPOINT_APP_KEY })
   });
 
+  return { result, runTest };
+}
+
+function ConnectionTestCheck() {
+  const t = useTranslations();
+  const { result, runTest } = useStoredSharePointConnectionTest();
   const state: HealthState = result === null ? "unknown" : result.success ? "ok" : "error";
 
   return (
@@ -329,6 +360,7 @@ function ConnectionTestCheck() {
               ? (result.error_message ?? t("sharepoint_health_state_error"))
               : t("sharepoint_health_test_description")}
       </p>
+      {!result?.success && <MicrosoftAuthErrorGuidance message={result?.error_message} />}
     </HealthCheck>
   );
 }

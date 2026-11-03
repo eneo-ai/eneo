@@ -2,7 +2,7 @@
 
 import { ProgressBar } from "@astryxdesign/core/ProgressBar";
 import { useQuery } from "@tanstack/react-query";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { useId } from "react";
 import { Table } from "@/components/astryx/table";
 import { browserApi } from "@/lib/api/browser";

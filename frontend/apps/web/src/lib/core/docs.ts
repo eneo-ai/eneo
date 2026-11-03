@@ -1,4 +1,4 @@
-import { latestRelease, type Release } from "@eneo/whats-new";
+import { latestRelease, releases, type Release } from "@eneo/whats-new";
 
 /**
  * The docs version this build is documented in: its release line once that
@@ -18,6 +18,10 @@ export function docsUrl(
   anchor?: string
 ): string {
   const languagePrefix = locale === "sv" ? "/sv" : "";
-  const version = docsVersionPath(latestRelease());
+  const release =
+    page === "guides/embed-widget"
+      ? releases.find((release) => release.entries.some((entry) => entry.id === "web-widgets"))
+      : latestRelease();
+  const version = docsVersionPath(release);
   return `https://docs.eneo.ai${version}${languagePrefix}/${page}${anchor ? `#${anchor}` : ""}`;
 }

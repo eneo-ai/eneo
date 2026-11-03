@@ -32,8 +32,7 @@ export function personaView(
 }
 
 /**
- * Icons are public on the backend; the embed page reaches them through this
- * app's visitor proxy (src/app/api/v1/icons) under its own origin. Relative
+ * Icons are public on FastAPI, under the embed page's own origin. Relative
  * on the page itself (whatever host it is served on); absolute, with the
  * app's origin, where another site reads it (the loader's launcher).
  */

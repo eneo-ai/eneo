@@ -1,0 +1,140 @@
+import { Button } from "@astryxdesign/core/Button";
+import { useAnnounce } from "@astryxdesign/core/hooks";
+import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
+import { Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
+import { TextInput } from "@/components/astryx/text-input";
+import { useQueryClient } from "@tanstack/react-query";
+import { useTranslations } from "use-intl";
+import { useEffect, useId, useRef, useState } from "react";
+import { revealProblems } from "@/components/composites/field-problem";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
+import { confirmationMatches } from "@/components/composites/confirmation-match";
+import { browserApi } from "@/lib/api/browser";
+import { unwrap } from "@/lib/api/errors";
+import { useRemovalMutation } from "@/features/spaces/removal";
+import { invalidateSpaces, type SpaceSparse } from "@/features/spaces/space";
+
+/** Mounted only during deletion, so settlement and every retry reset the timer. */
+export function SpaceDeletionHint() {
+  const t = useTranslations();
+  const announce = useAnnounce();
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSlow(true);
+      announce(t("delete_space_hint"));
+    }, 5_000);
+    return () => clearTimeout(timer);
+  }, [announce, t]);
+  return slow ? <p className="text-ax-text-secondary text-sm">{t("delete_space_hint")}</p> : null;
+}
+
+/**
+ * Confirms deleting a space by typing its name (irreversible, WCAG 3.3.4).
+ * Opened from a card's more-menu; `space` null means closed. Only the header
+ * stays mounted while closed (Astryx names the dialog from the title present
+ * when the <dialog> mounts); the form exists only while it is open. Deleting
+ * without the exact name says so at the field, which takes focus.
+ */
+export function DeleteSpaceDialog({
+  space,
+  onClose
+}: {
+  space: SpaceSparse | null;
+  onClose: () => void;
+}) {
+  const t = useTranslations();
+  const queryClient = useQueryClient();
+  const formId = useId();
+  const [typed, setTyped] = useState("");
+  const [submitted, setSubmitted] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const deleteSpace = useRemovalMutation({
+    mutationFn: (id: string) =>
+      unwrap(browserApi.DELETE("/api/v1/spaces/{id}/", { params: { path: { id } } })),
+    refresh: () => invalidateSpaces(queryClient),
+    onRemoved: () => close()
+  });
+
+  function close() {
+    setTyped("");
+    setSubmitted(false);
+    onClose();
+  }
+
+  function onOpenChange(open: boolean) {
+    if (!open && !deleteSpace.isPending) close();
+  }
+
+  const name = space?.name ?? "";
+  const matches = space !== null && confirmationMatches(typed, name);
+  const problem =
+    submitted && !matches ? t("form_problem_confirm_mismatch", { value: name }) : null;
+
+  return (
+    <Dialog isOpen={space !== null} onOpenChange={onOpenChange} purpose="form" width={460}>
+      <Layout
+        height="auto"
+        header={<DialogHeader title={t("delete_space")} onOpenChange={onOpenChange} />}
+        content={
+          space ? (
+            <LayoutContent>
+              <form
+                id={formId}
+                className="flex flex-col gap-4"
+                noValidate
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (deleteSpace.isPending) return;
+                  if (!matches) {
+                    revealProblems(() => setSubmitted(true), inputRef.current);
+                    return;
+                  }
+                  deleteSpace.mutate(space.id);
+                }}
+              >
+                <p className="text-ax-text-secondary text-sm">
+                  {t("confirm_delete_space_message", { space: name })}
+                </p>
+                {deleteSpace.isPending && <SpaceDeletionHint />}
+                <TextInput
+                  ref={inputRef}
+                  label={t("enter_space_name_to_confirm")}
+                  description={t("space_delete_type_name_hint", { name })}
+                  value={typed}
+                  onChange={setTyped}
+                  autoComplete="off"
+                  {...KEYBOARD.identifier}
+                  status={problem ? { type: "error", message: problem } : undefined}
+                />
+              </form>
+            </LayoutContent>
+          ) : null
+        }
+        footer={
+          space ? (
+            <LayoutFooter>
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button
+                  label={t("cancel")}
+                  isDisabled={deleteSpace.isPending}
+                  onClick={() => onOpenChange(false)}
+                />
+                <Button
+                  type="submit"
+                  form={formId}
+                  variant="destructive"
+                  label={deleteSpace.isPending ? t("deleting") : t("confirm_deletion")}
+                  // Keeps focus while deleting; a second press is ignored.
+                  isLoading={deleteSpace.isPending}
+                  isInterruptible
+                />
+              </div>
+            </LayoutFooter>
+          ) : null
+        }
+      />
+    </Dialog>
+  );
+}

@@ -21,9 +21,11 @@ and user-facing notes on that branch. An unreleased feature belongs on
 instructions for a new feature into an older release just to make them visible
 on the site's front page.
 
-For What's new, reuse an existing entry or add one under the intended release;
-do not choose a release by whatever happens to be first in the file. The
-package's PLAYBOOK owns entry shape, translations and release dates. Its
+For What's new, reuse an existing entry or, on `develop`, add one to the
+`next` block; never pick a version number yourself. A fix that ships on a
+release branch goes into that branch's release block. The package's PLAYBOOK
+owns entry shape, translations and the release flow that assigns versions and
+dates. Its
 `releases.json` is the source for both the app and the documentation's release
 notes component. MDX explains how to use a feature; it does not duplicate the
 announcement. On branches predating that package, ordinary documentation fixes
@@ -33,7 +35,7 @@ remain possible without introducing a release-notes package.
 
 - **A new storage policy will ship in the next release:** change its existing
   guide on `develop`, alongside the implementation. Add the brief user-facing
-  announcement to that release in `releases.json`. The guide is visible in
+  announcement to the `next` block in `releases.json`. The guide is visible in
   `/dev/` until a final tag selects its release line.
 - **An environment variable is misspelled in the 2.1 installation guide:** fix
   `src/content/guides/deployment.mdx` on `release/v2.1`, then port the correction

@@ -4,7 +4,7 @@ import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import type { WidgetClient, WidgetPublicConfig } from "@eneo/eneo-js";
 import { Maximize2, MessageSquarePlus, Minimize2, X } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { loadAltcha, solveWithAltcha } from "../altcha";
 import { answerText } from "../answer-text";

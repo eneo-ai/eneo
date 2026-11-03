@@ -1,9 +1,9 @@
 "use client";
 
 import { Button } from "@astryxdesign/core/Button";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useState } from "react";
-import { Switch } from "@/components/astryx/switch";
+import { Switch } from "@astryxdesign/core/Switch";
 import { TextInput } from "@/components/astryx/text-input";
 import { IconField, iconUrl, uploadIcon } from "@/components/composites/icon-field";
 import type { Schema } from "@/lib/api/models";
@@ -139,8 +139,6 @@ export function WidgetPersonaFields({
           </p>
         ) : locked ? (
           avatarUrl && (
-            // The upload behind this app's icon proxy; next/image has nothing to add.
-            // eslint-disable-next-line @next/next/no-img-element
             <img
               className="size-16 rounded-full object-cover"
               src={avatarUrl}

@@ -2,7 +2,7 @@
 
 import { Badge } from "@astryxdesign/core/Badge";
 import { RadioList, RadioListItem } from "@astryxdesign/core/RadioList";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { DEFAULT_PRIMARY_COLOR, isHexColor } from "../contrast";
 import { templateRelease, type WidgetTemplate } from "./template-locks";
 

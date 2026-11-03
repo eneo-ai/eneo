@@ -1,6 +1,6 @@
 ---
 title: Driftsätt Eneo
-translationSource: guides/deployment.mdx@5bcb0a191fe7
+translationSource: guides/deployment.mdx@46d4a3e749af
 ---
 
 import { Callout } from "nextra/components";
@@ -11,6 +11,8 @@ Den här guiden hjälper dig att installera en ny Eneo-instans med Docker Compos
 på en egen server. Referenskonfigurationen använder Traefik för HTTPS,
 PostgreSQL med pgvector för databasen, Redis för köer, separata workers för
 bakgrundsjobb och crawlning samt en isolerad körmiljö för inbyggda verktyg.
+React/Vite-appen serveras av backend på huvuddomänen. Svelte-appen finns kvar
+för att kunna återställa webbgränssnittet utan att ändra databasen.
 
 <Callout type="warning">
   Exempelfilerna måste anpassas. Ersätt alla förekomster av `your-domain.com`,
@@ -105,7 +107,8 @@ integrationshemligheter.
 I `env_backend.env`, sätt `PUBLIC_ORIGIN` till den externa adressen, exempelvis
 `https://eneo.example.se`.
 
-I `env_frontend.env`:
+Behåll `env_frontend.env` konfigurerad för Svelte-tjänsten som används vid
+återställning av webbgränssnittet:
 
 | Variabel                     | Värde i referensinstallationen |
 | ---------------------------- | ------------------------------ |
@@ -169,11 +172,17 @@ webbcrawlning kräver både den allmänna workern och crawler-workern.
 
 ## Reverse proxy och nätverk
 
-En egen reverse proxy behöver vidarebefordra `/api/*`, `/scim/*`, `/version`,
-`/openapi.json` och `/docs` till backend. Övrig webbtrafik går till frontend. Bevara
-strömmande svar; buffring kan hindra att chattsvaren visas löpande. Läs den
-engelska versionens avsnitt _Reverse Proxy Requirements_ för detaljer och
-konfigurationsexempel.
+En egen reverse proxy skickar normalt all publik webbtrafik till backend på
+port 8000: React-sidor, byggda resurser, autentiseringscallbacks, `/api/*`,
+`/scim/*`, `/version` och `/openapi.json`. Undanta `/internal-mcp` och dess
+undersökvägar från alla publika routrar. När webbläsarsessioner är aktiverade
+svarar `/docs` och `/redoc` med 404; använd `/openapi.json` för API-verktyg.
+
+Referenskonfigurationen ger API-routningen prioritet 10, React-appen 5 och
+Svelte 1. Vid återställning av gränssnittet får Svelte prioritet 7, medan
+API-anrop fortsätter till backend. Bevara strömmande svar; buffring kan hindra
+att chattsvaren visas löpande. Läs den engelska versionens avsnitt _Reverse
+Proxy Requirements_ för detaljer och konfigurationsexempel.
 
 Databas och Redis ligger på det interna nätverket `data_net`. Frontend och
 Traefik har ingen direkt åtkomst dit. Moduler använder `module_net`, verktygens
@@ -231,7 +240,7 @@ Har du en egen Compose-fil, ge även tjänsten `db` `shm_size: 1gb` och
   kapacitet och anslutning till databas och Redis.
 - **Delat minne i databasen tar slut:** vissa anrop ger HTTP 500 och
   databasloggen visar `could not resize shared memory segment ... No space left
-  on device`. Disken är inte full: PostgreSQL har slut på `/dev/shm`, ett litet
+on device`. Disken är inte full: PostgreSQL har slut på `/dev/shm`, ett litet
   minnesområde i containern som Docker och Podman begränsar till 64 MB om
   tjänsten inte sätter `shm_size`. Sätt `shm_size: 1gb` på tjänsten `db`, som
   referensfilens `docker-compose.yml` gör, och skapa om containern med
@@ -239,55 +248,101 @@ Har du en egen Compose-fil, ge även tjänsten `db` `shm_size: 1gb` och
   också `stop_grace_period: 2m`, annars kan en upptagen databas dödas innan
   dess checkpoint är klar. Tills containern kan skapas om: stoppa parallella
   frågor utan omstart med `ALTER SYSTEM SET max_parallel_workers_per_gather =
-  0;` följt av `SELECT pg_reload_conf();` i `psql`, starta om backend så att
+0;` följt av `SELECT pg_reload_conf();` i `psql`, starta om backend så att
   anslutningarna görs om, och återställ med `ALTER SYSTEM RESET
-  max_parallel_workers_per_gather;` när `shm_size` är höjt.
+max_parallel_workers_per_gather;` när `shm_size` är höjt.
 
 För fler konfigurationstabeller, proxyexempel och driftsrutiner, byt till
 **English** på den här sidan. Andra fördjupningar finns i guiderna om
 [SCIM](/guides/scim-provisioning), [SharePoint](/guides/sharepoint-integration)
 och [modulinloggning](/docs/module-authentication).
 
-## Kör Next-betan bredvid den befintliga appen
+## Huvuddomän och återställning av webbgränssnittet [#main-host-and-ui-rollback]
 
-Den ordinarie Svelte-appen använder `ghcr.io/eneo-ai/eneo-frontend`. Den valfria
-Next-appen använder `ghcr.io/eneo-ai/eneo-web-next`, låst av `ENEO_WEB_NEXT_IMAGE`
-i samma releasepaket. Kör båda mot **en gemensam backend** från det paketet.
-Konton, behörigheter, konversationer, assistenter, filer, workers och databas
-delas. Ändringar i betan påverkar alltså samma data som i den ordinarie appen.
+Referensfilen `docker-compose.yml` låter backend servera React-appen på
+huvuddomänen. Den sätter `WEB_APP_ENABLED=true` och
+`BROWSER_SESSION_ENABLED=true` direkt på backend-tjänsten; värdena ersätter
+motsvarande värden i `env_backend.env`. Utanför referensfilen är båda flaggorna
+`false` som standard. Webbappen kräver webbläsarsessioner: backend vägrar
+starta med webbappen aktiverad och sessionerna avstängda.
+
+Prova bytet i en testmiljö först. Behåll `PUBLIC_ORIGIN` och de registrerade
+adresserna för OIDC och integrationer. MCP-vyer ska fortsatt ha en separat
+`MCP_APP_CONTENT_BASE_URL`. Ta bort `LEGACY_APP_URL` i `env_backend.env` när
+huvuddomänen går över till React, eftersom en länk till samma domän då inte
+längre leder till Svelte. Starta om backend efter miljöändringar.
+
+Användarna behöver logga in igen när de byter app. React använder backendens
+värdnamnsspecifika sessionskaka `__Host-eneo_web` och tar inte över Sveltes
+sessioner. Även en återgång till Svelte kan kräva ny inloggning.
+
+För att låta huvuddomänen återgå till Svelte, sätt följande i installationens
+`.env`, inte i `env_backend.env`:
+
+```dotenv
+FRONTEND_ROUTER_PRIORITY=7
+```
+
+Skapa om frontend-tjänsten med samma miljöfiler och eventuella overlays som
+vid ordinarie driftsättning:
+
+```bash
+docker compose --env-file .env --env-file release.env \
+  -f docker-compose.yml up -d --no-deps frontend
+```
+
+API-anropen går fortfarande till backend. En beta på ett separat värdnamn
+fortsätter att visa React. För att återgå till React på huvuddomänen tar du
+bort variabeln eller sätter den till `1` och kör samma kommando.
+Återställningen ändrar bara routningen: den återställer inte databasen,
+användarnas ändringar eller backendens migreringar.
+
+<span id="run-the-next-beta-alongside-the-existing-app" />
+
+## Kör React-betan bredvid den befintliga appen
+
+React/Vite-appen byggs in i `ghcr.io/eneo-ai/eneo-backend`. FastAPI serverar
+sidor, resurser, API och autentiseringscallbacks. Ingen separat
+`eneo-web-next`-avbildning, Node-server eller frontendhemlighet för sessioner
+används. Svelte-tjänsten `ghcr.io/eneo-ai/eneo-frontend` finns kvar för
+återställning på huvuddomänen. Den valfria overlay-filen lägger till ett
+separat värdnamn för samma React-app.
+
+Kör båda mot **en gemensam backend** från samma releasepaket. Konton,
+behörigheter, konversationer, assistenter, filer, workers och databas delas.
+Ändringar i betan påverkar samma data som i den ordinarie appen.
 
 Använd ett separat HTTPS-värdnamn, exempelvis `beta.example.com`, inte ett
-sökvägsprefix. Behåll den ordinarie appens och backendens `PUBLIC_ORIGIN`.
-Betan vidarebefordrar API-anrop och strömmande svar på serversidan. Ingen
+sökvägsprefix. Behåll backendens `PUBLIC_ORIGIN` för huvuddomänen. Ingen
 ytterligare databas, Redis, worker eller backend behövs.
 
 1. Ta backup av databas och lagring och prova uppgraderingen i en testmiljö.
-   Kör backendens migreringar en gång för releasen. Betans migreringar för
-   återkoppling och leverantörsstatus ingår i samma kedja; kontrollera att
+   Kör backendens migreringar en gång för releasen och kontrollera att
    `alembic heads` visar ett enda huvud.
-2. Kopiera `docs/deployment/env_web_next.template` till `env_web_next.env`.
-   Generera en separat `SESSION_SECRET` med `openssl rand -base64 48` och sätt
-   `LEGACY_APP_URL=https://app.example.com` för profilmenyns länk tillbaka.
-   Skydda filen på samma sätt som övriga hemligheter.
-3. Sätt `WEB_NEXT_HOST=beta.example.com` i installationens `.env`. Avbildningen
-   kommer från releasepaketets `ENEO_WEB_NEXT_IMAGE`. Starta med overlay-filen:
+2. Sätt `WEB_NEXT_HOST=beta.example.com` i installationens `.env`. Lämna
+   `LEGACY_APP_URL` tom när huvuddomänen visar React. Lägg till overlay-filen
+   i det befintliga Compose-kommandot och behåll eventuella overlays för
+   lagring och moduler:
 
    ```bash
    docker compose --env-file .env --env-file release.env \
-     -f docker-compose.yml -f docker-compose.web-next.yml --profile web-next up -d
+     -f docker-compose.yml -f docker-compose.web-next.yml up -d
    ```
 
-4. Använd backendhanterad federation vid utrullningen. Lägg till
+   Overlay-filen skickar betadomänen till backend med HTTPS och undantar
+   `/internal-mcp` och dess undersökvägar. Båda webbläsarflaggorna är redan
+   aktiverade i basfilen. Svelte-tjänsten och dess återställningsval finns kvar.
+
+3. För generisk OIDC-federation lägger du till
    `https://beta.example.com/login/callback` i federationens
-   `additional_redirect_uris` och registrera samma URI hos identitetsleverantören.
-   Behåll den befintliga callback-adressen. Frontendhanterad OIDC är fortfarande
-   experimentell: samtidiga anrop kan återanvända en roterande engångstoken och
-   göra sessionen ogiltig. Förnyelsen samordnas inte mellan anrop eller repliker.
-   Innan det läget släpps krävs gemensam samordning och verifiering av leverantörens
-   tokenrotation. Utvecklingskonfigurationen använder betans `OIDC_*`-variabler
-   och `https://beta.example.com/auth/callback`.
-5. För SharePoint och Confluence behåller du `OAUTH_CALLBACK_URL` för den
-   ordinarie appen och lägger till följande i backendens miljö:
+   `additional_redirect_uris` och registrerar samma URI hos identitetsleverantören.
+   Behåll den befintliga callback-adressen. Även MobilityGuard använder
+   backendens federationsflöde; React-appen har ingen separat OIDC-klient.
+   OIDC för en enda organisation fortsätter använda callback-adressen från
+   `PUBLIC_ORIGIN`; en betadomän registrerar inte automatiskt en ytterligare
+   tillåten callback.
+4. För SharePoint och Confluence behåller du `OAUTH_CALLBACK_URL` för det
+   befintliga gränssnittet och lägger till följande i backendens miljö:
 
    ```dotenv
    OAUTH_CALLBACK_URLS=["https://beta.example.com/integrations/callback/token/"]
@@ -299,11 +354,44 @@ ytterligare databas, Redis, worker eller backend behövs.
    Klienter som inte skickar en adress använder standardadressen. Starta om
    backend efter miljöändringen och slutför eller starta om pågående
    integrationsinloggningar vid uppgraderingen.
+
+5. Om MCP Apps används, lägg till beta-origin i `MCP_APP_HOST_ORIGINS` i
+   `env_backend.env` och behåll befintliga värden:
+
+   ```dotenv
+   MCP_APP_HOST_ORIGINS=["https://beta.example.com"]
+   ```
+
+   Behåll `MCP_APP_CONTENT_BASE_URL` på en separat origin från båda apparna.
+
 6. Kontrollera lösenordsinloggning, federerad inloggning, utloggning, strömmande
-   chatt, filer, organisationsbehörigheter och båda integrationsleverantörerna i
-   respektive app innan användare bjuds in. Varje app har en egen sessionskaka
-   för sitt värdnamn. SSO kan återanvända leverantörens session, men lokal
-   utloggning ur en app loggar inte nödvändigtvis ut ur den andra.
+   chatt, filer, organisationsbehörigheter, verktygsvyer och båda
+   integrationsleverantörerna i respektive app innan användare bjuds in.
+   Värdnamnen har separata sessionskakor. SSO kan återanvända leverantörens
+   session, men lokal utloggning i en app loggar inte ut ur den andra.
+
+### Backendavbildning och körmiljö
+
+Backendavbildningen innehåller Vite-bygget i `/app/web-dist`. Node och Bun
+används bara när avbildningen byggs; den körande avbildningen använder Python.
+Egna backendbyggen behöver frontendkällan som namngiven byggkontext:
+
+```bash
+docker buildx build --build-context web=./frontend -t eneo-backend:local backend
+```
+
+Publicerade backendavbildningar innehåller redan bygget. React-appen läser
+publika körmiljöinställningar från backend på `/api/v1/runtime-config`.
+Sätt exempelvis `SHOW_HELP_CENTER`, `HELP_CENTER_URL`, `LEGACY_APP_URL` och
+`ACCESSIBILITY_STATEMENT_URL` i `env_backend.env`. För MCP-vyer används origin
+från `MCP_APP_CONTENT_BASE_URL`; ingen separat frontendinställning
+`MCP_APP_CONTENT_ORIGIN` behövs. Se den engelska versionen för hela tabellen.
+
+En lokal testinstallation som tidigare körde Next-betan tar bort `web-next`
+från `COMPOSE_PROFILES` och den gamla `env_web_next.env` efter att publika
+länkar flyttats till `env_backend.env`. Skapa om stacken med overlay-filen
+ovan och `up -d --remove-orphans` för att ta bort den gamla containern.
+Behåll övriga profiler och overlays.
 
 ### Visa inbjudan till betan
 
@@ -319,8 +407,10 @@ HTTP(S)-adress krävs. Inbjudan visas för inloggade användare och öppnar en n
 flik. `false` döljer inbjudan, men betan är fortfarande nåbar via sin adress:
 bannern styr upptäckbarhet, inte åtkomst.
 
-För att dra tillbaka betan döljer du inbjudan och stoppar `web-next` eller tar
-bort dess ingress. Låt gemensam backend och databas fortsätta köras. Nedgradera
+För att dra tillbaka betan döljer du inbjudan, tar bort beta-overlay-filen
+från Compose-kommandot och skapar om backend så att dess betaroutning tas
+bort. Basfilen behåller React på huvuddomänen och båda webbläsarflaggorna
+aktiverade. Låt gemensam backend och databas fortsätta köras. Nedgradera
 inte databasen för att stänga betan; återställning av backend kräver en separat,
 testad migrerings- eller återställningsplan som bevarar användarnas data.
 

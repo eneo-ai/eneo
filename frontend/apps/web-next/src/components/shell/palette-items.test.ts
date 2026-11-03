@@ -112,7 +112,7 @@ describe("buildPaletteEntries", () => {
     const assistants = buildPaletteEntries(data, member, t).filter(
       (entry) => entry.group === "assistants"
     );
-    expect(assistants.map((entry) => [entry.id, entry.action])).toEqual([
+    expect(assistants.map((entry) => [entry.id, entry.command])).toEqual([
       ["personal-assistant:default", { type: "navigate", href: "/spaces/personal/chat" }],
       ["assistant:a1", { type: "navigate", href: "/dashboard/a1?tab=chat" }],
       ["assistant:a2", { type: "navigate", href: "/dashboard/a2?tab=chat" }],
@@ -139,7 +139,7 @@ describe("buildPaletteEntries", () => {
     expect(conversations.map((entry) => entry.activeAt)).toEqual(
       data.conversations.map((conversation) => conversation.last_activity_at)
     );
-    expect(conversations.map((entry) => [entry.label, entry.subtitle, entry.action])).toEqual([
+    expect(conversations.map((entry) => [entry.label, entry.subtitle, entry.command])).toEqual([
       [
         "Upphandlingsanalys mot LOU",
         "recent_partner_in_space(Upphandlingsassistenten,Upphandling)",
@@ -162,7 +162,7 @@ describe("buildPaletteEntries", () => {
     const knowledge = buildPaletteEntries(data, member, t).filter(
       (entry) => entry.group === "knowledge"
     );
-    expect(knowledge.map((entry) => [entry.label, entry.action])).toEqual([
+    expect(knowledge.map((entry) => [entry.label, entry.command])).toEqual([
       ["Upphandlingspolicy", { type: "navigate", href: "/spaces/s1/knowledge/collections/col1" }],
       ["https://lou.example.se", { type: "navigate", href: "/spaces/s1/knowledge/websites/w1" }]
     ]);
@@ -175,7 +175,7 @@ describe("buildPaletteEntries", () => {
     expect(forMember.some((id) => id.startsWith("admin:"))).toBe(false);
 
     const forAdmin = buildPaletteEntries(data, admin, t);
-    expect(forAdmin.find((entry) => entry.id === "action:create-space")?.action).toEqual({
+    expect(forAdmin.find((entry) => entry.id === "action:create-space")?.command).toEqual({
       type: "create-space"
     });
     const models = forAdmin.find((entry) => entry.id === "admin:/admin/models");
