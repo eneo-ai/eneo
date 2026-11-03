@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useMediaMatch } from "@/lib/hooks/use-media-match";
+import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { ExternalLink } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -31,7 +31,7 @@ const trim = (value: string) => value.trim();
 export function OverviewTab({ server }: { server: McpServer }) {
   const t = useTranslations();
   // A touch screen has no Shift, Ctrl or Enter key to point at.
-  const coarse = useMediaMatch("(pointer: coarse)");
+  const coarse = useMediaQuery("(pointer: coarse)");
   const queryClient = useQueryClient();
   const setSaveStatus = useSetSaveStatus();
   const managed = server.http_auth_type === "internal" || server.http_auth_type === "bundled";

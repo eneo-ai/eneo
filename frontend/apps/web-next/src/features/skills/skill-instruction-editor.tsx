@@ -1,7 +1,6 @@
 import { AtSign, Code } from "lucide-react";
-import { useMediaMatch } from "@/lib/hooks/use-media-match";
 import { Button } from "@astryxdesign/core/Button";
-import { useAnnounce } from "@astryxdesign/core/hooks";
+import { useAnnounce, useMediaQuery } from "@astryxdesign/core/hooks";
 import { parseInstructionReferences, type ReferenceCatalog } from "@eneo/skill-instructions";
 import {
   createInstructionEditor,
@@ -36,7 +35,7 @@ export function SkillInstructionEditor({
 }) {
   const t = useTranslations();
   // A touch screen has no Shift, Ctrl or Enter key to point at.
-  const coarse = useMediaMatch("(pointer: coarse)");
+  const coarse = useMediaQuery("(pointer: coarse)");
   const announce = useAnnounce();
   const mount = useRef<HTMLDivElement>(null);
   const editor = useRef<InstructionEditor | null>(null);

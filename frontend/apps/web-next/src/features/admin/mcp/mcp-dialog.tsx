@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMediaMatch } from "@/lib/hooks/use-media-match";
+import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { useRouter } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
 import { useRef, useState } from "react";
@@ -109,7 +109,7 @@ function McpServerForm({
 }) {
   const t = useTranslations();
   // A touch screen has no Shift, Ctrl or Enter key to point at.
-  const coarse = useMediaMatch("(pointer: coarse)");
+  const coarse = useMediaQuery("(pointer: coarse)");
 
   const { data: security } = useQuery(securityClassificationsQueryOptions(browserApi));
   const securityEnabled = security?.security_enabled ?? false;
