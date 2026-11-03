@@ -796,7 +796,8 @@ for (const colorScheme of ["light", "dark"] as const) {
           settings.flows_enabled !== true,
           "The tenant's flows_core gate is off in this stack, so the flow routes 404."
         );
-        await expect(page.getByRole("link", { name: /^(Flöden|Flows)( \(\d+\))?$/ })).toBeVisible();
+        // The tab is named by its label and, once the flows are read, their count (space-tabs.tsx).
+        await expect(page.getByRole("link", { name: /^(Flöden|Flows)( \d+)?$/ })).toBeVisible();
 
         await scan(page, `${space}/flows`, async () => {
           await expect(
