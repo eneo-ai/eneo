@@ -827,11 +827,11 @@ function ConversationView({
   }
 
   /** Takes a waiting question back out of the conversation; nothing was sent. */
-  function withdrawQuestion(pending: QuestionDraft, first: boolean) {
+  function withdrawQuestion(draft: QuestionDraft, first: boolean) {
     setPendingQuestion(null);
     // The draft comes back unless the user has already started a new one.
-    setInput((current) => (current.trim() ? current : pending.question));
-    panel.restoreQuote(pending.quote);
+    setInput((current) => (current.trim() ? current : draft.question));
+    panel.restoreQuote(draft.quote);
     // A first question takes the view back to the start state; keep focus in
     // the composer across that swap.
     if (first) {
