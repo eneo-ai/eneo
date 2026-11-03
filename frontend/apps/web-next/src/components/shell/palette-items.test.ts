@@ -108,6 +108,11 @@ describe("buildPaletteEntries", () => {
     expect(groups).toEqual(["assistants", "spaces", "conversations", "knowledge", "actions"]);
   });
 
+  it("opens the page of every assistant and app, which the sidebar no longer links", () => {
+    const entry = buildPaletteEntries(data, member, t).find((item) => item.id === "action:catalog");
+    expect(entry?.command).toEqual({ type: "navigate", href: "/dashboard" });
+  });
+
   it("lists what the Assistenter page lists: the personal assistant first, then assistants and apps", () => {
     const assistants = buildPaletteEntries(data, member, t).filter(
       (entry) => entry.group === "assistants"

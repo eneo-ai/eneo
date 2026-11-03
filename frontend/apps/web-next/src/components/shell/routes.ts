@@ -68,6 +68,23 @@ export function areaOf(pathname: string): Area | null {
   return "shared";
 }
 
+/** The sidebar beside a page from 768 px. */
+export type SideNavKind = "space" | "spaces-list" | "account" | "admin";
+
+/**
+ * Which sidebar a page has, as in the Svelte app: a space's own (its
+ * switcher and sections), the spaces list's, the account's (which the release
+ * notes share, Svelte's /news), or administration's. Other pages, the
+ * assistant catalogue among them, have none.
+ */
+export function sideNavKind(pathname: string): SideNavKind | null {
+  const [first, second] = segmentsOf(pathname);
+  if (first === "admin") return "admin";
+  if (first === "account" || first === "whats-new") return "account";
+  if (first !== "spaces" || !second) return null;
+  return second === "list" ? "spaces-list" : "space";
+}
+
 /** The space route id (`personal`, `organization` or a space id) of a space page. */
 export function spaceRouteIdFromPath(pathname: string): string | null {
   const [first, second] = segmentsOf(pathname);

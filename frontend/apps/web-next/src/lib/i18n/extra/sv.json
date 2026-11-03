@@ -513,7 +513,6 @@
   "chat_unsent_navigation_description": "Du har en fråga som inte har skickats. Vill du lämna chatten?",
   "chat_unsent_navigation_leave": "Lämna chatten",
   "chat_unsent_navigation_title": "Lämna chatten?",
-  "chat_view_label": "Chatt eller insikter",
   "chat_your_assistants": "Dina assistenter",
   "chat_your_message": "Ditt meddelande",
   "choose_timeframe_to_generate_insights": "Välj en tidsram för att generera insikter för",
@@ -1486,7 +1485,6 @@
   "sharepoint_wrapper_group": "Grupp",
   "sharepoint_wrapper_items": "{count} objekt",
   "sharepoint_wrapper_sites": "{count} webbplatser",
-  "shell_account_nav_label": "Kontoinställningar",
   "shell_administration": "Administration",
   "shell_all_spaces": "Alla ytor",
   "shell_back_to": "Tillbaka till {name}",
@@ -1918,5 +1916,7 @@
   "tools_bundled_unavailable": "Det gick inte att läsa Eneos inbyggda verktyg",
   "shell_area_shared": "Delat",
   "shell_top_nav_label": "Huvudområden",
-  "show_header": "Visa sidhuvudet"
+  "show_header": "Visa sidhuvudet",
+  "shell_space_nav_label": "Ytans meny",
+  "shell_palette_catalog": "Alla assistenter och appar"
 }

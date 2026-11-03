@@ -2,6 +2,8 @@
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { browserApi } from "@/lib/api/browser";
+import { spaceQueryOptions } from "@/features/spaces/space";
+import { makeSpace } from "@/features/spaces/testing/space-fixture";
 import { recentConversationsQueryOptions, type RecentConversation } from "@/lib/api/conversations";
 import type { Permission } from "@/lib/auth/permissions";
 import { expectNoAxeViolations } from "@/test/axe";
@@ -9,6 +11,10 @@ import { setRoute } from "@/test/navigation";
 import { noopShell, renderInApp, testAppContext, testQueryClient } from "@/test/render";
 import { PHONE_VIEWPORT, setViewport } from "@/test/setup-dom";
 import type { NavVariant } from "./routes";
+import { SideNav } from "@astryxdesign/core/SideNav";
+import { MainSections, MainTopContent } from "./main-nav";
+import { NavFooter } from "./nav-footer";
+import { NavHeader } from "./nav-header";
 import { DesktopSideNav, useSideNavRail } from "./side-nav";
 import { SIDE_NAV_COLLAPSED_COOKIE } from "./side-nav-preference";
 
@@ -21,12 +27,43 @@ vi.mock("@/features/whats-new/whats-new-provider", () => ({
   useWhatsNew: () => ({ enabled: false, hasUnseen: false })
 }));
 
-/** The SideNav as the app shell renders it: the shell owns its rail state. */
+/**
+ * The SideNav as the app shell renders it (the shell owns its rail state).
+ * Beside the top bar the admin pages have the admin nav; the main navigation
+ * (Ny konversation, the spaces, Senaste) is the phone drawer's, rendered here
+ * in a SideNav of the same make so its content and the rail can be tested.
+ */
+function SpaceSideNav() {
+  return <DesktopSideNav kind="space" navId="side-nav" rail={useSideNavRail(undefined)} />;
+}
+
 function RailedSideNav({
-  defaultCollapsed,
-  ...props
-}: { variant: NavVariant; navId: string; defaultCollapsed?: boolean }) {
-  return <DesktopSideNav {...props} rail={useSideNavRail(defaultCollapsed)} />;
+  variant,
+  navId,
+  defaultCollapsed
+}: {
+  variant: NavVariant;
+  navId: string;
+  defaultCollapsed?: boolean;
+}) {
+  const rail = useSideNavRail(defaultCollapsed);
+  if (variant === "admin") return <DesktopSideNav kind="admin" navId={navId} rail={rail} />;
+  return (
+    <SideNav
+      id={navId}
+      aria-label="Huvudmeny"
+      collapsible={{
+        isCollapsed: rail.collapsed,
+        onCollapsedChange: rail.change,
+        hasButton: false
+      }}
+      header={<NavHeader navId={navId} />}
+      topContent={<MainTopContent />}
+      footer={<NavFooter variant="main" />}
+    >
+      <MainSections />
+    </SideNav>
+  );
 }
 
 const SPACES = [
@@ -412,17 +449,21 @@ describe("DesktopSideNav on a tablet or a small laptop", () => {
     expect(expanded()).toBe(true);
   });
 
-  it("moves focus to the toggle when narrowing below 1280 px removes the focused link", async () => {
+  it("moves focus to the toggle when narrowing below 1280 px replaces the focused control", async () => {
     setViewport({ width: 1280, height: 800, pointer: "fine" });
-    renderStored();
-    const link = within(screen.getByRole("group", { name: "Senaste" })).getByRole("link", {
-      name: "Veckomöte"
-    });
-    link.focus();
+    setRoute("/spaces/s1/overview");
+    const queryClient = seededClient();
+    queryClient.setQueryData(
+      spaceQueryOptions(browserApi, "s1").queryKey,
+      makeSpace({ overrides: { id: "s1", name: "Upphandling" } })
+    );
+    renderInApp(<SpaceSideNav />, { queryClient, appContext: testAppContext() });
+    // The space switcher's trigger is another element in the icon rail.
+    const trigger = screen.getByRole("button", { name: "Öppna meny" });
+    trigger.focus();
 
     act(() => setViewport({ width: 1279, height: 800, pointer: "fine" }));
 
-    expect(screen.queryByRole("group", { name: "Senaste" })).toBeNull();
     const toggle = screen.getByRole("button", { name: "Fäll ut sidomenyn" });
     await waitFor(() => expect(document.activeElement).toBe(toggle));
   });

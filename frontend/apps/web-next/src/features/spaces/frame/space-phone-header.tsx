@@ -5,7 +5,7 @@ import { useTranslations } from "use-intl";
 import { ClassificationToken } from "@/components/composites/classification-token";
 import { PageBar } from "@/components/shell/page-bar";
 import { useSpace } from "../use-space";
-import { useSpaceDisplayName } from "./space-header";
+import { useSpaceDisplayName } from "../space-display-name";
 import { phoneSections, spaceLandingHref, spaceSections, type SpaceRoute } from "./space-sections";
 import { SpaceTabs } from "./space-tabs";
 

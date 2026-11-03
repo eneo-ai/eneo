@@ -18,6 +18,7 @@ import { integrationSetupAction } from "./setup-action";
 import { SourcesList, type SourceGroup } from "./sources-table";
 import { groupIntegrationSources } from "./sources";
 import { useSyncProgress } from "./use-sync-progress";
+import { useSectionHeadingLevels } from "@/features/spaces/frame/space-frame";
 
 /** Whether this user can import, connect an integration first, or only read why not. */
 function useIntegrationSetup() {
@@ -62,6 +63,8 @@ export function IntegrationsTab({
   name: TableName;
 }) {
   const t = useTranslations();
+  // Under the page's title: an h2 beside the sidebar, an h3 under a phone's space header.
+  const headingLevel = useSectionHeadingLevels().sub;
   const collator = useCollator();
   const [showImport, setShowImport] = useState(false);
   const { space } = useSpace();
@@ -116,7 +119,7 @@ export function IntegrationsTab({
           hue={AREA_HUES.knowledge}
           title={t("fix_integrations_empty_title")}
           description={t("space_integrations_empty_description")}
-          headingLevel={3}
+          headingLevel={headingLevel}
           actions={action}
         />
       ) : (

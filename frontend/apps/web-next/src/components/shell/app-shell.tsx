@@ -11,7 +11,7 @@ import { CreateSpaceDialog } from "@/features/spaces/create-space-dialog";
 import { PHONE_SCREEN_QUERY } from "@/lib/hooks/use-media-match";
 import { ConnectionAnnouncer, ConnectionBanner } from "./connection-banner";
 import { MobileTopBar } from "./mobile-top-bar";
-import { isAdminRoute, OPEN_NAV_EVENT, type NavVariant } from "./routes";
+import { isAdminRoute, OPEN_NAV_EVENT, sideNavKind, type NavVariant } from "./routes";
 import { isOtherDialogOpen, ShellContext, type ShellContextValue } from "./shell-context";
 import { DesktopSideNav, MobileNavDrawer, useSideNavRail } from "./side-nav";
 import { TopBar } from "./top-bar";
@@ -57,6 +57,8 @@ export function AppShellFrame({
   const drawerId = useId();
   const rail = useSideNavRail(sideNavCollapsed);
   const variant: NavVariant = isAdminRoute(pathname) ? "admin" : "main";
+  // From 768 px the sidebar holds the place the page is in, as in Svelte; some pages have none.
+  const sideNav = sideNavKind(pathname);
 
   const [navOpen, setNavOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -156,9 +158,11 @@ export function AppShellFrame({
           {isMobile ? null : <TopBar railCollapsed={rail.collapsed} />}
           <div className="flex min-h-0 flex-1">
             <AppShellMobileContext value={mobileNav}>
-              <div className="wide:flex wide:flex-col border-ax-border hidden min-h-0 shrink-0 border-e">
-                <DesktopSideNav variant={variant} navId={navId} rail={rail} />
-              </div>
+              {sideNav === null ? null : (
+                <div className="wide:flex wide:flex-col border-ax-border hidden min-h-0 shrink-0 border-e">
+                  <DesktopSideNav kind={sideNav} navId={navId} rail={rail} />
+                </div>
+              )}
             </AppShellMobileContext>
             {/* tabIndex -1: the skip link moves focus here, not just the scroll
             position (WCAG 2.4.1); tests/a11y.spec.ts checks it. relative:

@@ -104,7 +104,7 @@ describe("KnowledgePage", () => {
   it("keeps the Kunskap heading and tabs, with one create button in an empty space", async () => {
     const { container } = show(makeSpace());
 
-    expect(screen.getByRole("heading", { level: 2, name: "Kunskap" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1, name: "Kunskap" })).toBeTruthy();
     const tablist = screen.getByRole("tablist", { name: "Kunskapskällor" });
     expect(within(tablist).getAllByRole("tab")).toHaveLength(3);
     const collections = within(tablist).getByRole("tab", { name: "Samlingar" });
@@ -598,14 +598,15 @@ describe("KnowledgePage", () => {
       }),
       "integrations"
     );
-    expect(screen.getByRole("heading", { level: 3, name: "Text Embedding 3" })).toBeTruthy();
+    // Beside the sidebar the page's "Kunskap" is the h1, so its groups are h2s.
+    expect(screen.getByRole("heading", { level: 2, name: "Text Embedding 3" })).toBeTruthy();
 
     fireEvent.change(screen.getByRole("textbox", { name: "Filtrera integrationer" }), {
       target: { value: "ekonomi" }
     });
 
     expect(screen.queryByRole("table")).toBeNull();
-    expect(screen.getByRole("heading", { level: 3, name: "Inga resultat hittades" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 2, name: "Inga resultat hittades" })).toBeTruthy();
   });
 
   it("announces a refused sign-in politely when it happens, not on every visit", async () => {

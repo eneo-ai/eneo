@@ -1,31 +1,7 @@
 import { Heading } from "@astryxdesign/core/Heading";
-import Link from "@/lib/link";
-import { Plus } from "lucide-react";
 import { useRef } from "react";
 import { cn } from "@/lib/utils";
 import { RemovalFocusScope } from "../removal";
-
-/** "Visa alla" and friends: a standalone text link with a 24 px target. */
-export function OverviewLink({
-  href,
-  children,
-  label
-}: {
-  href: string;
-  children: React.ReactNode;
-  /** Fuller accessible name that starts with the visible text ("Visa alla assistenter"). */
-  label?: string;
-}) {
-  return (
-    <Link
-      href={href}
-      aria-label={label}
-      className="text-ax-text-accent focus-visible:outline-ring rounded-ax-inner inline-flex min-h-6 items-center text-sm font-semibold hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11"
-    >
-      {children}
-    </Link>
-  );
-}
 
 /**
  * A titled block on the space overview: h2, optional end content, body. When
@@ -63,26 +39,5 @@ export function OverviewSection({
         {children}
       </section>
     </RemovalFocusScope>
-  );
-}
-
-/**
- * Dashed card that starts a create flow: its hint and the flow's own control
- * (a split button or a button), so the card itself needs no click handling.
- * Where a screen is narrow the control moves into the section's heading
- * instead (a phone): a card as tall as an assistant is not worth the room.
- */
-export function OverviewCreateCard({ hint, action }: { hint: string; action: React.ReactNode }) {
-  return (
-    <div className="border-ax-border-strong rounded-ax-container flex h-full min-h-40 flex-col items-center justify-center gap-3 border border-dashed p-4 text-center">
-      <span
-        aria-hidden="true"
-        className="bg-ax-muted text-ax-text flex size-9 items-center justify-center rounded-full"
-      >
-        <Plus className="size-4.5" />
-      </span>
-      <p className="text-ax-text-secondary text-sm">{hint}</p>
-      {action}
-    </div>
   );
 }

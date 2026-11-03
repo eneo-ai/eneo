@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
-import { router } from "@/test/navigation";
 import { renderInApp, testAppContext } from "@/test/render";
 import { setViewport } from "@/test/setup-dom";
 import {
@@ -14,7 +13,6 @@ import {
 import {
   makeAssistant,
   makeCollection,
-  makeIntegration,
   makeMember,
   makeSpace,
   makeWebsite
@@ -69,179 +67,95 @@ function show(space: Space) {
   return renderInApp(<SpaceOverview />, { appContext });
 }
 
-/**
- * The overview's create controls are small and secondary, like "Ladda upp":
- * the tabs' docked create buttons stay each screen's one primary action.
- */
-function expectSecondaryCreate(scope: HTMLElement, name: string) {
-  const create = within(scope).getByRole("button", { name });
-  const more = within(scope).getByRole("button", { name: "Fler sätt att skapa" });
-  expect([create.dataset.variant, create.dataset.size]).toEqual(["secondary", "sm"]);
-  expect([more.dataset.variant, more.dataset.size]).toEqual(["secondary", "sm"]);
-}
-
 const busySpace = () =>
   makeSpace({
-    assistants: [
-      makeAssistant(),
-      makeAssistant({
-        id: "a2",
-        name: "Avtalsgranskaren",
-        published: false,
-        completion_model_id: "model-2",
-        updated_at: "2026-09-05T08:00:00Z"
-      }),
-      makeAssistant({ id: "a3", name: "Äldst", updated_at: "2025-01-01T00:00:00Z" })
-    ],
-    collections: [makeCollection()],
-    websites: [
-      makeWebsite({
-        latest_crawl: {
-          ...(makeWebsite().latest_crawl as Record<string, unknown>),
-          status: "failed"
-        }
-      })
-    ],
-    members: [makeMember()]
+    assistants: [makeAssistant(), makeAssistant({ id: "a2" }), makeAssistant({ id: "a3" })],
+    groupChats: [{ id: "g1" }],
+    apps: [{ id: "p1" }],
+    collections: [makeCollection(), makeCollection({ id: "shared", space_id: "other" })],
+    websites: [makeWebsite()],
+    members: [makeMember(), makeMember({ id: "u2", email: "erik@example.com" })],
+    overrides: { description: "Inköp och avtal." }
   });
+
+const tiles = () =>
+  within(screen.getByRole("list"))
+    .getAllByRole("link")
+    .map((link) => [link.getAttribute("aria-label"), link.getAttribute("href")]);
 
 describe("SpaceOverview", () => {
-  it("leaves knowledge to the Kunskap tab on a phone, where the overview lists what to act on", () => {
-    setViewport("phone");
-    show(busySpace());
-    expect(screen.getByRole("region", { name: "Assistenter" })).toBeTruthy();
-    expect(screen.queryByRole("region", { name: "Kunskap" })).toBeNull();
-  });
-
-  it("shows the newest assistants and a compact knowledge list", async () => {
+  // Svelte's [spaceId]/overview/+page.svelte.
+  it("titles the page Översikt and names the space under it, with its description", async () => {
     const { container } = show(busySpace());
-
-    const assistants = screen.getByRole("region", { name: "Assistenter" });
-    expect(within(assistants).getByRole("link", { name: "Visa alla assistenter" })).toBeTruthy();
-    // One row: two newest cards plus the create card for users who may create.
-    const grid = within(assistants).getAllByRole("list")[0]!;
-    const cards = Array.from(grid.children) as HTMLElement[];
-    expect(cards).toHaveLength(3);
-    expect(within(cards[0]!).getByRole("link", { name: "Avtalsgranskaren" })).toBeTruthy();
-    expect(within(cards[0]!).getByText("Utkast")).toBeTruthy();
-    expect(within(cards[0]!).getByText("claude-opus")).toBeTruthy();
-    expect(within(cards[1]!).getByText("Publicerad")).toBeTruthy();
-    expect(within(cards[1]!).getByText("Haiku 4.5")).toBeTruthy();
-    expect(within(cards[2]!).getByText("Börja från en mall eller från noll")).toBeTruthy();
-    expectSecondaryCreate(cards[2]!, "Skapa assistent");
-    expect(within(assistants).queryByRole("link", { name: "Äldst" })).toBeNull();
-
-    const knowledge = screen.getByRole("region", { name: "Kunskap" });
-    // One column: knowledge follows the assistants.
-    expect(knowledge.parentElement).toBe(assistants.parentElement);
-    expect(within(knowledge).queryByRole("table")).toBeNull();
-    expect(within(knowledge).getByText(/Samlingar, webbplatser och integrationer/)).toBeTruthy();
-    const website = within(knowledge).getByRole("link", { name: "www.upphandlingsmyndigheten.se" });
-    const websiteRow = website.closest("li")!;
-    expect(within(websiteRow).getByText("Synkfel")).toBeTruthy();
-    expect(within(websiteRow).getByText("318 sidor")).toBeTruthy();
-    expect(
-      within(websiteRow)
-        .getByRole("link", { name: "Åtgärda www.upphandlingsmyndigheten.se" })
-        .getAttribute("href")
-    ).toBe("/spaces/space-1/knowledge/websites/website-1");
-    const collectionRow = within(knowledge)
-      .getByRole("link", { name: "Upphandlingspolicy" })
-      .closest("li")!;
-    expect(within(collectionRow).getByText("42 filer")).toBeTruthy();
-    expect(within(collectionRow).getByText("Indexerad")).toBeTruthy();
-    expect(
-      within(collectionRow).getByRole("button", { name: "Fler åtgärder för Upphandlingspolicy" })
-    ).toBeTruthy();
-    expect(within(knowledge).getByRole("link", { name: "Visa alla kunskapskällor" })).toBeTruthy();
-
+    expect(screen.getByRole("heading", { level: 1, name: "Översikt" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 2, name: "Upphandling" })).toBeTruthy();
+    expect(screen.getByText("Inköp och avtal.")).toBeTruthy();
     await expectNoAxeViolations(container);
   });
 
-  it("offers no second full sync of a source while one runs", async () => {
-    state.progress = [
-      {
-        integration_knowledge_id: "integration-1",
-        sync_type: "full",
-        phase: "processing",
-        started_at: "2026-10-19T08:00:00Z",
-        updated_at: "2026-10-19T08:01:00Z",
-        total: 12,
-        done: 3,
-        indexed: 3,
-        unchanged: 0,
-        skipped: 0,
-        deleted: 0
-      }
-    ];
-    show(makeSpace({ integrations: [makeIntegration()] }));
-    const knowledge = screen.getByRole("region", { name: "Kunskap" });
-
-    fireEvent.click(
-      within(knowledge).getByRole("button", { name: "Fler åtgärder för Avtalsmallar" })
-    );
-    const busy = await screen.findByRole("menuitem", {
-      name: "En synk är redan köad eller pågår"
-    });
-    expect(busy.getAttribute("aria-disabled")).toBe("true");
+  it("welcomes to a space without a description", () => {
+    show(makeSpace({ overrides: { description: null } }));
+    expect(screen.getByText("Välkommen till Upphandling")).toBeTruthy();
   });
 
-  it("uploads to a chosen collection in the same dialog as the collection page", async () => {
+  it("counts the space's own content in a tile per kind, each a link to its tab", () => {
     show(busySpace());
-
-    const upload = screen.getByRole("button", { name: "Ladda upp" });
-    fireEvent.click(upload);
-    const item = await screen.findByRole("menuitem", { name: "Upphandlingspolicy" });
-    await expectNoAxeViolations(document.body);
-    fireEvent.click(item);
-
-    // No detour to the collection page: the upload flow opens here, with the
-    // accepted formats and limits.
-    const dialog = await screen.findByRole("dialog", { name: "Ladda upp filer" });
-    expect(within(dialog).getByText(/Upphandlingspolicy/)).toBeTruthy();
-    expect(within(dialog).getByText(/pdf/i)).toBeTruthy();
-    expect(router.push).not.toHaveBeenCalled();
+    expect(tiles()).toEqual([
+      ["Assistenter 4", "/spaces/space-1/assistants"],
+      ["Appar 1", "/spaces/space-1/apps"],
+      // The collection shared in from another space is not this space's.
+      ["Samlingar 1", "/spaces/space-1/knowledge?tab=collections"],
+      ["Webbplatser 1", "/spaces/space-1/knowledge?tab=websites"],
+      ["Medlemmar 2", "/spaces/space-1/members"]
+    ]);
   });
 
-  it("shows empty states with the create actions in an empty space", async () => {
-    const { container } = show(makeSpace());
-
-    const assistants = screen.getByRole("region", { name: "Assistenter" });
-    expect(within(assistants).getByRole("heading", { name: "Inga assistenter ännu" })).toBeTruthy();
-    // An empty section's one next step stays the filled button.
-    expect(
-      within(assistants).getByRole("button", { name: "Skapa assistent" }).dataset.variant
-    ).toBe("primary");
-    expect(within(assistants).queryByRole("link", { name: "Visa alla assistenter" })).toBeNull();
-
-    const knowledge = screen.getByRole("region", { name: "Kunskap" });
-    expect(within(knowledge).getByRole("heading", { name: "Inga källor ännu" })).toBeTruthy();
-    expect(within(knowledge).getByRole("button", { name: "Skapa samling" })).toBeTruthy();
-    expect(within(knowledge).queryByRole("button", { name: "Ladda upp" })).toBeNull();
-
-    await expectNoAxeViolations(container);
+  it("shows only the tiles the user may read", () => {
+    show(makeSpace({ resourcePermissions: [], permissions: ["read"] }));
+    expect(screen.queryByRole("list")).toBeNull();
   });
 
-  it("leaves out what the user may not see or change", () => {
+  it("greets in the personal space, without the shared space's actions", () => {
     show(
       makeSpace({
-        resourcePermissions: ["read"],
-        assistants: [makeAssistant()],
-        collections: [makeCollection({ permissions: ["read"] })],
-        overrides: { organization: false }
+        permissions: ["read"],
+        overrides: { personal: true, members: { items: [], count: 0, permissions: [] } }
       })
     );
-
-    const assistants = screen.getByRole("region", { name: "Assistenter" });
-    // No create card without create permission: three cards fit instead.
-    expect(within(assistants).queryByRole("button", { name: "Skapa assistent" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Ladda upp" })).toBeNull();
+    expect(screen.getByRole("heading", { level: 2, name: /^Hej, / })).toBeTruthy();
+    expect(screen.getByText(/din personliga yta/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Lägg till medlem" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Ny chatt" })).toBeNull();
   });
 
-  it("hides assistants in the organization space", () => {
-    show(makeSpace({ overrides: { organization: true } }));
-    expect(screen.queryByRole("region", { name: "Assistenter" })).toBeNull();
-    expect(screen.getByRole("region", { name: "Kunskap" })).toBeTruthy();
+  it("starts a chat with the space's assistant, for those who may read it", () => {
+    show(busySpace());
+    expect(screen.getByRole("link", { name: "Ny chatt" }).getAttribute("href")).toBe(
+      "/spaces/space-1/chat"
+    );
+    cleanup();
+    show(makeSpace({ overrides: { default_assistant: null } }));
+    expect(screen.queryByRole("link", { name: "Ny chatt" })).toBeNull();
+  });
+
+  it("opens the add-member dialog from the page bar and returns focus on Escape", async () => {
+    show(busySpace());
+    const invite = screen.getByRole("button", { name: "Lägg till medlem" });
+    invite.focus();
+    fireEvent.click(invite);
+
+    const dialog = await screen.findByRole("dialog", { name: "Lägg till medlem" });
+    expect(within(dialog).getByLabelText("E-post")).toBeTruthy();
+    await expectNoAxeViolations(dialog);
+
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(invite));
+  });
+
+  it("hides the add-member button without the permission", () => {
+    show(makeSpace({ resourcePermissions: ["read"] }));
+    expect(screen.queryByRole("button", { name: "Lägg till medlem" })).toBeNull();
   });
 });
 
@@ -276,19 +190,6 @@ describe("SpaceOverview on a phone: Hantera ytan (decision 24)", () => {
     expect(rows().map(([label]) => label)).toEqual(["Medlemmar (0)"]);
   });
 
-  it("lists the newest assistants as rows, with the create button in the heading instead of a card", () => {
-    setViewport("phone");
-    show(busySpace());
-    const assistants = screen.getByRole("region", { name: "Assistenter" });
-    const rows = within(within(assistants).getAllByRole("list")[0]!).getAllByRole("listitem");
-    // All three fit where the create card used to take the room of a row and a half.
-    expect(rows).toHaveLength(3);
-    expect(within(rows[0]!).getByRole("link", { name: /^Avtalsgranskaren/ })).toBeTruthy();
-    const heading = within(assistants).getByRole("heading", { name: "Assistenter" }).parentElement!;
-    expectSecondaryCreate(heading, "Skapa assistent");
-    expect(within(assistants).queryByText("Börja från en mall eller från noll")).toBeNull();
-  });
-
   it("is not there on a tablet, which has a tab for each", () => {
     setViewport("tablet-portrait");
     show(makeSpace());
@@ -299,89 +200,5 @@ describe("SpaceOverview on a phone: Hantera ytan (decision 24)", () => {
     setViewport("phone");
     show(makeSpace({ overrides: { organization: true } }));
     expect(screen.queryByRole("region", { name: "Hantera ytan" })).toBeNull();
-  });
-});
-
-const app = (overrides: Record<string, unknown> = {}) => ({
-  id: "app-1",
-  name: "Protokoll från möte",
-  description: "Gör ett protokoll av anteckningarna",
-  published: true,
-  permissions: ["read"],
-  updated_at: "2026-09-10T08:00:00Z",
-  ...overrides
-});
-
-const appSpace = (options: Parameters<typeof makeSpace>[0] = {}) =>
-  makeSpace({
-    apps: [
-      app(),
-      app({
-        id: "app-2",
-        name: "Anbudsutvärdering",
-        published: false,
-        updated_at: "2026-09-12T08:00:00Z"
-      }),
-      app({ id: "app-3", name: "Äldst", updated_at: "2025-01-01T00:00:00Z" })
-    ],
-    ...options
-  });
-
-describe("SpaceOverview apps", () => {
-  it("shows the newest apps, then the create card, and leads to the apps tab", () => {
-    show(appSpace());
-    const apps = screen.getByRole("region", { name: "Appar" });
-    expect(within(apps).getByRole("link", { name: "Visa alla appar" }).getAttribute("href")).toBe(
-      "/spaces/space-1/apps"
-    );
-    const cards = Array.from(within(apps).getAllByRole("list")[0]!.children) as HTMLElement[];
-    expect(cards).toHaveLength(3);
-    expect(within(cards[0]!).getByRole("link", { name: /Anbudsutvärdering/ })).toBeTruthy();
-    expect(within(cards[0]!).getByText("Utkast")).toBeTruthy();
-    expect(within(cards[1]!).getByRole("link", { name: /Protokoll från möte/ })).toBeTruthy();
-    expectSecondaryCreate(cards[2]!, "Skapa app");
-    expect(within(apps).queryByRole("link", { name: /Äldst/ })).toBeNull();
-    // The actions menu belongs to the apps tab.
-    expect(within(apps).queryByRole("button", { name: /Fler åtgärder|Åtgärder/ })).toBeNull();
-    // Assistants first, apps next, knowledge last: the order of the tabs.
-    const order = screen
-      .getAllByRole("heading", { level: 2 })
-      .map((heading) => heading.textContent);
-    expect(order.indexOf("Appar")).toBeGreaterThan(order.indexOf("Assistenter"));
-    expect(order.indexOf("Appar")).toBeLessThan(order.indexOf("Kunskap"));
-  });
-
-  it("puts the create button in the heading on a phone, and lists all three", () => {
-    setViewport("phone");
-    show(appSpace());
-    const apps = screen.getByRole("region", { name: "Appar" });
-    const rows = within(within(apps).getAllByRole("list")[0]!).getAllByRole("listitem");
-    expect(rows).toHaveLength(3);
-    const heading = within(apps).getByRole("heading", { name: "Appar" }).parentElement!;
-    expectSecondaryCreate(heading, "Skapa app");
-  });
-
-  it("offers no create control to someone who may only read", () => {
-    show(appSpace({ resourcePermissions: ["read"] }));
-    const apps = screen.getByRole("region", { name: "Appar" });
-    expect(within(apps).queryByRole("button", { name: "Skapa app" })).toBeNull();
-    expect(within(apps).getAllByRole("link", { name: /^(?!Visa alla)/ }).length).toBe(3);
-  });
-
-  it("is not there for someone with no apps to open and none to create", () => {
-    show(makeSpace({ resourcePermissions: ["read"] }));
-    expect(screen.queryByRole("region", { name: "Appar" })).toBeNull();
-  });
-
-  it("invites someone who may create to make the first one", () => {
-    show(makeSpace());
-    const apps = screen.getByRole("region", { name: "Appar" });
-    expect(within(apps).getByText("Inga appar ännu")).toBeTruthy();
-    expect(within(apps).getByRole("button", { name: "Skapa app" })).toBeTruthy();
-  });
-
-  it("is not there for the organisation space", () => {
-    show(appSpace({ overrides: { organization: true } }));
-    expect(screen.queryByRole("region", { name: "Appar" })).toBeNull();
   });
 });

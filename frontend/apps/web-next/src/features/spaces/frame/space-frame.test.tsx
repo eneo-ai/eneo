@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
@@ -86,61 +86,13 @@ describe("SpaceFrame", () => {
     expect(screen.queryByRole("link", { name: "Ny chatt" })).toBeNull();
   });
 
-  it("gives a tab page the space name as its h1, breadcrumbs, members and tabs", async () => {
+  it("gives a page beside the sidebar no header of its own: the page's title is its h1", () => {
     const { container } = show(sharedSpace(), ["overview"]);
-
-    expect(screen.getByRole("heading", { level: 1, name: "Upphandling" })).toBeTruthy();
-    expect(screen.getByText("Stöd för kommunens upphandlare.")).toBeTruthy();
-    // ClassificationToken: read with its prefix.
-    expect(screen.getByText("Klass 2 · Intern").parentElement!.textContent).toBe(
-      "Säkerhetsklass: Klass 2 · Intern"
-    );
-
-    const crumbs = screen.getAllByRole("navigation")[0]!;
-    expect(within(crumbs).getByRole("link", { name: "Ytor" }).getAttribute("href")).toBe(
-      "/spaces/list"
-    );
-    expect(within(crumbs).getByText("Upphandling").closest("[aria-current='page']")).toBeTruthy();
-
-    const tabs = screen.getByRole("navigation", { name: "Ytans innehåll" });
-    const links = within(tabs).getAllByRole("link");
-    expect(links.map((link) => link.getAttribute("href"))).toEqual([
-      "/spaces/space-1/overview",
-      "/spaces/space-1/assistants",
-      "/spaces/space-1/apps",
-      "/spaces/space-1/knowledge",
-      "/spaces/space-1/skills",
-      "/spaces/space-1/members",
-      "/spaces/space-1/settings"
-    ]);
-    expect(within(tabs).getByRole("link", { name: "Översikt" }).getAttribute("aria-current")).toBe(
-      "true"
-    );
-    // Named by what it shows, the count with it, so the name holds the visible label (WCAG 2.5.3).
-    const assistants = within(tabs).getByRole("link", { name: "Assistenter 2" });
-    expect(assistants.hasAttribute("aria-label")).toBe(false);
-    expect(within(tabs).getByRole("link", { name: "Skills" })).toBeTruthy();
-
-    expect(screen.getByRole("group", { name: "4 medlemmar" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Lägg till medlem" })).toBeTruthy();
-    const newChat = screen.getByRole("link", { name: "Ny chatt" });
-    expect(newChat.getAttribute("href")).toBe("/spaces/space-1/chat");
-    // Each tab's own create button is the one primary action; a new chat stays in reach.
-    expect(newChat.getAttribute("data-variant")).toBe("secondary");
-    expect(screen.getByText("Sidans innehåll")).toBeTruthy();
-
-    await expectNoAxeViolations(container);
-  });
-
-  it("centres the name on the tile when no description runs under it", () => {
-    const column = () =>
-      screen.getByRole("heading", { level: 1, name: "Upphandling" }).closest(".flex-col")!;
-    show(sharedSpace(), ["overview"]);
-    // A description under the name: both start at the tile's top edge.
-    expect(column().className).not.toContain("self-center");
-    cleanup();
-    show(makeSpace({ overrides: { description: null } }), ["overview"]);
-    expect(column().className).toContain("self-center");
+    // As in Svelte, the sidebar carries the space and its sections (SpaceNav).
+    expect(screen.queryByRole("banner")).toBeNull();
+    expect(screen.queryByRole("navigation")).toBeNull();
+    expect(screen.queryByRole("heading")).toBeNull();
+    expect(container.querySelector("[data-own-phone-header]")).toBeNull();
   });
 
   it("scrolls with the page panel instead of a scroll container of its own", () => {
@@ -156,132 +108,6 @@ describe("SpaceFrame", () => {
     // The pages' shared column, which a full-bleed page spans edge to edge.
     expect(column.className).toContain("max-w-6xl");
     expect(column.className).toContain("has-[[data-space-full-bleed]]:max-w-none");
-  });
-
-  it("lines the header up with the page below it, in the pages' shared column", () => {
-    show(sharedSpace(), ["overview"]);
-    const header = screen
-      .getByRole("heading", { level: 1, name: "Upphandling" })
-      .closest("header")!;
-    // The band and its border span the frame; the name, actions and tabs start on the page's line.
-    expect(header.className).toContain("border-b");
-    expect(header.className).not.toContain("max-w-6xl");
-    expect(header.firstElementChild!.className).toContain("max-w-6xl");
-    expect(header.firstElementChild!.className).toContain("mx-auto");
-  });
-
-  it("leaves the h1 to a detail page and marks its tab as current", async () => {
-    const { container } = show(sharedSpace(), ["knowledge", "collections", "c1"]);
-
-    expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
-    // The space name is a small label there, not a second title.
-    expect(screen.getByText("Upphandling", { selector: "p" }).className).toContain("text-sm");
-    // The description belongs to the tab pages; details keep the header short.
-    expect(screen.queryByText("Stöd för kommunens upphandlare.")).toBeNull();
-    const crumbs = screen.getAllByRole("navigation")[0]!;
-    expect(within(crumbs).getByRole("link", { name: "Upphandling" }).getAttribute("href")).toBe(
-      "/spaces/space-1/overview"
-    );
-    const tabs = screen.getByRole("navigation", { name: "Ytans innehåll" });
-    expect(within(tabs).getByRole("link", { name: "Kunskap 0" }).getAttribute("aria-current")).toBe(
-      "true"
-    );
-
-    await expectNoAxeViolations(container);
-  });
-
-  it("shows the personal space without members or invites", () => {
-    const space = makeSpace({
-      permissions: ["read"],
-      overrides: { personal: true, members: { items: [], count: 0, permissions: [] } }
-    });
-    show(space, ["overview"], "personal");
-
-    expect(screen.getByRole("heading", { level: 1, name: "Personligt" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Lägg till medlem" })).toBeNull();
-    expect(screen.queryByRole("group", { name: /medlem/ })).toBeNull();
-    const newChat = screen.getByRole("link", { name: "Ny chatt" });
-    expect(newChat.getAttribute("href")).toBe("/spaces/personal/chat");
-    expect(newChat.getAttribute("data-variant")).toBe("secondary");
-    const tabs = screen.getByRole("navigation", { name: "Ytans innehåll" });
-    expect(within(tabs).queryByRole("link", { name: /Medlemmar/ })).toBeNull();
-    expect(within(tabs).queryByRole("link", { name: "Inställningar" })).toBeNull();
-  });
-
-  it("keeps the organization space to its three tabs, named by the h1 on its Skills tab", () => {
-    show(makeSpace({ overrides: { organization: true } }), ["skills"], "organization");
-
-    // The Skills page is a tab like any other: its own title is an h2.
-    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
-    expect(screen.queryByRole("link", { name: "Ny chatt" })).toBeNull();
-    const tabs = screen.getByRole("navigation", { name: "Ytans innehåll" });
-    expect(
-      within(tabs)
-        .getAllByRole("link")
-        .map((link) => link.getAttribute("href"))
-    ).toEqual([
-      "/spaces/organization/knowledge",
-      "/spaces/organization/skills",
-      "/spaces/organization/settings"
-    ]);
-    expect(within(tabs).getByRole("link", { name: "Skills" }).getAttribute("aria-current")).toBe(
-      "true"
-    );
-  });
-
-  it("hides actions the user lacks permission for", () => {
-    const space = makeSpace({
-      resourcePermissions: ["read"],
-      permissions: ["read"],
-      members: [makeMember()],
-      overrides: { default_assistant: null }
-    });
-    show(space, ["overview"]);
-
-    expect(screen.queryByRole("button", { name: "Lägg till medlem" })).toBeNull();
-    expect(screen.queryByRole("link", { name: "Ny chatt" })).toBeNull();
-    expect(screen.queryByRole("link", { name: "Inställningar" })).toBeNull();
-    expect(screen.getByRole("group", { name: "1 medlem" })).toBeTruthy();
-  });
-
-  it("keeps the tabs one tab stop that arrow keys move through", () => {
-    show(sharedSpace(), ["knowledge"]);
-    const tabs = screen.getByRole("navigation", { name: "Ytans innehåll" });
-    const current = within(tabs).getByRole("link", { name: "Kunskap 0" });
-    const others = within(tabs)
-      .getAllByRole("link")
-      .filter((link) => link !== current);
-
-    expect(current.getAttribute("tabindex")).toBe("0");
-    expect(others.every((link) => link.getAttribute("tabindex") === "-1")).toBe(true);
-
-    current.focus();
-    fireEvent.keyDown(current, { key: "ArrowRight" });
-    expect(document.activeElement).toBe(within(tabs).getByRole("link", { name: "Skills" }));
-  });
-
-  it("leaves adding members to the members tab's own button there", () => {
-    show(sharedSpace(), ["members"]);
-    expect(screen.queryByRole("button", { name: "Lägg till medlem" })).toBeNull();
-  });
-
-  it("opens the add-member dialog from the header and returns focus on Escape", async () => {
-    show(sharedSpace(), ["overview"]);
-    const invite = screen.getByRole("button", { name: "Lägg till medlem" });
-    invite.focus();
-    fireEvent.click(invite);
-
-    const dialog = await screen.findByRole("dialog", { name: "Lägg till medlem" });
-    expect(within(dialog).getByLabelText("E-post")).toBeTruthy();
-    expect(within(dialog).getByRole("combobox", { name: "Roll" })).toBeTruthy();
-    // The dialog itself: while a Radix modal is open, Radix leaves every
-    // [aria-live] subtree (each Astryx Button has one) outside aria-hidden,
-    // which is a shell-wide issue tracked in the migration report.
-    await expectNoAxeViolations(dialog);
-
-    fireEvent.keyDown(dialog, { key: "Escape" });
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    await waitFor(() => expect(document.activeElement).toBe(invite));
   });
 });
 
@@ -392,11 +218,11 @@ describe("SpaceFrame on a phone (decision 24)", () => {
     ).toBe("/spaces/space-1/apps/p1");
   });
 
-  it("is not on a tablet, which keeps the header with every tab", () => {
+  it("is not on a tablet, which has the sidebar", () => {
     setViewport("tablet-portrait");
     show(sharedSpace(), ["overview"]);
     expect(phoneHeader()).toBeNull();
-    expect(tabHrefs()).toHaveLength(7);
+    expect(screen.queryByRole("navigation")).toBeNull();
   });
 
   it("is on a phone turned sideways, which has no height for the breadcrumb and seven tabs", () => {
@@ -407,7 +233,7 @@ describe("SpaceFrame on a phone (decision 24)", () => {
     expect(screen.queryByRole("navigation", { name: /brödsmulor|breadcrumb/i })).toBeNull();
   });
 
-  it("turns with the phone: the header swaps for the phone's when it is laid sideways", () => {
+  it("turns with the phone: its header comes when it is laid sideways, and goes again", () => {
     setViewport("tablet-portrait");
     show(sharedSpace(), ["overview"]);
     act(() => setViewport("phone-landscape"));
@@ -416,6 +242,6 @@ describe("SpaceFrame on a phone (decision 24)", () => {
     // An iPad turned with its keyboard up is short too, but as wide as a laptop: the tablet's.
     act(() => setViewport({ width: 1180, height: 470, pointer: "coarse" }));
     expect(phoneHeader()).toBeNull();
-    expect(tabHrefs()).toHaveLength(7);
+    expect(screen.queryByRole("navigation")).toBeNull();
   });
 });

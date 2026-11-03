@@ -20,12 +20,10 @@ import { TemplateGalleryDialog } from "@/features/templates/template-gallery-dia
  * Creates a blank app at once, named "Ny app" (numbered on a collision), and
  * opens its editor, which focuses the name: no name dialog in between. With
  * templates enabled, a split-button menu also offers the template gallery.
- * `secondary` makes it small and unfilled where it is not the screen's primary
- * action (the space overview; the tabs' docked button is).
  * An app cannot run without both a completion and a transcription model, so
  * until the space has them, either way says what is missing instead.
  */
-export function CreateAppButton({ secondary = false }: { secondary?: boolean }) {
+export function CreateAppButton() {
   const t = useTranslations();
   const router = useRouter();
   const { settings } = useAppContext();
@@ -77,13 +75,10 @@ export function CreateAppButton({ secondary = false }: { secondary?: boolean }) 
   const openGallery = () => {
     if (!blocked()) setDialog("template");
   };
-  const variant = secondary ? "secondary" : "primary";
-  const size = secondary ? "sm" : "md";
   const createButton = (className?: string) => (
     <Button
       label={t("create_app")}
-      variant={variant}
-      size={size}
+      variant="primary"
       className={className}
       isLoading={create.isPending}
       isInterruptible
@@ -101,8 +96,7 @@ export function CreateAppButton({ secondary = false }: { secondary?: boolean }) 
               label: t("ui_more_ways_to_create"),
               icon: <ChevronDown aria-hidden="true" />,
               isIconOnly: true,
-              variant,
-              size,
+              variant: "primary",
               className: "rounded-l-none border-l"
             }}
             hasChevron={false}

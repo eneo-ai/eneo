@@ -83,8 +83,8 @@ describe("organisation skill catalogue", () => {
     show("list");
     await screen.findByText("Search reports");
     // A tab of the organization space, whose header holds the page's h1.
-    expect(screen.getByRole("heading", { level: 2, name: "skills" })).toBeTruthy();
-    expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
+    expect(screen.getByRole("heading", { level: 1, name: "skills" })).toBeTruthy();
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
     // The list is named by that heading (translation keys stand in for the text).
     expect(screen.getByRole("table", { name: "skills" })).toBeTruthy();
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "Reports" } });

@@ -34,6 +34,7 @@ import {
   type SkillRemovalResult,
   type SkillUsage
 } from "./organization-skills";
+import { useSectionHeadingLevels } from "@/features/spaces/frame/space-frame";
 
 const LIST_PATH = "/spaces/organization/skills";
 
@@ -84,6 +85,7 @@ export function skillRemovalMessage(
 
 export function OrganizationSkillsPage() {
   const t = useTranslations();
+  const levels = useSectionHeadingLevels();
   const locale = useLocale();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -153,7 +155,7 @@ export function OrganizationSkillsPage() {
     <div className="flex w-full flex-col gap-6 pb-16">
       {/* A tab of the organization space: the space header holds the h1. */}
       <PageHeader
-        headingLevel={2}
+        headingLevel={levels.title}
         headingId={headingId}
         title={t("skills")}
         actions={

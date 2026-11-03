@@ -513,7 +513,6 @@
   "chat_unsent_navigation_description": "You have a question that has not been sent. Do you want to leave this chat?",
   "chat_unsent_navigation_leave": "Leave chat",
   "chat_unsent_navigation_title": "Leave this chat?",
-  "chat_view_label": "Chat or insights",
   "chat_your_assistants": "Your assistants",
   "chat_your_message": "Your message",
   "choose_timeframe_to_generate_insights": "Choose a timeframe to generate insights for",
@@ -1486,7 +1485,6 @@
   "sharepoint_wrapper_group": "Group",
   "sharepoint_wrapper_items": "{count} items",
   "sharepoint_wrapper_sites": "{count} sites",
-  "shell_account_nav_label": "Account settings",
   "shell_administration": "Administration",
   "shell_all_spaces": "All spaces",
   "shell_back_to": "Back to {name}",
@@ -1918,5 +1916,7 @@
   "tools_bundled_unavailable": "Eneo's built-in tools could not be read",
   "shell_area_shared": "Spaces",
   "shell_top_nav_label": "Main areas",
-  "show_header": "Show header"
+  "show_header": "Show header",
+  "shell_space_nav_label": "Space menu",
+  "shell_palette_catalog": "All assistants and apps"
 }

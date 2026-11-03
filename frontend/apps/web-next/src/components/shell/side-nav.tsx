@@ -11,9 +11,16 @@ import { AdminSections, AdminTopContent } from "./admin-nav";
 import { EneoWordMark } from "./eneo-logo";
 import { MainSections, MainTopContent } from "./main-nav";
 import { NavFooter } from "./nav-footer";
+import { AccountNavHeading, AccountNavSections } from "@/features/account/account-side-nav";
+import {
+  SpaceNavHeading,
+  SpaceNavSections,
+  SpacesListNavHeading,
+  SpacesListNavSections
+} from "@/features/spaces/frame/space-nav";
 import { NavHeader } from "./nav-header";
 import { NotificationBells } from "./notification-bells";
-import type { NavVariant } from "./routes";
+import type { NavVariant, SideNavKind } from "./routes";
 import { DRAWER_MARKER } from "./shell-context";
 import { storeSideNavCollapsed } from "./side-nav-preference";
 
@@ -21,15 +28,6 @@ function navLabelKey(variant: NavVariant) {
   return variant === "admin" ? "shell_administration" : "shell_nav_label";
 }
 
-/**
- * The desktop SideNav (from 768 px, but not on a phone turned sideways): a
- * named `nav` landmark that collapses to an icon rail. Below 1280 px (an iPad either way, a small laptop) it is the rail
- * unless the user chose otherwise, so the page keeps its room; the rail's
- * items keep their names (accessible name and tooltip). The choice is a
- * per-browser preference: the layout reads it (`defaultCollapsed`, undefined
- * when none was made), a change stores it, and a stored choice wins at every
- * width.
- */
 export type SideNavRail = {
   /** Shown as the icon rail. */
   collapsed: boolean;
@@ -56,22 +54,32 @@ export function useSideNavRail(defaultCollapsed: boolean | undefined): SideNavRa
   };
 }
 
+/**
+ * The desktop SideNav (from 768 px, but not on a phone turned sideways): a
+ * named `nav` landmark that collapses to an icon rail. As in the Svelte app it
+ * holds the place the page is in (`sideNavKind`): a space's switcher and
+ * sections, the spaces list, the account, or administration. Below 1280 px
+ * (an iPad either way, a small laptop) it is the rail unless the user chose
+ * otherwise, so the page keeps its room; the rail's items keep their names
+ * (accessible name and tooltip). The choice is a per-browser preference
+ * (`useSideNavRail`), and a stored choice wins at every width.
+ */
 export function DesktopSideNav({
-  variant,
+  kind,
   navId,
   rail
 }: {
-  variant: NavVariant;
+  kind: SideNavKind;
   navId: string;
   rail: SideNavRail;
 }) {
   const t = useTranslations();
   const { collapsed, chosen } = rail;
 
-  // The width collapsing or expanding the nav removes whole sections (Senaste
-  // in the icon rail). If the focused link was one of them, focus goes to the
-  // toggle, which stays; focus anywhere else is left alone. Read while the
-  // focused element is still in the page, before this render commits.
+  // The width collapsing or expanding the nav removes whole sections. If the
+  // focused link was one of them, focus goes to the toggle, which stays; focus
+  // anywhere else is left alone. Read while the focused element is still in
+  // the page, before this render commits.
   const rescueFocus = useFocusRescue();
   const [shown, setShown] = useState({ collapsed, focusInNav: false });
   if (shown.collapsed !== collapsed) {
@@ -88,21 +96,50 @@ export function DesktopSideNav({
     );
   }, [shown, navId, rescueFocus]);
 
+  const content = SIDE_NAV_CONTENT[kind];
   return (
     <SideNav
       id={navId}
-      aria-label={t(navLabelKey(variant))}
+      aria-label={t(content.label)}
       collapsible={{ isCollapsed: collapsed, onCollapsedChange: rail.change, hasButton: false }}
-      header={<NavHeader navId={navId} />}
-      topContent={variant === "admin" ? <AdminTopContent /> : <MainTopContent />}
-      footer={<NavFooter variant={variant} />}
+      header={
+        <div className="flex flex-col gap-1">
+          <NavHeader navId={navId} />
+          {content.heading}
+        </div>
+      }
+      topContent={content.top}
+      footer={<NavFooter variant={kind === "admin" ? "admin" : "main"} />}
       // 17 rem wide as in the Svelte app, 64 px as an icon rail.
       className={cn("bg-ax-surface", collapsed ? "w-16" : "w-68")}
     >
-      {variant === "admin" ? <AdminSections /> : <MainSections />}
+      {content.items}
     </SideNav>
   );
 }
+
+/** What each sidebar holds: its name, its heading, and its items. */
+const SIDE_NAV_CONTENT: Record<
+  SideNavKind,
+  { label: string; heading?: React.ReactNode; top?: React.ReactNode; items: React.ReactNode }
+> = {
+  space: {
+    label: "shell_space_nav_label",
+    heading: <SpaceNavHeading />,
+    items: <SpaceNavSections />
+  },
+  "spaces-list": {
+    label: "shell_space_nav_label",
+    heading: <SpacesListNavHeading />,
+    items: <SpacesListNavSections />
+  },
+  account: {
+    label: "account_and_settings",
+    heading: <AccountNavHeading />,
+    items: <AccountNavSections />
+  },
+  admin: { label: "shell_administration", top: <AdminTopContent />, items: <AdminSections /> }
+};
 
 /**
  * Phones, held either way: the same navigation in an Astryx MobileNav drawer (a modal

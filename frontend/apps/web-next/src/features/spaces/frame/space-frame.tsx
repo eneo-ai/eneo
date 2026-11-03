@@ -2,7 +2,6 @@ import { useSpaceSegments } from "@/lib/navigation";
 import { PAGE_COLUMN } from "@/components/composites/page-frame";
 import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { cn } from "@/lib/utils";
-import { SpaceHeader } from "./space-header";
 import { SpacePhoneHeader } from "./space-phone-header";
 import { spaceRoute } from "./space-sections";
 
@@ -43,11 +42,7 @@ export function SpaceFrame({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex min-w-0 flex-1 flex-col">
-      {phone ? (
-        <SpacePhoneHeader route={route} segments={segments} />
-      ) : (
-        <SpaceHeader route={route} />
-      )}
+      {phone ? <SpacePhoneHeader route={route} segments={segments} /> : null}
       <div className="wide:p-6 flex min-w-0 flex-1 flex-col p-4 has-[[data-space-full-bleed]]:p-0">
         <div
           className={cn(
@@ -60,4 +55,13 @@ export function SpaceFrame({ children }: { children: React.ReactNode }) {
       </div>
     </div>
   );
+}
+
+/**
+ * Heading levels for a space page's own header: beside the sidebar its title
+ * is the page's h1, as in Svelte's page bar; on a phone the space's phone
+ * header holds the h1 and the title is an h2. `sub` is the level below it.
+ */
+export function useSectionHeadingLevels(): { title: 1 | 2; sub: 2 | 3 } {
+  return usePhoneScreen() ? { title: 2, sub: 3 } : { title: 1, sub: 2 };
 }

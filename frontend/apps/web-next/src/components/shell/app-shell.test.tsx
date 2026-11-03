@@ -124,7 +124,9 @@ describe("AppShellFrame", () => {
     // The form exists only while the dialog is open: no stray Namn field.
     expect(screen.queryByLabelText(/Namn/)).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Skapa yta" }));
+    // From the space switcher at the top of the sidebar, as in the Svelte app.
+    fireEvent.click(screen.getByRole("button", { name: "Öppna meny" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Skapa en ny yta" }));
 
     const dialog = await screen.findByRole("dialog", { name: "Skapa en ny yta" });
     expect(within(dialog).getByLabelText(/Namn/)).toBeTruthy();
@@ -281,7 +283,7 @@ describe("AppShellFrame on an iPad", () => {
       setViewport(viewport);
       renderShell();
       expect(screen.queryByRole("button", { name: "Öppna menyn" })).toBeNull();
-      expect(screen.getByRole("navigation", { name: "Huvudmeny" })).toBeTruthy();
+      expect(screen.getByRole("navigation", { name: "Ytans meny" })).toBeTruthy();
       expect(screen.getByRole("button", { name: "Fäll ut sidomenyn" })).toBeTruthy();
     }
   );

@@ -15,7 +15,8 @@ const TURNED = [
 // The shell's top bar: a space's own header (tablets, desktop) is a <header> in main.
 const TOP_BAR = "header:not(main *)";
 // The side navigation; on a phone its twin is in the closed drawer, out of the accessibility tree.
-const sideNav = (page: Page) => page.getByRole("navigation", { name: /^(Huvudmeny|Main menu)$/ });
+const sideNav = (page: Page) =>
+  page.getByRole("navigation", { name: /^(Huvudmeny|Main menu|Ytans meny|Space menu)$/ });
 
 async function spaceWithAssistant(page: Page) {
   const name = uniqueName("E2E Turned");

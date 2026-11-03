@@ -91,7 +91,8 @@ for (const reduced of [false, true]) {
       );
       await press("menu close", () => page.keyboard.press("Escape"));
 
-      await openRoute(page, "/dashboard", true);
+      // A page with a sidebar: the assistant catalogue has none, as in the Svelte app.
+      await openRoute(page, "/spaces/list", true);
       await press("drawer open", () =>
         page
           .getByRole("button", { name: /öppna menyn/i })
@@ -135,7 +136,7 @@ for (const reduced of [false, true]) {
  * on a spring. With reduce motion it only fades on a coarse pointer and lands at once with a
  * mouse. Measured inside the nav's wrapper, which holds that copy too.
  */
-const RAIL = 'nav[aria-label="Huvudmeny"]';
+const RAIL = 'nav[aria-label="Ytans meny"]';
 const RAIL_AREA = `:has(> ${RAIL})`;
 // The toggle's own press scale is a CSS transition, named for its property; the rail's motion
 // is Web Animations, which have no name.
@@ -157,7 +158,8 @@ for (const { title, reduced, touch } of [
       reducedMotion: reduced ? "reduce" : "no-preference"
     });
     const page = await context.newPage();
-    await openRoute(page, "/dashboard", true);
+    // A page with a sidebar: the assistant catalogue has none, as in the Svelte app.
+    await openRoute(page, "/spaces/list", true);
     // Astryx chooses the fade by the primary pointer, so the emulation has to report it.
     const coarse = await page.evaluate(() => matchMedia("(pointer: coarse)").matches);
     expect(coarse, "a coarse pointer").toBe(touch);

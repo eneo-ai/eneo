@@ -81,7 +81,7 @@ test(
     const space = await createSpace(page, uniqueName("Assistant routes"));
     await page.goto(`${space}/assistants`);
     await expect(
-      page.getByRole("heading", { name: "Assistenter", level: 2, exact: true })
+      page.getByRole("heading", { name: "Assistenter", level: 1, exact: true })
     ).toBeVisible();
     const response = await page.request.get("/api/v1/spaces/type/organization/");
     expect(response.status()).toBe(200);

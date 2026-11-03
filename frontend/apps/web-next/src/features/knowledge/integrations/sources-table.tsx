@@ -46,6 +46,7 @@ import type { ProgressById } from "./sync-progress";
 import { useAnnounceChange } from "@/lib/hooks/use-announce-change";
 import { useSourceListAnnouncements } from "./use-sync-announcements";
 import { VendorIcon } from "./vendor";
+import { useSectionHeadingLevels } from "@/features/spaces/frame/space-frame";
 
 type SourceRow = {
   id: string;
@@ -313,6 +314,9 @@ export function SourcesList({
   name: TableName;
 }) {
   const t = useTranslations();
+  // The groups sit under the page's title: h2 beside the sidebar, h3 under a phone's space header.
+  const headingLevel = useSectionHeadingLevels().sub;
+  const GroupHeading = `h${headingLevel}` as const;
   const { routeId } = useSpace();
   const collator = useCollator();
   // A search that matches no source of a group, said by its table or rows.
@@ -320,7 +324,7 @@ export function SourcesList({
     <EmptyState
       isAnnounced={false}
       title={t("no_results_found")}
-      headingLevel={3}
+      headingLevel={headingLevel}
       isCompact
       framed={false}
     />
@@ -423,17 +427,25 @@ export function SourcesList({
           <Button label={t("integration_filter_show_all")} size="sm" onClick={showAll} />
         </div>
       ) : shown.length === 0 ? (
-        // Under the group headings (h3) and the page's "Kunskap" (h2).
-        <EmptyState isAnnounced={false} title={t("no_results_found")} headingLevel={3} isCompact />
+        // At the group headings' level, under the page's "Kunskap".
+        <EmptyState
+          isAnnounced={false}
+          title={t("no_results_found")}
+          headingLevel={headingLevel}
+          isCompact
+        />
       ) : (
         shown.map((group) => {
           const headingId = group.heading === null ? null : `${headingIds}-${group.key}`;
           return (
             <div key={group.key} className="flex flex-col gap-2">
               {headingId ? (
-                <h3 id={headingId} className="text-ax-text-secondary text-sm font-semibold">
+                <GroupHeading
+                  id={headingId}
+                  className="text-ax-text-secondary text-sm font-semibold"
+                >
                   {group.heading}
-                </h3>
+                </GroupHeading>
               ) : null}
               <RowsOrTable
                 items={[...group.rows]

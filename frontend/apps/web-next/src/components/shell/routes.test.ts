@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   areaOf,
+  sideNavKind,
   conversationHref,
   currentNavTarget,
   isAdminRoute,
@@ -35,6 +36,24 @@ describe("areaOf", () => {
     expect(areaOf("/whats-new")).toBeNull();
     expect(areaOf("/spacesx")).toBeNull();
     expect(areaOf("/administration")).toBeNull();
+  });
+});
+
+describe("sideNavKind", () => {
+  // Which sidebar the Svelte app shows beside each page.
+  it.each([
+    ["/spaces/personal/chat", "space"],
+    ["/spaces/s1/knowledge/collections/c1", "space"],
+    ["/spaces/organization/skills", "space"],
+    ["/spaces/list", "spaces-list"],
+    ["/admin/models", "admin"],
+    ["/account/api-keys", "account"],
+    ["/whats-new", "account"],
+    ["/dashboard", null],
+    ["/dashboard/a1", null],
+    ["/somewhere", null]
+  ])("gives %s the %s sidebar", (pathname, kind) => {
+    expect(sideNavKind(pathname)).toBe(kind);
   });
 });
 
