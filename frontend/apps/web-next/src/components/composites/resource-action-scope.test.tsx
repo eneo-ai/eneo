@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { DropdownMenu, DropdownMenuItem } from "@astryxdesign/core/DropdownMenu";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { useEffect, useRef, useState } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { renderInApp } from "@/test/render";
 import { setViewport } from "@/test/setup-dom";
+import { ConfirmDialogControlled } from "./confirm-dialog";
 import { createResourceActions } from "./resource-action-scope";
 import { ResourceCard, ResourceCollection } from "./resource-tile";
 
@@ -158,5 +160,99 @@ describe("a resource's dialog across 768 px (a phone turned)", () => {
 
   it("asks for its scope instead of opening nothing", () => {
     expect(() => renderInApp(<Menu item={items[0]!} />)).toThrow(/ResourceActionScope/);
+  });
+});
+
+const deletes = createResourceActions<Item, "delete">();
+
+/** An Astryx menu, as a row has: the dialog opens from its item, gone once the dialog is up. */
+function DeleteMenu({ item }: { item: Item }) {
+  const open = deletes.useOpenResourceAction();
+  return (
+    <DropdownMenu button={{ label: `Fler åtgärder för ${item.name}`, isIconOnly: true }}>
+      <DropdownMenuItem label="Ta bort" onClick={() => open("delete", item)} />
+    </DropdownMenu>
+  );
+}
+
+/** What a confirmed delete does to the list: nothing, or the item goes once the list is read again. */
+const deleted: { removes: boolean; remove: (item: Item) => void } = {
+  removes: false,
+  remove: () => {}
+};
+
+function DeleteDialog({ resource, onClose }: { resource: Item; onClose: () => void }) {
+  return (
+    <ConfirmDialogControlled
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+      title={`Ta bort ${resource.name}`}
+      description="Det går inte att ångra."
+      confirmLabel="Ta bort"
+      onConfirm={async () => {
+        // The request answers, and the dialog closes, outside the click.
+        await Promise.resolve();
+        onClose();
+        // The refetch answers after the dialog has gone.
+        if (deleted.removes) setTimeout(() => deleted.remove(resource), 0);
+      }}
+    />
+  );
+}
+
+function DeletePage() {
+  const heading = useRef<HTMLHeadingElement>(null);
+  const [shown, setShown] = useState(items);
+  useEffect(() => {
+    deleted.remove = (item) => setShown((current) => current.filter(({ id }) => id !== item.id));
+  });
+  return (
+    <deletes.ResourceActionScope Dialog={DeleteDialog} focusTarget={heading}>
+      <h1 ref={heading} tabIndex={-1}>
+        Appar
+      </h1>
+      <ul>
+        {shown.map((item) => (
+          <li key={item.id}>
+            <DeleteMenu item={item} />
+          </li>
+        ))}
+      </ul>
+    </deletes.ResourceActionScope>
+  );
+}
+
+describe("a confirmation the scope drops once it is done", () => {
+  async function confirmDelete(name: string) {
+    renderInApp(<DeletePage />);
+    const menu = screen.getByRole("button", { name: `Fler åtgärder för ${name}` });
+    act(() => menu.focus());
+    // jsdom does not turn Enter into a click; Astryx opens menus on the key.
+    fireEvent.keyDown(menu, { key: "Enter" });
+    const items = document.getElementById(menu.getAttribute("aria-controls")!)!;
+    fireEvent.click(within(items).getByRole("menuitem", { name: "Ta bort" }));
+    const dialog = await screen.findByRole("alertdialog", { name: `Ta bort ${name}` });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Ta bort" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    return menu;
+  }
+
+  it("gives focus back to the menu that opened it when the item stays", async () => {
+    deleted.removes = false;
+    const menu = await confirmDelete("Avtal");
+    await waitFor(() => expect(document.activeElement).toBe(menu));
+  });
+
+  it("gives focus to the page's heading when the item leaves after the dialog has gone", async () => {
+    deleted.removes = true;
+    await confirmDelete("Avtal");
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Fler åtgärder för Avtal" })).toBeNull()
+    );
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Appar" }))
+    );
   });
 });

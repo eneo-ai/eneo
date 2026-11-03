@@ -111,12 +111,29 @@ export function useReturnFocus(open: boolean, triggerRef: React.RefObject<HTMLEl
     returnFocusTo(target);
   }, [open]);
 
-  React.useEffect(
-    () => () => {
-      if (openRef.current) returnFocusTo(targetRef.current);
-    },
-    []
-  );
+  // Unmounted while open: focus goes back once, from whichever comes first. A
+  // close in an event (a click) has its passive cleanups flushed with the
+  // commit. A close outside one (a request that answered) runs them later, after
+  // a page's focus rescue has heard of the removal; the microtask queued in the
+  // layout cleanup, before the dialog's nodes go, runs first: once the commit is
+  // done, after the dialog's own return. The rescue then finds focus on the
+  // opener and waits for that to go too (a deleted row's menu), as when the
+  // dialog closes while kept. Remounted at once (StrictMode), the queued return
+  // does nothing.
+  const mountedRef = React.useRef(false);
+  function returnAfterUnmount() {
+    if (mountedRef.current || !openRef.current) return;
+    openRef.current = false;
+    returnFocusTo(targetRef.current);
+  }
+  React.useLayoutEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      queueMicrotask(returnAfterUnmount);
+    };
+  }, []);
+  React.useEffect(() => () => returnAfterUnmount(), []);
 }
 
 /** Places focus on `target` when it is lost; when it stays lost, the page is told. */

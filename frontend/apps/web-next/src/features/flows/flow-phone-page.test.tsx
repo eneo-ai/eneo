@@ -82,7 +82,11 @@ function renderPhonePage(
     <Suspense>
       <FlowPage flowId={flow.id} />
     </Suspense>,
-    { queryClient, appContext: testAppContext({ permissions }) }
+    {
+      queryClient,
+      // The flow routes exist only where the tenant has flows.
+      appContext: testAppContext({ permissions, featureFlags: { federation: false, flows: true } })
+    }
   );
 }
 
@@ -143,11 +147,12 @@ describe("FlowPage on a phone", () => {
     expect(screen.queryByRole("tab", { hidden: true })).toBeNull();
   });
 
-  it('docks "Kör flödet" and has no breadcrumbs of its own below 768 px', async () => {
+  it('docks "Kör flödet" and has no breadcrumbs of its own, nor the space\'s flows to read for them', async () => {
     renderPhonePage();
     await screen.findByRole("heading", { level: 1, name: "Medborgarbrev" });
     expect(screen.getByRole("group", { name: "Åtgärder för flödet" })).toBeTruthy();
     expect(screen.queryByRole("navigation", { name: "Sökväg" })).toBeNull();
+    expect(api.GET).not.toHaveBeenCalledWith("/api/v1/flows/", expect.anything());
   });
 
   it("keeps the start form, and what was typed in it, when a tablet is split down to a phone's width", async () => {

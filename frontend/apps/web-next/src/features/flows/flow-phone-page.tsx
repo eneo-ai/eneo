@@ -6,10 +6,6 @@ import { useTranslations } from "use-intl";
 import { DockedActions } from "@/components/shell/docked-actions";
 import { PageBar } from "@/components/shell/page-bar";
 import { browserApi } from "@/lib/api/browser";
-import { PageHeader } from "@/components/composites/page-header";
-import { usePhoneScreen } from "@/lib/hooks/use-media-match";
-import { useSpaceDisplayName, useSpaceSections } from "@/features/spaces/frame/space-header";
-import { spaceLandingHref } from "@/features/spaces/frame/space-sections";
 import { useSpace } from "@/features/spaces/use-space";
 import { flowQueryOptions } from "./flows-api";
 import { flowKindLine } from "./flows-rows";
@@ -20,16 +16,12 @@ import { FlowRunsList } from "./runs/runs-list";
  * a computer): its name, what it is for, what it takes and gives, its runs
  * and "Kör flödet" docked under the thumb (the form it opens is the flow
  * page's). The definition and the flow's chat are not here: nothing offers to
- * edit.
+ * edit. FlowPage shows it only on a phone held either way (HANDHELD_QUERY), a
+ * phone's layout, so its chrome is the phone's: the page bar and the dock.
  */
 export function FlowPhonePage({ flowId, onStart }: { flowId: string; onStart: () => void }) {
   const t = useTranslations();
   const { routeId } = useSpace();
-  const spaceName = useSpaceDisplayName();
-  const sections = useSpaceSections();
-  // On a phone's layout (held either way) a page bar is the chrome and "Kör flödet" is docked;
-  // elsewhere the page has a header of its own (breadcrumbs back to Flöden, "Kör flödet" at the top).
-  const narrow = usePhoneScreen();
   const { data: flow } = useSuspenseQuery(flowQueryOptions(browserApi, flowId));
   const isPublished = flow.published_version != null;
   const canRun = isPublished && flow.permissions.can_run;
@@ -38,41 +30,16 @@ export function FlowPhonePage({ flowId, onStart }: { flowId: string; onStart: ()
   return (
     <div className="flex min-w-0 flex-1 flex-col">
       <PageBar until="phone" parent={{ label: t("flows"), href: `/spaces/${routeId}/flows` }} />
-      <div className="flex flex-col gap-6 px-4 py-4 md:px-6">
-        {narrow ? (
-          <header className="flex flex-col gap-2">
-            <h1 className="text-ax-text text-2xl leading-tight font-semibold break-words">
-              {flow.name}
-            </h1>
-            {flow.description?.trim() ? (
-              <p className="text-ax-text-secondary m-0 text-base break-words">{flow.description}</p>
-            ) : null}
-            {kind ? <p className="text-ax-text-secondary m-0 text-sm">{kind}</p> : null}
-          </header>
-        ) : (
-          <div className="flex flex-col gap-2">
-            <PageHeader
-              title={flow.name}
-              description={flow.description?.trim() || undefined}
-              breadcrumbs={[
-                { label: spaceName, href: spaceLandingHref(sections, routeId) },
-                { label: t("flows"), href: `/spaces/${routeId}/flows` },
-                { label: flow.name, current: true }
-              ]}
-              actions={
-                canRun ? (
-                  <Button
-                    label={t("flow_runs_start")}
-                    variant="primary"
-                    icon={<Play aria-hidden="true" />}
-                    onClick={onStart}
-                  />
-                ) : undefined
-              }
-            />
-            {kind ? <p className="text-ax-text-secondary m-0 text-sm">{kind}</p> : null}
-          </div>
-        )}
+      <div className="flex flex-col gap-6 p-4">
+        <header className="flex flex-col gap-2">
+          <h1 className="text-ax-text text-2xl leading-tight font-semibold break-words">
+            {flow.name}
+          </h1>
+          {flow.description?.trim() ? (
+            <p className="text-ax-text-secondary m-0 text-base break-words">{flow.description}</p>
+          ) : null}
+          {kind ? <p className="text-ax-text-secondary m-0 text-sm">{kind}</p> : null}
+        </header>
         {!isPublished ? (
           <Banner status="info" title={t("flow_phone_not_published")} collapsible={false} />
         ) : null}
@@ -87,7 +54,7 @@ export function FlowPhonePage({ flowId, onStart }: { flowId: string; onStart: ()
           <p className="text-ax-text-secondary m-0 text-sm">{t("flow_edit_on_desktop")}</p>
         ) : null}
       </div>
-      {canRun && narrow ? (
+      {canRun ? (
         <DockedActions label={t("flow_phone_actions")}>
           <Button
             label={t("flow_runs_start")}
