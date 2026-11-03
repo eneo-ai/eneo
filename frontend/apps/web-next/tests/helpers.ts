@@ -334,3 +334,40 @@ export async function animationsSettled(page: Page): Promise<void> {
     )
   );
 }
+
+const NOT_TEXT = ["checkbox", "radio", "range", "file", "hidden", "color", "button", "submit"];
+
+/**
+ * Visible text fields below 16 px, and visible controls that still take double-tap zoom
+ * (globals.css 14c, a touch screen's platform layer).
+ */
+export async function platformFaults(page: Page, screen: string) {
+  return page.evaluate(
+    ({ notText, screen }) => {
+      const shown = (element: Element) => element.getClientRects().length > 0;
+      const faults: string[] = [];
+      for (const field of document.querySelectorAll(
+        "input, textarea, select, [contenteditable='true']"
+      )) {
+        if (!shown(field) || notText.includes((field as HTMLInputElement).type)) continue;
+        const size = parseFloat(getComputedStyle(field).fontSize);
+        if (size < 16)
+          faults.push(
+            `${screen}: ${field.tagName} ${size}px ${field.id || field.getAttribute("name") || field.getAttribute("aria-label") || ""}`
+          );
+      }
+      const controls =
+        "a[href], button, input, select, textarea, [role=tab], [role=menuitem], [role=option]";
+      for (const control of document.querySelectorAll(controls)) {
+        if (!shown(control)) continue;
+        if (getComputedStyle(control).touchAction === "auto") {
+          faults.push(
+            `${screen}: ${control.tagName} touch-action auto ${(control.textContent ?? "").trim().slice(0, 30)}`
+          );
+        }
+      }
+      return faults;
+    },
+    { notText: NOT_TEXT, screen }
+  );
+}
