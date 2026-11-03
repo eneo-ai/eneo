@@ -56,8 +56,8 @@ from eneo.sessions.session import (
     SessionPublic,
 )
 from eneo.sessions.session_protocol import (
+    to_session_metadata_paginated_response,
     to_session_public,
-    to_sessions_paginated_response,
 )
 from eneo.skills.presentation.skill_assembler import (
     assistant_skill_binding_intents_from_input,
@@ -1038,7 +1038,7 @@ async def get_assistant_sessions(
         previous=previous,
     )
 
-    return to_sessions_paginated_response(
+    return to_session_metadata_paginated_response(
         sessions=sessions,
         limit=limit,
         cursor=cursor,
