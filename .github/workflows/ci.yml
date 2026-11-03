@@ -268,7 +268,7 @@ jobs:
           TESTCONTAINERS_RYUK_DISABLED: "true"
           DOCKER_HOST: unix:///var/run/docker.sock
 
-      - name: Verify crawler migration rollback
+      - name: Verify crawler and audit migration rollback
         if: matrix.suite == 'migrations'
         # These tests own disposable databases and deliberately change their schema.
         run: >-
@@ -276,6 +276,7 @@ jobs:
           tests/integration/migrations/test_crawl_lifecycle_round_trip.py
           tests/integration/migrations/test_website_source_url_identity.py
           tests/integration/migrations/test_crawler_develop_rollback.py
+          tests/integration/migrations/test_audit_description_statistics_round_trip.py
         env:
           TESTCONTAINERS_RYUK_DISABLED: "true"
           DOCKER_HOST: unix:///var/run/docker.sock
