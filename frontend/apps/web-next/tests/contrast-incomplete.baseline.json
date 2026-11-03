@@ -28,6 +28,14 @@
   "pseudoContent": 4,
   "shortTextContent": 2
  },
+ "ipad-dark|/admin/widgets": {
+  "bgOverlap": 3,
+  "shortTextContent": 2
+ },
+ "ipad-dark|/admin/widgets/templates/$": {
+  "bgOverlap": 2,
+  "nonBmp": 2
+ },
  "ipad-dark|/spaces/$": {
   "bgOverlap": 7,
   "shortTextContent": 4
@@ -56,7 +64,11 @@
   "shortTextContent": 4
  },
  "ipad-dark|/spaces/$/assistants/$/edit": {
-  "bgOverlap": 16
+  "bgOverlap": 17
+ },
+ "ipad-dark|/spaces/$/assistants/$/widget": {
+  "bgOverlap": 5,
+  "nonBmp": 2
  },
  "ipad-dark|/spaces/$/group-chats/$/edit": {
   "bgOverlap": 4
@@ -146,6 +158,13 @@
   "pseudoContent": 4,
   "shortTextContent": 2
  },
+ "ipad-landscape-dark|/admin/widgets": {
+  "bgOverlap": 5
+ },
+ "ipad-landscape-dark|/admin/widgets/templates/$": {
+  "bgOverlap": 2,
+  "nonBmp": 2
+ },
  "ipad-landscape-dark|/spaces/$": {
   "bgOverlap": 7,
   "shortTextContent": 4
@@ -175,6 +194,10 @@
  },
  "ipad-landscape-dark|/spaces/$/assistants/$/edit": {
   "bgOverlap": 5
+ },
+ "ipad-landscape-dark|/spaces/$/assistants/$/widget": {
+  "bgOverlap": 5,
+  "nonBmp": 2
  },
  "ipad-landscape-dark|/spaces/$/knowledge": {
   "bgOverlap": 10,
@@ -261,6 +284,13 @@
   "pseudoContent": 4,
   "shortTextContent": 2
  },
+ "ipad-landscape-light|/admin/widgets": {
+  "bgOverlap": 5
+ },
+ "ipad-landscape-light|/admin/widgets/templates/$": {
+  "bgOverlap": 2,
+  "nonBmp": 2
+ },
  "ipad-landscape-light|/spaces/$": {
   "bgOverlap": 7,
   "shortTextContent": 4
@@ -290,6 +320,10 @@
  },
  "ipad-landscape-light|/spaces/$/assistants/$/edit": {
   "bgOverlap": 5
+ },
+ "ipad-landscape-light|/spaces/$/assistants/$/widget": {
+  "bgOverlap": 5,
+  "nonBmp": 2
  },
  "ipad-landscape-light|/spaces/$/knowledge": {
   "bgOverlap": 10,
@@ -366,6 +400,14 @@
   "pseudoContent": 4,
   "shortTextContent": 2
  },
+ "ipad-light|/admin/widgets": {
+  "bgOverlap": 3,
+  "shortTextContent": 2
+ },
+ "ipad-light|/admin/widgets/templates/$": {
+  "bgOverlap": 2,
+  "nonBmp": 2
+ },
  "ipad-light|/spaces/$": {
   "bgOverlap": 7,
   "shortTextContent": 4
@@ -394,7 +436,11 @@
   "shortTextContent": 4
  },
  "ipad-light|/spaces/$/assistants/$/edit": {
-  "bgOverlap": 16
+  "bgOverlap": 17
+ },
+ "ipad-light|/spaces/$/assistants/$/widget": {
+  "bgOverlap": 5,
+  "nonBmp": 2
  },
  "ipad-light|/spaces/$/group-chats/$/edit": {
   "bgOverlap": 4
@@ -472,6 +518,14 @@
   "bgOverlap": 2,
   "shortTextContent": 2
  },
+ "ipad-mini-light|/admin/widgets": {
+  "bgOverlap": 3,
+  "shortTextContent": 2
+ },
+ "ipad-mini-light|/admin/widgets/templates/$": {
+  "bgOverlap": 2,
+  "nonBmp": 2
+ },
  "ipad-mini-light|/spaces/$": {
   "bgOverlap": 4
  },
@@ -480,6 +534,10 @@
  },
  "ipad-mini-light|/spaces/$/assistants": {
   "bgOverlap": 4
+ },
+ "ipad-mini-light|/spaces/$/assistants/$/widget": {
+  "bgOverlap": 5,
+  "nonBmp": 2
  },
  "ipad-mini-light|/spaces/$/knowledge": {
   "bgOverlap": 4
@@ -529,6 +587,14 @@
   "bgOverlap": 2,
   "shortTextContent": 2
  },
+ "phone-dark|/admin/widgets": {
+  "bgOverlap": 3,
+  "shortTextContent": 2
+ },
+ "phone-dark|/admin/widgets/templates/$": {
+  "bgOverlap": 2,
+  "nonBmp": 2
+ },
  "phone-dark|/spaces/$": {
   "bgOverlap": 4
  },
@@ -537,6 +603,10 @@
  },
  "phone-dark|/spaces/$/assistants": {
   "bgOverlap": 4
+ },
+ "phone-dark|/spaces/$/assistants/$/widget": {
+  "bgOverlap": 5,
+  "nonBmp": 2
  },
  "phone-dark|/spaces/$/knowledge": {
   "bgOverlap": 4
@@ -586,6 +656,14 @@
   "bgOverlap": 2,
   "shortTextContent": 2
  },
+ "phone-light|/admin/widgets": {
+  "bgOverlap": 3,
+  "shortTextContent": 2
+ },
+ "phone-light|/admin/widgets/templates/$": {
+  "bgOverlap": 2,
+  "nonBmp": 2
+ },
  "phone-light|/spaces/$": {
   "bgOverlap": 4
  },
@@ -594,6 +672,10 @@
  },
  "phone-light|/spaces/$/assistants": {
   "bgOverlap": 4
+ },
+ "phone-light|/spaces/$/assistants/$/widget": {
+  "bgOverlap": 5,
+  "nonBmp": 2
  },
  "phone-light|/spaces/$/knowledge": {
   "bgOverlap": 4
@@ -707,7 +789,7 @@
   "shortTextContent": 4
  },
  "WCAG 2.2 AA, dark mode › iPad portrait (820 × 1180)|a space's assistants, apps and members, an editor and an app result #4": {
-  "bgOverlap": 16
+  "bgOverlap": 17
  },
  "WCAG 2.2 AA, dark mode › iPad portrait (820 × 1180)|a space's assistants, apps and members, an editor and an app result #5": {
   "bgOverlap": 7,
@@ -1002,7 +1084,7 @@
   "shortTextContent": 4
  },
  "WCAG 2.2 AA, light mode › iPad portrait (820 × 1180)|a space's assistants, apps and members, an editor and an app result #4": {
-  "bgOverlap": 16
+  "bgOverlap": 17
  },
  "WCAG 2.2 AA, light mode › iPad portrait (820 × 1180)|a space's assistants, apps and members, an editor and an app result #5": {
   "bgOverlap": 7,
