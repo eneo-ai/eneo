@@ -1,11 +1,20 @@
 import messages from "../src/lib/i18n/messages/sv.json";
 import { expect, test } from "./csp";
+import { apiPost, uniqueName } from "./helpers";
 
 test(
   "prompt name stops native typing at 200 characters and cancels its draft",
   { tag: "@vite" },
   async ({ page }) => {
+    // An empty library offers its first prompt from the empty state instead; one stored
+    // prompt keeps this test from depending on another spec having made one.
     await page.goto("/admin/prompt-library");
+    await apiPost(page, "/admin/prompt-library/", {
+      name: uniqueName("Governance draft"),
+      description: "Native typing limit",
+      text: "Answer with the organisation's instructions."
+    });
+    await page.reload();
     const create = page.getByRole("button", {
       name: messages.governance_prompt_create,
       exact: true
