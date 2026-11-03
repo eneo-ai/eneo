@@ -69,7 +69,10 @@ test("one page link stays current across a saved chat and administration", async
   await expect(current).toHaveCount(1);
   await expect(current).toHaveAttribute("href", savedChat);
 
-  await page.getByRole("link", { name: "Administration", exact: true }).click();
+  await page
+    .getByRole("navigation", { name: "Huvudområden", exact: true })
+    .getByRole("link", { name: "Administratör", exact: true })
+    .click();
   await page
     .getByRole("navigation", { name: "Administration", exact: true })
     .getByRole("link", { name: "Användare", exact: true })

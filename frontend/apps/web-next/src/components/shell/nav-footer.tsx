@@ -6,7 +6,7 @@ import { useAppContext } from "@/components/providers/app-context";
 import { cn } from "@/lib/utils";
 import { useNavTarget } from "./nav-data";
 import { NAV_ITEM_CLASSES, SECONDARY_LINK_CLASSES } from "./nav-styles";
-import { ProfileLink, ProfileMenu } from "./profile-menu";
+import { ProfileLink } from "./profile-menu";
 import type { NavVariant } from "./routes";
 
 function OrganizationItem() {
@@ -52,9 +52,9 @@ function HelpCenterItem({ href }: { href: string }) {
 }
 
 /**
- * "Organisation" and "Administration" (admins), the help centre, then the
- * profile: a button and its menu in the SideNav, a link to Konto in the
- * drawer (decision 22).
+ * The help centre, as at the foot of Svelte's sidebar. In the phone's drawer
+ * also "Organisation" and "Administration" (admins) and a link to Konto
+ * (decision 22): on wider screens the top bar carries those.
  */
 export function NavFooter({ variant }: { variant: NavVariant }) {
   const t = useTranslations();
@@ -64,14 +64,18 @@ export function NavFooter({ variant }: { variant: NavVariant }) {
 
   return (
     <div className={cn("flex flex-col gap-0.5", NAV_ITEM_CLASSES, SECONDARY_LINK_CLASSES)}>
-      {variant === "main" && isAdmin ? (
+      {isInDrawer && variant === "main" && isAdmin ? (
         <>
           <OrganizationItem />
           <SideNavItem label={t("shell_administration")} icon={Shield} href="/admin" />
         </>
       ) : null}
       {links.helpCenter ? <HelpCenterItem href={links.helpCenter} /> : null}
-      <div className="mt-1.5">{isInDrawer ? <ProfileLink /> : <ProfileMenu />}</div>
+      {isInDrawer ? (
+        <div className="mt-1.5">
+          <ProfileLink />
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -1915,5 +1915,8 @@
   "session_extended": "You are still signed in.",
   "session_extend_failed": "The session could not be extended. Try again.",
   "skills_library_view_revision_aria": "Preview of version {revision}",
-  "tools_bundled_unavailable": "Eneo's built-in tools could not be read"
+  "tools_bundled_unavailable": "Eneo's built-in tools could not be read",
+  "shell_area_shared": "Spaces",
+  "shell_top_nav_label": "Main areas",
+  "show_header": "Show header"
 }

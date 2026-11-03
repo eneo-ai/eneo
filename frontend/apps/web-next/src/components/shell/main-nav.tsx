@@ -4,7 +4,12 @@ import { Button } from "@astryxdesign/core/Button";
 import { Icon } from "@astryxdesign/core/Icon";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { Kbd } from "@astryxdesign/core/Kbd";
-import { SideNavItem, SideNavSection, useSideNavCollapse } from "@astryxdesign/core/SideNav";
+import {
+  SideNavItem,
+  SideNavSection,
+  useSideNavCollapse,
+  useSideNavRenderMode
+} from "@astryxdesign/core/SideNav";
 import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { Tooltip } from "@astryxdesign/core/Tooltip";
 import { Bot, LayoutGrid, Plus, RotateCcw, Search, SquarePen, User } from "lucide-react";
@@ -57,6 +62,7 @@ export function MainTopContent() {
   // In the drawer, "Sök" opens the palette over the drawer instead of closing
   // it, so focus has somewhere to return to when the palette closes.
   const keepDrawerOpen = useMemo(() => ({ ...mobile, closeMobileNav: () => {} }), [mobile]);
+  const isInDrawer = useSideNavRenderMode() === "drawer-content";
 
   return (
     // The design sets "Sök" (the only button row) in secondary text.
@@ -68,21 +74,24 @@ export function MainTopContent() {
       )}
     >
       <NewConversationButton />
-      <AppShellMobileContext value={keepDrawerOpen}>
-        <SideNavItem
-          label={t("search")}
-          icon={Search}
-          size="lg"
-          onClick={() => openPalette()}
-          aria-keyshortcuts="Meta+K Control+K"
-          endContent={
-            // The drawer (below md) is the phone's menu: no key hints there, nor on touch.
-            <span aria-hidden="true" className="flex max-md:hidden pointer-coarse:hidden">
-              <Kbd keys="mod+k" />
-            </span>
-          }
-        />
-      </AppShellMobileContext>
+      {/* Beside the top bar, Sök is the top bar's (top-bar.tsx); the drawer keeps its own. */}
+      {isInDrawer && (
+        <AppShellMobileContext value={keepDrawerOpen}>
+          <SideNavItem
+            label={t("search")}
+            icon={Search}
+            size="lg"
+            onClick={() => openPalette()}
+            aria-keyshortcuts="Meta+K Control+K"
+            endContent={
+              // The drawer (below md) is the phone's menu: no key hints there, nor on touch.
+              <span aria-hidden="true" className="flex max-md:hidden pointer-coarse:hidden">
+                <Kbd keys="mod+k" />
+              </span>
+            }
+          />
+        </AppShellMobileContext>
+      )}
       <SideNavItem
         label={t("assistants")}
         icon={Bot}

@@ -1915,5 +1915,8 @@
   "session_extended": "Du är fortsatt inloggad.",
   "session_extend_failed": "Det gick inte att förlänga sessionen. Försök igen.",
   "skills_library_view_revision_aria": "Förhandsvisning av version {revision}",
-  "tools_bundled_unavailable": "Det gick inte att läsa Eneos inbyggda verktyg"
+  "tools_bundled_unavailable": "Det gick inte att läsa Eneos inbyggda verktyg",
+  "shell_area_shared": "Delat",
+  "shell_top_nav_label": "Huvudområden",
+  "show_header": "Visa sidhuvudet"
 }

@@ -30,19 +30,43 @@ function navLabelKey(variant: NavVariant) {
  * when none was made), a change stores it, and a stored choice wins at every
  * width.
  */
+export type SideNavRail = {
+  /** Shown as the icon rail. */
+  collapsed: boolean;
+  /** The stored choice; undefined while the width decides. */
+  chosen: boolean | undefined;
+  /** Collapses or expands the nav and stores the choice. */
+  change: (collapsed: boolean) => void;
+};
+
+/**
+ * Whether the SideNav is its icon rail. The app shell owns it, so the top
+ * bar's wordmark cell keeps to the SideNav's width without a CSS :has() rule.
+ */
+export function useSideNavRail(defaultCollapsed: boolean | undefined): SideNavRail {
+  const [chosen, setChosen] = useState(defaultCollapsed);
+  const isNarrow = useMediaQuery(`not all and ${MEDIA.xl}`);
+  return {
+    collapsed: chosen ?? isNarrow,
+    chosen,
+    change: (next) => {
+      setChosen(next);
+      storeSideNavCollapsed(next);
+    }
+  };
+}
+
 export function DesktopSideNav({
   variant,
   navId,
-  defaultCollapsed
+  rail
 }: {
   variant: NavVariant;
   navId: string;
-  defaultCollapsed?: boolean;
+  rail: SideNavRail;
 }) {
   const t = useTranslations();
-  const [chosen, setChosen] = useState(defaultCollapsed);
-  const isNarrow = useMediaQuery(`not all and ${MEDIA.xl}`);
-  const collapsed = chosen ?? isNarrow;
+  const { collapsed, chosen } = rail;
 
   // The width collapsing or expanding the nav removes whole sections (Senaste
   // in the icon rail). If the focused link was one of them, focus goes to the
@@ -64,21 +88,16 @@ export function DesktopSideNav({
     );
   }, [shown, navId, rescueFocus]);
 
-  function changeCollapsed(next: boolean) {
-    setChosen(next);
-    storeSideNavCollapsed(next);
-  }
-
   return (
     <SideNav
       id={navId}
       aria-label={t(navLabelKey(variant))}
-      collapsible={{ isCollapsed: collapsed, onCollapsedChange: changeCollapsed, hasButton: false }}
+      collapsible={{ isCollapsed: collapsed, onCollapsedChange: rail.change, hasButton: false }}
       header={<NavHeader navId={navId} />}
       topContent={variant === "admin" ? <AdminTopContent /> : <MainTopContent />}
       footer={<NavFooter variant={variant} />}
-      // ≈248 px wide (the design), 64 px as an icon rail; the app body shows through.
-      className={cn("bg-ax-body", collapsed ? "w-16" : "w-62")}
+      // 17 rem wide as in the Svelte app, 64 px as an icon rail.
+      className={cn("bg-ax-surface", collapsed ? "w-16" : "w-68")}
     >
       {variant === "admin" ? <AdminSections /> : <MainSections />}
     </SideNav>

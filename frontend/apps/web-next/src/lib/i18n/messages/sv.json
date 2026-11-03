@@ -7130,5 +7130,8 @@
   "session_expiring_announcement": "Din session går ut om {seconds, plural, one {# sekund} other {# sekunder}}.",
   "session_extended": "Du är fortsatt inloggad.",
   "session_extend_failed": "Det gick inte att förlänga sessionen. Försök igen.",
-  "tools_bundled_unavailable": "Det gick inte att läsa Eneos inbyggda verktyg"
+  "tools_bundled_unavailable": "Det gick inte att läsa Eneos inbyggda verktyg",
+  "shell_area_shared": "Delat",
+  "shell_top_nav_label": "Huvudområden",
+  "show_header": "Visa sidhuvudet"
 }

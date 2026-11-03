@@ -51,6 +51,23 @@ export function isAdminRoute(pathname: string): boolean {
   return segmentsOf(pathname)[0] === "admin";
 }
 
+/** A top-bar area: Personligt, Delat, Organisation or Administratör. */
+export type Area = "personal" | "shared" | "organization" | "admin";
+
+/**
+ * The top-bar area a route belongs to, as Svelte's top bar marks it: the
+ * personal and organisation spaces their own, every other space route (the
+ * list included) Delat, and the admin pages Administratör. Null elsewhere.
+ */
+export function areaOf(pathname: string): Area | null {
+  const [first, second] = segmentsOf(pathname);
+  if (first === "admin") return "admin";
+  if (first !== "spaces") return null;
+  if (second === "personal") return "personal";
+  if (second === "organization") return "organization";
+  return "shared";
+}
+
 /** The space route id (`personal`, `organization` or a space id) of a space page. */
 export function spaceRouteIdFromPath(pathname: string): string | null {
   const [first, second] = segmentsOf(pathname);
