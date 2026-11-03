@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from typing import List, Optional
 from uuid import UUID
 
@@ -12,11 +13,12 @@ from eneo.database.repositories.base import (
 )
 from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.user_groups_table import UserGroups
-from eneo.database.tables.users_table import Users
+from eneo.database.tables.users_table import Users, usergroups_users_table
 from eneo.main.exceptions import UniqueException
 from eneo.user_groups.user_group import (
     UserGroupCreate,
     UserGroupInDB,
+    UserGroupInDBBase,
     UserGroupState,
     UserGroupUpdate,
 )
@@ -24,6 +26,26 @@ from eneo.user_groups.user_group import (
 _NOT_DELETED = sa.or_(
     UserGroups.state.is_(None), UserGroups.state != UserGroupState.DELETED
 )
+
+
+async def count_group_users(
+    session: AsyncSession, group_ids: Iterable[UUID]
+) -> dict[UUID, int]:
+    """Users per group, in one grouped query; a group without users is absent.
+
+    Counts the same rows as ``UserGroups.users``: the link's foreign key
+    cascades from users, and soft-deleted users stay linked and counted.
+    """
+    ids = list(group_ids)
+    if not ids:
+        return {}
+    link = usergroups_users_table.c
+    rows = await session.execute(
+        sa.select(link.user_group_id, sa.func.count())
+        .where(link.user_group_id.in_(ids))
+        .group_by(link.user_group_id)
+    )
+    return {group_id: int(count) for group_id, count in rows.tuples()}
 
 
 class UserGroupsRepository:
@@ -53,6 +75,19 @@ class UserGroupsRepository:
             .options(*self._get_options())
         )
         return await self.delegate.get_model_from_query(query)
+
+    async def get_user_group_with_user_count(
+        self, id: UUID
+    ) -> tuple[UserGroupInDBBase, int] | None:
+        """A group and how many users it has, without loading the users."""
+        session = self.delegate.session
+        record = await session.scalar(
+            sa.select(UserGroups).where(UserGroups.id == id, _NOT_DELETED)
+        )
+        if record is None:
+            return None
+        counts = await count_group_users(session, [id])
+        return UserGroupInDBBase.model_validate(record), counts.get(id, 0)
 
     async def create_user_group(self, user_group: UserGroupCreate) -> UserGroupInDB:
         try:

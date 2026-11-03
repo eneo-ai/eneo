@@ -93,6 +93,7 @@ from eneo.spaces.space_factory import SpaceFactory
 from eneo.spaces.space_update import SpaceUpdate
 from eneo.spaces.utils.space_utils import effective_space_ids_for
 from eneo.user_groups.user_group import UserGroupState
+from eneo.user_groups.user_groups_repo import count_group_users
 
 logger = get_logger(__name__)
 
@@ -268,9 +269,9 @@ class SpaceRepository:
     def _options(self) -> list[Any]:
         return [
             selectinload(Spaces.members).selectinload(SpacesUsers.user),
-            selectinload(Spaces.group_members)
-            .selectinload(SpacesUserGroups.user_group)
-            .selectinload(UserGroups.users),
+            selectinload(Spaces.group_members).selectinload(
+                SpacesUserGroups.user_group
+            ),
             selectinload(Spaces.services).selectinload(Services.user),
             selectinload(Spaces.integration_knowledge_list).selectinload(
                 IntegrationKnowledge.embedding_model
@@ -1222,6 +1223,7 @@ class SpaceRepository:
         space = self.factory.create_space_from_db(
             entry_in_db,
             user=self.user,
+            group_user_counts=await self._group_user_counts([entry_in_db]),
             collections_in_db=collections,
             websites_in_db=websites,
             completion_models=completion_models,
@@ -1299,6 +1301,12 @@ class SpaceRepository:
             query.execution_options(populate_existing=True)
         )
         return result.all()
+
+    async def _group_user_counts(self, records: Sequence[Spaces]) -> dict[UUID, int]:
+        return await count_group_users(
+            self.session,
+            {link.user_group_id for record in records for link in record.group_members},
+        )
 
     async def add(self, space: Space) -> Space:
         query = (
@@ -1486,6 +1494,7 @@ class SpaceRepository:
         )
 
         records = await self._get_records_with_options(query)
+        group_user_counts = await self._group_user_counts(records)
 
         spaces: list[Space] = []
         for record in records:
@@ -1512,6 +1521,7 @@ class SpaceRepository:
                 self.factory.create_space_from_db(
                     record,
                     user=self.user,
+                    group_user_counts=group_user_counts,
                     assistants_in_db=assistants,
                     assistant_attachments=assistant_attachments,
                     apps_in_db=apps,
