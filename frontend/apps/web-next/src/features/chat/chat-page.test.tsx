@@ -414,6 +414,14 @@ describe("ChatPage Historik tab, as in Svelte", () => {
     expect(within(log).getByText("Vilken gräns gäller?")).toBeTruthy();
   });
 
+  it("names Historik as the page's h1 before a conversation has one, as Insikter", () => {
+    renderPage(null);
+    openHistory();
+    setRoute("/chat?tab=history");
+    // The wide header's h1 (a phone's header names it too; jsdom shows both).
+    expect(screen.getAllByRole("heading", { level: 1, name: "Historik" })).not.toHaveLength(0);
+  });
+
   it("switches views past the leave guard: the conversation and its draft stay", () => {
     renderPage(null);
     fireEvent.change(composer(), { target: { value: "Unsent question" } });

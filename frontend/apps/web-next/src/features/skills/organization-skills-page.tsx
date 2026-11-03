@@ -86,6 +86,7 @@ export function skillRemovalMessage(
 export function OrganizationSkillsPage() {
   const t = useTranslations();
   const levels = useSectionHeadingLevels();
+  const EmptyHeading = `h${levels.sub}` as const;
   const locale = useLocale();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -153,7 +154,7 @@ export function OrganizationSkillsPage() {
 
   return (
     <div className="flex w-full flex-col gap-6 pb-16">
-      {/* A tab of the organization space: the space header holds the h1. */}
+      {/* The page's title: the h1 beside the sidebar, an h2 under a phone's space header. */}
       <PageHeader
         headingLevel={levels.title}
         headingId={headingId}
@@ -230,14 +231,14 @@ export function OrganizationSkillsPage() {
           items.length === 0 ? (
             <div className="border-ax-border-strong flex max-w-3xl flex-col items-center gap-3 rounded-xl border border-dashed p-10 text-center">
               <BookOpenCheck className="text-muted-foreground size-9" />
-              {/* Under the tab's h2. */}
-              <h3 className="font-medium">
+              {/* One level under the page's title. */}
+              <EmptyHeading className="font-medium">
                 {removed && !search
                   ? t("organization_skills_removed_empty")
                   : search
                     ? t("skills_library_no_results")
                     : t("organization_skills_empty_manage_title")}
-              </h3>
+              </EmptyHeading>
               {!removed && !search && (
                 <>
                   <p className="text-muted-foreground text-sm">

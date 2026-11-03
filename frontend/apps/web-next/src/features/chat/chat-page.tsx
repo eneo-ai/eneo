@@ -330,7 +330,8 @@ export function ChatPage({
       <ChatHeader
         partner={partner}
         switcherItems={switcherItems}
-        title={viewTab === "insights" ? t("insights") : title}
+        // Historik and Insikter are the page's h1 themselves; the conversation's title names Chatt.
+        title={viewTab === "chat" ? title : t(viewTab)}
         // The personal assistant picks its model in the composer.
         modelName={modelSelector ? null : (partner.completionModel?.name ?? null)}
         view={{ value: viewTab, onChange: selectTab, hasInsights: insightPartner !== null }}

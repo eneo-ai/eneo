@@ -71,6 +71,19 @@ function show(page: "list" | "new") {
 }
 
 describe("organisation skill catalogue", () => {
+  it("heads an empty list one level under the page's title", async () => {
+    get.mockImplementation(() => ok({ items: [], next_cursor: null }));
+    show("list");
+    // Beside the sidebar the page's Skills is the h1.
+    expect(await screen.findByRole("heading", { level: 1, name: "skills" })).toBeTruthy();
+    expect(
+      await screen.findByRole("heading", {
+        level: 2,
+        name: "organization_skills_empty_manage_title"
+      })
+    ).toBeTruthy();
+  });
+
   it("shows the removal timestamp in removed list rows", async () => {
     removedFilter.value = true;
     get.mockImplementation(() =>
