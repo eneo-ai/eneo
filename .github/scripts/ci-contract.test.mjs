@@ -237,33 +237,23 @@ test("web-next runs all browser cases on FastAPI and has no Next runtime job", (
   assert.ok(assets > job.indexOf("- name: Wait for the E2E stack"));
   assert.ok(assets < job.indexOf("- name: Run E2E and accessibility tests"));
   assert.match(job.slice(assets), /e2e-backend:\/app\/web-bundle-report.json frontend\/apps\/web-next\/node_modules\/\.cache\/vite-bundle-report.json/);
+  // Production images and the web-next stack build the Vite app; the Svelte stack, which never serves it, does not.
   const dockerfile = fs.readFileSync(path.join(root, "backend/Dockerfile"), "utf8");
-  assert.match(dockerfile, /COPY --from=web-build .*\/vite-bundle-report.json \/app\/web-bundle-report.json/);
+  assert.match(dockerfile, /^ARG WEB_APP_STAGE=web-build$/m);
+  assert.match(dockerfile, /^FROM \$\{WEB_APP_STAGE\} AS web-app$/m);
+  assert.match(dockerfile, /COPY --from=web-app .*\/vite-bundle-report.json \/app\/web-bundle-report.json/);
+  const compose = (file) => fs.readFileSync(path.join(root, file), "utf8");
+  assert.match(compose("docker-compose.e2e.ci.yml"), /^ {8}WEB_APP_STAGE: no-web-app$/m);
+  assert.match(compose("docker-compose.e2e.web-app.yml"), /^ {8}WEB_APP_STAGE: web-build$/m);
 });
 
-test("web-next rejects route drift and retains Vite resource reports after build failure", () => {
+test("web-next rejects route drift before type checking", () => {
   const workflow = fs.readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8");
   const job = workflow.split("\n  frontend-web-next:\n")[1].split("\n  frontend-e2e:\n")[0];
   const step = (name) => job.split(`- name: ${name}\n`)[1]?.split(/\n      - name: /)[0];
   assert.match(job, /working-directory: frontend\n/);
-  assert.match(job, /fetch-depth: 0/);
-  assert.doesNotMatch(job.split("\n    steps:")[0], /ROUTE_PARITY_UPSTREAM:/);
-  assert.match(step("Lint") ?? "", /ROUTE_PARITY_UPSTREAM:/);
   assert.match(step("Check route tree drift") ?? "", /routes:generate && git diff --exit-code -- apps\/web-next\/src\/routeTree\.gen\.ts/);
   assert.ok(job.indexOf("- name: Check route tree drift") < job.indexOf("- name: Type check"));
-  const report = "$RUNNER_TEMP/web-next-vite-build.txt";
-  assert.ok(step("Build (Vite)")?.includes(`/usr/bin/time -v -o "${report}" bun run --filter '@eneo/web-next' build`));
-  assert.ok(step("Record Vite build memory")?.includes("Maximum resident set size"));
-  for (const name of ["Record Vite build memory", "Upload Vite build reports"]) {
-    assert.ok(step(name)?.includes("if: ${{ !cancelled() }}"), name);
-  }
-  const upload = step("Upload Vite build reports");
-  assert.ok(upload?.includes("name: web-next-vite-build-resources"));
-  assert.ok(upload.includes("${{ runner.temp }}/web-next-vite-build.txt"));
-  assert.ok(upload.includes("frontend/apps/web-next/node_modules/.cache/vite-bundle-report.json"));
-  assert.ok(upload.includes("include-hidden-files: true"), "the explicitly selected .cache report is uploaded");
-  assert.ok(upload.includes("retention-days: 7") && upload.includes("if-no-files-found: ignore"));
-  assert.ok(!job.includes("ci-build-memory.mjs"), "Vite sizes and RSS are report-only");
 });
 
 test("only develop pushes save the package download cache", () => {

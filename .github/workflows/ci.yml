@@ -361,15 +361,14 @@ jobs:
     needs: changes
     if: needs.changes.outputs.web_next == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    # The job takes 12-20 minutes.
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: frontend
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          fetch-depth: 0
 
       - name: Set up frontend dependencies
         uses: ./.github/actions/setup-frontend
@@ -379,8 +378,6 @@ jobs:
         run: bun run --filter '@eneo/web-next' routes:generate && git diff --exit-code -- apps/web-next/src/routeTree.gen.ts
 
       - name: Lint
-        env:
-          ROUTE_PARITY_UPSTREAM: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || 'origin/develop' }}
         run: FORCE_COLOR=1 bun run --filter '@eneo/web-next' lint
 
       - name: Type check
@@ -388,28 +385,6 @@ jobs:
 
       - name: Test
         run: FORCE_COLOR=1 bun run --filter '@eneo/web-next' test
-
-      - name: Build (Vite)
-        run: /usr/bin/time -v -o "$RUNNER_TEMP/web-next-vite-build.txt" bun run --filter '@eneo/web-next' build
-
-      - name: Record Vite build memory
-        if: ${{ !cancelled() }}
-        run: |
-          if [ -f "$RUNNER_TEMP/web-next-vite-build.txt" ]; then
-            grep 'Maximum resident set size' "$RUNNER_TEMP/web-next-vite-build.txt" | tee -a "$GITHUB_STEP_SUMMARY"
-          fi
-
-      - name: Upload Vite build reports
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: web-next-vite-build-resources
-          include-hidden-files: true
-          path: |
-            ${{ runner.temp }}/web-next-vite-build.txt
-            frontend/apps/web-next/node_modules/.cache/vite-bundle-report.json
-          if-no-files-found: ignore
-          retention-days: 7
 
   frontend-e2e:
     name: Frontend E2E

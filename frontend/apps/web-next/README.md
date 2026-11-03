@@ -50,10 +50,10 @@ is `null` while that feature is absent from the build. Other dynamic imports,
 including locale catalogs, remain visible in the chunk graph. These sizes
 exclude CSS and other assets.
 
-CI checks route-tree drift before type checking, builds the SPA, and
-publishes the bundle report and peak Vite build memory in the
-`web-next-vite-build-resources` artifact. Memory also appears in the job
-summary. Sizes and memory are measured without a budget gate.
+CI checks route-tree drift before type checking. The SPA is built inside the
+backend image (the Docker build and each web-next E2E leg), and the browser
+tests read that image's bundle report. Sizes are measured without a budget
+gate.
 
 ### Vite dev server
 
