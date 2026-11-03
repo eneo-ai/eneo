@@ -110,6 +110,9 @@ type PendingQuestionState = {
   request: SendRequest;
 };
 
+/** What a question taken back before it was sent returns to the composer. */
+type QuestionDraft = Pick<PendingQuestionState, "question" | "quote">;
+
 /**
  * Below Tailwind's `sm`, a phone: its start state docks the composer
  * (decision 5), and a waiting tool's decision takes the composer's place
@@ -276,7 +279,8 @@ function ConversationView({
       queuedSend ||
       pendingQuestion !== null
   );
-  // Ends the wait for the pending question's uploads (a stop while it waits).
+  // Ends the wait of a question not yet sent, for its uploads or a partner
+  // save (a stop while it waits).
   const pendingAbort = useRef<AbortController | null>(null);
   // The last question and its files, for "Försök igen" after an error.
   const [lastQuestion, setLastQuestion] = useState<{ text: string; files: SentFiles } | null>(null);
@@ -454,8 +458,9 @@ function ConversationView({
     });
 
   const busy = status === "submitted" || status === "streaming";
-  // The composer is taken from the moment a question leaves it, uploads included.
-  const sending = busy || pendingQuestion !== null;
+  // The composer is taken from the moment a question leaves it, uploads and
+  // partner saves included.
+  const sending = busy || pendingQuestion !== null || queuedSend;
 
   // Record client-side step timings for the answer being streamed.
   useEffect(() => {
@@ -744,7 +749,7 @@ function ConversationView({
           if (!mounted.current) return;
           pendingAbort.current = null;
           setPendingQuestion(null);
-          issue(pending.text, sentFiles(ready), pending.request);
+          issue(pending.text, sentFiles(ready), pending.request, pending);
         },
         () => {
           if (!mounted.current) return;
@@ -754,11 +759,14 @@ function ConversationView({
       );
       return;
     }
-    issue(text, resendFiles ?? sentFiles(batch), request);
+    issue(text, resendFiles ?? sentFiles(batch), request, { question, quote });
   }
 
-  /** Issues the request for a question whose files are all on the server. */
-  function issue(text: string, files: SentFiles, request: SendRequest) {
+  /**
+   * Issues the request for a question whose files are all on the server;
+   * `draft` is what a stop before it goes returns to the composer.
+   */
+  function issue(text: string, files: SentFiles, request: SendRequest, draft: QuestionDraft) {
     clearError();
     setStreamError(null);
     streamErrorRef.current = null;
@@ -794,9 +802,22 @@ function ConversationView({
     };
     // A model or reasoning switch made in the composer is saved on the
     // assistant; the backend answers with what is stored, so that save lands first.
+    // The question is on its way meanwhile: a stop takes it back, files included.
     if (hasPendingPartnerUpdates()) {
+      const controller = new AbortController();
+      pendingAbort.current = controller;
+      controller.signal.addEventListener("abort", () => {
+        pendingAbort.current = null;
+        setQueuedSend(false);
+        const taken = pendingSendRef.current;
+        pendingSendRef.current = null;
+        if (taken) attachments.restore(taken.attachments);
+        withdrawQuestion(draft, false);
+      });
       setQueuedSend(true);
       void awaitPartnerUpdates().then(() => {
+        if (controller.signal.aborted) return;
+        pendingAbort.current = null;
         // Sent from here on: the request itself outlasts the answer, not the wait.
         setQueuedSend(false);
         void send();
@@ -805,11 +826,11 @@ function ConversationView({
   }
 
   /** Takes a waiting question back out of the conversation; nothing was sent. */
-  function withdrawQuestion(pending: PendingQuestionState, first: boolean) {
+  function withdrawQuestion(draft: QuestionDraft, first: boolean) {
     setPendingQuestion(null);
     // The draft comes back unless the user has already started a new one.
-    setInput((current) => (current.trim() ? current : pending.question));
-    panel.restoreQuote(pending.quote);
+    setInput((current) => (current.trim() ? current : draft.question));
+    panel.restoreQuote(draft.quote);
     // A first question takes the view back to the start state; keep focus in
     // the composer across that swap.
     if (first) {
@@ -946,7 +967,7 @@ function ConversationView({
     sendBlocked,
     unavailable: partnerCannotAnswer(partner) ? t("no_completion_model_description") : null,
     busy: sending,
-    // A stop while the question still waits for its uploads takes it back.
+    // A stop while the question still waits for its uploads or a partner save takes it back.
     onStop: () => (pendingAbort.current ? pendingAbort.current.abort() : void stop()),
     label: composerLabel,
     placeholder: composerLabel,
