@@ -293,6 +293,12 @@ test("publications running side by side never cancel or replace each other's wor
     "  group: ${{ github.workflow == 'CI' && format('CI-{0}', github.event.pull_request.number || github.ref) || format('{0}-checks-{1}', github.workflow, github.run_id) }}",
     "  cancel-in-progress: ${{ github.workflow == 'CI' }}",
   ].join("\n"));
+  // The user-facing check ci.yml calls cancels only an older run of the same pull request.
+  const userFacing = read("user-facing.yml").split("\nconcurrency:\n")[1].split("\n\n")[0];
+  assert.equal(userFacing, [
+    "  group: ${{ github.event_name == 'pull_request' && format('user-facing-{0}-{1}', github.workflow, github.event.pull_request.number) || format('user-facing-{0}-{1}', github.workflow, github.run_id) }}",
+    "  cancel-in-progress: ${{ github.event_name == 'pull_request' }}",
+  ].join("\n"));
   // One tool-runtime publisher per version, and a waiting one is never replaced.
   const runtime = read("tool_runtime_image.yml").split("\n  image:\n")[1].split("\n    permissions:")[0];
   assert.match(runtime, /^      group: eneo-image-tool-runtime-\$\{\{ needs\.test\.outputs\.publish == 'true' && needs\.test\.outputs\.version \|\| github\.run_id \}\}\n      queue: max\n      cancel-in-progress: false$/m);
@@ -376,7 +382,7 @@ test("publication serializes a version's writes by that version, and nothing els
   assert.ok(read("application_image.yml").includes(lock("eneo-image-${{ inputs.component }}-${{ inputs.version }}")));
   assert.ok(workflow.split("\n  bundle:\n")[1].includes(lock("eneo-bundle-${{ needs.release.outputs.version }}")));
   // The tag's SBOM publisher queues too: a waiting retry is never replaced.
-  assert.match(read("release_sbom.yml"), /^concurrency:\n  group: \$\{\{ github\.workflow \}\}-\$\{\{ inputs\.tag \}\}\n  queue: max\n  cancel-in-progress: false$/m);
+  assert.match(read("release_sbom.yml"), /^concurrency:\n  group: eneo-release-sbom-\$\{\{ inputs\.tag \}\}\n  queue: max\n  cancel-in-progress: false$/m);
 });
 
 test("publication's CI skips only the backend and frontend dry-run builds it publishes itself", () => {
