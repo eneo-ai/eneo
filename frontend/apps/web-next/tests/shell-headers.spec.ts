@@ -1,8 +1,6 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "./csp";
-import { apiRequest, createSpace, productionAsset, uniqueName } from "./helpers";
-import type { Schema } from "../src/lib/api/models";
-import { hasPermission } from "../src/lib/auth/permissions";
+import { createSpace, flowsShown, productionAsset, uniqueName } from "./helpers";
 import sv from "../src/lib/i18n/messages/sv.json";
 
 // On a phone a page's own header replaces the shell's top bar. These
@@ -91,9 +89,7 @@ test("a shared space is pushed on a phone; the personal and organisation spaces 
   await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
   // A phone's tabs are the space's content (space-sections.ts): Översikt, Assistenter, Appar and
   // Kunskap, and Flöden beside Appar where the tenant has flows for this user (flowsAvailable).
-  const settings = await apiRequest<Schema<"SettingsPublic">>(page, "/settings/");
-  const me = await apiRequest<Parameters<typeof hasPermission>[0]>(page, "/users/me/");
-  const flows = settings.flows_enabled === true && hasPermission(me)("flows_view");
+  const flows = await flowsShown(page);
   await expect(tabs.getByRole("link")).toHaveCount(flows ? 5 : 4);
   for (const tab of ["Översikt", "Assistenter", "Appar", "Kunskap"]) {
     await expect(tabs.getByRole("link", { name: tab, exact: true })).toHaveCount(1);
@@ -285,7 +281,7 @@ test("a pushed screen's PageBar title is hidden or whole wherever the scroll sto
   await page.setViewportSize({ width: 390, height: 480 });
   await page.goto("/admin/users");
   const main = page.locator("#main-content");
-  const title = page.locator("[data-page-bar] .page-bar-title");
+  const title = page.locator("[data-phone-page-bar] .page-bar-title");
   await expect(title).toHaveText(/\S/);
   for (const top of [0, 24, 32, 36, 42, 48, 56, 96, 42, 0]) {
     await main.evaluate((element, to) => (element.scrollTop = to), top);

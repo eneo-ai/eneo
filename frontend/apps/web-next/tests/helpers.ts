@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { BundleReport } from "../scripts/vite-bundle-report";
 import type { components } from "../src/lib/api/schema";
+import { hasPermission } from "../src/lib/auth/permissions";
 
 export const MOCK_REPLY = process.env.MOCK_REPLY ?? "E2E mock completion: pong";
 export const E2E_CREDENTIALS = {
@@ -265,6 +266,16 @@ export async function apiRequest<T>(
   );
   expect(response.ok, response.body).toBe(true);
   return JSON.parse(response.body);
+}
+
+/**
+ * Whether the signed-in user sees flows (flowsAvailable in src/features/flows/flows-api.ts):
+ * the tenant has them switched on and the user may view them. A space then has a Flöden tab.
+ */
+export async function flowsShown(page: Page): Promise<boolean> {
+  const settings = await apiRequest<components["schemas"]["SettingsPublic"]>(page, "/settings/");
+  const me = await apiRequest<Parameters<typeof hasPermission>[0]>(page, "/users/me/");
+  return settings.flows_enabled === true && hasPermission(me)("flows_view");
 }
 
 /** A same-origin write returning the created resource's id. */

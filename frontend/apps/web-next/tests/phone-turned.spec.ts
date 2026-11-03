@@ -1,9 +1,9 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "./csp";
-import { apiPost, createSpace, uniqueName } from "./helpers";
+import { apiPost, createSpace, flowsShown, uniqueName } from "./helpers";
 
 // A phone turned sideways is wider than 768 px but under 500 px tall: it keeps the phone's
-// layout (the top bar and its menu, a space's slim bar and four tabs, an editor's index), so the
+// layout (the top bar and its menu, a space's slim bar and its content tabs, an editor's index), so the
 // header does not take most of the height. An iPad, upright or turned with its keyboard up, and a
 // split window keep what they had.
 
@@ -45,7 +45,8 @@ for (const size of TURNED) {
       await expect(sideNav(page)).toBeHidden();
       await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
       const tabs = page.getByRole("navigation", { name: /^(Ytans innehåll|Space content)$/ });
-      await expect(tabs.getByRole("link")).toHaveCount(4);
+      // Översikt, Assistenter, Appar and Kunskap, and Flöden where the user has flows.
+      await expect(tabs.getByRole("link")).toHaveCount((await flowsShown(page)) ? 5 : 4);
       const manage = page.getByRole("region", { name: /^(Hantera ytan|Manage space)$/ });
       await expect(manage.getByRole("link", { name: /^(Medlemmar|Members)/ })).toBeVisible();
       await expect(manage.getByRole("link", { name: /^(Inställningar|Settings)/ })).toBeVisible();
