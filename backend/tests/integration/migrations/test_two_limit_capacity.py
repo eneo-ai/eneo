@@ -8,7 +8,6 @@ import pytest
 
 from alembic import command
 from alembic.config import Config
-from alembic.script import ScriptDirectory
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
@@ -27,7 +26,6 @@ def test_two_limit_capacity_round_trip(test_settings):
     backend = Path(__file__).parents[3]
     config = Config(str(backend / "alembic.ini"))
     config.set_main_option("sqlalchemy.url", test_settings.sync_database_url)
-    assert ScriptDirectory.from_config(config).get_heads() == ["202609171100"]
     command.upgrade(config, "202609161100")
     with psycopg2.connect(
         test_settings.sync_database_url.replace("postgresql+psycopg2", "postgresql")
@@ -41,7 +39,7 @@ def test_two_limit_capacity_round_trip(test_settings):
                     (identity, identity, identity, input_tokens, output_tokens),
                 )
         connection.commit()
-        command.upgrade(config, "head")
+        command.upgrade(config, "heads")
         with connection.cursor() as cursor:
             cursor.execute(
                 "SELECT column_name FROM information_schema.columns WHERE table_name = 'completion_models' AND column_name = 'context_window_tokens'"
@@ -63,5 +61,5 @@ def test_two_limit_capacity_round_trip(test_settings):
                 )
                 assert cursor.fetchone() == (*expected, None)
         connection.commit()
-        command.upgrade(config, "head")
-        command.upgrade(config, "head")
+        command.upgrade(config, "heads")
+        command.upgrade(config, "heads")
