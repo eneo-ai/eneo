@@ -196,8 +196,12 @@ services:
   # Website crawls are delivered to their own ARQ queue (arq:crawler) and only
   # this role consumes it. Same role selection as the crawler-worker service in
   # docs/deployment/docker-compose.yml (run.sh reads WORKER_ROLE).
+  # Off by default (`--profile crawler` starts it): the browser suite's specs
+  # mock crawl results, and a live crawler fetched example.org from CI and
+  # changed the crawler pages while they were measured.
   crawler-worker:
     image: eneo_devcontainer-eneo
+    profiles: [crawler]
     working_dir: /workspace/backend
     depends_on:
       e2e-backend:

@@ -30,7 +30,7 @@ def _environment(service: dict[str, Any]) -> dict[str, str | None]:
 
 
 @pytest.mark.parametrize("stack", STACKS)
-def test_every_supported_stack_starts_a_crawler_role_worker(stack: str) -> None:
+def test_every_supported_stack_has_a_crawler_role_worker(stack: str) -> None:
     """Crawls are delivered to their own queue, so a stack without this service
     leaves every started crawl queued."""
     compose = yaml.safe_load(STACKS[stack].read_text())
@@ -39,6 +39,17 @@ def test_every_supported_stack_starts_a_crawler_role_worker(stack: str) -> None:
 
     assert environment["RUN_AS_WORKER"] == "true"
     assert environment["WORKER_ROLE"] == "crawler"
+
+
+@pytest.mark.parametrize("stack", STACKS)
+def test_browser_e2e_stacks_start_the_crawler_only_on_request(stack: str) -> None:
+    """The browser suite mocks crawl results; a live crawler there fetched the
+    internet and changed the crawler pages while they were measured."""
+    compose = yaml.safe_load(STACKS[stack].read_text())
+
+    profiles = compose["services"]["crawler-worker"].get("profiles")
+
+    assert profiles == (["crawler"] if stack.startswith("e2e") else None)
 
 
 def test_the_crawler_role_runs_the_settings_that_consume_the_crawl_queue() -> None:
