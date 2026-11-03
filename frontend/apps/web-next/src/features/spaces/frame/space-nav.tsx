@@ -104,6 +104,7 @@ function SpaceChip({ space }: { space: Space }) {
         ) : undefined
       }
       size="sm"
+      className="size-5"
     />
   );
 }

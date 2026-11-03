@@ -106,26 +106,37 @@ export function DesktopSideNav({
   }, [shown, navId, rescueFocus]);
 
   const content = tablet || kind === null ? TABLET_NAV_CONTENT[variant] : SIDE_NAV_CONTENT[kind];
+  // A row of its own for one button pushes the place's name down; the rail stacks them.
+  const toggleBesideHeading = !tablet && !collapsed && Boolean(content.heading);
   return (
     <SideNav
       id={navId}
       aria-label={t(content.label)}
       collapsible={{ isCollapsed: collapsed, onCollapsedChange: rail.change, hasButton: false }}
       header={
-        <div className="flex flex-col gap-1">
-          <NavHeader navId={navId} withBrand={tablet} />
-          {content.heading}
+        <div className="relative flex flex-col gap-1">
+          {tablet && <NavHeader navId={navId} withBrand />}
+          {content.heading && (
+            <div className={cn(toggleBesideHeading && "pe-9")}>{content.heading}</div>
+          )}
+          {/* After the heading, so Tab meets the switcher and then the toggle at the
+              row's end; in the rail it stands under the chip. */}
+          {!tablet && <NavHeader navId={navId} besideHeading={toggleBesideHeading} />}
         </div>
       }
       topContent={content.top}
       footer={<NavFooter variant={variant} />}
-      className={
+      className={cn(
+        // Astryx draws a row's icon at 16 px in a lighter grey than its label; beside
+        // a 14 px label that reads thin. The Svelte app's are larger and take the label's colour.
+        "[&_.astryx-side-nav-item>svg]:size-5 [&_.astryx-side-nav-item>svg]:[stroke-width:1.75]",
+        "[&_.astryx-side-nav-item:not([data-selected=selected])>svg]:text-ax-text-secondary",
         tablet
           ? // ≈248 px wide, 64 px as an icon rail; the app body shows through.
             cn("bg-ax-body", collapsed ? "w-16" : "w-62")
           : // 17 rem wide as in the Svelte app, 64 px as an icon rail.
             cn("bg-ax-surface", collapsed ? "w-16" : "w-68")
-      }
+      )}
     >
       {content.items}
     </SideNav>

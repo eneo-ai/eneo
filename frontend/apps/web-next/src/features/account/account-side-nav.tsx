@@ -28,7 +28,7 @@ export function AccountNavHeading() {
           name={name}
           icon={profileInitials(name)}
           size="sm"
-          className="rounded-full"
+          className="size-5 rounded-full"
         />
       }
     />
@@ -46,7 +46,7 @@ export function AccountNavSections() {
   const { enabled: whatsNewEnabled, hasUnseen } = useWhatsNew();
 
   return (
-    <>
+    <div className="flex flex-col gap-0.5">
       <SideNavItem
         label={t("my_account")}
         icon={User}
@@ -81,6 +81,6 @@ export function AccountNavSections() {
           }
         />
       )}
-    </>
+    </div>
   );
 }

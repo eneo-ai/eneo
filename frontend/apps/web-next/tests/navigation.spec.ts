@@ -531,3 +531,22 @@ test("a page in a menu opens from the keyboard, and Escape returns to the menu's
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/\/account$/);
 });
+
+test(
+  "Tab runs from the space switcher to the sidebar's toggle, which keeps focus",
+  { tag: ["@vite"] },
+  async ({ page }) => {
+    await page.goto("/spaces/personal/chat");
+    const space = await createSpace(page, uniqueName("Toggle order"));
+    await page.goto(`${space}/overview`);
+    const nav = page.getByRole("navigation", { name: "Ytans meny", exact: true });
+    const toggle = nav.getByRole("button", { name: /sidomenyn$/ });
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await nav.locator("button").first().focus();
+    await page.keyboard.press("Tab");
+    await expect(toggle).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(toggle).toBeFocused();
+  }
+);

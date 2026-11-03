@@ -17,11 +17,14 @@ import { NotificationBells } from "./notification-bells";
  */
 export function NavHeader({
   navId,
-  withBrand = false
+  withBrand = false,
+  besideHeading = false
 }: {
   navId: string;
   /** A tablet's SideNav, which has no top bar: the wordmark and the bells too. */
   withBrand?: boolean;
+  /** Expanded with a heading: the toggle lies over that row's end, not above it. */
+  besideHeading?: boolean;
 }) {
   const t = useTranslations();
   const { isCollapsed, toggle } = useSideNavCollapse();
@@ -29,7 +32,13 @@ export function NavHeader({
   if (withBrand) return <BrandedNavHeader navId={navId} />;
 
   return (
-    <div className={cn("flex items-center", isCollapsed ? "justify-center" : "justify-end")}>
+    <div
+      className={cn(
+        "flex items-center",
+        isCollapsed ? "justify-center" : "justify-end",
+        besideHeading && "absolute inset-y-0 end-0 z-1"
+      )}
+    >
       {/* SideNav's own collapse state, through a plain IconButton rather than
           SideNavCollapseButton: that one has no tooltip, and an icon-only
           control needs its name visible on hover. aria-expanded/-controls
