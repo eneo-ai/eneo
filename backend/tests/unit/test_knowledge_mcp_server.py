@@ -71,7 +71,10 @@ def _patch_read_source_context(monkeypatch, *, blob=None, repo_error=None):
     )
 
     @asynccontextmanager
-    async def fake_context(_ctx):
+    async def fake_context(_ctx, *, visitors: bool = False):
+        # The knowledge tools are the ones open to widget visitors.
+        assert visitors is True
+
         async def get_assistant(_assistant_id):
             return assistant, []
 
@@ -550,7 +553,10 @@ def _patch_search_context(
         return list(neighbors)
 
     @asynccontextmanager
-    async def fake_context(_ctx):
+    async def fake_context(_ctx, *, visitors: bool = False):
+        # The knowledge tools are the ones open to widget visitors.
+        assert visitors is True
+
         async def get_assistant(_assistant_id):
             return assistant, []
 
@@ -1010,7 +1016,10 @@ class TestOverviewContent:
 
 def _patch_describe_context(monkeypatch, assistant, *, listings=(), excerpts=()):
     @asynccontextmanager
-    async def fake_context(_ctx):
+    async def fake_context(_ctx, *, visitors: bool = False):
+        # The knowledge tools are the ones open to widget visitors.
+        assert visitors is True
+
         async def get_assistant(_assistant_id):
             return assistant, []
 
@@ -1166,7 +1175,10 @@ class TestSearchReranking:
             return spec
 
         @asynccontextmanager
-        async def fake_context(_ctx):
+        async def fake_context(_ctx, *, visitors: bool = False):
+            # The knowledge tools are the ones open to widget visitors.
+            assert visitors is True
+
             async def get_assistant(_assistant_id):
                 return assistant, []
 

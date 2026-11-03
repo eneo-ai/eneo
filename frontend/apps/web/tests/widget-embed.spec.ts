@@ -207,7 +207,11 @@ test.describe("embeddable widget", () => {
     const csp = embed.headers()["content-security-policy"] ?? "";
     expect(csp).toContain(`frame-ancestors 'self' ${HOST_ORIGIN}`);
     expect(csp).not.toContain(DENIED_ORIGIN);
-    expect(csp).not.toContain("unsafe-inline");
+    // Scripts run only with the response nonce; inline styles are the one
+    // allowance (server-rendered style attributes and ALTCHA's shadow styles).
+    expect(csp).not.toMatch(/script-src[^;]*unsafe-inline/);
+    expect(csp).toContain("default-src 'self'");
+    expect(csp).toContain("style-src 'self' 'unsafe-inline'");
     expect(csp).toContain("worker-src 'self' blob:");
     expect(csp).toContain("frame-src 'none'");
 
