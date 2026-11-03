@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { useTranslations } from "use-intl";
+import { PageFrame } from "@/components/composites/page-frame";
 import { PageHeader } from "@/components/composites/page-header";
 import { useTouchTablet } from "@/lib/hooks/use-media-match";
 import { AccountNav } from "./account-nav";
@@ -18,13 +19,13 @@ export function AccountFrame({ children }: { children: ReactNode }) {
   return (
     <>
       <AccountPageBar />
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 p-4 sm:p-6">
+      <PageFrame className="gap-6">
         <div className="flex flex-col gap-6 max-lg:hidden">
           <PageHeader title={t("account")} />
           {tablet ? <AccountNav /> : null}
         </div>
         <div className="flex flex-col gap-6">{children}</div>
-      </div>
+      </PageFrame>
     </>
   );
 }

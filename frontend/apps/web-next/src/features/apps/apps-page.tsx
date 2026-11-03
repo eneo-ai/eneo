@@ -1,4 +1,5 @@
 import { useCollator } from "@astryxdesign/core/i18n";
+import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { AppWindow, SearchX } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useCallback, useMemo, useRef, useState } from "react";
@@ -108,7 +109,7 @@ export function AppsPage() {
       : []),
     {
       key: "actions",
-      header: t("actions"),
+      header: <VisuallyHidden>{t("actions")}</VisuallyHidden>,
       width: pixel(64),
       renderCell: (item) => <AppActions app={item} />
     }

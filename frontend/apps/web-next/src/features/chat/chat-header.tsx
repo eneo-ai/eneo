@@ -434,14 +434,17 @@ export function ChatHeader({
               variant="header"
             />
           )}
-          {title !== null && (
+          {title !== null && view.value !== "chat" ? (
+            // The selected tab already shows this name; the h1 stays for a screen reader.
+            <h1 className="sr-only">{title}</h1>
+          ) : title !== null ? (
             <>
               <span aria-hidden="true" className="bg-ax-border-strong h-[22px] w-px shrink-0" />
               <h1 className="text-ax-text-secondary min-w-0 truncate text-sm font-medium">
                 {title}
               </h1>
             </>
-          )}
+          ) : null}
         </div>
         <TabList
           role="tablist"
