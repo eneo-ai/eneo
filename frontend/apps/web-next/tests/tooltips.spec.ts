@@ -8,14 +8,14 @@ import { expect, test } from "./csp";
  */
 test.use({ viewport: { width: 1280, height: 800 } });
 
-const TRIGGER = /^(Ny konversation|New conversation)$/;
+// The top bar's search: an icon button whose tooltip names it, on every page beside the sidebar.
+const TRIGGER = /^(Sök|Search)$/;
 
 test("a tooltip is dismissible, hoverable and persistent", { tag: "@vite" }, async ({ page }) => {
   await page.goto("/spaces/personal/chat");
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
-  const trigger = page.getByRole("button", { name: TRIGGER }).first();
-  // This button's tooltip: its neighbour in the tab order has one of its own.
-  const tooltip = page.getByRole("tooltip").filter({ hasText: /Ny konversation|New conversation/ });
+  const trigger = page.getByRole("banner").getByRole("button", { name: TRIGGER });
+  const tooltip = page.getByRole("tooltip").filter({ hasText: /^(Sök|Search)/ });
 
   await trigger.hover();
   await expect(tooltip).toBeVisible();

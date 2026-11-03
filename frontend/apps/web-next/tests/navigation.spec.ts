@@ -2,6 +2,7 @@ import type { Page } from "@playwright/test";
 import { expect, test } from "./csp";
 import {
   askChatQuestion,
+  CHAT_COMPOSER_NAME,
   chatComposer,
   conversationLog,
   createSpace,
@@ -212,8 +213,13 @@ for (const control of ["new", "history", "same-URL new"] as const) {
       const shown = new URL(originalUrl);
       if (control === "history") shown.searchParams.set("tab", "history");
       await expect(page).toHaveURL(shown.href);
-      await expect(chatComposer(page)).toHaveValue(draft);
-      await expect(attachment).toHaveCount(1);
+      // Behind Historik the conversation is hidden, not gone: its draft and file are there.
+      await expect(
+        page.getByRole("textbox", { name: CHAT_COMPOSER_NAME, includeHidden: true })
+      ).toHaveValue(draft);
+      await expect(
+        page.getByRole("button", { name: "Ta bort draft.txt", exact: true, includeHidden: true })
+      ).toHaveCount(1);
       await confirmation.getByRole("button", { name: "Avbryt", exact: true }).click();
       if (control === "history") await tab("Chatt").click();
       await expect(chatComposer(page)).toBeEditable();
