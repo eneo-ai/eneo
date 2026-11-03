@@ -70,6 +70,8 @@ const sharedSpace = () =>
 
 // A tablet's header is a chunk of its own: one render loads it, so every test then renders it at once.
 beforeAll(async () => {
+  // Fetched first: on a loaded test machine the chunk outlasts findBy's wait.
+  await import("./space-header");
   setViewport("tablet-portrait");
   show(sharedSpace(), ["overview"]);
   await screen.findByRole("button", { name: "Lägg till medlem" });
