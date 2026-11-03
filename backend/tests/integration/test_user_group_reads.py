@@ -8,7 +8,9 @@ tenant and modules cost a batch of statements per 500 members.
 from uuid import uuid4
 
 import pytest
+import sqlalchemy as sa
 
+from eneo.database.tables.users_table import Users, usergroups_users_table
 from eneo.main.models import ModelId
 from eneo.user_groups.user_group import UserGroupCreate, UserGroupUpdate
 from eneo.users.user import UserAdd, UserState
@@ -91,3 +93,37 @@ async def test_the_responses_return_each_member_as_a_sparse_user(
             )
             for m in members
         }
+
+
+async def test_the_list_returns_a_member_with_an_empty_username(
+    client, db_container, admin_user, token
+) -> None:
+    """The list validates into the public model only, which takes an empty username."""
+    email = f"no.name.{uuid4().hex[:8]}@example.com"
+    async with db_container() as container:
+        member_id = await container.session().scalar(
+            sa.insert(Users)
+            .values(
+                email=email, username="", state="active", tenant_id=admin_user.tenant_id
+            )
+            .returning(Users.id)
+        )
+        repo = container.user_groups_repo()
+        created = await repo.create_user_group(
+            UserGroupCreate(
+                name=f"group-{uuid4().hex[:8]}", tenant_id=admin_user.tenant_id
+            )
+        )
+        await container.session().execute(
+            sa.insert(usergroups_users_table).values(
+                user_group_id=created.id, user_id=member_id
+            )
+        )
+
+    response = await client.get(
+        "/api/v1/user-groups/", headers={"Authorization": f"Bearer {token}"}
+    )
+
+    assert response.status_code == 200, response.text
+    [listed] = [g for g in response.json()["items"] if g["id"] == str(created.id)]
+    assert [(u["email"], u["username"]) for u in listed["users"]] == [(email, "")]

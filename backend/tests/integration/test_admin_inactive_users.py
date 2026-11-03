@@ -91,3 +91,38 @@ async def test_one_read_whatever_the_tenant_size(
 
     assert len(inactive) == 2
     assert len(queries) == 1, [q.sql for q in queries]
+
+
+async def test_rows_it_does_not_return_cannot_fail_it(
+    client, db_container, admin_user, token
+) -> None:
+    """Only the inactive rows are validated, and an empty username shows the email."""
+    async with db_container() as container:
+        await container.session().execute(
+            sa.insert(Users),
+            [
+                {
+                    "email": "not-an-email",
+                    "username": "broken",
+                    "state": "active",
+                    "tenant_id": admin_user.tenant_id,
+                    "updated_at": CHANGED,
+                },
+                {
+                    "email": "gu.inactive@kommun.se",
+                    "username": "",
+                    "state": "inactive",
+                    "tenant_id": admin_user.tenant_id,
+                    "updated_at": CHANGED,
+                },
+            ],
+        )
+
+    response = await client.get(
+        "/api/v1/admin/users/inactive", headers={"Authorization": f"Bearer {token}"}
+    )
+
+    assert response.status_code == 200, response.text
+    assert [(u["username"], u["email"]) for u in response.json()] == [
+        ("gu.inactive@kommun.se", "gu.inactive@kommun.se")
+    ]
