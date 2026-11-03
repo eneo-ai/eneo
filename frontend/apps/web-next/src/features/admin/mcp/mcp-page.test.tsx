@@ -2,7 +2,6 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openMenuOnRelease } from "@/test/menus";
-import { router } from "@/test/navigation";
 import { renderInApp } from "@/test/render";
 
 type Tool = {
@@ -247,19 +246,18 @@ describe("McpServersPage", () => {
     expect(screen.getByRole("button", { name: "Fler åtgärder för Kartan" })).toBeTruthy();
   });
 
-  it("opens a server's menu on release; its items open the server or its tools", async () => {
+  it("opens a server's menu on release; its items link the server or its tools", async () => {
     renderInApp(<McpServersPage />);
     const more = await screen.findByRole("button", { name: "Fler åtgärder för Diariet" });
     const menu = await openMenuOnRelease(more);
-    fireEvent.click(within(menu).getByRole("menuitem", { name: "MCP-serververktyg" }));
-    expect(router.push).toHaveBeenCalledWith("/admin/mcp-servers/diariet?tab=tools");
+    expect(
+      within(menu).getByRole("menuitem", { name: "MCP-serververktyg" }).getAttribute("href")
+    ).toBe("/admin/mcp-servers/diariet?tab=tools");
+    expect(within(menu).getByRole("menuitem", { name: "Hantera" }).getAttribute("href")).toBe(
+      "/admin/mcp-servers/diariet"
+    );
 
-    fireEvent.click(more);
-    fireEvent.click(await within(menu).findByRole("menuitem", { name: "Hantera" }));
-    expect(router.push).toHaveBeenLastCalledWith("/admin/mcp-servers/diariet");
-
-    fireEvent.click(more);
-    fireEvent.click(await within(menu).findByRole("menuitem", { name: "Ta bort" }));
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Ta bort" }));
     expect(await screen.findByRole("alertdialog", { name: "Ta bort MCP-server" })).toBeTruthy();
   });
 

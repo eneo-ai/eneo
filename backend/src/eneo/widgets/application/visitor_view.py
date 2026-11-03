@@ -3,7 +3,6 @@
 # Licensed under the MIT License.
 
 
-import re
 from dataclasses import replace
 from typing import Any, Optional
 
@@ -14,7 +13,7 @@ from eneo.ai_models.completion_models.completion_model import (
     ToolCallMetadata,
 )
 from eneo.assistants.api.assistant_models import AssistantResponse
-from eneo.assistants.assistant_service import REFERENCE_PATTERN
+from eneo.assistants.reference_tags import INLINE_REFERENCE_PATTERN
 from eneo.questions.question import (
     McpToolReferencePublic,
     Question,
@@ -165,7 +164,7 @@ class VisitorView:
         self._tail = window[-_MARKER_TAIL:]
         cited = [
             self._uncited.pop(short_id)
-            for short_id in dict.fromkeys(re.findall(REFERENCE_PATTERN, window))
+            for short_id in dict.fromkeys(INLINE_REFERENCE_PATTERN.findall(window))
             if short_id in self._uncited
         ]
         if not cited:

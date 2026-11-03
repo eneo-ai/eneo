@@ -37,7 +37,7 @@ import {
 import { formatBytes } from "@/lib/format";
 import type { Schema } from "@/lib/api/models";
 import { toast } from "@/lib/toast";
-import { useMediaMatch } from "@/lib/hooks/use-media-match";
+import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { cn } from "@/lib/utils";
 import {
   buildTemplateCreate,
@@ -173,7 +173,7 @@ function TemplateWizard({
 }) {
   const t = useTranslations();
   // Dragging a file onto the page needs a mouse: a touch screen is told to choose files.
-  const coarse = useMediaMatch("(pointer: coarse)");
+  const coarse = useMediaQuery("(pointer: coarse)");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const { dragging, handlers } = useFileDrop(onAddFiles);
   const wizard = template.wizard;

@@ -22,7 +22,6 @@ import {
   User
 } from "lucide-react";
 import Link from "@/lib/link";
-import { useRouter } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { useAppContext } from "@/components/providers/app-context";
@@ -108,7 +107,6 @@ export function ProfileMenu() {
   const t = useTranslations();
   const { user, federationStatus, links, versions } = useAppContext();
   const { enabled: whatsNewEnabled, hasUnseen } = useWhatsNew();
-  const router = useRouter();
   const { locale, switchLocale } = useLocaleSwitch();
   const { isCollapsed } = useSideNavCollapse();
 
@@ -152,16 +150,9 @@ export function ProfileMenu() {
         <span className="text-ax-text-secondary truncate">{user.email}</span>
       </div>
       <DropdownMenuDivider />
-      <DropdownMenuItem
-        icon={User}
-        label={t("my_account")}
-        onClick={() => router.push("/account")}
-      />
-      <DropdownMenuItem
-        icon={KeyRound}
-        label={t("my_api_keys")}
-        onClick={() => router.push("/account/api-keys")}
-      />
+      {/* Pages are links: a modified or middle click opens them in a new tab. */}
+      <DropdownMenuItem icon={User} label={t("my_account")} href="/account" />
+      <DropdownMenuItem icon={KeyRound} label={t("my_api_keys")} href="/account/api-keys" />
       {whatsNewEnabled && (
         <DropdownMenuItem
           icon={Sparkles}
@@ -174,14 +165,10 @@ export function ProfileMenu() {
               </>
             ) : undefined
           }
-          onClick={() => router.push("/whats-new")}
+          href="/whats-new"
         />
       )}
-      <DropdownMenuItem
-        icon={Plug}
-        label={t("integrations")}
-        onClick={() => router.push("/account/integrations")}
-      />
+      <DropdownMenuItem icon={Plug} label={t("integrations")} href="/account/integrations" />
       <DropdownMenuDivider />
       <DropdownMenuSubMenu icon={Globe} label={t("language")}>
         <DropdownMenuRadioGroup label={t("language")} value={locale} onChange={switchLocale}>
@@ -200,17 +187,18 @@ export function ProfileMenu() {
         <DropdownMenuItem
           icon={ArrowLeft}
           label={t("beta_return_to_legacy")}
-          onClick={() => navigateTo(links.legacyApp!)}
+          href={links.legacyApp}
         />
       )}
       {links.accessibilityStatement && (
         <DropdownMenuItem
           icon={Accessibility}
           label={t("a11y_statement_link")}
-          onClick={() => navigateTo(links.accessibilityStatement!)}
+          href={links.accessibilityStatement}
         />
       )}
       <DropdownMenuDivider />
+      {/* Full page loads (navigateTo), not links: a link would preload them on hover. */}
       {federationStatus.has_multi_tenant_federation && (
         <DropdownMenuItem
           icon={Building2}

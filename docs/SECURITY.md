@@ -169,8 +169,13 @@ on the documentation site.
   commits dismiss earlier approvals, review conversations must be resolved,
   and merges go through the merge queue.
 - **Releases.** Only Core Maintainers can create, update or delete
-  `release/**` branches and `v*` tags. A `v*` tag starts image publication,
-  so this restriction controls who can publish a release.
+  `release/**` branches and control human `v*` tag operations. When configured
+  and enabled with repository variable `RELEASE_MANAGED`,
+  the repository-scoped release App can create final tags after a reviewed
+  preparation PR is merged and push CI succeeds on that exact commit. Its tag
+  creation permission must be separate from update/deletion protections; it
+  cannot merge PRs, move/delete tags or bypass branch checks. A `v*` tag starts
+  image publication, so these restrictions control who can publish a release.
 - **`main`.** Protected against deletion and force pushes.
 - **Bypass.** Core Maintainers can bypass the `develop` ruleset for a single
   pull request when a fix is urgent or no second Core Maintainer can review.
@@ -185,6 +190,8 @@ on the documentation site.
   why write access is not granted outside Core Maintainers. Keep repository
   and organisation secrets limited to those referenced by workflows; when a
   secret is no longer used, delete it and revoke it at its source.
+  The release controller's privileged `workflow_run` jobs execute only code
+  from `develop`; release checkouts are validated as data, never executed.
 - **Changes to access.** Only organisation owners change team roles, rulesets
   or bypass lists. Record each change in a GitHub issue so the access history
   is reviewable.

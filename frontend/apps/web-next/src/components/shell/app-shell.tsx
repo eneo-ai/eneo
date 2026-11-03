@@ -5,6 +5,7 @@ import {
 import { useHotkeys, useMediaQuery } from "@astryxdesign/core/hooks";
 import { usePathname } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
+import { AnimatedLayoutScope } from "@/components/astryx/collapsible";
 import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { CreateSpaceDialog } from "@/features/spaces/create-space-dialog";
 import { PHONE_SCREEN_QUERY } from "@/lib/hooks/use-media-match";
@@ -158,7 +159,9 @@ export function AppShellFrame({
             while a PageBar sticks to its top, focus and scrollIntoView stop
             below the bar instead of under it (WCAG 2.4.11). The bottom
             likewise keeps clear of a phone's docked action bar
-            (DockedActions), which it reserves room for. */}
+            (DockedActions), which it reserves room for. A disclosure in the
+            page glides what follows it inside this panel
+            (AnimatedLayoutScope). */}
         <main
           ref={mainRef}
           id="main-content"
@@ -168,7 +171,7 @@ export function AppShellFrame({
           {/* Under the top bar; a page with its own header shows its own
               under that header, and this one gives way. */}
           <ConnectionBanner className="phone:group-has-[[data-own-phone-header]]/shell:hidden group-has-[[data-own-mobile-header]]/shell:hidden" />
-          {children}
+          <AnimatedLayoutScope containerRef={mainRef}>{children}</AnimatedLayoutScope>
         </main>
         <ConnectionAnnouncer />
         {isMobile && (

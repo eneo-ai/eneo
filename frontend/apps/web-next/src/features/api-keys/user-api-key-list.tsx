@@ -24,7 +24,8 @@ import { RemovalFocusScope } from "@/features/spaces/removal";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { cursorPagination, flattenPages } from "@/lib/api/pagination";
-import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
+import { useMediaQuery } from "@astryxdesign/core/hooks";
+import { PHONE_QUERY } from "@/lib/hooks/use-media-match";
 import { ApiKeyActionScope, ApiKeyMenu } from "./api-key-actions";
 import {
   API_KEY_STATE_BADGE_VARIANT,
@@ -292,7 +293,7 @@ export function UserApiKeyList({
   onLoaded?: () => void;
 }) {
   const t = useTranslations();
-  const phone = useMediaMatch(PHONE_QUERY);
+  const phone = useMediaQuery(PHONE_QUERY);
   const [stateFilter, setStateFilter] = useState<ApiKeyStateFilter>("active");
   const now = useNow({ updateInterval: 60_000 });
   const [search, setSearch] = useState("");

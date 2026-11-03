@@ -41,6 +41,23 @@ test.describe("the audit log on a phone, then a tablet (decision 9)", () => {
       await expect(event).toBeFocused();
     }
 
+    // The filters open in a bottom sheet, upright and turned sideways; Escape
+    // closes it and focus comes back to the button.
+    const filter = page.getByRole("button", { name: "Filter", exact: true });
+    const sheet = page.getByRole("dialog", { name: "Filter" });
+    for (const size of [
+      { width: 390, height: 844 },
+      { width: 844, height: 390 }
+    ]) {
+      await page.setViewportSize(size);
+      await filter.click();
+      await expect(sheet).toBeVisible();
+      expect(await sheet.evaluate((el) => el.tagName)).toBe("DIALOG");
+      await page.keyboard.press("Escape");
+      await expect(sheet).toBeHidden();
+      await expect(filter).toBeFocused();
+    }
+
     // An iPad held upright: the table fits.
     await page.setViewportSize({ width: 820, height: 1180 });
     await expect

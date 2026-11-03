@@ -15,7 +15,9 @@ from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.widgets_table import Widgets
 from eneo.main.exceptions import BadRequestException
+from eneo.questions.question import QuestionAdd
 from eneo.widgets.application.visitor_token_service import VisitorTokenService
+from eneo.widgets.application.visitor_user import build_visitor_user
 from eneo.widgets.application.widget_limits import BudgetReservation, WidgetBudget
 from eneo.widgets.application.widget_retention import purge_expired_widget_sessions
 from eneo.widgets.domain.exceptions import (
@@ -28,6 +30,7 @@ from eneo.widgets.domain.widget_template import WidgetTemplate
 from eneo.widgets.infrastructure.widget_overview_repo_impl import WidgetOverviewRepoImpl
 from eneo.widgets.infrastructure.widget_repo_impl import WidgetRepoImpl
 from eneo.widgets.infrastructure.widget_usage_repo_impl import WidgetUsageRepoImpl
+from tests.integration.flows.statement_capture_support import capture_queries
 
 
 async def _load_widget(widget_id: str):
@@ -35,6 +38,96 @@ async def _load_widget(widget_id: str):
         widget = await WidgetRepoImpl(session).get(UUID(widget_id))
         assert widget is not None
         return widget
+
+
+async def test_history_metadata_is_scoped_to_widget_and_visitor(
+    db_container, admin_user, active_widget
+):
+    widget = await _load_widget(active_widget["id"])
+    async with db_container(user=admin_user) as container:
+        other_widget = (
+            await container.widget_service().create_widget(
+                space_id=widget.space_id,
+                target_id=widget.target_id,
+                name="Another widget for the same assistant",
+            )
+        ).widget
+        image = await container.file_service().save_image_from_bytes(
+            b"\x89PNG" + b"history image" * 8,
+            name="history.png",
+            mimetype="image/png",
+        )
+
+    # A visitor UUID can equal a real user's UUID. Neither that coincidence,
+    # another visitor nor another widget grants access to their conversations.
+    owner = build_visitor_user(widget, admin_user.id, admin_user.tenant)
+    other_visitor = build_visitor_user(widget, uuid4(), admin_user.tenant)
+    other_widget_visitor = build_visitor_user(other_widget, owner.id, admin_user.tenant)
+    conversations: list[UUID] = []
+    for user, name in (
+        (owner, "owned first"),
+        (owner, "owned second"),
+        (other_visitor, "another visitor"),
+        (other_widget_visitor, "another widget"),
+        (admin_user, "signed-in app conversation"),
+    ):
+        async with db_container(user=user) as container:
+            conversation = await container.session_service().create_session(
+                name=name, assistant_id=widget.target_id
+            )
+            conversations.append(conversation.id)
+            if name == "owned first":
+                await container.question_repo().add(
+                    QuestionAdd(
+                        question="Question content must not be listed",
+                        answer="Answer content must not be listed",
+                        num_tokens_question=1,
+                        num_tokens_answer=1,
+                        tenant_id=widget.tenant_id,
+                        session_id=conversation.id,
+                        assistant_id=widget.target_id,
+                    ),
+                    files=[image],
+                )
+
+    for user, expected_ids in (
+        (owner, set(conversations[:2])),
+        (other_visitor, {conversations[2]}),
+        (other_widget_visitor, {conversations[3]}),
+        (admin_user, {conversations[4]}),
+    ):
+        async with db_container(user=user) as container:
+            bind = container.session().sync_session.bind
+            assert bind is not None
+            with capture_queries(bind) as queries:
+                (
+                    metadata,
+                    total,
+                ) = await container.session_service().get_sessions_by_assistant(
+                    assistant_id=widget.target_id
+                )
+
+        assert {item.id for item in metadata} == expected_ids
+        assert total == len(expected_ids)
+        assert all(
+            set(item.model_dump()) == {"id", "name", "created_at", "updated_at"}
+            for item in metadata
+        )
+        assert not [
+            query.sql
+            for query in queries
+            if any(
+                table in query.sql
+                for table in (
+                    "FROM questions",
+                    "JOIN questions",
+                    "FROM files",
+                    "JOIN files",
+                    "FROM info_blobs",
+                    "JOIN info_blobs",
+                )
+            )
+        ]
 
 
 async def test_concurrent_budget_admission_and_exactly_once_completion(active_widget):

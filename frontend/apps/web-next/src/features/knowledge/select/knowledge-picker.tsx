@@ -10,7 +10,7 @@ import {
   Plus,
   X
 } from "lucide-react";
-import { Collapsible as AstryxCollapsible } from "@astryxdesign/core/Collapsible";
+import { Collapsible as AstryxCollapsible } from "@/components/astryx/collapsible";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { useLocale, useTranslations } from "use-intl";
 import { useState } from "react";

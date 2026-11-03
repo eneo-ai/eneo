@@ -8,7 +8,8 @@ import { useFormatter, useTranslations } from "use-intl";
 import { StatusLabel, type StatusTone } from "@/components/composites/status-label";
 import { TableFrame } from "@/components/composites/table-frame";
 import { personToneClass } from "@/features/spaces/members/member-avatar";
-import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
+import { useMediaQuery } from "@astryxdesign/core/hooks";
+import { PHONE_QUERY } from "@/lib/hooks/use-media-match";
 import { UserActions } from "./user-actions";
 import type { AdminUser, UserState } from "./users";
 
@@ -68,7 +69,7 @@ type UsersProps = {
  * in `UserActionScope` above, so a turn across 768 px keeps an open one.
  */
 export function UserList(props: UsersProps) {
-  const phone = useMediaMatch(PHONE_QUERY);
+  const phone = useMediaQuery(PHONE_QUERY);
   return phone ? (
     <UserRows {...props} />
   ) : (

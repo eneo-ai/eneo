@@ -9,13 +9,9 @@ import { makeAssistant, makeSpace } from "./testing/space-fixture";
 
 const state = vi.hoisted(() => ({
   space: null as unknown,
-  pushed: [] as string[],
   deleted: [] as string[]
 }));
 
-vi.mock("@/lib/navigation", () => ({
-  useRouter: () => ({ push: (href: string) => state.pushed.push(href), prefetch: () => {} })
-}));
 vi.mock("@/features/spaces/use-space", async () => {
   const { useSpaceFromQuery } = await import("@/features/spaces/testing/space-query");
   return { useSpace: () => useSpaceFromQuery(() => state.space as Space) };
@@ -36,7 +32,6 @@ import { AssistantsPage } from "@/features/assistants/assistants-page";
 afterEach(() => {
   cleanup();
   window.localStorage.clear();
-  state.pushed = [];
   state.deleted = [];
 });
 
@@ -112,9 +107,12 @@ describe("AssistantsPage", () => {
     const opened = vi.fn();
     card.addEventListener("click", opened);
     fireEvent.click(menu);
-    fireEvent.click(menuOf(menu).getByRole("menuitem", { name: "Redigera" }));
+    const edit = menuOf(menu).getByRole("menuitem", { name: "Redigera" });
+    expect(edit.getAttribute("href")).toBe("/spaces/space-1/assistants/assistant-1/edit");
+    // jsdom cannot navigate; the click only has to stay off the card's link.
+    edit.addEventListener("click", (event) => event.preventDefault());
+    fireEvent.click(edit);
     expect(opened).not.toHaveBeenCalled();
-    expect(state.pushed).toEqual(["/spaces/space-1/assistants/assistant-1/edit"]);
   });
 
   it.each(["cards", "list"])(
@@ -194,6 +192,28 @@ describe("AppsPage", () => {
     // The tab's primary action stays filled (the overview's are secondary).
     expect(screen.getByRole("button", { name: "Skapa app" }).dataset.variant).toBe("primary");
     await expectNoAxeViolations(apps.container);
+  });
+
+  it("links an app's editor from its menu", () => {
+    show(
+      makeSpace({
+        apps: [
+          {
+            id: "app-1",
+            name: "Protokollsammanfattning",
+            published: true,
+            user_id: "u",
+            permissions: ["read", "edit"]
+          }
+        ]
+      }),
+      <AppsPage />
+    );
+    const menu = screen.getByRole("button", { name: "Fler åtgärder för Protokollsammanfattning" });
+    fireEvent.click(menu);
+    expect(menuOf(menu).getByRole("menuitem", { name: "Redigera" }).getAttribute("href")).toBe(
+      "/spaces/space-1/apps/app-1/edit"
+    );
   });
 
   it("explains an empty list", () => {

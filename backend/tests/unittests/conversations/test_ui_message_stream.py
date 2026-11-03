@@ -21,6 +21,7 @@ from eneo.ai_models.completion_models.completion_model import (
     ToolCallMetadata,
 )
 from eneo.assistants.api.assistant_models import AssistantResponse
+from eneo.conversations import ui_message_stream
 from eneo.conversations.ui_message_stream import (
     UI_MESSAGE_STREAM_HEADERS,
     _tool_chunks,
@@ -229,6 +230,42 @@ async def test_golden_transcript():
         "completion_tokens": 5,
         "turn_tokens": 15,
     }
+
+
+@pytest.mark.asyncio
+async def test_a_source_resent_by_a_later_chunk_is_built_once(monkeypatch):
+    """Each text chunk lists every source cited so far; a long cited answer
+    must not rebuild the payload of each one per chunk."""
+    first, second = _blob(), _blob(UUID("55555555-5555-5555-5555-555555555555"))
+    built: list[UUID] = []
+    build = ui_message_stream._source_document_chunk
+
+    def counting_build(blob):
+        built.append(blob.id)
+        return build(blob)
+
+    monkeypatch.setattr(ui_message_stream, "_source_document_chunk", counting_build)
+    completions = [
+        Completion(response_type=ResponseType.TEXT, text="A", reference_chunks=[first]),
+        Completion(
+            response_type=ResponseType.TEXT,
+            text="B",
+            reference_chunks=[first, second],
+        ),
+        Completion(
+            response_type=ResponseType.TEXT,
+            text="C",
+            reference_chunks=[first, second],
+        ),
+    ]
+
+    chunks = await _collect(_response(completions))
+
+    assert built == [first.id, second.id]
+    assert [c["sourceId"] for c in chunks if c["type"] == "source-document"] == [
+        str(first.id),
+        str(second.id),
+    ]
 
 
 @pytest.mark.asyncio

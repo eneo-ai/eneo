@@ -2,7 +2,6 @@ import type { DropdownMenuOption } from "@astryxdesign/core/DropdownMenu";
 import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowDownToLine, ArrowUpToLine, FolderInput, Pencil, Trash2 } from "lucide-react";
-import { useRouter } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
 import type { ReactNode, RefObject } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
@@ -29,13 +28,13 @@ function chatAppMenuItems(
   permissions: string[],
   {
     published,
-    onEdit,
+    editHref,
     onPublish,
     onMove,
     onDelete
   }: {
     published: boolean;
-    onEdit: () => void;
+    editHref: string;
     onPublish: () => void;
     onMove?: () => void;
     onDelete: () => void;
@@ -43,7 +42,7 @@ function chatAppMenuItems(
 ): DropdownMenuOption[] {
   return [
     ...(permissions.includes("edit")
-      ? [{ label: t("edit"), icon: <Pencil aria-hidden="true" />, onClick: onEdit }]
+      ? [{ label: t("edit"), icon: <Pencil aria-hidden="true" />, href: editHref }]
       : []),
     ...(permissions.includes("publish")
       ? [
@@ -215,7 +214,6 @@ export function ChatAppActionScope({
 /** The menu of an assistant or group chat: edit, publish, move (assistants) and delete, as far as the user may. */
 export function ChatAppActions({ item }: { item: ChatAppItem }) {
   const t = useTranslations();
-  const router = useRouter();
   const { routeId } = useSpace();
   const open = useOpenResourceAction();
   const permissions = item.permissions ?? [];
@@ -231,10 +229,7 @@ export function ChatAppActions({ item }: { item: ChatAppItem }) {
       alignment="end"
       items={chatAppMenuItems(t, permissions, {
         published: item.published ?? false,
-        onEdit: () =>
-          router.push(
-            `/spaces/${routeId}/${isGroupChat ? "group-chats" : "assistants"}/${item.id}/edit`
-          ),
+        editHref: `/spaces/${routeId}/${isGroupChat ? "group-chats" : "assistants"}/${item.id}/edit`,
         onPublish: () => open("publish", item),
         onMove: isGroupChat ? undefined : () => open("move", item),
         onDelete: () => open("delete", item)

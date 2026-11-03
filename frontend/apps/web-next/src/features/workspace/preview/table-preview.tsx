@@ -1,5 +1,5 @@
 import { Button } from "@astryxdesign/core/Button";
-import { useMediaMatch } from "@/lib/hooks/use-media-match";
+import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import {
   proportional,
@@ -155,7 +155,7 @@ export function TablePreview({
 }: TablePreviewProps) {
   const t = useTranslations();
   // A touch screen has no Shift, Ctrl or Enter key to point at.
-  const coarse = useMediaMatch("(pointer: coarse)");
+  const coarse = useMediaQuery("(pointer: coarse)");
   const format = useCellFormat();
   const panelId = useId();
   const target = parseTableLocator(highlight?.locator);

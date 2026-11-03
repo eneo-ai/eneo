@@ -44,6 +44,11 @@ const astryxWrappedImports = [
     name: "@astryxdesign/core/TextInput",
     message:
       'Use `TextInput` from "@/components/astryx/text-input": its search key puts the phone keyboard away.'
+  },
+  {
+    name: "@astryxdesign/core/Collapsible",
+    message:
+      'Use `Collapsible` and `CollapsibleGroup` from "@/components/astryx/collapsible": it glides what follows it in the page or the chat.'
   }
 ];
 

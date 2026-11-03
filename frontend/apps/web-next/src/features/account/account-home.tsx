@@ -23,7 +23,8 @@ import { useAppContext } from "@/components/providers/app-context";
 import { profileDisplayName, profileInitials } from "@/components/shell/profile-menu";
 import { THEMES } from "@/components/shell/theme-switcher";
 import { useWhatsNew } from "@/features/whats-new/whats-new-provider";
-import { MOBILE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
+import { useMediaQuery } from "@astryxdesign/core/hooks";
+import { MOBILE_QUERY } from "@/lib/hooks/use-media-match";
 import { LOCALE_LABELS } from "@/lib/i18n/locales";
 import { navigateTo } from "@/lib/navigate-to";
 import { AccountProfile } from "@/features/account/account-profile";
@@ -39,10 +40,10 @@ import { AccountVersions } from "./account-versions";
  * outlives a turn of an iPad across 1024 px.
  */
 export function AccountHome() {
-  const mobile = useMediaMatch(MOBILE_QUERY);
+  const mobile = useMediaQuery(MOBILE_QUERY);
   return (
     <>
-      {mobile !== false ? <Konto /> : null}
+      {mobile ? <Konto /> : null}
       <div className="flex flex-col gap-6 max-lg:hidden">
         <AccountProfile />
         <ChangePasswordCard />
