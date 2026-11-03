@@ -48,9 +48,60 @@ jobs:
           python3 scripts/check_whats_new.py --repo-root . --branch "$branch" --release-tag "$tag"
       - name: Release and deployment contract tests
         run: python3 -m unittest discover -s scripts/tests -p 'test_release_*.py'
-  checks:
+  # A develop commit has already passed the full suite in the merge queue when that run
+  # left a full-scope receipt (ci.yml's CI job writes it); otherwise, and always for
+  # tags, manual runs and other branches, the full suite runs here.
+  acceptance:
     needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      reuse: ${{ steps.acceptance.outputs.reuse }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts/ci-publication-acceptance.mjs
+          sparse-checkout-cone-mode: false
+      - name: Reuse only a full-suite receipt from the merge queue
+        id: acceptance
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+        run: node .github/scripts/ci-publication-acceptance.mjs
+  checks:
+    needs: [release, acceptance]
+    if: needs.acceptance.outputs.reuse != 'true'
     uses: ./.github/workflows/ci.yml
+  # Advisories and scanning rules change without a commit: a reused result never
+  # replaces a fresh security check of what is published.
+  security:
+    needs: [release, acceptance]
+    if: needs.acceptance.outputs.reuse == 'true'
+    uses: ./.github/workflows/security.yml
+    with:
+      base_sha: ${{ github.event.before || '' }}
+  # Passes by a reused full-suite result with a fresh security check, or by full checks.
+  accepted:
+    needs: [acceptance, checks, security]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require full checks, or a reused full suite and fresh security
+        env:
+          REUSE: ${{ needs.acceptance.outputs.reuse }}
+          CHECKS: ${{ needs.checks.result }}
+          SECURITY: ${{ needs.security.result }}
+        run: |
+          if [[ "$CHECKS" == success || ( "$REUSE" == true && "$CHECKS" == skipped && "$SECURITY" == success ) ]]; then
+            echo "Accepted: checks $CHECKS, reuse $REUSE, security $SECURITY."
+          else
+            echo "::error::Not accepted: checks $CHECKS, reuse $REUSE, security $SECURITY."
+            exit 1
+          fi
   backend:
     needs: release
     uses: ./.github/workflows/application_image.yml
@@ -74,7 +125,16 @@ jobs:
       revision: ${{ needs.release.outputs.revision }}
       publish: true
   bundle:
-    needs: [release, checks, backend, frontend, tool-runtime]
+    needs: [release, accepted, backend, frontend, tool-runtime]
+    # Explicit: one of checks and security is always skipped upstream, and a job with no
+    # status check of its own would be skipped with it.
+    if: >-
+      ${{ !cancelled()
+      && needs.release.result == 'success'
+      && needs.accepted.result == 'success'
+      && needs.backend.result == 'success'
+      && needs.frontend.result == 'success'
+      && needs.tool-runtime.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -140,7 +200,7 @@ jobs:
         run: python3 scripts/release_bundle.py promote
   release-sbom:
     needs: bundle
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: ${{ !cancelled() && needs.bundle.result == 'success' && startsWith(github.ref, 'refs/tags/v') }}
     permissions:
       contents: write
       packages: read

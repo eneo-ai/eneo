@@ -8,6 +8,7 @@ import test from "node:test";
 import { checkBuildMemory, readPeakRssMb } from "./ci-build-memory.mjs";
 import { changedFiles, planCi } from "./ci-change-scope.mjs";
 import { evaluateCi } from "./ci-gate.mjs";
+import { CI_WORKFLOW, proves } from "./ci-publication-acceptance.mjs";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const appFile = "frontend/apps/web/src/routes/+page.svelte";
@@ -294,6 +295,52 @@ test("publications running side by side never cancel or replace each other's wor
   // One tool-runtime publisher per version, and a waiting one is never replaced.
   const runtime = read("tool_runtime_image.yml").split("\n  image:\n")[1].split("\n    permissions:")[0];
   assert.match(runtime, /^      group: tool-runtime-image-\$\{\{ needs\.test\.outputs\.publish == 'true' && needs\.test\.outputs\.version \|\| github\.run_id \}\}\n      queue: max\n      cancel-in-progress: false$/m);
+});
+
+test("publication reuses CI only through a full-suite receipt from the merge queue on that commit", () => {
+  const repository = "eneo-ai/eneo";
+  const sha = "a".repeat(40);
+  const run = {
+    id: 7, run_attempt: 2, event: "merge_group", path: CI_WORKFLOW, head_sha: sha,
+    repository: { full_name: repository }, head_repository: { full_name: repository },
+    status: "completed", conclusion: "success",
+  };
+  const receipt = {
+    schema: 1, sha, repository, workflow: `${repository}/${CI_WORKFLOW}@refs/heads/gh-readonly-queue/develop/pr-1-x`,
+    event: "merge_group", run_id: 7, run_attempt: 2, scope: "full",
+  };
+  assert.equal(proves(run, receipt, { sha, repository }), true);
+  for (const [field, value] of [
+    ["event", "pull_request"], ["path", ".github/workflows/other.yml"], ["head_sha", "b".repeat(40)],
+    ["repository", { full_name: "fork/eneo" }], ["head_repository", { full_name: "fork/eneo" }],
+    ["status", "in_progress"], ["conclusion", "failure"],
+  ]) assert.equal(proves({ ...run, [field]: value }, receipt, { sha, repository }), false, `run ${field}`);
+  for (const [field, value] of [
+    ["schema", 2], ["sha", "b".repeat(40)], ["repository", "fork/eneo"], ["event", "push"],
+    ["workflow", `${repository}/.github/workflows/build_and_push_images.yml@refs/heads/develop`],
+    ["run_id", 8], ["run_attempt", 1], ["scope", "scoped"],
+  ]) assert.equal(proves(run, { ...receipt, [field]: value }, { sha, repository }), false, `receipt ${field}`);
+  assert.equal(proves(run, undefined, { sha, repository }), false);
+
+  // CI writes the receipt only after its gate passed, from the scope the run planned.
+  const ci = fs.readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8");
+  const gate = ci.slice(ci.indexOf("\n  ci:\n"));
+  assert.ok(gate.indexOf("run: node .github/scripts/ci-gate.mjs") < gate.indexOf("- name: Write the validation receipt"));
+  assert.match(gate, /FULL: \$\{\{ needs\.changes\.outputs\.full \}\}/);
+  assert.match(gate, /name: ci-receipt\n {10}path: ci-receipt\.json\n {10}retention-days: 14\n {10}overwrite: true/);
+
+  const workflow = fs.readFileSync(path.join(root, ".github/workflows/build_and_push_images.yml"), "utf8");
+  const job = (name) => workflow.split(`\n  ${name}:\n`)[1].split(/\n  [a-z-]+:\n/)[0];
+  assert.match(job("acceptance"), /^    permissions:\n      actions: read\n      contents: read\n/m);
+  assert.match(job("checks"), /^    needs: \[release, acceptance\]\n    if: needs\.acceptance\.outputs\.reuse != 'true'\n    uses: \.\/\.github\/workflows\/ci\.yml$/m);
+  assert.match(job("security"), /^    if: needs\.acceptance\.outputs\.reuse == 'true'\n    uses: \.\/\.github\/workflows\/security\.yml$/m);
+  assert.ok(job("accepted").includes(`[[ "$CHECKS" == success || ( "$REUSE" == true && "$CHECKS" == skipped && "$SECURITY" == success ) ]]`));
+  assert.match(job("bundle"), /^    needs: \[release, accepted, /m);
+  // One of checks and security is always skipped: without their own status checks the
+  // jobs after accepted would be skipped with it.
+  assert.ok(job("bundle").includes("&& needs.accepted.result == 'success'"));
+  assert.match(job("bundle"), /\$\{\{ !cancelled\(\)/);
+  assert.match(job("release-sbom"), /^    if: \$\{\{ !cancelled\(\) && needs\.bundle\.result == 'success' && startsWith\(github\.ref, 'refs\/tags\/v'\) \}\}$/m);
 });
 
 test("only develop pushes save the package download cache", () => {

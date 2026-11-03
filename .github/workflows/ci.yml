@@ -857,3 +857,26 @@ jobs:
           EXPECTED_JOBS: ${{ needs.changes.outputs.expected_jobs }}
           JOB_RESULTS: ${{ toJSON(needs) }}
         run: node .github/scripts/ci-gate.mjs
+
+      # Evidence for image publication, written only once every required job passed:
+      # which commit passed which scope, in which run and attempt of which workflow.
+      # Publication reuses a merge-queue run only through this receipt.
+      - name: Write the validation receipt
+        env:
+          FULL: ${{ needs.changes.outputs.full }}
+        run: |
+          jq -n --arg sha "$GITHUB_SHA" --arg repository "$GITHUB_REPOSITORY" \
+            --arg workflow "$GITHUB_WORKFLOW_REF" --arg event "$GITHUB_EVENT_NAME" \
+            --argjson run_id "$GITHUB_RUN_ID" --argjson run_attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg scope "$([[ "$FULL" == true ]] && echo full || echo scoped)" \
+            '{schema: 1, sha: $sha, repository: $repository, workflow: $workflow, event: $event,
+              run_id: $run_id, run_attempt: $run_attempt, scope: $scope}' >ci-receipt.json
+          cat ci-receipt.json
+
+      - name: Keep the validation receipt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ci-receipt
+          path: ci-receipt.json
+          retention-days: 14
+          overwrite: true
