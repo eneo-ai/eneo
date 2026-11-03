@@ -13,6 +13,7 @@ import {
   Paperclip,
   X
 } from "lucide-react";
+import { queryOptions, useQuery } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "use-intl";
 import { useEffect, useRef, useState } from "react";
 import { useReturnFocus } from "@/components/ui/dialog-focus";
@@ -32,29 +33,46 @@ export function FileKindIcon({ mimetype, className }: { mimetype: string; classN
   return <File aria-hidden className={className} />;
 }
 
-/** Resolves a short-lived inline signed URL for a backend file on mount. */
+/**
+ * A file's inline signed URL, shared by every view of it: the URL lives an
+ * hour (`signedFileUrl`), so a thumbnail, its preview and the next visit to
+ * the conversation reuse one URL, and the browser's copy of the image,
+ * instead of signing and downloading it again.
+ */
+function signedUrlQuery(fileId: string) {
+  return queryOptions({
+    queryKey: ["files", fileId, "signed-url"],
+    queryFn: () => signedFileUrl(browserApi, fileId, "inline"),
+    // A new view renews it well before the hour is up. A view still open past
+    // the hour gets a new one through `resign` when its image fails to load.
+    staleTime: 50 * 60_000,
+    gcTime: 55 * 60_000,
+    // A loaded image keeps its bytes; only a new view needs a newer URL.
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false
+  });
+}
+
+/**
+ * Resolves a short-lived inline signed URL for a backend file. `resign` is
+ * for an `<img>`'s `onError`: a URL that no longer loads is signed again,
+ * once per file, so a file that fails with its new URL too is not signed for
+ * good.
+ */
 export function useSignedUrl(fileId: string) {
-  const [result, setResult] = useState<{
-    fileId: string;
-    url: string | null;
-    error: boolean;
-  } | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    signedFileUrl(browserApi, fileId, "inline")
-      .then((url) => {
-        if (active) setResult({ fileId, url, error: false });
-      })
-      .catch(() => {
-        if (active) setResult({ fileId, url: null, error: true });
-      });
-    return () => {
-      active = false;
-    };
-  }, [fileId]);
-
-  return result?.fileId === fileId ? result : { fileId, url: null, error: false };
+  const query = useQuery(signedUrlQuery(fileId));
+  const [resigned, setResigned] = useState<string | null>(null);
+  return {
+    url: query.data ?? null,
+    // A failed renewal keeps the URL it had, which may still load.
+    error: query.isError && !query.data,
+    resign: () => {
+      if (!query.data || resigned === fileId) return;
+      setResigned(fileId);
+      // Joins a signing already under way, such as another view's `resign`.
+      void query.refetch({ cancelRefetch: false });
+    }
+  };
 }
 
 /** Native link preserves the backend's slash-sensitive download path. */
@@ -132,7 +150,8 @@ function PdfPreview({ url, name }: { url: string; name: string }) {
 /**
  * Preview of a single attachment in an Astryx Dialog: images render inline,
  * PDFs in an iframe, everything else falls back to a download link. `url` may
- * be null while a signed URL is still resolving.
+ * be null while a signed URL is still resolving; `onImageError` is
+ * `useSignedUrl`'s `resign`.
  */
 export function AttachmentPreviewDialog({
   open,
@@ -140,7 +159,8 @@ export function AttachmentPreviewDialog({
   name,
   mimetype,
   url,
-  error = false
+  error = false,
+  onImageError
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -148,6 +168,7 @@ export function AttachmentPreviewDialog({
   mimetype: string;
   url: string | null;
   error?: boolean;
+  onImageError?: () => void;
 }) {
   const t = useTranslations();
   const noTrigger = useRef<HTMLElement>(null);
@@ -173,6 +194,7 @@ export function AttachmentPreviewDialog({
                 <img
                   src={url}
                   alt={name}
+                  onError={onImageError}
                   className="rounded-ax-element max-h-[70dvh] max-w-full object-contain"
                 />
               ) : isPdf ? (
