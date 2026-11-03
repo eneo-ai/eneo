@@ -16,7 +16,7 @@ const docsFile = "frontend/apps/docs-site/src/content/contributing/index.mdx";
 const resultsFor = (plan) => Object.fromEntries(Object.entries(plan.expected_jobs)
   .map(([job, required]) => [job, { result: required ? "success" : "skipped" }]));
 
-for (const event of ["pull_request", "merge_group"]) {
+for (const event of ["pull_request"]) {
   test(`${event}: Svelte-only changes retain E2E and a production image build`, () => {
     const plan = planCi([appFile], event);
     assert.equal(plan.frontend, true);
@@ -48,7 +48,7 @@ for (const event of ["pull_request", "merge_group"]) {
 
 test("shared frontend inputs validate both apps and all application images", () => {
   for (const file of ["frontend/bun.lock", "frontend/package.json", "frontend/patches/x.patch", "frontend/packages/ui/src/styles/main.css"]) {
-    const plan = planCi([file], "merge_group");
+    const plan = planCi([file], "pull_request");
     for (const name of ["frontend", "frontend_e2e", "web_next", "web_next_e2e"]) assert.equal(plan[name], true, `${file}: ${name}`);
     assert.deepEqual(plan.docker_matrix.include.map(({ image }) => image), ["backend", "frontend"]);
   }
@@ -56,7 +56,7 @@ test("shared frontend inputs validate both apps and all application images", () 
 
 test("workflow, local action, scope and gate changes force full validation", () => {
   for (const file of [".github/workflows/ci.yml", ".github/actions/setup-playwright/action.yml", ".github/scripts/ci-gate.mjs", ".github/scripts/ci-web-next-e2e-legs.mjs"]) {
-    const plan = planCi([file], "merge_group");
+    const plan = planCi([file], "pull_request");
     assert.equal(plan.full, true);
     assert.equal(plan.docker_matrix.include.length, 3);
   }
@@ -380,7 +380,7 @@ test("push, tag and manual callers keep full validation even with only docs chan
 });
 
 test("a combined candidate includes requirements from every changed area", () => {
-  const plan = planCi([backendFile, appFile], "merge_group");
+  const plan = planCi([backendFile, appFile], "pull_request");
   assert.equal(plan.backend, true);
   assert.equal(plan.frontend, true);
   assert.equal(plan.web_next_e2e, true);
@@ -388,12 +388,12 @@ test("a combined candidate includes requirements from every changed area", () =>
 });
 
 test("empty diffs run the full suite", () => {
-  assert.equal(planCi([], "merge_group").full, true);
+  assert.equal(planCi([], "pull_request").full, true);
 });
 
 test("unmapped runtime and root configuration paths run the full suite", () => {
   for (const file of ["new-service/main.py", ".env.example", "docker-compose.yml"]) {
-    assert.equal(planCi([file], "merge_group").full, true, file);
+    assert.equal(planCi([file], "pull_request").full, true, file);
   }
 });
 
@@ -423,14 +423,14 @@ test("contract inputs select their consumers and developer tooling", () => {
     [".devcontainer/Dockerfile", ["docker_devcontainer"]],
   ];
   for (const [file, required] of cases) {
-    const plan = planCi([file], "merge_group");
+    const plan = planCi([file], "pull_request");
     for (const name of required) assert.equal(plan[name], true, `${file}: ${name}`);
   }
   assert.equal(planCi([backendFile], "pull_request").scripts, false);
 });
 
 test("web-next-only changes do not build the Svelte app", () => {
-  const plan = planCi(["frontend/apps/web-next/src/routes/index.tsx"], "merge_group");
+  const plan = planCi(["frontend/apps/web-next/src/routes/index.tsx"], "pull_request");
   assert.equal(plan.web_next, true);
   assert.equal(plan.web_next_e2e, true);
   assert.equal(plan.frontend, false);
@@ -440,7 +440,7 @@ test("web-next-only changes do not build the Svelte app", () => {
 
 test("web-next inputs rebuild the backend image that bundles the web app", () => {
   for (const file of ["frontend/bunfig.toml", "frontend/apps/web-next/src/main.tsx"]) {
-    const plan = planCi([file], "merge_group");
+    const plan = planCi([file], "pull_request");
     const backend = plan.docker_matrix.include.find(({ image }) => image === "backend");
     assert.equal(backend?.build_contexts, "web=./frontend", file);
   }
@@ -449,7 +449,7 @@ test("web-next inputs rebuild the backend image that bundles the web app", () =>
 });
 
 test("missing, failed, cancelled and unexpectedly skipped required jobs fail the gate", () => {
-  const plan = planCi([appFile], "merge_group");
+  const plan = planCi([appFile], "pull_request");
   for (const job of Object.keys(plan.expected_jobs).filter((job) => plan.expected_jobs[job])) {
     for (const result of ["failure", "cancelled", "skipped", "timed_out", undefined]) {
       const needs = resultsFor(plan);
@@ -460,7 +460,7 @@ test("missing, failed, cancelled and unexpectedly skipped required jobs fail the
 });
 
 test("optional jobs cannot hide a failure and unknown jobs cannot bypass the gate", () => {
-  const plan = planCi([docsFile], "merge_group");
+  const plan = planCi([docsFile], "pull_request");
   const needs = resultsFor(plan);
   needs.frontend.result = "failure";
   assert.ok(evaluateCi(plan.expected_jobs, needs).length);
@@ -472,7 +472,7 @@ test("optional jobs cannot hide a failure and unknown jobs cannot bypass the gat
 });
 
 test("a broken scope job cannot turn the aggregate green", () => {
-  const plan = planCi([docsFile], "merge_group");
+  const plan = planCi([docsFile], "pull_request");
   const needs = resultsFor(plan);
   needs.changes.result = "failure";
   assert.ok(evaluateCi(plan.expected_jobs, needs).length);
@@ -508,7 +508,7 @@ test("workflow selection matches the required-job plan for each kind of change",
   }
 });
 
-test("each candidate is classified by its own diff onto the preceding candidate, and a bad base runs everything", () => {
+test("a pull request is classified by its own diff, the merge queue runs everything, and a bad base runs everything", () => {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "eneo-ci-diff-"));
   const git = (...args) => execFileSync("git", args, {
     cwd, encoding: "utf8", timeout: 5_000,
@@ -522,12 +522,13 @@ test("each candidate is classified by its own diff onto the preceding candidate,
     git("init", "--quiet");
     git("config", "user.name", "CI contract test");
     git("config", "user.email", "ci@example.invalid");
-    const scope = (baseSha, head) => {
+    const scope = (baseSha, head, event = "pull_request") => {
       const eventPath = path.join(cwd, "event.json");
-      fs.writeFileSync(eventPath, JSON.stringify({ merge_group: { base_sha: baseSha } }));
+      fs.writeFileSync(eventPath, JSON.stringify(event === "pull_request"
+        ? { pull_request: { base: { sha: baseSha } } } : { merge_group: { base_sha: baseSha } }));
       return spawnSync(process.execPath, [path.join(root, ".github/scripts/ci-change-scope.mjs"), "--github-event"], {
         cwd, encoding: "utf8", timeout: 5_000,
-        env: { ...process.env, GITHUB_EVENT_NAME: "merge_group", GITHUB_EVENT_PATH: eventPath, GITHUB_SHA: head, GITHUB_STEP_SUMMARY: "" },
+        env: { ...process.env, GITHUB_EVENT_NAME: event, GITHUB_EVENT_PATH: eventPath, GITHUB_SHA: head, GITHUB_STEP_SUMMARY: "" },
       });
     };
     write(backendFile, "original\n");
@@ -538,13 +539,18 @@ test("each candidate is classified by its own diff onto the preceding candidate,
     write(appFile, "later queued PR\n");
     git("add", "."); git("commit", "--quiet", "-m", "candidate");
     let head = git("rev-parse", "HEAD");
-    // merge_group.base_sha is the preceding candidate's head, not the develop tip.
     assert.deepEqual(changedFiles(preceding, head, cwd), [appFile]);
     let run = scope(preceding, head);
     assert.equal(run.status, 0, run.stderr);
     assert.match(run.stdout, /^full=false$/m);
     assert.match(run.stdout, /^frontend=true$/m);
     assert.match(run.stdout, /^backend=false$/m);
+    // A queue entry's diff leaves out the entries ahead of it, and publication reuses
+    // the queue's result for the commit that lands: the queue validates everything.
+    run = scope(preceding, head, "merge_group");
+    assert.equal(run.status, 0, run.stderr);
+    assert.match(run.stdout, /^full=true$/m);
+    assert.match(run.stdout, /^backend=true$/m);
     fs.mkdirSync(path.join(cwd, "docs"));
     git("mv", backendFile, "docs/moved.md");
     git("commit", "--quiet", "-m", "move out of backend");

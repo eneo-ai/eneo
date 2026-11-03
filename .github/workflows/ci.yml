@@ -13,7 +13,8 @@ on:
     branches:
       - develop
       - "release/**"
-  # Classify the entire candidate diff, including preceding queued PRs.
+  # The full suite: the candidate is what lands on develop, and image publication
+  # reuses this run's result for that commit.
   merge_group:
     types: [checks_requested]
 
