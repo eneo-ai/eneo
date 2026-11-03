@@ -828,9 +828,10 @@ jobs:
           build-contexts: ${{ matrix.build_contexts }}
           pull: true
           push: false
-          # Default-branch publication exports each application image's cache
-          # under its own scope; a second export of the same layers here would
-          # only double cache storage. The devcontainer has no publication
+          # Default-branch publication exports the backend image's cache under
+          # its scope (not the Svelte frontend's, whose layers are rarely reused);
+          # an export of application layers here would only double cache
+          # storage. The devcontainer has no publication
           # build, so CI warms its cache itself, on branch pushes only:
           # PR/queue refs cannot share exported caches with later candidates.
           cache-from: |
