@@ -110,6 +110,18 @@ describe("globals.css", () => {
     );
   });
 
+  it("stops every transition with reduced motion, a dialog's backdrop included", () => {
+    // ::backdrop is not matched by * or ::before/::after; Astryx fades the
+    // drawer's and the dialogs' backdrop on their own duration.
+    const rules = declarationsOf("base", "(prefers-reduced-motion: reduce)");
+    const selector = [...rules.keys()].find((key) => key.split(", ").includes("*"));
+    expect(selector?.split(", ")).toEqual(["*", "::before", "::after", "::backdrop"]);
+    expect(rules.get(selector!)).toMatchObject({
+      "animation-duration": "0.01ms",
+      "transition-duration": "0.01ms"
+    });
+  });
+
   it("pins color-scheme to the next-themes class", () => {
     expect(css).toMatch(/:root\.dark,\s*:root\.dark \[data-astryx-theme\]:not\(\[data-theme\]\)/);
   });
