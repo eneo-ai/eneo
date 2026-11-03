@@ -35,6 +35,10 @@ export default defineConfig(({ command, mode }) => ({
       { find: /^@\//, replacement: `${path.resolve(import.meta.dirname, "src")}/` }
     ]
   },
+  // A catalogue is read only as a whole object, so no key needs its own
+  // export: the locale chunks compile to one JSON.parse string instead of a
+  // binding per key next to the object (about 70 KB gzip off every route).
+  json: { namedExports: false },
   // FastAPI replaces the placeholder with each response's CSP nonce. The dev
   // server sends no CSP: it is checked against the FastAPI-served build.
   html: { cspNonce: "__ENEO_CSP_NONCE__" },
