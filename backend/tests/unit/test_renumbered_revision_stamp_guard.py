@@ -44,7 +44,7 @@ def test_an_old_branch_stamp_with_the_branch_schema_is_refused_with_its_repair(
         with pytest.raises(RenumberedRevisionStampError) as refused:
             check_renumbered_revision_stamp(connection)
 
-    assert f"alembic stamp --purge {revision.new}" in str(refused.value)
+    assert revision.repair_command() in str(refused.value)
 
 
 @pytest.mark.parametrize("revision", RENUMBERED_BRANCH_REVISIONS, ids=lambda r: r.old)
@@ -100,3 +100,25 @@ def test_alembic_refuses_the_upgrade_and_the_repair_stamp_clears_it(tmp_path: Pa
         )
         check_renumbered_revision_stamp(connection)
     assert stamps == [revision.new]
+
+
+def test_a_stamp_at_the_removed_jobs_index_id_is_refused_before_alembic_looks_it_up(
+    tmp_path: Path,
+):
+    """202610261000 left the history: upgrade names the repair instead of
+    failing with "Can't locate revision", and the repair stamp still runs."""
+    revision = next(r for r in RENUMBERED_BRANCH_REVISIONS if r.removed)
+    engine = _database(tmp_path, [revision.old], [_branch_schema(revision)])
+    config = Config(str(BACKEND_DIR / "alembic.ini"))
+    config.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
+    config.set_main_option("sqlalchemy.url", str(engine.url))
+
+    with pytest.raises(RenumberedRevisionStampError) as refused:
+        command.upgrade(config, "head")
+    assert "alembic stamp --purge 202610251100" in str(refused.value)
+    assert "no longer in the history" in str(refused.value)
+
+    command.stamp(config, "202610251100", purge=True)
+
+    with engine.connect() as connection:
+        check_renumbered_revision_stamp(connection)

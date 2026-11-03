@@ -21,6 +21,13 @@ flows on by default migration became 202610220930. A database stamped at one
 of the old ids by the branch would now be read as develop's migration of that
 id: Alembic would rerun the branch's renamed migrations and skip develop's.
 
+The develop merge of November 3 brought develop's copy of the branch's jobs
+poll index (202610261000) as 202611030830, after develop's own chain, so the
+branch's copy left the history. A database stamped at 202610261000 alone would
+fail with Alembic's "Can't locate revision"; it is refused with the repair
+instead: back to the stamp before it, after which develop's 202611030830 keeps
+the index the database already has.
+
 Such a database is recognised by schema the branch had at that stamp, which
 develop's migration of the same id never creates. It is refused with the
 exact repair instead of migrated.
@@ -41,6 +48,8 @@ class RenumberedRevision:
     # Set when the renumbered migration also moved after develop's migrations:
     # the old stamp then lacks develop's migrations that the new one implies.
     repair: str | None = None
+    # Set when the old id left the history instead of taking a new meaning.
+    removed: bool = False
 
     def repair_command(self) -> str:
         return self.repair or f"alembic stamp --purge {self.new}"
@@ -118,6 +127,13 @@ RENUMBERED_BRANCH_REVISIONS: tuple[RenumberedRevision, ...] = (
         table="flow_provider_calls",
         column="digest_call",
     ),
+    RenumberedRevision(
+        old="202610261000",
+        new="202611030830",
+        table="jobs",
+        repair="alembic stamp --purge 202610251100",
+        removed=True,
+    ),
 )
 
 
@@ -153,10 +169,16 @@ def check_renumbered_revision_stamp(connection: Connection) -> None:
         return
     for revision in RENUMBERED_BRANCH_REVISIONS:
         if stamps[0] == revision.old and _has_branch_schema(connection, revision):
+            reason = (
+                f"{revision.old} is no longer in the history, so it cannot migrate "
+                "as is."
+                if revision.removed
+                else f"develop uses {revision.old} for a different migration. "
+                "Migrating it as is would skip develop's migrations."
+            )
             raise RenumberedRevisionStampError(
                 f"This database is stamped at {revision.old}, the flows and builder "
                 f"branch's old id for the migration now numbered {revision.new}; "
-                f"develop uses {revision.old} for a different migration. Migrating "
-                "it as is would skip develop's migrations. Repair the stamp, then "
-                f"migrate again: {revision.repair_command()}"
+                f"{reason} Repair the stamp, then migrate again: "
+                f"{revision.repair_command()}"
             )
