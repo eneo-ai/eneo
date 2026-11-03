@@ -209,8 +209,8 @@ function PersonalLists() {
 /**
  * The empty conversation: a greeting (a space's own assistant, or the personal
  * chat) or the partner's name and description; the composer, centred under it
- * from 640px (on phones the view docks it at the bottom, where it stays:
- * decision 5); and in the personal chat "Fortsätt" and "Dina assistenter".
+ * (on phones and touch screens the view docks it at the bottom, where it
+ * stays: decision 5); and in the personal chat "Fortsätt" and "Dina assistenter".
  * A space's own assistant leaves other assistants to its header's switcher,
  * which lists the space's own: a shortcut to assistants of other spaces does
  * not belong inside one.
@@ -220,7 +220,7 @@ export function StartState({
   composer
 }: {
   partner: ChatPartner;
-  /** The centred composer; absent on phones, where the view docks it. */
+  /** The centred composer; absent where the view docks it. */
   composer?: ReactNode;
 }) {
   const t = useTranslations();
@@ -234,14 +234,14 @@ export function StartState({
   return (
     // Auto margins centre the content vertically but, unlike justify-center,
     // never push it above the scroll edge when it is taller (zoom, short phones).
-    // The personal start leads with its greeting on a phone, start-aligned
-    // above its lists; another assistant's has only its introduction, centred
-    // at every width.
+    // The personal start leads with its greeting, start-aligned above its
+    // lists, where the composer is docked; another assistant's has only its
+    // introduction, centred at every width.
     <div className="short:py-3 flex w-full flex-1 flex-col items-center px-4 pt-6 pb-4 sm:py-10">
       <div
         className={cn(
           "short:gap-4 @container flex w-full max-w-[720px] flex-col gap-7 sm:gap-8",
-          personal ? "sm:my-auto sm:items-center" : "my-auto items-center"
+          personal ? cn("sm:items-center", composer && "sm:my-auto") : "my-auto items-center"
         )}
       >
         <div
@@ -276,8 +276,8 @@ export function StartState({
           </p>
         </div>
 
-        {/* The one-time release notice sits above the composer (from 640px; on
-            phones above the lists, the composer docked under them), never over it. */}
+        {/* The one-time release notice sits above the composer (where it is docked,
+            above the lists, the composer under them), never over it. */}
         {personal && <WhatsNewBanner />}
         {composer}
 

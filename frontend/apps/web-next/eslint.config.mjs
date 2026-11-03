@@ -112,6 +112,14 @@ const eslintConfig = defineConfig([
             'Literal[value=/(opacity-0|invisible)[^"]*(group-)?hover:(opacity-100|visible)/], TemplateElement[value.raw=/(opacity-0|invisible)[^"]*(group-)?hover:(opacity-100|visible)/]',
           message:
             "Do not reveal anything on hover only: touch has no hover. Show it, or put it in a menu."
+        },
+        {
+          // Astryx puts a menu's className on the menu, not on its button: a
+          // size meant for the button squeezed the answer's menu to 44 px.
+          selector:
+            "JSXOpeningElement[name.name=/^(MoreMenu|DropdownMenu)$/] > JSXAttribute[name.name='className']",
+          message:
+            "MoreMenu and DropdownMenu put className on the menu, not the button, which the theme already sizes for touch. Style the button through DropdownMenu's `button`."
         }
       ]
     }

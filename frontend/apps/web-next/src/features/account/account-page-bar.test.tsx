@@ -44,7 +44,7 @@ describe("AccountPageBar on a phone", () => {
     const back = screen.getByRole("link", { name: "Tillbaka till Konto" });
     expect(back.getAttribute("href")).toBe("/account");
     expect(back.closest("[data-own-mobile-header]")).toBeTruthy();
-    // The page's heading below 1024 px; from there the layout's "Mitt konto".
+    // The page's heading below 1024 px; from there the layout's "Konto".
     const heading = screen.getByRole("heading", { level: 1, name: title });
     expect(heading.className).toContain("lg:hidden");
     expect(container.querySelectorAll("h1")).toHaveLength(1);

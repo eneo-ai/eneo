@@ -58,7 +58,7 @@ export function OrganizationSkillDetailPage({ skillId }: { skillId: string }) {
   const value = skill.data;
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-7 pb-16">
+    <div className="flex w-full flex-col gap-7 pb-16">
       <PageHeader title={value.display_name}>
         {!value.removed_at && (
           <Button

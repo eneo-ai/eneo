@@ -1,5 +1,6 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useTranslations } from "use-intl";
+import { PageFrame } from "@/components/composites/page-frame";
 import { PageBar } from "@/components/shell/page-bar";
 import { WhatsNewPage } from "@/features/whats-new/whats-new-page";
 import { browserApi } from "@/lib/api/browser";
@@ -21,7 +22,10 @@ function WhatsNewRoute() {
   return (
     <>
       <PageBar parent={{ label: t("account"), href: "/account" }} title={t("whats_new")} />
-      <WhatsNewPage title={t("whats_new")} />
+      {/* A reading column, on the pages' shared left edge. */}
+      <PageFrame>
+        <WhatsNewPage title={t("whats_new")} />
+      </PageFrame>
     </>
   );
 }

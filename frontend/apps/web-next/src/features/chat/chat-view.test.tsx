@@ -265,20 +265,48 @@ describe("ChatView start state", () => {
   });
 });
 
-describe("ChatView start state on a phone (decisions 5 and 8)", () => {
+describe("ChatView start state where the composer is docked: phones and touch screens (decisions 5 and 8)", () => {
   const follows = (later: Node, earlier: Node) =>
     Boolean(earlier.compareDocumentPosition(later) & Node.DOCUMENT_POSITION_FOLLOWING);
 
-  it("docks the composer from the first frame, under the greeting, conversations and assistants", async () => {
-    setViewport("phone");
+  it.each<Parameters<typeof setViewport>[0]>([
+    "phone",
+    "tablet-portrait",
+    "tablet-landscape",
+    { width: 844, height: 390, pointer: "coarse" },
+    // A desktop window narrowed to a phone's width.
+    { width: 600, height: 800, pointer: "fine" }
+  ])(
+    "docks the composer from the first frame, under the greeting, conversations and assistants (%o)",
+    async (viewport) => {
+      setViewport(viewport);
+      recents.items = [conversation("c1", "Remissvar detaljplan")];
+      renderInApp(<Harness partner={personal} />);
+      const quickLinks = await screen.findByRole("region", { name: "Dina assistenter" });
+      const keepGoing = screen.getByRole("region", { name: "Fortsätt" });
+      // One composer; read after everything it docks under.
+      const textarea = screen.getByRole("textbox", { name: "Fråga Personlig assistent" });
+      expect(follows(textarea, quickLinks)).toBe(true);
+      expect(follows(quickLinks, keepGoing)).toBe(true);
+      // The greeting and the lists start at the top, not centred above the dock.
+      const column = screen.getByRole("heading", { level: 1 }).closest(".\\@container");
+      expect(column?.className).not.toContain("my-auto");
+    }
+  );
+
+  it.each<Parameters<typeof setViewport>[0]>([
+    "desktop",
+    // Below an upright iPad's width a touch screen keeps the phone's 640px rule.
+    { width: 700, height: 1000, pointer: "coarse" }
+  ])("keeps the composer centred under the greeting, above the lists (%o)", async (viewport) => {
+    setViewport(viewport);
     recents.items = [conversation("c1", "Remissvar detaljplan")];
     renderInApp(<Harness partner={personal} />);
-    const quickLinks = await screen.findByRole("region", { name: "Dina assistenter" });
-    const keepGoing = screen.getByRole("region", { name: "Fortsätt" });
-    // One composer once the width is known; read after everything it docks under.
+    const keepGoing = await screen.findByRole("region", { name: "Fortsätt" });
     const textarea = screen.getByRole("textbox", { name: "Fråga Personlig assistent" });
-    expect(follows(textarea, quickLinks)).toBe(true);
-    expect(follows(quickLinks, keepGoing)).toBe(true);
+    expect(follows(keepGoing, textarea)).toBe(true);
+    const column = screen.getByRole("heading", { level: 1 }).closest(".\\@container");
+    expect(column?.className).toContain("sm:my-auto");
   });
 
   it("says only where the data stays under the docked composer before the first answer", () => {
@@ -314,7 +342,21 @@ describe("ChatView start state on a phone (decisions 5 and 8)", () => {
     );
   });
 
-  it("moves the focus with the composer when the phone is turned past 640px", () => {
+  it("moves the focus with the composer when a window is widened past 640px", () => {
+    setViewport({ width: 600, height: 800, pointer: "fine" });
+    renderInApp(<Harness partner={personal} />);
+    const docked = screen.getByRole("textbox", { name: "Fråga Personlig assistent" });
+    docked.focus();
+    fireEvent.change(docked, { target: { value: "Ett halvskrivet utkast" } });
+
+    act(() => setViewport("desktop"));
+    const centred = screen.getByRole("textbox", { name: "Fråga Personlig assistent" });
+    expect(centred).not.toBe(docked);
+    expect(document.activeElement).toBe(centred);
+    expect((centred as HTMLTextAreaElement).value).toBe("Ett halvskrivet utkast");
+  });
+
+  it("keeps the same docked field, and the focus, when a phone is turned", () => {
     setViewport("phone");
     renderInApp(<Harness partner={personal} />);
     const docked = screen.getByRole("textbox", { name: "Fråga Personlig assistent" });
@@ -322,10 +364,9 @@ describe("ChatView start state on a phone (decisions 5 and 8)", () => {
     fireEvent.change(docked, { target: { value: "Ett halvskrivet utkast" } });
 
     act(() => setViewport({ width: 844, height: 390, pointer: "coarse" }));
-    const centred = screen.getByRole("textbox", { name: "Fråga Personlig assistent" });
-    expect(centred).not.toBe(docked);
-    expect(document.activeElement).toBe(centred);
-    expect((centred as HTMLTextAreaElement).value).toBe("Ett halvskrivet utkast");
+    expect(screen.getByRole("textbox", { name: "Fråga Personlig assistent" })).toBe(docked);
+    expect(document.activeElement).toBe(docked);
+    expect((docked as HTMLTextAreaElement).value).toBe("Ett halvskrivet utkast");
   });
 });
 

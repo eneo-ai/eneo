@@ -7,7 +7,7 @@ import { usePathname } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
 import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { CreateSpaceDialog } from "@/features/spaces/create-space-dialog";
-import { MOBILE_QUERY } from "@/lib/hooks/use-media-match";
+import { PHONE_SCREEN_QUERY } from "@/lib/hooks/use-media-match";
 import { ConnectionAnnouncer, ConnectionBanner } from "./connection-banner";
 import { MobileTopBar } from "./mobile-top-bar";
 import { isAdminRoute, OPEN_NAV_EVENT, type NavVariant } from "./routes";
@@ -17,14 +17,15 @@ import { DesktopSideNav, MobileNavDrawer } from "./side-nav";
 // Loaded the first time the palette opens: nothing of it ships with page loads.
 const ShellCommandPalette = lazy(() => import("./command-palette"));
 
-// Below MOBILE_QUERY (Tailwind's `lg`: phones and an iPad held upright) the
-// SideNav becomes a drawer. The markup mirrors it with `lg:` variants.
+// On a phone's layout (below 768 px, or a phone turned sideways) the SideNav
+// becomes a drawer. The markup mirrors it with the `phone:` and `wide:` variants.
 
 /**
- * The app frame: skip link (first tab stop), the SideNav (from 1024 px) or
- * the top bar + drawer (phones and iPads held upright), and the page panel
- * `main#main-content` that pages scroll inside. Also hosts the ⌘K palette
- * and the "Skapa yta" dialog.
+ * The app frame: skip link (first tab stop), the SideNav (from 768 px; an
+ * icon rail by default below 1280 px) or the top bar + drawer (phones, held
+ * either way: a phone turned sideways is too short for the rail's pages), and
+ * the page panel `main#main-content` that pages scroll inside. Also hosts the
+ * ⌘K palette and the "Skapa yta" dialog.
  *
  * Not Astryx AppShell: it fixes its own main landmark id and skip link, and
  * web-next's contract is `main#main-content` (ACCESSIBILITY.md rule 1,
@@ -41,15 +42,15 @@ const ShellCommandPalette = lazy(() => import("./command-palette"));
  */
 export function AppShellFrame({
   children,
-  sideNavCollapsed = false
+  sideNavCollapsed
 }: {
   children: React.ReactNode;
-  /** The stored SideNav preference, read from its cookie by the server layout. */
+  /** The stored SideNav choice, read from its cookie by the layout; undefined when none was made. */
   sideNavCollapsed?: boolean;
 }) {
   const t = useTranslations();
   const pathname = usePathname();
-  const isMobile = useMediaQuery(MOBILE_QUERY);
+  const isMobile = useMediaQuery(PHONE_SCREEN_QUERY);
   const navId = useId();
   const drawerId = useId();
   const variant: NavVariant = isAdminRoute(pathname) ? "admin" : "main";
@@ -69,7 +70,7 @@ export function AppShellFrame({
   }
   const drawerOpen = isMobile && navOpen;
 
-  // Widening past the phone layout (an iPad turned sideways) unmounts the
+  // Leaving the phone layout (an iPad's split window grown past 768 px) unmounts the
   // drawer or hides the top bar, and with them the focused element: the page
   // takes the focus instead of the document body.
   const mainRef = useRef<HTMLElement>(null);
@@ -134,9 +135,9 @@ export function AppShellFrame({
           (viewport-fit=cover): the frame keeps the top and the sides clear,
           main#main-content the bottom. On phones the surface fills the
           frame, so the strip under the status bar continues the top bar;
-          from lg the page panel floats on the body colour. group/shell: the
+          otherwise (wide:) the page panel floats on the body colour. group/shell: the
           top bar hides while the page has its own header. */}
-      <div className="group/shell bg-ax-surface lg:bg-ax-body flex h-svh flex-col pt-[env(safe-area-inset-top,0px)] pr-[env(safe-area-inset-right,0px)] pl-[env(safe-area-inset-left,0px)] lg:flex-row lg:gap-2 lg:pt-[max(0.5rem,env(safe-area-inset-top,0px))] lg:pr-[max(0.5rem,env(safe-area-inset-right,0px))] lg:pb-[max(0.5rem,env(safe-area-inset-bottom,0px))] lg:pl-[max(0.5rem,env(safe-area-inset-left,0px))]">
+      <div className="group/shell bg-ax-surface wide:bg-ax-body wide:flex-row wide:gap-2 wide:pt-[max(0.5rem,env(safe-area-inset-top,0px))] wide:pr-[max(0.5rem,env(safe-area-inset-right,0px))] wide:pb-[max(0.5rem,env(safe-area-inset-bottom,0px))] wide:pl-[max(0.5rem,env(safe-area-inset-left,0px))] flex h-svh flex-col pt-[env(safe-area-inset-top,0px)] pr-[env(safe-area-inset-right,0px)] pl-[env(safe-area-inset-left,0px)]">
         <a
           href="#main-content"
           className="focus:bg-ax-surface focus:text-ax-text focus:rounded-ax-element focus:border-ax-border-strong focus:shadow-ax-med focus-visible:outline-ring sr-only focus:not-sr-only focus:absolute focus:top-3 focus:left-3 focus:z-50 focus:border focus:px-3 focus:py-2 focus-visible:outline-2 focus-visible:outline-offset-2"
@@ -145,7 +146,7 @@ export function AppShellFrame({
         </a>
         <AppShellMobileContext value={mobileNav}>
           <MobileTopBar />
-          <div className="hidden min-h-0 shrink-0 lg:flex lg:flex-col">
+          <div className="wide:flex wide:flex-col hidden min-h-0 shrink-0">
             <DesktopSideNav variant={variant} navId={navId} defaultCollapsed={sideNavCollapsed} />
           </div>
         </AppShellMobileContext>
@@ -162,11 +163,11 @@ export function AppShellFrame({
           ref={mainRef}
           id="main-content"
           tabIndex={-1}
-          className="bg-ax-surface lg:rounded-ax-page lg:shadow-ax-low relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto pb-[env(safe-area-inset-bottom,0px)] focus:outline-none max-lg:has-[[data-page-bar]]:scroll-pt-14 max-md:has-[[data-docked-actions]]:scroll-pb-[var(--docked-actions-height,calc(4.5rem+env(safe-area-inset-bottom,0px)))] max-md:has-[[data-docked-actions]]:pb-[var(--docked-actions-height,calc(4.5rem+env(safe-area-inset-bottom,0px)))] max-md:has-[[data-phone-page-bar]]:scroll-pt-14 lg:pb-0"
+          className="bg-ax-surface wide:rounded-ax-page wide:shadow-ax-low phone:has-[[data-docked-actions]]:scroll-pb-[var(--docked-actions-height,calc(4.5rem+env(safe-area-inset-bottom,0px)))] phone:has-[[data-docked-actions]]:pb-[var(--docked-actions-height,calc(4.5rem+env(safe-area-inset-bottom,0px)))] phone:has-[[data-phone-page-bar]]:scroll-pt-14 wide:pb-0 relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto pb-[env(safe-area-inset-bottom,0px)] focus:outline-none max-lg:has-[[data-page-bar]]:scroll-pt-14"
         >
           {/* Under the top bar; a page with its own header shows its own
               under that header, and this one gives way. */}
-          <ConnectionBanner className="group-has-[[data-own-mobile-header]]/shell:hidden max-md:group-has-[[data-own-phone-header]]/shell:hidden" />
+          <ConnectionBanner className="phone:group-has-[[data-own-phone-header]]/shell:hidden group-has-[[data-own-mobile-header]]/shell:hidden" />
           {children}
         </main>
         <ConnectionAnnouncer />

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Schema } from "@/lib/api/models";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
+import { setViewport } from "@/test/setup-dom";
 
 const state = vi.hoisted(() => ({
   items: [] as Schema<"ApiKeyV2">[],
@@ -11,7 +12,8 @@ const state = vi.hoisted(() => ({
   failFirst: false,
   failNext: false,
   requests: [] as { cursor?: string | null; state?: string | null }[],
-  spaceRequests: [] as { include_applications?: boolean }[]
+  spaceRequests: [] as { include_applications?: boolean }[],
+  patches: [] as { path: string; options: unknown }[]
 }));
 
 vi.mock("@/lib/api/browser", () => ({
@@ -44,6 +46,10 @@ vi.mock("@/lib/api/browser", () => ({
         };
       }
       return Promise.resolve({ data, response: new Response("{}") });
+    },
+    PATCH: (path: string, options: unknown) => {
+      state.patches.push({ path, options });
+      return Promise.resolve({ data: {}, response: new Response("{}") });
     }
   }
 }));
@@ -71,6 +77,7 @@ beforeEach(() => {
   state.failNext = false;
   state.requests = [];
   state.spaceRequests = [];
+  state.patches = [];
 });
 afterEach(cleanup);
 
@@ -188,6 +195,38 @@ describe("UserApiKeyList", () => {
     expect(screen.getByText("Integration 1")).toBeTruthy();
   });
 
+  it("keeps an open editor and its typed name when a turn swaps the table and the rows", async () => {
+    state.items[1] = key("2", { owner_user_id: "user-1" });
+    renderInApp(<UserApiKeyList limit={25} onRotated={vi.fn()} />);
+    const more = await screen.findByRole("button", { name: "Fler åtgärder för Integration 2" });
+    more.focus();
+    fireEvent.keyDown(more, { key: "Enter" });
+    const menu = document.getElementById(more.getAttribute("aria-controls") ?? "")!;
+    fireEvent.click(await within(menu).findByRole("menuitem", { name: "Redigera" }));
+    const dialog = await screen.findByRole("dialog", { name: "Redigera API-nyckel" });
+    fireEvent.change(await within(dialog).findByLabelText("Namn"), {
+      target: { value: "Ärendeportalen" }
+    });
+
+    // A phone turned to portrait, then back: the rows replace the table, and the table the rows.
+    act(() => setViewport("phone"));
+    expect(await screen.findByRole("list", { name: "API-nycklar" })).toBeTruthy();
+    act(() => setViewport("desktop"));
+    expect(await screen.findByRole("table", { name: "API-nycklar" })).toBeTruthy();
+
+    const open = screen.getByRole("dialog", { name: "Redigera API-nyckel" });
+    expect((within(open).getByLabelText("Namn") as HTMLInputElement).value).toBe("Ärendeportalen");
+    fireEvent.click(within(open).getByRole("button", { name: "Spara" }));
+    await waitFor(() =>
+      expect(state.patches).toEqual([
+        {
+          path: "/api/v1/api-keys/{id}",
+          options: { params: { path: { id: "2" } }, body: { name: "Ärendeportalen" } }
+        }
+      ])
+    );
+  });
+
   it("reports a failed initial read instead of an empty list, and offers retry", async () => {
     state.failFirst = true;
     renderInApp(<UserApiKeyList limit={25} onRotated={vi.fn()} />);
@@ -196,5 +235,52 @@ describe("UserApiKeyList", () => {
     state.failFirst = false;
     fireEvent.click(retry);
     expect(await screen.findByText("Integration 1")).toBeTruthy();
+  });
+});
+
+describe("UserApiKeyList on a phone", () => {
+  it("lists the keys as rows with their name, key, state, scope, expiry and menu", async () => {
+    setViewport("phone");
+    state.items = [
+      key("1", {
+        scope_type: "space",
+        scope_id: "space-1",
+        ownership: "service",
+        state: "suspended",
+        suspended_at: "2026-09-30T10:00:00Z",
+        suspended_reason_code: "admin_action",
+        suspended_reason_text: "Integration under review"
+      }),
+      key("2")
+    ];
+    renderInApp(<UserApiKeyList limit={25} onRotated={vi.fn()} />);
+    const list = await screen.findByRole("list", { name: "API-nycklar" });
+    expect(screen.queryByRole("table")).toBeNull();
+    const [first, second] = within(list).getAllByRole("listitem");
+    expect(await within(first!).findByText("Yta · Upphandling · Läs")).toBeTruthy();
+    for (const text of [
+      "Integration 1",
+      "sk_test…1",
+      "Tjänstenyckel",
+      "Pausad",
+      "Administratörsåtgärd · Integration under review",
+      "Går ut: Aldrig",
+      "Senast använd: Aldrig"
+    ])
+      expect(within(first!).getByText(text)).toBeTruthy();
+    expect(
+      within(first!).getByRole("button", { name: "Fler åtgärder för Integration 1" })
+    ).toBeTruthy();
+    expect(within(second!).getByText("Organisation · Läs")).toBeTruthy();
+
+    // A search narrows the rows as it does the table.
+    fireEvent.change(screen.getByRole("textbox", { name: "Sök API-nycklar" }), {
+      target: { value: "2" }
+    });
+    expect(within(list).getAllByRole("listitem")).toHaveLength(1);
+    await expectNoAxeViolations(document.body);
+
+    act(() => setViewport("desktop"));
+    expect(screen.getByRole("table", { name: "API-nycklar" })).toBeTruthy();
   });
 });

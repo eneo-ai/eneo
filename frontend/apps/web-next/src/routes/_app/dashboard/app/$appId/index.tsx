@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { PageFrame } from "@/components/composites/page-frame";
 import { appQueryOptions, appRunsQueryOptions } from "@/features/apps/apps";
 import { DashboardApp } from "@/features/dashboard/dashboard-app.client";
 import { browserApi } from "@/lib/api/browser";
@@ -27,8 +28,8 @@ export const Route = createFileRoute("/_app/dashboard/app/$appId/")({
 function DashboardAppPage() {
   const { appId } = Route.useParams();
   return (
-    <div className="flex flex-col p-4 sm:p-6">
+    <PageFrame>
       <DashboardApp appId={appId} />
-    </div>
+    </PageFrame>
   );
 }

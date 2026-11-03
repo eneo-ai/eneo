@@ -52,7 +52,7 @@ import {
   userGroupsQueryOptions
 } from "@/features/admin/user-groups/user-groups";
 import { useFocusRescue } from "@/lib/focus-rescue";
-import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
+import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { toast } from "@/lib/toast";
 import { RemovalFocusScope, useRemovalMutation } from "@/features/spaces/removal";
 import type { SpaceMember, SpaceRoleValue } from "@/features/spaces/space";
@@ -554,11 +554,9 @@ function useMembershipLabels(membership: Membership) {
 
 /**
  * A member or group as a phone row (decision 25): avatar, name, the e-mail or
- * user count, and the role in words at the end. Tapping it opens the role
- * sheet; your own row, or one you may not change, only reads. Where the rows
- * are narrow for their text (a 320 px phone, larger text sizes: under 20rem
- * of the rows' container), the role moves under the name instead, so the
- * e-mail keeps the width and does not break mid-address.
+ * user count, and "Roll: …" under them, so the e-mail keeps the row's width
+ * and does not break mid-address. A chevron at the end where tapping opens the
+ * role sheet; your own row, or one you may not change, only reads.
  */
 function PhoneMembershipRow({
   membership,
@@ -584,8 +582,7 @@ function PhoneMembershipRow({
       description={
         <>
           {detail ? <span className="block [overflow-wrap:anywhere]">{detail}</span> : null}
-          {/* Under the name where the rows are narrow; for screen readers always. */}
-          <span className="block @min-[20rem]/rows:sr-only">{`${t("role")}: ${roleLabel}`}</span>
+          <span className="block">{`${t("role")}: ${roleLabel}`}</span>
         </>
       }
       startContent={
@@ -607,11 +604,9 @@ function PhoneMembershipRow({
         )
       }
       endContent={
-        <span aria-hidden="true" className="text-ax-text-secondary flex items-center gap-1">
-          <span className="hidden text-sm @min-[20rem]/rows:inline">{roleLabel}</span>
-          {/* The chevron's place stays, so roles line up with rows that have one. */}
-          {onOpen ? <ChevronRight className="size-4" /> : <span className="size-4" />}
-        </span>
+        onOpen ? (
+          <ChevronRight aria-hidden="true" className="text-ax-text-secondary size-4" />
+        ) : undefined
       }
       onClick={onOpen ?? undefined}
     />
@@ -640,11 +635,9 @@ function MembershipSection({
           {count}
         </span>
       </h3>
-      <div className="@container/rows">
-        <List hasDividers edge="outset" aria-labelledby={id}>
-          {children}
-        </List>
-      </div>
+      <List hasDividers edge="outset" aria-labelledby={id}>
+        {children}
+      </List>
     </section>
   );
 }
@@ -860,13 +853,13 @@ function PhoneMembers() {
 export function SpaceMembers() {
   const t = useTranslations();
   const { space, can } = useSpace();
-  const phone = useMediaMatch(PHONE_QUERY);
+  const phone = usePhoneScreen();
   const headingRef = useRef<HTMLHeadingElement>(null);
 
-  // Crossing 768 px (a phone turned) replaces the member controls with the
-  // other layout's. A control that had the focus goes with them, and focus
-  // goes to the title (WCAG 2.4.3). The rescue moves focus only if it was
-  // lost, so a button elsewhere keeps it.
+  // Changing between a phone's layout and a tablet's (a phone turned)
+  // replaces the member controls with the other layout's. A control that had
+  // the focus goes with them, and focus goes to the title (WCAG 2.4.3). The
+  // rescue moves focus only if it was lost, so a button elsewhere keeps it.
   const controls = useRef<HTMLDivElement>(null);
   const focusWasInControls = useRef(false);
   const rescue = useFocusRescue();
@@ -892,7 +885,7 @@ export function SpaceMembers() {
   return (
     // Removing a member or group takes its row (and remove button) away: focus goes to the title.
     <RemovalFocusScope target={headingRef}>
-      <div className="flex w-full flex-col gap-8 max-md:gap-4">
+      <div className="phone:gap-4 flex w-full flex-col gap-8">
         <PageHeader
           headingLevel={2}
           headingRef={headingRef}
@@ -909,13 +902,10 @@ export function SpaceMembers() {
         />
 
         <div ref={controls} className="contents">
-          {phone !== false ? (
-            <div className="md:hidden">
-              <PhoneMembers />
-            </div>
-          ) : null}
-          {phone !== true ? (
-            <div className="flex flex-col gap-8 max-md:hidden">
+          {phone ? (
+            <PhoneMembers />
+          ) : (
+            <div className="flex flex-col gap-8">
               <SettingsGroup title={t("current_members")}>
                 <SettingsRow
                   title={t("admins_editors")}
@@ -956,7 +946,7 @@ export function SpaceMembers() {
                 </SettingsRow>
               </SettingsGroup>
             </div>
-          ) : null}
+          )}
         </div>
       </div>
     </RemovalFocusScope>

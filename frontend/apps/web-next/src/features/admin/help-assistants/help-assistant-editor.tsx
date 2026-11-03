@@ -39,7 +39,7 @@ function HelpAssistantEditorContent({ assistantId, helperKind }: Props) {
   const ai = useAssistantAiDraft(assistant);
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
+    <div className="flex w-full max-w-4xl flex-col gap-6">
       <div className="flex flex-col gap-1">
         <BackLink href="/admin/help-assistants">{t("admin_help_assistants_nav_label")}</BackLink>
         <PageHeader title={assistant.name}>

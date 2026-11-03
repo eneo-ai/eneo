@@ -159,10 +159,12 @@ function EntryTable({
     {
       key: "updated_at",
       header: t("governance_col_updated"),
-      width: proportional(1),
+      // Room for the longest relative time ("för 59 minuter sedan") on one line;
+      // with a reader's wider text spacing it wraps rather than being cut off.
+      width: pixel(176),
       sortable: true,
       renderCell: (entry) => (
-        <span className="text-ax-text-secondary whitespace-nowrap">
+        <span className="text-ax-text-secondary">
           <ClientTime value={entry.updated_at} format="auto" />
         </span>
       )
@@ -259,7 +261,7 @@ export function PromptLibraryPage() {
   );
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
+    <div className="flex w-full flex-col gap-6">
       <PageHeader
         title={t("governance_tab_prompts")}
         description={t("governance_prompts_intro")}

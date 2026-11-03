@@ -66,7 +66,7 @@ export function StorageAdminPage() {
   });
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 pb-16">
+    <div className="flex w-full flex-col gap-6 pb-16">
       <PageHeader
         title={t("storage_settings_title")}
         description={t("storage_settings_description")}
@@ -376,7 +376,7 @@ function StoragePolicyEditor({
               return (
                 <label
                   key={target}
-                  className={`flex cursor-pointer items-start gap-3 rounded-lg border p-4 ${selected ? "border-primary bg-accent" : ""} ${unavailable ? "opacity-60" : ""}`}
+                  className={`flex cursor-pointer items-start gap-3 rounded-lg border p-4 ${selected ? "border-primary bg-accent" : ""}`}
                 >
                   <input
                     type="radio"
@@ -392,10 +392,15 @@ function StoragePolicyEditor({
                   {target === "postgres_inline" ? (
                     <Database className="mt-0.5 size-5 shrink-0" />
                   ) : (
-                    <HardDrive className="mt-0.5 size-5 shrink-0" />
+                    <HardDrive
+                      className={`mt-0.5 size-5 shrink-0 ${unavailable ? "opacity-60" : ""}`}
+                    />
                   )}
                   <span className="space-y-1">
-                    <span className="flex flex-wrap items-center gap-2 font-medium">
+                    {/* An option that cannot be chosen is muted, by colour, not opacity. */}
+                    <span
+                      className={`flex flex-wrap items-center gap-2 font-medium ${unavailable ? "text-muted-foreground" : ""}`}
+                    >
                       {targetLabel(target)}
                       {baseline.policy.new_write_storage_target === target && (
                         <Badge variant="outline">{t("storage_overview_active")}</Badge>

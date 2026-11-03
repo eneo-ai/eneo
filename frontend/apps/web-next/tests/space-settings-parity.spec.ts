@@ -266,7 +266,7 @@ test(
       "aria-disabled",
       "true"
     );
-    await page.getByRole("button", { name: "Välj Chattmodeller", exact: true }).click();
+    await page.getByRole("button", { name: "Välj modeller, Chattmodeller", exact: true }).click();
     await expect(page.getByText("Utfasad", { exact: true }).first()).toBeVisible();
     await expect(page.getByText("2020-01-01", { exact: true }).first()).toBeVisible();
     await scan(page);

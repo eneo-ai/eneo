@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { openMenuOnRelease } from "@/test/menus";
 import { renderInApp } from "@/test/render";
 
 vi.mock("@/lib/navigation", () => import("@/test/navigation"));
@@ -49,6 +50,17 @@ describe("McpServerDetail", () => {
 
     expect(await screen.findByRole("heading", { level: 1, name: "Diariet" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Fler åtgärder för Diariet" })).toBeTruthy();
+  });
+
+  it("opens the page's menu on release and asks before deleting (2.5.2)", async () => {
+    renderInApp(<McpServerDetail serverId="diariet" />);
+    const menu = await openMenuOnRelease(
+      await screen.findByRole("button", { name: "Fler åtgärder för Diariet" })
+    );
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Ta bort" }));
+
+    expect(await screen.findByRole("alertdialog", { name: "Ta bort MCP-server" })).toBeTruthy();
+    expect(remove).not.toHaveBeenCalled();
   });
 
   it("follows the route's current tab after back or forward navigation", async () => {

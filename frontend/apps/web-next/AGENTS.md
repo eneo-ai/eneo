@@ -150,6 +150,11 @@ ships must be release-ready: correct, accessible, tested and without dead ends.
   - BottomSheet skips `data-autofocus` when opening the dialog already focused
     its panel: focus the target yourself once the sheet is open (as
     `activity-sources.tsx` does).
+  - MoreMenu and DropdownMenu put `className` on the menu, not on its button
+    (lint refuses it; the theme already makes the button 44 px on touch), and
+    end a menu row's label in an ellipsis: `globals.css` (section 12d) wraps
+    it. A start-aligned menu gets only the room right of its button: align a
+    button near the right edge `end`, and one whose place varies `center`.
   - A searchable Selector names its trigger by its label alone: give it an
     `aria-label` that includes the value (as `model-selector.tsx` does).
   - Table names every scroll region "Tabell", and absolutely positioned
@@ -181,18 +186,22 @@ settings sections inside a space. Its header is `EditorHeader`
 and the tab, the name as the h1, the save state and the actions. The editor
 owns the surface: `spaceRoute` classifies the assistant, app and group-chat
 editors as `editor`, and the space frame renders no space header or tabs
-above them. Provide one ordered section list for both the section links (an
-Astryx TabList in its navigation pattern: it scrolls with edge fades, keeps
-the current link in view and moves with the arrow keys, so no label is ever
-truncated) and the single-column content. Keep conditional sections in that
-list so a link never points to hidden or unavailable settings. Use
-`SettingsGroup` for each card's heading and rows. Do not add another sidebar
-inside the space navigation. Keep anchors and focused controls clear of the
-sticky header, and check keyboard navigation and narrow widths when changing
-the shared layout. An editor opened right after "Skapa …" gets the resource
-through `useJustCreated` (`src/features/spaces/just-created.ts`): it focuses
-the default name and announces the creation; `createWithUniqueName` numbers
-the default name on a backend name collision (9017).
+above them. Provide one ordered section list for both the section links and
+the single-column content. Below 1024 px the links are an Astryx TabList in
+the header, in its navigation pattern (it scrolls with edge fades, keeps the
+current link in view and moves with the arrow keys, so no label is ever
+truncated); from 1024 px they are a sticky list beside the form, under the
+sections' groups, still inside the editor page (no other sidebar in the space
+navigation). Keep conditional sections in that list so a link never points to
+hidden or unavailable settings. Use `SettingsGroup` for each card's heading
+and rows. Anchors and focused controls stay clear of the sticky header
+through its measured height (`--editor-header-h`); check keyboard navigation
+and narrow widths when changing the shared layout. A page under a frame's
+header (space settings) passes `isFramed` to start on its line instead of
+centring. An editor opened right after "Skapa …" gets the resource through
+`useJustCreated` (`src/features/spaces/just-created.ts`): it focuses the
+default name and announces the creation; `createWithUniqueName` numbers the
+default name on a backend name collision (9017).
 
 On a phone an editor opens on an index of its sections (decision 21): pass
 `phone` (`useEditorPhoneIndex`) and give each section a `group` and, where its
@@ -264,16 +273,19 @@ open), so the index has no bar of its own and names itself with a heading.
   `ANSWER_TEXT_CLASS` in `ai-elements/message.tsx`), JetBrains Mono (`font-mono`).
   Source Serif 4 stays loaded as `font-voice` so the answer voice can be flipped
   back with one class. Type scale 14px / 1.2.
-- **App shell** (`src/components/shell/`): Astryx `SideNav` (collapsed state in
-  the `eneo_sidenav_collapsed` cookie, read on first mount), an admin mode under
-  `/admin`, Astryx `MobileNav` below 1024px (phones and an iPad held upright;
-  markup that follows the shell uses `lg:`, not `md:`) and the ⌘K
-  `CommandPalette`. A page header that replaces the phone top bar (the chat
-  header, a pushed screen's `PageBar` with its back link) spreads
-  `OWN_MOBILE_HEADER` and the top bar hides in CSS while it is on the page,
-  from its first render. A space is pushed on phones only (decision 24:
-  tablets show it with breadcrumbs under the top bar): its bar is
-  `PageBar until="md"`, which spreads `OWN_PHONE_HEADER` instead. The chat
+- **App shell** (`src/components/shell/`): Astryx `SideNav` from 768px (`wide:`), an
+  icon rail by default below 1280px (an iPad either way, a small laptop) and
+  the full nav above; a stored choice (the `eneo_sidenav_collapsed` cookie,
+  "1" or "0", read on first mount) wins at every width. An admin mode under
+  `/admin`, Astryx `MobileNav` and the top bar on a phone, held either way
+  (`PHONE_SCREEN_QUERY`; markup that follows the shell uses `phone:`/`wide:`)
+  and the ⌘K `CommandPalette`. A page
+  header that replaces the phone top bar (the chat header, a pushed screen's
+  `PageBar` with its back link) spreads `OWN_MOBILE_HEADER` and the top bar
+  hides in CSS while it is on the page, from its first render. A space and an
+  admin area are pushed on phones only (tablets show them with breadcrumbs
+  beside the side navigation): their bar is `PageBar until="phone"`, which
+  spreads `OWN_PHONE_HEADER` instead; Konto's pages keep theirs below 1024px. The chat
   header opens the drawer with
   `window.dispatchEvent(new CustomEvent(OPEN_NAV_EVENT))`
   (`src/components/shell/routes.ts`).
@@ -293,10 +305,10 @@ open), so the index has no bar of its own and names itself with a heading.
   where both do not fit. Widths in that rule are px, set inline.
 - **Collections of resources** (spaces, assistants, apps and the
   catalog) render through `ResourceCollection` (`resource-tile.tsx`): list
-  rows on a phone (`PHONE_QUERY`), cards from 768 px in a grid that fits as
+  rows on a phone (`usePhoneScreen`), cards otherwise in a grid that fits as
   many columns as the page has room for. A list row with a link is one
-  target (globals.css 12b); put controls in its end slot. A turn across
-  768 px remounts every item, so the dialogs of an item's menu (move, publish,
+  target (globals.css 12b); put controls in its end slot. A turn between the
+  two remounts every item, so the dialogs of an item's menu (move, publish,
   delete) are not in the item: `createResourceActions`
   (`resource-action-scope.tsx`) puts them in one scope above the collection,
   the menus only ask to open one, and an open dialog survives the turn. Follow
@@ -385,11 +397,14 @@ shadcn names (`bg-background`, `text-muted-foreground`, `border-input`,
 
 - Legacy radius classes follow the same scale: `rounded-sm` 6, `-md` 10
   (buttons, inputs), `-lg` 12, `-xl` 14, `-2xl` 18 (page panel), `-3xl` 20.
-- Contrast is tested (`src/theme/eneo-theme.contrast.test.ts`): text tokens
-  pass 4.5:1 on every surface, secondary also on hover/selected/pressed rows.
-  Use `-secondary` instead of `-tertiary` on pressed states and on hover or
-  selected rows over `body` (the sidebar). Add a pair to the test when you add
-  a token or use one on a new surface.
+- Contrast is tested (`src/theme/eneo-theme.contrast.test.ts`): every text,
+  icon, status and control-border token on every surface under every state
+  (hover, selected, pressed, both stacked, the muted fills), and every fill with
+  its on-colour at rest, hovered and pressed. A new token is picked up by name.
+  Use `-secondary` instead of `-tertiary` on pressed and stacked states, muted
+  fills, and hover or selected rows over `body` (the sidebar), `muted` or
+  `sunken`; keep form fields off tinted rows. What may fail is listed, with the
+  reason, in `src/theme/contrast-exemptions.ts`, which can only shrink.
 - `border-ax-border` and `-strong` are decorative (dividers, container edges)
   and below 3:1. Inputs, selects, checkboxes, radios and switch tracks use the
   control border; Astryx controls get it from the theme's `components`
@@ -406,6 +421,14 @@ focus-visible:outline-offset-2 focus-visible:outline-ring`);
   pages in a `bg-ax-surface rounded-ax-page` panel on the `bg-ax-body`
   background, and `main#main-content` is the scroll container. Pages don't
   set their own page background.
+- Page width: every page sits in one centred 1152 px column with one left
+  edge, so the heading stays put from page to page. Top-level routes and the
+  admin layout render `PageFrame` (`src/components/composites/page-frame.tsx`,
+  the inset and the column); the space frame and its header band use its
+  `PAGE_COLUMN`. A page sets no `mx-auto` of its own (a unit test fails on
+  it, outside Konto, the full-screen editors, the chat's column and a
+  document's prose); a form or reading page may cap itself narrower
+  (`max-w-4xl`) and so starts on the same edge. Konto keeps its own frame.
 
 ## Tables
 
@@ -419,7 +442,11 @@ focus-visible:outline-offset-2 focus-visible:outline-ring`);
   The table's min width is the sum of the pixel columns plus, for each
   proportional one, its min width times the total share over its own share:
   three `proportional(1)` beside a `proportional(3)` make 840 px of a table
-  whose content needs half. Knowledge tables fit an iPad held upright (770 px).
+  whose content needs half. Beside the icon rail an iPad held upright leaves
+  a page's table 682 px and one held sideways 1042 px. The users, audit and
+  most knowledge tables fit upright; the websites table, a source's folder
+  documents and the models table scroll there with their name pinned, and
+  fit sideways.
 - Decision 9: a table keeps every column on a phone and scrolls sideways with
   what names a row held in view: `pinnedColumn="name"` (the wrapper pins it
   and any selection or row-status column before it, and keeps focus clear of
@@ -581,8 +608,13 @@ Every screen works from a 320 px phone to a 1366 px iPad held sideways, with a
 finger and with a mouse, and a test keeps it that way. Build a new screen from
 what is here before writing layout of your own.
 
-**Tiers.** Phone below `md` (768 px), tablet from `md`, side navigation from
-`lg` (1024 px); `short:` is a viewport under 30rem tall (a phone turned
+**Tiers.** Phone: below 768 px, or a touch screen under 500 px tall and under
+1024 px wide (a phone turned sideways). JS reads it with `usePhoneScreen` or
+`PHONE_SCREEN_QUERY`, CSS with the `phone:` and `wide:` variants (globals.css,
+kept in step by a test); don't use `md:`/`max-md:` for the shell, a space's
+chrome, an editor or a collection. Tablet: `wide:`, side navigation there too
+(an icon rail below `xl`, 1280 px, unless the user chose). Admin and Konto
+keep their own `md:`/`lg:` tiers. `short:` is a viewport under 30rem tall (a phone turned
 sideways: a browser's own bars leave about 280 px, a keyboard leaves 50 to
 150). A touch pointer (`pointer-coarse:`) gets 44 px targets; a mouse does not.
 
@@ -590,9 +622,9 @@ sideways: a browser's own bars leave about 280 px, a keyboard leaves 50 to
 
 | Need                                           | Use                                                                                                                                               |
 | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A pushed screen's header and back link         | `PageBar` (below `lg`); its parent label names where it returns                                                                                   |
-| The one primary action of a screen             | `DockedActions` (docked below `md`, in the header from `md`)                                                                                      |
-| A list of resources                            | `ResourceCollection` / `ResourceCard` (rows on a phone, cards from `md`)                                                                          |
+| A pushed screen's header and back link         | `PageBar` (`until="phone"`; Konto's below `lg`); its parent label names where it returns                                                          |
+| The one primary action of a screen             | `DockedActions` (docked on a phone, in the header otherwise)                                                                                      |
+| A list of resources                            | `ResourceCollection` / `ResourceCard` (rows on a phone, cards otherwise)                                                                          |
 | Settings                                       | `SettingsGroup` / `SettingsRow`, `PageHeader`                                                                                                     |
 | A page outside the shell (sign-in, a callback) | `p-safe` (clears the notch and the home indicator)                                                                                                |
 | A search, e-mail or user-name field            | `{...KEYBOARD.search}` / `.email` / `.identifier` from `@/components/astryx/keyboard-hints`                                                       |
@@ -608,8 +640,10 @@ sideways: a browser's own bars leave about 280 px, a keyboard leaves 50 to
   tokens (the contrast test cannot see alpha).
 - Add `env(safe-area-inset-*)` inside a page. The shell frame, `DockedActions`,
   the side panel, the toaster and the space members sheet own it.
-- Let Return send: Return adds a line, Ctrl or Cmd+Enter sends (the chat's
-  rule, `prompt-guide` too). The search key closes the keyboard.
+- Let Return send on a touch screen: Return adds a line there, Ctrl or
+  Cmd+Enter sends (`prompt-guide` everywhere). The chat's composer is the one
+  exception with a mouse or trackpad: Return sends, Shift+Return adds a line.
+  The search key closes the keyboard.
 - Confirm a copy with a toast over a docked composer: confirm at the button.
 - Make a visible target smaller than 44 px on touch, or two targets overlap.
 
@@ -629,26 +663,38 @@ A component that swaps at a breakpoint rebuilds what is open and fails it.
 
 `tests/tooltips.spec.ts` holds a tooltip to WCAG 1.4.13 with a mouse and the keyboard: the pointer can
 move onto it, it stays, and Escape closes it. `src/test/a11y-source-guards.test.ts` guards what one line of
-source could break (no orientation lock, no autoplay, no password paste block).
+source could break (no orientation lock, no autoplay, no password paste block, no text dimmed with
+`opacity-*` or a `text-*/NN` alpha outside its allowlist).
 
-| What it finds                                                                                                                                                                           | Run                                                                                              |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| Sideways scroll, a target under 44 px, one outside the screen, two on top of each other, text cut off, a text field under 16 px on a phone (iPhone Safari zooms into it), at five sizes | `tests/responsive-contract.spec.ts` (`CONTRACT_VIEWPORTS`, `CONTRACT_ROUTES`)                    |
-| WCAG 2.2 A/AA by axe (contrast, names, target size, structure) on every route, phone and iPad, light and dark                                                                           | `tests/a11y-routes.spec.ts` (`A11Y_ROUTES`, `A11Y_VARIANTS`, `A11Y_SHOTS=<dir>` saves a picture) |
-| The same with a dialog, menu or panel open, and what axe cannot see (collapsed table columns, reflow at 320)                                                                            | `tests/a11y.spec.ts`                                                                             |
-| A filled control with no boundary, or a legacy switch with no visible state, in Windows high contrast (forced colours), on every route                                                  | `tests/forced-colors.spec.ts` (`FORCED_ROUTES`)                                                  |
-| A screen that shifts by more than 0.1 while it loads on a slow phone (CPU x4, Fast 4G, cold cache): a card shown before the editor that pushes it, a spinner that widens a button       | `tests/layout-shift.spec.ts` (`LAYOUT_ROUTES`)                                                   |
-| A whole screen scrolling sideways with the text at 200% (a bar whose rem-sized controls no longer fit in a row)                                                                         | `tests/responsive-text-size.spec.ts`                                                             |
-| Menus open in 165 ms and leave in 125, drawers, sheets and dialogs open in 225, and nothing runs with reduced motion (2.3.3)                                                            | `tests/motion.spec.ts` (measured with `document.getAnimations()`)                                |
-| The skip link first, and a visible focus on each of the first 30 Tab stops, on every route (2.4.1, 2.4.7)                                                                               | `tests/keyboard-focus.spec.ts`                                                                   |
-| Keyboard, safe areas, short screens, header and focus across a breakpoint                                                                                                               | `tests/touch-platform.spec.ts`, `tests/header-continuity.spec.ts`                                |
-| A raw `<select>` without 16 px text and a 44 px touch height, in the dialogs the contract never opens                                                                                   | `src/test/raw-select.test.ts`                                                                    |
-| Patterns in the source: `vh`, a fixed bar without safe area, missing labels, label association                                                                                          | `eslint` (the `no-restricted-syntax` selectors and `jsx-a11y`)                                   |
+| What it finds                                                                                                                                                                               | Run                                                                                              |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Sideways scroll, a target under 44 px, one outside the screen, two on top of each other, text cut off, a text field under 16 px on a phone (iPhone Safari zooms into it), at six sizes      | `tests/responsive-contract.spec.ts` (`CONTRACT_VIEWPORTS`, `CONTRACT_ROUTES`)                    |
+| WCAG 2.2 A/AA by axe (contrast, names, target size, structure) on every route, phone and iPad, light and dark                                                                               | `tests/a11y-routes.spec.ts` (`A11Y_ROUTES`, `A11Y_VARIANTS`, `A11Y_SHOTS=<dir>` saves a picture) |
+| The same with a dialog, menu or panel open, and what axe cannot see (collapsed table columns, reflow at 320)                                                                                | `tests/a11y.spec.ts`                                                                             |
+| Text whose contrast axe could not judge (over a gradient, an image or another element; hover and pressed are gradients), more per scan than `tests/contrast-incomplete.baseline.json` holds | `tests/a11y-routes.spec.ts`, `tests/a11y.spec.ts` (`CONTRAST_UPDATE=1` rewrites the baseline)    |
+| Contrast axe cannot judge: text under 4.5:1 (large 3:1), a field, checkbox or icon-only control under 3:1, with hover (mouse only), pressed and keyboard focus forced                       | `tests/contrast-probe.ts` in `tests/a11y-routes.spec.ts` (`PROBES_UPDATE=1`)                     |
+| A switcher's selected option shown by a colour under 3:1 alone, or a selected plate darker than its track in dark mode                                                                      | `tests/selected-probe.ts` in `tests/a11y-routes.spec.ts`                                         |
+| A list or overview page whose h1, first list row or second column is off the shared column's left edge by more than 1 px                                                                    | `tests/left-edge-probe.ts` in `tests/a11y-routes.spec.ts`                                        |
+| A filled control with no boundary, or a legacy switch with no visible state, in Windows high contrast (forced colours), on every route                                                      | `tests/forced-colors.spec.ts` (`FORCED_ROUTES`)                                                  |
+| A screen that shifts by more than 0.1 while it loads on a slow phone (CPU x4, Fast 4G, cold cache): a card shown before the editor that pushes it, a spinner that widens a button           | `tests/layout-shift.spec.ts` (`LAYOUT_ROUTES`)                                                   |
+| A whole screen scrolling sideways with the text at 200% (a bar whose rem-sized controls no longer fit in a row)                                                                             | `tests/responsive-text-size.spec.ts`                                                             |
+| Menus open in 165 ms (and close at once), drawers, sheets and dialogs open in 225, and nothing runs with reduced motion (2.3.3)                                                             | `tests/motion.spec.ts` (measured with `document.getAnimations()`)                                |
+| The skip link first, and a visible focus on each of the first 30 Tab stops, on every route (2.4.1, 2.4.7)                                                                                   | `tests/keyboard-focus.spec.ts`                                                                   |
+| Keyboard, safe areas, short screens, header and focus across a breakpoint                                                                                                                   | `tests/touch-platform.spec.ts`, `tests/header-continuity.spec.ts`                                |
+| A raw `<select>` without 16 px text and a 44 px touch height, in the dialogs the contract never opens                                                                                       | `src/test/raw-select.test.ts`                                                                    |
+| Patterns in the source: `vh`, a fixed bar without safe area, missing labels, label association                                                                                              | `eslint` (the `no-restricted-syntax` selectors and `jsx-a11y`)                                   |
 
 `tests/responsive-contract.baseline.json` is where a known violation would be
 listed. It is empty and `BASELINE_BUDGET` in `src/test/responsive-baseline.test.ts`
-is 0: a violation fails the run, so fix the screen. Example of a narrow run:
+is 0: a violation fails the run, so fix the screen. `tests/contrast-incomplete.baseline.json`
+is the same kind of ratchet for unjudged contrast (`src/test/contrast-incomplete-baseline.test.ts`
+keeps it well-formed); it starts empty and is generated with `CONTRAST_UPDATE=1` on a fresh stack. Example of a narrow run:
 `CONTRACT_VIEWPORTS=390x844 CONTRACT_ROUTES='^/spaces' bun run test:e2e tests/responsive-contract.spec.ts`.
+
+The UI probes (`tests/ui-probes.ts`) each keep `tests/<probe>-probe.baseline.json`, budget 0 in
+`src/test/ui-probes-baseline.test.ts`, generated with `PROBES_UPDATE=1` on a fresh stack. What a
+probe cannot judge (text over an image) is attached to the run for review, never failed.
+`tests/ui-probes.spec.ts` proves each probe on hand-made pages.
 
 Automation finds the mechanical faults; it does not feel a tap, hear a screen
 reader or judge whether a flow makes sense. Those stay with a person on a
@@ -682,7 +728,7 @@ and with the text size at 130 %.
     anchors by default. Real-router tests call `vi.unmock("@/lib/link")` and
     use `renderWithRouter` from `src/test/router.tsx`.
   - `src/test/setup-dom.ts` fills in what jsdom lacks and behaves like Chromium:
-    `setViewport("phone" | "desktop" | {…})` drives `matchMedia`,
+    `setViewport("phone" | "phone-landscape" | "desktop" | {…})` drives `matchMedia`,
     `reportResize(el, { height })` drives ResizeObserver, `<dialog>` focuses
     its first focusable element on `showModal()`, nothing in a closed dialog
     takes focus, and `close` fires in a later task (advance fake timers).

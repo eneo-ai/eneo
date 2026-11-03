@@ -23,6 +23,7 @@ import { formatBytes } from "@/lib/format";
 import { saveBlob } from "@/features/files/signed-file-url";
 import { useRemovalMutation } from "@/features/spaces/removal";
 import { useFocusRescue } from "@/lib/focus-rescue";
+import { OUTLINE_BUTTON_CLASS } from "./bundled";
 import { DocumentTemplateDialog, type DocumentTemplateAction } from "./document-template-dialog";
 
 const STATUS_LABELS = {
@@ -221,8 +222,11 @@ export function DocumentTemplatesSection() {
           </p>
         </div>
         {templates.data && (
+          // Outlines, like every button on the Verktyg page.
           <Button
             label={t("document_template_upload")}
+            variant="ghost"
+            className={OUTLINE_BUTTON_CLASS}
             size="sm"
             onClick={() => {
               const data = templates.data;
@@ -252,7 +256,8 @@ export function DocumentTemplatesSection() {
           )}
           <Button
             label={t("retry")}
-            variant="secondary"
+            variant="ghost"
+            className={OUTLINE_BUTTON_CLASS}
             size="sm"
             isLoading={immediate.isPending}
             isInterruptible
@@ -382,7 +387,8 @@ export function DocumentTemplatesSection() {
                   )}
                   <Button
                     label={t("document_template_download_builtin")}
-                    variant="secondary"
+                    variant="ghost"
+                    className={OUTLINE_BUTTON_CLASS}
                     size="sm"
                     isDisabled={!data.runtime_configured}
                     isLoading={immediate.isPending && immediate.variables.kind === "builtin"}

@@ -10,7 +10,8 @@ import { NEW_CONVERSATION_HREF } from "./routes";
 import { useShell } from "./shell-context";
 
 /**
- * Phones and iPads held upright: menu, Eneo, search (the ⌘K palette), the
+ * Phones, held either way (below 768 px, or turned sideways; otherwise the
+ * SideNav carries all of it): menu, Eneo, search (the ⌘K palette), the
  * notification bells and "Ny konversation", 56 px high with 44 px targets.
  * With text enlarged to about 125% or more (the bar is then narrower than
  * 22 rem) the bells and "Ny konversation" leave it: their rem-sized buttons
@@ -22,7 +23,7 @@ export function MobileTopBar() {
   const t = useTranslations();
   const { openPalette } = useShell();
   return (
-    <header className="bg-ax-surface border-ax-border @container/topbar flex h-14 shrink-0 items-center gap-1 border-b px-1.5 group-has-[[data-own-mobile-header]]/shell:hidden max-md:group-has-[[data-own-phone-header]]/shell:hidden lg:hidden">
+    <header className="bg-ax-surface border-ax-border phone:group-has-[[data-own-phone-header]]/shell:hidden wide:hidden @container/topbar flex h-14 shrink-0 items-center gap-1 border-b px-1.5 group-has-[[data-own-mobile-header]]/shell:hidden">
       {/* Astryx measures the layout after mount; reserve the toggle's space
           so the logo stays in place. */}
       <span className="flex size-11 shrink-0 items-center justify-center">

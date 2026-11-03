@@ -29,7 +29,7 @@ export function SpaceSkillNewPage() {
   const base = `/spaces/${routeId}/skills`;
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 pb-16">
+    <div className="flex w-full max-w-5xl flex-col gap-6 pb-16">
       <PageHeader title={t("skills_library_new_heading")} />
       <BackLink href={base} hideOnPhone>
         {t("skills")}

@@ -550,6 +550,14 @@ class Settings(BaseSettings):
             "by the backend."
         ),
     )
+    browser_session_max_age: int = Field(
+        default=JWT_EXPIRY_TIME_MAXIMUM_MINUTES,
+        description=(
+            "Minutes a browser session may last in total, counted from sign-in, "
+            "however often the person chooses to stay signed in. At least "
+            "JWT_EXPIRY_TIME (equal turns renewal off), at most 30 days."
+        ),
+    )
     web_app_enabled: bool = Field(
         default=False,
         description=(
@@ -589,6 +597,13 @@ class Settings(BaseSettings):
             raise ValueError(
                 "BROWSER_SESSION_ENABLED with ENVIRONMENT=development needs "
                 "PUBLIC_ORIGIN set to a localhost origin"
+            )
+        # One token already lasts JWT_EXPIRY_TIME; a shorter maximum would be
+        # outlived by the first token.
+        if self.browser_session_max_age < self.jwt_expiry_time:
+            raise ValueError(
+                "BROWSER_SESSION_MAX_AGE must be at least JWT_EXPIRY_TIME; set them "
+                "equal to turn off staying signed in"
             )
         # The web app signs in only through the browser session.
         if self.web_app_enabled and not self.browser_session_enabled:
@@ -864,6 +879,20 @@ class Settings(BaseSettings):
                 "JWT_EXPIRY_TIME is the session lifetime in minutes and may not "
                 f"exceed {JWT_EXPIRY_TIME_MAXIMUM_MINUTES} (30 days). "
                 "Set 1440 for 24-hour sessions."
+            )
+        return v
+
+    @field_validator("browser_session_max_age")
+    @classmethod
+    def validate_browser_session_max_age(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError(
+                "BROWSER_SESSION_MAX_AGE must be a positive number of minutes"
+            )
+        if v > JWT_EXPIRY_TIME_MAXIMUM_MINUTES:
+            raise ValueError(
+                "BROWSER_SESSION_MAX_AGE may not exceed "
+                f"{JWT_EXPIRY_TIME_MAXIMUM_MINUTES} minutes (30 days)"
             )
         return v
 

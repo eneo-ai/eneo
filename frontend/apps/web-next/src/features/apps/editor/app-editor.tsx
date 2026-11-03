@@ -57,7 +57,8 @@ export function AppEditor({ appId }: { appId: string }) {
   useCreatedAnnouncement(created, t("app_created_announcement"));
   const summary = editorSummaries(t);
   const content = t("editor_group_content");
-  const modelAndAccess = t("editor_group_model_access");
+  const model = t("editor_group_model");
+  const access = t("editor_group_access");
 
   const sections: SettingsSection[] = [
     {
@@ -113,7 +114,7 @@ export function AppEditor({ appId }: { appId: string }) {
       id: "ai",
       label: t("ai_settings"),
       icon: Sparkles,
-      group: modelAndAccess,
+      group: model,
       summary: summary.model(app.completion_model),
       node: <AiSection app={app} />
     },
@@ -121,7 +122,7 @@ export function AppEditor({ appId }: { appId: string }) {
       id: "security",
       label: t("security_and_privacy"),
       icon: ShieldCheck,
-      group: modelAndAccess,
+      group: access,
       summary: summary.retention(app.data_retention_days),
       node: <SecuritySection app={app} />
     },
@@ -131,7 +132,7 @@ export function AppEditor({ appId }: { appId: string }) {
             id: "api-keys",
             label: t("api_keys"),
             icon: KeyRound,
-            group: modelAndAccess,
+            group: access,
             node: (
               <ResourceApiKeysSection scopeType="app" scopeId={app.id} resourceName={app.name} />
             )
@@ -144,7 +145,7 @@ export function AppEditor({ appId }: { appId: string }) {
             id: "publishing",
             label: t("publishing"),
             icon: Send,
-            group: modelAndAccess,
+            group: access,
             summary: summary.publishing(app.published),
             node: <PublishingSection app={app} />
           }

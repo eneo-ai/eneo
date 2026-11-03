@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { expectNoAxeViolations } from "@/test/axe";
+import { expectNameToHoldVisibleText, expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testAppContext } from "@/test/render";
 
 type Run = Record<string, unknown>;
@@ -254,9 +254,16 @@ describe("CrawlerPage", () => {
     ).toBeTruthy();
 
     const today = screen.getByRole("group", { name: "Idag" });
-    expect(within(today).getByRole("button", { name: "Visa Klara · Idag" }).textContent).toContain(
-      "7"
-    );
+    expect(within(today).getByRole("button", { name: "7 Klara, Idag" })).toBeTruthy();
+    // Each day card is named by what it shows, then its day (2.5.3). ToggleButton repeats its
+    // content in an aria-hidden copy that only reserves the pressed width (hidden in a browser).
+    for (const day of ["Idag", "Igår"]) {
+      for (const card of within(screen.getByRole("group", { name: day })).getAllByRole("button")) {
+        const shown = card.cloneNode(true) as Element;
+        shown.querySelectorAll("[aria-hidden=true]").forEach((copy) => copy.remove());
+        expectNameToHoldVisibleText(shown, card.getAttribute("aria-label") ?? "");
+      }
+    }
 
     // Label in name (2.5.3): what the button shows leads its accessible name, so a person
     // who says what they see can press it.
@@ -277,7 +284,7 @@ describe("CrawlerPage", () => {
     show();
     // The cards wait for the overview before they can be pressed.
     await screen.findByRole("table", { name: "Alla" });
-    const card = screen.getByRole("button", { name: "Visa Misslyckade · Igår" });
+    const card = screen.getByRole("button", { name: /^\d+ Misslyckade, Igår$/ });
     fireEvent.click(card);
 
     await waitFor(() =>

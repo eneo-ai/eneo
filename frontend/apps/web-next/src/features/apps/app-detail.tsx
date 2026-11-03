@@ -6,7 +6,7 @@ import { BackLink } from "@/components/composites/back-link";
 import { PageHeader } from "@/components/composites/page-header";
 import { browserApi } from "@/lib/api/browser";
 import { useSpace } from "@/features/spaces/use-space";
-import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
+import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { AppRunTabs } from "./app-run-tabs";
 import { appQueryOptions } from "./apps";
 import { AppSwitcher } from "./app-switcher";
@@ -15,14 +15,14 @@ import { AppSwitcher } from "./app-switcher";
 export function AppDetail({ appId }: { appId: string }) {
   const t = useTranslations();
   const { routeId } = useSpace();
-  const phone = useMediaMatch(PHONE_QUERY);
+  const phone = usePhoneScreen();
   const { data: app } = useSuspenseQuery(appQueryOptions(browserApi, appId));
 
   const base = `/spaces/${routeId}/apps/${appId}`;
   const canEdit = (app.permissions ?? []).includes("edit");
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
+    <div className="flex w-full max-w-5xl flex-col gap-6">
       <div className="flex flex-col gap-1">
         <BackLink href={`/spaces/${routeId}/apps`} hideOnPhone>
           {t("apps")}

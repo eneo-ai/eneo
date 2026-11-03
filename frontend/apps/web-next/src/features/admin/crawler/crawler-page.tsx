@@ -213,15 +213,15 @@ function DayCards({
                     <ToggleButton
                       key={outcome.status}
                       value={`${day}:${outcome.status}`}
-                      label={t("admin_crawler_show_day_status", {
-                        status: statusLabel(t, outcome.status),
+                      label={t("admin_crawler_day_card_name", {
+                        shown: `${count(data.calendar[day], outcome.count)} ${statusLabel(t, outcome.status)}`,
                         day: t(PERIOD_KEYS[day])
                       })}
                     >
                       <span className="flex min-w-0 flex-col items-start gap-1 text-start">
                         <span className="text-xl font-semibold tabular-nums">
                           {count(data.calendar[day], outcome.count)}
-                        </span>
+                        </span>{" "}
                         <span className="text-ax-text-secondary text-xs leading-5 whitespace-normal">
                           {statusLabel(t, outcome.status)}
                         </span>
@@ -233,8 +233,10 @@ function DayCards({
                   <ToggleButton
                     size="sm"
                     value={`${day}:cancelled`}
-                    label={t("admin_crawler_show_day_status", {
-                      status: statusLabel(t, "cancelled"),
+                    label={t("admin_crawler_day_card_name", {
+                      shown: t("admin_crawler_cancelled_count", {
+                        count: count(data.calendar[day], "cancelled")
+                      }),
                       day: t(PERIOD_KEYS[day])
                     })}
                   >

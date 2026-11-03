@@ -1,25 +1,12 @@
+import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import {
-  ArrowDownToLine,
-  ArrowUpToLine,
-  Lock,
-  LockOpen,
-  MoreHorizontal,
-  Pencil,
-  Trash2
-} from "lucide-react";
+import { ArrowDownToLine, ArrowUpToLine, Lock, LockOpen, Pencil, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useTranslations } from "use-intl";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { PageHeader } from "@/components/composites/page-header";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger
-} from "@/components/ui/dropdown-menu";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { browserApi } from "@/lib/api/browser";
@@ -65,31 +52,35 @@ function ClassificationActions({
 
   return (
     <>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label={t("ui_more_actions_for", { name: classification.name })}
-          >
-            <MoreHorizontal className="size-4" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem disabled={isHighest} onSelect={() => onMove("up")}>
-            <ArrowUpToLine className="size-4" /> {t("move_up")}
-          </DropdownMenuItem>
-          <DropdownMenuItem disabled={isLowest} onSelect={() => onMove("down")}>
-            <ArrowDownToLine className="size-4" /> {t("move_down")}
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => setShowEdit(true)}>
-            <Pencil className="size-4" /> {t("edit")}
-          </DropdownMenuItem>
-          <DropdownMenuItem variant="destructive" onSelect={() => setShowDelete(true)}>
-            <Trash2 className="size-4" /> {t("delete")}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <MoreMenu
+        label={t("ui_more_actions_for", { name: classification.name })}
+        alignment="end"
+        items={[
+          {
+            label: t("move_up"),
+            icon: <ArrowUpToLine aria-hidden="true" />,
+            isDisabled: isHighest,
+            onClick: () => onMove("up")
+          },
+          {
+            label: t("move_down"),
+            icon: <ArrowDownToLine aria-hidden="true" />,
+            isDisabled: isLowest,
+            onClick: () => onMove("down")
+          },
+          {
+            label: t("edit"),
+            icon: <Pencil aria-hidden="true" />,
+            onClick: () => setShowEdit(true)
+          },
+          {
+            label: t("delete"),
+            icon: <Trash2 aria-hidden="true" />,
+            variant: "destructive",
+            onClick: () => setShowDelete(true)
+          }
+        ]}
+      />
       <ClassificationDialog
         open={showEdit}
         onOpenChange={setShowEdit}
@@ -200,7 +191,7 @@ export function SecurityClassificationsPage() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
+    <div className="flex w-full max-w-4xl flex-col gap-6">
       <PageHeader title={t("security_classifications")} />
 
       <SettingsGroup title={t("general")}>

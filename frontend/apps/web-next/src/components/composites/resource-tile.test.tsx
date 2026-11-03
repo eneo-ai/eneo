@@ -45,6 +45,14 @@ describe("ResourceCollection (decision 9)", () => {
     await expectNoAxeViolations(container);
   });
 
+  it("keeps the rows on a phone turned sideways, without a grid of cards", () => {
+    setViewport("phone-landscape");
+    renderInApp(<Collection />);
+    const rows = screen.getAllByRole("list")[0]!;
+    expect(rows.className).not.toContain("auto-fill");
+    expect(within(rows).getAllByRole("listitem")[0]!.className).toContain("astryx-item");
+  });
+
   it("shows cards from a tablet up, as many columns as the room takes", () => {
     setViewport("tablet-portrait");
     renderInApp(<Collection />);

@@ -5,10 +5,11 @@ import { apiPost, createSpace, uniqueName } from "./helpers";
 /** A new space with one assistant (or app); returns the space's path and the editor's. */
 async function assistantEditor(page: Page, kind: "assistants" | "apps" = "assistants") {
   const space = await createSpace(page, uniqueName("Editor"));
+  const name = uniqueName("Bygglov");
   const id = await apiPost(page, `/spaces/${space.split("/").pop()}/applications/${kind}/`, {
-    name: uniqueName("Bygglov")
+    name
   });
-  return { space, editor: `${space}/${kind}/${id}/edit` };
+  return { space, name, editor: `${space}/${kind}/${id}/edit` };
 }
 
 test.describe("an editor on a phone (decision 21)", () => {
@@ -115,28 +116,54 @@ test.describe("an editor on a small phone", () => {
   }
 });
 
-test.describe("a page bar's back link (decision 39)", () => {
+test.describe("a page bar's back link", () => {
   test.use({ viewport: { width: 320, height: 640 }, hasTouch: true, isMobile: true });
 
-  test("keeps its full name and never cuts its label, as the width changes", async ({ page }) => {
-    const { editor } = await assistantEditor(page);
+  test("always names its parent; a name too long for the bar ends in an ellipsis and the link's name holds all of it", async ({
+    page
+  }) => {
+    const { editor, name } = await assistantEditor(page);
     await page.goto(`${editor}?section=security`);
     const back = page.locator("[data-phone-page-bar] a").first();
     const widths = [320, 324, 328, 332, 340, 360, 375, 390, 414, 430];
+    const cutAt: number[] = [];
     for (const width of [...widths, ...widths.toReversed()]) {
       await page.setViewportSize({ width, height: 640 });
-      await expect(back).toHaveAccessibleName(/^Tillbaka till /);
-      // Measured after the resize: a label shown is shown whole.
+      // The full name is reachable by assistive technology at every width (ACCESSIBILITY.md 6).
+      await expect(back).toHaveAccessibleName(`Tillbaka till ${name}`);
+      // Measured after the resize: the label is the parent's whole name, and a label cut
+      // for room ends in an ellipsis; nothing else in the link is cut.
       await expect
         .poll(() =>
-          back.evaluate((link) =>
-            [link, ...link.querySelectorAll<HTMLElement>("*")].every(
-              (element) => element.scrollWidth <= element.clientWidth + 1
+          back.evaluate((link, parent) => {
+            const parts = [link, ...link.querySelectorAll<HTMLElement>("*")];
+            const label = parts.find(
+              (element) => element.childElementCount === 0 && element.textContent === parent
+            );
+            if (!label) return "no label with the parent's name";
+            const cut = (element: Element) => element.scrollWidth > element.clientWidth + 1;
+            if (cut(label) && getComputedStyle(label).textOverflow !== "ellipsis")
+              return "cut without an ellipsis";
+            if (
+              parts.some((element) => element !== label && !element.contains(label) && cut(element))
             )
+              return "another part is cut";
+            return cut(label) ? "ellipsis" : "whole";
+          }, name)
+        )
+        .toMatch(/^(ellipsis|whole)$/);
+      if (
+        await back.evaluate((link) =>
+          [...link.querySelectorAll("*")].some(
+            (element) =>
+              element.childElementCount === 0 && element.scrollWidth > element.clientWidth + 1
           )
         )
-        .toBe(true);
+      )
+        cutAt.push(width);
     }
+    // The name is long enough to need the ellipsis on the narrowest phone.
+    expect(cutAt).toContain(320);
   });
 });
 
@@ -219,5 +246,144 @@ test.describe("an editor turned while a section is open from the index", () => {
     await page.goForward();
     await expect(page).toHaveURL(/\?section=instructions$/);
     await expect(prompt).toBeVisible();
+  });
+});
+
+/**
+ * Makes the editor's sticky header taller, as a long title wrapping to two lines would,
+ * and waits until the section's scroll margin has followed it.
+ */
+async function growHeader(page: Page, section: string) {
+  const header = page.locator("[data-space-full-bleed] > header");
+  await header.evaluate((element) =>
+    (element.firstElementChild as HTMLElement).style.setProperty("padding-bottom", "48px")
+  );
+  await expect
+    .poll(async () => {
+      const { height } = (await header.boundingBox())!;
+      const margin = await page
+        .locator(`[id="${section}"]`)
+        .evaluate((element) => parseFloat(getComputedStyle(element).scrollMarginTop));
+      return margin - height;
+    })
+    .toBeGreaterThanOrEqual(0);
+}
+
+/** The section's own top (the anchor's target, not a heading inset in it) is clear of the header. */
+async function expectBelowHeader(page: Page, section: string) {
+  const target = page.locator(`[id="${section}"]`);
+  await expect(target).toBeInViewport();
+  await expect
+    .poll(async () => {
+      const header = (await page.locator("[data-space-full-bleed] > header").boundingBox())!;
+      return (await target.boundingBox())!.y - (header.y + header.height);
+    })
+    .toBeGreaterThanOrEqual(-0.5);
+}
+
+test.describe("an editor on a laptop", () => {
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  test("lists every section beside the form, under its group, and keeps the list in view", async ({
+    page
+  }) => {
+    const { editor } = await assistantEditor(page);
+    await page.goto(editor);
+    const list = page.getByRole("navigation", { name: "Avsnitt", exact: true });
+    await expect(list).toHaveAttribute("data-editor-rail");
+    await expect(page.locator("header").getByRole("navigation", { name: "Avsnitt" })).toBeHidden();
+    for (const group of ["Innehåll", "Modell och funktioner", "Åtkomst"]) {
+      await expect(list.getByRole("group", { name: group })).toBeVisible();
+    }
+    for (const name of ["Allmänt", "Bilagor", "Säkerhet och integritet", "Publicering"]) {
+      await expect(list.getByRole("link", { name })).toBeVisible();
+    }
+
+    // A link scrolls its section to just below the sticky header, however tall the header
+    // grows; the list stays where it was.
+    await growHeader(page, "security");
+    const top = (await list.boundingBox())!.y;
+    await list.getByRole("link", { name: "Säkerhet och integritet" }).click();
+    await expectBelowHeader(page, "security");
+    expect(Math.abs((await list.boundingBox())!.y - top)).toBeLessThanOrEqual(1);
+  });
+});
+
+test.describe("an editor on an iPad held sideways", () => {
+  test.use({ viewport: { width: 1180, height: 820 }, hasTouch: true });
+
+  test("reaches the list's last section", async ({ page }) => {
+    const { editor } = await assistantEditor(page);
+    await page.goto(editor);
+    const list = page.locator("[data-editor-rail]");
+    const last = list.getByRole("link").last();
+    await last.scrollIntoViewIfNeeded();
+    await expect(last).toBeInViewport();
+  });
+
+  test("lines space settings up with the space's header", async ({ page }) => {
+    const space = await createSpace(page, uniqueName("Settings"));
+    await page.goto(`${space}/settings`);
+    const list = page.locator("[data-editor-rail]");
+    await expect(list).toBeVisible();
+    // The space's header: its breadcrumbs start on the frame's line.
+    const crumbs = page.locator("main header nav").first();
+    const line = (await crumbs.boundingBox())!.x;
+    const first = list.getByRole("link").first();
+    expect(Math.abs((await first.boundingBox())!.x - line)).toBeLessThanOrEqual(1);
+    const title = page.locator("[data-space-full-bleed] > header").getByRole("heading").first();
+    expect(Math.abs((await title.boundingBox())!.x - line)).toBeLessThanOrEqual(1);
+  });
+});
+
+test.describe("an editor on a tablet, at the card's height", () => {
+  test.use({ viewport: { width: 820, height: 1180 }, hasTouch: true });
+
+  test("scrolls a section from the strip to just below the header", async ({ page }) => {
+    const { editor } = await assistantEditor(page);
+    await page.goto(editor);
+    const strip = page.locator("header").getByRole("navigation", { name: "Avsnitt" });
+    await growHeader(page, "ai");
+    await strip.getByRole("link", { name: "AI-inställningar" }).click();
+    await expectBelowHeader(page, "ai");
+  });
+});
+
+test.describe("an unavailable Promptguide", () => {
+  /** Opens the editor's instructions with the Promptguide reported unavailable. */
+  async function openInstructions(page: Page, section: string) {
+    const { editor } = await assistantEditor(page);
+    // The real answer, so it keeps the session's headers; only its body says unavailable.
+    await page.route("**/api/v1/help-assistants/availability**", async (route) =>
+      route.fulfill({
+        response: await route.fetch(),
+        json: { available: false, disabled_reason: "no_assignment" }
+      })
+    );
+    const availability = page.waitForResponse("**/api/v1/help-assistants/availability**");
+    await page.goto(`${editor}${section}`);
+    await availability;
+    await expect(page.getByRole("button", { name: "Visa prompthistorik" })).toBeVisible();
+    return page.getByRole("button", { name: "Promptguide", includeHidden: true });
+  }
+
+  test.describe("on a phone", () => {
+    test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+    test("is left out, as its reason's tooltip cannot be reached", async ({ page }) => {
+      const promptGuide = await openInstructions(page, "?section=instructions");
+      await expect(promptGuide).toBeAttached();
+      await expect(promptGuide).toBeHidden();
+    });
+  });
+
+  test.describe("on a tablet", () => {
+    test.use({ viewport: { width: 820, height: 1180 }, hasTouch: true });
+
+    test("is shown disabled, its reason in the tooltip", async ({ page }) => {
+      const promptGuide = await openInstructions(page, "");
+      await expect(promptGuide).toBeVisible();
+      await expect(promptGuide).toBeDisabled();
+    });
   });
 });

@@ -134,7 +134,7 @@ it("keeps named impact after a failed save and refreshes visible models on succe
     { id: "assistant", name: "Berörd assistent", user_id: "user", type: "assistant" }
   ];
   renderInApp(<SpaceSettings />);
-  fireEvent.click(await screen.findByRole("button", { name: "Välj Chattmodeller" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Välj modeller, Chattmodeller" }));
   await screen.findByRole("switch", { name: "Före klassning" });
   api.PATCH.mockResolvedValueOnce({
     error: { message: "Fixture save refused" },

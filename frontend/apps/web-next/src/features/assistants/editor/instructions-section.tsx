@@ -19,6 +19,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { browserApi } from "@/lib/api/browser";
 import { formatDateTime } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import {
   promptGuideAvailabilityQueryOptions,
   type HelperAvailability
@@ -140,11 +141,13 @@ export function InstructionsSection({
           </div>
           {/* Wrapped under the label on a phone: the ghost buttons' own inset is pulled
               back so their icons start on the gutter with the label. */}
-          <div className="flex min-w-0 flex-wrap items-center gap-1 max-md:-ms-2.5">
+          <div className="phone:-ms-2.5 flex min-w-0 flex-wrap items-center gap-1">
             {promptGuide && availability && !promptLocked && (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <span className="inline-flex">
+                  {/* Unavailable, its reason is only in the tooltip, which a finger cannot
+                      reach: a phone leaves the button out rather than show it disabled. */}
+                  <span className={cn("inline-flex", !availability.available && "phone:hidden")}>
                     <Button
                       type="button"
                       variant="ghost"

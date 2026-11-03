@@ -2,6 +2,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { FILLED_BUTTONS, isOutline } from "@/test/buttons";
 import type { McpServer } from "../mcp/mcp";
 
 const get = vi.hoisted(() => vi.fn());
@@ -115,6 +116,16 @@ describe("admin function sources", () => {
         const card = screen.getByRole("heading", { name: "file_creation" }).closest("section")!;
         expect(card.contains(heading)).toBe(true);
         expect(within(card).getByRole("button", { name: "document_template_upload" })).toBeTruthy();
+        // No filled button anywhere on the page: the functions, the offers, the add menu
+        // and the template library are all outlines, so none competes for attention.
+        await waitFor(() => expect(document.querySelectorAll(FILLED_BUTTONS)).toHaveLength(0));
+        for (const button of [
+          ...screen.getAllByRole("button", { name: "capability_configure" }),
+          ...screen.getAllByRole("button", { name: "tools_builtin_turn_on" }),
+          within(card).getByRole("button", { name: "tools_add_source" }),
+          within(card).getByRole("button", { name: "document_template_upload" })
+        ])
+          expect(isOutline(button)).toBe(true);
       } else {
         expect(screen.queryByRole("heading", { name: "document_templates" })).toBeNull();
         expect(get.mock.calls.some(([path]) => path === "/api/v1/document-templates/")).toBe(false);

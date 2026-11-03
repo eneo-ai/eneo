@@ -4,6 +4,7 @@ import { ChatComposer, ChatComposerDrawer, useChatComposerContext } from "@astry
 import { useAnnounce, useMergedRefs } from "@astryxdesign/core/hooks";
 import { Kbd } from "@astryxdesign/core/Kbd";
 import { Popover } from "@astryxdesign/core/Popover";
+import { isImeKeyEvent } from "@astryxdesign/core/utils";
 import {
   ArrowUp,
   BookOpen,
@@ -45,11 +46,12 @@ const PILL_ACTIVE_CLASS = "bg-ax-accent-muted text-ax-text-accent";
 
 /**
  * The composer's text field. A real <textarea> (e2e and assistive tech rely
- * on it) wired to Astryx ChatComposer's context. Return adds a line, as in
- * any text field, and ⌘ or Ctrl+Return sends (decision 3: a half-written
- * question is never sent by accident); the hint is in its description. IME
- * composition is respected, pasted files become attachments and Backspace in
- * an empty field removes the last attachment.
+ * on it) wired to Astryx ChatComposer's context. Where there is a keyboard
+ * (`returnSends`) Return sends and Shift+Return adds a line, as in other
+ * chats; on a touch screen Return adds a line, as in any text field. ⌘ or
+ * Ctrl+Return sends everywhere; the hint is in its description. Return that
+ * commits an input method's word never sends, pasted files become attachments
+ * and Backspace in an empty field removes the last attachment.
  */
 function ComposerTextarea({
   label,
@@ -60,6 +62,7 @@ function ComposerTextarea({
   onPasteFiles,
   onBackspaceEmpty,
   rows,
+  returnSends,
   ref
 }: {
   label: string;
@@ -70,14 +73,19 @@ function ComposerTextarea({
   onPasteFiles: (files: File[]) => void;
   onBackspaceEmpty: () => void;
   rows: number;
+  returnSends: boolean;
   ref?: Ref<HTMLTextAreaElement>;
 }) {
   const composer = useChatComposerContext();
   const [composing, setComposing] = useState(false);
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-      if (composing || event.nativeEvent.isComposing) return;
+    if (
+      event.key === "Enter" &&
+      (event.metaKey || event.ctrlKey || (returnSends && !event.shiftKey))
+    ) {
+      // keyCode 229: Safari's Return that commits a word, after compositionend.
+      if (composing || isImeKeyEvent(event.nativeEvent)) return;
       event.preventDefault();
       onSend();
       return;
@@ -325,7 +333,8 @@ export function Composer({
   textareaRef
 }: ComposerProps) {
   const t = useTranslations();
-  // A touch screen has no Shift, Ctrl or Enter key to point at.
+  // A touch screen has no Shift, Ctrl or Enter key to point at, and its
+  // Return adds a line.
   const coarse = useMediaMatch("(pointer: coarse)");
   const announce = useAnnounce();
   const hintId = useId();
@@ -375,7 +384,7 @@ export function Composer({
         <ChatComposer
           value={value}
           onChange={change}
-          // Submission runs through `send` (the textarea's ⌘/Ctrl+Return and
+          // Submission runs through `send` (the textarea's Return keys and
           // the send button) so a blocked send never clears the field.
           onSubmit={send}
           onStop={onStop}
@@ -405,6 +414,7 @@ export function Composer({
               invalid={problem !== null}
               placeholder={placeholder}
               rows={variant === "start" ? 2 : 1}
+              returnSends={!coarse}
               onSend={send}
               onPasteFiles={(files) => void attachments.addFiles(files)}
               onBackspaceEmpty={() => {
@@ -441,12 +451,22 @@ export function Composer({
           sendActions={
             <>
               {modelSelector}
-              {/* The shortcut beside the button it stands for, where there is a keyboard
-                  to press it and room for it: not on a touch screen, nor in a phone-width
-                  window, where it only crowds the send button. The field's description says
+              {/* The keys beside the button they stand for, where there is a keyboard
+                  to press them and room for them: not on a touch screen, nor in a phone-width
+                  window, where they only crowd the send button. The field's description says
                   it in words. */}
-              <span aria-hidden="true" className="hidden md:pointer-fine:inline-flex">
-                <Kbd keys="mod+enter" />
+              <span
+                aria-hidden="true"
+                className="text-ax-text-secondary hidden items-center gap-2 text-xs whitespace-nowrap md:pointer-fine:inline-flex"
+              >
+                <span className="inline-flex items-center gap-1">
+                  <Kbd keys="enter" />
+                  {t("send")}
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <Kbd keys="shift+enter" />
+                  {t("chat_composer_key_newline")}
+                </span>
               </span>
             </>
           }

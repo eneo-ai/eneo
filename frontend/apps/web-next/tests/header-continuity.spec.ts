@@ -3,7 +3,7 @@ import { expect, test } from "./csp";
 
 test.skip(!process.env.E2E_BASE_URL, "Requires the FastAPI-served Vite build");
 
-// Below 1024 px a page with its own header (the chat's, a pushed screen's
+// On a phone a page with its own header (the chat's, a pushed screen's
 // PageBar) replaces the shell's top bar, which gives way to it in CSS. The
 // SPA has no server HTML: the page's code decides what the first frame holds.
 // So the rule is about frames, not about what arrives before a script runs:
@@ -15,7 +15,8 @@ test.use(PHONE);
 
 // The shell's top bar: a space's own header (tablets, desktop) is a <header> in main.
 const TOP_BAR = "header:not(main *)";
-const OWN_HEADER = "[data-own-mobile-header]";
+// A page's own header: a pushed screen's (Konto, the chat) or a phone's only (an admin area).
+const OWN_HEADER = "[data-own-mobile-header], [data-own-phone-header]";
 
 type Frame = { top: boolean; own: boolean; h1: boolean; main: boolean; at: number };
 
@@ -25,35 +26,38 @@ type Frame = { top: boolean; own: boolean; h1: boolean; main: boolean; at: numbe
  * (`window.__headerFrames`); a frame is kept when any of them changes.
  */
 async function recordHeaders(page: Page) {
-  await page.addInitScript((topBar) => {
-    const frames: Frame[] = [];
-    (window as unknown as { __headerFrames: Frame[] }).__headerFrames = frames;
-    const shown = (element: Element | null) => !!element && element.getClientRects().length > 0;
-    const start = performance.now();
-    const tick = () => {
-      if (document.body) {
-        const frame = {
-          top: shown(document.querySelector(topBar)),
-          own: [...document.querySelectorAll("[data-own-mobile-header]")].some(shown),
-          h1: [...document.querySelectorAll("main h1")].some(shown),
-          main: shown(document.querySelector("main#main-content")),
-          at: Math.round(performance.now() - start)
-        };
-        const last = frames.at(-1);
-        if (
-          !last ||
-          last.top !== frame.top ||
-          last.own !== frame.own ||
-          last.h1 !== frame.h1 ||
-          last.main !== frame.main
-        ) {
-          frames.push(frame);
+  await page.addInitScript(
+    ([topBar, ownHeader]) => {
+      const frames: Frame[] = [];
+      (window as unknown as { __headerFrames: Frame[] }).__headerFrames = frames;
+      const shown = (element: Element | null) => !!element && element.getClientRects().length > 0;
+      const start = performance.now();
+      const tick = () => {
+        if (document.body) {
+          const frame = {
+            top: shown(document.querySelector(topBar)),
+            own: [...document.querySelectorAll(ownHeader)].some(shown),
+            h1: [...document.querySelectorAll("main h1")].some(shown),
+            main: shown(document.querySelector("main#main-content")),
+            at: Math.round(performance.now() - start)
+          };
+          const last = frames.at(-1);
+          if (
+            !last ||
+            last.top !== frame.top ||
+            last.own !== frame.own ||
+            last.h1 !== frame.h1 ||
+            last.main !== frame.main
+          ) {
+            frames.push(frame);
+          }
         }
-      }
+        requestAnimationFrame(tick);
+      };
       requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
-  }, TOP_BAR);
+    },
+    [TOP_BAR, OWN_HEADER] as const
+  );
 }
 
 const headerFrames = (page: Page) =>
@@ -170,7 +174,8 @@ test.describe("a screen opened cold", () => {
         const frames = withPanel(await headerFrames(page));
         expect(frames.length, "the page panel was on screen").toBeGreaterThan(0);
         for (const frame of frames) {
-          expect(frame, `at ${frame.at} ms`).toMatchObject(
+          // Every recorded frame in the message, so a rare failure shows what came before and after.
+          expect(frame, `at ${frame.at} ms of ${JSON.stringify(frames)}`).toMatchObject(
             header === "own" ? { top: false, own: true } : { top: true, own: false }
           );
         }

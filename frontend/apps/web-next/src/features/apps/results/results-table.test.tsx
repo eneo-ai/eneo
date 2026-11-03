@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { openMenuOnRelease, tap } from "@/test/menus";
 import { renderInApp, testQueryClient } from "@/test/render";
 import { PHONE_VIEWPORT, setViewport } from "@/test/setup-dom";
 
@@ -162,13 +163,20 @@ it("filters by the visible empty-input title and uses it in the deletion confirm
     "/results/run-2"
   ]);
   const row = screen.getByRole("link", { name: emptyTitle }).closest("tr")!;
-  fireEvent.keyDown(within(row).getByRole("button"), { key: "Enter" });
-  fireEvent.click(await screen.findByRole("menuitem", { name: "Ta bort" }));
+  const menu = await openMenuOnRelease(within(row).getByRole("button"));
+  fireEvent.click(within(menu).getByRole("menuitem", { name: "Ta bort" }));
   const dialog = await screen.findByRole("alertdialog");
   expect(
     within(dialog).getByText(`Vill du verkligen ta bort resultatet ${emptyTitle}?`)
   ).toBeTruthy();
 });
+
+/** Picks Ta bort from the menu of `button`, opened from the keyboard. */
+async function chooseDelete(button: HTMLElement) {
+  fireEvent.keyDown(button, { key: "Enter" });
+  const menu = document.getElementById(button.getAttribute("aria-controls") ?? "")!;
+  fireEvent.click(await within(menu).findByRole("menuitem", { name: "Ta bort" }));
+}
 
 async function requestDelete(id: string) {
   const table = await screen.findByRole("table", { name: "Resultat" });
@@ -177,8 +185,7 @@ async function requestDelete(id: string) {
     .find((row) => row.querySelector(`a[href='/results/${id}']`))!;
   const menu = within(row).getByRole("button");
   menu.focus();
-  fireEvent.keyDown(menu, { key: "Enter" });
-  fireEvent.click(await screen.findByRole("menuitem", { name: "Ta bort" }));
+  await chooseDelete(menu);
   const dialog = await screen.findByRole("alertdialog");
   fireEvent.click(within(dialog).getByRole("button", { name: "Ta bort" }));
   return dialog;
@@ -231,8 +238,7 @@ it.each([false, true])(
     const menu = within(list)
       .getAllByRole("button", { name: /^Fler åtgärder för / })
       .at(-1)!;
-    fireEvent.keyDown(menu, { key: "Enter" });
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Ta bort" }));
+    await chooseDelete(menu);
     const dialog = await screen.findByRole("alertdialog");
     expect(within(dialog).getByText(/Sammanfatta protokollet/)).toBeTruthy();
 
@@ -280,9 +286,10 @@ it("returns focus to the result list when cancellation follows a layout change",
   const menu = within(list)
     .getAllByRole("button", { name: /^Fler åtgärder för / })
     .at(-1)!;
-  menu.focus();
-  fireEvent.keyDown(menu, { key: "Enter" });
-  fireEvent.click(await screen.findByRole("menuitem", { name: "Ta bort" }));
+  // Tapped: jsdom does not make the page behind the dialog inert, so a menu
+  // closed from the keyboard would refocus its button there as no browser does.
+  const item = within(await openMenuOnRelease(menu)).getByRole("menuitem", { name: "Ta bort" });
+  tap(item);
   const dialog = await screen.findByRole("alertdialog");
   act(() => setViewport("tablet-portrait"));
   fireEvent.click(within(dialog).getByRole("button", { name: "Avbryt" }));

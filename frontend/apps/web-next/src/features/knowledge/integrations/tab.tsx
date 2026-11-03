@@ -122,7 +122,7 @@ export function IntegrationsTab({
       ) : (
         <>
           {/* contents on a phone: the docked action leaves the flow, adding no gap. */}
-          <div className="flex flex-wrap justify-end gap-2 max-md:contents">{action}</div>
+          <div className="phone:contents flex flex-wrap justify-end gap-2">{action}</div>
           <SourcesList
             groups={groups}
             progress={progress}

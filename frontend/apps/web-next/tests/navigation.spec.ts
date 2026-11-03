@@ -438,7 +438,7 @@ test.describe("unsaved edits on Vite", { tag: "@vite" }, () => {
       .click();
     const unloading = page.waitForEvent("dialog");
     const copy = page
-      .getByRole("menuitem", { name: /kopiera som rich text|copy as rich text/i })
+      .getByRole("menuitem", { name: /kopiera som formaterad text|copy as formatted text/i })
       .click();
     const warning = await unloading;
     expect(warning.type()).toBe("beforeunload");

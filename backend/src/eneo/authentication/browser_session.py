@@ -11,6 +11,7 @@ from starlette.responses import Response
 from starlette.types import Scope
 from yarl import URL
 
+from eneo.authentication.auth_models import SESSION_ID_PATTERN
 from eneo.main.config import Settings, get_settings
 from eneo.main.logging import get_logger
 
@@ -72,6 +73,12 @@ def safe_next_path(value: str | None) -> str:
 # on a request, the one the sending page was loaded with. A
 # fingerprint, neither a credential nor a CSRF token.
 SESSION_GENERATION_HEADER = "Eneo-Session-Generation"
+# On the probe: whole seconds the admitted session has left. Relative, so a
+# page can warn before it ends whatever its own clock says.
+SESSION_EXPIRES_IN_HEADER = "Eneo-Session-Expires-In"
+# On the probe: whole seconds the admitted session was issued for, so a page
+# opened late in a session still knows how early to warn.
+SESSION_LIFETIME_HEADER = "Eneo-Session-Lifetime"
 # Request-state keys: the generation of the cookie OAUTH2_SCHEME selected, and
 # the same value once canonical authentication admitted the request.
 _SELECTED_GENERATION = "browser_session_selected_generation"
@@ -183,15 +190,35 @@ def session_token_from_request(request: Request) -> str | None:
 
 
 def session_generation(token: str) -> str:
-    """The generation of a session: 128 bits of the SHA-256 of its exact token.
+    """The generation of a session: 128 bits of a SHA-256.
 
-    A different credential has a different generation, and it reveals
-    nothing of the token. Not a session id: re-issuing an identical token
-    repeats it, which is fine, since only a different credential must never be
-    taken for the one a page was loaded with.
+    A browser session's token (one with ``sid``) hashes its session id. Staying
+    signed in renews the token but keeps the ``sid``, so a page keeps its
+    generation and an answer lost after the cookie changed costs nothing,
+    while every sign-in, to the same account or another, starts a session with
+    a new id and so a new generation. Any other token hashes the token itself,
+    so a different credential has a different generation.
+
+    Read before the token is verified, as a fingerprint only: it names a
+    session without revealing the token or the session id, and a forged token
+    with someone's ``sid`` still fails authentication.
     """
-    digest = hashlib.sha256(token.encode()).digest()[:16]
+    sid = _unverified_session_id(token)
+    material = token if sid is None else f"sid:{sid}"
+    digest = hashlib.sha256(material.encode()).digest()[:16]
     return base64.urlsafe_b64encode(digest).decode().rstrip("=")
+
+
+def _unverified_session_id(token: str) -> str | None:
+    try:
+        claims = jwt.decode(token, options={"verify_signature": False})
+    except jwt.PyJWTError:
+        return None
+    sid = claims.get("sid")
+    # Only the form sign-in writes; any other value is no session id.
+    return (
+        sid if isinstance(sid, str) and re.fullmatch(SESSION_ID_PATTERN, sid) else None
+    )
 
 
 def admit_session(connection: HTTPConnection) -> None:
@@ -228,8 +255,9 @@ def refuse_superseded_session(request: Request, token: str) -> None:
     """Refuse a request from a page loaded under another session.
 
     The page names the generation it was loaded with; when the cookie now
-    holds another credential (another tab signed in or out), acting on it
-    would act as someone the page does not show. Only bootstrap reads may
+    holds another session (another tab signed out and in again, perhaps as
+    someone else), acting on it would act as someone the page does not show.
+    A renewal of the page's own session keeps its generation. Only bootstrap reads may
     omit the header; writes must name their expected session. The domain
     exception handler logs the refusal.
     """
@@ -254,18 +282,32 @@ def _set_cookie(
     )
 
 
-def set_session_cookie(response: Response, token: str, *, settings: Settings) -> None:
-    """Hand the browser a token just issued, for exactly its remaining life.
+def session_seconds_left(token: str) -> int:
+    """Whole seconds until the token expires.
 
-    ``exp`` is read unverified: the token comes from this process, not from
-    the request.
+    ``exp`` is read unverified: callers pass a token this process issued or
+    one canonical authentication has already admitted.
     """
     exp = jwt.decode(token, options={"verify_signature": False})["exp"]
+    return max(0, int(exp - time.time()))
+
+
+def session_lifetime(token: str) -> int:
+    """Whole seconds the token was issued for (``exp - iat``).
+
+    Read unverified, like :func:`session_seconds_left`.
+    """
+    claims = jwt.decode(token, options={"verify_signature": False})
+    return max(0, int(claims["exp"] - claims["iat"]))
+
+
+def set_session_cookie(response: Response, token: str, *, settings: Settings) -> None:
+    """Hand the browser a token just issued, for exactly its remaining life."""
     _set_cookie(
         response,
         session_cookie_name(settings),
         token,
-        max(0, int(exp - time.time())),
+        session_seconds_left(token),
         settings,
     )
 

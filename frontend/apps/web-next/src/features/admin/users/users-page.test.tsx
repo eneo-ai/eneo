@@ -13,7 +13,9 @@ vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 vi.mock("sonner", () => ({ toast }));
 vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 vi.mock("./user-editor", () => ({
-  UserEditorDialog: () => null,
+  // Stands in for the editor: a dialog named after the user it edits.
+  UserEditorDialog: ({ open, user }: { open: boolean; user?: { email: string } }) =>
+    open && user ? <div role="dialog" aria-label={`Redigera ${user.email}`} /> : null,
   IssuedPasswordDialog: () => null
 }));
 
@@ -310,12 +312,11 @@ describe("AdminUsersPage", () => {
     ).toBeTruthy();
     // Without a username the email is the name.
     expect(within(per!).getByText("per.berg@kommun.se")).toBeTruthy();
-    // In the status column, and on a phone under the name too.
-    expect(within(per!).getAllByText("Inbjuden")).toHaveLength(2);
+    expect(within(per!).getAllByText("Inbjuden")).toHaveLength(1);
 
     expect(screen.getByRole("heading", { level: 1, name: "Användare" })).toBeTruthy();
-    // The breadcrumb names the section as the admin navigation does.
-    expect(screen.getByText("Organisation")).toBeTruthy();
+    // No breadcrumb above the title: the admin navigation says where this is.
+    expect(screen.queryByText("Organisation")).toBeNull();
     expect(screen.getByRole("textbox", { name: "E-post" })).toBeTruthy();
     expect(screen.queryByText(/Listan visar högst 100 sidor/)).toBeNull();
     expect(screen.getByText("2 användare")).toBeTruthy();
@@ -332,6 +333,8 @@ describe("AdminUsersPage", () => {
       .filter((cell) => cell.style.insetInlineStart);
     expect(pinned.map((cell) => cell.textContent)).toEqual(["Användare"]);
     expect(within(table).getAllByRole("columnheader")).toHaveLength(5);
+    // An iPad held upright leaves it 682 px beside the icon rail: it fits whole.
+    expect(Number.parseFloat(table.style.minWidth)).toBeLessThanOrEqual(682);
     // Its scroll region is named after the table.
     expect(screen.getByRole("group", { name: "Aktiva användare" })).toBeTruthy();
   });
@@ -371,6 +374,139 @@ describe("AdminUsersPage", () => {
 
     await waitFor(() => expect(liveRegion()).toBe("1 användare"), { timeout: 2000 });
     expect(screen.getByText("1 användare", { selector: "p" })).toBeTruthy();
+  });
+});
+
+describe("AdminUsersPage on a phone", () => {
+  beforeEach(() => {
+    searchParams.value = "";
+    setViewport("phone");
+  });
+
+  it("shows one e-mail search and the users as rows, the first screen not filled by filters", async () => {
+    renderPage(users);
+    const list = await screen.findByRole("list", { name: "Aktiva användare" });
+    expect(screen.queryByRole("table")).toBeNull();
+    // The username and role filters wait behind the Filter button.
+    expect(within(screen.getByRole("search")).getAllByRole("textbox")).toEqual([
+      screen.getByRole("textbox", { name: "Sök på e-post" })
+    ]);
+    // The rule for this field only; the username's waits in the sheet.
+    const hint = screen
+      .getByRole("textbox", { name: "Sök på e-post" })
+      .getAttribute("aria-describedby")!;
+    expect(document.getElementById(hint)?.textContent).toBe("Ange minst 3 tecken.");
+    expect(screen.queryByRole("combobox", { name: "Roll" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Filter" })).toBeTruthy();
+    expect(screen.getByText("2 användare")).toBeTruthy();
+
+    const [anna, per] = within(list).getAllByRole("listitem");
+    expect(within(anna!).getByText("anna.lind")).toBeTruthy();
+    expect(within(anna!).getByText("anna.lind@kommun.se")).toBeTruthy();
+    expect(within(anna!).getByText("Roll: Manager")).toBeTruthy();
+    expect(
+      within(anna!).getByRole("button", { name: "Fler åtgärder för anna.lind@kommun.se" })
+    ).toBeTruthy();
+    // Without a username the e-mail is the name, once.
+    expect(within(per!).getAllByText("per.berg@kommun.se")).toHaveLength(1);
+    expect(within(per!).getByText("Inbjuden")).toBeTruthy();
+    await expectNoAxeViolations(document.body);
+  });
+
+  it("filters by username and role in the Filter sheet", async () => {
+    renderPage(users);
+    await screen.findByRole("list", { name: "Aktiva användare" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Filter" }));
+    const sheet = await screen.findByRole("dialog", { name: "Filter" });
+    fireEvent.change(within(sheet).getByRole("textbox", { name: "Användarnamn" }), {
+      target: { value: "anna" }
+    });
+    await waitFor(
+      () =>
+        expect(api.GET).toHaveBeenCalledWith(
+          "/api/v1/admin/users/",
+          usersQuery({ search_name: "anna" })
+        ),
+      { timeout: 2000 }
+    );
+    expect(await screen.findByRole("button", { name: "Filter (1)" })).toBeTruthy();
+
+    fireEvent.click(within(sheet).getByRole("combobox", { name: "Roll" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Manager" }));
+    await waitFor(() =>
+      expect(api.GET).toHaveBeenCalledWith(
+        "/api/v1/admin/users/",
+        usersQuery({ search_name: "anna", role_id: "custom" })
+      )
+    );
+    expect(await screen.findByRole("button", { name: "Filter (2)" })).toBeTruthy();
+    await expectNoAxeViolations(document.body);
+
+    fireEvent.click(within(sheet).getByRole("button", { name: "Klar" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Filter" })).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Rensa filter" }));
+    expect(await screen.findByRole("button", { name: "Filter" })).toBeTruthy();
+  });
+
+  it("keeps a typed search and an open editor through a turn across 768 px", async () => {
+    renderPage(users);
+    const list = await screen.findByRole("list", { name: "Aktiva användare" });
+    fireEvent.change(screen.getByRole("textbox", { name: "Sök på e-post" }), {
+      target: { value: "ann" }
+    });
+    const trigger = within(list).getByRole("button", {
+      name: "Fler åtgärder för anna.lind@kommun.se"
+    });
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    const menu = document.getElementById(trigger.getAttribute("aria-controls")!)!;
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Redigera användare" }));
+    expect(screen.getByRole("dialog", { name: "Redigera anna.lind@kommun.se" })).toBeTruthy();
+
+    act(() => setViewport("desktop"));
+
+    expect(await screen.findByRole("table", { name: "Aktiva användare" })).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: "Redigera anna.lind@kommun.se" })).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: "E-post" })).toHaveProperty("value", "ann");
+  });
+
+  it("keeps the e-mail search focused, with what was typed, through a turn across 768 px and back", async () => {
+    renderPage(users);
+    await screen.findByRole("list", { name: "Aktiva användare" });
+    const phoneField = screen.getByRole("textbox", { name: "Sök på e-post" });
+    phoneField.focus();
+    fireEvent.change(phoneField, { target: { value: "ann" } });
+
+    // The phone held sideways: 844 px wide.
+    act(() => setViewport({ width: 844, height: 390, pointer: "coarse" }));
+    await screen.findByRole("table", { name: "Aktiva användare" });
+    const wideField = screen.getByRole("textbox", { name: "E-post" });
+    expect(wideField).toHaveProperty("value", "ann");
+    expect(document.activeElement).toBe(wideField);
+
+    act(() => setViewport("phone"));
+    await screen.findByRole("list", { name: "Aktiva användare" });
+    const backField = screen.getByRole("textbox", { name: "Sök på e-post" });
+    expect(backField).toHaveProperty("value", "ann");
+    expect(document.activeElement).toBe(backField);
+  });
+
+  it("does not reopen the Filter sheet on its own after a turn to 768 px and back", async () => {
+    renderPage(users);
+    await screen.findByRole("list", { name: "Aktiva användare" });
+    fireEvent.click(screen.getByRole("button", { name: "Filter" }));
+    expect(await screen.findByRole("dialog", { name: "Filter" })).toBeTruthy();
+
+    act(() => setViewport("desktop"));
+    await screen.findByRole("table", { name: "Aktiva användare" });
+    act(() => setViewport("phone"));
+
+    await screen.findByRole("list", { name: "Aktiva användare" });
+    expect(screen.queryByRole("dialog", { name: "Filter" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Filter" }).getAttribute("aria-expanded")).toBe(
+      "false"
+    );
   });
 });
 

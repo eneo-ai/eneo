@@ -81,7 +81,7 @@ describe("useFocusRescue", () => {
     // Before the check the user opens a row's menu.
     document.body.insertAdjacentHTML(
       "beforeend",
-      '<div role="menu" data-state="open"><div id="item" role="menuitem" tabindex="-1">Byt namn</div></div>'
+      '<div role="menu"><div id="item" role="menuitem" tabindex="-1">Byt namn</div></div>'
     );
     document.getElementById("item")!.focus();
     vi.advanceTimersToNextFrame();
@@ -238,15 +238,23 @@ describe("isFocusLost", () => {
     expect(isFocusLost()).toBe(false);
   });
 
-  it("is lost on an item of a menu that is closing or hidden", () => {
+  it("is lost on an item of a menu that is hidden", () => {
     document.body.innerHTML = `
-      <div role="menu" data-state="closed"><div id="radix" role="menuitem" tabindex="-1">A</div></div>
       <div hidden><div role="menu"><div id="hidden" role="menuitem" tabindex="-1">B</div></div></div>
     `;
-    for (const id of ["radix", "hidden"]) {
-      document.getElementById(id)!.focus();
-      expect(isFocusLost()).toBe(true);
-    }
+    document.getElementById("hidden")!.focus();
+    expect(isFocusLost()).toBe(true);
+  });
+
+  it("reads the display Astryx sets on a menu's popover where the Popover API is missing", () => {
+    document.body.innerHTML = `
+      <div popover="auto" style="display: none"><div role="menu" id="menu" tabindex="-1"></div></div>
+    `;
+    const menu = document.getElementById("menu")!;
+    menu.focus();
+    expect(isFocusLost()).toBe(true);
+    menu.parentElement!.style.display = "block";
+    expect(isFocusLost()).toBe(false);
   });
 
   it("reads an Astryx menu's popover state where the Popover API exists", () => {

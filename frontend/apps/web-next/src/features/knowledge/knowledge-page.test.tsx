@@ -957,7 +957,7 @@ describe("KnowledgePage", () => {
     expect(cells("Varningar")[3]!.textContent).toBe("Delvis klarKunde inte indexeras:Sidor: 1");
     expect(
       within(cells("Varningar")[3]!).getByRole("button", {
-        name: "Visa sidor som inte kunde indexeras (1)"
+        name: "Sidor: 1, visa de som inte kunde indexeras"
       })
     ).toBeTruthy();
     expect(cells("Varningar")[5]!.textContent).toMatch(/^Varje dagNästa indexering: \d/);
@@ -981,12 +981,15 @@ describe("KnowledgePage", () => {
 /*
  * Decision 9: a knowledge table keeps all its columns where it shows (from
  * 768 px) and scrolls sideways with its name held in view. Its short columns
- * are as wide as what they hold, so an iPad held upright shows it whole.
+ * are as wide as what they hold, so an iPad shows it whole; held upright, only
+ * the websites table needs more than the room beside the icon rail.
  */
 describe("knowledge tables on tablets", () => {
-  // What an iPad held upright (820 px) leaves a space's table: the page's
+  // What an iPad held upright (820 px) or sideways (1180 px) leaves a space's
+  // table: the shell's 8 px insets and gap, the 64 px icon rail, the page's
   // 24 px insets and the frame's border.
-  const IPAD_PORTRAIT_WIDTH = 770;
+  const IPAD_PORTRAIT_WIDTH = 682;
+  const IPAD_LANDSCAPE_WIDTH = 1042;
   // Headers of the columns held in view (Astryx offsets them from the start).
   const pinned = (table: HTMLElement) =>
     within(table)
@@ -1003,12 +1006,12 @@ describe("knowledge tables on tablets", () => {
     expect(minWidth(table)).toBeLessThanOrEqual(IPAD_PORTRAIT_WIDTH);
   });
 
-  it("holds a website's checkbox and name in view and fits an iPad", () => {
-    setViewport("tablet-portrait");
+  it("holds a website's checkbox and name in view where it scrolls, and fits an iPad held sideways", () => {
+    setViewport("tablet-landscape");
     show(makeSpace({ websites: [makeWebsite()] }), "websites");
     const table = screen.getByRole("table", { name: "Webbplatser" });
     expect(pinned(table)).toEqual([expect.stringContaining("Markera alla rader"), "Webbplats"]);
-    expect(minWidth(table)).toBeLessThanOrEqual(IPAD_PORTRAIT_WIDTH);
+    expect(minWidth(table)).toBeLessThanOrEqual(IPAD_LANDSCAPE_WIDTH);
   });
 
   it("holds a source's name in view and fits an iPad", async () => {
@@ -1198,6 +1201,9 @@ describe("Kunskap on a phone", () => {
     const dock = screen.getByRole("group", { name: "Kunskap, åtgärder" });
     expect(within(dock).getByRole("button", { name: "Skapa samling" })).toBeTruthy();
     expect(screen.getAllByRole("button", { name: "Skapa samling" })).toHaveLength(1);
+    // Its wrapper gives way on the same query as the dock (a turned phone too),
+    // so the fixed dock leaves no empty gap behind in the controls row.
+    expect(dock.parentElement?.classList).toContain("phone:contents");
     cleanup();
 
     setViewport("phone");

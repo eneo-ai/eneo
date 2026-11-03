@@ -8,7 +8,7 @@ import type { UseTableSortableConfig } from "@astryxdesign/core/Table";
 import { ArrowDown, ArrowUp, LayoutGrid, List } from "lucide-react";
 import { useState } from "react";
 import { useTranslations } from "use-intl";
-import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
+import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 
 export type ResourceView = "cards" | "list";
 type Surface = "apps" | "assistants" | "spaces";
@@ -48,7 +48,7 @@ export function ResourceViewControls<Key extends string>({
   options: { key: Key; label: string }[];
 }) {
   const t = useTranslations();
-  const phone = useMediaMatch(PHONE_QUERY);
+  const phone = usePhoneScreen();
   const selected = sortConfig.sort[0];
   const choices = options.flatMap((option) =>
     (["ascending", "descending"] as const).map((direction) => ({
@@ -88,8 +88,8 @@ export function ResourceViewControls<Key extends string>({
           ))}
         </DropdownMenuRadioGroup>
       </DropdownMenu>
-      {phone !== true && (
-        <div role="group" aria-label={t("resource_view")} className="flex gap-1 max-md:hidden">
+      {!phone && (
+        <div role="group" aria-label={t("resource_view")} className="flex gap-1">
           <Button
             label={t("list")}
             icon={<List aria-hidden="true" />}

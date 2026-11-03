@@ -55,12 +55,18 @@ async function renderChoice() {
 
 it("refreshes the saved format for other app-context readers without a document refresh", async () => {
   await renderChoice();
-  expect(screen.getByRole("status").textContent).toBe(messages.copy_format_markdown);
-  fireEvent.click(screen.getByRole("radio", { name: messages.copy_format_richtext }));
+  // Formatted text until the user chooses; a choice of Markdown is saved, and kept.
+  expect(screen.getByRole("status").textContent).toBe(messages.copy_format_richtext);
+  expect(screen.getAllByRole("radio").map((radio) => radio.getAttribute("value"))).toEqual([
+    "richtext",
+    "markdown"
+  ]);
+  fireEvent.click(screen.getByRole("radio", { name: messages.copy_format_markdown }));
   await waitFor(() =>
-    expect(screen.getByRole("status").textContent).toBe(messages.copy_format_richtext)
+    expect(screen.getByRole("status").textContent).toBe(messages.copy_format_markdown)
   );
   expect(api.POST).toHaveBeenCalledTimes(1);
+  expect(settings.chatbot_widget).toEqual({ preferred_text_format: "markdown" });
 });
 
 it("restores the selected format and leaves other readers unchanged when saving fails", async () => {
@@ -69,11 +75,11 @@ it("restores the selected format and leaves other readers unchanged when saving 
     error: { message: "Unavailable" },
     response: new Response(null, { status: 503 })
   });
-  fireEvent.click(screen.getByRole("radio", { name: messages.copy_format_richtext }));
+  fireEvent.click(screen.getByRole("radio", { name: messages.copy_format_markdown }));
   await waitFor(() =>
     expect(
-      screen.getByRole("radio", { name: messages.copy_format_markdown }).getAttribute("data-state")
+      screen.getByRole("radio", { name: messages.copy_format_richtext }).getAttribute("data-state")
     ).toBe("checked")
   );
-  expect(screen.getByRole("status").textContent).toBe(messages.copy_format_markdown);
+  expect(screen.getByRole("status").textContent).toBe(messages.copy_format_richtext);
 });

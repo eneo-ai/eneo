@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
+import { FILLED_BUTTONS, isOutline } from "@/test/buttons";
 import { flushAnnouncements, recordAnnouncements, renderInApp } from "@/test/render";
 
 const get = vi.hoisted(() => vi.fn());
@@ -206,6 +207,11 @@ describe("Verktyg", () => {
       "/admin/tools?tab=mcp-servers"
     );
     expect(screen.getByRole("heading", { name: "Diagram" })).toBeTruthy();
+    // No filled button: "Konfigurera" and "Slå på" are outlines like the rest.
+    expect(screen.getAllByRole("button", { name: /^Konfigurera / })[0]!.dataset.variant).toBe(
+      "outline"
+    );
+    expect(document.querySelectorAll(FILLED_BUTTONS)).toHaveLength(0);
     await expectNoAxeViolations(document.body);
   });
 
@@ -213,7 +219,13 @@ describe("Verktyg", () => {
     renderInApp(<ToolsPage tab="mcp-servers" />);
     expect(await screen.findByRole("link", { name: "Jira" })).toBeTruthy();
     expect(screen.getByRole("switch", { name: "Visa funktionsservrar" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Lägg till MCP-server" })).toBeTruthy();
+    // The add menu, once the built-in servers have loaded, is an outline like every
+    // button on the page: Astryx has no outline variant, so a ghost button with a border.
+    await waitFor(() => {
+      const add = screen.getByRole("button", { name: "Lägg till MCP-server" });
+      expect(add.dataset.variant === "ghost" && isOutline(add)).toBe(true);
+    });
+    expect(document.querySelectorAll(FILLED_BUTTONS)).toHaveLength(0);
     await expectNoAxeViolations(document.body);
   });
 });

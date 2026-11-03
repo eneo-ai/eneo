@@ -233,7 +233,7 @@ function SourcesTable({
     {
       key: "name",
       header: t("integration_source_column_source"),
-      width: proportional(1, { minWidth: 176 }),
+      width: proportional(1, { minWidth: 152 }),
       sortable: true,
       renderCell: (row) => <SourceNameCell source={row.source} />
     },

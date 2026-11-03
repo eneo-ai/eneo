@@ -1,6 +1,4 @@
-import { Icon } from "@astryxdesign/core/Icon";
 import { RadioList, RadioListItem } from "@astryxdesign/core/RadioList";
-import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useLocale, useTranslations } from "use-intl";
 import { useTheme } from "next-themes";
@@ -10,9 +8,10 @@ import { LOCALE_LABELS, locales } from "@/lib/i18n/locales";
 import { useLocaleSwitch } from "@/lib/i18n/use-locale-switch";
 
 /**
- * "Utseende och språk", pushed from Konto: both choices in view at once, each
- * applied as it is made and said politely ("Tema: Mörkt"), so nothing waits
- * for a save. A new language is said once the page is in it.
+ * "Utseende och språk", pushed from Konto: both choices in view at once, as
+ * lists of radios (no label is cut at 320 px or at 200 % text), each applied
+ * as it is made and said politely ("Tema: Mörkt"), so nothing waits for a
+ * save. A new language is said once the page is in it.
  */
 export function AccountAppearance() {
   const t = useTranslations();
@@ -52,26 +51,20 @@ export function AccountAppearance() {
           </p>
         </div>
         {/* next-themes knows the theme only in the browser: none is marked until then. */}
-        <SegmentedControl
+        <RadioList
           label={t("theme")}
+          isLabelHidden
           value={theme ?? "system"}
           onChange={(next) => {
             setTheme(next);
             const option = THEMES.find(({ value }) => value === next);
             if (option) say(t("theme"), t(option.labelKey));
           }}
-          layout="fill"
-          size="lg"
         >
-          {THEMES.map(({ value, labelKey, icon }) => (
-            <SegmentedControlItem
-              key={value}
-              value={value}
-              label={t(labelKey)}
-              icon={<Icon icon={icon} />}
-            />
+          {THEMES.map(({ value, labelKey }) => (
+            <RadioListItem key={value} value={value} label={t(labelKey)} />
           ))}
-        </SegmentedControl>
+        </RadioList>
       </div>
       <div className="flex flex-col gap-1">
         <h2 id={languageId} className="text-[1.0625rem] font-semibold">

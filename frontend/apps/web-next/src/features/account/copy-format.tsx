@@ -16,7 +16,8 @@ import {
   setPreferredAssistantCopyFormat
 } from "@/features/chat/copy-assistant-answer";
 
-const COPY_FORMAT_OPTIONS: AssistantCopyFormat[] = ["markdown", "richtext"];
+// The default first.
+const COPY_FORMAT_OPTIONS: AssistantCopyFormat[] = ["richtext", "markdown"];
 
 export function AccountCopyFormat() {
   const t = useTranslations();

@@ -438,7 +438,7 @@ export function ChatSkills() {
   const searchField = { value: searchInput, onChange: setSearchInput, query: search };
 
   const label = skills.running
-    ? t("personal_chat_skills_button_label", { count: skills.running.total })
+    ? t("chat_skills_named", { count: skills.running.total })
     : t("personal_chat_skills_button");
   const pill = (props: { onClick?: () => void }) => (
     <button
@@ -451,7 +451,7 @@ export function ChatSkills() {
       {...props}
     >
       <BookOpenCheck aria-hidden="true" className="size-[15px]" />
-      <span className="max-sm:sr-only">{t("personal_chat_skills_button")}</span>
+      <span className="max-sm:sr-only">{t("personal_chat_skills_button")}</span>{" "}
       {skills.running && (
         <span aria-hidden="true" className={COMPOSER_PILL_COUNT_CLASS}>
           {skills.running.total}

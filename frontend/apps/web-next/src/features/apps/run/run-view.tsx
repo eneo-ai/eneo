@@ -96,8 +96,10 @@ export function RunView({ app, resultHref }: { app: App; resultHref: (runId: str
   }
 
   return (
+    // From 768 px the card starts on the page's left line, under the heading and the tabs,
+    // rather than floating centred like a dialog.
     <div
-      className="flex w-full flex-1 flex-col items-center justify-center p-4 max-md:p-0"
+      className="flex w-full flex-1 flex-col items-center justify-center p-4 max-md:p-0 md:items-start md:px-0"
       {...handlers}
     >
       {dragging && (

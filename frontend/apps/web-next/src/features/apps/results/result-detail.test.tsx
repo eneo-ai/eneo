@@ -136,11 +136,13 @@ describe("ResultDetail", () => {
     renderResult(makeRun());
     const back = screen.getByRole("link", { name: "Tillbaka" });
     expect(back.getAttribute("href")).toBe("/apps");
-    expect(back.className).not.toContain("max-md:hidden");
+    expect(back.className).not.toContain("hidden");
     cleanup();
 
+    // `phone:`, not `max-md:`: a phone turned sideways is wider than 768 px and
+    // shows the page bar's back link too, so this one must give way there as well.
     renderResult(makeRun(), true);
-    expect(screen.getByRole("link", { name: "Tillbaka" }).className).toContain("max-md:hidden");
+    expect(screen.getByRole("link", { name: "Tillbaka" }).classList).toContain("phone:hidden");
   });
 
   it("shows the output without tabs when nothing was transcribed", () => {

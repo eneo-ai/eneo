@@ -97,7 +97,11 @@ export function mcpConversationOptions({
   };
 }
 
-/** The composer's popover pills (Verktyg, Skills): icon, label (icon-only on phones) and count. */
+/**
+ * The composer's popover pills (Verktyg, Skills): icon, label (icon-only on phones) and count.
+ * A space between label and count keeps them two words for axe, whose check that the name
+ * ("Verktyg: 2 av 3 aktiva") holds the label joins text with no separator (WCAG 2.5.3).
+ */
 export const COMPOSER_PILL_CLASS =
   "text-ax-text-secondary hover:bg-ax-hover hover:text-ax-text focus-visible:outline-ring aria-expanded:bg-ax-hover inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[13px] font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:h-11 pointer-coarse:min-w-11";
 export const COMPOSER_PILL_COUNT_CLASS =
@@ -338,7 +342,7 @@ export function ChatTools({
         className={COMPOSER_PILL_CLASS}
       >
         <Plug aria-hidden="true" className="size-[15px]" />
-        <span className="max-sm:sr-only">{t("chat_tools")}</span>
+        <span className="max-sm:sr-only">{t("chat_tools")}</span>{" "}
         <span aria-hidden="true" className={COMPOSER_PILL_COUNT_CLASS}>
           {activeCount}
         </span>

@@ -28,7 +28,13 @@ import {
   setCapabilityProviderActive,
   type McpServer
 } from "../mcp/mcp";
-import { bundledIdentity, SOURCE_KINDS, sourceKindOf, type BundledTool } from "./bundled";
+import {
+  bundledIdentity,
+  OUTLINE_BUTTON_CLASS,
+  SOURCE_KINDS,
+  sourceKindOf,
+  type BundledTool
+} from "./bundled";
 import { CapabilitySourceDialog } from "./capability-source-dialog";
 import { DocumentTemplatesSection } from "./document-templates-section";
 import { RuntimeStatusCard } from "./runtime-status";
@@ -114,8 +120,14 @@ function BundledOffer({
             )}
           </p>
         </div>
-        {/* Busy, it stays enabled so it keeps focus; a second press is ignored. */}
-        <Button disabled={!bundled.available} aria-busy={busy || undefined} onClick={onTurnOn}>
+        {/* Busy, it stays enabled so it keeps focus; a second press is ignored. An outline,
+            like every button on this page: none is the one main action. */}
+        <Button
+          variant="outline"
+          disabled={!bundled.available}
+          aria-busy={busy || undefined}
+          onClick={onTurnOn}
+        >
           {t("tools_builtin_turn_on")}
         </Button>
       </div>
@@ -239,7 +251,7 @@ export function CapabilityProvidersPage({ embedded = false }: { embedded?: boole
     bundledToAdd.find((tool) => tool.purpose === purpose);
 
   return (
-    <div className={cn("flex w-full flex-col gap-6", !embedded && "mx-auto max-w-5xl pb-16")}>
+    <div className={cn("flex w-full flex-col gap-6", !embedded && "pb-16")}>
       {!embedded && (
         <PageHeader title={t("tools")} tour="admin-tools">
           <Button asChild variant="outline">
@@ -297,7 +309,9 @@ export function CapabilityProvidersPage({ embedded = false }: { embedded?: boole
                 <DropdownMenu
                   button={{
                     label: t("tools_add_source"),
-                    variant: "secondary",
+                    // An outline, like the shadcn ones beside it.
+                    variant: "ghost",
+                    className: OUTLINE_BUTTON_CLASS,
                     size: "sm",
                     icon: <Plus className="size-4" />,
                     isDisabled: addBundled.isPending
@@ -326,7 +340,7 @@ export function CapabilityProvidersPage({ embedded = false }: { embedded?: boole
                   ]}
                 />
               ) : (
-                <Button size="sm" onClick={() => configure()}>
+                <Button size="sm" variant="outline" onClick={() => configure()}>
                   <Plus className="size-4" />
                   {sources.length
                     ? t("tools_add_source")

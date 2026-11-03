@@ -3,20 +3,15 @@ import { Bot, ChevronDown, LayoutTemplate, Users } from "lucide-react";
 import { useRouter } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
 import { useId, useRef, useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Button as AstryxButton } from "@astryxdesign/core/Button";
+import { Button } from "@astryxdesign/core/Button";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
+import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";
 import { FormLayout } from "@astryxdesign/core/FormLayout";
 import { Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
 import { Switch } from "@astryxdesign/core/Switch";
 import { TextInput } from "@/components/astryx/text-input";
+import { useReturnFocus } from "@/components/ui/dialog-focus";
 import { revealProblems } from "@/components/composites/field-problem";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger
-} from "@/components/ui/dropdown-menu";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
@@ -34,8 +29,10 @@ import { TemplateGalleryDialog } from "@/features/templates/template-gallery-dia
  * that same name. The chevron menu also offers a named group chat with a choice
  * to open its editor, and — when the tenant has templates enabled — creation from a template
  * gallery (passes from_template), which still asks for the template and name.
+ * `secondary` makes it small and unfilled where it is not the screen's primary
+ * action (the space overview; the tabs' docked button is).
  */
-export function CreateChatAppMenu() {
+export function CreateChatAppMenu({ secondary = false }: { secondary?: boolean }) {
   const t = useTranslations();
   const router = useRouter();
   const { space, routeId } = useSpace();
@@ -47,6 +44,10 @@ export function CreateChatAppMenu() {
   const [groupName, setGroupName] = useState("");
   const [openGroupEditor, setOpenGroupEditor] = useState(true);
   const [groupNameMissing, setGroupNameMissing] = useState(false);
+  // Opened from a menu item, gone once the dialog is up (a tap leaves focus in
+  // the closed menu): focus goes back to the menu button.
+  const noTrigger = useRef<HTMLElement | null>(null);
+  useReturnFocus(dialog === "group-chat", noTrigger);
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["spaces", routeId] });
 
@@ -128,40 +129,58 @@ export function CreateChatAppMenu() {
     createGroupChat.mutate({ name, openEditor: openGroupEditor });
   };
 
+  const variant = secondary ? "secondary" : "primary";
+  const size = secondary ? "sm" : "md";
+
   return (
     <>
       <div className="flex max-w-full">
         <Button
-          className="min-w-0 shrink grow rounded-r-none"
-          aria-busy={createAssistant.isPending || undefined}
+          label={t("create_assistant")}
+          variant={variant}
+          size={size}
+          // Astryx keeps a label on one line at a fixed height and cuts it with an
+          // ellipsis; this one may shrink at 320 px, so it wraps instead (1.4.4).
+          className={`h-auto min-w-0 shrink grow rounded-r-none text-center whitespace-normal ${
+            secondary ? "min-h-(--size-element-sm)" : "min-h-(--size-element-md)"
+          }`}
+          isLoading={createAssistant.isPending}
+          isInterruptible
           onClick={createBlankAssistant}
-        >
-          {t("create_assistant")}
-        </Button>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              size="icon"
-              className="rounded-l-none border-l"
-              aria-label={t("ui_more_ways_to_create")}
-            >
-              <ChevronDown className="size-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onSelect={createBlankAssistant}>
-              <Bot className="size-4" /> {t("create_new_assistant")}
-            </DropdownMenuItem>
-            {settings.using_templates && (
-              <DropdownMenuItem onSelect={() => setDialog("template")}>
-                <LayoutTemplate className="size-4" /> {t("start_with_template")}
-              </DropdownMenuItem>
-            )}
-            <DropdownMenuItem onSelect={createBlankGroupChat}>
-              <Users className="size-4" /> {t("create_new_group_chat")}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        />
+        <DropdownMenu
+          button={{
+            label: t("ui_more_ways_to_create"),
+            icon: <ChevronDown aria-hidden="true" />,
+            isIconOnly: true,
+            variant,
+            size,
+            className: "rounded-l-none border-l"
+          }}
+          hasChevron={false}
+          alignment="end"
+          items={[
+            {
+              label: t("create_new_assistant"),
+              icon: <Bot aria-hidden="true" />,
+              onClick: createBlankAssistant
+            },
+            ...(settings.using_templates
+              ? [
+                  {
+                    label: t("start_with_template"),
+                    icon: <LayoutTemplate aria-hidden="true" />,
+                    onClick: () => setDialog("template")
+                  }
+                ]
+              : []),
+            {
+              label: t("create_new_group_chat"),
+              icon: <Users aria-hidden="true" />,
+              onClick: createBlankGroupChat
+            }
+          ]}
+        />
       </div>
       <Dialog
         isOpen={dialog === "group-chat"}
@@ -219,12 +238,12 @@ export function CreateChatAppMenu() {
             dialog === "group-chat" ? (
               <LayoutFooter>
                 <div className="flex flex-wrap justify-end gap-2">
-                  <AstryxButton
+                  <Button
                     label={t("cancel")}
                     isDisabled={pending}
                     onClick={() => closeGroupDialog(false)}
                   />
-                  <AstryxButton
+                  <Button
                     type="submit"
                     form={groupFormId}
                     variant="primary"

@@ -69,9 +69,13 @@ describe("DashboardList", () => {
     expect(within(upphandling).getByRole("heading", { level: 2 })).toBeTruthy();
     expect(
       within(upphandling)
-        .getByRole("link", { name: "Upphandlingsassistenten, Upphandling" })
+        .getByRole("link", { name: "Upphandlingsassistenten, Assistent i Upphandling" })
         .getAttribute("href")
     ).toBe("/dashboard/a1?tab=chat");
+    // Under the name, the kind: the space's name is already the heading above.
+    expect(within(upphandling).getByText("Assistent")).toBeTruthy();
+    expect(within(upphandling).getByText("App")).toBeTruthy();
+    expect(within(upphandling).getAllByText("Upphandling")).toHaveLength(1);
     expect(
       within(upphandling)
         .getByRole("link", { name: "Avtalsanalys, App i Upphandling" })
@@ -117,8 +121,16 @@ describe("DashboardList on a phone (decision 9)", () => {
     const upphandling = screen.getByRole("region", { name: "Upphandling" });
     const app = within(upphandling).getByRole("link", { name: /^Avtalsanalys/ });
     expect(app.getAttribute("href")).toBe("/dashboard/app/app1");
-    expect(app.textContent).toContain("App i Upphandling");
     expect(app.closest(".astryx-item")).toBeTruthy();
+    // The second line says the kind; the heading above already names the space,
+    // which screen readers still hear in the link.
+    expect(app.textContent).toContain("App i Upphandling");
+    expect(within(app).getByText("App").getAttribute("aria-hidden")).toBe("true");
+    expect(within(app).getByText("App i Upphandling").className).toBe("sr-only");
+    const assistant = within(upphandling).getByRole("link", { name: /^Upphandlingsassistenten/ });
+    expect(within(assistant).getByText("Assistent").getAttribute("aria-hidden")).toBe("true");
+    expect(within(assistant).getByText("Assistent i Upphandling").className).toBe("sr-only");
+    expect(within(upphandling).getAllByText("Upphandling")).toHaveLength(1);
     await expectNoAxeViolations(container);
   });
 });

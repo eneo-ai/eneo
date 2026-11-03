@@ -194,3 +194,11 @@ it("keeps the run button in the group a phone docks under the thumb", () => {
   const docked = screen.getByRole("group", { name: "Åtgärder för appen" });
   expect(within(docked).getByRole("button", { name: "Kör appen" })).toBeTruthy();
 });
+
+it("starts the card on the page's left line from 768 px, under the heading and the tabs", () => {
+  renderInApp(<RunView app={app([{ type: "text-field" }])} resultHref={(id) => `/runs/${id}`} />);
+  // Not a centred card floating in bands of its own: the page's line, no inset.
+  const surface = screen.getByRole("group", { name: "Indata" }).closest(".flex-1")!;
+  expect(surface.className).toContain("md:items-start");
+  expect(surface.className).toContain("md:px-0");
+});

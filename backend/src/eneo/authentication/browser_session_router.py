@@ -11,6 +11,7 @@ import hashlib
 import hmac
 import re
 import secrets
+import time
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from typing import Annotated, Any, cast
@@ -25,8 +26,12 @@ from starlette.responses import RedirectResponse
 from starlette.types import Message, Receive, Scope, Send
 
 from eneo.authentication.auth_dependencies import get_current_active_user
+from eneo.authentication.auth_models import BrowserSessionExtension
+from eneo.authentication.auth_service import AuthService
 from eneo.authentication.browser_session import (
     SAFE_METHODS,
+    SESSION_EXPIRES_IN_HEADER,
+    SESSION_LIFETIME_HEADER,
     admitted_session_generation,
     clear_session_cookies,
     clear_transaction_cookie,
@@ -34,6 +39,9 @@ from eneo.authentication.browser_session import (
     refuse_superseded_session,
     safe_next_path,
     session_cookie,
+    session_generation,
+    session_lifetime,
+    session_seconds_left,
     set_session_cookie,
     set_transaction_cookie,
     transaction_cookie,
@@ -48,7 +56,11 @@ from eneo.authentication.federation_router import (
     auth_callback,
     initiate_auth,
 )
-from eneo.main.config import LOOPBACK_HOSTS, get_settings, validate_content_base_url
+from eneo.main.config import (
+    LOOPBACK_HOSTS,
+    get_settings,
+    validate_content_base_url,
+)
 from eneo.main.container.container import Container
 from eneo.main.exceptions import AuthenticationException
 from eneo.main.logging import get_logger
@@ -56,6 +68,7 @@ from eneo.main.request_context import ensure_correlation_id
 from eneo.server.dependencies.container import get_container
 from eneo.server.exception_handlers import http_exception_response
 from eneo.server.protocol import responses
+from eneo.users.password_lifecycle import PASSWORD_AUTH_METHOD
 from eneo.users.user import UserInDB
 from eneo.users.user_router import login_with_password
 
@@ -132,7 +145,9 @@ async def create_browser_session(
         password=form_data.password,
         container=container,
     )
-    session_token = await container.browser_session_service().start(token.access_token)
+    session_token = await container.browser_session_service().start(
+        token.access_token, replacing=session_cookie(request, get_settings())
+    )
     response = Response(status_code=status.HTTP_204_NO_CONTENT)
     # A new token every time, never one the request brought (session fixation).
     set_session_cookie(response, session_token, settings=get_settings())
@@ -182,24 +197,113 @@ async def end_browser_session(
     response_model=None,
     name="Check the browser session",
     description=(
-        "Authenticate the browser's session cookie and name its generation in "
-        "`Eneo-Session-Generation`. A Bearer token is not a browser session (401)."
+        "Authenticate the browser's session cookie, name its generation in "
+        "`Eneo-Session-Generation`, the whole seconds it has left in "
+        "`Eneo-Session-Expires-In` and the whole seconds it was issued for in "
+        "`Eneo-Session-Lifetime`. A Bearer token is not a browser session (401)."
     ),
     responses=responses.get_responses([401, 403, 404]),
 )
 @endpoint_access(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
-    reason="Any signed-in browser may check its own session; it reveals only a fingerprint of the caller's cookie.",
+    reason="Any signed-in browser may check its own session; it reveals only a fingerprint of the caller's cookie and when it ends.",
     reachable_before_password_change=True,
 )
 async def get_browser_session(
     request: Request,
     _user: Annotated[UserInDB, Depends(get_current_active_user)],
 ) -> Response:
-    if admitted_session_generation(request.scope) is None:
+    token = _admitted_session_token(request)
+    return Response(
+        status_code=status.HTTP_204_NO_CONTENT,
+        headers={
+            SESSION_EXPIRES_IN_HEADER: str(session_seconds_left(token)),
+            SESSION_LIFETIME_HEADER: str(session_lifetime(token)),
+        },
+    )
+
+
+def _admitted_session_token(request: Request) -> str:
+    """The cookie's token, when canonical authentication admitted it.
+
+    A Bearer token or an API key also authenticates, but is no browser session.
+    """
+    token = session_cookie(request, get_settings())
+    admitted = admitted_session_generation(request.scope)
+    if token is None or admitted is None or admitted != session_generation(token):
         raise AuthenticationException("No browser session")
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return token
+
+
+@router.post(
+    "/session/extend/",
+    response_model=BrowserSessionExtension,
+    name="Extend the browser session",
+    description=(
+        "Renew the browser's session: the cookie gets a new token for the same "
+        "session, user, organisation and sign-in method, valid for "
+        "`JWT_EXPIRY_TIME` again, but never past `BROWSER_SESSION_MAX_AGE` "
+        "after the original sign-in (401 once reached). A session that was signed out or has "
+        "ended cannot renew itself (401). Needs the current "
+        "`Eneo-Session-Generation`, which the renewal keeps. The token itself "
+        "is only in the cookie. Only for requests from the site's own pages."
+    ),
+    responses=responses.get_responses([401, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason="A signed-in browser renews its own session; the new token carries only the admitted session's id, user, organisation, sign-in method and sign-in time.",
+)
+async def extend_browser_session(
+    request: Request,
+    response: Response,
+    # The renewal commits (the session row and its audit entry) before the
+    # cookie is set; BrowserSessionService.renew owns that transaction.
+    container: Annotated[
+        Container, Depends(get_container(with_user=True, with_transaction=False))
+    ],
+) -> BrowserSessionExtension:
+    settings = get_settings()
+    user = container.user()
+    auth_service = AuthService()
+    current, claims = auth_service.get_jwt_payload_with_claims(
+        _admitted_session_token(request),
+        key=str(settings.jwt_secret),
+        aud=settings.jwt_audience,
+        algs=[settings.jwt_algorithm],
+    )
+    if current.user_id != user.id or current.tenant_id != user.tenant_id:
+        raise AuthenticationException("No browser session")
+    # Tokens issued before auth_time existed started at their iat.
+    signed_in_at = claims.get("auth_time", current.iat)
+    if isinstance(signed_in_at, bool) or not isinstance(signed_in_at, int | float):
+        raise AuthenticationException("Could not validate token credentials.")
+    # Renewal never moves the original sign-in, so a captured cookie still
+    # ends BROWSER_SESSION_MAX_AGE after it.
+    seconds_left = signed_in_at + settings.browser_session_max_age * 60 - time.time()
+    if seconds_left <= 0:
+        raise AuthenticationException("The session has reached its maximum age")
+    issued = auth_service.create_access_token_for_user(
+        user,
+        expires_in=min(settings.jwt_expiry_time, seconds_left / 60),
+        extra_claims={"auth_time": signed_in_at},
+        # The password lifecycle gate applies to password sessions only.
+        auth_method=(
+            PASSWORD_AUTH_METHOD
+            if current.auth_method == PASSWORD_AUTH_METHOD
+            else None
+        ),
+    )
+    # The same session, so sign-out still ends it. A renewal that cannot be
+    # recorded or audited fails instead, and the cookie stays as it was.
+    token = await container.browser_session_service().renew(current, issued, user)
+    set_session_cookie(response, token, settings=settings)
+    return BrowserSessionExtension(
+        generation=session_generation(token),
+        expires_in=session_seconds_left(token),
+    )
 
 
 def _federation_failure(
@@ -477,7 +581,7 @@ async def complete_browser_federation(
         # turns the public HTTP failure into a redirect.
         raise
     session_token = await container.browser_session_service().start(
-        token["access_token"]
+        token["access_token"], replacing=session_cookie(request, settings)
     )
     response = RedirectResponse(diagnostics.next_path, status_code=303)
     set_session_cookie(response, session_token, settings=settings)

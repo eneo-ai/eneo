@@ -479,7 +479,7 @@ export function AssistantInsightsPage({ assistantId }: { assistantId: string }) 
   );
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl min-w-0 flex-col gap-6">
+    <div className="flex w-full min-w-0 flex-col gap-6">
       <PageHeader
         title={assistant.name}
         actions={

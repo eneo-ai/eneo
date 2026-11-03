@@ -2,7 +2,6 @@ import { Button } from "@astryxdesign/core/Button";
 import { Icon } from "@astryxdesign/core/Icon";
 import { ChevronLeft } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { useLayoutEffect, useRef, useState } from "react";
 import { SamePageLink, type InPlaceLink } from "@/components/composites/in-place-link";
 import { cn } from "@/lib/utils";
 import { ConnectionBanner } from "./connection-banner";
@@ -25,18 +24,20 @@ export type PageBarProps = {
   /** Page actions at the end of the bar. */
   actions?: React.ReactNode;
   /**
-   * Below which width the bar replaces the shell's top bar: `lg` (1024 px,
-   * every pushed screen) or `md` (768 px: a space, which tablets show with
-   * breadcrumbs under the top bar).
+   * Where the bar is shown: below `lg` (1024 px: Konto's pushed screens) or
+   * on a `phone`'s layout (below 768 px, or a phone turned sideways: a space,
+   * an admin area, which tablets show with breadcrumbs beside the side
+   * navigation).
    */
-  until?: "lg" | "md";
+  until?: "lg" | "phone";
 };
 
 /**
- * The header of a pushed screen below 1024px (an admin area; later a space
- * page or an editor): a back link that names where it goes (decision 20),
- * the title once the page has scrolled, and actions. It replaces the shell's
- * top bar (`OWN_MOBILE_HEADER`), so the menu is one tap back, on the parent.
+ * The header of a pushed screen (an admin area, a space, an editor's section,
+ * Konto's pages): a back link that names where it goes (decision 20), the
+ * title once the page has scrolled, and actions. On a phone it replaces the
+ * shell's top bar (`OWN_MOBILE_HEADER`), so the menu is one tap back, on the
+ * parent.
  * Render it first in main#main-content, outside the page's padding: it
  * sticks to the top of the page panel.
  */
@@ -48,42 +49,32 @@ export function PageBar({
   until = "lg"
 }: PageBarProps) {
   const t = useTranslations();
-  const phone = until === "md";
-  const backRef = useRef<HTMLDivElement>(null);
-  const back = useBackLabel(backRef, [parent.label, t("back")]);
+  const phone = until === "phone";
   return (
     <>
-      {/* The title is centred between equal sides. A parent name that does not
-          fit beside it reads "Tillbaka" (decision 39), and where that does not
-          fit either, the arrow alone; the link's accessible name keeps all of
-          it. */}
+      {/* The back link always names the parent, on every sibling page alike.
+          It goes before the title, which is decoration and takes the room
+          left over; a name longer than the bar ends in an ellipsis, and the
+          link's accessible name keeps all of it. */}
       <div
         {...(phone ? OWN_PHONE_HEADER : OWN_MOBILE_HEADER)}
         // main#main-content keeps focused and scrolled-to content clear of it (app-shell.tsx).
         {...(phone ? { "data-phone-page-bar": "" } : { "data-page-bar": "" })}
         className={cn(
-          // The back side keeps 44 px (2.75rem) however long the title and the action are:
-          // the title column truncates and gives way, the back link does not.
-          "bg-ax-surface border-ax-border sticky top-0 z-10 grid h-14 shrink-0 grid-cols-[minmax(2.75rem,1fr)_minmax(0,auto)_minmax(max-content,1fr)] items-center gap-1 border-b px-1.5",
-          phone ? "md:hidden" : "lg:hidden"
+          // The back side keeps at least 44 px (2.75rem) and grows to its whole name; the
+          // title column truncates and gives way, and the actions keep their size.
+          "bg-ax-surface border-ax-border sticky top-0 z-10 grid h-14 shrink-0 grid-cols-[minmax(2.75rem,max-content)_minmax(0,1fr)_max-content] items-center gap-1 border-b px-1.5",
+          phone ? "wide:hidden" : "lg:hidden"
         )}
       >
-        <div ref={backRef} className="min-w-0">
+        <div className="min-w-0">
           <Button
             href={parent.href}
             {...(parent.onClick ? { onClick: parent.onClick, as: SamePageLink } : {})}
             variant="ghost"
             size="lg"
             icon={<Icon icon={ChevronLeft} />}
-            // Astryx names an icon-only button by its label: the full name then.
-            label={
-              back === 2
-                ? t("shell_back_to", { name: parent.label })
-                : back === 1
-                  ? t("back")
-                  : parent.label
-            }
-            isIconOnly={back === 2}
+            label={parent.label}
             aria-label={t("shell_back_to", { name: parent.label })}
             className="text-ax-text-accent max-w-full min-w-0"
           />
@@ -92,7 +83,6 @@ export function PageBar({
           aria-hidden="true"
           className={cn(
             "truncate text-center text-sm font-semibold",
-            "max-w-[50vw]",
             !isTitleShown && "page-bar-title"
           )}
         >
@@ -102,52 +92,8 @@ export function PageBar({
       </div>
       {/* Under the bar, not in it: the bar is hidden from 1024px, the banner is
           not. Where the bar is for phones only, the shell's banner is back
-          from 768px, and this one gives way to it. */}
-      <ConnectionBanner className={phone ? "md:hidden" : undefined} />
+          where the layout is not a phone's, and this one gives way to it. */}
+      <ConnectionBanner className={phone ? "wide:hidden" : undefined} />
     </>
   );
-}
-
-/**
- * Which of the back link's labels fits its side of the bar: 0 the first (the
- * parent's name), 1 the next ("Tillbaka"), 2 none (the arrow alone). Each is
- * measured in the link's font, with the link's icon and padding as a labelled
- * link has them (an icon-only one has none, so they are kept from the first
- * measure), against the side's width, which does not depend on the label (a
- * `minmax(0, 1fr)` column), so the answer never flips back and forth. 0 until
- * measured: a hidden bar or a test has no layout, and keeps the name.
- */
-function useBackLabel(cellRef: React.RefObject<HTMLDivElement | null>, labels: readonly string[]) {
-  const [fitting, setFitting] = useState(0);
-  const chromeRef = useRef<number | null>(null);
-  const key = labels.join("\u0000");
-  useLayoutEffect(() => {
-    const cell = cellRef.current;
-    if (!cell || typeof ResizeObserver === "undefined") return;
-    const measure = () => {
-      const link = cell.firstElementChild;
-      if (!(link instanceof HTMLElement) || cell.clientWidth === 0) return;
-      const context = document.createElement("canvas").getContext("2d");
-      if (!context) return;
-      const style = getComputedStyle(link);
-      context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
-      const icon = link.querySelector("svg")?.getBoundingClientRect().width ?? 0;
-      chromeRef.current ??=
-        parseFloat(style.paddingLeft) +
-        parseFloat(style.paddingRight) +
-        icon +
-        (parseFloat(style.columnGap) || 0);
-      const chrome = chromeRef.current;
-      const index = key
-        .split("\u0000")
-        .findIndex((label) => context.measureText(label).width + chrome <= cell.clientWidth);
-      setFitting(index === -1 ? 2 : index);
-    };
-    // Observing reports the first size; the fonts may still swap in.
-    const observer = new ResizeObserver(measure);
-    observer.observe(cell);
-    void document.fonts?.ready.then(measure);
-    return () => observer.disconnect();
-  }, [cellRef, key]);
-  return fitting;
 }

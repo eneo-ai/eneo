@@ -1,3 +1,4 @@
+import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { ChevronRight, Plus, Sparkles } from "lucide-react";
 import { useTranslations } from "use-intl";
@@ -7,14 +8,6 @@ import { ConfirmDialog } from "@/components/composites/confirm-dialog";
 import { PageHeader } from "@/components/composites/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger
-} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -73,37 +66,34 @@ function AddHelpAssistant({ templates }: { templates: HelperTemplate[] }) {
   // is visible text: a disabled button's tooltip reaches no keyboard user.
   return (
     <div className="flex flex-col items-end gap-1">
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            type="button"
-            disabled={noneAvailable}
-            aria-busy={install.isPending || undefined}
-            aria-describedby={noneAvailable ? reasonId : undefined}
-          >
-            {!install.isPending && <Plus className="size-4" />}
-            {t("admin_help_assistants_add_button")}
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-80 max-w-[calc(100vw-2rem)]">
-          <DropdownMenuLabel>{t("admin_help_assistants_add_menu_label")}</DropdownMenuLabel>
-          <DropdownMenuSeparator />
-          {templates.map((template) => (
-            <DropdownMenuItem
-              key={template.kind}
-              className="flex cursor-pointer flex-col items-start gap-0.5 whitespace-normal"
-              onClick={() => {
+      <DropdownMenu
+        button={{
+          label: t("admin_help_assistants_add_button"),
+          variant: "primary",
+          icon: <Plus aria-hidden="true" />,
+          isDisabled: noneAvailable,
+          isLoading: install.isPending,
+          isInterruptible: true,
+          "aria-describedby": noneAvailable ? reasonId : undefined
+        }}
+        placement="below"
+        alignment="end"
+        menuWidth={320}
+        items={[
+          {
+            type: "section",
+            title: t("admin_help_assistants_add_menu_label"),
+            items: templates.map((template) => ({
+              id: template.kind,
+              label: template.name,
+              description: template.description,
+              onClick: () => {
                 if (!install.isPending) install.mutate(template.kind);
-              }}
-            >
-              <span className="font-medium">{template.name}</span>
-              <span className="text-muted-foreground text-xs leading-snug">
-                {template.description}
-              </span>
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuContent>
-      </DropdownMenu>
+              }
+            }))
+          }
+        ]}
+      />
       {noneAvailable && (
         <p id={reasonId} className="text-muted-foreground text-sm">
           {t("admin_help_assistants_add_none_available")}
@@ -234,7 +224,7 @@ export function HelpAssistantsPage() {
   );
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
+    <div className="flex w-full flex-col gap-6">
       <PageHeader title={t("admin_help_assistants_page_title")}>
         <AddHelpAssistant templates={templates} />
       </PageHeader>

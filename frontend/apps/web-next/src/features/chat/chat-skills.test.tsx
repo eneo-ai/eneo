@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Schema } from "@/lib/api/models";
-import { expectNoAxeViolations } from "@/test/axe";
+import { expectNameToHoldVisibleText, expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testAppContext } from "@/test/render";
 import { setViewport } from "@/test/setup-dom";
 import { ChatSkills } from "./chat-skills";
@@ -172,7 +172,7 @@ function renderSkills(permissions: readonly string[] = OWN_AND_CHAT) {
 }
 
 /** Opens the popover (or sheet) and waits until the person's skills have loaded into it. */
-async function openSkills(name = "Skills i din personliga chatt: 2") {
+async function openSkills(name = "Skills: 2 aktiva i din personliga chatt") {
   fireEvent.click(await screen.findByRole("button", { name }));
   const dialog = await screen.findByRole("dialog", { name: "Skills" });
   await waitFor(() => expect(dialog.querySelector('[aria-busy="true"]')).toBeNull());
@@ -234,7 +234,9 @@ describe("ChatSkills", () => {
     expect(
       await within(notesMode).findByRole("radio", { name: "Vid behov", checked: true })
     ).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Skills i din personliga chatt: 3" })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Skills: 3 aktiva i din personliga chatt" })
+    ).toBeTruthy();
     await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(1));
     expect(hasPendingPartnerUpdates()).toBe(true);
     // The person's whole ordered list; the organisation's skills are never sent.
@@ -291,7 +293,9 @@ describe("ChatSkills", () => {
     const reason = "Din organisation har stängt av skills vid behov. Välj Alltid.";
     expect(await within(rowOf(notesMode)).findByText(reason)).toBeTruthy();
     expect(within(notesMode).getByRole("radio", { name: "Av", checked: true })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Skills i din personliga chatt: 2" })).toBeTruthy();
+    const name = "Skills: 2 aktiva i din personliga chatt";
+    // The name holds what the pill shows, its label and count, in order (WCAG 2.5.3).
+    expectNameToHoldVisibleText(screen.getByRole("button", { name }), name);
   });
 
   it("says the change was not saved when the save fails for another reason", async () => {
@@ -323,7 +327,7 @@ describe("ChatSkills", () => {
     expect(await within(popover).findByText(refusal)).toBeTruthy();
 
     // Closed with the trigger, then opened again.
-    const trigger = screen.getByRole("button", { name: "Skills i din personliga chatt: 2" });
+    const trigger = screen.getByRole("button", { name: "Skills: 2 aktiva i din personliga chatt" });
     fireEvent.click(trigger);
     await waitFor(() => expect(trigger.getAttribute("aria-expanded")).toBe("false"));
     popover = await openSkills();
@@ -332,7 +336,9 @@ describe("ChatSkills", () => {
 
   it("fits the popover in the room above the pill, so it never covers the composer", async () => {
     renderSkills();
-    const trigger = await screen.findByRole("button", { name: "Skills i din personliga chatt: 2" });
+    const trigger = await screen.findByRole("button", {
+      name: "Skills: 2 aktiva i din personliga chatt"
+    });
     // The pill sits 400 px down the window (jsdom has no layout of its own).
     vi.spyOn(trigger, "getBoundingClientRect").mockReturnValue(
       DOMRect.fromRect({ x: 300, y: 400, width: 96, height: 32 })
@@ -357,7 +363,7 @@ describe("ChatSkills", () => {
       personal_layer: { status: "suspended", reason: "attachment_limit_exceeded", detail: null }
     };
     renderSkills();
-    const popover = await openSkills("Skills i din personliga chatt: 1");
+    const popover = await openSkills("Skills: 1 aktiv i din personliga chatt");
 
     expect(within(popover).getByText("Dina skills är pausade")).toBeTruthy();
     expect(
@@ -377,7 +383,7 @@ describe("ChatSkills", () => {
     configuration = { ...configuration, bindings: [] };
     skills = [];
     renderSkills();
-    const popover = await openSkills("Skills i din personliga chatt: 1");
+    const popover = await openSkills("Skills: 1 aktiv i din personliga chatt");
 
     expect(
       within(popover).getByText(
@@ -394,7 +400,7 @@ describe("ChatSkills", () => {
       personal_layer: { status: "suspended", reason: "permission_missing", detail: null }
     };
     renderSkills(["personal_chat"]);
-    const popover = await openSkills("Skills i din personliga chatt: 1");
+    const popover = await openSkills("Skills: 1 aktiv i din personliga chatt");
 
     expect(
       within(popover).getByText(
@@ -483,7 +489,7 @@ describe("ChatSkills", () => {
     configuration = { ...configuration, bindings: [{ ...answers, execution_blocked: true }] };
     renderSkills();
     // A blocked skill does not run, so it is not counted.
-    const popover = await openSkills("Skills i din personliga chatt: 1");
+    const popover = await openSkills("Skills: 1 aktiv i din personliga chatt");
     const answersMode = within(popover).getByRole("radiogroup", {
       name: "Läge för Mina svarspreferenser"
     });
@@ -585,7 +591,7 @@ describe("ChatSkills", () => {
       library[1]!
     ];
     renderSkills();
-    const popover = await openSkills("Skills i din personliga chatt: 1");
+    const popover = await openSkills("Skills: 1 aktiv i din personliga chatt");
 
     expect(within(popover).queryByText(/Du har inga egna skills än/)).toBeNull();
     fireEvent.click(within(popover).getByRole("button", { name: "Ladda mer" }));

@@ -71,7 +71,7 @@ describe("ExpiringKeysNotification", () => {
 
     fireEvent.keyDown(panel, { key: "Escape" });
     await waitFor(() => expect(bell.getAttribute("aria-expanded")).toBe("false"));
-    expect(document.activeElement).toBe(bell);
+    await waitFor(() => expect(document.activeElement).toBe(bell));
   });
 
   it("goes away when the tenant turns the reminders off, cached keys or not", async () => {

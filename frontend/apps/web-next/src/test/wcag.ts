@@ -14,6 +14,9 @@ export const WCAG_22_AA_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wca
  * find real structure faults (a paragraph styled as a heading, a table without header cells, two
  * landmarks of one kind with no name, an empty heading or header cell, a scope on the wrong cell).
  * The first three are ACCESSIBILITY.md rule 1: one main landmark, an h1, headings in order.
+ * `label-content-name-mismatch` is axe's experimental check of WCAG 2.5.3 Label in Name (rule 8):
+ * a control named by aria-label holds what it shows, in order. It joins text in separate spans
+ * with no separator, so words that sit in different spans need a space between them.
  */
 export const AXE_PAGE_RULES = [
   "page-has-heading-one",
@@ -25,7 +28,8 @@ export const AXE_PAGE_RULES = [
   "landmark-unique",
   "empty-heading",
   "empty-table-header",
-  "scope-attr-valid"
+  "scope-attr-valid",
+  "label-content-name-mismatch"
 ];
 
 /** An issue reference: a URL, `#1234` or `owner/repo#1234`. */

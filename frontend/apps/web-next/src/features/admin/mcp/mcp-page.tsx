@@ -1,9 +1,9 @@
-import { DropdownMenu as AxDropdownMenu } from "@astryxdesign/core/DropdownMenu";
+import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";
+import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import {
   ChevronRight,
   Lock,
-  MoreHorizontal,
   Plus,
   Search,
   Settings2,
@@ -12,6 +12,7 @@ import {
   Wrench
 } from "lucide-react";
 import Link from "@/lib/link";
+import { useRouter } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
 import { useMemo, useState } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
@@ -24,19 +25,17 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger
-} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Switch as AxSwitch } from "@astryxdesign/core/Switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { securityClassificationsQueryOptions } from "@/features/admin/security-classifications/security-classifications";
 import { useSettingSwitch } from "@/features/admin/use-setting-switch";
-import { BUNDLED_SERVERS, SOURCE_KINDS } from "@/features/admin/tools/bundled";
+import {
+  BUNDLED_SERVERS,
+  OUTLINE_BUTTON_CLASS,
+  SOURCE_KINDS
+} from "@/features/admin/tools/bundled";
 import { browserApi } from "@/lib/api/browser";
 import { toastApiError } from "@/lib/api/toast";
 import { matchesSearch } from "@/lib/search";
@@ -110,6 +109,7 @@ function McpServerCard({
   securityEnabled: boolean;
 }) {
   const t = useTranslations();
+  const router = useRouter();
   const queryClient = useQueryClient();
   const [showDelete, setShowDelete] = useState(false);
   const [activationError, setActivationError] = useState<unknown>(null);
@@ -243,32 +243,28 @@ function McpServerCard({
           </Link>
         </Button>
 
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label={t("ui_more_actions_for", { name: server.name })}
-            >
-              <MoreHorizontal className="size-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem asChild>
-              <Link href={detailHref}>
-                <Settings2 className="size-4" /> {t("mcp_manage")}
-              </Link>
-            </DropdownMenuItem>
-            <DropdownMenuItem asChild>
-              <Link href={`${detailHref}?tab=tools`}>
-                <Wrench className="size-4" /> {t("mcp_server_tools")}
-              </Link>
-            </DropdownMenuItem>
-            <DropdownMenuItem variant="destructive" onSelect={() => setShowDelete(true)}>
-              <Trash2 className="size-4" /> {t("delete")}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <MoreMenu
+          label={t("ui_more_actions_for", { name: server.name })}
+          alignment="end"
+          items={[
+            {
+              label: t("mcp_manage"),
+              icon: <Settings2 aria-hidden="true" />,
+              onClick: () => router.push(detailHref)
+            },
+            {
+              label: t("mcp_server_tools"),
+              icon: <Wrench aria-hidden="true" />,
+              onClick: () => router.push(`${detailHref}?tab=tools`)
+            },
+            {
+              label: t("delete"),
+              icon: <Trash2 aria-hidden="true" />,
+              variant: "destructive",
+              onClick: () => setShowDelete(true)
+            }
+          ]}
+        />
       </div>
 
       {activationError != null && (
@@ -379,10 +375,13 @@ export function McpServersPage({ embedded = false }: { embedded?: boolean } = {}
   // One entry point: the servers built into Eneo first, then an external one.
   const addControl =
     bundledToAdd.length > 0 ? (
-      <AxDropdownMenu
+      <DropdownMenu
         button={{
           label: t("add_mcp_server"),
-          variant: "primary",
+          // An outline, like every button on the Verktyg page: none is its one main
+          // action.
+          variant: "ghost",
+          className: OUTLINE_BUTTON_CLASS,
           icon: <Plus className="size-4" />,
           isDisabled: addBundled.isPending
         }}
@@ -414,13 +413,13 @@ export function McpServersPage({ embedded = false }: { embedded?: boolean } = {}
         ]}
       />
     ) : (
-      <Button onClick={() => setShowAdd(true)}>
+      <Button variant="outline" onClick={() => setShowAdd(true)}>
         <Plus className="size-4" /> {t("add_mcp_server")}
       </Button>
     );
 
   return (
-    <div className={cn("flex w-full flex-col gap-6", !embedded && "mx-auto max-w-5xl")}>
+    <div className={"flex w-full flex-col gap-6"}>
       {embedded ? (
         <div className="flex flex-wrap items-start justify-between gap-3">
           <p className="text-muted-foreground max-w-2xl text-sm">

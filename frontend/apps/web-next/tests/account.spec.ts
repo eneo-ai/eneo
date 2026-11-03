@@ -145,9 +145,11 @@ test.describe("Konto on a phone (decision 22)", { tag: "@vite" }, () => {
     }
     await page.reload();
     await page.getByRole("textbox", { name: "Sök API-nycklar" }).fill(`${name} 3`);
-    const table = page.getByRole("table", { name: "API-nycklar" });
-    await expect(table.getByText(`${name} 3`, { exact: true })).toBeVisible();
-    await expect(table.getByText(`${name} 0`, { exact: true })).toBeHidden();
+    // On a phone the keys are rows, not a table.
+    const list = page.getByRole("list", { name: "API-nycklar" });
+    await expect(list.getByText(`${name} 3`, { exact: true })).toBeVisible();
+    await expect(list.getByText(`${name} 0`, { exact: true })).toBeHidden();
+    await expect(page.getByRole("table", { name: "API-nycklar" })).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
       390
     );
@@ -160,14 +162,46 @@ test.describe("Konto on a phone (decision 22)", { tag: "@vite" }, () => {
   });
 });
 
+test.describe("Konto on an iPad held upright", { tag: "@vite" }, () => {
+  test.use({ viewport: { width: 820, height: 1180 }, hasTouch: true });
+
+  test("is a centred column of 42 rem with inset groups; a phone keeps its edge-to-edge rows", async ({
+    page
+  }) => {
+    await page.goto("/account");
+    const main = page.getByRole("main");
+    await expect(main.getByRole("heading", { level: 1, name: "Konto" })).toBeVisible();
+    const group = main.getByRole("list").first();
+    const box = (await group.boundingBox())!;
+    expect(box.width).toBeLessThanOrEqual(672 + 1);
+    const panel = (await main.boundingBox())!;
+    // Centred in the page: as much room on either side.
+    expect(
+      Math.abs(box.x - panel.x - (panel.x + panel.width - box.x - box.width))
+    ).toBeLessThanOrEqual(2);
+    expect(await group.evaluate((list) => getComputedStyle(list).borderTopLeftRadius)).not.toBe(
+      "0px"
+    );
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      820
+    );
+
+    // A phone: the rows run edge to edge of the page again.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect
+      .poll(async () => (await group.boundingBox())!.width - (await main.boundingBox())!.width)
+      .toBeGreaterThanOrEqual(-1);
+    expect(await group.evaluate((list) => getComputedStyle(list).borderTopLeftRadius)).toBe("0px");
+  });
+});
+
 test.describe("the account pages on an iPad held sideways", { tag: "@vite" }, () => {
   test.use({ viewport: { width: 1180, height: 820 }, hasTouch: true });
 
-  test("keep Mitt konto, its tabs and the profile menu", async ({ page }) => {
+  test("keep the title Konto, as upright, its tabs and the profile menu", async ({ page }) => {
     await page.goto("/account");
-    await expect(page.getByRole("heading", { level: 1, name: "Mitt konto" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "Konto", exact: true })).toBeVisible();
     await expect(page.getByRole("navigation", { name: "Kontoinställningar" })).toBeVisible();
-    await expect(page.getByRole("heading", { level: 1, name: "Konto", exact: true })).toBeHidden();
     await expect(page.getByRole("button", { name: /: konto och inställningar$/ })).toHaveAttribute(
       "aria-haspopup",
       "menu"

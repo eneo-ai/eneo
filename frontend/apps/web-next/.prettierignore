@@ -13,3 +13,5 @@ src/theme/eneo.variants.d.ts
 eslint-suppressions.json
 # Written by tests/responsive-contract.spec.ts (CONTRACT_UPDATE=1), one entry per line on purpose: a review sees each violation added or gone
 tests/responsive-contract.baseline.json
+# Written by the page scans (CONTRAST_UPDATE=1, tests/contrast-incomplete.ts), in the same shape
+tests/contrast-incomplete.baseline.json
