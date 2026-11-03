@@ -243,6 +243,17 @@ roadmap snapshots such as `2.0`, `2.1`, `2.2` or `2.X`. See
 [Project Roadmap](/contributing/project-roadmap) for the fields, version rules
 and export workflow.
 
+## Maintainer releases
+
+Maintainers preparing a final release use **Actions → Prepare and Publish
+Release** on `develop` and supply the version. Review and merge the generated
+preparation PR; the controller creates the tag only after CI passes on the
+merged release commit. The GitHub release stays a draft until images, the
+verified bundle and SBOMs are complete, then a second PR records its news in
+the development history. Setup, retry behavior and prerequisites for older
+release branches are documented in the
+[release procedure](https://github.com/eneo-ai/eneo/blob/develop/docs/DEPLOYMENT_WORKFLOW.md#creating-a-production-release).
+
 ## Development setup and detailed guidelines
 
 For the development environment, architecture, testing, code standards and
