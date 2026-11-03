@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { SideNav } from "@astryxdesign/core/SideNav";
-import { act, cleanup, fireEvent, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { browserApi } from "@/lib/api/browser";
+import { EneoApiError } from "@/lib/api/errors";
 import type { Permission } from "@/lib/auth/permissions";
 import { expectNoAxeViolations } from "@/test/axe";
 import { setRoute } from "@/test/navigation";
@@ -206,14 +207,33 @@ describe("SpaceNav", () => {
 
   it("keeps the cached sections when a background refresh fails", async () => {
     const { queryClient } = renderNav("/spaces/s1/overview");
-    vi.spyOn(browserApi, "GET").mockRejectedValue(new Error("boom"));
-    await act(() =>
-      queryClient
-        .refetchQueries({ queryKey: spaceQueryOptions(browserApi, "s1").queryKey })
-        .catch(() => {})
+    const get = vi.spyOn(browserApi, "GET").mockRejectedValue(new Error("boom"));
+    // A page's own reader refreshes the cached space and fails.
+    await act(async () => {
+      await queryClient
+        .query({ ...spaceQueryOptions(browserApi, "s1"), staleTime: 0, retry: false })
+        .catch(() => {});
+      // Let Query notify the sidebar of the failure before looking at it.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(get).toHaveBeenCalled();
+    expect(queryClient.getQueryState(spaceQueryOptions(browserApi, "s1").queryKey)?.status).toBe(
+      "error"
     );
     expect(links().map((link) => link.name)).toContain("Översikt");
     expect(screen.queryByRole("button", { name: "Försök ladda ytorna igen" })).toBeNull();
+  });
+
+  it("drops a cached space once it is gone (404)", async () => {
+    const { queryClient } = renderNav("/spaces/s1/overview");
+    vi.spyOn(browserApi, "GET").mockRejectedValue(new EneoApiError("Missing", { status: 404 }));
+    await act(() =>
+      queryClient
+        .query({ ...spaceQueryOptions(browserApi, "s1"), staleTime: 0, retry: false })
+        .catch(() => {})
+    );
+    await waitFor(() => expect(screen.queryAllByRole("link")).toHaveLength(0));
+    expect(screen.queryByText("Upphandling")).toBeNull();
   });
 
   it("shows Välj en yta and Dina ytor on the spaces list", () => {
