@@ -409,6 +409,10 @@ for (const colorScheme of ["light", "dark"] as const) {
           page.getByRole("heading", { level: 1, name: sv.page_not_found })
         ).toBeVisible();
         await expect(page).toHaveURL(/\/activate$/);
+        await expect(page.getByRole("link", { name: sv.back_to_home })).toHaveAttribute(
+          "href",
+          "/"
+        );
       });
     });
 
