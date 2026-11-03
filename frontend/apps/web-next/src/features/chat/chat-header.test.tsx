@@ -5,6 +5,7 @@ import type { ChatPartner } from "@/lib/chat/types";
 import { expectNameToHoldVisibleText, expectNoAxeViolations } from "@/test/axe";
 import { router } from "@/test/navigation";
 import { renderInApp } from "@/test/render";
+import { setViewport } from "@/test/setup-dom";
 import { OPEN_NAV_EVENT } from "@/components/shell/routes";
 import { ChatHeader, PartnerSwitcher } from "./chat-header";
 import { CHAT_PANEL_IDS } from "./chat-url";
@@ -190,6 +191,44 @@ describe("ChatHeader", () => {
   it("has no axe violations", async () => {
     const { container } = renderHeader();
     await expectNoAxeViolations(container);
+  });
+});
+
+describe("ChatHeader beside an icon rail (below 1280 px: an iPad, a small laptop)", () => {
+  afterEach(() => setViewport("desktop"));
+
+  it("keeps its buttons whole: Felsökning and Redigera as named icons, Ny konversation in words", () => {
+    setViewport("tablet-portrait");
+    renderHeader({
+      debug: { isEnabled: true, onOpen: vi.fn() },
+      editHref: "/spaces/s/assistants/assistant-1/edit"
+    });
+    const wide = screen.getByRole("tablist").closest<HTMLElement>("[class*='wide:flex']")!;
+    const debug = within(wide).getByRole("button", { name: "Felsökning" });
+    const edit = within(wide).getByRole("link", { name: "Redigera" });
+    // Their names stay (tooltip and accessible name); the words leave the row.
+    expect(debug.textContent).not.toContain("Felsökning");
+    expect(edit.textContent).not.toContain("Redigera");
+    expect(within(wide).getByRole("button", { name: "Ny konversation" }).textContent).toContain(
+      "Ny konversation"
+    );
+    // The title gives way first: the buttons do not shrink.
+    expect(debug.closest("div")!.className).toMatch(/(^| )shrink-0( |$)/);
+  });
+
+  it("hides Felsökning on touch until a saved answer exists: its reason is a tooltip touch cannot reach", () => {
+    setViewport("tablet-portrait");
+    renderHeader({ debug: { isEnabled: false, onOpen: vi.fn() } });
+    expect(screen.queryByRole("button", { name: "Felsökning" })).toBeNull();
+    cleanup();
+    renderHeader({ debug: { isEnabled: true, onOpen: vi.fn() } });
+    expect(screen.getByRole("button", { name: "Felsökning" })).toBeTruthy();
+  });
+
+  it("shows the words from 1280 px", () => {
+    setViewport({ width: 1280, height: 800, pointer: "fine" });
+    renderHeader({ debug: { isEnabled: true, onOpen: vi.fn() } });
+    expect(screen.getByRole("button", { name: "Felsökning" }).textContent).toContain("Felsökning");
   });
 });
 

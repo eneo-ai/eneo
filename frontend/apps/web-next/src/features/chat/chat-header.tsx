@@ -7,7 +7,9 @@ import { IconButton } from "@astryxdesign/core/IconButton";
 import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import { Button } from "@astryxdesign/core/Button";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
-import { Bug, ChevronDown, Menu, SquarePen } from "lucide-react";
+import { useMediaQuery } from "@astryxdesign/core/hooks";
+import { Bug, ChevronDown, Menu, Pencil, SquarePen } from "lucide-react";
+import { MEDIA } from "@/lib/breakpoints";
 import { useRouter } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
 import { ClassificationToken } from "@/components/composites/classification-token";
@@ -391,6 +393,10 @@ export function ChatHeader({
   minimal = false
 }: ChatHeaderProps) {
   const t = useTranslations();
+  const compact = useMediaQuery(`not all and ${MEDIA.xl}`);
+  // Felsökning waits for a saved answer with its reason in a tooltip, which
+  // touch cannot reach: on touch it shows once it can be opened.
+  const coarse = useMediaQuery("(pointer: coarse)");
   const subtitle = [partner.spaceName, modelName].filter(Boolean).join(" · ") || null;
   const mobileMenu: HeaderMenuItem[] = [
     {
@@ -452,19 +458,43 @@ export function ChatHeader({
             <Tab value="insights" label={t("insights")} panelId={CHAT_PANEL_IDS.insights} />
           )}
         </TabList>
-        <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
+        {/* Beside an icon rail (below 1280 px: an iPad either way, a small laptop)
+            Felsökning and Redigera are named icons, and the row keeps its
+            buttons whole: the conversation's title gives way instead. */}
+        <div
+          className={cn(
+            "flex items-center justify-end gap-2",
+            compact ? "shrink-0" : "min-w-0 flex-1"
+          )}
+        >
           <ClassificationToken name={partner.securityClassification} />
-          {debug && (
+          {debug && (debug.isEnabled || !coarse) && (
             <Button
               label={t("chat_debug_open")}
               variant="secondary"
               icon={<Bug aria-hidden="true" />}
+              isIconOnly={compact}
               isDisabled={!debug.isEnabled}
-              tooltip={debug.isEnabled ? undefined : t("chat_debug_no_turn_title")}
+              tooltip={
+                debug.isEnabled
+                  ? compact
+                    ? t("chat_debug_open")
+                    : undefined
+                  : t("chat_debug_no_turn_title")
+              }
               onClick={(event) => debug.onOpen(event.currentTarget)}
             />
           )}
-          {editHref && <Button label={t("edit")} variant="ghost" href={editHref} />}
+          {editHref && (
+            <Button
+              label={t("edit")}
+              variant="ghost"
+              href={editHref}
+              icon={compact ? <Pencil aria-hidden="true" /> : undefined}
+              isIconOnly={compact}
+              tooltip={compact ? t("edit") : undefined}
+            />
+          )}
           <Button label={t("new_conversation")} variant="primary" onClick={onNewConversation} />
           {menuItems.length > 0 && (
             <MoreMenu label={t("chat_more_options")} items={menuItems} alignment="end" />
