@@ -98,7 +98,10 @@ export function WidgetOverviewList({ overview }: { overview: WidgetOverview }) {
                 <div className="border-ax-border flex flex-wrap items-start justify-between gap-2 border-b pb-3">
                   <div className="min-w-0">
                     <h3 className="flex flex-wrap items-center gap-2 text-base font-semibold">
-                      <Link className="underline-offset-2 hover:underline" href={widgetHref(item)}>
+                      <Link
+                        className="inline-flex min-h-6 min-w-6 items-center underline-offset-2 hover:underline pointer-coarse:min-h-11 pointer-coarse:min-w-11"
+                        href={widgetHref(item)}
+                      >
                         {item.name}
                       </Link>
                       <Badge
@@ -122,7 +125,7 @@ export function WidgetOverviewList({ overview }: { overview: WidgetOverview }) {
                     </p>
                   </div>
                   <Link
-                    className="text-ax-accent inline-flex items-center gap-1 text-sm underline-offset-2 hover:underline"
+                    className="text-ax-accent inline-flex min-h-6 min-w-6 items-center gap-1 text-sm underline-offset-2 hover:underline pointer-coarse:min-h-11 pointer-coarse:min-w-11"
                     href={widgetHref(item)}
                     aria-label={t("widget_admin_overview_open", { name: item.name })}
                   >
