@@ -1,4 +1,5 @@
 import { SendHorizontal } from "lucide-react";
+import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { isImeKeyEvent } from "@astryxdesign/core/utils";
 import { useTranslations } from "use-intl";
 import {
@@ -9,7 +10,6 @@ import {
   useState,
   type KeyboardEvent
 } from "react";
-import { useMediaMatch } from "@/lib/hooks/use-media-match";
 
 export type WidgetComposerHandle = {
   focus: () => void;
@@ -41,7 +41,7 @@ export const WidgetComposer = forwardRef<
 ) {
   const t = useTranslations();
   const textarea = useRef<HTMLTextAreaElement>(null);
-  const coarse = useMediaMatch("(pointer: coarse)");
+  const coarse = useMediaQuery("(pointer: coarse)");
   const [composing, setComposing] = useState(false);
 
   const resize = useCallback(() => {
