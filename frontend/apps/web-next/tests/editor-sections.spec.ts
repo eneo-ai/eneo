@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "./csp";
-import { apiPost, createSpace, uniqueName } from "./helpers";
+import { apiPost, createSpace, platformFaults, uniqueName } from "./helpers";
 
 /** A new space with one assistant (or app); returns the space's path and the editor's. */
 async function assistantEditor(page: Page, kind: "assistants" | "apps" = "assistants") {
@@ -97,6 +97,8 @@ test.describe("an editor on a small phone", () => {
       for (const id of ids) {
         await page.goto(`${editor}?section=${id}`);
         await expect(page.locator(`[data-editor-section="${id}"]`)).toBeVisible();
+        // The touch platform layer (touch-platform.spec.ts) holds in every section too.
+        expect(await platformFaults(page, `section ${id}`)).toEqual([]);
         const overflow = await page.evaluate(() => {
           const main = document.getElementById("main-content")!;
           return main.scrollWidth - main.clientWidth;

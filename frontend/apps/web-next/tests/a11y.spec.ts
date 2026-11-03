@@ -920,6 +920,7 @@ for (const colorScheme of ["light", "dark"] as const) {
     test("account", { tag: "@vite" }, async ({ page }) => {
       await scan(page, "/account", async () => {
         await expect(page.getByText(/byt lösenord/i).first()).toBeVisible();
+        await expect(page.locator('input[autocomplete="new-password"]').first()).toBeVisible();
       });
     });
 
