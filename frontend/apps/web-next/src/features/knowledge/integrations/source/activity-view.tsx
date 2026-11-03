@@ -1,5 +1,5 @@
 import { Button } from "@astryxdesign/core/Button";
-import { Collapsible } from "@astryxdesign/core/Collapsible";
+import { Collapsible } from "@/components/astryx/collapsible";
 import { useCollator } from "@astryxdesign/core/i18n";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Timestamp } from "@astryxdesign/core/Timestamp";

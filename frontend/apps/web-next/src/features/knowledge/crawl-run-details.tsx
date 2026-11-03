@@ -1,5 +1,5 @@
 import { Button } from "@astryxdesign/core/Button";
-import { Collapsible } from "@astryxdesign/core/Collapsible";
+import { Collapsible } from "@/components/astryx/collapsible";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
 import { Link } from "@astryxdesign/core/Link";

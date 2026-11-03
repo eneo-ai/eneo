@@ -2,7 +2,7 @@ import { Download, Mic, Square, Trash2 } from "lucide-react";
 import { useLocale, useTranslations } from "use-intl";
 import { useEffect, useRef, useState } from "react";
 import { useAnnounce } from "@astryxdesign/core/hooks";
-import { Collapsible } from "@astryxdesign/core/Collapsible";
+import { Collapsible } from "@/components/astryx/collapsible";
 import { Button } from "@astryxdesign/core/Button";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
