@@ -114,6 +114,8 @@ export function ChatPage({
   const [pendingSessionId, setPendingSessionId] = useState<string | null>(urlSessionId);
   const [followedUrlSession, setFollowedUrlSession] = useState<string | null>(urlSessionId);
   const [historyOpen, setHistoryOpen] = useState(false);
+  // Reported by the conversation, which knows when an answer is saved.
+  const [debugReady, setDebugReady] = useState(false);
   // The row that holds the conversation, its side panel and the history.
   const rowRef = useRef<HTMLDivElement>(null);
   const [activity, setActivity] = useState<ActivityState | null>(null);
@@ -339,7 +341,7 @@ export function ChatPage({
         debug={
           debugAvailable
             ? {
-                isEnabled: started && sessionId !== null,
+                isEnabled: debugReady,
                 onOpen: (trigger) => {
                   // Felsökning shows in Chatt, beside the answer it explains.
                   if (viewTab !== "chat") selectTab("chat");
@@ -406,6 +408,7 @@ export function ChatPage({
                 key={active.key}
                 leaveConfirmationRef={leaveConfirmation}
                 debugRef={debugRef}
+                onDebugReadyChange={setDebugReady}
                 partner={partner}
                 initialSessionId={active.sessionId}
                 initialMessages={active.messages}

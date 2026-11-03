@@ -199,6 +199,8 @@ type ChatViewProps = {
   leaveConfirmationRef?: Ref<LeaveConfirmationHandle>;
   /** The page header's Felsökning button opens the latest answer's debug view through it. */
   debugRef?: Ref<ChatDebugHandle>;
+  /** Whether `debugRef` has a saved answer to open: the header enables Felsökning by it. */
+  onDebugReadyChange?: (ready: boolean) => void;
   partner: ChatPartner;
   initialSessionId?: string | null;
   initialMessages?: EneoUIMessage[];
@@ -247,6 +249,7 @@ export function ChatView(props: ChatViewProps) {
 function ConversationView({
   leaveConfirmationRef,
   debugRef,
+  onDebugReadyChange,
   partner,
   initialSessionId = null,
   initialMessages = [],
@@ -982,19 +985,33 @@ function ConversationView({
     [openActivityId, closeActivity, onActivityChange]
   );
   // The header's Felsökning: the latest saved answer's debug view, its focus
-  // returning to the button as from a pill.
+  // returning to the button as from a pill. An answer still being written has
+  // nothing saved to inspect yet, so it is never the target, and before the
+  // first answer is saved the button waits.
+  const debugAnswerId =
+    debugAvailable && sessionId !== null
+      ? (messages.findLast(
+          (message, index) =>
+            message.role === "assistant" && !(busy && index === messages.length - 1)
+        )?.id ?? null)
+      : null;
+  const debugReady = debugAnswerId !== null;
+  useEffect(() => {
+    onDebugReadyChange?.(debugReady);
+    // Gone with this conversation: the next one reports its own.
+    return () => onDebugReadyChange?.(false);
+  }, [debugReady, onDebugReadyChange]);
   useImperativeHandle(
     debugRef,
     () => ({
       openDebug: (trigger) => {
-        const answer = messages.findLast((message) => message.role === "assistant");
-        if (!debugAvailable || sessionId === null || !answer) return false;
+        if (debugAnswerId === null) return false;
         activityTrigger.current = trigger;
-        onActivityChange({ messageId: answer.id, tab: "debug", source: null });
+        onActivityChange({ messageId: debugAnswerId, tab: "debug", source: null });
         return true;
       }
     }),
-    [messages, debugAvailable, sessionId, onActivityChange]
+    [debugAnswerId, onActivityChange]
   );
   // A call waiting for a decision takes the dock on a phone (decision 26): a
   // sheet over the dock gives way to it, and the focus goes back to what

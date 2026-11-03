@@ -491,6 +491,29 @@ describe("ChatPage Felsökning", () => {
     expect(screen.queryByRole("tab", { name: "Felsök", selected: true })).toBeNull();
   });
 
+  it("stays disabled while the first answer streams, though its session id has come", async () => {
+    renderDebug(null);
+    askWithKeyboard("Vilken gräns gäller?");
+    await waitFor(() => expect(spies.streams).toHaveLength(1));
+    const stream = spies.streams[0]!;
+    await act(async () => {
+      stream.enqueue({
+        type: "data-session",
+        data: { session_id: "session-d", files: [], web_search_references: [] }
+      });
+      stream.enqueue({ type: "text-start", id: "t" });
+      stream.enqueue({ type: "text-delta", id: "t", delta: "Gränsen" });
+    });
+    const debug = screen.getByRole("button", { name: "Felsökning" });
+    expect(debug.getAttribute("aria-disabled")).toBe("true");
+    await act(async () => {
+      stream.enqueue({ type: "text-end", id: "t" });
+      stream.enqueue({ type: "finish" });
+      stream.close();
+    });
+    await waitFor(() => expect(debug.getAttribute("aria-disabled")).not.toBe("true"));
+  });
+
   it("opens the latest answer's debug view in Chatt, from Historik too", async () => {
     window.history.replaceState(null, "", "/chat?session_id=s-1&tab=history");
     setRoute("/chat?session_id=s-1&tab=history");
