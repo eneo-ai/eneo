@@ -149,7 +149,7 @@ export function WidgetMessage({
               >
                 <button
                   type="button"
-                  className="text-ax-text-secondary hover:text-ax-text flex items-center gap-1.5 rounded-md text-sm"
+                  className="text-ax-text-secondary hover:text-ax-text flex min-h-6 items-center gap-1.5 rounded-md text-sm"
                   aria-expanded={expanded}
                   aria-controls={listId}
                   onClick={() => setExpanded((value) => !value)}
@@ -217,7 +217,7 @@ export function WidgetMessage({
                                     </span>
                                     <button
                                       type="button"
-                                      className="text-ax-text-accent mt-1 inline-flex w-fit items-center gap-1 rounded-md text-xs underline-offset-2 hover:underline"
+                                      className="text-ax-text-accent mt-1 inline-flex min-h-6 w-fit items-center gap-1 rounded-md text-xs underline-offset-2 hover:underline"
                                       aria-label={t("widget_copy_reference_for", {
                                         title: source.title
                                       })}

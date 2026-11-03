@@ -147,14 +147,18 @@
         {m.widget_admin_preview_failed()}
       </p>
     {:else if src}
-      <!-- Same origin as this page: a sandbox attribute would be no barrier here, so none is pretended. -->
-      <iframe
-        {src}
-        title={m.widget_admin_preview_frame_title()}
-        class="border-default bg-primary rounded-lg border shadow"
-        style:width={mobile ? "375px" : "100%"}
-        style:height="600px"
-      ></iframe>
+      <!-- Same origin as this page: a sandbox attribute would be no barrier here, so none is pretended.
+           A fresh frame per address: navigating an existing frame would add the
+           token-bearing address to the browser's session history on every save. -->
+      {#key src}
+        <iframe
+          {src}
+          title={m.widget_admin_preview_frame_title()}
+          class="border-default bg-primary rounded-lg border shadow"
+          style:width={mobile ? "375px" : "100%"}
+          style:height="600px"
+        ></iframe>
+      {/key}
     {:else}
       <p class="text-secondary py-10 text-sm" aria-live="polite">{m.widget_preview_loading()}</p>
     {/if}

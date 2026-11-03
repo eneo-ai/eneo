@@ -194,7 +194,10 @@ export function WidgetPreview({ widget }: { widget: Widget }) {
           </p>
         ) : src ? (
           // Same origin as this page: a sandbox attribute would be no barrier here, so none is pretended.
+          // A fresh frame per address: navigating an existing frame would add the
+          // token-bearing address to the browser's session history on every save.
           <iframe
+            key={src}
             src={src}
             title={t("widget_admin_preview_frame_title")}
             className="border-ax-border bg-ax-surface rounded-lg border shadow"

@@ -28,23 +28,33 @@ export function isHostSource(source: string): boolean {
   return HOST_SOURCE.test(source);
 }
 
-/** A bare scheme source (`https:`), which CSP accepts as "anything over that scheme". */
-const SCHEME_SOURCE = /^https?:$/i;
+/** A host source with its scheme: the only shape an allowed origin takes. */
+const ORIGIN_SOURCE = /^https?:\/\//i;
 
+/**
+ * Host sources for a directive. A bare scheme (`https:`) or a scheme-less
+ * host would widen the directive to every site over that scheme or any
+ * scheme; the backend never produces either, so they are dropped here too.
+ */
 function hostSources(sources: readonly string[] | undefined): string[] {
   const cleaned = (sources ?? [])
     .map((source) => source.trim())
-    .filter((source) => isHostSource(source) || SCHEME_SOURCE.test(source));
+    .filter((source) => isHostSource(source) && ORIGIN_SOURCE.test(source));
   return [...new Set(cleaned)];
 }
 
 /**
  * Directives the embed page adds on top of SvelteKit's nonce-based script-src.
- * `style-src` is deliberately not restricted: server-rendered `style:`
- * attributes and the ALTCHA widget's shadow-root styles are inline, and a
- * nonce cannot reach either without patching both.
+ * `style-src` keeps `'unsafe-inline'` for the page's own origin: server-rendered
+ * `style:` attributes and the ALTCHA widget's shadow-root styles are inline,
+ * and a nonce cannot reach either without patching both. Everything the page
+ * does not load (fonts from elsewhere, media, plugins) is closed off.
  */
 export const EMBED_HARDENING: ReadonlyArray<readonly [string, string]> = [
+  ["default-src", "'self'"],
+  ["style-src", "'self' 'unsafe-inline'"],
+  ["font-src", "'self'"],
+  ["media-src", "'none'"],
   ["base-uri", "'none'"],
   ["object-src", "'none'"],
   ["form-action", "'self'"],

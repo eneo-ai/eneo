@@ -26,7 +26,7 @@ export type VisitorSessionOptions = {
   solve: () => Promise<string>;
   storage?: StorageLike | null;
   now?: () => number;
-  /** Seconds an expired token may still rotate silently (server grace is 60 min). */
+  /** Seconds an expired token may still rotate silently (the server's default grace is 15 min). */
   graceSeconds?: number;
   /** A preview token from the admin page: used as is, never stored or rotated. */
   fixedToken?: string | null;
@@ -69,7 +69,7 @@ export class VisitorSession {
           ? safeLocalStorage()
           : options.storage;
     this.#now = options.now ?? (() => Date.now());
-    this.#grace = (options.graceSeconds ?? 3600) * 1000;
+    this.#grace = (options.graceSeconds ?? 900) * 1000;
     this.#state = this.#load();
   }
 

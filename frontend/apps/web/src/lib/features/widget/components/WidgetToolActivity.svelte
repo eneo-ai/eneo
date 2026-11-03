@@ -43,7 +43,7 @@
   {:else if expandable}
     <button
       type="button"
-      class="hover:text-primary flex w-fit max-w-full items-start gap-1.5 rounded-md text-left"
+      class="hover:text-primary flex min-h-6 w-fit max-w-full items-start gap-1.5 rounded-md text-left"
       aria-expanded={open}
       onclick={() => (open = !open)}
     >

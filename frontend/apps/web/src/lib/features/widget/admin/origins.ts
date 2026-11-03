@@ -35,9 +35,11 @@ export function normalizeOrigin(raw: string): string | null {
     if (end < 0) return null;
     host = authority.slice(1, end);
     const rest = authority.slice(end + 1);
-    // The API reads the colons of a bare IPv6 literal as a malformed port.
-    if (!rest.startsWith(":")) return null;
-    port = rest.slice(1);
+    // After the bracket only a port may follow; the colons inside are the address.
+    if (rest !== "") {
+      if (!rest.startsWith(":")) return null;
+      port = rest.slice(1);
+    }
     if (!isIpv6(host)) return null;
   } else {
     const colon = authority.lastIndexOf(":");

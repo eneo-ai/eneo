@@ -166,7 +166,13 @@ describe("WidgetAdminPage", () => {
     expect(dark.getAttribute("aria-pressed")).toBe("true");
     expect(dark.querySelector("svg.lucide-check")).toBeTruthy();
     expect(automatic.querySelector("svg.lucide-check")).toBeNull();
-    expect(new URL(frame.src).searchParams.get("scheme")).toBe("dark");
+    // A changed address gets a fresh frame rather than a navigation of the old
+    // one, so the first frame is gone and the new one carries the scheme.
+    expect(frame.isConnected).toBe(false);
+    const reloaded = (await screen.findByTitle(
+      "Förhandsgranskning av chattwidgeten"
+    )) as HTMLIFrameElement;
+    expect(new URL(reloaded.src).searchParams.get("scheme")).toBe("dark");
   });
 
   it("saves an edited name with the widget's revision after a pause", async () => {

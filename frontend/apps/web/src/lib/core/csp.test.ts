@@ -28,9 +28,10 @@ describe("withFramePolicy", () => {
         harden: true
       })
     ).toBe(
-      "script-src 'self'; object-src 'self'; frame-ancestors 'self'; base-uri 'none'; form-action 'self'; frame-src 'none'"
+      "script-src 'self'; object-src 'self'; frame-ancestors 'self'; default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; media-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'"
     );
     expect(withFramePolicy(null, { frameAncestors: "'none'" })).not.toContain("base-uri");
+    expect(withFramePolicy(null, { frameAncestors: "'none'" })).not.toContain("default-src");
   });
 
   it("allows blob workers only when asked", () => {
@@ -50,6 +51,13 @@ describe("frameAncestorsFor", () => {
     expect(frameAncestorsFor(["https://www.kommun.se", "https://*.kommun.se"])).toBe(
       "'self' https://www.kommun.se https://*.kommun.se"
     );
+  });
+
+  it("drops a bare scheme or a scheme-less host, which would allow any site", () => {
+    expect(frameAncestorsFor(["https:", "www.kommun.se", "https://ok.se"])).toBe(
+      "'self' https://ok.se"
+    );
+    expect(frameAncestorsFor(["https:", "http:"])).toBe("'none'");
   });
 });
 

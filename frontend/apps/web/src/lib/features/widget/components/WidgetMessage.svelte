@@ -146,7 +146,7 @@
         <section aria-label={m.widget_references()} class="border-default mt-1 border-t pt-2">
           <button
             type="button"
-            class="text-secondary hover:text-primary flex items-center gap-1.5 rounded-md text-sm"
+            class="text-secondary hover:text-primary flex min-h-6 items-center gap-1.5 rounded-md text-sm"
             aria-expanded={expanded}
             aria-controls={listId}
             onclick={() => (expanded = !expanded)}

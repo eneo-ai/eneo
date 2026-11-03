@@ -1,6 +1,6 @@
 ---
 title: Bädda in en chattwidget på webbplatsen
-translationSource: guides/embed-widget.mdx@f9c68fb3540d
+translationSource: guides/embed-widget.mdx@b55026edd267
 ---
 
 # Bädda in en chattwidget på webbplatsen
@@ -433,7 +433,10 @@ att ladda om när mallen har ändrat deras widget.
   widgetens tillåtna origins. En webbplats som inte är listad får en tom ram.
   En pausad widget visar ingen chattknapp på nyligen inlästa sidor. En chatt
   som öppnades före pausen visar ett kort meddelande om att den inte är
-  tillgänglig vid nästa anrop.
+  tillgänglig vid nästa anrop. Chattsidan är den enda delen av Eneo som kan
+  ramas in: alla andra sidor svarar med `frame-ancestors 'none'` och
+  `X-Frame-Options: DENY`, så en intranätportal som tidigare visade Eneo i en
+  ram behöver länka dit i stället.
 - **Widgetar i en avstängd organisation** behandlas som pausade i hela den
   publika ytan: nyligen inlästa sidor döljer chattknappen, en redan öppen chatt
   visar meddelandet om att den inte är tillgänglig vid nästa anrop, och inga
@@ -480,7 +483,7 @@ backend. Standardvärdena passar de flesta installationer.
 | Variabel                                 | Standard           | Betydelse                                                                                                                                                                                                    |
 | ---------------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `WIDGET_VISITOR_TOKEN_TTL_SECONDS`       | `900`              | Livslängd för en besökartoken. Chatten förnyar den automatiskt.                                                                                                                                              |
-| `WIDGET_VISITOR_TOKEN_GRACE_SECONDS`     | `3600`             | Hur länge en utgången token fortfarande kan styrka besökarens identitet vid förnyelse, utan ny beräkningsuppgift.                                                                                            |
+| `WIDGET_VISITOR_TOKEN_GRACE_SECONDS`     | `900`              | Hur länge en utgången token fortfarande kan styrka besökarens identitet vid förnyelse, utan ny beräkningsuppgift. Högst livslängden; föregångaren till en förnyad token slutar gälla direkt.                 |
 | `WIDGET_PREVIEW_TOKEN_TTL_SECONDS`       | `3600`             | Livslängd för token bakom förhandsvisningen och **Testa i Eneo**. Förhandsvisningen får en ny token strax innan den går ut. Det gör inte **Testa i Eneo**, så ta bort widgeten från sidan och visa den igen. |
 | `WIDGET_ALTCHA_COST`                     | `1000`             | Hashiterationer per försök i beräkningsuppgiften (minst 1000). Höj värdet för en widget som missbrukas.                                                                                                      |
 | `WIDGET_ALTCHA_KEY_PREFIX`               | `0`                | Ett till fyra hexadecimala tecken som varje försök måste träffa; varje extra tecken gör uppgiften 16 gånger dyrare.                                                                                          |
