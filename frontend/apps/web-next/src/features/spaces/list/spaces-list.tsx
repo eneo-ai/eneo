@@ -14,7 +14,6 @@ import {
   type TableColumn
 } from "@astryxdesign/core/Table";
 import Link from "@/lib/link";
-import { useRouter } from "@/lib/navigation";
 import { ResourceViewControls, useResourceView } from "@/features/spaces/resource-view";
 import { EmptyState } from "@/components/composites/empty-state";
 import { AREA_HUES } from "@/components/composites/icon-tile";
@@ -51,7 +50,6 @@ function SpaceActions({
   onDelete: (space: SpaceSparse) => void;
 }) {
   const t = useTranslations();
-  const router = useRouter();
   const canEdit = space.permissions?.includes("edit");
   const canDelete = space.permissions?.includes("delete");
   if (!canEdit && !canDelete) return null;
@@ -65,7 +63,7 @@ function SpaceActions({
               {
                 label: t("edit"),
                 icon: <Pencil aria-hidden="true" />,
-                onClick: () => router.push(`/spaces/${spaceRouteId(space)}/settings`)
+                href: `/spaces/${spaceRouteId(space)}/settings`
               }
             ]
           : []),

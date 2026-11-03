@@ -1,6 +1,6 @@
 import { Button } from "@astryxdesign/core/Button";
 import { useQuery } from "@tanstack/react-query";
-import { replaceUrl, useRouter, useSearchParams, type UrlOptions } from "@/lib/navigation";
+import { replaceUrl, useSearchParams, type UrlOptions } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
 import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { LoadingState } from "@/components/composites/loading-state";
@@ -120,7 +120,6 @@ export function ChatPage({
   editHref?: string | null;
 }) {
   const t = useTranslations();
-  const router = useRouter();
   const leaveConfirmation = useRef<LeaveConfirmationHandle>(null);
   const [active, setActive] = useState<ActiveConversation | null>(() =>
     urlSessionId ? null : { key: "new", sessionId: null, messages: [], title: null, started: false }
@@ -331,9 +330,7 @@ export function ChatPage({
           }
         ]
       : []),
-    ...(editHref
-      ? [{ label: t("chat_edit_assistant"), onClick: () => router.push(editHref) }]
-      : []),
+    ...(editHref ? [{ label: t("chat_edit_assistant"), href: editHref }] : []),
     {
       label: contextUsagePinned ? t("context_usage_menu_hide") : t("context_usage_menu_show"),
       onClick: () => setContextUsagePinned(!contextUsagePinned)
