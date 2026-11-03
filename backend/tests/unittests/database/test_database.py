@@ -31,6 +31,7 @@ def test_database_engine_honors_configured_pool_settings(monkeypatch):
         pool_pre_ping=False,
         pool_recycle=90,
         echo_pool=True,
+        hide_parameters=True,
     )
 
 
