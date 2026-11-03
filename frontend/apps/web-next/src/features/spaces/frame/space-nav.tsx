@@ -27,7 +27,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { blockingError } from "@/components/composites/query-state";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
-import { iconUrl } from "@/components/composites/icon-field";
+import { iconUrl } from "@/components/composites/icon-url";
 import { useAppContext } from "@/components/providers/app-context";
 import { spaceRouteIdFromPath } from "@/components/shell/routes";
 import { useShell } from "@/components/shell/shell-context";
