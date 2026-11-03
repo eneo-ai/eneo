@@ -50,7 +50,7 @@ import {
 } from "./side-panel/document-versions";
 import { messageGeneratedFiles, messageToolCalls } from "./side-panel/message-tool-calls";
 import { isTableQuote, parseQuotedQuestion, quotedFileMatches } from "./side-panel/question-quote";
-import { useSidePanel } from "./side-panel/use-side-panel";
+import { useSidePanel, useSidePanelStore } from "./side-panel/use-side-panel";
 import {
   assistantClipboardContent,
   canCopyRichText,
@@ -594,7 +594,8 @@ function AssistantMessage({
   documents: ConversationDocument[];
   draft: DocumentDraft | null;
 }) {
-  const panel = useSidePanel();
+  // Only a document link's click reads the panel; its document lines follow it themselves.
+  const panel = useSidePanelStore();
   const text = messageText(message);
   // The names an answer can mention a document by: each is a link to it.
   const names = useMemo(
