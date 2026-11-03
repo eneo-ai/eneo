@@ -6,6 +6,7 @@ import { EneoError, type WidgetPublicConfig } from "@eneo/eneo-js";
 import "../../../../app.css";
 import axe, { type AxeResults } from "axe-core";
 import { virtual } from "@guidepup/virtual-screen-reader";
+import { expectNoAxeViolations } from "$lib/test/axe";
 import { backgroundOf, contrastAgainst } from "./contrastProbe";
 
 /** Rule ids and targets of every axe violation on the page, for a readable diff. */
@@ -18,14 +19,20 @@ async function violations() {
 }
 
 /** Every WCAG 2.0–2.2 A and AA rule, contrast included; any impact counts. */
-async function wcagViolations() {
-  const result = await axe.run(document, {
+async function expectNoWidgetWcagViolations() {
+  // The shared scan waits for finite intro animations before measuring contrast.
+  // This embed is a whole document, so keep its page-level checks enabled too.
+  await expectNoAxeViolations(document, {
     runOnly: {
       type: "tag",
       values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22a", "wcag22aa"]
+    },
+    rules: {
+      region: { enabled: true },
+      "landmark-one-main": { enabled: true },
+      "page-has-heading-one": { enabled: true }
     }
   });
-  return summarise(result);
 }
 
 function summarise(result: AxeResults) {
@@ -1172,12 +1179,12 @@ describe("WidgetChat against WCAG 2.2 A and AA", () => {
       });
       await expect.element(composer()).toBeVisible();
       expect(document.documentElement.dataset.theme).toBe(scheme);
-      expect(JSON.stringify(await wcagViolations())).toBe("[]");
+      await expectNoWidgetWcagViolations();
 
       await userEvent.click(suggestion());
       await releaseAnswer();
       await expect.element(page.getByText("widget_feedback_prompt")).toBeVisible();
-      expect(JSON.stringify(await wcagViolations())).toBe("[]");
+      await expectNoWidgetWcagViolations();
     }
   );
 
@@ -1198,12 +1205,12 @@ describe("WidgetChat against WCAG 2.2 A and AA", () => {
         hostScheme: scheme
       });
       await expect.element(composer()).toBeVisible();
-      expect(JSON.stringify(await wcagViolations())).toBe("[]");
+      await expectNoWidgetWcagViolations();
 
       await userEvent.click(suggestion());
       await releaseAnswer();
       await expect.element(page.getByText("widget_feedback_prompt")).toBeVisible();
-      expect(JSON.stringify(await wcagViolations())).toBe("[]");
+      await expectNoWidgetWcagViolations();
     }
   );
 
@@ -1212,13 +1219,13 @@ describe("WidgetChat against WCAG 2.2 A and AA", () => {
     fake.failNextAsk = true;
     await userEvent.click(suggestion());
     await expect.element(page.getByRole("alert")).toHaveTextContent("widget_error_generic");
-    expect(JSON.stringify(await wcagViolations())).toBe("[]");
+    await expectNoWidgetWcagViolations();
 
     await expect.element(composer()).toHaveValue("Vad har biblioteket för öppettider?");
     await userEvent.click(page.getByRole("button", { name: "widget_send", exact: true }));
     await releaseAnswer();
     await expect.element(page.getByRole("button", { name: "widget_new_question" })).toBeVisible();
-    expect(JSON.stringify(await wcagViolations())).toBe("[]");
+    await expectNoWidgetWcagViolations();
   });
 });
 
