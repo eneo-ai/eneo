@@ -196,14 +196,6 @@ test("the Vite widget loads cross-origin, streams and stores conversation feedba
     await expect(
       frame.getByRole("button", { name: "Redigera kommentar", exact: true })
     ).toBeVisible();
-    expect(
-      (
-        await new AxeBuilder({ page: host })
-          .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22a", "wcag22aa"])
-          .analyze()
-      ).violations
-    ).toEqual([]);
-
     await composer.focus();
     await host.keyboard.press("Escape");
     await expect(launcher).toHaveAttribute("aria-expanded", "false");
@@ -215,6 +207,52 @@ test("the Vite widget loads cross-origin, streams and stores conversation feedba
     }
   } finally {
     await host.close();
+  }
+});
+
+test("the real widget passes the full WCAG AA audit in its accessibility instrumentation context", async ({
+  page,
+  browser
+}) => {
+  test.setTimeout(120_000);
+  const widget = await createWidget(page, true);
+  const response = await page.request.get("/widget/manifest.json");
+  expect(response.status()).toBe(200);
+  const release: LoaderRelease = await response.json();
+  hostHtml = hostDocument(eneoOrigin, widget, release);
+  // Axe's CSSOM preloader copies shadow-root styles into inline STYLE nodes
+  // in a helper document. Only this audit context permits that instrumentation;
+  // the separate functional flow enforces the real host and production CSP.
+  const auditContext = await browser.newContext({ bypassCSP: true });
+  try {
+    const host = await auditContext.newPage();
+    await host.goto(allowedOrigin);
+    await host.locator("eneo-widget button.launcher").click();
+    const frame = host.frameLocator("eneo-widget iframe");
+    await expect(frame.getByRole("heading", { name: "Fråga kommunen", exact: true })).toBeVisible();
+    const composer = frame.getByRole("textbox", { name: "Din fråga", exact: true });
+    await expect(composer).toBeFocused();
+    await composer.fill("Hej, vad kan du?");
+    await frame.getByRole("button", { name: "Skicka", exact: true }).click();
+    await expect(frame.getByRole("log").getByText(MOCK_REPLY, { exact: true })).toBeVisible({
+      timeout: 45_000
+    });
+    const helpful = frame.getByRole("button", { name: "Hjälpsam konversation", exact: true });
+    await expect(helpful).toBeVisible();
+    const audit = async () => {
+      const results = await new AxeBuilder({ page: host })
+        .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22a", "wcag22aa"])
+        .analyze();
+      expect(results.violations).toEqual([]);
+    };
+    // Cover the question, answer and vote controls before the modal hides them.
+    await audit();
+    await helpful.click();
+    await frame.getByRole("button", { name: "Vill du berätta mer?", exact: true }).click();
+    await expect(frame.getByRole("dialog", { name: "Berätta mer", exact: true })).toBeVisible();
+    await audit();
+  } finally {
+    await auditContext.close();
   }
 });
 
