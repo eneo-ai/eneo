@@ -332,6 +332,11 @@ SESSIONS_REPO_CASES: list[tuple[str, Callable[..., Awaitable[set[UUID]]], str]] 
         "single",
     ),
     (
+        "get_ownership_returns_none_for_helper",
+        lambda repo, s: repo.get_ownership(s["helper_session"]),
+        "single",
+    ),
+    (
         "get_metadata_by_assistant_helper_returns_empty",
         lambda repo, s: repo.get_metadata_by_assistant(
             assistant_id=s["helper_assistant"]

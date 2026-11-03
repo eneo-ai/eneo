@@ -386,18 +386,17 @@ class ConversationService:
         """
         inline_file_text = True
         if session_id:
-            session = await self.session_service.get_session_by_uuid(session_id)
-            assert session is not None
-            if session.group_chat_id:
+            owner = await self.session_service.get_session_ownership(session_id)
+            if owner.group_chat_id:
                 model, selector_tokens = await self._group_chat_preflight_model(
-                    session.group_chat_id,
+                    owner.group_chat_id,
                     question=question,
                     tool_assistant_id=tool_assistant_id,
                 )
             else:
-                assert session.assistant is not None
+                assert owner.assistant_id is not None
                 model, inline_file_text = await self._assistant_preflight_settings(
-                    session.assistant.id
+                    owner.assistant_id
                 )
                 selector_tokens = 0
         elif assistant_id:

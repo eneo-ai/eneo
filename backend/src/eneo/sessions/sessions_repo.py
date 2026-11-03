@@ -51,6 +51,15 @@ class OwnedChatPartner(NamedTuple):
     group_chat_id: UUID | None
 
 
+class SessionOwnership(NamedTuple):
+    """Who a conversation belongs to and whom it is with, without its turns."""
+
+    user_id: UUID | None
+    api_key_id: UUID | None
+    assistant_id: UUID | None
+    group_chat_id: UUID | None
+
+
 @dataclass(frozen=True, slots=True)
 class ChatPartnerAccess:
     """An assistant or group chat the user has conversations with.
@@ -232,6 +241,19 @@ class SessionRepository:
         return await self._hydrate_optional(
             await self.delegate.get_model_from_query(query)
         )
+
+    async def get_ownership(self, id: UUID) -> SessionOwnership | None:
+        """``get`` reduced to the principal and chat partner columns."""
+        query = self._exclude_helper_run_sessions(
+            sa.select(
+                Sessions.user_id,
+                Sessions.api_key_id,
+                Sessions.assistant_id,
+                Sessions.group_chat_id,
+            ).where(Sessions.id == id)
+        )
+        row = (await self.session.execute(query)).one_or_none()
+        return None if row is None else SessionOwnership(*row)
 
     async def get_owned_chat_partner(
         self,
