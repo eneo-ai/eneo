@@ -283,6 +283,19 @@ test("web-next rejects route drift before type checking", () => {
   assert.ok(job.indexOf("- name: Check route tree drift") < job.indexOf("- name: Type check"));
 });
 
+test("publications running side by side never cancel or replace each other's work", () => {
+  const read = (file) => fs.readFileSync(path.join(root, ".github/workflows", file), "utf8");
+  // Called by image publication, CI carries the caller's workflow name and belongs to that run.
+  const ci = read("ci.yml").split("\nconcurrency:\n")[1].split("\n\n")[0];
+  assert.equal(ci, [
+    "  group: ${{ github.workflow == 'CI' && format('CI-{0}', github.event.pull_request.number || github.ref) || format('{0}-checks-{1}', github.workflow, github.run_id) }}",
+    "  cancel-in-progress: ${{ github.workflow == 'CI' }}",
+  ].join("\n"));
+  // One tool-runtime publisher per version, and a waiting one is never replaced.
+  const runtime = read("tool_runtime_image.yml").split("\n  image:\n")[1].split("\n    permissions:")[0];
+  assert.match(runtime, /^      group: tool-runtime-image-\$\{\{ needs\.test\.outputs\.publish == 'true' && needs\.test\.outputs\.version \|\| github\.run_id \}\}\n      queue: max\n      cancel-in-progress: false$/m);
+});
+
 test("only develop pushes save the package download cache", () => {
   // Pull request and merge-queue refs saved their own ~610 MB copy that no other ref could restore.
   const action = fs.readFileSync(path.join(root, ".github/actions/setup-frontend/action.yml"), "utf8");

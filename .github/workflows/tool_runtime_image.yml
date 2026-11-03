@@ -84,9 +84,12 @@ jobs:
     name: Build ${{ needs.test.outputs.publish == 'true' && 'and publish ' || '' }}image
     needs: test
     runs-on: ubuntu-latest
-    # One publisher at a time so the version-tag check below cannot race.
+    # One publisher per version so the version-tag check below cannot race; other
+    # versions and pull-request builds (which publish nothing) wait for none of them,
+    # and a waiting publisher is never replaced by a later one.
     concurrency:
-      group: tool-runtime-image-${{ needs.test.outputs.publish }}
+      group: tool-runtime-image-${{ needs.test.outputs.publish == 'true' && needs.test.outputs.version || github.run_id }}
+      queue: max
       cancel-in-progress: false
     permissions:
       contents: read

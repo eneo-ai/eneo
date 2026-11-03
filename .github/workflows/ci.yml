@@ -21,9 +21,12 @@ permissions:
   contents: read
   pull-requests: read
 
+# A newer push to a pull request or branch replaces its older CI run. Called by image
+# publication, CI takes the caller's workflow name: there it belongs to that one
+# publication run and is never cancelled or replaced by another publication's checks.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow == 'CI' && format('CI-{0}', github.event.pull_request.number || github.ref) || format('{0}-checks-{1}', github.workflow, github.run_id) }}
+  cancel-in-progress: ${{ github.workflow == 'CI' }}
 
 env:
   POSTGRES_USER: placeholder
