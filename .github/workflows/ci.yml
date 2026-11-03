@@ -2,6 +2,12 @@ name: CI
 
 on:
   workflow_call:
+    inputs:
+      # Image publication builds the backend and frontend images itself; its CI skips
+      # their dry-run builds.
+      publication:
+        type: boolean
+        default: false
   # A branch that is not a pull request (a feature integration branch) can
   # run the full CI by hand without publishing images.
   workflow_dispatch:
@@ -13,7 +19,8 @@ on:
     branches:
       - develop
       - "release/**"
-  # Classify the entire candidate diff, including preceding queued PRs.
+  # The full suite: the candidate is what lands on develop, and image publication
+  # reuses this run's result for that commit.
   merge_group:
     types: [checks_requested]
 
@@ -21,9 +28,12 @@ permissions:
   contents: read
   pull-requests: read
 
+# A newer push to a pull request or branch replaces its older CI run. Called by image
+# publication, CI takes the caller's workflow name: there it belongs to that one
+# publication run and is never cancelled or replaced by another publication's checks.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow == 'CI' && format('CI-{0}', github.event.pull_request.number || github.ref) || format('{0}-checks-{1}', github.workflow, github.run_id) }}
+  cancel-in-progress: ${{ github.workflow == 'CI' }}
 
 env:
   POSTGRES_USER: placeholder
@@ -79,6 +89,8 @@ jobs:
 
       - name: Plan CI from the event's complete diff
         id: scope
+        env:
+          CI_PUBLICATION: ${{ inputs.publication }}
         run: node .github/scripts/ci-change-scope.mjs --github-event >> "$GITHUB_OUTPUT"
 
       - name: Check branch name
@@ -408,6 +420,10 @@ jobs:
       - name: Type check
         run: FORCE_COLOR=1 bun run --filter '@eneo/web-next' check
 
+      # Before the E2E legs spend their minutes: every case runs in exactly one leg.
+      - name: Check the E2E legs' selections
+        run: node ../.github/scripts/ci-web-next-e2e-legs.mjs
+
       - name: Test
         run: FORCE_COLOR=1 bun run --filter '@eneo/web-next' test
 
@@ -542,7 +558,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.web_next_e2e == 'true'
     runs-on: ubuntu-24.04
-    # Legs take 21-28 minutes, but a route walk that hits its 15-minute test limit
+    # Legs take 20-24 minutes, but a route walk that hits its 15-minute test limit
     # and its retry must still finish here: a job that times out also loses its
     # !cancelled() report upload.
     timeout-minutes: 60
@@ -551,19 +567,23 @@ jobs:
     # long route walks unbalanced, so four legs take the walks by tag, the screens
     # leg takes the admin, space and editor screens' specs (and the forced-colors
     # walk) by file name, and the rest leg excludes both: every case runs once.
-    # The split follows the test minutes of runs 41640686762 and 41646343618:
-    # walks 17-20 each, screens about 13, rest about 13. A new route walk adds its
-    # tag to a walk leg and to the other legs' exclusions.
+    # The a11y-routes, keyboard and contract walks also carry their viewport's
+    # device (walkTags in tests/responsive-fixtures.ts), so a leg takes one cell of
+    # them, such as "@a11y-routes @ipad". @a11y-light is in no walk leg and runs in
+    # the rest leg. The split follows the test minutes of the six-leg runs
+    # 41661461275, 41666456119 and 41668050527: about 16-17 for each walk leg and
+    # the rest leg, 11 for screens. A new route walk adds its tag to a walk leg and
+    # to the other legs' exclusions.
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { leg: walks-1, grep: "@a11y-routes", grep_invert: "@upload-worker" }
-          - { leg: walks-2, grep: "@layout-shift|@text-size", grep_invert: "@upload-worker" }
-          - { leg: walks-3, grep: "@keyboard|@a11y-dark", grep_invert: "@upload-worker" }
-          - { leg: walks-4, grep: "@contract|@a11y-light|@turn", grep_invert: "@upload-worker" }
-          - { leg: screens, grep: " (admin|assistant|document|editor|forced|knowledge|mcp|resource|sharepoint|skills|space)-[^ ]*[.]spec[.]ts ", grep_invert: "@upload-worker|@a11y-routes|@layout-shift|@text-size|@keyboard|@a11y-dark|@contract|@a11y-light|@turn" }
-          - { leg: rest, grep: ".", grep_invert: "@upload-worker|@a11y-routes|@layout-shift|@text-size|@keyboard|@a11y-dark|@contract|@a11y-light|@turn| (admin|assistant|document|editor|forced|knowledge|mcp|resource|sharepoint|skills|space)-[^ ]*[.]spec[.]ts ", upload_worker: true }
+          - { leg: walks-1, grep: "@a11y-routes @phone|@keyboard @desktop|@keyboard @ipad|@turn", grep_invert: "@upload-worker" }
+          - { leg: walks-2, grep: "@a11y-routes @ipad|@contract @ipad", grep_invert: "@upload-worker" }
+          - { leg: walks-3, grep: "@keyboard @phone|@layout-shift", grep_invert: "@upload-worker" }
+          - { leg: walks-4, grep: "@contract @phone|@text-size|@a11y-dark", grep_invert: "@upload-worker" }
+          - { leg: screens, grep: " (admin|assistant|document|editor|forced|knowledge|mcp|resource|sharepoint|skills|space)-[^ ]*[.]spec[.]ts ", grep_invert: "@upload-worker|@a11y-routes @phone|@keyboard @desktop|@keyboard @ipad|@turn|@a11y-routes @ipad|@contract @ipad|@keyboard @phone|@layout-shift|@contract @phone|@text-size|@a11y-dark" }
+          - { leg: rest, grep: ".", grep_invert: "@upload-worker|@a11y-routes @phone|@keyboard @desktop|@keyboard @ipad|@turn|@a11y-routes @ipad|@contract @ipad|@keyboard @phone|@layout-shift|@contract @phone|@text-size|@a11y-dark| (admin|assistant|document|editor|forced|knowledge|mcp|resource|sharepoint|skills|space)-[^ ]*[.]spec[.]ts ", upload_worker: true }
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -822,9 +842,10 @@ jobs:
           build-contexts: ${{ matrix.build_contexts }}
           pull: true
           push: false
-          # Default-branch publication exports each application image's cache
-          # under its own scope; a second export of the same layers here would
-          # only double cache storage. The devcontainer has no publication
+          # Default-branch publication exports the backend image's cache under
+          # its scope (not the Svelte frontend's, whose layers are rarely reused);
+          # an export of application layers here would only double cache
+          # storage. The devcontainer has no publication
           # build, so CI warms its cache itself, on branch pushes only:
           # PR/queue refs cannot share exported caches with later candidates.
           cache-from: |
@@ -859,3 +880,29 @@ jobs:
           EXPECTED_JOBS: ${{ needs.changes.outputs.expected_jobs }}
           JOB_RESULTS: ${{ toJSON(needs) }}
         run: node .github/scripts/ci-gate.mjs
+
+      # Evidence for image publication, written only once every required job passed:
+      # which commit passed which scope, in which run and attempt of which workflow.
+      # Publication reuses a merge-queue run only through this receipt, so only those
+      # runs write one; elsewhere an artifact-service hiccup cannot turn CI red.
+      - name: Write the validation receipt
+        if: github.event_name == 'merge_group'
+        env:
+          FULL: ${{ needs.changes.outputs.full }}
+        run: |
+          jq -n --arg sha "$GITHUB_SHA" --arg repository "$GITHUB_REPOSITORY" \
+            --arg workflow "$GITHUB_WORKFLOW_REF" --arg event "$GITHUB_EVENT_NAME" \
+            --argjson run_id "$GITHUB_RUN_ID" --argjson run_attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg scope "$([[ "$FULL" == true ]] && echo full || echo scoped)" \
+            '{schema: 1, sha: $sha, repository: $repository, workflow: $workflow, event: $event,
+              run_id: $run_id, run_attempt: $run_attempt, scope: $scope}' >ci-receipt.json
+          cat ci-receipt.json
+
+      - name: Keep the validation receipt
+        if: github.event_name == 'merge_group'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ci-receipt
+          path: ci-receipt.json
+          retention-days: 14
+          overwrite: true

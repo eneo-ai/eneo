@@ -7,7 +7,7 @@ import { STORAGE_STATE } from "../playwright.config";
 import { contrastIncomplete } from "./contrast-incomplete";
 import { contrastProbe } from "./contrast-probe";
 import { leftEdgeProbe } from "./left-edge-probe";
-import { createFixtures, openRoute } from "./responsive-fixtures";
+import { createFixtures, openRoute, walkTags } from "./responsive-fixtures";
 import { ROUTES, type Fixtures } from "./responsive-routes";
 import { selectedProbe } from "./selected-probe";
 import { DEV_ONLY, probeBaseline, type Cell } from "./ui-probes";
@@ -86,7 +86,7 @@ for (const variant of VARIANTS) {
   if (only && !only.includes(`${variant.name}-${variant.scheme}`)) continue;
   test(
     `every screen passes axe on a ${variant.name}, ${variant.scheme} mode`,
-    { tag: ["@vite", "@a11y-routes"] },
+    { tag: walkTags("@a11y-routes", variant.name) },
     async ({ browser, baseURL }) => {
       test.setTimeout(15 * 60_000);
       const problems: string[] = [];

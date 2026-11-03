@@ -750,7 +750,6 @@ class Releases:
                 for r in self.github.pages("/releases")
                 if not r["draft"] and not r["prerelease"]
             ],
-            None,
         )
         if release["draft"]:
             self.github.request(

@@ -99,7 +99,7 @@ export function bundleReport(): Plugin {
       for (const [name, scope] of Object.entries(report.scopes)) {
         const eager = scope?.modules.filter(
           (id) =>
-            /(?:^|\/)node_modules\/(?:driver\.js|@tiptap\/[^/]+|prosemirror-[^/]+|rehype-stringify)\//.test(
+            /(?:^|\/)node_modules\/(?:driver\.js|@tiptap\/[^/]+|prosemirror-[^/]+|rehype-stringify|shiki|@shikijs\/[^/]+)\//.test(
               id
             ) ||
             [

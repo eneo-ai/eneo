@@ -9,7 +9,11 @@ import { useTranslations } from "use-intl";
 import { useRef, useState } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { browserApi } from "@/lib/api/browser";
-import { dropFromRecentConversations, invalidateConversationLists } from "@/lib/api/conversations";
+import {
+  invalidateRecentConversations,
+  patchConversations,
+  patchRecentConversations
+} from "@/lib/api/conversations";
 import { unwrap } from "@/lib/api/errors";
 import type { CursorPage } from "@/lib/api/pagination";
 import { toastApiError } from "@/lib/api/toast";
@@ -42,11 +46,29 @@ export function useSessionMutations(
 ) {
   const t = useTranslations();
   const queryClient = useQueryClient();
+  // Each list once: invalidating this partner's history twice would read its
+  // first page twice (the second call cancels the first).
   const invalidate = () =>
     Promise.all([
-      invalidateConversationLists(queryClient, historyQueryKey(partner)),
+      invalidateRecentConversations(queryClient),
       queryClient.invalidateQueries(historyLists)
     ]);
+  // A rename (the new name) or a delete (null) shows at once in every loaded
+  // list, every page of each history included; the refetch follows.
+  const patchLists = (id: string, name: string | null) => {
+    patchRecentConversations(queryClient, id, name);
+    queryClient.setQueriesData<InfiniteData<CursorPage<{ id: string; name: string }>>>(
+      historyLists,
+      (data) =>
+        data && {
+          ...data,
+          pages: data.pages.map((page) => ({
+            ...page,
+            items: patchConversations(page.items, id, name)
+          }))
+        }
+    );
+  };
 
   const rename = useMutation({
     mutationFn: ({ id, name }: { id: string; name: string }) =>
@@ -57,6 +79,7 @@ export function useSessionMutations(
         })
       ),
     onSuccess: (_, { id, name }) => {
+      patchLists(id, name);
       invalidate();
       onRenamed?.(id, name);
     },
@@ -71,20 +94,9 @@ export function useSessionMutations(
         })
       ),
     onSuccess: (_, id) => {
-      // Drop the row at once (the refetch follows), so the history never shows
-      // a deleted conversation and focus can move on from its row.
-      dropFromRecentConversations(queryClient, id);
-      queryClient.setQueriesData<InfiniteData<CursorPage<{ id: string }>>>(historyLists, (data) =>
-        data
-          ? {
-              ...data,
-              pages: data.pages.map((page) => ({
-                ...page,
-                items: page.items.filter((item) => item.id !== id)
-              }))
-            }
-          : data
-      );
+      // The history never shows a deleted conversation, and focus can move on
+      // from its row.
+      patchLists(id, null);
       invalidate();
       onDeleted?.(id);
     },

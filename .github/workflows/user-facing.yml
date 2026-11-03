@@ -15,9 +15,12 @@ permissions:
   contents: read
   pull-requests: read
 
+# A newer push to a pull request replaces its older check. Called by CI for anything
+# else (image publication included), it belongs to that one run and is never cancelled
+# or replaced by another run's check.
 concurrency:
-  group: user-facing-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.event_name == 'pull_request' && format('user-facing-{0}-{1}', github.workflow, github.event.pull_request.number) || format('user-facing-{0}-{1}', github.workflow, github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   user-facing:

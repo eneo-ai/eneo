@@ -21,8 +21,11 @@ on:
         default: false
         type: boolean
 
+# One SBOM publication per tag at a time, manual or called by image publication; a
+# waiting one is never replaced by a later one.
 concurrency:
-  group: ${{ github.workflow }}-${{ inputs.tag }}
+  group: eneo-release-sbom-${{ inputs.tag }}
+  queue: max
   cancel-in-progress: false
 
 env:

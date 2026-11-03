@@ -14,13 +14,14 @@ import {
 } from "react";
 import { API_BASE, onBrowserApiRequest, onRawRefusal } from "@/lib/api/base";
 import { browserApi } from "@/lib/api/browser";
-import { apiErrorFromResponse, getErrorMessage, unwrap } from "@/lib/api/errors";
+import { apiErrorFromResponse, getErrorMessage, orOn404, unwrap } from "@/lib/api/errors";
 import { pollWhile } from "@/lib/api/query";
 import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
 import { toast } from "@/lib/toast";
 import {
   pendingImports,
   reportImports,
+  trackImports,
   type SettledImport
 } from "@/features/knowledge/integrations/import-completion";
 import { pendingSyncs, untrackSyncs } from "@/features/knowledge/integrations/pending-syncs";
@@ -32,7 +33,10 @@ import {
   EMPTY_LEDGER,
   isJobOver,
   rememberActiveJob,
-  type JobLedger
+  isCurrentRead,
+  settleRead,
+  type JobLedger,
+  type LedgerEntry
 } from "./job-transitions";
 import { isJobActive, JOBS_KEY, type Job } from "./jobs";
 import { recordFinishedJob } from "./recent-results";
@@ -50,6 +54,8 @@ export type Upload = {
   errorMessage?: string;
 };
 
+/** The safety net while the live feed is open: a reconnect refetches anyway. */
+const LIVE_POLL_MS = 120_000;
 const SLOW_POLL_MS = 30_000;
 const FAST_POLL_MS = 2_000;
 /** Poll fast for this long after a job is registered, then fall back. */
@@ -169,6 +175,16 @@ const NO_JOBS: Job[] = [];
 
 const fetchJobs = async (): Promise<Job[]> => (await unwrap(browserApi.GET("/api/v1/jobs/"))).items;
 
+const readJob = (id: string): Promise<Job | null> =>
+  orOn404(unwrap(browserApi.GET("/api/v1/jobs/{id}/", { params: { path: { id } } })), null);
+
+/** The cached list with these jobs' latest state: replaced in place, or added. */
+function withJobs(current: readonly Job[], jobs: readonly Job[]): Job[] {
+  const latest = new Map(jobs.map((job) => [job.id, job]));
+  const added = jobs.filter((job) => !current.some((item) => item.id === job.id));
+  return [...current.map((item) => latest.get(item.id) ?? item), ...added];
+}
+
 export function JobsProvider({ children }: { children: React.ReactNode }) {
   const t = useTranslations();
   const queryClient = useQueryClient();
@@ -178,16 +194,22 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   const fastPollUntil = useRef(0);
   // Set by the fetcher, not by the cache: a pushed update can fill the cache
   // before the first list arrives, and only a list says which jobs are gone.
-  const listReceived = useRef(false);
+  // Lists are numbered as they start; `listedBy` is the last one received
+  // (0: none yet), so a job the client started is judged only by lists
+  // begun after it (job-transitions.ts).
+  const listsStarted = useRef(0);
+  const listedBy = useRef(0);
   const listJobs = useCallback(async () => {
+    const number = ++listsStarted.current;
     const items = await fetchJobs();
-    listReceived.current = true;
+    listedBy.current = number;
     return items;
   }, []);
 
   // The live feed (job-events.ts) delivers every status change the moment it
-  // is committed. Polling stays as the safety net: slow while the feed is
-  // open, fast while it is down and something is running or was just started.
+  // is committed. Polling stays as the safety net: every two minutes while
+  // the feed is open; while it is down, fast when something is running or
+  // was just started, slow otherwise.
   const live = useJobEventsConnected();
   const { data: jobs, dataUpdatedAt: jobsUpdatedAt } = useQuery({
     queryKey: JOBS_KEY,
@@ -197,7 +219,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
       // eslint-disable-next-line react-hooks/refs, react-hooks/purity
       (items) => !live && (Date.now() < fastPollUntil.current || !!items?.some(isJobActive)),
       FAST_POLL_MS,
-      SLOW_POLL_MS
+      live ? LIVE_POLL_MS : SLOW_POLL_MS
     )
   });
   useEffect(
@@ -207,9 +229,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
           // A pushed update goes straight into the cached list; the snapshot
           // effect below then treats it like a poll that saw the change.
           queryClient.setQueryData<Job[]>(JOBS_KEY, (current = NO_JOBS) =>
-            current.some((item) => item.id === job.id)
-              ? current.map((item) => (item.id === job.id ? job : item))
-              : [...current, job]
+            withJobs(current, [job])
           );
         },
         () => {
@@ -226,10 +246,45 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   // queued from a menu stops reading as queued once its job is over. The
   // ledger lives in a ref because it is bookkeeping, not render state.
   const ledger = useRef<JobLedger>(EMPTY_LEDGER);
+  /** A job read by id was gone: its data may have changed all the same. */
+  const refreshDue = useRef(false);
+
+  // The list keeps a completed job for five minutes, so one that finished
+  // while the feed was down for longer leaves it unseen. Each such job is
+  // read by id, and what its read says goes into the cached list as a pushed
+  // update would: the snapshot path below reports it. A job that is gone
+  // (404) is dropped and its data refreshed, as before these reads; the
+  // cache write has the list judged again for an import or sync waiting on
+  // it. A job still running, or a failed read, is read again with the next
+  // list that misses it.
+  const readVanished = useCallback(
+    (lookup: LedgerEntry) => {
+      void readJob(lookup.job.id)
+        .catch(() => undefined)
+        .then((job) => {
+          // A list has shown it since, or a newer read speaks for it.
+          if (!isCurrentRead(ledger.current, lookup)) return;
+          const gone = job === null;
+          ledger.current = settleRead(ledger.current, lookup, gone);
+          const found = job && !isJobActive(job) ? [job] : [];
+          // Refreshed by the snapshot this write brings about, once for
+          // every job that ended or went in the same render.
+          if (gone) refreshDue.current = true;
+          if (gone || found.length > 0) {
+            queryClient.setQueryData<Job[]>(JOBS_KEY, (current = NO_JOBS) =>
+              withJobs(current, found)
+            );
+          }
+        });
+    },
+    [queryClient]
+  );
+
   const handleSnapshot = useCallback(
-    (loaded: readonly Job[] | undefined) => {
-      const snapshot = loaded ?? NO_JOBS;
-      const diff = diffJobs(ledger.current, snapshot);
+    (snapshot: readonly Job[] | undefined) => {
+      // Only a list says which jobs are gone.
+      if (!snapshot) return;
+      const diff = diffJobs(ledger.current, snapshot, listedBy.current);
       ledger.current = diff.ledger;
       const imports = pendingImports();
       for (const { job, outcome } of diff.transitions) {
@@ -244,12 +299,12 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
           toast.info(feedback.title);
         }
       }
-      // A vanished job finished (or was cleaned up) without reporting; its
-      // data may still have changed, so refresh as for a reported outcome.
-      const changed = diff.transitions.length > 0 || diff.vanished.length > 0;
-      if (changed) invalidateAfterJobs(queryClient);
-      if (!loaded) return;
-      const over = (jobId: string) => isJobOver(jobId, snapshot, diff.ledger, listReceived.current);
+      if (diff.transitions.length > 0 || refreshDue.current) {
+        refreshDue.current = false;
+        invalidateAfterJobs(queryClient);
+      }
+      for (const { id } of diff.vanished) readVanished(diff.ledger.get(id)!);
+      const over = (jobId: string) => isJobOver(jobId, snapshot, diff.ledger, listedBy.current > 0);
       untrackSyncs(pendingSyncs().flatMap((item) => (over(item.jobId) ? [item.jobId] : [])));
       // Retry pending reports on each successful poll, even when no job changed.
       // reportImports serialises attempts and removes only reported imports.
@@ -258,10 +313,19 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
           ? [
               {
                 ...item,
-                jobStatus: snapshot.find((job) => job.id === item.jobId)?.status ?? null
+                jobStatus:
+                  snapshot.find((job) => job.id === item.jobId)?.status ?? item.jobStatus ?? null
               }
             ]
           : []
+      );
+      // A later list may no longer show the job (one read by id, say): the
+      // pending import keeps how it ended for the reports still to come.
+      const known = (jobId: string) => imports.find((item) => item.jobId === jobId)?.jobStatus;
+      trackImports(
+        settled.flatMap(({ jobStatus, ...item }) =>
+          jobStatus !== null && jobStatus !== known(item.jobId) ? [{ ...item, jobStatus }] : []
+        )
       );
       if (settled.length > 0) {
         void reportImports(settled, {
@@ -271,7 +335,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         });
       }
     },
-    [queryClient, router, t]
+    [queryClient, readVanished, router, t]
   );
   useEffect(() => {
     handleSnapshot(jobs);
@@ -281,7 +345,9 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
     (job?: Job | Job[]) => {
       const jobs = job === undefined ? [] : Array.isArray(job) ? job : [job];
       if (jobs.length > 0) {
-        for (const started of jobs) ledger.current = rememberActiveJob(ledger.current, started);
+        for (const started of jobs) {
+          ledger.current = rememberActiveJob(ledger.current, started, listsStarted.current);
+        }
         // The cached list may already show these jobs finished. Judge it now:
         // a refetch that returns identical data does not re-run the effect.
         handleSnapshot(queryClient.getQueryData<Job[]>(JOBS_KEY));
