@@ -538,7 +538,7 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
   if (!shown) {
     return (
       <div className="flex min-w-0 flex-1 flex-col">
-        <div className="flex w-full max-w-5xl flex-col py-4 md:px-6 md:py-5">
+        <div className="flex w-full max-w-5xl flex-col py-4 md:py-5">
           <LoadingState rows={4} label={t("flow_runs_run_loading")} />
         </div>
       </div>
@@ -547,7 +547,7 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
 
   return (
     <div className="flex min-w-0 flex-1 flex-col">
-      <div className="border-ax-border flex flex-col gap-3 border-b pt-4 pb-3 md:px-6">
+      <div className="border-ax-border flex flex-col gap-3 border-b pt-4 pb-3">
         <PageHeader
           title={title}
           headingRef={headingRef}
@@ -611,7 +611,7 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
         ) : null}
       </div>
 
-      <div className="flex w-full max-w-5xl flex-col gap-6 py-4 md:gap-8 md:px-6 md:py-5">
+      <div className="flex w-full max-w-5xl flex-col gap-6 py-4 md:gap-8 md:py-5">
         {blockingError({
           data: progress.data,
           isError: progress.isError,
