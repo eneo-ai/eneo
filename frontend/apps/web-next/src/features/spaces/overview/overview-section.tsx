@@ -1,7 +1,30 @@
 import { Heading } from "@astryxdesign/core/Heading";
+import Link from "@/lib/link";
 import { useRef } from "react";
 import { cn } from "@/lib/utils";
 import { RemovalFocusScope } from "../removal";
+
+/** "Visa alla" and friends: a standalone text link with a 24 px target. */
+export function OverviewLink({
+  href,
+  children,
+  label
+}: {
+  href: string;
+  children: React.ReactNode;
+  /** Fuller accessible name that starts with the visible text ("Visa alla assistenter"). */
+  label?: string;
+}) {
+  return (
+    <Link
+      href={href}
+      aria-label={label}
+      className="text-ax-text-accent focus-visible:outline-ring rounded-ax-inner inline-flex min-h-6 items-center text-sm font-semibold hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11"
+    >
+      {children}
+    </Link>
+  );
+}
 
 /**
  * A titled block on the space overview: h2, optional end content, body. When

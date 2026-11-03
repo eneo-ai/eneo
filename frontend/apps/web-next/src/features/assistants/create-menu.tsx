@@ -29,8 +29,10 @@ import { TemplateGalleryDialog } from "@/features/templates/template-gallery-dia
  * that same name. The chevron menu also offers a named group chat with a choice
  * to open its editor, and — when the tenant has templates enabled — creation from a template
  * gallery (passes from_template), which still asks for the template and name.
+ * `secondary` makes it small and unfilled where it is not the screen's primary
+ * action (a phone's space overview; the tab's docked button is).
  */
-export function CreateChatAppMenu() {
+export function CreateChatAppMenu({ secondary = false }: { secondary?: boolean }) {
   const t = useTranslations();
   const router = useRouter();
   const { space, routeId } = useSpace();
@@ -127,19 +129,23 @@ export function CreateChatAppMenu() {
     createGroupChat.mutate({ name, openEditor: openGroupEditor });
   };
 
+  const variant = secondary ? "secondary" : "primary";
+  const size = secondary ? "sm" : "md";
+
   return (
     <>
       <div className="flex max-w-full">
         <Button
           label={t("create_assistant")}
-          variant="primary"
+          variant={variant}
+          size={size}
           // Astryx keeps a label on one line at a fixed height and cuts it with an
           // ellipsis; this one may shrink at 320 px, so it wraps instead (1.4.4).
           // A line and py-1 fit the element height, which min-h keeps, so one
           // line is exactly as tall as the menu button beside it.
-          className={
-            "h-auto min-h-(--size-element-md) min-w-0 shrink grow rounded-r-none py-1 text-center whitespace-normal"
-          }
+          className={`h-auto min-w-0 shrink grow rounded-r-none py-1 text-center whitespace-normal ${
+            secondary ? "min-h-(--size-element-sm)" : "min-h-(--size-element-md)"
+          }`}
           isLoading={createAssistant.isPending}
           isInterruptible
           onClick={createBlankAssistant}
@@ -149,8 +155,13 @@ export function CreateChatAppMenu() {
             label: t("ui_more_ways_to_create"),
             icon: <ChevronDown aria-hidden="true" />,
             isIconOnly: true,
-            variant: "primary",
-            className: "rounded-l-none border-l"
+            variant,
+            size,
+            // As tall as the label beside it when that wraps (h-auto, stretched); an
+            // icon button's width follows its height, so it keeps its own minimum.
+            className: `h-auto self-stretch rounded-l-none border-l pointer-coarse:min-w-11 ${
+              secondary ? "min-w-(--size-element-sm)" : "min-w-(--size-element-md)"
+            }`
           }}
           hasChevron={false}
           alignment="end"

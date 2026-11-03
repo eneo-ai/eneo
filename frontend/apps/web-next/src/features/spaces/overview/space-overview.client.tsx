@@ -7,10 +7,13 @@ import { PageHeader } from "@/components/composites/page-header";
 import { useAppContext } from "@/components/providers/app-context";
 import { firstNameOf } from "@/features/chat/format";
 import { useSectionHeadingLevels } from "@/features/spaces/frame/space-frame";
+import { OverviewApps } from "@/features/spaces/overview/overview-apps";
+import { OverviewAssistants } from "@/features/spaces/overview/overview-assistants";
+import { OverviewKnowledge } from "@/features/spaces/overview/overview-knowledge";
 import { OverviewManage } from "@/features/spaces/overview/overview-manage";
 import { AddMemberDialog } from "@/features/spaces/members/space-members";
 import { useSpace } from "@/features/spaces/use-space";
-import { usePhoneScreen } from "@/lib/hooks/use-media-match";
+import { usePhoneScreen, useTouchTablet } from "@/lib/hooks/use-media-match";
 
 /** A count tile, as Svelte's OverviewTile: the label and a large number, the whole card a link. */
 function CountTile({ title, count, href }: { title: string; count: number; href: string }) {
@@ -28,21 +31,43 @@ function CountTile({ title, count, href }: { title: string; count: number; href:
  * The space overview, as Svelte's (`[spaceId]/overview/+page.svelte`): the
  * page title "Översikt" with the space's actions, the space's name (in the
  * personal space a greeting) and description, and a tile per kind of
- * content with its count. The tiles follow the reader's permissions. A
- * phone also lists what manages the space under "Hantera ytan" (decision 24).
+ * content with its count. The tiles follow the reader's permissions.
+ *
+ * Svelte is not built for touch, so a phone or a tablet keeps the overview
+ * #1328 built: the newest assistants, apps and knowledge, things to open with
+ * a finger rather than counts that repeat the tabs. Their space header (a
+ * tablet's SpaceHeader, a phone's SpacePhoneHeader) carries the name, the
+ * description and Ny chatt; a phone lists what manages the space under
+ * "Hantera ytan" (decision 24).
  */
 export function SpaceOverview() {
-  const t = useTranslations();
-  const { user } = useAppContext();
-  const { space, can, routeId } = useSpace();
-  const levels = useSectionHeadingLevels();
   const phone = usePhoneScreen();
+  const tablet = useTouchTablet();
+  return phone || tablet ? <OverviewLists /> : <WideOverview />;
+}
+
+/** The newest assistants, apps and (beside the sidebar) knowledge; Hantera ytan on a phone. */
+function OverviewLists() {
+  const { space, can } = useSpace();
+  const phone = usePhoneScreen();
+  return (
+    <div className="flex w-full min-w-0 flex-col gap-7">
+      {!space.organization && can("read", "assistant") ? <OverviewAssistants /> : null}
+      {!space.organization && can("read", "app") ? <OverviewApps /> : null}
+      {/* A phone has the Kunskap tab in the space's strip: its overview lists what to act on. */}
+      {!phone && (can("read", "collection") || can("read", "website")) ? (
+        <OverviewKnowledge />
+      ) : null}
+      {phone ? <OverviewManage /> : null}
+    </div>
+  );
+}
+
+function CountTiles() {
+  const t = useTranslations();
+  const { space, can, routeId } = useSpace();
   const base = `/spaces/${routeId}`;
   const own = (item: { space_id: string }) => item.space_id === space.id;
-
-  const isShared = !space.personal && !space.organization;
-  const canAddMember = isShared && can("add", "member");
-  const canChat = isShared && space.default_assistant != null && can("read", "default_assistant");
 
   const tiles = [
     can("read", "assistant") && {
@@ -72,6 +97,29 @@ export function SpaceOverview() {
       href: `${base}/members`
     }
   ].filter((tile) => tile !== false);
+
+  if (tiles.length === 0) return null;
+  return (
+    <ul className="grid gap-4 md:grid-cols-3">
+      {tiles.map((tile) => (
+        <li key={tile.href}>
+          <CountTile {...tile} />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function WideOverview() {
+  const t = useTranslations();
+  const { user } = useAppContext();
+  const { space, can, routeId } = useSpace();
+  const levels = useSectionHeadingLevels();
+  const base = `/spaces/${routeId}`;
+
+  const isShared = !space.personal && !space.organization;
+  const canAddMember = isShared && can("add", "member");
+  const canChat = isShared && space.default_assistant != null && can("read", "default_assistant");
 
   return (
     <div className="flex w-full min-w-0 flex-col gap-6">
@@ -105,16 +153,7 @@ export function SpaceOverview() {
             : space.description?.trim() || t("welcome_to_space", { space: space.name })}
         </p>
       </div>
-      {tiles.length > 0 ? (
-        <ul className="grid gap-4 md:grid-cols-3">
-          {tiles.map((tile) => (
-            <li key={tile.href}>
-              <CountTile {...tile} />
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      {phone ? <OverviewManage /> : null}
+      <CountTiles />
     </div>
   );
 }
