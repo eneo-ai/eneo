@@ -317,3 +317,20 @@ export async function auditLogs(page: Page) {
   await expect(table).toBeVisible();
   return { table, region: page.getByRole("group", { name: "Granskningsloggar" }) };
 }
+
+/**
+ * Resolves once every finite animation on the page has finished. A disclosure fades
+ * what it reveals in and glides what follows; a check that reads colours or positions
+ * (axe's contrast, a bounding box) mid-way reads a frame that is not the page at rest.
+ * Endless ones (a loading spinner) are left out, and so are those cancelled meanwhile.
+ */
+export async function animationsSettled(page: Page): Promise<void> {
+  await page.evaluate(() =>
+    Promise.all(
+      document
+        .getAnimations()
+        .filter((animation) => animation.effect?.getComputedTiming().endTime !== Infinity)
+        .map((animation) => animation.finished.catch(() => undefined))
+    )
+  );
+}

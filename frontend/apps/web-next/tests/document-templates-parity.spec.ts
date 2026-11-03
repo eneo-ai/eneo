@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import type { Schema } from "../src/lib/api/models";
 import { expect, test } from "./csp";
-import { uniqueName } from "./helpers";
+import { animationsSettled, uniqueName } from "./helpers";
 import { WCAG_22_AA_TAGS } from "../src/test/wcag";
 
 // Real cookie authentication, tool-runtime DOCX bytes and template persistence.
@@ -71,6 +71,8 @@ test(
     await row.getByRole("button", { name: "Visa kontroll" }).click();
     await expect(row.getByRole("heading", { name: "Kontroll av mallen" })).toBeVisible();
     await expect(row.getByRole("heading", { name: "Fält i mallen" })).toBeVisible();
+    // The disclosure fades its content in; axe reads the page once it is at rest.
+    await animationsSettled(page);
     const desktopScan = await new AxeBuilder({ page })
       .include('section[aria-labelledby="capability-file_creation"]')
       .withTags(WCAG_22_AA_TAGS)
