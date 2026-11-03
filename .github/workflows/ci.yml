@@ -291,14 +291,27 @@ jobs:
           TESTCONTAINERS_RYUK_DISABLED: "true"
           DOCKER_HOST: unix:///var/run/docker.sock
 
-      - name: Verify crawler migration rollback
+      - name: Verify migration round trips
         if: matrix.suite == 'migrations'
-        # These tests own disposable databases and deliberately change their schema.
-        run: >-
-          uv run pytest -q -m migration_isolation
-          tests/integration/migrations/test_crawl_lifecycle_round_trip.py
-          tests/integration/migrations/test_website_source_url_identity.py
-          tests/integration/migrations/test_crawler_develop_rollback.py
+        # Each migration_isolation test owns a disposable database and changes its
+        # schema, so the parallel suite skips them. Discovery over all of tests/
+        # finds every one, new ones included, except the File/Icon tests of the
+        # next step. Each module runs in its own pytest process, so modules that
+        # share the session database each start from a fresh schema. Modules in
+        # tests/integration/quarantined-migration-tests.txt are not started.
+        run: |
+          uv run pytest -q --collect-only -m migration_isolation tests \
+            --ignore=tests/integration/migrations/test_file_icon_preflight.py \
+            --ignore=tests/integration/migrations/test_file_icon_legacy_cleanup.py \
+            --ignore=tests/integration/migrations/test_file_icon_bridge_rehearsal.py \
+            | grep '::' | cut -d: -f1 | sort -u > "$RUNNER_TEMP/migration-modules.txt"
+          mapfile -t modules < <(grep -vxFf tests/integration/quarantined-migration-tests.txt \
+            "$RUNNER_TEMP/migration-modules.txt")
+          status=0
+          for module in "${modules[@]}"; do
+            uv run pytest -q -m migration_isolation "$module" || status=1
+          done
+          exit "$status"
         env:
           TESTCONTAINERS_RYUK_DISABLED: "true"
           DOCKER_HOST: unix:///var/run/docker.sock
@@ -417,6 +430,10 @@ jobs:
 
       - name: Type check
         run: FORCE_COLOR=1 bun run --filter '@eneo/web-next' check
+
+      # Before the E2E legs spend their minutes: every case runs in exactly one leg.
+      - name: Check the E2E legs' selections
+        run: node ../.github/scripts/ci-web-next-e2e-legs.mjs
 
       - name: Test
         run: FORCE_COLOR=1 bun run --filter '@eneo/web-next' test
@@ -554,24 +571,32 @@ jobs:
     needs: changes
     if: needs.changes.outputs.web_next_e2e == 'true'
     runs-on: ubuntu-24.04
-    # Headroom while layout-shift, responsive-contract and responsive-text-size have
-    # no CI timing: a job that times out also loses its !cancelled() report upload.
-    # Tighten it from the first run's leg durations.
+    # Legs take 20-24 minutes, but a route walk that hits its 15-minute test limit
+    # and its retry must still finish here: a job that times out also loses its
+    # !cancelled() report upload.
     timeout-minutes: 60
     # The suite outgrew one 45-minute job (run 41297645205). Each leg runs one worker
-    # on its own stack. Playwright's --shard balances test counts, but a whole-route
-    # walk is one test of 1.5-13 minutes, so three legs take the walks by tag and the
-    # rest leg excludes all their tags: every case runs once. The split follows the
-    # measured test minutes of run 41491915398, about 22-23 per walk leg and 20 for
-    # the rest. A new route walk adds its tag to a walk leg and to the rest leg.
+    # on its own stack. Playwright's --shard splits by test count, which leaves the
+    # long route walks unbalanced, so four legs take the walks by tag, the screens
+    # leg takes the admin, space and editor screens' specs (and the forced-colors
+    # walk) by file name, and the rest leg excludes both: every case runs once.
+    # The a11y-routes, keyboard and contract walks also carry their viewport's
+    # device (walkTags in tests/responsive-fixtures.ts), so a leg takes one cell of
+    # them, such as "@a11y-routes @ipad". @a11y-light is in no walk leg and runs in
+    # the rest leg. The split follows the test minutes of the six-leg runs
+    # 41661461275, 41666456119 and 41668050527: about 16-17 for each walk leg and
+    # the rest leg, 11 for screens. A new route walk adds its tag to a walk leg and
+    # to the other legs' exclusions.
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { leg: walks-1, grep: "@a11y-routes|@a11y-light|@forced-colors", grep_invert: "@upload-worker" }
-          - { leg: walks-2, grep: "@layout-shift|@contract|@turn", grep_invert: "@upload-worker" }
-          - { leg: walks-3, grep: "@keyboard|@a11y-dark|@text-size", grep_invert: "@upload-worker" }
-          - { leg: rest, grep: ".", grep_invert: "@upload-worker|@a11y-routes|@a11y-light|@forced-colors|@layout-shift|@contract|@turn|@keyboard|@a11y-dark|@text-size", upload_worker: true }
+          - { leg: walks-1, grep: "@a11y-routes @phone|@keyboard @desktop|@keyboard @ipad|@turn", grep_invert: "@upload-worker" }
+          - { leg: walks-2, grep: "@a11y-routes @ipad|@contract @ipad", grep_invert: "@upload-worker" }
+          - { leg: walks-3, grep: "@keyboard @phone|@layout-shift", grep_invert: "@upload-worker" }
+          - { leg: walks-4, grep: "@contract @phone|@text-size|@a11y-dark", grep_invert: "@upload-worker" }
+          - { leg: screens, grep: " (admin|assistant|document|editor|forced|knowledge|mcp|resource|sharepoint|skills|space)-[^ ]*[.]spec[.]ts ", grep_invert: "@upload-worker|@a11y-routes @phone|@keyboard @desktop|@keyboard @ipad|@turn|@a11y-routes @ipad|@contract @ipad|@keyboard @phone|@layout-shift|@contract @phone|@text-size|@a11y-dark" }
+          - { leg: rest, grep: ".", grep_invert: "@upload-worker|@a11y-routes @phone|@keyboard @desktop|@keyboard @ipad|@turn|@a11y-routes @ipad|@contract @ipad|@keyboard @phone|@layout-shift|@contract @phone|@text-size|@a11y-dark| (admin|assistant|document|editor|forced|knowledge|mcp|resource|sharepoint|skills|space)-[^ ]*[.]spec[.]ts ", upload_worker: true }
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

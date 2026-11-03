@@ -134,6 +134,20 @@ async function finishedFlowRun(page: Page, spaceId: string, completionModel: str
   throw new Error("The contract's flow run did not finish within 60 s");
 }
 
+/**
+ * The device a walk's viewport stands for, named by its first word. CI splits each walk
+ * over its legs by walk tag and device (".github/workflows/ci.yml" greps "@a11y-routes @ipad"),
+ * so a viewport whose name starts with none of these has no leg: it fails here.
+ */
+export const DEVICE_GROUPS = ["phone", "ipad", "desktop"] as const;
+
+/** A walk test's tags: the walk's own, then its device's, in the order the legs grep them. */
+export function walkTags(walk: `@${string}`, viewport: string): string[] {
+  const device = DEVICE_GROUPS.find((group) => viewport.startsWith(group));
+  if (!device) throw new Error(`${viewport}: no device group in DEVICE_GROUPS`);
+  return ["@vite", walk, `@${device}`];
+}
+
 /** Opens a route and waits until it shows its content and has stopped loading. */
 export async function openRoute(page: Page, url: string, signedIn: boolean) {
   await page.goto(url);

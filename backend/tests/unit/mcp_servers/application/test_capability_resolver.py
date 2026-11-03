@@ -704,15 +704,16 @@ def _tie_providers():
 
 def _mixed_purpose_providers():
     # web_search has only a group-targeted provider; image_generation has a
-    # default plus a toolless group-targeted one for the same group. No
-    # purpose may ever pick another purpose's provider.
+    # default plus a toolless group-targeted one for the same group, and a
+    # stricter one. No purpose may ever pick another purpose's provider.
     return [
-        _server("image_generation", name="Images"),
+        _server("image_generation", name="Images", security_level=2),
         _server(
             "web_search",
             name="Legal search",
             audience=AUDIENCE_GROUPS,
             group_ids=[_GROUP_G],
+            security_level=0,
         ),
         _server(
             "image_generation",
@@ -878,28 +879,6 @@ class TestCapabilityAvailability:
 
 
 class TestResolveFromOneLoad:
-    async def test_each_purpose_picks_only_its_own_providers(self, entity_records):
-        images, legal_search, _legal_images = _mixed_purpose_providers()
-        providers = [images, legal_search, _legal_images]
-        requested = ["web_search", "image_generation", "file_analysis"]
-
-        async def resolve(user_group_ids):
-            return await resolve_capability_servers(
-                _ProviderSession(providers),
-                uuid4(),
-                [],
-                requested_capabilities=requested,
-                supports_tool_calling=True,
-                in_space=_every_server,
-                user_group_ids=user_group_ids,
-            )
-
-        outsider = await resolve({_GROUP_H})
-        member = await resolve({_GROUP_G})
-
-        assert outsider.capability_servers == [images]
-        assert member.capability_servers == [legal_search]
-
     async def test_requested_purposes_load_with_one_provider_select(
         self, entity_records
     ):
@@ -916,3 +895,49 @@ class TestResolveFromOneLoad:
 
         assert [s.name for s in resolution.capability_servers] == ["Images"]
         assert session.provider_selects == 1
+
+
+@pytest.mark.parametrize(
+    "scope",
+    [
+        {},
+        {"user_group_ids": set()},
+        {"user_group_ids": {_GROUP_G}},
+        {"user_group_ids": {_GROUP_H}, "allowed_purposes": {"web_search"}},
+    ],
+)
+@pytest.mark.parametrize("level", [None, 1])
+def test_one_load_describes_each_purpose_as_its_own_load_did(scope, level):
+    providers = _mixed_purpose_providers()
+    classification = _classification(level) if level is not None else None
+
+    assert availability_from_providers(providers, classification, **scope) == [
+        capability_resolver.describe_capability_availability(
+            [p for p in providers if p.purpose == purpose],
+            purpose,
+            classification,
+            **scope,
+        )
+        for purpose in CAPABILITY_PURPOSES
+    ]
+
+
+async def test_resolution_picks_each_purpose_from_its_own_providers(monkeypatch):
+    images, legal_search, legal_images = _mixed_purpose_providers()
+    lookup = AsyncMock(return_value=[images, legal_search, legal_images])
+    monkeypatch.setattr(capability_resolver, "active_capability_providers", lookup)
+
+    async def resolve(user_group_ids):
+        return await resolve_capability_servers(
+            AsyncMock(),
+            uuid4(),
+            [],
+            requested_capabilities=["web_search", "image_generation", "charts"],
+            supports_tool_calling=True,
+            in_space=_every_server,
+            user_group_ids=user_group_ids,
+        )
+
+    assert (await resolve({_GROUP_H})).capability_servers == [images]
+    assert (await resolve({_GROUP_G})).capability_servers == [legal_search]
+    assert lookup.await_count == 2

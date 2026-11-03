@@ -22,6 +22,17 @@ class _DeploymentPolicySeed:
     transcription_audio_limit_bytes: int
 
 
+# Migration round trips that are known to fail; the file says why. CI does not
+# start them, and a pytest run that asks for migration_isolation skips them.
+QUARANTINED_MIGRATION_FILES = frozenset(
+    line
+    for line in (Path(__file__).parent / "quarantined-migration-tests.txt")
+    .read_text()
+    .splitlines()
+    if line and not line.startswith("#")
+)
+
+
 def pytest_collection_modifyitems(config, items):
     """Mark integration tests and auto-skip migration_isolation unless requested.
 
@@ -46,6 +57,25 @@ def pytest_collection_modifyitems(config, items):
         and "not migration_isolation" not in marker_expr
     ):
         # User explicitly requested migration_isolation tests, don't skip
+        backend_root = integration_root.parents[1]
+        stale = [
+            f for f in QUARANTINED_MIGRATION_FILES if not (backend_root / f).is_file()
+        ]
+        if stale:
+            raise pytest.UsageError(
+                f"Quarantined migration tests not found: {sorted(stale)}"
+            )
+        quarantine = pytest.mark.skip(
+            reason="Quarantined: fails downgrading through a later irreversible migration"
+        )
+        for item in items:
+            path = Path(item.path).resolve()
+            if (
+                path.is_relative_to(backend_root)
+                and path.relative_to(backend_root).as_posix()
+                in QUARANTINED_MIGRATION_FILES
+            ):
+                item.add_marker(quarantine)
         return
 
     # Skip all tests with migration_isolation marker

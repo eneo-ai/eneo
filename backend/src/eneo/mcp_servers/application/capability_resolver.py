@@ -33,22 +33,10 @@ from eneo.mcp_servers.infrastructure.repo_impl.mcp_server_repo_impl import (
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
+    from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
     from eneo.security_classifications.domain.entities.security_classification import (
         SecurityClassification,
     )
-
-
-def usable_capability_tools(server: "MCPServer") -> list["MCPServerTool"]:
-    """Tools the proxy would actually expose: enabled, still on the remote,
-    and with an admin-approved definition."""
-    return [
-        tool
-        for tool in server.tools
-        if tool.is_enabled
-        and not tool.removed_from_remote
-        and (tool.description is not None or tool.input_schema is not None)
-    ]
 
 
 async def active_capability_providers(
@@ -58,12 +46,14 @@ async def active_capability_providers(
 ) -> list["MCPServer"]:
     """Return every active provider for any of ``purposes`` in the tenant.
 
-    Read through the server repository so each tool carries its tenant override,
-    audience groups, classification and backing model. Filter all requested
-    purposes in one query, in creation order.
+    One flat list in creation order: callers pick per purpose, so a purpose
+    never sees another purpose's providers. Read through the server
+    repository like every other server read, so the tools carry the tenant's
+    tool settings and audience groups, security classification and backing
+    model (built-in providers) are loaded for resolution.
     """
-    return await MCPServerRepoImpl(session, MCPServerMapper()).query_for_purposes(
-        purposes, tenant_id=tenant_id, is_enabled=True
+    return await MCPServerRepoImpl(session, MCPServerMapper()).query(
+        tenant_id=tenant_id, purposes=purposes, is_enabled=True
     )
 
 

@@ -4,7 +4,6 @@ import re
 from unittest.mock import AsyncMock
 
 import pytest
-import sqlalchemy as sa
 from sqlalchemy import select
 
 from eneo.database.tables.capabilities_table import (
@@ -18,6 +17,7 @@ from eneo.main.exceptions import BadRequestException
 from eneo.mcp_servers.application.capability_resolver import resolve_capability_servers
 from eneo.mcp_servers.application.mcp_server_service import ConnectionResult
 from eneo.mcp_servers.domain.entities.mcp_server import CAPABILITY_PURPOSES
+from tests.integration.flows.statement_capture_support import capture_queries
 
 
 async def provider(
@@ -209,8 +209,12 @@ async def test_create_and_activate_is_one_transaction(
 
 
 _PROVIDER_SELECT = re.compile(
-    r"FROM mcp_servers\b.*\bmcp_servers\.purpose (=|IN)", re.S
+    r"FROM mcp_servers\b.*\bmcp_servers\.purpose (= |IN )", re.S
 )
+
+
+def _provider_selects(statements) -> int:
+    return sum(bool(_PROVIDER_SELECT.search(s.sql)) for s in statements)
 
 
 async def test_space_and_ask_load_capability_providers_once(
@@ -226,20 +230,11 @@ async def test_space_and_ask_load_capability_providers_once(
                 session, admin_user.tenant_id, purpose, purpose=purpose, is_enabled=True
             )
 
-        statements: list[str] = []
-
-        def capture_statement(
-            _connection, _cursor, statement, _parameters, _context, _executemany
-        ) -> None:
-            statements.append(statement)
-
         assert session.bind is not None
         engine = session.bind.sync_engine
-        sa.event.listen(engine, "before_cursor_execute", capture_statement)
-        try:
+        with capture_queries(engine) as space_statements:
             loaded = await container.space_repo().get_space_by_assistant(assistant.id)
-            space_selects = sum(map(bool, map(_PROVIDER_SELECT.search, statements)))
-            statements.clear()
+        with capture_queries(engine) as ask_statements:
             resolution = await resolve_capability_servers(
                 session,
                 admin_user.tenant_id,
@@ -248,9 +243,6 @@ async def test_space_and_ask_load_capability_providers_once(
                 supports_tool_calling=True,
                 in_space=lambda _server_id: True,
             )
-            ask_selects = sum(map(bool, map(_PROVIDER_SELECT.search, statements)))
-        finally:
-            sa.event.remove(engine, "before_cursor_execute", capture_statement)
 
         tenant_states = {s.purpose: s for s in loaded.available_capabilities}
         assert tenant_states["web_search"].available
@@ -262,6 +254,7 @@ async def test_space_and_ask_load_capability_providers_once(
         assistant_states = {
             s.purpose: s for s in loaded_assistant.available_capabilities
         }
+        assert assistant_states["web_search"].available
         assert assistant_states["image_generation"].reason == "space_disabled"
         assert [p.purpose for p in resolution.capability_servers] == [
             "web_search",
@@ -269,5 +262,5 @@ async def test_space_and_ask_load_capability_providers_once(
         ]
         # The tenant-wide and user-scoped availability share one provider
         # load, and ask-time resolution loads every requested purpose at once.
-        assert space_selects == 1
-        assert ask_selects == 1
+        assert _provider_selects(space_statements) == 1
+        assert _provider_selects(ask_statements) == 1

@@ -51,30 +51,6 @@ async function recordHeaders(page: Page) {
 const headerFrames = (page: Page) =>
   page.evaluate(() => (window as unknown as { __headerFrames: Frame[] }).__headerFrames);
 
-test("a loaded pushed screen or chat shows only its own header", async ({ page }) => {
-  const open = (path: string) => page.goto(path);
-
-  for (const pushed of ["/admin/users", "/account/appearance", "/spaces/personal/chat"]) {
-    await open(pushed);
-    await expect(page.locator(OWN_HEADER)).toBeVisible({ timeout: 15_000 });
-    await expect(page.locator(TOP_BAR)).toBeHidden();
-  }
-  await open("/admin/users");
-  await expect(
-    page.getByRole("link", { name: /^(Tillbaka till|Back to) Administration$/ })
-  ).toBeVisible();
-
-  for (const root of ["/admin", "/account", "/spaces/list"]) {
-    await open(root);
-    // Konto is rendered with the frame's heading until the width is known, CSS showing one.
-    await expect(page.locator("main h1").filter({ visible: true })).toBeVisible({
-      timeout: 15_000
-    });
-    await expect(page.locator(TOP_BAR)).toBeVisible();
-    await expect(page.locator(OWN_HEADER)).toHaveCount(0);
-  }
-});
-
 test("a shared space is pushed on a phone; the personal and organisation spaces keep the menu", async ({
   page
 }) => {

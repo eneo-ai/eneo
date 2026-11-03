@@ -40,6 +40,7 @@ export function CreateSpaceDialog({
   const createSpace = useMutation({
     mutationFn: (body: { name: string }) => unwrap(browserApi.POST("/api/v1/spaces/", { body })),
     onSuccess: (space) => {
+      // A new space changes the list of spaces, not the spaces already loaded.
       void invalidateSpacesList(queryClient);
       close();
       router.push(`/spaces/${space.id}/overview`);

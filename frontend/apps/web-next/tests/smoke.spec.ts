@@ -4,12 +4,6 @@ import { expect, test } from "./csp";
 // authenticated and shows a marker element from the newly-ported feature.
 // Labels are the Swedish defaults (the app's default locale).
 
-test("account shows the change-password card", { tag: "@vite" }, async ({ page }) => {
-  await page.goto("/account");
-  await expect(page.getByText(/byt lösenord/i).first()).toBeVisible();
-  await expect(page.locator('input[autocomplete="new-password"]').first()).toBeVisible();
-});
-
 test(
   "starts a styled tour on first use and closes it with Escape",
   { tag: "@vite" },

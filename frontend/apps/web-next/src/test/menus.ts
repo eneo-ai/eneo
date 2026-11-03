@@ -1,5 +1,5 @@
 import { act, fireEvent, waitFor } from "@testing-library/react";
-import { expect } from "vitest";
+import { expect, onTestFinished } from "vitest";
 
 type PointerType = "touch" | "mouse";
 
@@ -36,18 +36,36 @@ export async function openMenuOnRelease(button: HTMLElement, pointerType: Pointe
   fireEvent(button, pointerEvent("pointerup", pointerType));
   fireEvent.click(button, { detail: 1 });
   await waitFor(() => expect(button.getAttribute("aria-expanded")).toBe("true"));
-  const menu = document.getElementById(button.getAttribute("aria-controls") ?? "")!;
-  // Astryx focuses the opened menu on the next animation frame. Waiting for that
-  // frame, not for a wall-clock timeout, keeps a loaded runner from failing it.
-  await nextFrame();
+  const id = button.getAttribute("aria-controls") ?? "";
+  // Astryx focuses the opened menu in an animation frame after the open, the next one
+  // or, after a layout change or a remount, a later one. Waiting for that focus itself,
+  // not for a frame count or a wall-clock timeout, keeps a loaded runner from failing it.
+  await menuFocus(id);
+  const menu = document.getElementById(id)!;
   expect(document.activeElement).toBe(menu);
   return menu;
 }
 
 /**
- * Resolves after the next animation frame. jsdom runs frames in the order they
- * were asked for, so every frame a component asked for before this one has run.
+ * Resolves once the element with `id` has focus: at once, or on its focusin. A menu
+ * that never gets focus fails at the test's timeout; the wait then ends with the test,
+ * so its listener and its act() scope do not outlive it into the next test.
  */
-function nextFrame(): Promise<void> {
-  return act(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+export function menuFocus(id: string): Promise<void> {
+  return act(
+    () =>
+      new Promise<void>((resolve) => {
+        const focused = () => document.activeElement?.id === id;
+        if (focused()) return resolve();
+        const done = () => {
+          document.removeEventListener("focusin", onFocus, true);
+          resolve();
+        };
+        const onFocus = () => {
+          if (focused()) done();
+        };
+        document.addEventListener("focusin", onFocus, true);
+        onTestFinished(done);
+      })
+  );
 }

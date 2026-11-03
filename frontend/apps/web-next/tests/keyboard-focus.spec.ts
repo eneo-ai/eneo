@@ -1,6 +1,6 @@
 import { expect, test } from "./csp";
 import { STORAGE_STATE } from "../playwright.config";
-import { createFixtures, openRoute, watchDocument } from "./responsive-fixtures";
+import { createFixtures, openRoute, walkTags, watchDocument } from "./responsive-fixtures";
 import { ROUTES } from "./responsive-routes";
 
 test.skip(!process.env.E2E_BASE_URL, "Requires the FastAPI-served Vite build");
@@ -29,7 +29,7 @@ const only = process.env.KEYBOARD_ROUTES ? new RegExp(process.env.KEYBOARD_ROUTE
 
 test(
   "every screen starts at the skip link and draws its keyboard focus",
-  { tag: ["@vite", "@keyboard"] },
+  { tag: walkTags("@keyboard", "desktop") },
   async ({ browser, baseURL }) => {
     test.setTimeout(15 * 60_000);
     const fixtures = await createFixtures(browser, baseURL, "Focus");
@@ -120,7 +120,7 @@ const TOUCH_SIZES = [
 for (const size of TOUCH_SIZES) {
   test(
     `keyboard focus is not hidden by a fixed or sticky bar on a ${size.name}`,
-    { tag: ["@vite", "@keyboard"] },
+    { tag: walkTags("@keyboard", size.name) },
     async ({ browser, baseURL }) => {
       test.setTimeout(15 * 60_000);
       const fixtures = await createFixtures(browser, baseURL, "Obscured");

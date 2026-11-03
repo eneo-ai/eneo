@@ -50,6 +50,8 @@ export type Upload = {
   errorMessage?: string;
 };
 
+/** The safety net while the live feed is open: a reconnect refetches anyway. */
+const LIVE_POLL_MS = 120_000;
 const SLOW_POLL_MS = 30_000;
 const FAST_POLL_MS = 2_000;
 /** Poll fast for this long after a job is registered, then fall back. */
@@ -186,8 +188,9 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // The live feed (job-events.ts) delivers every status change the moment it
-  // is committed. Polling stays as the safety net: slow while the feed is
-  // open, fast while it is down and something is running or was just started.
+  // is committed. Polling stays as the safety net: every two minutes while
+  // the feed is open; while it is down, fast when something is running or
+  // was just started, slow otherwise.
   const live = useJobEventsConnected();
   const { data: jobs, dataUpdatedAt: jobsUpdatedAt } = useQuery({
     queryKey: JOBS_KEY,
@@ -197,7 +200,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
       // eslint-disable-next-line react-hooks/refs, react-hooks/purity
       (items) => !live && (Date.now() < fastPollUntil.current || !!items?.some(isJobActive)),
       FAST_POLL_MS,
-      SLOW_POLL_MS
+      live ? LIVE_POLL_MS : SLOW_POLL_MS
     )
   });
   useEffect(

@@ -14,7 +14,6 @@ from eneo.database.tables.collections_table import CollectionsTable
 from eneo.database.tables.group_chats_table import GroupChatsTable
 from eneo.database.tables.service_table import Services
 from eneo.database.tables.spaces_table import Spaces
-from eneo.database.tables.users_table import Users
 from eneo.files.file_models import File
 from eneo.group_chat.domain.factories.group_chat_factory import GroupChatFactory
 from eneo.integration.domain.entities.integration_knowledge import (
@@ -305,7 +304,9 @@ class SpaceFactory:
         integration_knowledge_in_db: Iterable["IntegrationKnowledgeDBModel"]
         | None = None,
         unloaded_hidden_assistant_ids: frozenset[UUID] = frozenset(),
+        group_user_counts: Mapping[UUID, int] | None = None,
     ) -> Space:
+        group_user_counts = group_user_counts or {}
         collections_in_db = list(collections_in_db or [])
         websites_in_db = list(websites_in_db or [])
         completion_models = list(completion_models or [])
@@ -408,12 +409,11 @@ class SpaceFactory:
         for space_group in getattr(space_in_db, "group_members", []) or []:
             user_group = space_group.user_group
             if user_group and user_group.state != UserGroupState.DELETED:
-                users = cast(list[Users], user_group.users or [])
                 group_members[user_group.id] = SpaceGroupMember(
                     id=user_group.id,
                     name=user_group.name,
                     role=cast(SpaceRoleValue, space_group.role),
-                    user_count=len(users),
+                    user_count=group_user_counts.get(user_group.id, 0),
                 )
 
         space_collections: list[Collection] = []

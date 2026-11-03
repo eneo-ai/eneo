@@ -55,7 +55,7 @@ test("shared frontend inputs validate both apps and all application images", () 
 });
 
 test("workflow, local action, scope and gate changes force full validation", () => {
-  for (const file of [".github/workflows/ci.yml", ".github/actions/setup-playwright/action.yml", ".github/scripts/ci-gate.mjs"]) {
+  for (const file of [".github/workflows/ci.yml", ".github/actions/setup-playwright/action.yml", ".github/scripts/ci-gate.mjs", ".github/scripts/ci-web-next-e2e-legs.mjs"]) {
     const plan = planCi([file], "merge_group");
     assert.equal(plan.full, true);
     assert.equal(plan.docker_matrix.include.length, 3);
@@ -146,6 +146,15 @@ test("both E2E jobs free disk before building their stack", () => {
   }
 });
 
+test("E2E stacks keep their network inside their compose project", () => {
+  // A fixed network name let stacks started side by side with their own -p resolve each other's e2e-db and e2e-redis.
+  for (const file of ["docker-compose.e2e.yml", "docker-compose.e2e.ci.yml"]) {
+    const networks = fs.readFileSync(path.join(root, file), "utf8").split("\nnetworks:\n")[1].split(/\n(?=\S)/)[0];
+    assert.match(networks, /^ {2}e2e: \{\}$/m, file);
+    assert.doesNotMatch(networks, /^ +name:/m, file);
+  }
+});
+
 test("the Svelte build is checked against a memory budget below its heap limit", () => {
   const workflow = fs.readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8");
   const stepBody = (name) => workflow.split(`- name: ${name}\n`)[1]?.split(/\n      - name: /)[0];
@@ -197,24 +206,42 @@ test("web-next runs all browser cases on FastAPI and has no Next runtime job", (
   assert.ok(legs.length >= 2 && legs.every(Boolean), include.join("\n"));
   assert.equal(new Set(legs.map(({ leg }) => leg)).size, legs.length, "artifact names are unique");
   assert.equal(legs.filter(({ worker }) => worker).length, 1, "the upload case runs once");
-  const walks = legs.filter(({ grep }) => grep !== ".");
+  // Walk legs select by tag; file legs select specs by name and exclude the walks; the rest
+  // leg excludes both.
+  const walks = legs.filter(({ grep }) => grep.startsWith("@"));
+  const files = legs.filter(({ grep }) => grep !== "." && !grep.startsWith("@"));
   const rest = legs.filter(({ grep }) => grep === ".");
   assert.equal(rest.length, 1);
   for (const { invert } of walks) assert.equal(invert, "@upload-worker");
-  assert.equal(rest[0].invert, ["@upload-worker", ...walks.map(({ grep }) => grep)].join("|"));
-  const tags = walks.flatMap(({ grep }) => grep.split("|"));
-  assert.equal(new Set(tags).size, tags.length);
-  // A tag that no test carries would quietly move its walk into the rest leg.
+  const notWalks = ["@upload-worker", ...walks.map(({ grep }) => grep)].join("|");
+  for (const { invert } of files) assert.equal(invert, notWalks);
+  assert.equal(rest[0].invert, [notWalks, ...files.map(({ grep }) => grep)].join("|"));
+  // A walk leg selects cells: a walk's tag, or its tag and a viewport's device, which
+  // walkTags (tests/responsive-fixtures.ts) puts right after it. Which cases each leg
+  // then holds is checked against Playwright's own listing by ci-web-next-e2e-legs.mjs.
+  const cells = walks.flatMap(({ grep }) => grep.split("|"));
+  assert.equal(new Set(cells).size, cells.length, "each cell runs in one leg");
+  const parsed = cells.map((cell) => cell.match(/^(@[a-z0-9-]+)(?: @([a-z]+))?$/));
+  assert.ok(parsed.every(Boolean), cells.join("|"));
+  const tags = [...new Set(parsed.map(([, tag]) => tag))];
+  const unit = workflow.split("\n  frontend-web-next:\n")[1].split("\n  frontend-e2e:\n")[0];
+  assert.match(unit, /^        run: node \.\.\/\.github\/scripts\/ci-web-next-e2e-legs\.mjs$/m);
   const testsDir = path.join(root, "frontend/apps/web-next/tests");
   const specs = fs.readdirSync(testsDir).filter((file) => file.endsWith(".spec.ts"))
     .map((file) => [file, fs.readFileSync(path.join(testsDir, file), "utf8")]);
+  // Playwright matches --grep, case-insensitively, against the title path, which holds the
+  // spec's file name between spaces.
+  const selects = (grep, file) => new RegExp(grep, "i").test(` smoke ${file} `);
+  // A tag or file pattern that selects nothing would quietly move its walk into the rest leg.
   for (const tag of tags) assert.ok(specs.some(([, source]) => source.includes(`"${tag}"`)), tag);
+  for (const { leg, grep } of files) assert.ok(specs.some(([file]) => selects(grep, file)), leg);
   // A whole-route walk (a test limit of ten minutes or more) must not land in the rest leg.
   for (const [file, source] of specs) {
     const limits = [...source.matchAll(/test\.setTimeout\(([\d_]+)( \* 60_000)?\)/g)]
       .map(([, value, minutes]) => Number(value.replaceAll("_", "")) * (minutes ? 60_000 : 1));
     if (limits.some((ms) => ms >= 10 * 60_000)) {
-      assert.ok(tags.some((tag) => source.includes(`"${tag}"`)), `${file}: a route walk without a walk leg's tag`);
+      const led = tags.some((tag) => source.includes(`"${tag}"`)) || files.some(({ grep }) => selects(grep, file));
+      assert.ok(led, `${file}: a route walk outside the walk and file legs`);
     }
   }
   const workerIndex = job.indexOf("- name: Start and check the knowledge upload worker");
@@ -275,6 +302,23 @@ test("only develop pushes save the package download cache", () => {
   const order = ["Restore the package download cache", "Install locked workspace dependencies", "Save the package download cache"]
     .map((name) => action.indexOf(`- name: ${name}\n`));
   assert.ok(order.every((index, i) => index > (order[i - 1] ?? -1)), String(order));
+});
+
+test("the migrations leg runs every migration_isolation test file exactly once", () => {
+  // A round trip that only a hand-written list ran never ran once nobody added it to the list.
+  // Discovery over all of tests/ finds a marked file in any directory and under either name pattern.
+  const workflow = fs.readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8");
+  const step = (name) => workflow.split(`- name: ${name}\n`)[1]?.split(/\n      - name: /)[0] ?? "";
+  const roundTrips = step("Verify migration round trips");
+  const fileIcon = step("Verify File/Icon upgrade and optional cleanup on PostgreSQL 13");
+  assert.match(roundTrips, /^        if: matrix\.suite == 'migrations'$/m);
+  assert.match(roundTrips, /--collect-only -m migration_isolation tests \\$/m);
+  // One process per module: modules that share the session database start from a fresh schema.
+  assert.match(roundTrips, /for module in "\$\{modules\[@\]\}"; do\n\s+uv run pytest -q -m migration_isolation "\$module" \|\| status=1/);
+  const ignored = [...roundTrips.matchAll(/--ignore=(\S+)/g)].map(([, file]) => file);
+  const dedicated = [...fileIcon.matchAll(/(tests\/integration\/\S+\.py)/g)].map(([, file]) => file);
+  assert.ok(ignored.length > 0);
+  assert.deepEqual([...ignored].sort(), [...new Set(dedicated)].sort(), "ignored files run in the File/Icon step");
 });
 
 test("the memory check passes within budget and fails above it or without a measurement", () => {

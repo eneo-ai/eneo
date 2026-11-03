@@ -11,11 +11,16 @@ import { renderWithRouter } from "@/test/router";
 import { observedElements, reportResize } from "@/test/setup-dom";
 import { replaceInstructionText } from "@/test/skill-instructions";
 import { ChatView, type ActivityState } from "./chat-view";
+import { queuePartnerUpdate } from "./partner-updates";
 
 vi.unmock("@/lib/link");
 
 const post = vi.hoisted(() => vi.fn());
+const sendMessages = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api/browser", () => ({ browserApi: { POST: post } }));
+vi.mock("@/lib/chat/transport", () => ({
+  createChatTransport: () => ({ sendMessages, reconnectToStream: async () => null })
+}));
 vi.mock("@/features/workspace/preview/load-preview", () => ({
   loadPreview: vi.fn(),
   PreviewTooLargeError: class extends Error {}
@@ -121,4 +126,45 @@ it("keeps a document after a failed save and cancelled navigation, then leaves a
     }
   );
   expect(screen.queryByRole("alertdialog")).toBeNull();
+});
+
+it("asks before leaving while a question waits for a model save, and sends nothing once it has left", async () => {
+  post.mockImplementation(async () => ({ data: undefined, response: new Response() }));
+  // A model or reasoning switch made in the composer is saved before the question goes.
+  let saved!: () => void;
+  const saving = new Promise<void>((resolve) => (saved = resolve));
+  const save = queuePartnerUpdate(() => saving);
+  try {
+    const { router } = await renderWithRouter(<Link href="/done">Leave conversation</Link>, {
+      route: "/chat",
+      routes: (root) => [
+        createRoute({ getParentRoute: () => root, path: "/chat", component: Chat }),
+        createRoute({ getParentRoute: () => root, path: "/done", component: () => <h1>Done</h1> })
+      ]
+    });
+    const field = screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Fråga Assistant" });
+    fireEvent.change(field, { target: { value: "Skicka när modellen är sparad" } });
+    fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
+    expect(field.value).toBe("");
+
+    // Out of the composer and not sent: leaving would end it.
+    await act(async () => {
+      fireEvent.click(screen.getByRole("link", { name: "Leave conversation" }));
+    });
+    const dialog = await screen.findByRole("alertdialog", { name: "Lämna chatten?" });
+    expect(router.state.location.pathname).toBe("/chat");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Lämna chatten" }));
+    await screen.findByRole("heading", { name: "Done" });
+
+    // Saved after the view has gone: the question it held is not sent.
+    await act(async () => {
+      saved();
+      await save;
+    });
+    expect(sendMessages).not.toHaveBeenCalled();
+  } finally {
+    // The save queue is module state: never leave it waiting for the next test.
+    saved();
+    await save;
+  }
 });

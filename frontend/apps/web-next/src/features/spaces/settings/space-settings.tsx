@@ -68,7 +68,7 @@ import {
   type SecurityClassification
 } from "@/features/admin/security-classifications/security-classifications";
 import { parseRetentionDays } from "@/features/spaces/retention-days";
-import { invalidateSpacesList, type Space } from "@/features/spaces/space";
+import { invalidateDeletedSpace, invalidateSpacesList, type Space } from "@/features/spaces/space";
 import { editorSummaries } from "@/features/spaces/editor-summaries";
 import { useSpace } from "@/features/spaces/use-space";
 import { PageHeader } from "@/components/composites/page-header";
@@ -1015,14 +1015,8 @@ function DangerSection() {
   const deleteSpace = useMutation({
     mutationFn: () =>
       unwrap(browserApi.DELETE("/api/v1/spaces/{id}/", { params: { path: { id: space.id } } })),
-    onSuccess: async () => {
-      // The list refreshes. The deleted space is only marked stale: nothing
-      // reads it while the page leaves, and coming back to it reads it again.
-      // A read from before the delete must not answer after it and make the
-      // space fresh again.
-      await queryClient.cancelQueries({ queryKey: ["spaces", routeId] });
-      void queryClient.invalidateQueries({ queryKey: ["spaces"], exact: true });
-      void queryClient.invalidateQueries({ queryKey: ["spaces", routeId], refetchType: "none" });
+    onSuccess: () => {
+      void invalidateDeletedSpace(queryClient, routeId);
       router.push("/spaces/list");
     },
     onError: (error) => toastApiError(error, t)

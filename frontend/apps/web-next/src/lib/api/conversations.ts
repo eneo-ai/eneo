@@ -1,14 +1,7 @@
-import {
-  queryOptions,
-  type InfiniteData,
-  type QueryClient,
-  type QueryFilters,
-  type QueryKey
-} from "@tanstack/react-query";
+import { queryOptions, type QueryClient, type QueryKey } from "@tanstack/react-query";
 import type { EneoClient } from "./browser";
 import { unwrap } from "./errors";
 import type { Schema } from "./models";
-import type { CursorPage } from "./pagination";
 
 export type RecentConversation = Schema<"RecentConversation">;
 
@@ -42,11 +35,29 @@ export function recentConversationsQueryOptions(
   });
 }
 
-/** Drops a deleted conversation from every recent list at once; the refetch follows. */
-export function dropFromRecentConversations(queryClient: QueryClient, id: string) {
+/** `items` with conversation `id` renamed to `name`, or without it when `name` is null. */
+export function patchConversations<Item extends { id: string; name: string }>(
+  items: Item[],
+  id: string,
+  name: string | null
+): Item[] {
+  return name === null
+    ? items.filter((item) => item.id !== id)
+    : items.map((item) => (item.id === id ? { ...item, name } : item));
+}
+
+/**
+ * Shows a rename (the new `name`) or a delete (`null`) in every loaded recent
+ * list at once; the refetch follows.
+ */
+export function patchRecentConversations(
+  queryClient: QueryClient,
+  id: string,
+  name: string | null
+) {
   queryClient.setQueriesData<RecentConversation[]>(
     { queryKey: RECENT_CONVERSATIONS_KEY },
-    (items) => items?.filter((item) => item.id !== id)
+    (items) => items && patchConversations(items, id, name)
   );
 }
 
@@ -58,33 +69,11 @@ export function dropFromRecentConversations(queryClient: QueryClient, id: string
 export function invalidateConversationLists(queryClient: QueryClient, historyKey: QueryKey) {
   return Promise.all([
     queryClient.invalidateQueries({ queryKey: historyKey }),
-    queryClient.invalidateQueries({ queryKey: RECENT_CONVERSATIONS_KEY })
+    invalidateRecentConversations(queryClient)
   ]);
 }
 
-/**
- * Shows a rename (the new `name`) or a delete (`null`) at once in the lists a
- * conversation shows up in: its partner's history (`historyFilters`, every loaded
- * page) and the recent list. A list that is not loaded stays unloaded; the
- * refetch `invalidateConversationLists` starts follows.
- */
-export function patchConversationLists(
-  queryClient: QueryClient,
-  historyFilters: QueryFilters,
-  id: string,
-  name: string | null
-) {
-  const patch = <Item extends { id: string; name: string }>(items: Item[]) =>
-    name === null
-      ? items.filter((item) => item.id !== id)
-      : items.map((item) => (item.id === id ? { ...item, name } : item));
-  queryClient.setQueriesData<InfiniteData<CursorPage<{ id: string; name: string }>>>(
-    historyFilters,
-    (data) =>
-      data && { ...data, pages: data.pages.map((page) => ({ ...page, items: patch(page.items) })) }
-  );
-  queryClient.setQueriesData<RecentConversation[]>(
-    { queryKey: RECENT_CONVERSATIONS_KEY },
-    (data) => data && patch(data)
-  );
+/** Refetches every recent list: the SideNav's and the history's "Alla". */
+export function invalidateRecentConversations(queryClient: QueryClient) {
+  return queryClient.invalidateQueries({ queryKey: RECENT_CONVERSATIONS_KEY });
 }

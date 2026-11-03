@@ -3,7 +3,7 @@ import path from "node:path";
 import type { Browser, BrowserContext } from "@playwright/test";
 import { expect, test } from "./csp";
 import { STORAGE_STATE } from "../playwright.config";
-import { createFixtures, openRoute } from "./responsive-fixtures";
+import { createFixtures, openRoute, walkTags } from "./responsive-fixtures";
 import { measure, type PageMeasure, type Violation } from "./responsive-measure";
 import { ROUTES, type Fixtures } from "./responsive-routes";
 
@@ -71,7 +71,7 @@ async function contextFor(
 for (const vp of VIEWPORTS) {
   test(
     `every screen holds up at ${vp.name} (${vp.width} × ${vp.height})`,
-    { tag: ["@vite", "@contract"] },
+    { tag: walkTags("@contract", vp.name) },
     async ({ browser, baseURL }) => {
       test.setTimeout(15 * 60_000);
       const problems: string[] = [];

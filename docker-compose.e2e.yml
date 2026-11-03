@@ -233,8 +233,9 @@ services:
       retries: 3
 
 networks:
-  e2e:
-    name: eneo-e2e
+  # Named by the compose project, so stacks started side by side with their
+  # own -p never resolve each other's e2e-db or e2e-redis.
+  e2e: {}
 
 volumes:
   # The devcontainer's prebuilt backend venv, reused read-only so we skip a pip

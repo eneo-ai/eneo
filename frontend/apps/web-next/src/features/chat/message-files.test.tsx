@@ -1,20 +1,25 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { useEffect } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Schema } from "@/lib/api/models";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderInApp } from "@/test/render";
+import { renderInApp, testQueryClient } from "@/test/render";
 import { MessageFiles, PendingMessageFiles, summarizeFiles } from "./message-files";
 import { SidePanelStore } from "./side-panel/side-panel-store";
 import { SidePanelProvider, useSidePanel } from "./side-panel/use-side-panel";
 
+const post = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/api/browser", () => ({ browserApi: { POST: post } }));
 vi.mock("@/features/workspace/preview/load-preview", () => ({
   loadPreview: vi.fn(async () => ({ kind: "text", text: "Ready", truncated: false })),
   PreviewTooLargeError: class extends Error {}
 }));
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  post.mockReset();
+});
 
 const pdf = (index: number): Schema<"FilePublic"> => ({
   id: `file-${index}`,
@@ -44,6 +49,97 @@ function renderWithPanel(files: Schema<"FilePublic">[]) {
     </SidePanelProvider>
   );
 }
+
+describe("signed image URLs", () => {
+  const photo: Schema<"FilePublic"> = {
+    id: "file-9",
+    name: "Foto.png",
+    mimetype: "image/png",
+    size: 2_048
+  };
+  /** Each signing mints a new token, as the backend does. */
+  function signEachTime() {
+    let minted = 0;
+    post.mockImplementation(async () => ({
+      data: { url: `https://backend:8000/api/v1/files/file-9/download/?token=t${++minted}` },
+      response: new Response()
+    }));
+  }
+  const thumbnail = () => screen.getByRole("img", { name: "Foto.png" });
+
+  it("signs an image once for its thumbnail, its preview and the next visit", async () => {
+    signEachTime();
+    const queryClient = testQueryClient();
+    const first = renderInApp(<MessageFiles files={[photo]} />, { queryClient });
+    const src = (await screen.findByRole("img", { name: "Foto.png" })).getAttribute("src");
+    expect(src).toContain("token=t1");
+
+    fireEvent.click(screen.getByRole("button", { name: "Förhandsvisa Foto.png" }));
+    const dialog = await screen.findByRole("dialog", { name: "Foto.png" });
+    await waitFor(() =>
+      expect(within(dialog).getByRole("img", { name: "Foto.png" }).getAttribute("src")).toBe(src)
+    );
+    first.unmount();
+
+    renderInApp(<MessageFiles files={[photo]} />, { queryClient });
+    expect(thumbnail().getAttribute("src")).toBe(src);
+    expect(post).toHaveBeenCalledOnce();
+  });
+
+  it("signs again once when the image does not load", async () => {
+    signEachTime();
+    renderInApp(<MessageFiles files={[photo]} />);
+    fireEvent.error(await screen.findByRole("img", { name: "Foto.png" }));
+    await waitFor(() => expect(thumbnail().getAttribute("src")).toContain("token=t2"));
+
+    // A file that does not load with a new URL either is not signed for good.
+    fireEvent.error(thumbnail());
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(post).toHaveBeenCalledTimes(2);
+  });
+
+  it("signs once when the thumbnail and its preview both fail to load", async () => {
+    signEachTime();
+    renderInApp(<MessageFiles files={[photo]} />);
+    const src = (await screen.findByRole("img", { name: "Foto.png" })).getAttribute("src");
+    fireEvent.click(screen.getByRole("button", { name: "Förhandsvisa Foto.png" }));
+    const dialog = await screen.findByRole("dialog", { name: "Foto.png" });
+    const preview = await within(dialog).findByRole("img", { name: "Foto.png" });
+    await waitFor(() => expect(preview.getAttribute("src")).toBe(src));
+
+    // The second failure joins the signing the first one started.
+    let renew!: () => void;
+    post.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          renew = () =>
+            resolve({
+              data: { url: "https://backend:8000/api/v1/files/file-9/download/?token=t2" },
+              response: new Response()
+            });
+        })
+    );
+    fireEvent.error(screen.getAllByRole("img", { name: "Foto.png" })[0]!);
+    fireEvent.error(preview);
+    renew();
+    await waitFor(() => expect(preview.getAttribute("src")).toContain("token=t2"));
+    expect(post).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps showing the image when signing it again fails", async () => {
+    signEachTime();
+    renderInApp(<MessageFiles files={[photo]} />);
+    const src = (await screen.findByRole("img", { name: "Foto.png" })).getAttribute("src");
+
+    post.mockRejectedValueOnce(new Error("signing failed"));
+    fireEvent.error(thumbnail());
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(2));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    // The URL it has is still the best one to show; only a file without one is an error.
+    expect(thumbnail().getAttribute("src")).toBe(src);
+  });
+});
 
 describe("MessageFiles", () => {
   it("shows up to three documents as chips that open the file in the panel", () => {

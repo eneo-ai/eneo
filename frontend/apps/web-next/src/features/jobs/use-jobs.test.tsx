@@ -104,6 +104,30 @@ it("reports a pushed job update without waiting for a poll", async () => {
   fake.restore();
 });
 
+it("finishes a crawl from the feed, refreshing its website without a poll", async () => {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  const fake = (await import("./job-events.test-support")).installFakeEventSource();
+  const crawl = { ...job, task: "crawl", name: "Devize" } as Job;
+  api.items = [crawl];
+  const { queryClient } = renderInApp(
+    <JobsProvider>
+      <JobIndicator />
+    </JobsProvider>
+  );
+  await screen.findByRole("button", { name: "Aviseringar, 1 pågår" });
+  await act(async () => fake.latest().open());
+  const polls = vi.mocked(browserApi.GET).mock.calls.length;
+  const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+
+  await act(async () => fake.latest().job({ ...crawl, status: "complete" }));
+
+  await screen.findByRole("button", { name: "Aviseringar" });
+  expect(queryClient.getQueryData<Job[]>(["jobs"])).toEqual([{ ...crawl, status: "complete" }]);
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: ["websites"] });
+  expect(browserApi.GET).toHaveBeenCalledTimes(polls);
+  fake.restore();
+});
+
 it("keeps its context still when the jobs arrive", async () => {
   // The provider sits above every page: a context that changes while React
   // still hydrates a page makes React render the page again from scratch.
@@ -213,6 +237,33 @@ it("checks active jobs every two seconds until they finish", async () => {
   fireEvent.click(bell);
   const panel = await screen.findByRole("dialog", { name: "Aviseringar och jobb" });
   expect(within(panel).getByText("Klar")).toBeTruthy();
+});
+
+it("checks the list every two minutes while the feed is open, and every 30 s once it is down", async () => {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  const fake = (await import("./job-events.test-support")).installFakeEventSource();
+  api.items = [];
+  // The jobs list is the only read here.
+  const polls = () => vi.mocked(browserApi.GET).mock.calls.length;
+  const { queryClient } = renderInApp(
+    <JobsProvider>
+      <JobIndicator />
+    </JobsProvider>
+  );
+  await waitFor(() => expect(queryClient.getQueryData(["jobs"])).toEqual([]));
+  await act(async () => fake.latest().open());
+  const opened = polls();
+
+  // The feed delivers every change: the list is only the safety net.
+  await act(() => vi.advanceTimersByTimeAsync(119_000));
+  expect(polls()).toBe(opened);
+  await act(() => vi.advanceTimersByTimeAsync(1_000));
+  expect(polls()).toBe(opened + 1);
+
+  await act(async () => fake.latest().refuse());
+  await act(() => vi.advanceTimersByTimeAsync(30_000));
+  expect(polls()).toBe(opened + 2);
+  fake.restore();
 });
 
 it("catches an upload whose job is already finished on the first poll", async () => {

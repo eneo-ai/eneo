@@ -135,7 +135,7 @@ def test_a_constructor_override_reaches_a_repo_resolved_later() -> None:
     session = object()
     container = request_container(session=providers.Object(session))
 
-    assert container.flow_repo().session is session
+    assert container.user_repo().session is session
 
 
 def test_a_user_set_after_a_provider_was_first_used_reaches_that_provider() -> None:
@@ -152,11 +152,11 @@ def test_a_user_set_after_a_provider_was_first_used_reaches_that_provider() -> N
 def test_a_provider_reached_through_another_is_the_one_touched_by_name() -> None:
     session = object()
     container = request_container(session=providers.Object(session))
-    reached = container.flow_run_access_policy.kwargs["flow_repo"]
+    reached = container.user_service.kwargs["user_repo"]
 
-    assert "flow_repo" not in container.providers
-    assert container.flow_repo is reached
-    assert container.flow_repo().session is session
+    assert "user_repo" not in container.providers
+    assert container.user_repo is reached
+    assert container.user_repo().session is session
 
 
 def test_a_singleton_is_one_per_request_container() -> None:
@@ -215,4 +215,4 @@ def test_a_request_container_refuses_a_deep_copy() -> None:
         providers.deepcopy(container)
     # Container itself still deep-copies, so the refusal is the request container's.
     copied = providers.deepcopy(Container(session=providers.Object("S")))
-    assert copied.flow_repo().session == "S"
+    assert copied.user_repo().session == "S"

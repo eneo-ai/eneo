@@ -315,6 +315,52 @@ async def test_default_transaction_scope_stays_open_through_streaming_response(
     ]
 
 
+@pytest.mark.parametrize(
+    "dependency",
+    [
+        container_dependency.get_container(),
+        container_dependency.get_container(with_transaction=False),
+        container_dependency.get_container_for_sysadmin(),
+    ],
+)
+async def test_each_request_copies_only_the_providers_it_uses_into_its_own_container(
+    dependency: object,
+) -> None:
+    async def _session() -> AsyncIterator[object]:
+        yield object()
+
+    seen: list[tuple[Container, object, object]] = []
+    app = FastAPI()
+    app.dependency_overrides[container_dependency.get_session_with_transaction] = (
+        _session
+    )
+    app.dependency_overrides[container_dependency.get_session] = _session
+
+    @app.get("/")
+    async def _route(
+        container: Annotated[Container, Depends(dependency)],
+    ) -> dict[str, bool]:
+        seen.append((container, container.session(), container.user_repo()))
+        return {"ok": True}
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        for _ in range(2):
+            assert (await client.get("/")).status_code == 200
+
+    (first, first_session, first_repo), (second, second_session, second_repo) = seen
+    assert first_repo.session is first_session
+    assert second_repo.session is second_session
+    assert first_session is not second_session
+    assert first is not second
+    assert first.user_repo is not second.user_repo
+    assert first.user_repo is not Container.user_repo
+    # Only what the request reached was copied, not all of Container.
+    assert set(first.providers) < set(Container.providers)
+    assert "space_service" not in first.providers
+
+
 async def test_websocket_user_authenticates_on_its_own_session_in_a_transaction(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -333,6 +379,7 @@ async def test_websocket_user_authenticates_on_its_own_session_in_a_transaction(
 
     monkeypatch.setattr(container_dependency.sessionmanager, "session", _own_session)
     monkeypatch.setattr(UserService, "authenticate", _authenticate)
+    monkeypatch.setattr(container_dependency, "authorize_user", lambda *_args: None)
 
     resolved = await container_dependency.get_user_from_websocket(
         websocket=SimpleNamespace(scope={}),
