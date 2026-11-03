@@ -92,7 +92,7 @@ jobs:
     # versions and pull-request builds (which publish nothing) wait for none of them,
     # and a waiting publisher is never replaced by a later one.
     concurrency:
-      group: tool-runtime-image-${{ needs.test.outputs.publish == 'true' && needs.test.outputs.version || github.run_id }}
+      group: eneo-image-tool-runtime-${{ needs.test.outputs.publish == 'true' && needs.test.outputs.version || github.run_id }}
       queue: max
       cancel-in-progress: false
     outputs:

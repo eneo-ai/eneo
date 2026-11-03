@@ -21,8 +21,10 @@ on:
         default: false
         type: boolean
 
+# One SBOM publication per tag at a time; a waiting one is never replaced by a later one.
 concurrency:
   group: ${{ github.workflow }}-${{ inputs.tag }}
+  queue: max
   cancel-in-progress: false
 
 env:

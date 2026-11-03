@@ -28,6 +28,11 @@ on:
 jobs:
   image:
     runs-on: ubuntu-latest
+    # One writer of a version's image tag at a time, whichever ref resolved to it.
+    concurrency:
+      group: eneo-image-${{ inputs.component }}-${{ inputs.version }}
+      queue: max
+      cancel-in-progress: false
     outputs:
       digest: ${{ steps.reuse.outputs.digest || steps.build.outputs.digest }}
     permissions:

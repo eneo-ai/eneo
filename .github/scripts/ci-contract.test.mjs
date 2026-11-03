@@ -294,7 +294,7 @@ test("publications running side by side never cancel or replace each other's wor
   ].join("\n"));
   // One tool-runtime publisher per version, and a waiting one is never replaced.
   const runtime = read("tool_runtime_image.yml").split("\n  image:\n")[1].split("\n    permissions:")[0];
-  assert.match(runtime, /^      group: tool-runtime-image-\$\{\{ needs\.test\.outputs\.publish == 'true' && needs\.test\.outputs\.version \|\| github\.run_id \}\}\n      queue: max\n      cancel-in-progress: false$/m);
+  assert.match(runtime, /^      group: eneo-image-tool-runtime-\$\{\{ needs\.test\.outputs\.publish == 'true' && needs\.test\.outputs\.version \|\| github\.run_id \}\}\n      queue: max\n      cancel-in-progress: false$/m);
 });
 
 test("publication reuses CI only through a full-suite receipt from the merge queue on that commit", () => {
@@ -361,6 +361,17 @@ test("publication moves aliases only from its bundle, under the release controll
   assert.ok(promote.includes("(needs.release-sbom.result == 'skipped' && !startsWith(github.ref, 'refs/tags/'))"));
   assert.match(promote, /^        if: needs\.release\.outputs\.managed != 'true'\n        run: python3 scripts\/release_bundle\.py promote --bundle release-bundle\/release\.json$/m);
   assert.equal(workflow.match(/release_bundle\.py promote/g).length, 1);
+});
+
+test("publication serializes a version's writes by that version, and nothing else", () => {
+  const read = (file) => fs.readFileSync(path.join(root, ".github/workflows", file), "utf8");
+  const workflow = read("build_and_push_images.yml");
+  assert.doesNotMatch(workflow, /^concurrency:/m);
+  const lock = (group) => `    concurrency:\n      group: ${group}\n      queue: max\n      cancel-in-progress: false\n`;
+  assert.ok(read("application_image.yml").includes(lock("eneo-image-${{ inputs.component }}-${{ inputs.version }}")));
+  assert.ok(workflow.split("\n  bundle:\n")[1].includes(lock("eneo-bundle-${{ needs.release.outputs.version }}")));
+  // The tag's SBOM publisher queues too: a waiting retry is never replaced.
+  assert.match(read("release_sbom.yml"), /^concurrency:\n  group: \$\{\{ github\.workflow \}\}-\$\{\{ inputs\.tag \}\}\n  queue: max\n  cancel-in-progress: false$/m);
 });
 
 test("only develop pushes save the package download cache", () => {

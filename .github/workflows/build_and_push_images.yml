@@ -5,11 +5,10 @@ on:
     branches: [develop]
     tags: ['v*']
   workflow_dispatch:
-# Serialize all application publication, including alias promotion and reruns.
-concurrency:
-  group: eneo-application-publication
-  queue: max
-  cancel-in-progress: false
+# Different commits and refs publish side by side. What they share is serialized where
+# it is written: a version's image tags by the component image jobs, its release assets
+# by the bundle job (each locked by the resolved version, so refs that resolve to the
+# same version wait for each other), and the aliases by the promote job.
 permissions:
   contents: read
   pull-requests: read
@@ -136,6 +135,10 @@ jobs:
       && needs.frontend.result == 'success'
       && needs.tool-runtime.result == 'success' }}
     runs-on: ubuntu-latest
+    concurrency:
+      group: eneo-bundle-${{ needs.release.outputs.version }}
+      queue: max
+      cancel-in-progress: false
     permissions:
       contents: write
       packages: read
