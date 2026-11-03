@@ -775,10 +775,22 @@ class SpaceRepository:
                 override.mcp_server_tool_id
             ] = override.is_enabled
 
+        # Each assistant is projected over its own servers' rows only, so the
+        # work stays the size of what it returns, not assistants x catalog.
+        tools_by_server: dict[UUID, list[MCPServerToolsTable]] = {}
+        for tool in tools_db:
+            tools_by_server.setdefault(tool.mcp_server_id, []).append(tool)
+
         return {
             projection.assistant_id: self._project_assistant_mcp_server_tools(
                 mcp_servers=deepcopy(list(projection.mcp_servers)),
-                tools_db=tools_db,
+                tools_db=[
+                    tool
+                    for server_id in dict.fromkeys(
+                        server.id for server in projection.mcp_servers
+                    )
+                    for tool in tools_by_server.get(server_id, ())
+                ],
                 tenant_tool_settings=tenant_tool_settings,
                 space_tool_overrides=space_tool_overrides.get(projection.space_id, {}),
                 assistant_tool_overrides=assistant_tool_overrides.get(
@@ -853,27 +865,30 @@ class SpaceRepository:
                 None,
             )
 
-        # For each assistant, load MCP servers with tools and apply space+assistant overrides
-        for assistant in assistants:
-            if assistant.mcp_servers:
-                from eneo.mcp_servers.infrastructure.mappers.mcp_server_mapper import (
-                    MCPServerMapper,
+        # Each assistant's MCP servers with their tools, switched by the space
+        # and by that assistant, projected for all assistants in one pass.
+        from eneo.mcp_servers.infrastructure.mappers.mcp_server_mapper import (
+            MCPServerMapper,
+        )
+
+        with_mcp_servers = [
+            assistant for assistant in assistants if assistant.mcp_servers
+        ]
+        projected = await self.project_assistants_mcp_servers(
+            [
+                AssistantMCPServerProjection(
+                    space_id=space_id,
+                    assistant_id=assistant.id,
+                    mcp_servers=tuple(
+                        MCPServerMapper.to_entities(assistant.mcp_servers)
+                    ),
                 )
-
-                # Map to domain entities first
-                mcp_servers = MCPServerMapper.to_entities(assistant.mcp_servers)
-
-                # Apply space + assistant level overrides using same logic as space MCP loading
-                mcp_servers = (
-                    await self._load_assistant_mcp_server_tools_with_overrides(
-                        space_id=space_id,
-                        assistant_id=assistant.id,
-                        mcp_servers=mcp_servers,
-                    )
-                )
-
-                # Store the filtered entities back on the assistant for the factory
-                setattr(assistant, "_mcp_server_entities", mcp_servers)
+                for assistant in with_mcp_servers
+            ]
+        )
+        for assistant in with_mcp_servers:
+            # The factory takes these in place of the unfiltered relationship.
+            setattr(assistant, "_mcp_server_entities", projected[assistant.id])
 
         return assistants
 
