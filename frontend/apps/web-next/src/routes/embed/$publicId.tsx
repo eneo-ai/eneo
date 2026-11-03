@@ -1,7 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { EmbedRoute, EmbedError, embedSearch } from "@/features/widget/embed-route";
-import { loadEmbedConfig } from "@/features/widget/components/embed-page";
+import { EmbedRoute, EmbedError } from "@/features/widget/embed-route";
+import { loadEmbedConfig } from "@/features/widget/embed-config";
 import { PREVIEW_QUERY } from "@/features/widget/preview";
+import { embedSearch } from "@/features/widget/urls";
 
 export const Route = createFileRoute("/embed/$publicId")({
   validateSearch: embedSearch,

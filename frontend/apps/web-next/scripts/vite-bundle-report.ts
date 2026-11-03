@@ -101,7 +101,12 @@ export function bundleReport(): Plugin {
           (id) =>
             /(?:^|\/)node_modules\/(?:driver\.js|@tiptap\/[^/]+|prosemirror-[^/]+|rehype-stringify)\//.test(
               id
-            ) || id.split("?")[0] === "src/components/ai-elements/answer-clipboard.ts"
+            ) ||
+            [
+              "src/components/ai-elements/answer-clipboard.ts",
+              "src/features/widget/components/embed-app.tsx",
+              "src/features/widget/components/widget-chat.tsx"
+            ].includes(id.split("?")[0] ?? "")
         );
         if (eager?.length) {
           this.error(`Eager feature dependencies in ${name}:\n${eager.join("\n")}`);
