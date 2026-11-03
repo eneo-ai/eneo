@@ -597,3 +597,55 @@ async def test_overview_includes_durable_inflight_budget_without_per_widget_read
     assert row.budget_used_today == 8_000
     assert row.questions_30d == 0
     assert row.last_activity is None
+
+
+async def test_reapplying_a_release_during_its_publication_does_not_deadlock(
+    db_container, active_widget
+):
+    """A publication holds the template and then its followers. A follower
+    reapplying that release must queue on the template first; holding its
+    own row while waiting for the template would deadlock the two."""
+    async with db_container() as container:
+        templates = container.widget_template_service()
+        created = await templates.create_template(name="Kommunblå")
+        template = (await templates.publish_template(created.id)).template
+        assert template.id is not None
+        linked = await container.widget_service().link_template(
+            UUID(active_widget["id"]), template.id, revision=active_widget["revision"]
+        )
+    template_id = template.id
+    widget_id = UUID(active_widget["id"])
+    revision = linked.widget.revision
+
+    async def reapply() -> Widget | None:
+        async with db_container() as container:
+            try:
+                view = await container.widget_service().link_template(
+                    widget_id, template_id, revision=revision
+                )
+            except WidgetRevisionConflictError:
+                # Publication wrote onto the follower first; the editor reloads.
+                return None
+            return view.widget
+
+    async with db_container() as publisher:
+        # Hold the template as a publication does, let the reapply line up
+        # behind it, then publish onto the follower rows.
+        repo = publisher.widget_template_repo()
+        assert await repo.get(template_id, for_update=True) is not None
+        racer = asyncio.create_task(reapply())
+        await _wait_until_blocked(publisher.session(), racer)
+        service = publisher.widget_template_service()
+        await service.update_template(
+            template_id,
+            {"texts": template.texts.model_copy(update={"title": "Fråga kommunen"})},
+        )
+        await service.publish_template(template_id)
+        assert not racer.done()
+    await racer
+
+    async with db_container() as reader:
+        widget = await reader.widget_repo().get(widget_id)
+    assert widget is not None
+    assert widget.template_id == template_id
+    assert widget.texts.title == "Fråga kommunen"

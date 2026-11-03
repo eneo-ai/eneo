@@ -322,8 +322,12 @@ class WidgetService:
         self, widget_id: UUID, template_id: UUID, *, revision: int
     ) -> WidgetView:
         validate_permission(self.user, Permission.WIDGETS)
-        widget, space = await self._widget_for_change(widget_id, revision)
+        # Template before widget, the order a publication takes them in: an
+        # existing follower reapplying its release while that release is
+        # being published then queues on the template instead of deadlocking
+        # against the publication's lock on the follower rows.
         template = await self._template_to_follow(template_id)
+        widget, space = await self._widget_for_change(widget_id, revision)
         before = widget.model_copy(deep=True)
         self._link(widget, template)
         self._hold_to_rules(before, widget)
