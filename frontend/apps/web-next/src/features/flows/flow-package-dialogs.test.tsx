@@ -212,40 +212,42 @@ describe("FlowPackageImportDialog", () => {
     });
   }, 20_000);
 
-  it("lets a model with undeclared capacity stand in, and says what that means for runs", async () => {
+  it("says why a model of the space cannot stand in for the package's", async () => {
     const [model] = plan.dependency_resolutions;
-    const undeclared = {
+    const withRejected = {
       ...plan,
       dependency_resolutions: [
         {
           ...model,
-          suggestions: [
+          rejected_candidates: [
             {
-              local_kind: "completion_model",
-              local_id: "m-2",
-              label: "Gemma lokalt",
-              model_kind: "completion_model",
-              max_input_tokens: null
+              candidate: { local_kind: "completion_model", local_id: "m-2", label: "Gemma 4" },
+              reasons: ["model_capacity_unknown"]
+            },
+            {
+              candidate: { local_kind: "transcription_model", local_id: "t-1", label: "Whisper" },
+              reasons: ["model_kind_mismatch"]
             }
           ]
         }
       ]
     };
     api.POST.mockImplementation(() =>
-      Promise.resolve({ data: undeclared, response: json(200, undeclared) })
+      Promise.resolve({ data: withRejected, response: json(200, withRejected) })
     );
     const { container } = renderImport();
     choose(container, new File(["zip"], "brev.eneopkg", { type: "application/zip" }));
 
-    fireEvent.click(await screen.findByRole("combobox", { name: /Lokal resurs för Skrivmodell/ }));
-    fireEvent.click(await screen.findByRole("option", { name: "Gemma lokalt" }));
-
     expect(
-      await screen.findByText(/en administratör behöver ange modellens gränser innan det kan köras/)
+      await screen.findByText(
+        /^Gemma 4 kan inte väljas: Det är inte angivet hur mycket text modellen kan ta emot\./
+      )
     ).toBeTruthy();
-    await waitFor(() =>
-      expect(screen.queryByText("Välj en lokal resurs för Skrivmodell.")).toBeNull()
-    );
+    // A model of the other kind is no candidate at all, so it is not listed.
+    expect(screen.queryByText(/Whisper/)).toBeNull();
+    fireEvent.click(screen.getByRole("combobox", { name: /Lokal resurs för Skrivmodell/ }));
+    expect(await screen.findByRole("option", { name: "Modell A" })).toBeTruthy();
+    await expectNoAxeViolations(container);
   }, 20_000);
 
   it("says why the core refused the package", async () => {

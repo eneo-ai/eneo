@@ -485,10 +485,7 @@ def _identity(provider: str, model: str) -> FlowPackageModelIdentity:
 
 @pytest.mark.parametrize("minimum", [None, 32000])
 @pytest.mark.parametrize("reverse", [False, True])
-def test_unknown_capacity_is_offered_after_known_with_a_warning(minimum, reverse):
-    """A package names the model it was made with; the instance may not have it.
-    A model whose capacity no admin declared stays selectable for the draft and
-    says so; a run refuses it until the capacity is declared."""
+def test_unknown_capacity_rejects_only_its_candidate(minimum, reverse):
     unknown = _completion_model(
         "11111111-1111-4111-8111-111111111111", "Unknown", max_input_tokens=None
     )
@@ -506,37 +503,13 @@ def test_unknown_capacity_is_offered_after_known_with_a_warning(minimum, reverse
     candidates = (unknown, known) if reverse else (known, unknown)
     result = resolve_model_requirement(requirement=requirement, candidates=candidates)
     assert result.status is FlowPackageImportPlanStatus.RESOLVED_EXACT
-    assert result.suggestions == [known, unknown]
-    assert result.eligible_candidate_count == 2
-    assert result.rejected_candidates == []
-    assert (
-        hard_model_candidate_rejection_reasons(
-            requirement=requirement, candidate=unknown
-        )
-        == ()
-    )
-
-    alone = resolve_model_requirement(requirement=requirement, candidates=(unknown,))
-    assert alone.status is FlowPackageImportPlanStatus.REQUIRES_HUMAN_CONFIRMATION
-    assert alone.suggestions == [unknown]
-    assert alone.auto_select_allowed is False
-    assert alone.install_blocks is False
-    assert [warning.value for warning in alone.selection_warnings] == [
+    assert result.suggestions == [known]
+    assert result.eligible_candidate_count == 1
+    assert result.total_candidate_count == 2
+    assert result.rejected_candidates[0].candidate == unknown
+    assert [reason.value for reason in result.rejected_candidates[0].reasons] == [
         "model_capacity_unknown"
     ]
-
-
-def test_a_tested_model_with_unknown_capacity_is_not_chosen_for_the_person():
-    tested = _completion_model(
-        "11111111-1111-4111-8111-111111111111", "Tested", max_input_tokens=None
-    )
-    result = resolve_model_requirement(
-        requirement=_requirement(tested_with=[tested.identity]),
-        candidates=(tested,),
-    )
-    assert result.status is FlowPackageImportPlanStatus.REQUIRES_HUMAN_CONFIRMATION
-    assert result.auto_select_allowed is False
-    assert result.suggestions == [tested]
-    assert [warning.value for warning in result.selection_warnings] == [
-        "model_capacity_unknown"
-    ]
+    rejected = resolve_model_requirement(requirement=requirement, candidates=(unknown,))
+    assert rejected.status is FlowPackageImportPlanStatus.UNRESOLVED_REQUIRED
+    assert rejected.suggestions == []

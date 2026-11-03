@@ -64,6 +64,25 @@ function blockingText(reason: BlockingReason, t: Translate): string {
   }
 }
 
+/**
+ * The space's models that cannot stand in for the package's, each with why, so
+ * a model the person expected in the list is explained rather than missing.
+ * Models of the other kind (transcription for completion) are left out.
+ */
+function unusableModels(resolution: Resolution, t: Translate): string[] {
+  if (resolution.kind !== "model") return [];
+  return (resolution.rejected_candidates ?? []).flatMap(({ candidate, reasons }) => {
+    const why = reasons.filter((reason) => reason !== "model_kind_mismatch");
+    if (why.length === 0) return [];
+    return [
+      t("flow_editor_tools_package_model_unusable", {
+        model: candidate.label,
+        reasons: why.map((reason) => t(`flow_editor_tools_package_model_issue_${reason}`)).join(" ")
+      })
+    ];
+  });
+}
+
 function guidanceOf(resolution: Resolution): string | null {
   const guidance = resolution.guidance;
   if (!guidance) return null;
@@ -117,6 +136,7 @@ function Requirement({
         ? t("flow_editor_tools_package_recommended")
         : t("flow_editor_tools_package_optional");
 
+  const unusable = unusableModels(resolution, t);
   let control: React.ReactNode;
   if (template && resolution.kind === "template_asset") {
     control = (
@@ -168,22 +188,9 @@ function Requirement({
       <FieldMessage id={problemId} message={t("flow_editor_tools_package_no_candidates")} />
     );
   } else {
-    const chosen = resolution.suggestions.find(
-      (candidate) => candidateKey(candidate) === selection
-    );
-    // A model whose capacity no admin declared can stand in for the package's; a run refuses it
-    // until its limits are declared, so the person hears that before importing.
-    const capacityUnknown =
-      chosen !== undefined &&
-      chosen.local_kind === "completion_model" &&
-      "max_input_tokens" in chosen &&
-      chosen.max_input_tokens == null;
     control = (
       <Selector
         label={t("flow_editor_tools_package_local_resource", { slot: label })}
-        description={
-          capacityUnknown ? t("flow_editor_tools_package_model_capacity_unknown") : undefined
-        }
         options={[
           ...(selection === null && resolution.required
             ? [{ value: SKIP, label: t("flow_editor_tools_package_select_local_resource") }]
@@ -250,6 +257,17 @@ function Requirement({
           </div>
         ) : null}
         {control}
+        {unusable.length > 0 ? (
+          <ul className="m-0 flex list-none flex-col gap-1 p-0">
+            {unusable.map((line) => (
+              <li key={line}>
+                <Text type="supporting" size="sm" as="p" display="block" className="m-0">
+                  {line}
+                </Text>
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </article>
     </li>
   );
