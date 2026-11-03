@@ -146,6 +146,15 @@ test("both E2E jobs free disk before building their stack", () => {
   }
 });
 
+test("E2E stacks keep their network inside their compose project", () => {
+  // A fixed network name let stacks started side by side with their own -p resolve each other's e2e-db and e2e-redis.
+  for (const file of ["docker-compose.e2e.yml", "docker-compose.e2e.ci.yml"]) {
+    const networks = fs.readFileSync(path.join(root, file), "utf8").split("\nnetworks:\n")[1].split(/\n(?=\S)/)[0];
+    assert.match(networks, /^ {2}e2e: \{\}$/m, file);
+    assert.doesNotMatch(networks, /^ +name:/m, file);
+  }
+});
+
 test("the Svelte build is checked against a memory budget below its heap limit", () => {
   const workflow = fs.readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8");
   const stepBody = (name) => workflow.split(`- name: ${name}\n`)[1]?.split(/\n      - name: /)[0];
