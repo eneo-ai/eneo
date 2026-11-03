@@ -141,7 +141,9 @@ export function CreateChatAppMenu({ secondary = false }: { secondary?: boolean }
           size={size}
           // Astryx keeps a label on one line at a fixed height and cuts it with an
           // ellipsis; this one may shrink at 320 px, so it wraps instead (1.4.4).
-          className={`h-auto min-w-0 shrink grow rounded-r-none text-center whitespace-normal ${
+          // A line and py-1 fit the element height, which min-h keeps, so one
+          // line is exactly as tall as the menu button beside it.
+          className={`h-auto min-w-0 shrink grow rounded-r-none py-1 text-center whitespace-normal ${
             secondary ? "min-h-(--size-element-sm)" : "min-h-(--size-element-md)"
           }`}
           isLoading={createAssistant.isPending}
