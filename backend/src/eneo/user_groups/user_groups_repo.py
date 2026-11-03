@@ -11,7 +11,6 @@ from eneo.database.repositories.base import (
     BaseRepositoryDelegate,
     RelationshipOption,
 )
-from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.user_groups_table import UserGroups
 from eneo.database.tables.users_table import Users, usergroups_users_table
 from eneo.main.exceptions import UniqueException
@@ -19,6 +18,7 @@ from eneo.user_groups.user_group import (
     UserGroupCreate,
     UserGroupInDB,
     UserGroupInDBBase,
+    UserGroupPublic,
     UserGroupState,
     UserGroupUpdate,
 )
@@ -61,12 +61,9 @@ class UserGroupsRepository:
         )
 
     def _get_options(self):
-        return [
-            selectinload(UserGroups.users).selectinload(Users.roles),
-            selectinload(UserGroups.users)
-            .selectinload(Users.tenant)
-            .selectinload(Tenants.modules),
-        ]
+        # The members' roles, tenant and modules are never read; loading them
+        # cost a batch of statements per 500 members.
+        return [selectinload(UserGroups.users)]
 
     async def get_user_group(self, id: UUID) -> UserGroupInDB | None:
         query = (
@@ -97,16 +94,7 @@ class UserGroupsRepository:
 
     @staticmethod
     def _get_relationship_options():
-        return [
-            RelationshipOption(
-                name="users",
-                table=Users,
-                options=[
-                    selectinload(Users.roles),
-                    selectinload(Users.tenant).selectinload(Tenants.modules),
-                ],
-            ),
-        ]
+        return [RelationshipOption(name="users", table=Users)]
 
     async def update_user_group(
         self, user_group: UserGroupUpdate
@@ -125,10 +113,11 @@ class UserGroupsRepository:
 
     async def get_all_user_groups(
         self, tenant_id: Optional[UUID] = None
-    ) -> List[UserGroupInDB]:
-        query = (
-            sa.select(UserGroups)
-            .where(UserGroups.tenant_id == tenant_id, _NOT_DELETED)
-            .options(*self._get_options())
+    ) -> List[UserGroupPublic]:
+        """Validated straight into the response model: each member's email is
+        validated once, not as UserInDBBase and then again as UserSparse."""
+        query = sa.select(UserGroups).where(
+            UserGroups.tenant_id == tenant_id, _NOT_DELETED
         )
-        return await self.delegate.get_models_from_query(query)
+        records = await self.delegate.get_records_from_query(query)
+        return [UserGroupPublic.model_validate(record) for record in records]
