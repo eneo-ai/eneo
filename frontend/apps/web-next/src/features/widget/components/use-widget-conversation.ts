@@ -34,7 +34,9 @@ const EMPTY: WidgetConversation = { id: null, messages: [], feedback: null };
 /** How one question ended: with an answer, or with an error before or after it began. */
 export type AskResult =
   | { status: "done"; sessionId: string; answer: string }
-  | { status: "failed"; error: unknown; started: boolean; sessionId?: string };
+  | { status: "failed"; error: unknown; started: boolean; sessionId?: string }
+  /** Started over (or unmounted) before the stream settled: nothing of it is kept. */
+  | { status: "cancelled" };
 
 /**
  * The one conversation a visitor has with the widget, driven by the widget
@@ -127,6 +129,7 @@ export function useWidgetConversation(client: WidgetClient) {
       };
 
       setAsking(true);
+      let result: AskResult;
       try {
         const final = await client.conversations.ask({
           conversation: { id: current.current.id },
@@ -171,11 +174,11 @@ export function useWidgetConversation(client: WidgetClient) {
         // The stream's own view of the answer is authoritative; the text
         // events are what the visitor saw arrive.
         answer = final.answer ?? answer;
-        return sessionId
+        result = sessionId
           ? { status: "done", sessionId, answer }
           : { status: "failed", error: new Error("The answer never started"), started: false };
       } catch (error) {
-        return { status: "failed", error, started, sessionId };
+        result = { status: "failed", error, started, sessionId };
       } finally {
         if (frame !== null && typeof cancelAnimationFrame === "function") {
           cancelAnimationFrame(frame);
@@ -186,6 +189,10 @@ export function useWidgetConversation(client: WidgetClient) {
           setAsking(false);
         }
       }
+      // The callbacks already drop a stale stream's events; its outcome (an
+      // abort rejection, or an answer that finished anyway) belongs to the
+      // discarded conversation and must not be kept, shown or announced.
+      return stale() ? { status: "cancelled" } : result;
     },
     [client]
   );

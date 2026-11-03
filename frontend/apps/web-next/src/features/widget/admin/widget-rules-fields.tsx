@@ -4,7 +4,7 @@ import { NumberInput } from "@astryxdesign/core/NumberInput";
 import { Selector } from "@astryxdesign/core/Selector";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { useLocale, useTranslations } from "use-intl";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Switch } from "@astryxdesign/core/Switch";
 import { SettingsGroup } from "@/components/composites/settings-rows";
 import type { AutosaveSnapshot, Widget, WidgetAutosave } from "./autosave";
@@ -43,10 +43,18 @@ function RuleNumber({
   const t = useTranslations();
   const locale = useLocale();
   const [rangeError, setRangeError] = useState<string | null>(null);
+  const held = rangeError !== null;
+  // The parent's callback is read through a ref: reporting a held state
+  // re-renders the parent, which hands down a new callback, and an effect
+  // keyed on it would report again without end.
+  const report = useRef(onRange);
   useEffect(() => {
-    onRange(rangeError !== null);
-    return () => onRange(false);
-  }, [rangeError, onRange]);
+    report.current = onRange;
+  });
+  useEffect(() => {
+    report.current(held);
+    return () => report.current(false);
+  }, [held]);
   const message = rangeError ?? problem;
   const status: Status = message ? { type: "error", message } : undefined;
   return (

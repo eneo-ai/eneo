@@ -2,10 +2,10 @@
 
 import { Button } from "@astryxdesign/core/Button";
 import { useTranslations } from "use-intl";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Switch } from "@astryxdesign/core/Switch";
 import { TextInput } from "@/components/astryx/text-input";
-import { IconField, iconUrl, uploadIcon } from "@/components/composites/icon-field";
+import { IconField, iconUrl, releaseIcon, uploadIcon } from "@/components/composites/icon-field";
 import type { Schema } from "@/lib/api/models";
 import { WidgetPersonaByline } from "../components/widget-persona-byline";
 import { monogram } from "../persona";
@@ -59,6 +59,29 @@ export function WidgetPersonaFields({
   const hasName = savedName.length > 0;
   const avatarUrl = iconUrl(persona.avatar_icon_id);
 
+  // An upload finishes after other edits may have changed the persona, so an
+  // avatar is attached to the persona as it is then, never as it was when
+  // the upload began.
+  const latest = useRef(persona);
+  useEffect(() => {
+    latest.current = persona;
+  });
+
+  async function attachAvatar(iconId: string) {
+    const current = latest.current;
+    // No name, no face: the API refuses an avatar on an empty persona, so
+    // an upload that lands after the persona was cleared is let go.
+    if (!current.name) {
+      await releaseIcon(iconId);
+      return;
+    }
+    onChange({ ...current, avatar_icon_id: iconId });
+  }
+
+  function removeAvatar() {
+    onChange({ ...latest.current, avatar_icon_id: null, avatar_in_launcher: false });
+  }
+
   function setName(value: string) {
     const next = value.slice(0, 30);
     name.setText(next);
@@ -85,7 +108,7 @@ export function WidgetPersonaFields({
       if (!response.ok) throw new Error(`Icon fetch returned ${response.status}`);
       const blob = await response.blob();
       const uploaded = await uploadIcon(new File([blob], "avatar", { type: blob.type }));
-      onChange({ ...persona, avatar_icon_id: uploaded.id });
+      await attachAvatar(uploaded.id);
     } catch (error) {
       console.error("Failed to copy the assistant's icon:", error);
       setCopyFailed(true);
@@ -151,13 +174,7 @@ export function WidgetPersonaFields({
           <div className="flex flex-col gap-2">
             <IconField
               iconId={persona.avatar_icon_id}
-              onSave={async (iconId) =>
-                onChange(
-                  iconId
-                    ? { ...persona, avatar_icon_id: iconId }
-                    : { ...persona, avatar_icon_id: null, avatar_in_launcher: false }
-                )
-              }
+              onSave={async (iconId) => (iconId ? attachAvatar(iconId) : removeAvatar())}
             />
             {assistantIconId && (
               <div className="flex flex-wrap items-center gap-2">

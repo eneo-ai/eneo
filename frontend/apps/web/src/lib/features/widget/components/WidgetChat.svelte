@@ -366,27 +366,33 @@
    * minutes after the answer, so the token is refreshed like before a
    * question and re-minted once if it turned stale meanwhile.
    */
-  async function submitFeedback(
-    feedback: { value: 1 | -1; text?: string },
-    retried = false
-  ): Promise<string | null> {
+  async function submitFeedback(feedback: {
+    value: 1 | -1;
+    text?: string;
+  }): Promise<string | null> {
     const sessionId = chat.currentConversation.id;
     if (!sessionId) return m.widget_error_generic();
     // Feedback owns the next error location, just as sending a question
     // clears an older feedback error. Never keep two attempts' alerts.
     errorMessage = null;
-    try {
-      await session.ensureToken();
-      await client.conversations.leaveFeedback({ conversation: { id: sessionId }, feedback });
-      return null;
-    } catch (error) {
-      if (isTokenRejected(error) && !retried) {
-        session.invalidate();
-        return submitFeedback(feedback, true);
+    // The vote belongs to the conversation it was given in; starting over
+    // during the request must not redirect the retry to the new one.
+    const attempt = async (retried: boolean): Promise<string | null> => {
+      try {
+        await session.ensureToken();
+        await client.conversations.leaveFeedback({ conversation: { id: sessionId }, feedback });
+        return null;
+      } catch (error) {
+        if (isTokenRejected(error) && !retried) {
+          session.invalidate();
+          return attempt(true);
+        }
+        // The feedback component shows this where the visitor is looking.
+        return describeWidgetError(error);
       }
-      // The feedback component shows this where the visitor is looking.
-      return describeWidgetError(error);
-    }
+    };
+    const result = await attempt(false);
+    return chat.currentConversation.id === sessionId ? result : null;
   }
 </script>
 

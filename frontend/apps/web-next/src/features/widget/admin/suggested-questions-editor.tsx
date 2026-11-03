@@ -68,10 +68,17 @@ export function SuggestedQuestionsEditor({
     .filter((_, index) => texts[index] && texts.indexOf(texts[index]!) < index)
     .map((row) => row.key);
   const held = duplicates.length > 0;
+  // The parent's callback is read through a ref: reporting a held state
+  // re-renders the parent, which hands down a new callback, and an effect
+  // keyed on it would report again without end.
+  const report = useRef(onHeld);
   useEffect(() => {
-    onHeld?.(held);
-    return () => onHeld?.(false);
-  }, [held, onHeld]);
+    report.current = onHeld;
+  });
+  useEffect(() => {
+    report.current?.(held);
+    return () => report.current?.(false);
+  }, [held]);
 
   function emit(current: Row[]) {
     if (duplicates.length > 0) return;

@@ -20,15 +20,32 @@ vi.mock("$app/navigation", () => ({
 vi.mock("$app/state", () => ({
   page: { url: new URL("http://localhost/spaces/s1/assistants/a1/widget"), state: {} }
 }));
-vi.mock("$lib/paraglide/messages", () => ({
-  m: new Proxy<Record<string, (params?: Record<string, string>) => string>>(
-    {},
-    {
-      get: (_target, key) => (params?: Record<string, string>) =>
-        params ? `${String(key)}(${Object.values(params).join("|")})` : String(key)
-    }
-  )
-}));
+vi.mock("$lib/paraglide/messages", () => {
+  const message = (key: string | symbol) => (params?: Record<string, string>) =>
+    params ? `${String(key)}(${Object.values(params).join("|")})` : String(key);
+  // The persona's avatar upload imports the module namespace (`import * as m`),
+  // so the messages it reads are named exports here, beside `m`.
+  const avatarUploadKeys = [
+    "avatar_current",
+    "avatar_invalid_type",
+    "avatar_too_large",
+    "avatar_upload",
+    "avatar_uploading",
+    "close",
+    "delete",
+    "download",
+    "upload_avatar_alt",
+    "upload_avatar_preview_alt",
+    "upload_view_avatar"
+  ];
+  return {
+    ...Object.fromEntries(avatarUploadKeys.map((key) => [key, message(key)])),
+    m: new Proxy<Record<string, (params?: Record<string, string>) => string>>(
+      {},
+      { get: (_target, key) => message(key) }
+    )
+  };
+});
 vi.mock("$lib/paraglide/runtime", () => ({
   getLocale: () => "sv",
   localizeHref: (href: string) => href
@@ -289,6 +306,82 @@ describe("WidgetEditor", () => {
       page.getByRole("alertdialog").getByRole("button", { name: "widget_admin_template_detach" })
     );
     await vi.waitFor(() => expect(detachTemplate).toHaveBeenCalledTimes(1));
+
+    await userEvent.click(page.getByRole("tab", { name: /widget_admin_tab_rules/ }));
+    const held = page.getByLabelText("widget_admin_allowed_origins", { exact: true });
+    await expect.element(held).toHaveValue("https://www.kommun.se\nhttps://ny.kommun.se");
+    await expect.element(held).toHaveAccessibleDescription(/widget_admin_origins_refused/);
+  });
+
+  // Linking copies the persona too, so a refused persona is moot afterwards;
+  // a refused edit the release does not touch stays held.
+  test("applying a template that locks the persona drops a refused persona but keeps other held edits", async () => {
+    const linked = widget({
+      template: { id: "t1", name: "Kommunblå", locked_groups: [] }
+    } as unknown as Partial<Widget>);
+    const refuse = (...loc: string[]) => ({
+      loc: ["body", ...loc],
+      type: "value_error",
+      msg: "Invalid"
+    });
+    const update = vi.fn(async ({ update: patch }: { update: Partial<Widget> }) => {
+      const detail = [
+        ...("persona" in patch ? [refuse("persona", "name")] : []),
+        ...("allowed_origins" in patch ? [refuse("allowed_origins")] : [])
+      ];
+      if (detail.length > 0) throw new EneoError("raw", "RESPONSE", 422, 0, { detail });
+      return { ...linked, ...patch };
+    });
+    const linkTemplate = vi.fn(async () => ({
+      ...linked,
+      persona: { name: "Kommunboten", avatar_icon_id: null, avatar_in_launcher: false },
+      template: { id: "t1", name: "Kommunblå", locked_groups: ["persona"] },
+      revision: 1
+    }));
+    const eneo = {
+      widgets: {
+        update,
+        linkTemplate,
+        previewToken: vi.fn(() => new Promise(() => {})),
+        usage: vi.fn(() => new Promise(() => {}))
+      }
+    } as unknown as Eneo;
+    render(WidgetEditor, {
+      widget: linked,
+      assistant: { id: "a1", published: true, mcp_servers: [] } as unknown as Assistant,
+      eneo,
+      isAdmin: true,
+      policy: null,
+      release: null
+    });
+
+    const personaName = page.getByLabelText("widget_admin_persona_name", { exact: true });
+    await userEvent.fill(personaName, "Robo");
+    await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    await expect.element(personaName).toHaveAccessibleDescription(/widget_admin_value_refused/);
+
+    await userEvent.click(page.getByRole("tab", { name: /widget_admin_tab_rules/ }));
+    const origins = page.getByLabelText("widget_admin_allowed_origins", { exact: true });
+    await userEvent.fill(origins, "https://www.kommun.se\nhttps://ny.kommun.se");
+    await userEvent.click(page.getByRole("tab", { name: /widget_admin_tab_appearance/ }));
+    await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(2), { timeout: 3000 });
+
+    await userEvent.click(page.getByRole("button", { name: "widget_admin_template_reapply" }));
+    await userEvent.click(
+      page.getByRole("alertdialog").getByRole("button", { name: "widget_admin_template_reapply" })
+    );
+    await vi.waitFor(() => expect(linkTemplate).toHaveBeenCalledTimes(1));
+    await expect
+      .element(
+        page.getByText("widget_admin_template_locked_parts(widget_admin_template_lock_persona)")
+      )
+      .toBeVisible();
+
+    await userEvent.click(page.getByRole("tab", { name: /widget_admin_tab_content/ }));
+    const lockedName = page.getByLabelText("widget_admin_persona_name", { exact: true });
+    await expect.element(lockedName).toHaveValue("Kommunboten");
+    await expect.element(lockedName).toBeDisabled();
+    await expect.element(lockedName).toHaveAttribute("aria-invalid", "false");
 
     await userEvent.click(page.getByRole("tab", { name: /widget_admin_tab_rules/ }));
     const held = page.getByLabelText("widget_admin_allowed_origins", { exact: true });

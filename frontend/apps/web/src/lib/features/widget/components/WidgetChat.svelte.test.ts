@@ -60,6 +60,8 @@ const fake = vi.hoisted(() => ({
   failNextFeedback: false,
   holdNextFeedback: false,
   releaseFeedback: null as null | (() => void),
+  // Errors the next feedback calls fail with, in order.
+  feedbackErrors: [] as unknown[],
   // Rejects the next question when set, then clears itself.
   failNextAsk: false,
   // A stored conversation the fake returns on restore, when set.
@@ -183,6 +185,8 @@ vi.mock("@eneo/eneo-js", async (importOriginal) => {
             fake.failNextFeedback = false;
             throw new Error("boom");
           }
+          const failure = fake.feedbackErrors.shift();
+          if (failure) throw failure;
           fake.feedback.push(args);
           return {};
         },
@@ -321,6 +325,7 @@ beforeEach(() => {
   fake.failNextFeedback = false;
   fake.holdNextFeedback = false;
   fake.releaseFeedback = null;
+  fake.feedbackErrors.length = 0;
   fake.failNextAsk = false;
   fake.answers.length = 0;
   fake.breakOffNext = false;
@@ -475,6 +480,40 @@ describe("WidgetChat", () => {
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(page.getByRole("alert").elements()).toHaveLength(1);
     expect(document.querySelector("main [role='alert']")).toBeNull();
+  });
+
+  test("a feedback retry after starting over still goes to the conversation it was given in", async () => {
+    renderApp();
+    await userEvent.click(suggestion());
+    await releaseAnswer();
+    fake.holdNextFeedback = true;
+    fake.feedbackErrors.push(widgetError(401, "visitor_token_invalid"));
+    await userEvent.click(page.getByRole("button", { name: "widget_feedback_helpful" }));
+    await vi.waitFor(() => expect(fake.releaseFeedback).not.toBeNull());
+
+    await userEvent.click(page.getByRole("button", { name: "widget_new_conversation" }));
+    await userEvent.click(
+      page
+        .getByRole("alertdialog")
+        .getByRole("button", { name: "widget_new_conversation_confirm_action" })
+    );
+    await askFollowUp("Ny fråga?", "Nytt svar.");
+    expect(fake.asks.at(-1)?.conversationId).toBeFalsy();
+
+    fake.releaseFeedback!();
+    await vi.waitFor(() => expect(fake.feedback).toHaveLength(1));
+    expect(fake.feedback[0]).toEqual({
+      conversation: { id: "session-1" },
+      feedback: { value: 1 }
+    });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(fake.feedback).toHaveLength(1);
+    await expect.element(page.getByText("widget_feedback_prompt")).toBeVisible();
+    await expect
+      .element(page.getByRole("button", { name: "widget_feedback_helpful" }))
+      .toHaveAttribute("aria-pressed", "false");
+    await expect.element(page.getByRole("status")).not.toHaveTextContent("widget_feedback_thanks");
+    expect(page.getByRole("alert").elements()).toHaveLength(0);
   });
 
   test("a failed comment keeps the dialog open and says so inside it", async () => {

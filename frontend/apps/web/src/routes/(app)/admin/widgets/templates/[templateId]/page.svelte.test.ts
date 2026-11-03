@@ -173,6 +173,49 @@ describe("widget template page", () => {
     await vi.waitFor(() => expect(publish).toHaveBeenCalledTimes(1), { timeout: 3000 });
     expect(document.querySelector('[role="alertdialog"]')).toBeNull();
   });
+
+  // History navigation between two templates reuses the page; a publication
+  // that finishes after the move belongs to the template it was asked for.
+  test("a publication that lands after moving to another template leaves that one alone", async () => {
+    const first = template({ linked_widgets: 0, has_unpublished_changes: true });
+    const second = template({
+      id: "t2",
+      name: "Skogsgrön",
+      theme: { primary_color: "#2E7D32", radius: 4 },
+      linked_widgets: 0
+    });
+    let release!: (published: WidgetTemplate) => void;
+    const publish = vi.fn(() => new Promise<WidgetTemplate>((resolve) => (release = resolve)));
+    const update = vi.fn(
+      async ({
+        template: { id },
+        update: patch
+      }: {
+        template: { id: string };
+        update: Partial<WidgetTemplate>;
+      }) => ({ ...(id === "t2" ? second : first), ...patch, has_unpublished_changes: true })
+    );
+    const eneo = { widgets: { templates: { update, publish } } };
+    const screen = render(TemplatePage, { data: { template: first, eneo } as never });
+    click(page.getByRole("button", { name: "widget_admin_template_publish" }));
+    await vi.waitFor(() => expect(publish).toHaveBeenCalledWith({ id: "t1" }), { timeout: 3000 });
+
+    await screen.rerender({ data: { template: second, eneo } as never });
+    const name = page.getByLabelText("name", { exact: true });
+    await expect.element(name).toHaveValue("Skogsgrön");
+    release({ ...first, has_unpublished_changes: false, published_at: "2026-09-21T12:00:00Z" });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await expect.element(name).toHaveValue("Skogsgrön");
+    expect(document.body.textContent).not.toContain("Kommunblå");
+
+    click(page.getByRole("tab", { name: "widget_admin_tab_appearance" }));
+    await userEvent.fill(page.getByLabelText("widget_admin_radius", { exact: true }), "8");
+    await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    expect(update).toHaveBeenLastCalledWith({
+      template: { id: "t2" },
+      update: { theme: { primary_color: "#2E7D32", radius: 8 } }
+    });
+  });
 });
 
 describe("widget template details", () => {

@@ -8,7 +8,7 @@ import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { ExternalLink, FileText, Palette, Rocket, SlidersHorizontal } from "lucide-react";
 import Link from "@/lib/link";
 import { useTranslations } from "use-intl";
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Switch } from "@astryxdesign/core/Switch";
 import { TextInput } from "@/components/astryx/text-input";
 import { SettingsGroup } from "@/components/composites/settings-rows";
@@ -43,7 +43,7 @@ type TabId = (typeof TABS)[number];
 const VISITOR_CAPABILITIES: ReadonlySet<string> = new Set(["web_search"]);
 
 /** What linking copies from the template's release onto the widget. */
-const RELEASE_GROUPS = ["texts", "theme", "language"];
+const RELEASE_GROUPS = ["texts", "theme", "language", "persona"];
 
 /**
  * The "Webbwidget" page body. Status and lifecycle on top; then four tabs in
@@ -59,7 +59,8 @@ export function WidgetEditor({
   release,
   appOrigin,
   templates: allTemplates,
-  onArchived
+  onArchived,
+  onSaved
 }: {
   widget: Widget;
   assistant: Assistant;
@@ -70,6 +71,8 @@ export function WidgetEditor({
   templates: WidgetTemplate[];
   /** An archived widget cannot be edited, so the page takes the editor away. */
   onArchived: () => void;
+  /** Every widget the server answers with, for the page's list cache. */
+  onSaved?: (widget: Widget) => void;
 }) {
   const t = useTranslations();
   const ids = useId();
@@ -78,6 +81,20 @@ export function WidgetEditor({
   const { autosave, state } = useWidgetAutosave(widget);
   const current = state.widget;
   const [tab, setTab] = useUrlTab(TABS, "content");
+
+  // The list the page was built from must follow every answer (a save, a
+  // lifecycle action, a template, a reload), or reopening the page within
+  // its stale time would rebuild the editor from the old entry.
+  const reportSaved = useRef(onSaved);
+  useEffect(() => {
+    reportSaved.current = onSaved;
+  });
+  const reported = useRef(widget);
+  useEffect(() => {
+    if (state.saved === reported.current) return;
+    reported.current = state.saved;
+    reportSaved.current?.(state.saved);
+  }, [state.saved]);
 
   // A blank name is never sent: the API would refuse it and hold every
   // later edit back with it.
@@ -133,6 +150,7 @@ export function WidgetEditor({
     .map((group) => groupLabels[group] ?? group)
     .join(", ");
 
+  // The action reads the revision after the flush, which may have advanced it.
   async function withTemplate(action: () => Promise<Widget>, replaced: string[]) {
     setApplying(true);
     try {
@@ -156,7 +174,7 @@ export function WidgetEditor({
     if (confirm === "apply" && chosenTemplate) {
       if (
         await withTemplate(
-          () => widgetApi.linkTemplate(widget.id, chosenTemplate.id, current.revision),
+          () => widgetApi.linkTemplate(widget.id, chosenTemplate.id, autosave.widget.revision),
           RELEASE_GROUPS
         )
       ) {
@@ -166,14 +184,16 @@ export function WidgetEditor({
     } else if (confirm === "reapply" && link) {
       if (
         await withTemplate(
-          () => widgetApi.linkTemplate(widget.id, link.id, current.revision),
+          () => widgetApi.linkTemplate(widget.id, link.id, autosave.widget.revision),
           RELEASE_GROUPS
         )
       ) {
         setConfirm(null);
       }
     } else if (confirm === "detach") {
-      if (await withTemplate(() => widgetApi.detachTemplate(widget.id, current.revision), [])) {
+      if (
+        await withTemplate(() => widgetApi.detachTemplate(widget.id, autosave.widget.revision), [])
+      ) {
         setConfirm(null);
       }
     }

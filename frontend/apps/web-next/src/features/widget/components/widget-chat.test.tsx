@@ -3,7 +3,7 @@ import type { WidgetClient, WidgetPublicConfig } from "@eneo/eneo-js";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderInApp } from "@/test/render";
+import { flushAnnouncements, renderInApp } from "@/test/render";
 import { personaView } from "../persona";
 import { WidgetChat } from "./widget-chat";
 
@@ -41,27 +41,31 @@ function config(overrides: Partial<WidgetPublicConfig> = {}): WidgetPublicConfig
 
 type Callbacks = NonNullable<Parameters<WidgetClient["conversations"]["ask"]>[0]["callbacks"]>;
 
-/** A widget client whose answers arrive as one chunk of text. */
-function fakeClient(answer = "Pour over: 15 g kaffe på 250 g vatten.") {
-  const leaveFeedback = vi.fn(async () => ({}));
-  const ask = vi.fn(
-    async ({ question, callbacks }: { question: string; callbacks?: Callbacks }) => {
-      const message = {
-        id: "m1",
-        session_id: SESSION,
-        question,
-        answer: "",
-        files: [],
-        generated_files: [],
-        references: [],
-        tools: { assistants: [] },
-        mcp_tool_references: []
-      };
-      callbacks?.onFirstChunk?.(message as never);
-      callbacks?.onText?.({ answer, references: [] } as never);
-      return { ...message, answer };
-    }
-  );
+type AskArgs = { question: string; callbacks?: Callbacks };
+
+/** The first chunk of an answer: the stored message without its text. */
+function firstChunk(question: string, sessionId = SESSION) {
+  return {
+    id: "m1",
+    session_id: sessionId,
+    question,
+    answer: "",
+    files: [],
+    generated_files: [],
+    references: [],
+    tools: { assistants: [] },
+    mcp_tool_references: []
+  };
+}
+
+/** A widget client around the given conversation calls; visitor tokens always mint. */
+function clientWith({
+  ask,
+  leaveFeedback = vi.fn(async () => ({}))
+}: {
+  ask: ReturnType<typeof vi.fn>;
+  leaveFeedback?: ReturnType<typeof vi.fn>;
+}) {
   const client = {
     publicId: PUBLIC_ID,
     challengeUrl: `http://localhost:3100/api/v1/widgets/${PUBLIC_ID}/challenge/`,
@@ -75,6 +79,66 @@ function fakeClient(answer = "Pour over: 15 g kaffe på 250 g vatten.") {
     conversations: { ask, get: vi.fn(), leaveFeedback }
   };
   return { client: client as unknown as WidgetClient, ask, leaveFeedback };
+}
+
+/** A widget client whose answers arrive as one chunk of text. */
+function fakeClient(answer = "Pour over: 15 g kaffe på 250 g vatten.") {
+  const ask = vi.fn(async ({ question, callbacks }: AskArgs) => {
+    const message = firstChunk(question);
+    callbacks?.onFirstChunk?.(message as never);
+    callbacks?.onText?.({ answer, references: [] } as never);
+    return { ...message, answer };
+  });
+  return clientWith({ ask });
+}
+
+/**
+ * A widget client whose stream delivers the first chunk and the start of the
+ * answer at once, then stays open until the test finishes or fails it.
+ */
+function streamingClient() {
+  const stream: { finish: () => void; fail: (error: unknown) => void } = {
+    finish: () => {},
+    fail: () => {}
+  };
+  const ask = vi.fn(({ question, callbacks }: AskArgs) => {
+    const message = firstChunk(question);
+    callbacks?.onFirstChunk?.(message as never);
+    callbacks?.onText?.({ answer: "Pour over:", references: [] } as never);
+    return new Promise<typeof message>((resolve, reject) => {
+      stream.finish = () => resolve({ ...message, answer: "Pour over: 15 g kaffe." });
+      stream.fail = reject;
+    });
+  });
+  return { ...clientWith({ ask }), stream };
+}
+
+/** The conversation the visitor's storage would restore; undefined before a token was minted. */
+function rememberedSession(): string | null | undefined {
+  const raw = localStorage.getItem(`eneo-widget:${PUBLIC_ID}`);
+  return raw ? (JSON.parse(raw) as { session_id: string | null }).session_id : undefined;
+}
+
+function typeQuestion(question: string) {
+  const field = screen.getByRole("textbox", { name: "Din fråga" });
+  fireEvent.change(field, { target: { value: question } });
+  fireEvent.keyDown(field, { key: "Enter" });
+}
+
+/** The header's new-conversation button, confirmed. */
+async function startOver() {
+  fireEvent.click(screen.getByRole("button", { name: "Ny konversation" }));
+  const dialog = await screen.findByRole("alertdialog");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Starta ny" }));
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+}
+
+/** Alerts with something in them; Astryx's assertive live region is one while empty. */
+function shownAlerts(): string[] {
+  return screen
+    .queryAllByRole("alert")
+    .map((alert) => alert.textContent?.trim() ?? "")
+    .filter(Boolean);
 }
 
 function renderChat(widget: WidgetPublicConfig, client: WidgetClient) {
@@ -176,6 +240,108 @@ describe("WidgetChat", () => {
     await screen.findByText("Tack för din återkoppling på konversationen");
     expect(screen.getByRole("button", { name: "Ändra omdöme" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Hjälpsam konversation" })).toBeNull();
+  });
+
+  it.each([
+    ["finishes", (stream: { finish: () => void }) => stream.finish()],
+    ["fails", (stream: { fail: (error: unknown) => void }) => stream.fail(new Error("aborted"))]
+  ])(
+    "keeps nothing of a conversation started over while its answer streamed, once the stream %s",
+    async (_outcome, settle) => {
+      const { client, ask, stream } = streamingClient();
+      renderChat(config(), client);
+      typeQuestion("Hur brygger jag?");
+      const log = await screen.findByRole("log", { name: "Konversation" });
+      await within(log).findByText("Pour over:");
+      // The visitor has an identity, and no conversation is kept until the answer ends.
+      expect(rememberedSession()).toBeNull();
+
+      await startOver();
+      expect(within(log).queryByText("Pour over:")).toBeNull();
+      await act(async () => settle(stream));
+      await flushAnnouncements();
+
+      // The old send is over: the pending question goes with it.
+      await waitFor(() => expect(screen.queryByRole("log")).toBeNull());
+      expect(rememberedSession()).toBeNull();
+      expect(shownAlerts()).toEqual([]);
+      expect(announced()).not.toContain("Pour over");
+      expect(announced()).not.toContain("Svaret är klart");
+      // The next question starts a conversation of its own.
+      typeQuestion("Och espresso?");
+      await waitFor(() => expect(ask).toHaveBeenCalledTimes(2));
+      expect(ask).toHaveBeenLastCalledWith(
+        expect.objectContaining({ question: "Och espresso?", conversation: { id: null } })
+      );
+    }
+  );
+
+  it("retries a vote on the conversation it was given for, not the one started since", async () => {
+    const SESSION_B = "66666666-7777-4888-8999-000000000000";
+    const sessions = [SESSION, SESSION_B];
+    const ask = vi.fn(async ({ question, callbacks }: AskArgs) => {
+      const message = firstChunk(question, sessions.shift());
+      callbacks?.onFirstChunk?.(message as never);
+      callbacks?.onText?.({ answer: "Svar.", references: [] } as never);
+      return { ...message, answer: "Svar." };
+    });
+    let rejectFirst!: (error: unknown) => void;
+    const leaveFeedback = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise((_resolve, reject) => {
+            rejectFirst = reject;
+          })
+      )
+      .mockResolvedValue({});
+    const { client } = clientWith({ ask, leaveFeedback });
+    renderChat(config(), client);
+
+    fireEvent.click(screen.getByRole("button", { name: "Hur brygger jag pour over?" }));
+    await screen.findByText("Svar.");
+    const helpful = await screen.findByRole("button", { name: "Hjälpsam konversation" });
+    await waitFor(() => expect((helpful as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(helpful);
+    await waitFor(() => expect(leaveFeedback).toHaveBeenCalledTimes(1));
+
+    // The vote is still on its way when the visitor starts over and asks again.
+    await startOver();
+    typeQuestion("Och nu?");
+    await screen.findByText("Svar.");
+    await screen.findByRole("button", { name: "Hjälpsam konversation" });
+    expect(ask).toHaveBeenLastCalledWith(expect.objectContaining({ conversation: { id: null } }));
+
+    const { EneoError } = await import("@eneo/eneo-js");
+    await act(async () =>
+      rejectFirst(
+        new EneoError(
+          "expired",
+          "SERVER",
+          401,
+          0,
+          { detail: { code: "token_expired" } },
+          { endpoint: "/feedback" }
+        )
+      )
+    );
+    await waitFor(() => expect(leaveFeedback).toHaveBeenCalledTimes(2));
+    expect(leaveFeedback).toHaveBeenNthCalledWith(2, {
+      conversation: { id: SESSION },
+      feedback: { value: 1 }
+    });
+    expect(
+      leaveFeedback.mock.calls.some(
+        (call) => (call[0] as { conversation: { id: string } }).conversation.id === SESSION_B
+      )
+    ).toBe(false);
+    await flushAnnouncements();
+    // The new conversation is untouched: its thumbs are still open and nothing was acknowledged.
+    const thumb = screen.getByRole("button", { name: "Hjälpsam konversation" });
+    expect(thumb.getAttribute("aria-pressed")).toBe("false");
+    expect(screen.queryByText("Tack för din återkoppling på konversationen")).toBeNull();
+    expect(announced()).not.toContain("Tack för din återkoppling");
+    expect(shownAlerts()).toEqual([]);
   });
 
   it("puts a refused question back in the field and says what happened", async () => {

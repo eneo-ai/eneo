@@ -111,6 +111,7 @@ export function WidgetAdminPage({
               release={release}
               appOrigin={appOrigin}
               templates={templatesQuery.data ?? []}
+              onSaved={(updated) => replaceInList(updated)}
               onArchived={() => {
                 replaceInList(null, widget.id);
                 setArchived(true);

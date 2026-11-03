@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
+import type { QueryClient } from "@tanstack/react-query";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderInApp, testAppContext } from "@/test/render";
+import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
 import type { Space } from "@/features/spaces/space";
 import { makeSpace } from "@/features/spaces/testing/space-fixture";
-import type { Widget } from "./autosave";
+import type { Widget, WidgetTemplate } from "./autosave";
+import { template } from "./org/fixtures";
 
 const state = vi.hoisted(() => ({ space: null as unknown as Space, routeId: "space-1" }));
 const api = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn(), PATCH: vi.fn() }));
@@ -81,7 +83,15 @@ function assistant() {
   };
 }
 
-function showPage(widgets: Widget[], permissions: ("widgets" | "admin")[] = ["widgets"]) {
+function showPage(
+  widgets: Widget[],
+  permissions: ("widgets" | "admin")[] = ["widgets"],
+  {
+    templates = [],
+    queryClient,
+    route
+  }: { templates?: WidgetTemplate[]; queryClient?: QueryClient; route?: string } = {}
+) {
   state.space = makeSpace({ overrides: { id: SPACE_ID, name: "Test" } });
   api.GET.mockImplementation((path: string) => {
     switch (path) {
@@ -97,7 +107,7 @@ function showPage(widgets: Widget[], permissions: ("widgets" | "admin")[] = ["wi
           allow_bot_protection_none: false
         });
       case "/api/v1/widget-templates/":
-        return ok({ items: [], count: 0, total_count: 0 });
+        return ok({ items: templates, count: templates.length, total_count: templates.length });
       case "/api/v1/widgets/{id}/usage/":
         return ok({ days: [], budget_used_today: 0, daily_token_budget: 500000 });
       default:
@@ -119,8 +129,40 @@ function showPage(widgets: Widget[], permissions: ("widgets" | "admin")[] = ["wi
       release={{ version: "1.0.11", channel: "v1", integrity: "sha384-x" }}
       appOrigin="https://eneo.test"
     />,
-    { appContext: testAppContext({ permissions }) }
+    { appContext: testAppContext({ permissions }), queryClient, route }
   );
+}
+
+const WIDGET_PATH = "/api/v1/widgets/{id}/";
+const WIDGETS_PATH = "/api/v1/spaces/{space_id}/widgets/";
+const LINK_PATH = "/api/v1/widgets/{id}/link-template/";
+
+/** A 422 as openapi-fetch hands it over: the body on `error`, the status on `response`. */
+function refused(detail: unknown) {
+  return Promise.resolve({
+    error: { detail },
+    response: new Response("{}", { status: 422 })
+  });
+}
+
+/** The published template applied to the widget: its persona copied, persona locked. */
+function linked(overrides: Partial<Widget> = {}): Widget {
+  return widget({
+    revision: 5,
+    persona: { name: "Mallen", avatar_icon_id: null, avatar_in_launcher: false },
+    template: { id: "t1", name: "Kommunmallen", locked_groups: ["persona"] },
+    ...overrides
+  });
+}
+
+/** Picks the first published template on the appearance tab and confirms linking it. */
+async function applyTemplate() {
+  fireEvent.click(screen.getByRole("tab", { name: /Utseende/ }));
+  fireEvent.click(await screen.findByRole("radio", { name: /Kommunmallen/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Koppla till mall" }));
+  const dialog = await screen.findByRole("alertdialog", { name: "Koppla till mallen?" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Koppla till mall" }));
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
 }
 
 afterEach(() => {
@@ -236,6 +278,130 @@ describe("WidgetAdminPage", () => {
       expect.objectContaining({
         body: { target_id: ASSISTANT, name: "Kaffe_tips", language: "auto", template_id: null }
       })
+    );
+  });
+
+  it("stays usable while two suggested questions repeat, and settles once one is changed", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    api.PATCH.mockImplementation((_path: string, init: { body: Record<string, unknown> }) =>
+      ok(widget({ ...init.body, revision: 4 }))
+    );
+    showPage([
+      widget({ texts: { ...widget().texts, suggested_questions: ["Öppettider?", "Öppettider?"] } })
+    ]);
+    const [, second] = await screen.findAllByRole("textbox", { name: /^Föreslagen fråga/ });
+    expect(second!.getAttribute("aria-invalid")).toBe("true");
+    expect(screen.getByText("Frågan finns redan i listan.", { selector: "li *" })).toBeTruthy();
+    // The repeated question is held back, which the header counts as unsaved.
+    expect(await screen.findByText("1 osparad ändring")).toBeTruthy();
+
+    fireEvent.change(second!, { target: { value: "Kontakt?" } });
+    fireEvent.blur(second!);
+    await waitFor(() => expect(second!.getAttribute("aria-invalid")).toBeNull());
+    await waitFor(
+      () =>
+        expect(api.PATCH).toHaveBeenCalledWith(
+          WIDGET_PATH,
+          expect.objectContaining({
+            body: expect.objectContaining({
+              texts: expect.objectContaining({ suggested_questions: ["Öppettider?", "Kontakt?"] })
+            })
+          })
+        ),
+      { timeout: 2000 }
+    );
+    await screen.findByText("Alla ändringar sparade", { selector: "section *" });
+    expect(consoleError.mock.calls.flat().join(" ")).not.toContain("Maximum update depth");
+  });
+
+  it("links a template with the revision the save it waited for returned", async () => {
+    api.PATCH.mockImplementation((_path: string, init: { body: Record<string, unknown> }) =>
+      ok(widget({ ...init.body, revision: 4 }))
+    );
+    showPage([widget()], ["widgets"], { templates: [template()] });
+    api.POST.mockImplementation((path: string) =>
+      path === LINK_PATH ? ok(linked()) : ok({ token: "preview-token", expires_in: 900 })
+    );
+    const [name] = await screen.findAllByRole("textbox", { name: /^Namn/ });
+    // The name edit is still queued when the template is applied.
+    fireEvent.change(name!, { target: { value: "Kaffe och te" } });
+    expect(api.PATCH).not.toHaveBeenCalled();
+    await applyTemplate();
+
+    expect(api.PATCH).toHaveBeenCalledWith(
+      WIDGET_PATH,
+      expect.objectContaining({ body: { name: "Kaffe och te", revision: 3 } })
+    );
+    expect(api.POST).toHaveBeenCalledWith(
+      LINK_PATH,
+      expect.objectContaining({ body: { template_id: "t1", revision: 4 } })
+    );
+    expect(await screen.findByText("Följer mallen ”Kommunmallen”")).toBeTruthy();
+  });
+
+  it("shows the template's persona after linking and clears only that refusal", async () => {
+    api.PATCH.mockImplementation((_path: string, init: { body: Record<string, unknown> }) => {
+      const locs = [
+        ...("name" in init.body ? [["body", "name"]] : []),
+        ...("persona" in init.body ? [["body", "persona", "name"]] : [])
+      ];
+      return locs.length > 0
+        ? refused(locs.map((loc) => ({ loc, msg: "Invalid", type: "value_error" })))
+        : ok(widget({ ...init.body, revision: 4 }));
+    });
+    showPage([widget()], ["widgets"], { templates: [template()] });
+    api.POST.mockImplementation((path: string) =>
+      path === LINK_PATH ? ok(linked()) : ok({ token: "preview-token", expires_in: 900 })
+    );
+    const [name, personaName] = await screen.findAllByRole("textbox", { name: /^Namn/ });
+    fireEvent.change(name!, { target: { value: "Kaffe 2" } });
+    fireEvent.change(personaName!, { target: { value: "Kim" } });
+    // One save carries both; the server refuses both groups.
+    const personaRefused = "Värdet godtogs inte. Ändra det så sparas det igen.";
+    expect(await screen.findAllByText("Ange ett namn.", {}, { timeout: 2000 })).not.toHaveLength(0);
+    expect(screen.getAllByText(personaRefused)).not.toHaveLength(0);
+
+    await applyTemplate();
+
+    expect(api.POST).toHaveBeenCalledWith(
+      LINK_PATH,
+      expect.objectContaining({ body: { template_id: "t1", revision: 3 } })
+    );
+    // The release replaced the persona, so its refused edit is gone with it.
+    await waitFor(() => expect((personaName as HTMLInputElement).value).toBe("Mallen"));
+    expect(screen.queryAllByText(personaRefused)).toHaveLength(0);
+    // The widget's name is not part of a release: still refused, still shown.
+    expect((name as HTMLInputElement).value).toBe("Kaffe 2");
+    expect(screen.getAllByText("Ange ett namn.")).not.toHaveLength(0);
+  });
+
+  it("reopens within the list's stale time on the saved widget and its revision", async () => {
+    api.PATCH.mockImplementation((_path: string, init: { body: Record<string, unknown> }) =>
+      ok(widget({ ...init.body, revision: 4 }))
+    );
+    const queryClient = testQueryClient();
+    const first = showPage([widget()], ["widgets"], { queryClient });
+    const [name] = await screen.findAllByRole("textbox", { name: /^Namn/ });
+    fireEvent.change(name!, { target: { value: "Kaffe och te" } });
+    await waitFor(() => expect(api.PATCH).toHaveBeenCalledTimes(1), { timeout: 2000 });
+    await screen.findByText("Alla ändringar sparade", { selector: "section *" });
+    first.unmount();
+
+    // The list is fresh, so the page is built from the cache, not fetched.
+    const listed = api.GET.mock.calls.filter(([path]) => path === WIDGETS_PATH).length;
+    showPage([widget()], ["widgets"], { queryClient });
+    const [reopened] = await screen.findAllByRole("textbox", { name: /^Namn/ });
+    expect((reopened as HTMLInputElement).value).toBe("Kaffe och te");
+    expect(api.GET.mock.calls.filter(([path]) => path === WIDGETS_PATH)).toHaveLength(listed);
+
+    fireEvent.change(reopened!, { target: { value: "Kaffe, te och saft" } });
+    await waitFor(
+      () =>
+        expect(api.PATCH).toHaveBeenLastCalledWith(
+          WIDGET_PATH,
+          expect.objectContaining({ body: { name: "Kaffe, te och saft", revision: 4 } })
+        ),
+      { timeout: 2000 }
     );
   });
 });

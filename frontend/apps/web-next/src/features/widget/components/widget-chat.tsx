@@ -360,6 +360,8 @@ export function WidgetChat({
     } catch (error) {
       result = { status: "failed", error, started: false };
     }
+    // Started over while the answer streamed: the chat is already empty.
+    if (result.status === "cancelled") return;
     if (result.status === "done") {
       keepConversation(wasNew, result.sessionId);
       // The finished answer is read once, as in any chat; the stream never
@@ -448,13 +450,15 @@ export function WidgetChat({
   /**
    * One vote or comment on the visible conversation. A vote often comes
    * minutes after the answer, so the token is refreshed like before a
-   * question and re-minted once if it turned stale meanwhile.
+   * question and re-minted once if it turned stale meanwhile. The
+   * conversation is bound on the first attempt: a retry after a slow 401
+   * must still reach it, not whichever one the visitor has started since.
    */
   async function submitFeedback(
     feedback: { value: 1 | -1; text?: string },
+    sessionId: string | null = conversationRef.current.id,
     retried = false
   ): Promise<string | null> {
-    const sessionId = conversationRef.current.id;
     if (!sessionId) return t("widget_error_generic");
     // Feedback owns the next error location, just as sending a question
     // clears an older feedback error. Never keep two attempts' alerts.
@@ -462,15 +466,19 @@ export function WidgetChat({
     try {
       await session.ensureToken();
       await client.conversations.leaveFeedback({ conversation: { id: sessionId }, feedback });
-      return null;
     } catch (error) {
       if (isTokenRejected(error) && !retried) {
         session.invalidate();
-        return submitFeedback(feedback, true);
+        return submitFeedback(feedback, sessionId, true);
       }
       // The feedback component shows this where the visitor is looking.
       return describeWidgetError(error, t);
     }
+    // The conversation is gone from the chat: its feedback component is
+    // unmounted, so nothing shows this; a non-null result keeps the pending
+    // vote from announcing thanks for it.
+    if (conversationRef.current.id !== sessionId) return t("widget_error_generic");
+    return null;
   }
 
   return (

@@ -29,7 +29,7 @@
   import { intlLocale } from "$lib/core/formatting/dateTime";
   import FileText from "@lucide/svelte/icons/file-text";
   import Palette from "@lucide/svelte/icons/palette";
-  import { untrack } from "svelte";
+  import { onDestroy, untrack } from "svelte";
 
   let { data } = $props();
 
@@ -49,14 +49,26 @@
   );
 
   // SvelteKit reuses this component when only the id changes (history
-  // navigation between two templates); the form must follow the new data.
-  let loadedId = untrack(() => data.template.id);
-  $effect(() => {
-    if (data.template.id !== loadedId) {
-      loadedId = data.template.id;
-      autosave.reload(data.template);
-    }
+  // navigation between two templates); the form must follow the new data,
+  // and a publication begun on the previous template must not land on it.
+  let owner = $state.raw({ templateId: untrack(() => data.template.id) });
+  let destroyed = false;
+  onDestroy(() => {
+    destroyed = true;
   });
+  $effect.pre(() => {
+    const templateId = data.template.id;
+    if (templateId === owner.templateId) return;
+    untrack(() => {
+      owner = { templateId };
+      autosave.reload(data.template);
+      confirmPublish = false;
+    });
+  });
+
+  function isCurrent(candidate: typeof owner) {
+    return !destroyed && candidate === owner && candidate.templateId === data.template.id;
+  }
 
   guardAutosaveNavigation(autosave);
 
@@ -169,13 +181,16 @@
   );
 
   const publish = createAsyncState(async () => {
+    const visit = owner;
     try {
       await autosave.flush();
-      if (autosave.hasPending) return;
-      autosave.replace(await data.eneo.widgets.templates.publish({ id: data.template.id }));
+      if (!isCurrent(visit) || autosave.hasPending) return;
+      const published = await data.eneo.widgets.templates.publish({ id: visit.templateId });
+      if (!isCurrent(visit)) return;
+      autosave.replace(published);
       confirmPublish = false;
     } catch (error) {
-      toastWidgetError(error, m.widget_admin_template_could_not_publish());
+      if (isCurrent(visit)) toastWidgetError(error, m.widget_admin_template_could_not_publish());
     }
   });
 

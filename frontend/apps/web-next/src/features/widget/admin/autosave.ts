@@ -21,6 +21,8 @@ export type AutosaveStatus = "idle" | "saving" | "saved" | "error" | "conflict" 
 
 export type AutosaveSnapshot<Resource> = {
   widget: Resource;
+  /** The server's latest answer, without the unsaved edits `widget` lays on top. */
+  saved: Resource;
   status: AutosaveStatus;
   error: unknown;
   /** Field paths the server refused, each with the message to show at the field. */
@@ -92,6 +94,10 @@ export class Autosave<Resource extends object, Update extends object> {
 
   get widget(): Resource {
     return this.#widget;
+  }
+
+  get saved(): Resource {
+    return this.#baseline;
   }
 
   get status(): AutosaveStatus {
@@ -224,6 +230,7 @@ export class Autosave<Resource extends object, Update extends object> {
   #takeSnapshot(): AutosaveSnapshot<Resource> {
     return {
       widget: this.#widget,
+      saved: this.#baseline,
       status: this.#status,
       error: this.#error,
       refusals: this.#refusals,

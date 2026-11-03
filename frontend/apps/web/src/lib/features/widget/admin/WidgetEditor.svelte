@@ -135,6 +135,7 @@
     appearance: m.widget_admin_template_lock_appearance(),
     language: m.widget_admin_template_lock_language(),
     legal_texts: m.widget_admin_template_lock_legal_texts(),
+    persona: m.widget_admin_template_lock_persona(),
     wording: m.widget_admin_template_lock_wording()
   });
   const lockedParts = $derived(
@@ -142,7 +143,7 @@
   );
 
   // What linking copies from the template's release onto the widget.
-  const RELEASE_GROUPS = ["texts", "theme", "language"];
+  const RELEASE_GROUPS = ["texts", "theme", "language", "persona"];
 
   async function withTemplate(
     action: () => Promise<Widget>,
