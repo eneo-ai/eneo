@@ -122,9 +122,13 @@ services:
               async with connect("ws://127.0.0.1:8201/v1/realtime") as socket:
                   await socket.recv()
           asyncio.run(check())
-      interval: 2s
+      # Every 2 s until healthy, then once a minute: each check starts Python
+      # and imports websockets, a quarter of a core at 2 s for the whole run.
+      start_interval: 2s
+      start_period: 80s
+      interval: 60s
       timeout: 3s
-      retries: 40
+      retries: 3
 
   e2e-tool-runtime:
     image: eneo-e2e-tools:workflow
@@ -197,10 +201,13 @@ services:
     healthcheck:
       # The check imports the worker the same way, so it needs the same time.
       test: ["CMD", "task-execution-worker", "--check"]
-      interval: 5s
+      # It probes every 5 s until healthy, then once a minute: at 5 s these
+      # imports kept a CPU core busy for the whole run, slowing every page.
+      start_interval: 5s
+      start_period: 270s
+      interval: 60s
       timeout: 60s
-      retries: 30
-      start_period: 120s
+      retries: 3
 
   task-maintenance-worker:
     image: eneo-e2e-backend
@@ -230,10 +237,13 @@ services:
       # host), so a 10 s timeout fails the check before the import ends.
       test:
         ["CMD", "arq", "--check", "src.eneo.worker.arq.CrawlerWorkerSettings"]
-      interval: 5s
+      # It probes every 5 s until healthy, then once a minute: at 5 s these
+      # imports kept a CPU core busy for the whole run, slowing every page.
+      start_interval: 5s
+      start_period: 270s
+      interval: 60s
       timeout: 60s
-      retries: 30
-      start_period: 120s
+      retries: 3
 
 networks:
   e2e:

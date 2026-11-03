@@ -165,10 +165,13 @@ services:
       # A healthcheck does not inherit the command's PATH export, and this
       # image installs the entrypoint only in the mounted venv.
       test: ["CMD", "/workspace/backend/.venv/bin/task-execution-worker", "--check"]
-      interval: 5s
+      # It probes every 5 s until healthy, then once a minute: at 5 s these
+      # imports kept a CPU core busy for the whole run, slowing every page.
+      start_interval: 5s
+      start_period: 270s
+      interval: 60s
       timeout: 60s
-      retries: 30
-      start_period: 120s
+      retries: 3
 
   task-maintenance-worker:
     image: eneo_devcontainer-eneo
@@ -217,10 +220,13 @@ services:
       # arq --check imports the whole worker module (about 10 s on a loaded
       # host), so a 10 s timeout fails the check before the import ends.
       test: ["CMD", "bash", "-lc", "export PATH=/workspace/backend/.venv/bin:$$PATH && arq --check src.eneo.worker.arq.CrawlerWorkerSettings"]
-      interval: 5s
+      # It probes every 5 s until healthy, then once a minute: at 5 s these
+      # imports kept a CPU core busy for the whole run, slowing every page.
+      start_interval: 5s
+      start_period: 270s
+      interval: 60s
       timeout: 60s
-      retries: 30
-      start_period: 120s
+      retries: 3
 
 networks:
   e2e:
