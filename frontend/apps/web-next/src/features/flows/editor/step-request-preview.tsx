@@ -314,7 +314,6 @@ export function StepRequestPreviewButton(props: {
       </div>
       <Dialog isOpen={open} onOpenChange={setOpen} width={680}>
         <Layout
-          height="auto"
           header={
             <DialogHeader
               title={t("flow_editor_tools_preview_title")}

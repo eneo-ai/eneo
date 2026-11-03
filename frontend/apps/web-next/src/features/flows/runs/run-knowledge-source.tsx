@@ -143,7 +143,6 @@ export function KnowledgeSourceViewer({
   return (
     <Dialog isOpen={open} onOpenChange={onOpenChange} width={1040} maxHeight="90dvh">
       <Layout
-        height="auto"
         header={
           <DialogHeader
             title={name}

@@ -93,7 +93,6 @@ export function ContractFromExampleDialog({
       </div>
       <Dialog isOpen={open} onOpenChange={(next) => (next ? setOpen(true) : close())} width={560}>
         <Layout
-          height="auto"
           header={
             <DialogHeader
               title={t("flow_editor_tools_contract_example_title")}

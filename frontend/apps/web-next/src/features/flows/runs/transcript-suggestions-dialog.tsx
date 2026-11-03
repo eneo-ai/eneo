@@ -63,7 +63,6 @@ export function SuggestionsDialog({
       maxHeight="85dvh"
     >
       <Layout
-        height="auto"
         header={
           <DialogHeader
             title={t("flow_transcript_suggest_title")}

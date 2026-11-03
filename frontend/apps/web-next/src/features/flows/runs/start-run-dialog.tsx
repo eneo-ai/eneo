@@ -718,9 +718,6 @@ export function StartRunDialog({
         maxHeight="85dvh"
       >
         <Layout
-          // Whole screen: the form scrolls and the footer stays. A dialog that sizes to its form
-          // would clip a long one with its buttons beyond the screen.
-          height={whole ? "fill" : "auto"}
           header={
             <DialogHeader
               title={t("flow_runs_start_title", { name: flow.name })}

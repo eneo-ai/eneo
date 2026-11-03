@@ -158,7 +158,6 @@ function AllSourcesDialog({
   return (
     <Dialog isOpen={open} onOpenChange={onOpenChange} width={880} maxHeight="86dvh">
       <Layout
-        height="auto"
         header={
           <DialogHeader
             title={t("flow_run_knowledge_all_sources_title")}

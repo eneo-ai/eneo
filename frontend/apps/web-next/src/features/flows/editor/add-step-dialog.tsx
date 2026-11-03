@@ -467,7 +467,6 @@ export function AddStepDialog({
       maxHeight="85dvh"
     >
       <Layout
-        height="auto"
         header={
           <DialogHeader title={t("flow_step_editor_add_title")} onOpenChange={requestOpenChange} />
         }

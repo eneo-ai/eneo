@@ -88,7 +88,6 @@ export function NewFlowDialog({
   return (
     <Dialog isOpen={open} onOpenChange={requestOpenChange} purpose="form" width={480}>
       <Layout
-        height="auto"
         header={
           <DialogHeader
             title={t("flows_new_title")}

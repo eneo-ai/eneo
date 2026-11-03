@@ -450,7 +450,6 @@ export function FlowPackageImportDialog({
   return (
     <Dialog isOpen={open} onOpenChange={requestOpenChange} purpose="form" width={680}>
       <Layout
-        height="auto"
         header={
           <DialogHeader
             title={t("flow_editor_tools_package_import_title")}
