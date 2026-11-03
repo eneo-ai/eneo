@@ -268,14 +268,27 @@ jobs:
           TESTCONTAINERS_RYUK_DISABLED: "true"
           DOCKER_HOST: unix:///var/run/docker.sock
 
-      - name: Verify crawler migration rollback
+      - name: Verify migration round trips
         if: matrix.suite == 'migrations'
-        # These tests own disposable databases and deliberately change their schema.
-        run: >-
-          uv run pytest -q -m migration_isolation
-          tests/integration/migrations/test_crawl_lifecycle_round_trip.py
-          tests/integration/migrations/test_website_source_url_identity.py
-          tests/integration/migrations/test_crawler_develop_rollback.py
+        # Each migration_isolation test owns a disposable database and changes its
+        # schema, so the parallel suite skips them. Discovery over all of tests/
+        # finds every one, new ones included, except the File/Icon tests of the
+        # next step. Each module runs in its own pytest process, so modules that
+        # share the session database each start from a fresh schema. Modules in
+        # tests/integration/quarantined-migration-tests.txt are not started.
+        run: |
+          uv run pytest -q --collect-only -m migration_isolation tests \
+            --ignore=tests/integration/migrations/test_file_icon_preflight.py \
+            --ignore=tests/integration/migrations/test_file_icon_legacy_cleanup.py \
+            --ignore=tests/integration/migrations/test_file_icon_bridge_rehearsal.py \
+            | grep '::' | cut -d: -f1 | sort -u > "$RUNNER_TEMP/migration-modules.txt"
+          mapfile -t modules < <(grep -vxFf tests/integration/quarantined-migration-tests.txt \
+            "$RUNNER_TEMP/migration-modules.txt")
+          status=0
+          for module in "${modules[@]}"; do
+            uv run pytest -q -m migration_isolation "$module" || status=1
+          done
+          exit "$status"
         env:
           TESTCONTAINERS_RYUK_DISABLED: "true"
           DOCKER_HOST: unix:///var/run/docker.sock
