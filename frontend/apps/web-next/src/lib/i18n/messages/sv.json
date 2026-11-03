@@ -7090,7 +7090,7 @@
   "website_detail_actions": "Webbplats, åtgärder",
   "space_apps_actions": "Appar, åtgärder",
   "chat_composer_hint_touch": "Retur ger en ny rad. Skicka med Skicka-knappen.",
-  "chat_composer_key_newline": "Ny rad",
+  "chat_send_tooltip": "Skicka (Retur). Skift+Retur ger en ny rad.",
   "app_run_start": "Kör appen",
   "admin_mcp_servers_empty_title": "Inga MCP-servrar ännu",
   "space_assistants_actions": "Assistenter, åtgärder",

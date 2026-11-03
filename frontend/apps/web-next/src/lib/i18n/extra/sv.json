@@ -1856,7 +1856,7 @@
   "module_admin_remove_description": "{moduleKey} kommer inte längre vara tillgänglig i den här Eneo-installationen. Kopplingen till callback-URL:erna och tjänstenyckeln tas bort.",
   "space_apps_actions": "Appar, åtgärder",
   "chat_composer_hint_touch": "Retur ger en ny rad. Skicka med Skicka-knappen.",
-  "chat_composer_key_newline": "Ny rad",
+  "chat_send_tooltip": "Skicka (Retur). Skift+Retur ger en ny rad.",
   "app_run_start": "Kör appen",
   "admin_mcp_servers_empty_title": "Inga MCP-servrar ännu",
   "space_assistants_actions": "Assistenter, åtgärder",

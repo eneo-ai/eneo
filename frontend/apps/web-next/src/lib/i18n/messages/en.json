@@ -7090,7 +7090,7 @@
   "website_detail_actions": "Website, actions",
   "space_apps_actions": "Apps, actions",
   "chat_composer_hint_touch": "Return adds a line. Send with the Send button.",
-  "chat_composer_key_newline": "New line",
+  "chat_send_tooltip": "Send (Return). Shift+Return adds a line.",
   "app_run_start": "Run the app",
   "admin_mcp_servers_empty_title": "No MCP servers yet",
   "space_assistants_actions": "Assistants, actions",
