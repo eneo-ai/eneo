@@ -3,10 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TypeAlias
 
-from eneo.completion_models.domain.model_capacity import (
-    ModelCapacity,
-    UnknownModelCapacityError,
-)
+from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.flow_packages.domain.flow_package_import_plan import (
     MAX_IMPORT_PLAN_SUGGESTIONS,
     FlowPackageImportPlanStatus,
@@ -137,6 +134,13 @@ def _evaluate_candidate(
         tested_identities=tested_identities,
         publisher_suggested_identities=publisher_suggested_identities,
     )
+    if _capacity_unknown(candidate):
+        # Selectable for the draft: a run refuses the model until an admin
+        # declares its capacity, so it is never chosen for the person.
+        selection_warnings = (
+            *selection_warnings,
+            FlowPackageModelMatchIssue.MODEL_CAPACITY_UNKNOWN,
+        )
     if rejection_reasons:
         selection_warnings = ()
     return _ModelCandidateEvaluation(
@@ -155,12 +159,6 @@ def hard_model_candidate_rejection_reasons(
     if candidate.model_kind is not requirement.model_kind:
         return (FlowPackageModelMatchIssue.MODEL_KIND_MISMATCH,)
 
-    if candidate.model_kind is FlowPackageModelKind.COMPLETION_MODEL:
-        try:
-            ModelCapacity(candidate.max_input_tokens, None).require_input_tokens()
-        except UnknownModelCapacityError:
-            return (FlowPackageModelMatchIssue.MODEL_CAPACITY_UNKNOWN,)
-
     reasons: list[FlowPackageModelMatchIssue] = []
     if requirement.completion_constraints is not None:
         reasons.extend(
@@ -177,8 +175,10 @@ def _completion_constraint_rejections(
     candidate: FlowPackageModelCandidate,
 ) -> list[FlowPackageModelMatchIssue]:
     reasons: list[FlowPackageModelMatchIssue] = []
-    if constraints.minimum_context_tokens is not None and (
-        not ModelCapacity(candidate.max_input_tokens, None).admits_input(
+    if (
+        constraints.minimum_context_tokens is not None
+        and candidate.max_input_tokens is not None
+        and not ModelCapacity(candidate.max_input_tokens, None).admits_input(
             constraints.minimum_context_tokens, safety_tokens=0
         )
     ):
@@ -255,6 +255,7 @@ def _resolution_outcome(
     is_exact_allowed = (
         selected_evaluation.identity_rank == _TESTED_IDENTITY_RANK
         and policy_status is FlowPackagePolicyStatus.ALLOWED
+        and not _capacity_unknown(selected_evaluation.candidate)
     )
     return _ModelResolutionOutcome(
         status=(
@@ -268,6 +269,13 @@ def _resolution_outcome(
         auto_select_allowed=is_exact_allowed,
         suggestions=suggestions,
         selection_warnings=list(selected_evaluation.selection_warnings),
+    )
+
+
+def _capacity_unknown(candidate: FlowPackageModelCandidate) -> bool:
+    return (
+        candidate.model_kind is FlowPackageModelKind.COMPLETION_MODEL
+        and candidate.max_input_tokens is None
     )
 
 
@@ -285,11 +293,8 @@ def _evaluation_sort_key(
     candidate = evaluation.candidate
     return (
         evaluation.identity_rank,
-        -(
-            ModelCapacity(candidate.max_input_tokens, None).require_input_tokens()
-            if candidate.model_kind is FlowPackageModelKind.COMPLETION_MODEL
-            else 0
-        ),
+        # An undeclared capacity sorts after every declared one.
+        -(candidate.max_input_tokens or 0),
         len(evaluation.selection_warnings),
         candidate.label.casefold(),
         candidate.local_kind.value,

@@ -168,9 +168,22 @@ function Requirement({
       <FieldMessage id={problemId} message={t("flow_editor_tools_package_no_candidates")} />
     );
   } else {
+    const chosen = resolution.suggestions.find(
+      (candidate) => candidateKey(candidate) === selection
+    );
+    // A model whose capacity no admin declared can stand in for the package's; a run refuses it
+    // until its limits are declared, so the person hears that before importing.
+    const capacityUnknown =
+      chosen !== undefined &&
+      chosen.local_kind === "completion_model" &&
+      "max_input_tokens" in chosen &&
+      chosen.max_input_tokens == null;
     control = (
       <Selector
         label={t("flow_editor_tools_package_local_resource", { slot: label })}
+        description={
+          capacityUnknown ? t("flow_editor_tools_package_model_capacity_unknown") : undefined
+        }
         options={[
           ...(selection === null && resolution.required
             ? [{ value: SKIP, label: t("flow_editor_tools_package_select_local_resource") }]

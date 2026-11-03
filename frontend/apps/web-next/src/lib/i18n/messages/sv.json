@@ -7908,6 +7908,7 @@
   "flow_editor_tools_package_template_not_applied": "Filen används inte. {message}",
   "flow_editor_tools_package_template_read_failed": "Filen kunde inte läsas. Välj filen igen.",
   "flow_editor_tools_package_no_candidates": "Ingen lokal resurs hittades för detta krav.",
+  "flow_editor_tools_package_model_capacity_unknown": "Det är inte angivet hur mycket text den här modellen kan ta emot. Flödet kan importeras som utkast, men en administratör behöver ange modellens gränser innan det kan köras.",
   "flow_editor_tools_package_select_local_resource": "Välj lokal resurs",
   "flow_editor_tools_package_skip_optional": "Hoppa över",
   "flow_editor_tools_package_used_by_steps": "Används av: {steps}",

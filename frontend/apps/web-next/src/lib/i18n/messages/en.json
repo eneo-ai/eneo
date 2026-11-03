@@ -7908,6 +7908,7 @@
   "flow_editor_tools_package_template_not_applied": "The file was not applied. {message}",
   "flow_editor_tools_package_template_read_failed": "The file could not be read. Choose the file again.",
   "flow_editor_tools_package_no_candidates": "No local resource was found for this requirement.",
+  "flow_editor_tools_package_model_capacity_unknown": "How much text this model can take is not declared. The flow can be imported as a draft, but an administrator must declare the model's limits before it can run.",
   "flow_editor_tools_package_select_local_resource": "Select local resource",
   "flow_editor_tools_package_skip_optional": "Skip",
   "flow_editor_tools_package_used_by_steps": "Used by: {steps}",

@@ -212,6 +212,42 @@ describe("FlowPackageImportDialog", () => {
     });
   }, 20_000);
 
+  it("lets a model with undeclared capacity stand in, and says what that means for runs", async () => {
+    const [model] = plan.dependency_resolutions;
+    const undeclared = {
+      ...plan,
+      dependency_resolutions: [
+        {
+          ...model,
+          suggestions: [
+            {
+              local_kind: "completion_model",
+              local_id: "m-2",
+              label: "Gemma lokalt",
+              model_kind: "completion_model",
+              max_input_tokens: null
+            }
+          ]
+        }
+      ]
+    };
+    api.POST.mockImplementation(() =>
+      Promise.resolve({ data: undeclared, response: json(200, undeclared) })
+    );
+    const { container } = renderImport();
+    choose(container, new File(["zip"], "brev.eneopkg", { type: "application/zip" }));
+
+    fireEvent.click(await screen.findByRole("combobox", { name: /Lokal resurs för Skrivmodell/ }));
+    fireEvent.click(await screen.findByRole("option", { name: "Gemma lokalt" }));
+
+    expect(
+      await screen.findByText(/en administratör behöver ange modellens gränser innan det kan köras/)
+    ).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.queryByText("Välj en lokal resurs för Skrivmodell.")).toBeNull()
+    );
+  }, 20_000);
+
   it("says why the core refused the package", async () => {
     api.POST.mockResolvedValue({
       error: { message: "Bad", code: "flow_package_checksum_mismatch" },
