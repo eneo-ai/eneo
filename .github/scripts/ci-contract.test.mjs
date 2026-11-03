@@ -55,7 +55,7 @@ test("shared frontend inputs validate both apps and all application images", () 
 });
 
 test("workflow, local action, scope and gate changes force full validation", () => {
-  for (const file of [".github/workflows/ci.yml", ".github/actions/setup-playwright/action.yml", ".github/scripts/ci-gate.mjs"]) {
+  for (const file of [".github/workflows/ci.yml", ".github/actions/setup-playwright/action.yml", ".github/scripts/ci-gate.mjs", ".github/scripts/ci-web-next-e2e-legs.mjs"]) {
     const plan = planCi([file], "merge_group");
     assert.equal(plan.full, true);
     assert.equal(plan.docker_matrix.include.length, 3);
@@ -216,9 +216,16 @@ test("web-next runs all browser cases on FastAPI and has no Next runtime job", (
   const notWalks = ["@upload-worker", ...walks.map(({ grep }) => grep)].join("|");
   for (const { invert } of files) assert.equal(invert, notWalks);
   assert.equal(rest[0].invert, [notWalks, ...files.map(({ grep }) => grep)].join("|"));
-  const tags = walks.flatMap(({ grep }) => grep.split("|"));
-  assert.ok(tags.every((tag) => /^@[a-z0-9-]+$/.test(tag)), tags.join("|"));
-  assert.equal(new Set(tags).size, tags.length);
+  // A walk leg selects cells: a walk's tag, or its tag and a viewport's device, which
+  // walkTags (tests/responsive-fixtures.ts) puts right after it. Which cases each leg
+  // then holds is checked against Playwright's own listing by ci-web-next-e2e-legs.mjs.
+  const cells = walks.flatMap(({ grep }) => grep.split("|"));
+  assert.equal(new Set(cells).size, cells.length, "each cell runs in one leg");
+  const parsed = cells.map((cell) => cell.match(/^(@[a-z0-9-]+)(?: @([a-z]+))?$/));
+  assert.ok(parsed.every(Boolean), cells.join("|"));
+  const tags = [...new Set(parsed.map(([, tag]) => tag))];
+  const unit = workflow.split("\n  frontend-web-next:\n")[1].split("\n  frontend-e2e:\n")[0];
+  assert.match(unit, /^        run: node \.\.\/\.github\/scripts\/ci-web-next-e2e-legs\.mjs$/m);
   const testsDir = path.join(root, "frontend/apps/web-next/tests");
   const specs = fs.readdirSync(testsDir).filter((file) => file.endsWith(".spec.ts"))
     .map((file) => [file, fs.readFileSync(path.join(testsDir, file), "utf8")]);
