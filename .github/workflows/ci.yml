@@ -2,6 +2,12 @@ name: CI
 
 on:
   workflow_call:
+    inputs:
+      # Image publication builds the backend and frontend images itself; its CI skips
+      # their dry-run builds.
+      publication:
+        type: boolean
+        default: false
   # A branch that is not a pull request (a feature integration branch) can
   # run the full CI by hand without publishing images.
   workflow_dispatch:
@@ -83,6 +89,8 @@ jobs:
 
       - name: Plan CI from the event's complete diff
         id: scope
+        env:
+          CI_PUBLICATION: ${{ inputs.publication }}
         run: node .github/scripts/ci-change-scope.mjs --github-event >> "$GITHUB_OUTPUT"
 
       - name: Check branch name

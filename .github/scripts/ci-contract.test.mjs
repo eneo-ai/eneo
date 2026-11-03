@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -348,7 +349,7 @@ test("publication moves aliases only from its bundle, under the release controll
   const job = (name) => workflow.split(`\n  ${name}:\n`)[1].split(/\n  [a-z-]+:\n/)[0];
   assert.doesNotMatch(job("bundle"), /release_bundle\.py promote|packages: write/);
   const promote = job("promote");
-  assert.match(promote, /^    needs: \[release, bundle, release-sbom\]$/m);
+  assert.match(promote, /^    needs: \[release, verify, bundle, release-sbom\]$/m);
   const lock = "    concurrency:\n      group: eneo-release-lifecycle\n      queue: max\n      cancel-in-progress: false\n";
   assert.ok(promote.includes(lock));
   // The controller takes the same lock on its job, so skipped completions never queue in it.
@@ -372,6 +373,67 @@ test("publication serializes a version's writes by that version, and nothing els
   assert.ok(workflow.split("\n  bundle:\n")[1].includes(lock("eneo-bundle-${{ needs.release.outputs.version }}")));
   // The tag's SBOM publisher queues too: a waiting retry is never replaced.
   assert.match(read("release_sbom.yml"), /^concurrency:\n  group: \$\{\{ github\.workflow \}\}-\$\{\{ inputs\.tag \}\}\n  queue: max\n  cancel-in-progress: false$/m);
+});
+
+test("publication's CI skips only the backend and frontend dry-run builds it publishes itself", () => {
+  const plan = planCi([], "push", { publication: true });
+  assert.equal(plan.full, true);
+  assert.deepEqual(plan.docker_matrix.include.map(({ image }) => image), ["devcontainer"]);
+  assert.equal(plan.expected_jobs["docker-builds"], true);
+  assert.equal(planCi([], "push").docker_matrix.include.length, 3);
+  const workflow = fs.readFileSync(path.join(root, ".github/workflows/build_and_push_images.yml"), "utf8");
+  assert.match(workflow.split("\n  checks:\n")[1].split(/\n  [a-z-]+:\n/)[0], /^    with:\n(?:      #.*\n)*      publication: true$/m);
+  assert.match(fs.readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8"), /CI_PUBLICATION: \$\{\{ inputs\.publication \}\}/);
+});
+
+test("the frontend image builds beside the backend, with its release version and no cache export", () => {
+  const publication = fs.readFileSync(path.join(root, ".github/workflows/build_and_push_images.yml"), "utf8");
+  assert.match(publication.split("\n  frontend:\n")[1], /^    needs: release\n/);
+  const image = fs.readFileSync(path.join(root, ".github/workflows/application_image.yml"), "utf8");
+  assert.doesNotMatch(image, /backend_digest|sync-frontend-with-backend/);
+  assert.match(image, /sudo fallocate -l 6G \/mnt\/eneo-frontend\.swap/);
+  assert.match(image, /test "\$\(jq -r \.version frontend\/apps\/web\/package\.json\)" = "\$VERSION"/);
+  assert.match(image, /cache-to: \$\{\{ inputs\.component != 'frontend' && /);
+  // The bundle is published only after acceptance; verifying it does not wait for that.
+  assert.match(publication.split("\n  verify:\n")[1], /^    needs: \[release, backend, frontend, tool-runtime\]\n/);
+  assert.match(publication.split("\n  bundle:\n")[1], /^    needs: \[release, accepted, verify\]\n/);
+  // The bundle files cross jobs as an artifact: bundle and promote use them only if they
+  // are the files verify checked.
+  assert.match(publication.split("\n  verify:\n")[1], /^    outputs:\n      sums: \$\{\{ steps\.bundle\.outputs\.sums \}\}$/m);
+  const check = "          test \"$(ls -A | sort | tr '\\n' ' ')\" = \"release.env release.json \"\n          base64 -d <<<\"$SUMS\" | sha256sum -c -\n";
+  // Only those two files are uploaded, attested and published.
+  assert.doesNotMatch(publication, /release-bundle\/\*|path: release-bundle\/\n/);
+  assert.match(publication, /subject-path: release-bundle\/release\.json,release-bundle\/release\.env$/m);
+  for (const name of ["bundle", "promote"]) {
+    const block = publication.split(`\n  ${name}:\n`)[1].split(/\n  [a-z-]+:\n/)[0];
+    assert.ok(block.indexOf(check) > 0, name);
+    assert.ok(block.indexOf(check) < block.indexOf(name === "bundle" ? "Attest the complete bundle" : "release_bundle.py promote"), name);
+  }
+  assert.ok(publication.split("\n  bundle:\n")[1].includes("&& needs.verify.result == 'success'"));
+});
+
+test("the bundle check passes only the two files verify checked, unchanged", () => {
+  const publication = fs.readFileSync(path.join(root, ".github/workflows/build_and_push_images.yml"), "utf8");
+  const script = publication.split("\n  bundle:\n")[1].split("- name: Check the bundle is the one verify checked\n")[1]
+    .split("\n        run: |\n")[1].split(/\n      - /)[0].replace(/^ {10}/gm, "");
+  const files = { "release.json": "{\"version\": \"1\"}\n", "release.env": "ENEO_VERSION=1\n" };
+  const sums = Buffer.from(Object.entries(files)
+    .map(([name, content]) => `${crypto.createHash("sha256").update(content).digest("hex")}  ${name}\n`).join("")).toString("base64");
+  const check = (change) => {
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "eneo-bundle-check-"));
+    try {
+      fs.mkdirSync(path.join(cwd, "release-bundle"));
+      for (const [name, content] of Object.entries(files)) fs.writeFileSync(path.join(cwd, "release-bundle", name), content);
+      change(path.join(cwd, "release-bundle"));
+      return spawnSync("bash", ["-e", "-c", script], { cwd, env: { ...process.env, SUMS: sums }, encoding: "utf8" }).status;
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
+  };
+  assert.equal(check(() => {}), 0);
+  assert.notEqual(check((dir) => fs.appendFileSync(path.join(dir, "release.json"), " ")), 0);
+  assert.notEqual(check((dir) => fs.writeFileSync(path.join(dir, "payload.sh"), "exit 0\n")), 0);
+  assert.notEqual(check((dir) => fs.rmSync(path.join(dir, "release.env"))), 0);
 });
 
 test("only develop pushes save the package download cache", () => {

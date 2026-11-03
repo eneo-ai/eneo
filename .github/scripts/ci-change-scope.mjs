@@ -41,7 +41,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   } catch (error) {
     console.error(`::warning::Cannot determine changed files; running full CI. ${error.message}`);
   }
-  const plan = planCi(files, eventName);
+  const plan = planCi(files, eventName, { publication: process.env.CI_PUBLICATION === "true" });
   writeOutputs(plan);
   if (process.env.GITHUB_STEP_SUMMARY) {
     const jobs = Object.entries(plan.expected_jobs).filter(([, required]) => required).map(([job]) => job);
@@ -62,13 +62,15 @@ export function changedFiles(base, head, cwd = process.cwd()) {
   }).split("\0").filter(Boolean);
 }
 
-export function planCi(files, eventName) {
+export function planCi(files, eventName, { publication = false } = {}) {
   // Only a pull request is scoped to its diff. The merge queue validates everything:
   // its candidate is what lands on develop, image publication reuses that result, and
   // a queued entry's diff leaves out the entries ahead of it. Reusable workflows
   // inherit the caller's event, so pushes, tags and manual publication do the same.
   const scope = eventName === "pull_request" ? classify(files) : allTrue();
-  const images = dockerImages.filter(({ image }) => scope[`docker_${image.replaceAll("-", "_")}`]);
+  // Publication builds and checks the backend and frontend images it publishes.
+  const images = dockerImages.filter(({ image }) => scope[`docker_${image.replaceAll("-", "_")}`]
+    && !(publication && ["backend", "frontend"].includes(image)));
   return {
     ...scope,
     docker: images.length > 0,
