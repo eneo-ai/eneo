@@ -266,6 +266,27 @@ test("web-next rejects route drift and retains Vite resource reports after build
   assert.ok(!job.includes("ci-build-memory.mjs"), "Vite sizes and RSS are report-only");
 });
 
+test("only develop pushes save the package download cache", () => {
+  // Pull request and merge-queue refs saved their own ~610 MB copy that no other ref could restore.
+  const action = fs.readFileSync(path.join(root, ".github/actions/setup-frontend/action.yml"), "utf8");
+  const step = (name) => action.split(`- name: ${name}\n`)[1]?.split(/\n    - /)[0] ?? "";
+  const restore = step("Restore the package download cache");
+  const save = step("Save the package download cache");
+  assert.doesNotMatch(action, /uses: actions\/cache@/);
+  assert.match(restore, /^      id: bun-cache$/m);
+  assert.match(restore, /^      uses: actions\/cache\/restore@[0-9a-f]{40} # v4$/m);
+  assert.match(restore, /^        restore-keys: bun-/m);
+  assert.equal(save.match(/^      if: (.*)$/m)?.[1],
+    "github.event_name == 'push' && github.ref == 'refs/heads/develop' && steps.bun-cache.outputs.cache-hit != 'true'");
+  assert.match(save, /^      uses: actions\/cache\/save@[0-9a-f]{40} # v4$/m);
+  assert.match(save, /^        key: \$\{\{ steps\.bun-cache\.outputs\.cache-primary-key \}\}$/m);
+  const cachePath = (body) => body.match(/^        path: (.*)$/m)?.[1];
+  assert.equal(cachePath(save), cachePath(restore));
+  const order = ["Restore the package download cache", "Install locked workspace dependencies", "Save the package download cache"]
+    .map((name) => action.indexOf(`- name: ${name}\n`));
+  assert.ok(order.every((index, i) => index > (order[i - 1] ?? -1)), String(order));
+});
+
 test("the memory check passes within budget and fails above it or without a measurement", () => {
   const report = (kb) => `\tCommand being timed: "bun run build"\n\tMaximum resident set size (kbytes): ${kb}\n\tExit status: 0\n`;
   assert.equal(readPeakRssMb(report(6_291_456)), 6144);
