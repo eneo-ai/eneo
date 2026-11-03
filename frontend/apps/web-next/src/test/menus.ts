@@ -1,4 +1,4 @@
-import { fireEvent, waitFor } from "@testing-library/react";
+import { act, fireEvent, waitFor } from "@testing-library/react";
 import { expect } from "vitest";
 
 type PointerType = "touch" | "mouse";
@@ -37,6 +37,17 @@ export async function openMenuOnRelease(button: HTMLElement, pointerType: Pointe
   fireEvent.click(button, { detail: 1 });
   await waitFor(() => expect(button.getAttribute("aria-expanded")).toBe("true"));
   const menu = document.getElementById(button.getAttribute("aria-controls") ?? "")!;
-  await waitFor(() => expect(document.activeElement).toBe(menu));
+  // Astryx focuses the opened menu on the next animation frame. Waiting for that
+  // frame, not for a wall-clock timeout, keeps a loaded runner from failing it.
+  await nextFrame();
+  expect(document.activeElement).toBe(menu);
   return menu;
+}
+
+/**
+ * Resolves after the next animation frame. jsdom runs frames in the order they
+ * were asked for, so every frame a component asked for before this one has run.
+ */
+function nextFrame(): Promise<void> {
+  return act(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
 }
