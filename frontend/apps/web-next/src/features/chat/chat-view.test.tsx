@@ -414,6 +414,56 @@ describe("ChatView composer drafts", () => {
     });
   });
 
+  /** How many questions went out: each request is announced as it goes. */
+  const requestsSent = () =>
+    spies.announce.mock.calls.filter(([message]) => message === "Assistenten skriver ett svar")
+      .length;
+
+  it("sends one question at a time while a model switch is being saved", async () => {
+    sessionStorage.clear();
+    renderInApp(<Harness partner={assistant} />);
+    let saved!: () => void;
+    void queuePartnerUpdate(() => new Promise<void>((resolve) => (saved = resolve)));
+    const field = screen.getByRole("textbox", { name: "Fråga Upphandlingsassistenten" });
+    fireEvent.change(field, { target: { value: "Första frågan" } });
+    fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
+
+    // The first question waits for the save: a second stays in the composer.
+    fireEvent.change(field, { target: { value: "Andra frågan" } });
+    fireEvent.keyDown(field, { key: "Enter", ctrlKey: true });
+    expect((field as HTMLTextAreaElement).value).toBe("Andra frågan");
+
+    await act(async () => {
+      await Promise.resolve();
+      saved();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(requestsSent()).toBe(1);
+  });
+
+  it("takes a question waiting for a model switch back to the composer when stopped", async () => {
+    sessionStorage.clear();
+    renderInApp(<Harness partner={assistant} />);
+    let saved!: () => void;
+    void queuePartnerUpdate(() => new Promise<void>((resolve) => (saved = resolve)));
+    const field = screen.getByRole("textbox", { name: "Fråga Upphandlingsassistenten" });
+    fireEvent.change(field, { target: { value: "Skicka när modellen är sparad" } });
+    fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
+    expect((field as HTMLTextAreaElement).value).toBe("");
+
+    fireEvent.click(screen.getByRole("button", { name: "Stoppa generering" }));
+    expect((field as HTMLTextAreaElement).value).toBe("Skicka när modellen är sparad");
+    expect(screen.getByRole("button", { name: "Skicka meddelande" })).toBeTruthy();
+
+    // Saved after the stop: nothing goes out.
+    await act(async () => {
+      await Promise.resolve();
+      saved();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(requestsSent()).toBe(0);
+  });
+
   it("keeps a draft for the account that typed it, and gives it to no other", async () => {
     sessionStorage.clear();
     const mine = renderInApp(<Harness partner={assistant} />);

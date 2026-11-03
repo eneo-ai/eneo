@@ -4,6 +4,7 @@ import { IconButton } from "@astryxdesign/core/IconButton";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { pixel, proportional, type TableColumn } from "@astryxdesign/core/Table";
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
+import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, SearchX, Trash2, Upload, Workflow } from "lucide-react";
 import Link from "@/lib/link";
@@ -17,7 +18,7 @@ import { PageHeader } from "@/components/composites/page-header";
 import { QueryStateBoundary } from "@/components/composites/query-state";
 import { useAppContext } from "@/components/providers/app-context";
 import { useAnnounceChange } from "@/lib/hooks/use-announce-change";
-import { HANDHELD_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
+import { HANDHELD_QUERY } from "@/lib/hooks/use-media-match";
 import { useSearchDraft } from "@/lib/hooks/use-search-draft";
 import { browserApi } from "@/lib/api/browser";
 import { toastApiError } from "@/lib/api/toast";
@@ -64,7 +65,7 @@ export function FlowsPage() {
   const canManage = can("flows_manage");
   // A phone runs and reviews flows; building one (many settings, prompts and
   // steps) is for a computer, so nothing here offers to.
-  const phone = useMediaMatch(HANDHELD_QUERY);
+  const phone = useMediaQuery(HANDHELD_QUERY);
   const base = `/spaces/${routeId}/flows`;
 
   const pathname = usePathname();

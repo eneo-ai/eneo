@@ -332,6 +332,31 @@ describe("ChatPage", () => {
     window.localStorage.clear();
   });
 
+  it("links the assistant's editor from the chat menu, in the sheet on a phone too", async () => {
+    const editHref = "/spaces/s/assistants/assistant-1/edit";
+    const page = <ChatPage {...{ partner, buildSessionUrl, editHref }} sessionId={null} />;
+    renderInApp(page);
+    const [more] = screen.getAllByRole("button", { name: "Fler alternativ" });
+    fireEvent.click(more!);
+    const menu = document.getElementById(more!.getAttribute("aria-controls") ?? "")!;
+    expect(
+      within(menu).getByRole("menuitem", { name: "Redigera assistenten" }).getAttribute("href")
+    ).toBe(editHref);
+    cleanup();
+
+    setViewport("phone");
+    renderInApp(page);
+    fireEvent.click(
+      within(document.querySelector<HTMLElement>("[data-own-mobile-header]")!).getByRole("button", {
+        name: "Fler alternativ"
+      })
+    );
+    const sheet = await screen.findByRole("dialog");
+    expect(
+      within(sheet).getByRole("link", { name: "Redigera assistenten" }).getAttribute("href")
+    ).toBe(editHref);
+  });
+
   it("has no axe violations with a loaded conversation", async () => {
     renderPage("s-1");
     await screen.findByRole("log", { name: "Konversation" });

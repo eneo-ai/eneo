@@ -91,11 +91,22 @@ it("renders a finished message again only when what it shows changes", async () 
   for (const text of ["h", "he", "hej"]) typeIntoComposer(field, text);
   expect(savedRenders()).toBe(0);
 
-  // Streaming an answer.
+  // Streaming an answer; a group chat names the answering assistant on the way.
   fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
   await settle();
   expect(probe.controller).not.toBeNull();
   probe.renders.clear();
+  await act(async () =>
+    probe.controller!.enqueue({
+      type: "data-session",
+      data: {
+        session_id: "session-1",
+        answering_assistant: { id: "assistant-1", handle: "assistenten" },
+        files: [],
+        web_search_references: []
+      }
+    })
+  );
   for (let i = 0; i < 5; i++) {
     await act(async () =>
       probe.controller!.enqueue({ type: "text-delta", id: "t", delta: `ord${i} ` })

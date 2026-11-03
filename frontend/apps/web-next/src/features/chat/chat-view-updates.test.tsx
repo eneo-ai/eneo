@@ -115,6 +115,22 @@ it("saved answers follow the activity pill state", async () => {
   expect(pillOf(a1!).getAttribute("aria-expanded")).toBe("false");
 });
 
+it("a saved answer's source opens that answer's activity", async () => {
+  renderInApp(<Harness />);
+  const [a0, a1] = answers();
+  fireEvent.click(within(a0!).getByRole("button", { name: /Källa s0aaaaaa-1/ }));
+  await settle();
+  expect(pillOf(a0!).getAttribute("aria-expanded")).toBe("true");
+  fireEvent.click(within(a1!).getByRole("button", { name: /Källa s1bbbbbb-1/ }));
+  await settle();
+  expect(pillOf(a0!).getAttribute("aria-expanded")).toBe("false");
+  expect(pillOf(a1!).getAttribute("aria-expanded")).toBe("true");
+  // A source opens or switches; it never closes the activity.
+  fireEvent.click(within(a1!).getByRole("button", { name: /Källa s1bbbbbb-1/ }));
+  await settle();
+  expect(pillOf(a1!).getAttribute("aria-expanded")).toBe("true");
+});
+
 it("a saved answer follows the open-file highlight", async () => {
   renderInApp(<Harness />);
   const line = within(answers()[0]!).getByRole("button", { name: /Plan/ });

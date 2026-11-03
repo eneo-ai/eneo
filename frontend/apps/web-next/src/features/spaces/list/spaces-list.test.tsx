@@ -13,7 +13,6 @@ import {
   testAppContext
 } from "@/test/render";
 import { setViewport } from "@/test/setup-dom";
-import { router } from "@/test/navigation";
 import messages from "@/lib/i18n/messages/sv.json";
 
 const api = vi.hoisted(() => ({
@@ -155,8 +154,7 @@ describe("SpacesList", () => {
     fireEvent.click(screen.getByRole("button", { name: "Fler åtgärder för Upphandling" }));
     const edit = await screen.findByRole("menuitem", { name: "Redigera" });
     expect(screen.queryByRole("menuitem", { name: "Radera yta" })).toBeNull();
-    fireEvent.click(edit);
-    expect(router.push).toHaveBeenCalledExactlyOnceWith("/spaces/s1/settings");
+    expect(edit.getAttribute("href")).toBe("/spaces/s1/settings");
     expect(api.deleted).toEqual([]);
   });
 

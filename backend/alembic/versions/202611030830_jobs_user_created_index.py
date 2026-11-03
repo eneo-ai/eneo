@@ -14,9 +14,9 @@ The index is built ``CONCURRENTLY`` (no write lock on jobs). A failed build can
 leave it INVALID; a rerun drops that leftover before building it again and
 keeps an index already built.
 
-Revision ID: 202610261000
-Revises: 202610251100
-Create Date: 2026-10-26 10:00:00.000000
+Revision ID: 202611030830
+Revises: 202611021100
+Create Date: 2026-11-03 08:30:00.000000
 """
 
 from __future__ import annotations
@@ -27,8 +27,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "202610261000"
-down_revision: str | None = "202610251100"
+revision: str = "202611030830"
+down_revision: str | None = "202611021100"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

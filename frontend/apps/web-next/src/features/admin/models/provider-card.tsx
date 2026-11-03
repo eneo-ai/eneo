@@ -22,7 +22,8 @@ import { MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useId, useMemo, useRef, useState } from "react";
 import { useFocusRescue } from "@/lib/focus-rescue";
-import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
+import { useMediaQuery } from "@astryxdesign/core/hooks";
+import { PHONE_QUERY } from "@/lib/hooks/use-media-match";
 import { ProviderLogo } from "@/components/ai-elements/provider-logo";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { StatusLabel } from "@/components/composites/status-label";
@@ -181,7 +182,7 @@ export function ProviderCard({
   const headingId = useId();
   const cardRef = useRef<HTMLElement>(null);
   const rescueFocus = useFocusRescue();
-  const phone = useMediaMatch(PHONE_QUERY);
+  const phone = useMediaQuery(PHONE_QUERY);
   const [modelSelection, setModelSelection] = useState<ModelSelection | null>(null);
   const [showEdit, setShowEdit] = useState(false);
   const [showDelete, setShowDelete] = useState(false);

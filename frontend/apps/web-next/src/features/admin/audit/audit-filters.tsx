@@ -1,11 +1,9 @@
-import { BottomSheet } from "@astryxdesign/core/BottomSheet";
 import { Button } from "@astryxdesign/core/Button";
 import {
   DateRangeInput,
   type DateRange,
   type DateRangePreset
 } from "@astryxdesign/core/DateRangeInput";
-import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { MultiSelector, type MultiSelectorOptionType } from "@astryxdesign/core/MultiSelector";
 import { Popover } from "@astryxdesign/core/Popover";
 import { Token } from "@astryxdesign/core/Token";
@@ -17,7 +15,6 @@ import { useMemo, useState } from "react";
 import { TextInput } from "@/components/astryx/text-input";
 import { Typeahead } from "@/components/astryx/typeahead";
 import { browserApi } from "@/lib/api/browser";
-import { MEDIA } from "@/lib/breakpoints";
 import { formatCalendarDate } from "@/lib/calendar-date";
 import { SEARCH_DEBOUNCE_MS } from "@/lib/hooks/use-debounced-value";
 import { adminUsersQueryOptions, MIN_SEARCH_LENGTH } from "@/features/admin/users/users";
@@ -221,55 +218,35 @@ function AuditFilterFields({
   );
 }
 
-/** The "Filter" button: a popover beside it on wide screens, a bottom sheet on phones. */
+/** The "Filter" button: a popover beside it, a bottom sheet on a compact touch screen. */
 function FilterButton({ filters, onChange }: { filters: AuditFilters; onChange: OnChange }) {
   const t = useTranslations();
   const [open, setOpen] = useState(false);
-  const wide = useMediaQuery(MEDIA.md);
   const count = activeFilterCount(filters);
   const label = count > 0 ? t("audit_filters_button_count", { count }) : t("audit_filters_button");
   const fields = (
     <AuditFilterFields filters={filters} onChange={onChange} onDone={() => setOpen(false)} />
   );
 
-  if (wide) {
-    return (
-      <Popover
-        isOpen={open}
-        onOpenChange={setOpen}
-        placement="below"
-        alignment="end"
-        width={360}
-        label={t("audit_filters_button")}
-        closeButtonLabel={t("close")}
-        // Mounted only while open: closed, Astryx keeps the popover element in
-        // the DOM, and the fields' empty listboxes would be scanned as visible.
-        content={open ? <div className="p-1">{fields}</div> : null}
-      >
-        {/* Popover attaches the click and aria-expanded to the button inside. */}
-        <Button label={label} icon={<ListFilter aria-hidden="true" />} />
-      </Popover>
-    );
-  }
   return (
-    <>
-      <Button
-        label={label}
-        icon={<ListFilter aria-hidden="true" />}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        onClick={() => setOpen(true)}
-      />
-      <BottomSheet
-        isOpen={open}
-        onOpenChange={setOpen}
-        label={t("audit_filters_button")}
-        height="tall"
-        padding={0}
-      >
-        <div className="p-4">{fields}</div>
-      </BottomSheet>
-    </>
+    <Popover
+      isOpen={open}
+      onOpenChange={setOpen}
+      presentation="adaptive"
+      placement="below"
+      alignment="end"
+      width={360}
+      padding={0}
+      label={t("audit_filters_button")}
+      closeButtonLabel={t("close")}
+      // Mounted only while open: closed, Astryx keeps the content in the DOM of
+      // the popover or the sheet, and the fields' empty listboxes would be
+      // scanned as visible.
+      content={open ? <div className="p-4">{fields}</div> : null}
+    >
+      {/* Popover attaches the click and aria-expanded to the button inside. */}
+      <Button label={label} icon={<ListFilter aria-hidden="true" />} />
+    </Popover>
   );
 }
 

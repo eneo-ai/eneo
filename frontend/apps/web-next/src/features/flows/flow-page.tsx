@@ -16,7 +16,7 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { focusAfterRemoval } from "@/lib/focus-after-removal";
 import { useFocusRescue } from "@/lib/focus-rescue";
-import { HANDHELD_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
+import { HANDHELD_QUERY } from "@/lib/hooks/use-media-match";
 import { cn } from "@/lib/utils";
 import { useSpaceDisplayName, useSpaceSections } from "@/features/spaces/frame/space-header";
 import { spaceLandingHref } from "@/features/spaces/frame/space-sections";
@@ -979,7 +979,7 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
  * edited in it.
  */
 export function FlowPage({ flowId }: { flowId: string }) {
-  const handheld = useMediaMatch(HANDHELD_QUERY);
+  const handheld = useMediaQuery(HANDHELD_QUERY);
   // The start form is here, not in either page: turning a phone across 768 px swaps the pages,
   // and a recording in the form goes on.
   const [starting, setStarting] = useState(false);

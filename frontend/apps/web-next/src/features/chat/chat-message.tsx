@@ -4,7 +4,7 @@ import {
   ChatMessageBubble,
   ChatTokenizedText
 } from "@astryxdesign/core/Chat";
-import { useAnnounce, useClipboard } from "@astryxdesign/core/hooks";
+import { useAnnounce, useClipboard, useMediaQuery } from "@astryxdesign/core/hooks";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { List, ListItem } from "@astryxdesign/core/List";
 import { MoreMenu } from "@astryxdesign/core/MoreMenu";
@@ -30,7 +30,6 @@ import { tableLocationLabel } from "@/features/workspace/preview/table-reference
 import type { PreviewFile } from "@/features/workspace/preview/preview-kind";
 import { resolveInrefs, trimPartialInref } from "@/lib/chat/inref";
 import type { AnswerRating, EneoUIMessage, KnowledgeOrigin } from "@/lib/chat/types";
-import { useMediaMatch } from "@/lib/hooks/use-media-match";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 
@@ -431,7 +430,7 @@ function AnswerActions({
   // Decision 7: on touch the actions say what they do ("Kopiera", "Bra
   // svar", "Dåligt svar"), 44 px targets 8 px apart; a mouse keeps the icons
   // with tooltips. Known once hydrated; answers render after that.
-  const labelled = useMediaMatch("(pointer: coarse)") === true;
+  const labelled = useMediaQuery("(pointer: coarse)");
   const iconClass = "pointer-coarse:size-11";
   // The panel returns focus to the menu button that opened it.
   const openPanel = (open: (trigger: HTMLElement) => void) => {

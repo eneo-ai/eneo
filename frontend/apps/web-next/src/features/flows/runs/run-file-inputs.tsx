@@ -2,13 +2,14 @@ import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
 import { FileInput } from "@astryxdesign/core/FileInput";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { ProgressBar } from "@astryxdesign/core/ProgressBar";
+import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { CircleAlert, CircleCheck, Download, RotateCw, X } from "lucide-react";
 import { Fragment } from "react";
 import { useLocale, useTranslations } from "use-intl";
 import { saveUrl, signedFileUrl, toastDownloadError } from "@/features/files/signed-file-url";
 import { browserApi } from "@/lib/api/browser";
 import { formatBytes } from "@/lib/format";
-import { HANDHELD_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
+import { HANDHELD_QUERY } from "@/lib/hooks/use-media-match";
 import { UploadRetryHint } from "./recording/upload-retry-hint";
 import type { InputProblem, UploadEntry } from "./run-contract";
 import { inputLimitsText } from "./run-format";
@@ -200,10 +201,10 @@ export function RunFileInput({
 }) {
   const t = useTranslations();
   const locale = useLocale();
-  const coarse = useMediaMatch("(pointer: coarse)");
+  const coarse = useMediaQuery("(pointer: coarse)");
   // A phone held in a hand: the microphone is the way in a phone has and a desktop lacks, so
   // recording comes first, and a picked file is a field, not a drop zone with nothing to drop.
-  const handheld = useMediaMatch(HANDHELD_QUERY);
+  const handheld = useMediaQuery(HANDHELD_QUERY);
   const label = inputLabel(input, t);
   const limits = inputLimitsText(input, t, locale);
   const description = [input.description?.trim(), limits].filter(Boolean).join(" ");

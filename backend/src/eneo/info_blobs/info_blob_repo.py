@@ -1180,7 +1180,14 @@ class InfoBlobRepository:
             sa.select(InfoBlobs)
             .where(InfoBlobs.group_id == group_id, active_info_blob_version())
             .order_by(InfoBlobs.created_at)
-            .options(defer(InfoBlobs.text), selectinload(InfoBlobs.group))
+            # The website is loaded too: a row that has one would otherwise
+            # lazy-load it during validation, which async sessions refuse.
+            # With no website set, this issues no statement.
+            .options(
+                defer(InfoBlobs.text),
+                selectinload(InfoBlobs.group),
+                selectinload(InfoBlobs.website),
+            )
         )
         return [InfoBlobInDBNoText.model_validate(record) for record in records]
 

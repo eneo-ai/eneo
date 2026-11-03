@@ -25,6 +25,13 @@ a tag such as `v2.0.0-rc.2` gets SBOM files for that prerelease.
 
 ## How the release flow works
 
+Managed final releases remain GitHub release drafts while the images, bundle
+and SBOMs are prepared. Only a successful complete image workflow and a
+verified bundle allow publication and promotion of the latest release. The
+maintainer's [release procedure](https://github.com/eneo-ai/eneo/blob/develop/docs/DEPLOYMENT_WORKFLOW.md#creating-a-production-release)
+describes preparation, approval and recovery. Already published releases and
+RC tags retain their existing workflow.
+
 After the application coordinator attaches a completed release bundle, it calls
 the release SBOM workflow automatically:
 

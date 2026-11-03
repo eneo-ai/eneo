@@ -234,6 +234,13 @@ class AuditLogRepositoryImpl(AuditLogRepository):
                     sa.func.lower(search_pattern), escape="\\"
                 )
             )
+            # A pooled connection reuses the prepared count and page. After
+            # five runs Postgres may plan them once for any pattern, and that
+            # plan scans the trigram index even for terms matching most of the
+            # log. Custom plans let the statistics on lower(description) choose.
+            await self.session.execute(
+                sa.text("SET LOCAL plan_cache_mode = force_custom_plan")
+            )
 
         # Get total count
         count_query = sa.select(sa.func.count()).select_from(query.subquery())

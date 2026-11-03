@@ -6,7 +6,7 @@ import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
 import { NumberInput } from "@astryxdesign/core/NumberInput";
 import { TextArea } from "@astryxdesign/core/TextArea";
-import { useAnnounce } from "@astryxdesign/core/hooks";
+import { useAnnounce, useMediaQuery } from "@astryxdesign/core/hooks";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
 import { useId, useImperativeHandle, useRef, useState, type Ref } from "react";
@@ -16,7 +16,6 @@ import { LoadingState } from "@/components/composites/loading-state";
 import {
   HANDHELD_QUERY,
   PHONE_QUERY,
-  useMediaMatch,
   usePhoneScreen
 } from "@/lib/hooks/use-media-match";
 import { toast } from "@/lib/toast";
@@ -417,7 +416,7 @@ function StartRunForm({
   const maxSpeakerOption = contract.transcription?.max_speakers;
   // What the run is called is optional: on a phone it comes last, so the input is what the
   // first screen holds.
-  const handheld = useMediaMatch(HANDHELD_QUERY);
+  const handheld = useMediaQuery(HANDHELD_QUERY);
   const labelField = <RunLabelField value={runLabel} onChange={setRunLabel} />;
 
   return (
@@ -594,7 +593,7 @@ export function StartRunDialog({
   // A phone gets the whole screen (the form is long and the keyboard takes half of it) and a
   // footer that stacks with the primary action first, under the thumb. Held sideways it is wider
   // than a phone but just as short: the whole screen still, so the form scrolls above its footer.
-  const phone = useMediaMatch(PHONE_QUERY);
+  const phone = useMediaQuery(PHONE_QUERY);
   const whole = usePhoneScreen();
   const formId = useId();
   const [pending, setPending] = useState(false);

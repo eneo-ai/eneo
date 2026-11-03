@@ -27,12 +27,14 @@ class InlineReferenceScanner(Generic[TBlob]):
     the order first cited, each once, a cited id resolving to the first blob
     whose id starts with it. A tag cannot start inside another, so rescanning
     from one tag length before the old end finds every tag the new text ends.
+    Each cited id is resolved once, the first time it is seen.
     """
 
+    # One scanner lives for each streaming answer: keep its state small.
+    __slots__ = ("_blobs", "_cited", "_references", "_scanned")
+
     def __init__(self, info_blobs: Sequence[TBlob]) -> None:
-        self._blobs: dict[str, TBlob] = {}
-        for blob in info_blobs:
-            self._blobs.setdefault(str(_blob_id(blob))[:8], blob)
+        self._blobs = info_blobs
         self._cited: dict[str, None] = {}
         self._references: list[TBlob] = []
         self._scanned = 0
@@ -43,7 +45,10 @@ class InlineReferenceScanner(Generic[TBlob]):
             if blob_id in self._cited:
                 continue
             self._cited[blob_id] = None
-            if (blob := self._blobs.get(blob_id)) is not None:
+            blob = next(
+                (b for b in self._blobs if str(_blob_id(b))[:8] == blob_id), None
+            )
+            if blob is not None:
                 self._references.append(blob)
         self._scanned = len(answer)
         return list(self._references)

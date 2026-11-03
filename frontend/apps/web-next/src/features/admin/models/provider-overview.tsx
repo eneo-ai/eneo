@@ -1,5 +1,5 @@
 import { Button } from "@astryxdesign/core/Button";
-import { useAnnounce } from "@astryxdesign/core/hooks";
+import { useAnnounce, useMediaQuery } from "@astryxdesign/core/hooks";
 import { Link } from "@astryxdesign/core/Link";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { Selector } from "@astryxdesign/core/Selector";
@@ -19,7 +19,7 @@ import {
   type SecurityClassification
 } from "@/features/admin/security-classifications/security-classifications";
 import { browserApi } from "@/lib/api/browser";
-import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
+import { PHONE_QUERY } from "@/lib/hooks/use-media-match";
 import { modelDisplayName } from "@/lib/models/model-display-name";
 import { modelProvidersQueryOptions, providerCapabilitiesQueryOptions } from "./model-providers";
 import { useModelTypeLabel } from "./model-type-label";
@@ -216,7 +216,7 @@ export function ProviderOverview({
     announce(isFiltering ? t("admin_models_results", { count: shown }) : "");
   }
 
-  const phone = useMediaMatch(PHONE_QUERY);
+  const phone = useMediaQuery(PHONE_QUERY);
   const kindOptions = KIND_FILTERS.map((filter) => ({
     value: filter,
     label: t("admin_models_kind_filter_option", {

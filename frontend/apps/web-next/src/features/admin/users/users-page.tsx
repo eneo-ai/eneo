@@ -17,7 +17,7 @@ import { browserApi } from "@/lib/api/browser";
 import { MEDIA } from "@/lib/breakpoints";
 import { rolesQueryOptions } from "@/features/admin/roles/roles";
 import { useFocusRescue } from "@/lib/focus-rescue";
-import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
+import { PHONE_QUERY } from "@/lib/hooks/use-media-match";
 import { useSearchDraft } from "@/lib/hooks/use-search-draft";
 import { cn } from "@/lib/utils";
 import { PasswordPolicyPanel } from "./password-policy-panel";
@@ -98,7 +98,7 @@ export function AdminUsersPage() {
   const isNarrow = useMediaQuery(NARROW_QUERY);
   // A phone searches by e-mail and keeps username and role in a sheet, so
   // its first screen shows users rather than filters.
-  const phone = useMediaMatch(PHONE_QUERY);
+  const phone = useMediaQuery(PHONE_QUERY);
   const [filtersOpen, setFiltersOpen] = useState(false);
   // The sheet goes with a turn past 768 px; turning back must not reopen it.
   if (!phone && filtersOpen) setFiltersOpen(false);

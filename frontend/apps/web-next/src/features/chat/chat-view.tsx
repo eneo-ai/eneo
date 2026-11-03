@@ -1,8 +1,8 @@
 import { useChat } from "@ai-sdk/react";
 import { Button } from "@astryxdesign/core/Button";
 import { ChatMessageList, ChatSystemMessage } from "@astryxdesign/core/Chat";
-import { Collapsible } from "@astryxdesign/core/Collapsible";
-import { useAnnounce } from "@astryxdesign/core/hooks";
+import { Collapsible } from "@/components/astryx/collapsible";
+import { useAnnounce, useMediaQuery } from "@astryxdesign/core/hooks";
 import { Selector } from "@astryxdesign/core/Selector";
 import { useQueryClient } from "@tanstack/react-query";
 import { CircleAlert } from "lucide-react";
@@ -24,7 +24,6 @@ import {
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
 import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
-import { useMediaMatch } from "@/lib/hooks/use-media-match";
 import { MEDIA } from "@/lib/breakpoints";
 import { useOnline } from "@/lib/hooks/use-online";
 import { invalidateConversationLists } from "@/lib/api/conversations";
@@ -122,6 +121,9 @@ type PendingQuestionState = {
   keys: string[];
   request: SendRequest;
 };
+
+/** What a question taken back before it was sent returns to the composer. */
+type QuestionDraft = Pick<PendingQuestionState, "question" | "quote">;
 
 /**
  * Below Tailwind's `sm`, a phone: its start state docks the composer
@@ -347,7 +349,8 @@ function ConversationView({
       queuedSend ||
       pendingQuestion !== null
   );
-  // Ends the wait for the pending question's uploads (a stop while it waits).
+  // Ends the wait of a question not yet sent, for its uploads or a partner
+  // save (a stop while it waits).
   const pendingAbort = useRef<AbortController | null>(null);
   // The last question and its files, for "Försök igen" after an error.
   const [lastQuestion, setLastQuestion] = useState<{ text: string; files: SentFiles } | null>(null);
@@ -395,8 +398,8 @@ function ConversationView({
   const dockInputRef = useRef<ComposerHandle>(null);
   const startInputRef = useRef<ComposerHandle>(null);
   const startDockInputRef = useRef<ComposerHandle>(null);
-  const phone = useMediaMatch(PHONE);
-  const startDocked = useMediaMatch(DOCK_START);
+  const phone = useMediaQuery(PHONE);
+  const startDocked = useMediaQuery(DOCK_START);
   /** The start composer's field the user has: docked or centred (DOCK_START). */
   const startInput = () => (startDocked ? startDockInputRef : startInputRef).current;
   const startField = useEffectEvent(startInput);
@@ -540,8 +543,9 @@ function ConversationView({
       announce(t("chat_announce_question", { question: openQuestionText }));
     }
   }, [announce, openQuestionId, openQuestionText, t]);
-  // The composer is taken from the moment a question leaves it, uploads included.
-  const sending = busy || pendingQuestion !== null;
+  // The composer is taken from the moment a question leaves it, uploads and
+  // partner saves included.
+  const sending = busy || pendingQuestion !== null || queuedSend;
 
   // Record client-side step timings for the answer being streamed.
   useEffect(() => {
@@ -857,7 +861,7 @@ function ConversationView({
           if (!mounted.current) return;
           pendingAbort.current = null;
           setPendingQuestion(null);
-          issue(pending.text, sentFiles(ready), pending.request);
+          issue(pending.text, sentFiles(ready), pending.request, pending);
         },
         () => {
           if (!mounted.current) return;
@@ -867,11 +871,14 @@ function ConversationView({
       );
       return;
     }
-    issue(text, resendFiles ?? sentFiles(batch), request);
+    issue(text, resendFiles ?? sentFiles(batch), request, { question, quote });
   }
 
-  /** Issues the request for a question whose files are all on the server. */
-  function issue(text: string, files: SentFiles, request: SendRequest) {
+  /**
+   * Issues the request for a question whose files are all on the server;
+   * `draft` is what a stop before it goes returns to the composer.
+   */
+  function issue(text: string, files: SentFiles, request: SendRequest, draft: QuestionDraft) {
     clearError();
     setStreamError(null);
     streamErrorRef.current = null;
@@ -907,9 +914,22 @@ function ConversationView({
     };
     // A model or reasoning switch made in the composer is saved on the
     // assistant; the backend answers with what is stored, so that save lands first.
+    // The question is on its way meanwhile: a stop takes it back, files included.
     if (hasPendingPartnerUpdates()) {
+      const controller = new AbortController();
+      pendingAbort.current = controller;
+      controller.signal.addEventListener("abort", () => {
+        pendingAbort.current = null;
+        setQueuedSend(false);
+        const taken = pendingSendRef.current;
+        pendingSendRef.current = null;
+        if (taken) attachments.restore(taken.attachments);
+        withdrawQuestion(draft, false);
+      });
       setQueuedSend(true);
       void awaitPartnerUpdates().then(() => {
+        if (controller.signal.aborted) return;
+        pendingAbort.current = null;
         // Sent from here on: the request itself outlasts the answer, not the wait.
         setQueuedSend(false);
         void send();
@@ -918,11 +938,11 @@ function ConversationView({
   }
 
   /** Takes a waiting question back out of the conversation; nothing was sent. */
-  function withdrawQuestion(pending: PendingQuestionState, first: boolean) {
+  function withdrawQuestion(draft: QuestionDraft, first: boolean) {
     setPendingQuestion(null);
     // The draft comes back unless the user has already started a new one.
-    setInput((current) => (current.trim() ? current : pending.question));
-    panel.restoreQuote(pending.quote);
+    setInput((current) => (current.trim() ? current : draft.question));
+    panel.restoreQuote(draft.quote);
     // A first question takes the view back to the start state; keep focus in
     // the composer across that swap.
     if (first) {
@@ -996,13 +1016,6 @@ function ConversationView({
     activityTrigger.current = null;
     if (trigger) requestAnimationFrame(() => trigger.focus());
   }, [onActivityChange]);
-  // A call waiting for a decision takes the dock on a phone (decision 26): a
-  // sheet over the dock gives way to it, and the focus goes back to what
-  // opened the sheet.
-  const activityOpen = activity !== null;
-  useEffect(() => {
-    if (deciding && activityOpen) closeActivity();
-  }, [deciding, activityOpen, closeActivity]);
   const openActivityId = activity?.messageId;
   const toggleActivity = useCallback(
     (messageId: string, trigger: HTMLElement, request?: ActivityRequest) => {
@@ -1017,6 +1030,13 @@ function ConversationView({
     },
     [openActivityId, closeActivity, onActivityChange]
   );
+  // A call waiting for a decision takes the dock on a phone (decision 26): a
+  // sheet over the dock gives way to it, and the focus goes back to what
+  // opened the sheet.
+  const activityOpen = activity !== null;
+  useEffect(() => {
+    if (deciding && activityOpen) closeActivity();
+  }, [deciding, activityOpen, closeActivity]);
 
   const failure = error ? describeChatFailure(error, streamError, t) : null;
 
@@ -1066,7 +1086,7 @@ function ConversationView({
     sendBlocked,
     unavailable: partnerCannotAnswer(partner) ? t("no_completion_model_description") : null,
     busy: sending,
-    // A stop while the question still waits for its uploads takes it back.
+    // A stop while the question still waits for its uploads or a partner save takes it back.
     onStop: () => (pendingAbort.current ? pendingAbort.current.abort() : void stop()),
     label: composerLabel,
     placeholder: placeholder ?? composerLabel,
@@ -1342,7 +1362,8 @@ function ConversationView({
                     assistant={assistantIdentity}
                     isStreaming={streaming}
                     showResponseLabel={partner.showResponseLabel ?? false}
-                    liveAnswering={liveAnswering}
+                    // Only the answer being written shows who is answering.
+                    liveAnswering={streaming ? liveAnswering : null}
                     knowledge={partner.knowledge}
                     durations={timings.durations(message.id)}
                     activityExpanded={activity?.messageId === message.id}

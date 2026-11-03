@@ -2,7 +2,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
 import { ScrollableArea } from "@astryxdesign/core/ScrollableArea";
 import { Heading } from "@astryxdesign/core/Heading";
-import { useAnnounce } from "@astryxdesign/core/hooks";
+import { useAnnounce, useMediaQuery } from "@astryxdesign/core/hooks";
 import { Text } from "@astryxdesign/core/Text";
 import { Timer } from "@astryxdesign/core/Timer";
 import { useQuery } from "@tanstack/react-query";
@@ -22,7 +22,6 @@ import { Banner } from "@astryxdesign/core/Banner";
 import { EneoApiError } from "@/lib/api/errors";
 import { formatBytes } from "@/lib/format";
 import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
-import { useMediaMatch } from "@/lib/hooks/use-media-match";
 import type { RecordingPartInfo, UploadEntry } from "../run-contract";
 import {
   liveSocketUrl,
@@ -301,7 +300,7 @@ export function RunRecorder({
   const locale = useLocale();
   const announce = useAnnounce();
   // A touch screen has no address bar icon to point at and no microphone to plug in.
-  const coarse = useMediaMatch("(pointer: coarse)");
+  const coarse = useMediaQuery("(pointer: coarse)");
   const [support] = useState(() => recordingSupport(browserEnvironment()));
   const [options] = useState(() =>
     selectRecordingOptions((type) =>

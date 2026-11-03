@@ -22,6 +22,7 @@ from eneo.files.image_processing import (
     extract_images_from_pdf,
 )
 from eneo.files.text import PdfExtractionLimits, TextExtractor, TextMimeTypes
+from eneo.main.bounded_executor import BoundedExecutor
 from eneo.main.config import get_settings
 from eneo.main.exceptions import FileTooLargeException
 from eneo.object_content.deployment_policy import (
@@ -42,6 +43,10 @@ def sanitize_filename(filename: str | None) -> str:
 
 
 _FILE_STREAM_CHUNK_BYTES = 256 * 1024
+# Photos decode one at a time per process, as they did on the event loop: a
+# decoding 12 MP photo holds about 80 MB, so photos uploaded together must not
+# all hold it at once.
+_IMAGE_DECODER = BoundedExecutor(1, "image-decode")
 
 
 @dataclass(frozen=True, slots=True)
@@ -248,7 +253,7 @@ class FileProtocol:
             if file_type is FileType.IMAGE:
                 # Decoding and resampling a photo takes about 0.1 s of CPU, which
                 # would stall every request and stream on this event loop.
-                processed = await asyncio.to_thread(
+                processed = await _IMAGE_DECODER.run(
                     lambda: downscale_image(
                         self.image_extractor.extract(
                             filepath,
@@ -256,7 +261,7 @@ class FileProtocol:
                             upload_file.filename,
                         ),
                         media_type,
-                    )
+                    ),
                 )
                 model_input = PendingFileContent(
                     variant=FileContentVariant.MODEL_INPUT,
