@@ -76,8 +76,10 @@ depend on anyone remembering them.
 - **Four eyes on every change.** Every pull request into `develop` needs an
   approval from a Core Maintainer other than its author. New commits reset the
   approval.
-- **Tested before and after merging.** Required checks run on the pull request,
-  again in the merge queue and once more on `develop`.
+- **Tested before and after merging.** Required checks run on the pull request
+  and, as the full suite, in the merge queue. Publishing `develop` reuses that
+  full run for the exact commit and still runs a fresh security scan and scans
+  the published images.
 - **Isolated CI for contributions.** Pull requests from forks cannot read
   secrets or publish anything.
 - **Controlled releases.** Only Core Maintainers can create release branches
