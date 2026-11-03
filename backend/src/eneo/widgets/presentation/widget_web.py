@@ -41,7 +41,6 @@ from eneo.widgets.domain.widget import (
 
 logger = get_logger(__name__)
 
-WIDGET_LOADER_DIR = Path("/app/widget-loader")
 _VERSION = re.compile(r"^\d+\.\d+\.\d+$")
 _CROSS_ORIGIN = {
     "Access-Control-Allow-Origin": "*",
@@ -58,6 +57,7 @@ class EmbedPolicy:
     frame_ancestors: str
     locale: Literal["sv", "en"]
     scheme: Literal["light", "dark", "system"]
+    state: Literal["active", "preview", "unavailable"]
 
 
 def embed_policy(
@@ -97,7 +97,17 @@ def embed_policy(
         selected = request.query_params.get("scheme")
     if selected in ("light", "dark"):
         scheme = "light" if selected == "light" else "dark"
-    return EmbedPolicy(ancestors, locale, scheme)
+    # Availability belongs to this document's policy snapshot. A permissively
+    # framed unavailable notice must not become a live chat if the widget is
+    # activated before the browser requests its public configuration.
+    state: Literal["active", "preview", "unavailable"] = (
+        "preview"
+        if preview
+        else "active"
+        if widget is not None and not failed
+        else "unavailable"
+    )
+    return EmbedPolicy(ancestors, locale, scheme, state)
 
 
 class LoaderManifest(BaseModel):
@@ -124,12 +134,13 @@ def _manifest(directory: Path) -> LoaderManifest | None:
 def _loader_asset(
     request: Request, version: str, asset: Literal["js", "css"]
 ) -> Response:
-    current = _manifest(WIDGET_LOADER_DIR / "dist")
-    directory = WIDGET_LOADER_DIR / "dist"
+    loader_dir = get_settings().widget_loader_dir
+    current = _manifest(loader_dir / "dist")
+    directory = loader_dir / "dist"
     if current is not None and version in (current.channel, current.version):
         manifest = current
     elif _VERSION.fullmatch(version):
-        directory = WIDGET_LOADER_DIR / "releases" / version
+        directory = loader_dir / "releases" / version
         archived = _manifest(directory)
         if archived is None or archived.version != version:
             return Response(
@@ -250,7 +261,7 @@ def _require_web_host(request: Request) -> None:
 
 
 def install_widget_web(
-    app: FastAPI, render_embed: Callable[[EmbedPolicy], HTMLResponse]
+    app: FastAPI, render_embed: Callable[[EmbedPolicy], HTMLResponse] | None = None
 ) -> None:
     router = APIRouter(
         include_in_schema=False, dependencies=[Depends(_require_web_host)]
@@ -264,6 +275,7 @@ def install_widget_web(
     async def embed_document(
         request: Request, public_id: str, container: PublicContainer
     ) -> Response:
+        assert render_embed is not None
         widget = None
         failed = False
         if request.query_params.get("preview") != "1":
@@ -285,7 +297,7 @@ def install_widget_web(
         reason=_PUBLIC_REASON,
     )
     async def loader_manifest() -> Response:
-        manifest = _manifest(WIDGET_LOADER_DIR / "dist")
+        manifest = _manifest(get_settings().widget_loader_dir / "dist")
         headers = {**_CROSS_ORIGIN, "Cache-Control": "no-store"}
         if manifest is None:
             return Response(status_code=503, headers={**headers, "Retry-After": "60"})
@@ -355,8 +367,9 @@ def install_widget_web(
             launcher_settings(widget, origin).model_dump(mode="json"), headers=headers
         )
 
-    for path in ("/embed/{public_id}", "/en/embed/{public_id}"):
-        router.add_api_route(path, embed_document, methods=["GET", "HEAD"])
+    if render_embed is not None:
+        for path in ("/embed/{public_id}", "/en/embed/{public_id}"):
+            router.add_api_route(path, embed_document, methods=["GET", "HEAD"])
     router.add_api_route(
         "/widget/manifest.json", loader_manifest, methods=["GET", "HEAD"]
     )

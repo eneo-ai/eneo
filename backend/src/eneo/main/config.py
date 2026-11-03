@@ -691,9 +691,12 @@ class Settings(BaseSettings):
     api_key_rate_limit_assistant_default: int = 1000
     api_key_rate_limit_app_default: int = 1000
     api_key_enforce_resource_permissions: bool = True
-    # Embeddable widgets: anonymous visitor access. Tokens are short-lived and
-    # re-minted silently; the grace window lets an expired token prove the
-    # visitor's identity for a re-mint without a new proof of work.
+    # Embeddable widgets: anonymous visitor access.
+    # The image supplies these assets; native Vite development points this
+    # explicitly at frontend/packages/widget-loader after building the package.
+    widget_loader_dir: Path = Path("/app/widget-loader")
+    # Tokens are short-lived and re-minted silently; the grace window lets an
+    # expired token prove the visitor's identity without a new proof of work.
     widget_visitor_token_ttl_seconds: int = Field(default=900, gt=0)
     widget_visitor_token_grace_seconds: int = Field(default=3600, ge=0)
     widget_preview_token_ttl_seconds: int = Field(default=3600, gt=0)

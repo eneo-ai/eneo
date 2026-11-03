@@ -58,7 +58,7 @@ gate.
 ### Vite dev server
 
 The browser talks only to `http://localhost:3101`. The dev server forwards
-`/api` (WebSockets too), `/version`, `/login/callback` and `/auth/callback` to
+`/api` (WebSockets too), `/widget`, `/version`, `/login/callback` and `/auth/callback` to
 the backend at `ENEO_BACKEND_URL` without changing the Host header, so the
 session cookie and the backend's same-origin checks work as in production. It
 refuses to start without `ENEO_BACKEND_URL` (set it in `.env.local`). It sends no
@@ -70,7 +70,15 @@ Run the backend in development mode with these in its `.env`:
 ENVIRONMENT=development          # session cookie eneo_web, without Secure, works on http
 BROWSER_SESSION_ENABLED=true
 PUBLIC_ORIGIN=http://localhost:3101
+WIDGET_LOADER_DIR=../frontend/packages/widget-loader
 ```
+
+Build the widget loader from `frontend` with
+`bun run --filter @eneo/widget-loader build`. The backend serves its public
+loader files, manifest and launcher settings in development even with
+`WEB_APP_ENABLED=false`, so the Vite preview and “Test in Eneo” need no built
+SPA on the backend. The development path above is relative to `backend`;
+the production image supplies `/app/widget-loader` by default.
 
 The backend refuses to start with the browser session in development mode
 unless `PUBLIC_ORIGIN` is a localhost origin. The SSO `redirect_uri` follows the

@@ -43,6 +43,47 @@ afterEach(() => {
 });
 
 describe("WidgetTemplatePage", () => {
+  it("reports an in-flight draft save before confirming that all changes are saved", async () => {
+    showPage(template());
+    await screen.findByRole("heading", { level: 1, name: "Kommunmallen" });
+    let finishSave: (saved: WidgetTemplate) => void = () => {};
+    api.PATCH.mockReturnValue(
+      new Promise<{ data: WidgetTemplate; response: Response }>((resolve) => {
+        finishSave = (data) => resolve({ data, response: new Response("{}") });
+      })
+    );
+
+    fireEvent.click(screen.getByRole("switch", { name: "Upplysning och sidfot" }));
+    await screen.findByText("Sparar…", {}, { timeout: 2000 });
+    expect(screen.queryByText("Alla ändringar sparade")).toBeNull();
+    await act(async () =>
+      finishSave(
+        template({
+          locked_groups: ["appearance", "language", "legal_texts"],
+          has_unpublished_changes: true
+        })
+      )
+    );
+    expect(await screen.findByText("Alla ändringar sparade")).toBeTruthy();
+  });
+
+  it("keeps a failed draft save visible in the header instead of claiming the changes were saved", async () => {
+    showPage(template());
+    await screen.findByRole("heading", { level: 1, name: "Kommunmallen" });
+    let refuseSave: () => void = () => {};
+    api.PATCH.mockReturnValue(
+      new Promise<never>((_resolve, reject) => {
+        refuseSave = () => reject(new Error("The connection was lost"));
+      })
+    );
+
+    fireEvent.click(screen.getByRole("switch", { name: "Upplysning och sidfot" }));
+    await screen.findByText("Sparar…", {}, { timeout: 2000 });
+    await act(async () => refuseSave());
+    expect(await screen.findByRole("link", { name: "Kunde inte spara ändringarna" })).toBeTruthy();
+    expect(screen.queryByText("Alla ändringar sparade")).toBeNull();
+  });
+
   it("a lock toggle only edits the draft and marks it unpublished", async () => {
     const { container } = showPage(template());
     await screen.findByRole("heading", { level: 1, name: "Kommunmallen" });

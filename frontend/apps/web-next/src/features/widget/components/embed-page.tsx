@@ -7,11 +7,19 @@ import { WidgetNotice } from "./widget-unavailable";
 
 type Scheme = "light" | "dark" | "auto";
 
+/** Availability and frame policy belong to the same server-issued document. */
+function unavailableDocument(): boolean {
+  return document.documentElement.dataset.eneoEmbedState === "unavailable";
+}
+
 /** Load visitor configuration directly from FastAPI, without browser-session cookies. */
 export async function loadEmbedConfig(
   publicId: string,
   signal?: AbortSignal
 ): Promise<WidgetPublicConfig | null> {
+  // A paused/unknown widget's freely framed notice cannot turn into an active
+  // chat after reactivation. Only a new document can receive its active CSP.
+  if (unavailableDocument()) return null;
   const timeout = AbortSignal.timeout(8000);
   const requestSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
   const client = createWidgetClient({
@@ -45,12 +53,13 @@ export function EmbedPage({
   preview: boolean;
 }) {
   const t = useTranslations();
+  const documentUnavailable = unavailableDocument();
   const previewToken = preview ? readPreviewToken(location.hash) : null;
   const [previewConfig, setPreviewConfig] = useState<WidgetPublicConfig | null>(null);
   const [fetchFailed, setFetchFailed] = useState(false);
 
   useEffect(() => {
-    if (!previewToken) return;
+    if (!previewToken || documentUnavailable) return;
     const controller = new AbortController();
     const client = createWidgetClient({
       baseUrl: location.origin,
@@ -73,8 +82,9 @@ export function EmbedPage({
         if (!controller.signal.aborted) setFetchFailed(true);
       });
     return () => controller.abort();
-  }, [previewToken, publicId]);
+  }, [previewToken, publicId, documentUnavailable]);
 
+  if (documentUnavailable) return <WidgetNotice hostOrigin={hostOrigin} />;
   const config = loaded ?? previewConfig;
   if (config)
     return (

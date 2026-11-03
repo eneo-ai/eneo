@@ -34,6 +34,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   delete document.documentElement.dataset.eneoEmbedScheme;
+  delete document.documentElement.dataset.eneoEmbedState;
   window.history.replaceState({}, "", "/");
 });
 
@@ -53,13 +54,13 @@ async function open(path: string, response: Response) {
     </BootContext>
   );
   await act(() => router.load());
-  return fetcher;
+  return { fetcher, router };
 }
 
 it.each(["/embed", "/en/embed"])(
   "loads %s directly without a browser-session request or cookie credentials",
   async (prefix) => {
-    const fetcher = await open(
+    const { fetcher } = await open(
       `${prefix}/${publicId}?origin=https%3A%2F%2Fkommun.se&scheme=light`,
       Response.json({ name: "Besökschatten", texts: { title: "Besökschatten" } })
     );
@@ -75,7 +76,8 @@ it.each(["/embed", "/en/embed"])(
 );
 
 it("uses a preview token only from the fragment and never makes an anonymous config request first", async () => {
-  const fetcher = await open(
+  document.documentElement.dataset.eneoEmbedState = "preview";
+  const { fetcher } = await open(
     `/embed/${publicId}?preview=1#preview=draft-secret`,
     Response.json({ name: "Utkast", texts: { title: "Utkast" } })
   );
@@ -88,6 +90,26 @@ it("uses a preview token only from the fragment and never makes an anonymous con
   expect(request.credentials).toBe("omit");
   expect(request.url).not.toContain("draft-secret");
 });
+
+it.each(["/embed", "/en/embed"])(
+  "keeps %s unavailable for the document lifetime even after the widget is activated",
+  async (prefix) => {
+    document.documentElement.dataset.eneoEmbedState = "unavailable";
+    // The API could now succeed after activation; the existing document still
+    // has the freely framed unavailable policy and must never load that chat.
+    const { fetcher, router } = await open(
+      `${prefix}/${publicId}?origin=https%3A%2F%2Funapproved.example`,
+      Response.json({ name: "Activated while loading", texts: { title: "Active chat" } })
+    );
+    expect(
+      await screen.findByRole("heading", { name: messages.widget_not_available_title })
+    ).toBeTruthy();
+    expect(fetcher).not.toHaveBeenCalled();
+    await act(() => router.invalidate());
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(screen.queryByRole("heading", { name: "Activated while loading" })).toBeNull();
+  }
+);
 
 it("shows a framed unavailable notice for a paused or unknown widget", async () => {
   await open(

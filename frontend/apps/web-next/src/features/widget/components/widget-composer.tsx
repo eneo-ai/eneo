@@ -1,6 +1,15 @@
 import { SendHorizontal } from "lucide-react";
+import { isImeKeyEvent } from "@astryxdesign/core/utils";
 import { useTranslations } from "use-intl";
-import { forwardRef, useCallback, useImperativeHandle, useRef, type KeyboardEvent } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type KeyboardEvent
+} from "react";
+import { useMediaMatch } from "@/lib/hooks/use-media-match";
 
 export type WidgetComposerHandle = {
   focus: () => void;
@@ -32,6 +41,8 @@ export const WidgetComposer = forwardRef<
 ) {
   const t = useTranslations();
   const textarea = useRef<HTMLTextAreaElement>(null);
+  const coarse = useMediaMatch("(pointer: coarse)");
+  const [composing, setComposing] = useState(false);
 
   const resize = useCallback(() => {
     const element = textarea.current;
@@ -71,7 +82,10 @@ export const WidgetComposer = forwardRef<
       onEscape();
       return;
     }
-    if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+    if (event.key === "Enter" && (event.metaKey || event.ctrlKey || (!coarse && !event.shiftKey))) {
+      // Match the main chat: Return adds a line on touch; an IME's word
+      // confirmation (including Safari's keyCode 229) never sends a question.
+      if (composing || isImeKeyEvent(event.nativeEvent)) return;
       event.preventDefault();
       submit();
     }
@@ -103,6 +117,8 @@ export const WidgetComposer = forwardRef<
             resize();
           }}
           onKeyDown={onKeyDown}
+          onCompositionStart={() => setComposing(true)}
+          onCompositionEnd={() => setComposing(false)}
         />
         <button
           type="submit"

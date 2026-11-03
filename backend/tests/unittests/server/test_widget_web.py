@@ -34,6 +34,21 @@ def _widget() -> Widget:
     )
 
 
+def _widget_lookup(app: FastAPI, widget: Widget | None) -> AsyncMock:
+    get_active = AsyncMock(return_value=widget)
+    if widget is None:
+        get_active.side_effect = WidgetNotActiveError()
+    container = SimpleNamespace(
+        widget_authentication_service=lambda: SimpleNamespace(
+            get_active_widget=get_active
+        )
+    )
+    app.dependency_overrides[get_args(PublicContainer)[1].dependency] = (
+        lambda: container
+    )
+    return get_active
+
+
 def _client(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -51,18 +66,7 @@ def _client(
         app.add_middleware(
             CORSMiddleware, **{**CORS_OPTIONS, "callback": cors_callback}
         )
-    get_active = AsyncMock(return_value=widget)
-    if widget is None:
-        get_active.side_effect = WidgetNotActiveError()
-    container = SimpleNamespace(
-        widget_authentication_service=lambda: SimpleNamespace(
-            get_active_widget=get_active
-        )
-    )
-    app.dependency_overrides[get_args(PublicContainer)[1].dependency] = (
-        lambda: container
-    )
-    return TestClient(app), get_active
+    return TestClient(app), _widget_lookup(app, widget)
 
 
 @pytest.mark.parametrize("path", ["/embed/wgt_test", "/en/embed/wgt_test"])
@@ -91,6 +95,7 @@ def test_embed_document_has_widget_policy_without_preference_cookies(
     assert "connect-src 'self'" in csp
     assert "img-src 'self' blob: data:" in csp
     assert 'data-eneo-embed-scheme="dark"' in response.text
+    assert 'data-eneo-embed-state="active"' in response.text
     assert 'lang="en"' in response.text
     assert "__ENEO_CSP_NONCE__" not in response.text
     assert response.headers["cache-control"] == "no-store"
@@ -105,6 +110,7 @@ def test_preview_does_not_load_draft_configuration_on_the_server(monkeypatch, tm
     assert "frame-ancestors 'self'" in response.headers["content-security-policy"]
     assert 'lang="en"' in response.text
     assert 'data-eneo-embed-scheme="dark"' in response.text
+    assert 'data-eneo-embed-state="preview"' in response.text
     assert "set-cookie" not in response.headers
 
 
@@ -116,7 +122,21 @@ def test_unavailable_notice_may_be_framed_and_does_not_migrate_locale(
     assert response.status_code == 200
     assert "frame-ancestors *" in response.headers["content-security-policy"]
     assert 'lang="sv"' in response.text
+    assert 'data-eneo-embed-state="unavailable"' in response.text
     assert "set-cookie" not in response.headers
+
+
+def test_unavailable_document_cannot_promote_itself_when_the_widget_activates(
+    monkeypatch, tmp_path
+):
+    client, get_active = _client(monkeypatch, tmp_path, _widget())
+    get_active.side_effect = [WidgetNotActiveError(), _widget()]
+
+    response = client.get("/embed/wgt_test")
+
+    get_active.assert_awaited_once_with("wgt_test")
+    assert "frame-ancestors *" in response.headers["content-security-policy"]
+    assert 'data-eneo-embed-state="unavailable"' in response.text
 
 
 def test_embed_policy_drops_invalid_stored_origins():
@@ -172,7 +192,7 @@ def test_loader_bytes_cache_and_sri_survive_the_vite_migration(
 ):
     manifest = _write_bundle(tmp_path / "dist", "1.0.0")
     archived = _write_bundle(tmp_path / "releases" / "0.9.0", "0.9.0", css=False)
-    monkeypatch.setattr(widget_web, "WIDGET_LOADER_DIR", tmp_path)
+    set_settings(get_settings().model_copy(update={"widget_loader_dir": tmp_path}))
     app = FastAPI()
     widget_web.install_widget_web(app, lambda policy: HTMLResponse(""))
     client = TestClient(app)
@@ -202,7 +222,7 @@ def test_loader_bytes_cache_and_sri_survive_the_vite_migration(
 
 
 def test_loader_refuses_changed_bytes_and_reports_missing_build(monkeypatch, tmp_path):
-    monkeypatch.setattr(widget_web, "WIDGET_LOADER_DIR", tmp_path)
+    set_settings(get_settings().model_copy(update={"widget_loader_dir": tmp_path}))
     app = FastAPI()
     widget_web.install_widget_web(app, lambda policy: HTMLResponse(""))
     client = TestClient(app)
@@ -236,7 +256,7 @@ def test_launcher_settings_preserve_pinned_colors_persona_and_public_cache(
 
 def test_archived_loader_is_available_without_a_current_build(monkeypatch, tmp_path):
     _write_bundle(tmp_path / "releases" / "0.9.0", "0.9.0", css=False)
-    monkeypatch.setattr(widget_web, "WIDGET_LOADER_DIR", tmp_path)
+    set_settings(get_settings().model_copy(update={"widget_loader_dir": tmp_path}))
     app = FastAPI()
     widget_web.install_widget_web(app, lambda policy: HTMLResponse(""))
     client = TestClient(app)
@@ -282,6 +302,7 @@ def test_failed_policy_lookup_never_grants_cross_origin_framing(
     assert response.status_code == 200
     assert "frame-ancestors 'self'" in response.headers["content-security-policy"]
     assert "frame-ancestors *" not in response.headers["content-security-policy"]
+    assert 'data-eneo-embed-state="unavailable"' in response.text
     assert response.headers["cache-control"] == "no-store"
 
 
@@ -298,7 +319,7 @@ def test_public_widget_cors_bypasses_the_tenant_allowlist_only_for_reads(
     monkeypatch, tmp_path, path
 ):
     _write_bundle(tmp_path / "dist", "1.0.0")
-    monkeypatch.setattr(widget_web, "WIDGET_LOADER_DIR", tmp_path)
+    set_settings(get_settings().model_copy(update={"widget_loader_dir": tmp_path}))
     callback = AsyncMock(return_value=False)
     client, _ = _client(monkeypatch, tmp_path, _widget(), cors_callback=callback)
     response = client.get(
@@ -398,3 +419,60 @@ def test_beta_launcher_avatar_stays_on_the_loader_host_behind_tls(
         == f"https://beta.example/api/v1/icons/{avatar}/"
     )
     assert get_settings().public_origin == "https://main.example"
+
+
+def test_native_vite_development_serves_loader_without_a_built_spa(
+    monkeypatch, tmp_path
+):
+    loader_dir = tmp_path / "widget-loader"
+    _write_bundle(loader_dir / "dist", "1.0.0")
+    app = _app(
+        monkeypatch,
+        tmp_path / "missing-web-dist",
+        environment="development",
+        web_app_enabled=False,
+        widget_loader_dir=loader_dir,
+        public_origin="http://localhost:8123",
+    )
+    get_active = _widget_lookup(app, _widget())
+    callback = AsyncMock(return_value=False)
+    app.add_middleware(CORSMiddleware, **{**CORS_OPTIONS, "callback": callback})
+    client = TestClient(app)
+
+    for path in (
+        "/widget/v1/eneo.js",
+        "/widget/1.0.0/eneo.css",
+        "/widget/manifest.json",
+        "/widget/settings/wgt_test",
+    ):
+        response = client.get(path, headers={"Origin": "https://host.example"})
+        assert response.status_code == 200
+        assert response.headers["access-control-allow-origin"] == "*"
+        assert "access-control-allow-credentials" not in response.headers
+    get_active.assert_awaited_once_with("wgt_test")
+    callback.assert_not_awaited()
+    # Vite owns development documents; FastAPI did not register or read a SPA.
+    assert client.get("/embed/wgt_test").status_code == 404
+    assert not (tmp_path / "missing-web-dist").exists()
+
+
+def test_production_without_the_spa_does_not_install_widget_web_routes(
+    monkeypatch, tmp_path
+):
+    app = _app(
+        monkeypatch,
+        tmp_path / "missing-web-dist",
+        environment="production",
+        web_app_enabled=False,
+    )
+    get_active = _widget_lookup(app, _widget())
+    client = TestClient(app)
+
+    for path in (
+        "/widget/v1/eneo.js",
+        "/widget/v1/eneo.css",
+        "/widget/manifest.json",
+        "/widget/settings/wgt_test",
+    ):
+        assert client.get(path).status_code == 404
+    get_active.assert_not_awaited()

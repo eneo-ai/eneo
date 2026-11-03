@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
 import altcha
+import anyio
 import pytest
 import sqlalchemy as sa
 
@@ -18,8 +19,10 @@ from eneo.database.database import sessionmanager
 from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.tenant_table import Tenants
+from eneo.main import stream_lifecycle
 from eneo.main.exceptions import BadRequestException
 from eneo.questions.question import UseTools
+from eneo.widgets.application.widget_limits import BudgetReservation, WidgetBudget
 from eneo.widgets.application.widget_retention import purge_expired_widget_sessions
 
 
@@ -585,6 +588,54 @@ async def test_zero_retention_answer_leaves_no_session_behind(
             resp = await client.post(url, json=body, headers=_auth(token))
         assert resp.status_code == 404, resp.text
         assert resp.json()["detail"]["code"] == "session_not_owned"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_zero_retention_rolls_back_when_finalization_deadline_expires(
+    client, admin_token, active_widget, fake_assistant_ask, monkeypatch
+):
+    """A timed-out cleanup must not commit zero-retention content.
+
+    The answer's budget is settled in an independent transaction. Its timeout
+    also cancels the retention DELETE in the real request transaction. Pin the
+    SQLAlchemy rollback behavior explicitly: committing that canceled database
+    connection fails, and a fresh transaction sees no conversation or question.
+    """
+    widget_id = active_widget["id"]
+    public_id = active_widget["public_id"]
+    await _patch_widget(
+        client,
+        admin_token,
+        widget_id,
+        privacy={"retention_days": 0, "store_feedback_text": False},
+    )
+    token = await _mint(client, public_id)
+    settlement_started = asyncio.Event()
+
+    async def stalled_settle(
+        _self: WidgetBudget,
+        _reservation: BudgetReservation,
+        _input_tokens: int,
+        _output_tokens: int,
+    ) -> None:
+        settlement_started.set()
+        await anyio.sleep_forever()
+
+    monkeypatch.setattr(WidgetBudget, "settle", stalled_settle)
+    # Leave ample time for the real usage query to reach settlement, but bound
+    # the intentionally stalled cleanup independently of the suite's timeout.
+    monkeypatch.setattr(stream_lifecycle, "FINALIZATION_BUDGET_SECONDS", 1.0)
+
+    with pytest.raises(sa.exc.PendingRollbackError, match="invalid transaction"):
+        await client.post(
+            f"/api/v1/widgets/{public_id}/ask/",
+            json={"question": "Den här uppgiften får inte lagras."},
+            headers=_auth(token),
+        )
+
+    assert settlement_started.is_set()
+    assert await _stored_conversations(widget_id) == (0, 0)
 
 
 @pytest.mark.integration

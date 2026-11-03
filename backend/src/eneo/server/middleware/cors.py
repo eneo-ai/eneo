@@ -68,7 +68,7 @@ def _has_public_widget_web_cors(scope: Scope) -> bool:
     return (
         scope["method"] in ("GET", "HEAD")
         and bool(_PUBLIC_WIDGET_WEB_PATH.fullmatch(scope["path"]))
-        and get_settings().web_app_enabled
+        and (get_settings().web_app_enabled or get_settings().is_development)
     )
 
 

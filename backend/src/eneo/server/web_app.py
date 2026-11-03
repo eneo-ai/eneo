@@ -187,6 +187,10 @@ def _alias_healthz(app: FastAPI) -> None:
 def install_web_app(app: FastAPI) -> None:
     settings = get_settings()
     if not settings.web_app_enabled:
+        if settings.is_development:
+            # Vite serves the development document; FastAPI still owns the
+            # public loader assets and settings proxied from that origin.
+            install_widget_web(app)
         return
 
     # Read once, at startup: a missing or wrong build fails loud here.
@@ -299,7 +303,9 @@ def install_web_app(app: FastAPI) -> None:
         values = {_NONCE: nonce, _LANG: policy.locale}
         html = _PLACEHOLDER.sub(lambda match: values[match.group(0)], template)
         html = html.replace(
-            "<html ", f'<html data-eneo-embed-scheme="{policy.scheme}" ', 1
+            "<html ",
+            f'<html data-eneo-embed-scheme="{policy.scheme}" data-eneo-embed-state="{policy.state}" ',
+            1,
         )
         overrides = {
             "frame-ancestors": policy.frame_ancestors,

@@ -185,7 +185,7 @@ export function WidgetPreview({ widget }: { widget: Widget }) {
             src={src}
             title={t("widget_admin_preview_frame_title")}
             className="border-ax-border bg-ax-surface rounded-lg border shadow"
-            style={{ width: mobile ? "375px" : "100%", height: "600px" }}
+            style={{ width: mobile ? "375px" : "100%", maxWidth: "100%", height: "600px" }}
           />
         ) : (
           <p className="text-ax-text-secondary py-10 text-sm">{t("widget_preview_loading")}</p>

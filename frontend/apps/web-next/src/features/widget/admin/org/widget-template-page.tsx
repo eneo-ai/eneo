@@ -42,7 +42,11 @@ export function WidgetTemplatePage({ templateId }: { templateId: string }) {
       </p>
     );
   }
-  return <TemplateEditor key={template.data.id} template={template.data} />;
+  return (
+    <SaveStatusProvider>
+      <TemplateEditor key={template.data.id} template={template.data} />
+    </SaveStatusProvider>
+  );
 }
 
 /**
@@ -194,7 +198,7 @@ function TemplateEditor({ template: initial }: { template: WidgetTemplate }) {
   ];
 
   return (
-    <SaveStatusProvider>
+    <>
       <div className="flex w-full flex-col gap-6">
         <PageHeader
           title={template.name}
@@ -501,6 +505,6 @@ function TemplateEditor({ template: initial }: { template: WidgetTemplate }) {
           }
         />
       </Dialog>
-    </SaveStatusProvider>
+    </>
   );
 }
