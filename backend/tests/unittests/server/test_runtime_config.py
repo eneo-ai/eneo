@@ -247,7 +247,9 @@ def test_startup_log_runs_only_for_the_browser_platform(
 ):
     # The web app flag also serves a build; this test is about the log only.
     monkeypatch.setattr(browser_platform, "install_web_app", lambda app: None)
-    set_settings(_settings(test_settings, **flags))
+    set_settings(
+        _settings(test_settings, public_origin="http://localhost:3101", **flags)
+    )
 
     get_application()
 

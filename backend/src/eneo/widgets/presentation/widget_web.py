@@ -31,6 +31,7 @@ from eneo.main.config import LOOPBACK_HOSTS, get_settings, validate_content_base
 from eneo.main.logging import get_logger
 from eneo.mcp_apps.presentation.mcp_apps_router import on_content_origin
 from eneo.server.dependencies.widget_auth import PublicContainer
+from eneo.server.protocol import responses
 from eneo.widgets.domain.exceptions import WidgetNotActiveError
 from eneo.widgets.domain.widget import (
     Widget,
@@ -380,6 +381,9 @@ def install_widget_web(
         "/widget/{version}/eneo.css", loader_stylesheet, methods=["GET", "HEAD"]
     )
     router.add_api_route(
-        "/widget/settings/{public_id}", settings, methods=["GET", "HEAD"]
+        "/widget/settings/{public_id}",
+        settings,
+        methods=["GET", "HEAD"],
+        responses=responses.get_responses([400]),
     )
     app.include_router(router)

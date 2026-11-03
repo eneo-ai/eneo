@@ -592,15 +592,14 @@ async def test_zero_retention_answer_leaves_no_session_behind(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_zero_retention_rolls_back_when_finalization_deadline_expires(
+async def test_zero_retention_leaves_no_content_when_finalization_times_out(
     client, admin_token, active_widget, fake_assistant_ask, monkeypatch
 ):
     """A timed-out cleanup must not commit zero-retention content.
 
-    The answer's budget is settled in an independent transaction. Its timeout
-    also cancels the retention DELETE in the real request transaction. Pin the
-    SQLAlchemy rollback behavior explicitly: committing that canceled database
-    connection fails, and a fresh transaction sees no conversation or question.
+    The answer's budget is settled in an independent transaction. Even when
+    settlement exhausts the shared cleanup deadline, a fresh transaction must
+    see no conversation or question from this zero-retention request.
     """
     widget_id = active_widget["id"]
     public_id = active_widget["public_id"]
@@ -627,13 +626,14 @@ async def test_zero_retention_rolls_back_when_finalization_deadline_expires(
     # the intentionally stalled cleanup independently of the suite's timeout.
     monkeypatch.setattr(stream_lifecycle, "FINALIZATION_BUDGET_SECONDS", 1.0)
 
-    with pytest.raises(sa.exc.PendingRollbackError, match="invalid transaction"):
-        await client.post(
+    async with asyncio.timeout(10):
+        response = await client.post(
             f"/api/v1/widgets/{public_id}/ask/",
             json={"question": "Den här uppgiften får inte lagras."},
             headers=_auth(token),
         )
 
+    assert response.status_code == 200, response.text
     assert settlement_started.is_set()
     assert await _stored_conversations(widget_id) == (0, 0)
 
