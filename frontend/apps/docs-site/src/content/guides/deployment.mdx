@@ -19,6 +19,7 @@ import { Callout, Steps, Tabs } from "nextra/components";
 | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | Install a new production instance   | [Quick start](#quick-start)                                                                                                         |
 | Upgrade an existing instance        | [Updating Eneo](#updating-eneo)                                                                                                     |
+| Switch or roll back the web app     | [Main host and UI rollback](#main-host-and-ui-rollback)                                                                              |
 | Choose PostgreSQL or object storage | [Choose Content Storage](/guides/object-content-storage)                                                                            |
 | Configure OIDC or SSO               | [Single-Tenant OIDC](/guides/oidc-federation/single-tenant) or [Multi-Tenant OIDC Federation](/guides/oidc-federation/multi-tenant) |
 | Configure model providers           | [AI Provider Configuration](/guides/ai-providers)                                                                                   |
@@ -38,16 +39,10 @@ Eneo uses a small service stack. Durable content defaults to bounded
 PostgreSQL-inline bytes; an optional private object-store byte plane can be
 enabled when needed.
 
-<div className="bg-white dark:bg-white p-4 rounded-lg border border-gray-200 dark:border-gray-700 my-8">
-
-![Eneo System Architecture showing Client Layer, Reverse Proxy (Traefik), Frontend (SvelteKit), Backend API (FastAPI), Database (PostgreSQL with pgvector), Redis Cache/Queue, Worker (ARQ), and AI Providers](/diagrams/eneo-architecture.svg)
-
-</div>
-
 | Service            | Technology               | Port         | Role                                                   |
 | ------------------ | ------------------------ | ------------ | ------------------------------------------------------ |
-| **Frontend**       | SvelteKit                | 3000         | Web interface, SSR                                     |
-| **Backend**        | FastAPI (Python)         | 8000         | API server, authentication                             |
+| **Frontend**       | SvelteKit                | 3000         | Retained web interface for UI rollback                  |
+| **Backend**        | FastAPI + React/Vite     | 8000         | Main web app, API and authentication                    |
 | **Worker**         | ARQ                      | -            | Background processing, document indexing               |
 | **Database**       | PostgreSQL 16 + pgvector | 5432         | Data storage, vector search                            |
 | **Redis**          | Redis 7                  | 6379         | Cache, task queue                                      |
@@ -167,7 +162,7 @@ Edit `env_backend.env`:
 - `URL_SIGNING_KEY` - paste the generated value
 - `PUBLIC_ORIGIN` - your external URL (e.g., `https://eneo.example.com`)
 
-Edit `env_frontend.env`:
+Keep `env_frontend.env` configured for the retained Svelte rollback service:
 
 - `JWT_SECRET` - listed for parity with the backend; the SvelteKit app does
   not read it
@@ -186,7 +181,7 @@ Edit `env_frontend.env`:
 
 Edit `docker-compose.yml`:
 
-- Replace `your-domain.com` with your actual domain (4 locations)
+- Replace every `your-domain.com` with your actual domain
 - Replace `your-email@domain.com` with your email for Let's Encrypt
 
 The default `.env` needs no object-store values. Eneo uses bounded
@@ -213,6 +208,9 @@ docker compose logs -f
 ### Verify and login
 
 Navigate to `https://your-domain.com`
+
+The reference stack serves the React app from the backend on this host. Svelte
+remains in the bundle for [UI rollback](#main-host-and-ui-rollback).
 
 <Callout type="warning">
   **Default credentials:** `user@example.com` / `ChangeMePassword1!`
@@ -456,10 +454,11 @@ value and a comment.
 
   </Tabs.Tab>
   <Tabs.Tab>
-    ### Frontend Environment Variables
+    ### Svelte rollback environment variables
 
     <Callout type="warning">
-      **Important:** Eneo frontend uses **SvelteKit**, NOT Next.js. Use `ENEO_*` variables, not `NEXT_PUBLIC_*`.
+      These variables configure the retained Svelte service. The main React app
+      reads its [runtime settings from the backend](#backend-image-and-runtime-settings).
     </Callout>
 
     **Required:**
@@ -478,9 +477,8 @@ value and a comment.
     `OIDC_*`/federation keys so the two files can be kept in sync; the web app
     itself needs only `PUBLIC_ORIGIN` for the login flow.
 
-    **Optional:** the web app reads the UI flags `SHOW_WEB_SEARCH` and
-    `SHOW_HELP_CENTER`, plus `HELP_CENTER_URL` and
-    `REQUEST_INTEGRATION_FORM_URL`. The remaining commented lines in
+    **Optional:** the web app reads the UI flag `SHOW_HELP_CENTER`, plus
+    `HELP_CENTER_URL` and `REQUEST_INTEGRATION_FORM_URL`. The remaining commented lines in
     `env_frontend.template` (`FEEDBACK_FORM_URL`, `SUPPORT_EMAIL`,
     `SALES_EMAIL`) and `LOGLEVEL` are not read by the current web app.
 
@@ -668,14 +666,18 @@ Any reverse proxy (Traefik, nginx, HAProxy, Caddy) must meet these requirements:
 
 | Path            | Target               | Description                                                                          |
 | --------------- | -------------------- | ------------------------------------------------------------------------------------ |
-| `/*`            | Frontend (port 3000) | All requests except the backend paths below                                          |
+| `/*`            | Backend (port 8000)  | React pages, assets and authentication callbacks; exclude `/internal-mcp` and its subpaths |
 | `/api/*`        | Backend (port 8000)  | API endpoints (`/api/v1/...`) and health probes                                      |
 | `/scim/*`       | Backend (port 8000)  | SCIM 2.0 provisioning (mounted at `/scim/v2`; see [SCIM](/guides/scim-provisioning)) |
-| `/docs`         | Backend (port 8000)  | OpenAPI documentation                                                                |
+| `/docs`, `/redoc` | Backend (port 8000) | Return 404 with browser sessions enabled; use `/openapi.json`                         |
 | `/openapi.json` | Backend (port 8000)  | OpenAPI spec                                                                         |
 | `/version`      | Backend (port 8000)  | Version endpoint                                                                     |
 
-These are the exact prefixes the shipped Traefik labels route to the backend.
+The reference Traefik configuration gives API routes priority 10 and the main
+web app priority 5. Svelte stays at priority 1, or 7 for
+[UI rollback](#main-host-and-ui-rollback). Both broad backend app routes exclude
+`/internal-mcp` and its subpaths; do not expose the internal tool endpoint through
+another public router.
 
 **Headers:**
 
@@ -683,18 +685,32 @@ These are the exact prefixes the shipped Traefik labels route to the backend.
 - `X-Forwarded-For` - client IP address
 - `Host` - original host header
 
+Behind TLS termination the backend sees browser requests as `http`. A request
+whose `Origin` is `https://` on the same `Host` still passes CORS without an
+`allowed_origins` entry; `X-Forwarded-Host` is never compared. Requests that
+carry an API key keep their key and tenant origin policies. Existing
+`allowed_origins` entries for the app's own host can stay.
+
+A page on `localhost`, `127.0.0.1` or `[::1]` no longer passes CORS by default:
+only with `ENVIRONMENT=development`. A deployment that serves the web app to
+browsers from a loopback address on another port than the backend registers
+that origin in `allowed_origins`.
+
 **Requirements:**
 
 - WebSocket support (for real-time features)
 - TLS termination with valid certificate
+- No response compression on backend routes (for Traefik: no `compress`
+  middleware). The backend gzips JSON, HTML, JavaScript, CSS and SVG itself and
+  leaves downloads, streams and Range responses untouched; compressing again at
+  the proxy would undo that.
+- Preserve the backend's response headers. It supplies HSTS once for pages and
+  API responses; do not add another `Strict-Transport-Security` header in Traefik
+  or another reverse proxy.
 
 ### Using nginx Instead of Traefik
 
 ```nginx
-upstream frontend {
-    server frontend:3000;
-}
-
 upstream backend {
     server backend:8000;
 }
@@ -742,9 +758,17 @@ server {
         proxy_pass http://backend;
     }
 
-    # Everything else to frontend
+    location = /internal-mcp {
+        return 404;
+    }
+
+    location ^~ /internal-mcp/ {
+        return 404;
+    }
+
+    # React pages, assets and authentication callbacks
     location / {
-        proxy_pass http://frontend;
+        proxy_pass http://backend;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -1337,50 +1361,124 @@ backend and every worker.
 - [Object Content Storage](/guides/object-content-storage) - Configure SeaweedFS, MinIO, backups, and readiness
 - [Release SBOMs and attestations](/docs/release-sboms) - Verify shipped image digests and provenance
 
-## Run the Next beta alongside the existing app
+## Main host and UI rollback
 
-The existing Svelte frontend remains `ghcr.io/eneo-ai/eneo-frontend`. The optional
-Next frontend uses `ghcr.io/eneo-ai/eneo-web-next`, published and pinned in the
-same release bundle (`release.env` sets `ENEO_WEB_NEXT_IMAGE`). Deploy both
-against **one backend** from one bundle. They share accounts, permissions,
-conversations, assistants, files, workers and database changes. Beta writes are
-real writes to the same data; this is not a separate sandbox.
+The reference `docker-compose.yml` serves React pages and assets from the backend
+on the main HTTPS host. It sets `WEB_APP_ENABLED=true` and
+`BROWSER_SESSION_ENABLED=true` on that service. These Compose values override
+`env_backend.env`; the backend defaults remain `false` in other deployments.
+The web app signs in only through the browser session, so the backend refuses
+to start with `WEB_APP_ENABLED=true` and `BROWSER_SESSION_ENABLED=false`. To
+stop serving React pages, use the `FRONTEND_ROUTER_PRIORITY=7` rollback below;
+`WEB_APP_ENABLED=false` also needs it, since the backend then serves no pages.
+The Svelte service stays in the release bundle for UI rollback.
 
-Use a separate HTTPS hostname, for example `beta.example.com`, rather than a
-path prefix. Keep the existing app and backend `PUBLIC_ORIGIN` unchanged.
-The beta proxies API and streaming requests server-side to the shared backend.
-No additional database, Redis, worker or backend instance is needed.
+Before switching an existing installation, rehearse the upgrade on staging.
+Keep `PUBLIC_ORIGIN` and the existing main-host OIDC and integration callbacks
+registered. Retain a separate `MCP_APP_CONTENT_BASE_URL` origin for tool views.
+Unset `LEGACY_APP_URL` in `env_backend.env` when switching the main host to React:
+an old link to that host would no longer lead to Svelte. Restart the backend after
+changing its environment.
+
+Tell users they must sign in again when the new app takes over. React uses the
+backend's host-only `__Host-eneo_web` session; it does not import Svelte sessions.
+Returning to Svelte uses its own session and may require signing in again.
+
+The HTTPS routing order is:
+
+| Router | Priority |
+| --- | --- |
+| Main-host API | 10 |
+| Svelte with rollback enabled | 7 |
+| Main React app and optional beta | 5 |
+| Svelte normally | 1 |
+
+For the reference Traefik stack, return the main host to Svelte by setting this
+in the deployment `.env`, not `env_backend.env`:
+
+```dotenv
+FRONTEND_ROUTER_PRIORITY=7
+```
+
+Recreate only the frontend service, keeping the same environment files and any
+storage, module or beta overlays used by your normal deployment:
+
+```bash
+docker compose --env-file .env --env-file release.env \
+  -f docker-compose.yml up -d --no-deps frontend
+```
+
+The API stays on the backend. A retained beta overlay also has priority 5, so
+it cannot override rollback when `WEB_NEXT_HOST` equals the main host. A beta
+on a separate hostname continues to serve React. To restore React on the main
+host, remove the variable or set it to `1`, then run the same command.
+
+UI rollback changes routing only. It does not restore or downgrade the database,
+undo writes made in React, or roll back backend migrations. Both apps use the
+same accounts and data.
+
+Before rollout, verify the following on the installation's real HTTPS endpoint:
+
+```bash
+curl -sS -D - -o /dev/null https://your-domain.com/spaces/list
+curl -sS -D - -o /dev/null https://your-domain.com/api/v1/runtime-config
+curl -fsS https://your-domain.com/version
+```
+
+Require the backend's nonce-bearing CSP on the page, exactly one
+`Strict-Transport-Security: max-age=31536000` header on both page and API responses,
+and the selected release identity from `/version`. Check password and federated
+sign-in with the registered providers and the Secure `__Host-eneo_web` cookie.
+With rollback enabled, verify that main-host pages reach Svelte while API calls
+still reach the backend. Outside development, `/docs` and `/redoc` return 404;
+use `/openapi.json`. Local Compose checks do not establish these TLS or provider
+results.
+
+<span id="run-the-next-beta-alongside-the-existing-app" />
+
+## Run the React beta alongside the existing app
+
+The React/Vite app is built into `ghcr.io/eneo-ai/eneo-backend`.
+FastAPI serves its pages, assets, API and authentication callbacks. There is no
+separate `eneo-web-next` image, Node server or frontend session secret. The
+Svelte frontend remains `ghcr.io/eneo-ai/eneo-frontend` as the main host's rollback
+service. The optional overlay adds another hostname for the same React app.
+
+Deploy both against **one backend** from one release bundle. They share accounts,
+permissions, conversations, assistants, files, workers and database changes.
+Beta writes change the same data; this is not a separate sandbox.
+
+Choose a separate HTTPS hostname for a parallel beta. The names below are
+examples: each installation supplies its own hostname. Keep the main host's
+backend `PUBLIC_ORIGIN` unchanged. No additional database, Redis, worker or
+backend instance is needed.
 
 1. Back up the existing database and storage, and rehearse the upgrade on staging.
-   Apply backend migrations once with the backend release. The beta's
-   feedback/provider-status migrations follow the release's existing chain;
-   confirm `alembic heads` reports a single head.
-2. Copy `docs/deployment/env_web_next.template` to `env_web_next.env`. Generate a
-   separate `SESSION_SECRET` with `openssl rand -base64 48`, and set
-   `LEGACY_APP_URL=https://app.example.com` for the return link in the beta profile
-   menu. Protect the file as you protect other deployment secrets.
-3. Set `WEB_NEXT_HOST=beta.example.com` in the deployment `.env`. The image
-   comes from the release bundle's `ENEO_WEB_NEXT_IMAGE`, so the beta always
-   runs the build verified with the backend you deploy. Merge the optional
-   overlay into the reference stack:
+   Apply backend migrations once with the backend release; confirm
+   `alembic heads` reports a single head.
+2. Set `WEB_NEXT_HOST=beta.example.com` in the deployment `.env`. Leave
+   `LEGACY_APP_URL` unset when the main host serves React. Add the optional
+   overlay to your existing Compose invocation, preserving any storage or module
+   overlays:
 
    ```bash
    docker compose --env-file .env --env-file release.env \
-     -f docker-compose.yml -f docker-compose.web-next.yml --profile web-next up -d
+     -f docker-compose.yml -f docker-compose.web-next.yml up -d
    ```
 
-4. For backend-managed federation, add
+   The overlay routes the beta host to the backend with HTTPS. It excludes
+   `/internal-mcp` and its subpaths from this public router. Both browser flags
+   are already enabled by the base Compose file. The Svelte service and its
+   rollback control stay in place.
+3. For generic OIDC federation, add
    `https://beta.example.com/login/callback` to each applicable federation
    configuration's `additional_redirect_uris`, and register the same URI with the
-   identity provider. The existing canonical callback stays registered.
-   Use backend-managed authentication for the beta rollout. The separate
-   frontend-managed OIDC flow remains experimental: concurrent requests can reuse
-   a one-time rotating refresh token and invalidate the session. Refresh ownership
-   is not coordinated across requests or replicas. Before releasing that mode,
-   implement shared refresh coordination and validate the intended provider's
-   rotation behavior. Its development configuration uses the beta's `OIDC_*`
-   variables and the client callback `https://beta.example.com/auth/callback`.
-5. For SharePoint and Confluence, retain `OAUTH_CALLBACK_URL` for the existing UI
+   identity provider. Keep the existing canonical callback registered. Identity
+   providers, including MobilityGuard, use the backend's federation flow; the
+   React app has no separate OIDC client.
+   Single-tenant OIDC continues to use its configured `PUBLIC_ORIGIN` callback;
+   adding a beta hostname does not register an additional accepted callback.
+4. For SharePoint and Confluence, retain `OAUTH_CALLBACK_URL` for the existing UI
    and add this backend runtime variable (a JSON array):
 
    ```dotenv
@@ -1392,11 +1490,82 @@ No additional database, Redis, worker or backend instance is needed.
    callback to the initiating user's single-use OAuth state. Existing clients
    that omit a callback keep using the default. Restart the backend after changing
    its environment; finish or restart in-flight integration logins during upgrade.
+5. If MCP Apps are enabled, add the beta origin to `MCP_APP_HOST_ORIGINS` in
+   `env_backend.env`, retaining any existing entries:
 
+   ```dotenv
+   MCP_APP_HOST_ORIGINS=["https://beta.example.com"]
+   ```
+
+   Keep `MCP_APP_CONTENT_BASE_URL` on a separate origin from both frontends.
+   This permits the beta to frame tool views without weakening their isolation.
 6. Verify password/federated login, logout, streaming chat, files, tenant
-   permissions and both integration providers in each UI before inviting users.
-   Each UI has its own host-only session cookie. SSO can reuse the provider session,
-   but a local logout in one UI does not necessarily log out the other.
+   permissions, tool views and both integration providers in each UI before
+   inviting users. Separate hosts have separate host-only sessions. SSO can reuse
+   the provider session, but a local logout in one UI does not log out the other.
+
+## Backend image and runtime settings
+
+The backend image includes the Vite build at `/app/web-dist`. Node and Bun are
+used only during the build; the running image remains Python-only. The web build
+stage is included in the image's software bill of materials (SBOM).
+
+If you build the backend image yourself, run this from the repository root:
+
+```bash
+docker buildx build --build-context web=./frontend -t eneo-backend:local backend
+```
+
+The named `web` context is required. Published backend images already include
+the build. The image build arguments `APP_VERSION` and `APP_REVISION` identify
+both the bundled frontend and backend; the release workflow supplies them
+automatically. Custom builds can supply the same arguments. The account page
+shows the frontend's build version and, when supplied, commit alongside the
+backend's runtime version. Changing runtime environment variables does not
+change the identity embedded in the frontend assets.
+
+Configure the following in `env_backend.env`. The defaults below are backend
+defaults; the reference Compose file sets both enable flags to `true` itself.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `BROWSER_SESSION_ENABLED` | `false` | Accept the backend's browser session cookie. |
+| `BROWSER_SESSION_MAX_AGE` | `43200` | Minutes a browser session may last in total after sign-in, however often the user stays signed in. At least `JWT_EXPIRY_TIME`; set it equal to turn off staying signed in. At most 43200 (30 days). |
+| `WEB_APP_ENABLED` | `false` | Serve the web app from the backend. Requires `BROWSER_SESSION_ENABLED=true`. |
+| `SHOW_HELP_CENTER` | `false` | Show the configured help-center link. |
+| `HELP_CENTER_URL` | `https://www.eneo.ai/en/external-support-assistant` | Help-center destination. Set an empty value to hide the link even when `SHOW_HELP_CENTER` is enabled. |
+| `LEGACY_APP_URL` | unset | Optional Svelte return link. Leave unset once the main host serves React. |
+| `ACCESSIBILITY_STATEMENT_URL` | unset | Link to the installation's accessibility statement. |
+| `REQUEST_INTEGRATION_FORM_URL` | unset | Destination for integration requests. |
+
+The backend exposes public runtime settings at `GET /api/v1/runtime-config`.
+Blank links count as unset. Links must be absolute `http(s)` URLs: the backend
+drops any other value and, with either flag on, names it in a startup warning.
+The web app frames MCP views from the origin of `MCP_APP_CONTENT_BASE_URL`;
+there is no separate frontend `MCP_APP_CONTENT_ORIGIN` setting.
+
+Outside development, enabling either browser flag makes `/docs` and `/redoc`
+(including the SCIM documentation pages) return 404. Their third-party scripts
+must not run on the session's origin. `/openapi.json` remains available for API
+tools and documentation clients.
+
+For a local test installation that previously ran the Next beta, remove the
+`web-next` entry from `COMPOSE_PROFILES` and remove the unused `env_web_next.env`
+after moving its public links into `env_backend.env`. Recreate the stack with
+the overlay above and `up -d --remove-orphans` to remove the old standalone
+container. Keep other active profiles and overlays.
+
+With `ENVIRONMENT=development`, the backend refuses to start with
+`BROWSER_SESSION_ENABLED=true` unless `PUBLIC_ORIGIN` is a `localhost` or
+`127.0.0.1` URL, so the development cookie, which is not marked Secure, never
+reaches a public host. The browser session lasts `JWT_EXPIRY_TIME`, with no
+inactivity limit. Signing out ends the Eneo session on the server at once, so a
+copy of its cookie stops working; the identity provider's session stays. A
+password change still ends every session of the user. Two minutes before the
+session ends the web app offers to stay signed in, which renews the same session
+for `JWT_EXPIRY_TIME` again (audited as `session_extended`), never past
+`BROWSER_SESSION_MAX_AGE` after the original sign-in. To require a new sign-in
+every day, set `BROWSER_SESSION_MAX_AGE` to `1440`.
 
 ### Enable the invitation banner
 
@@ -1412,8 +1581,10 @@ are required. The invitation appears in the signed-in shell and opens a new tab,
 leaving the current app available. Setting the flag back to `false` hides it; the
 beta remains reachable by its URL. The banner is discoverability, not access control.
 
-To withdraw the beta, disable the invitation and stop the `web-next` service or
-remove its ingress. Keep the shared backend and database running. Do not downgrade
+To withdraw the beta, disable the invitation, remove the beta overlay from the
+Compose invocation and recreate the backend so its beta ingress labels are
+removed. The base configuration keeps the main React host and both browser flags
+enabled. Keep the shared backend and database running. Do not downgrade
 the shared database simply to turn off the beta; a backend rollback is a separate
 operation that requires a tested migration/restore plan and preserved user data.
 

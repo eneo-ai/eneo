@@ -1,5 +1,3 @@
-"use client";
-
 import { useEffect, useRef, useState } from "react";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
@@ -11,7 +9,7 @@ const DEBOUNCE_MS = 400;
 
 /**
  * Debounced token preflight for the context bar. Stale responses are
- * discarded via a generation counter (partner/session switches mid-flight).
+ * aborted on key changes and discarded if they arrive after cancellation.
  */
 export function usePreflight(request: {
   question: string;
@@ -19,6 +17,8 @@ export function usePreflight(request: {
   sessionId?: string | null;
   assistantId?: string | null;
   groupChatId?: string | null;
+  /** Client-side key for the partner's saved context configuration; not sent. */
+  revision?: string | null;
   settings?: Schema<"ConversationSettings">;
   settingsRevision?: number;
   disabled?: boolean;
@@ -28,26 +28,32 @@ export function usePreflight(request: {
 
   const { question, sessionId, assistantId, groupChatId, settings, settingsRevision, disabled } =
     request;
+  const revision = request.revision ?? null;
   const settingsKey = JSON.stringify(settings);
   const fileKey = request.fileIds.join(",");
   // An estimate stays valid while the same conversation context is typed
   // into; a model, revision or partner change invalidates it at once.
   const contextKey = JSON.stringify([
-    sessionId,
-    assistantId,
-    groupChatId,
+    sessionId ?? null,
+    assistantId ?? null,
+    groupChatId ?? null,
+    revision,
     settingsKey,
     settingsRevision
   ]);
+  const shouldRequest =
+    !disabled && Boolean(question || fileKey || (assistantId && !sessionId && !groupChatId));
 
   useEffect(() => {
     const current = ++generation.current;
-    if (disabled || (!question && !fileKey)) return;
+    if (!shouldRequest) return;
+    const controller = new AbortController();
 
     const timer = setTimeout(async () => {
       try {
         const response = await unwrap(
           browserApi.POST("/api/v1/conversations/preflight", {
+            signal: controller.signal,
             body: {
               question,
               file_ids: fileKey ? fileKey.split(",") : [],
@@ -59,17 +65,19 @@ export function usePreflight(request: {
             }
           })
         );
-        if (generation.current === current) setResult({ context: contextKey, value: response });
+        if (!controller.signal.aborted && generation.current === current) {
+          setResult({ context: contextKey, value: response });
+        }
       } catch {
         // Preflight is best-effort UX; stay silent on errors (incl. 429).
       }
     }, DEBOUNCE_MS);
 
     return () => {
-      generation.current = current + 1;
       clearTimeout(timer);
+      controller.abort();
     };
-    // Compare settings by value, not an incidental object identity.
+    // Compare settings by value (settingsKey), not an incidental object identity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     question,
@@ -79,11 +87,11 @@ export function usePreflight(request: {
     groupChatId,
     settingsKey,
     settingsRevision,
-    disabled
+    contextKey,
+    shouldRequest
   ]);
 
-  // Empty input: report no pending cost (derived, not reset via setState).
-  return !disabled && (question || fileKey) && result?.context === contextKey ? result.value : null;
+  return shouldRequest && result?.context === contextKey ? result.value : null;
 }
 
 /**
@@ -105,8 +113,17 @@ export function deriveContextUsage({
   const contextLimit = preflight?.context_window || fallbackContextLimit || 0;
   const pendingTextTokens = preflight?.input_tokens ?? 0;
   const pendingFileTokens = preflight?.file_tokens ?? 0;
+  const assistantPromptTokens = preflight?.prompt_tokens ?? 0;
+  const assistantAttachmentTokens = preflight?.assistant_attachment_tokens ?? 0;
+  // The backend includes the Skill context in prompt_tokens.
+  const skillContextTokens = preflight?.skill_context_tokens ?? 0;
   const projectedTotal =
-    lockedInputTokens + lockedOutputTokens + pendingTextTokens + pendingFileTokens;
+    lockedInputTokens +
+    lockedOutputTokens +
+    pendingTextTokens +
+    pendingFileTokens +
+    assistantPromptTokens +
+    assistantAttachmentTokens;
   return {
     contextLimit,
     // Per-segment breakdown for the context-usage bar: the last turn's locked
@@ -116,6 +133,9 @@ export function deriveContextUsage({
     lockedOutputTokens,
     pendingTextTokens,
     pendingFileTokens,
+    assistantPromptTokens,
+    assistantAttachmentTokens,
+    skillContextTokens,
     usedTokens: projectedTotal,
     willExceedContext: contextLimit > 0 && projectedTotal > contextLimit
   };

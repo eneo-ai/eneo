@@ -1,7 +1,5 @@
-"use client";
-
 import type { LucideIcon } from "lucide-react";
-import Link from "next/link";
+import Link from "@/lib/link";
 import type { ReactNode } from "react";
 import { StatusLabel, type StatusTone } from "@/components/composites/status-label";
 import { ResourceFilterInput } from "@/features/spaces/resource-filter-input";
@@ -88,9 +86,16 @@ export function KnowledgeTableControls({
         label={filterLabel}
         placeholder={filterPlaceholder}
         resultCount={resultCount}
-        className="sm:w-72"
+        // As wide as the filter on the other space tabs (ResourceFilterInput's max-w-sm).
+        className="sm:w-96"
       />
-      {children ? <div className="flex flex-wrap justify-end gap-2">{children}</div> : null}
+      {/* contents on a phone: a docked action leaves the flow (no gap for it),
+          and the others keep to the end. */}
+      {children ? (
+        <div className="phone:contents phone:*:self-end flex flex-wrap justify-end gap-2">
+          {children}
+        </div>
+      ) : null}
     </div>
   );
 }

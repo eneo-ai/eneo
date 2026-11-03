@@ -1,5 +1,4 @@
-"use client";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import type { Schema } from "@/lib/api/models";
 
 export function SkillDependencies({

@@ -1,13 +1,12 @@
-"use client";
-
 import { IconButton } from "@astryxdesign/core/IconButton";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 import { pixel, proportional, type TableColumn } from "@astryxdesign/core/Table";
 import { Table } from "@/components/astryx/table";
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { BookOpenCheck, Plus, Search, Trash2 } from "lucide-react";
-import Link from "next/link";
-import { useTranslations } from "next-intl";
+import Link from "@/lib/link";
+import { useTranslations } from "use-intl";
 import { useRef, useState, type SubmitEvent } from "react";
 import {
   AlertDialog,
@@ -19,18 +18,20 @@ import {
   AlertDialogTitle
 } from "@/components/ui/alert-dialog";
 import { EmptyState } from "@/components/composites/empty-state";
-import { LoadingState } from "@/components/composites/loading-state";
 import { StatusLabel } from "@/components/composites/status-label";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { browserApi } from "@/lib/api/browser";
-import { getErrorMessage, unwrap } from "@/lib/api/errors";
+import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
+import { cursorPagination, flattenPages } from "@/lib/api/pagination";
+import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 import { PageHeader } from "@/components/composites/page-header";
 import { ClientTime } from "@/components/composites/client-time";
+import { ListError, LoadMore, QueryStateBoundary } from "@/components/composites/query-state";
 import { useRemovalMutation } from "@/features/spaces/removal";
-import { SpaceTableFrame } from "@/features/spaces/table-frame";
+import { TableFrame } from "@/components/composites/table-frame";
+import { DockedActions } from "@/components/shell/docked-actions";
 import { useSpace } from "@/features/spaces/use-space";
 import { PersonalChatSkillStatus } from "./personal-chat-skills";
 import { skillQueryKey } from "./skill-revisions";
@@ -43,33 +44,35 @@ export function SpaceSkillsPage() {
   const { space, routeId, can } = useSpace();
   const queryClient = useQueryClient();
   const [searchInput, setSearchInput] = useState("");
-  const [search, setSearch] = useState("");
+  const search = useDebouncedValue(searchInput.trim());
   const headingRef = useRef<HTMLHeadingElement>(null);
   const [deleteTarget, setDeleteTarget] = useState<Skill | null>(null);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<unknown>(null);
   const [announcement, setAnnouncement] = useState("");
   const base = `/spaces/${routeId}/skills`;
   const key = skillQueryKey({ type: "space", spaceId: space.id });
   const skills = useInfiniteQuery({
     queryKey: [...key, search],
-    initialPageParam: null as string | null,
-    queryFn: ({ pageParam }) =>
+    ...cursorPagination,
+    queryFn: ({ pageParam, signal }) =>
       unwrap(
         browserApi.GET("/api/v1/spaces/{space_id}/skills/", {
+          signal,
           params: {
             path: { space_id: space.id },
             query: { limit: PAGE_SIZE, cursor: pageParam, q: search || undefined }
           }
         })
       ),
-    getNextPageParam: (page) => page.next_cursor ?? undefined,
     retry: false
   });
-  const items = skills.data?.pages.flatMap((page) => page.items) ?? [];
+  const items = flattenPages(skills.data?.pages);
+  // One create action at a time: an empty space's empty state carries its own.
+  const showCreate =
+    can("create", "skill") && (items.length > 0 || search !== "" || skills.isError);
 
   function submitSearch(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
-    setSearch(searchInput.trim());
   }
 
   // The error stays in the dialog, next to the action that failed.
@@ -85,7 +88,7 @@ export function SpaceSkillsPage() {
       setDeleteTarget(null);
       setAnnouncement(t("skills_library_deleted_success"));
     },
-    onError: (cause) => setDeleteError(getErrorMessage(cause, t)),
+    onError: (cause) => setDeleteError(cause),
     focusTarget: headingRef
   });
   const deleting = removeSkill.isPending;
@@ -183,13 +186,15 @@ export function SpaceSkillsPage() {
         description={t("skills_library_intro")}
         tour="space-skills"
         actions={
-          can("create", "skill") ? (
-            <Button asChild>
-              <Link href={`${base}/new`}>
-                <Plus className="size-4" />
-                {t("skills_library_create")}
-              </Link>
-            </Button>
+          showCreate ? (
+            <DockedActions label={t("space_skills_actions")}>
+              <Button asChild>
+                <Link href={`${base}/new`}>
+                  <Plus className="size-4" />
+                  {t("skills_library_create")}
+                </Link>
+              </Button>
+            </DockedActions>
           ) : undefined
         }
       />
@@ -202,6 +207,7 @@ export function SpaceSkillsPage() {
             <Search className="text-muted-foreground absolute top-1/2 left-3 size-4 -translate-y-1/2" />
             <Input
               type="search"
+              {...KEYBOARD.search}
               className="pl-9"
               value={searchInput}
               placeholder={t("skills_library_search_placeholder")}
@@ -209,83 +215,50 @@ export function SpaceSkillsPage() {
               onChange={(event) => setSearchInput(event.target.value)}
             />
           </div>
-          <Button type="submit" variant="outline">
-            {t("search")}
-          </Button>
         </form>
       ) : null}
-      {skills.isPending ? (
-        <LoadingState rows={3} />
-      ) : skills.isError && !skills.data ? (
-        <Alert variant="destructive" role="alert">
-          <AlertTitle>{t("request_failed")}</AlertTitle>
-          <AlertDescription>
-            <Button variant="outline" onClick={() => void skills.refetch()}>
-              {t("retry")}
-            </Button>
-          </AlertDescription>
-        </Alert>
-      ) : items.length === 0 ? (
-        <EmptyState
-          icon={<BookOpenCheck />}
-          headingLevel={3}
-          title={search ? t("skills_library_no_results") : t("skills_library_empty_title")}
-          description={search ? undefined : t("skills_library_empty_description")}
-          actions={
-            search ? (
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setSearch("");
-                  setSearchInput("");
-                }}
-              >
-                {t("clear")}
-              </Button>
-            ) : can("create", "skill") ? (
-              <Button asChild>
-                <Link href={`${base}/new`}>{t("skills_library_create_first")}</Link>
-              </Button>
-            ) : undefined
-          }
-        />
-      ) : (
-        <>
-          <SpaceTableFrame>
-            {/* Named like the page heading (PageHeader takes no id to point at). */}
-            <Table
-              data={items}
-              columns={columns}
-              idKey="id"
-              verticalAlign="top"
-              aria-label={t("skills")}
+      <QueryStateBoundary query={skills} rows={3}>
+        {() =>
+          items.length === 0 ? (
+            <EmptyState
+              icon={<BookOpenCheck />}
+              headingLevel={3}
+              title={search ? t("skills_library_no_results") : t("skills_library_empty_title")}
+              description={search ? undefined : t("skills_library_empty_description")}
+              actions={
+                search ? (
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setSearchInput("");
+                    }}
+                  >
+                    {t("clear")}
+                  </Button>
+                ) : can("create", "skill") ? (
+                  <Button asChild>
+                    <Link href={`${base}/new`}>{t("skills_library_create_first")}</Link>
+                  </Button>
+                ) : undefined
+              }
             />
-          </SpaceTableFrame>
-          {skills.hasNextPage && (
-            <Button
-              variant="outline"
-              className="self-center"
-              aria-busy={skills.isFetchingNextPage || undefined}
-              onClick={() => {
-                // Loading, it stays enabled so it keeps focus; a second press is ignored.
-                if (!skills.isFetchingNextPage) void skills.fetchNextPage();
-              }}
-            >
-              {skills.isFetchingNextPage ? t("loading") : t("load_more")}
-            </Button>
-          )}
-          {skills.isFetchNextPageError && (
-            <Alert variant="destructive" role="alert">
-              <AlertTitle>{t("request_failed")}</AlertTitle>
-              <AlertDescription>
-                <Button variant="outline" onClick={() => void skills.fetchNextPage()}>
-                  {t("retry")}
-                </Button>
-              </AlertDescription>
-            </Alert>
-          )}
-        </>
-      )}
+          ) : (
+            <>
+              <TableFrame>
+                {/* Named like the page heading (PageHeader takes no id to point at). */}
+                <Table
+                  data={items}
+                  columns={columns}
+                  idKey="id"
+                  verticalAlign="top"
+                  aria-label={t("skills")}
+                />
+              </TableFrame>
+              <LoadMore query={skills} label={t("load_more")} />
+            </>
+          )
+        }
+      </QueryStateBoundary>
       <AlertDialog
         open={deleteTarget !== null}
         onOpenChange={(open) => {
@@ -299,11 +272,8 @@ export function SpaceSkillsPage() {
               {t("skills_library_delete_description", { name: deleteTarget?.display_name ?? "" })}
             </AlertDialogDescription>
           </AlertDialogHeader>
-          {deleteError && (
-            <Alert variant="destructive" role="alert">
-              <AlertTitle>{t("request_failed")}</AlertTitle>
-              <AlertDescription>{deleteError}</AlertDescription>
-            </Alert>
+          {deleteError != null && (
+            <ListError error={deleteError} title={t("skills_library_delete_error")} />
           )}
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleting}>{t("cancel")}</AlertDialogCancel>

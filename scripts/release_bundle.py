@@ -9,9 +9,8 @@ import re
 import subprocess
 from pathlib import Path
 
-# web-next is the optional Next beta: published and pinned with every bundle so
-# a deployment that enables it runs the image verified with this release.
-COMPONENTS = ("backend", "frontend", "web-next", "tool-runtime")
+# The backend image includes the optional Vite UI; Svelte keeps its own image.
+COMPONENTS = ("backend", "frontend", "tool-runtime")
 REGISTRY = "ghcr.io/eneo-ai/eneo-"
 SHA = re.compile(r"[0-9a-f]{40}")
 SEMVER = re.compile(
@@ -161,14 +160,24 @@ def main() -> None:
         assert args.component
         digest = verify_image(args.component, version, revision)
         if digest:
-            run(
-                "gh",
-                "attestation",
-                "verify",
-                f"oci://{REGISTRY}{args.component}@{digest}",
-                "--repo",
-                os.environ["GITHUB_REPOSITORY"],
-            )
+            try:
+                run(
+                    "gh",
+                    "attestation",
+                    "verify",
+                    f"oci://{REGISTRY}{args.component}@{digest}",
+                    "--repo",
+                    os.environ["GITHUB_REPOSITORY"],
+                )
+            except subprocess.CalledProcessError:
+                # A previous run can push the image and fail before attesting it.
+                # Rebuild from this checkout; never reuse an unverified digest.
+                # Version/source/platform mismatches above remain fatal.
+                print(
+                    f"Cannot verify provenance for {args.component}@{digest}; "
+                    "rebuilding from the matching source revision."
+                )
+                digest = None
         with open(os.environ["GITHUB_OUTPUT"], "a") as out:
             out.write(f"exists={str(bool(digest)).lower()}\ndigest={digest or ''}\n")
         return

@@ -117,7 +117,9 @@ class AuthService:
         )
         payload = token_payload.model_dump(mode="json")
         if extra_claims:
-            reserved = set(extra_claims) & set(payload)
+            # Includes sid, which the dump leaves out: only a browser sign-in
+            # adds it (add_session_id).
+            reserved = set(extra_claims) & set(JWTPayload.model_fields)
             if reserved:
                 raise ValueError(
                     f"extra_claims may not override reserved claims: {sorted(reserved)}"
@@ -184,8 +186,14 @@ class AuthService:
         key: str,
         aud: str = JWT_AUDIENCE,
         algs: list[str] | None = None,
+        *,
+        verify_exp: bool = True,
     ) -> dict[str, object]:
-        """Verified raw claims, including ones ``JWTPayload`` does not model."""
+        """Verified raw claims, including ones ``JWTPayload`` does not model.
+
+        ``verify_exp=False`` still requires ``exp`` but accepts one that has
+        passed. Only sign-out uses it (``BrowserSessionService.end``).
+        """
         algs = algs or [JWT_ALGORITHM]
         try:
             return jwt.decode(
@@ -199,7 +207,8 @@ class AuthService:
                         name
                         for name, field in JWTPayload.model_fields.items()
                         if field.is_required()
-                    ]
+                    ],
+                    "verify_exp": verify_exp,
                 },
             )
         except jwt.PyJWTError:
@@ -223,16 +232,34 @@ class AuthService:
         key: str,
         aud: str = JWT_AUDIENCE,
         algs: list[str] | None = None,
+        *,
+        verify_exp: bool = True,
     ) -> tuple[JWTPayload, dict[str, object]]:
         """Validate the session contract and retain extra module/MCP claims."""
 
-        claims = self.get_verified_claims(token, key=key, aud=aud, algs=algs)
+        claims = self.get_verified_claims(
+            token, key=key, aud=aud, algs=algs, verify_exp=verify_exp
+        )
         try:
             payload = JWTPayload.model_validate(claims)
         except ValidationError:
             raise AuthenticationException("Could not validate token credentials.")
 
         return payload, claims
+
+    def add_session_id(self, token: str, sid: str) -> str:
+        """A session token this process just issued, re-signed with ``sid``.
+
+        Every other claim stays, the expiry included. Only
+        ``BrowserSessionService`` calls it: ``start`` after recording the
+        session, ``renew`` for the token that renews it.
+        """
+        settings = get_settings()
+        key = str(settings.jwt_secret)
+        claims = self.get_verified_claims(
+            token, key=key, aud=settings.jwt_audience, algs=[settings.jwt_algorithm]
+        )
+        return jwt.encode({**claims, "sid": sid}, key, algorithm=settings.jwt_algorithm)
 
     def get_payload_from_openid_jwt(
         self,

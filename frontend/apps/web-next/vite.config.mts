@@ -1,0 +1,69 @@
+import path from "node:path";
+import { tanstackRouter } from "@tanstack/router-plugin/vite";
+import react from "@vitejs/plugin-react";
+import { defineConfig, loadEnv, type ServerOptions } from "vite";
+import { bundleReport } from "./scripts/vite-bundle-report";
+
+// The Vite SPA build and dev server. Tests keep
+// their own vitest.config.mts, without the router plugin, so a test run never
+// rewrites the route tree.
+export default defineConfig(({ command, mode }) => ({
+  // Only these public build identifiers cross into browser code. Runtime
+  // backend configuration cannot identify an already-loaded frontend build.
+  define: {
+    "import.meta.env.APP_VERSION": JSON.stringify(process.env.APP_VERSION || ""),
+    "import.meta.env.APP_REVISION": JSON.stringify(process.env.APP_REVISION || "")
+  },
+  plugins: [
+    // Paths come from tsr.config.json, shared with the `tsr` CLI. The plugin
+    // reads that file from process.cwd() when it is constructed, so the build
+    // flags are inline: route splitting must not depend on where Vite starts.
+    // It must come before the React plugin so route files are split before
+    // JSX is transformed.
+    tanstackRouter({ target: "react", autoCodeSplitting: true }),
+    react(),
+    bundleReport()
+  ],
+  resolve: {
+    // Ordered: the first match wins, so specific aliases go before `@/`.
+    alias: [
+      // @streamdown/code imports Shiki's full `bundledLanguages` (235
+      // grammars, one chunk each); the web bundle keeps 57 common ones and
+      // other fences fall back to plain text. Only bare `shiki` is matched, so
+      // `shiki/engine/javascript` still resolves normally.
+      { find: /^shiki$/, replacement: "shiki/bundle/web" },
+      { find: /^@\//, replacement: `${path.resolve(import.meta.dirname, "src")}/` }
+    ]
+  },
+  // A catalogue is read only as a whole object, so no key needs its own
+  // export: the locale chunks compile to one JSON.parse string instead of a
+  // binding per key next to the object (about 70 KB gzip off every route).
+  json: { namedExports: false },
+  // FastAPI replaces the placeholder with each response's CSP nonce. The dev
+  // server sends no CSP: it is checked against the FastAPI-served build.
+  html: { cspNonce: "__ENEO_CSP_NONCE__" },
+  server: command === "serve" ? devServer(mode) : undefined
+}));
+
+// The browser stays on the dev server's origin and the backend paths are
+// proxied to FastAPI, so the session cookie, the Sec-Fetch-Site gate and the
+// WebSocket Origin check behave as in production. changeOrigin stays false:
+// the backend sees the browser's Host, as it does behind Traefik.
+function devServer(mode: string): ServerOptions {
+  // Only this variable: an empty prefix would load every secret in the env.
+  const target = loadEnv(mode, import.meta.dirname, "ENEO_BACKEND_URL").ENEO_BACKEND_URL;
+  if (!target) {
+    throw new Error("Set ENEO_BACKEND_URL (see .env.example) to the backend for the dev server");
+  }
+  const backend = { target, changeOrigin: false };
+  // Whole path segments, matched against the path and query.
+  return {
+    port: 3101,
+    strictPort: true,
+    proxy: {
+      "^/api(?:[/?]|$)": { ...backend, ws: true },
+      "^/version(?:[/?]|$)": backend,
+      "^/(?:login|auth)/callback(?:[/?]|$)": backend
+    }
+  };
+}

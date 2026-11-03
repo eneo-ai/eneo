@@ -1,5 +1,3 @@
-"use client";
-
 import { BottomSheet } from "@astryxdesign/core/BottomSheet";
 import { Button } from "@astryxdesign/core/Button";
 import {
@@ -11,13 +9,17 @@ import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { MultiSelector, type MultiSelectorOptionType } from "@astryxdesign/core/MultiSelector";
 import { Popover } from "@astryxdesign/core/Popover";
 import { Token } from "@astryxdesign/core/Token";
-import { Typeahead, type SearchableItem, type SearchSource } from "@astryxdesign/core/Typeahead";
+import type { SearchableItem, SearchSource } from "@astryxdesign/core/Typeahead";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ListFilter, User, X } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { useMemo, useState } from "react";
 import { TextInput } from "@/components/astryx/text-input";
+import { Typeahead } from "@/components/astryx/typeahead";
 import { browserApi } from "@/lib/api/browser";
+import { MEDIA } from "@/lib/breakpoints";
+import { formatCalendarDate } from "@/lib/calendar-date";
+import { SEARCH_DEBOUNCE_MS } from "@/lib/hooks/use-debounced-value";
 import { adminUsersQueryOptions, MIN_SEARCH_LENGTH } from "@/features/admin/users/users";
 import {
   actionLabel,
@@ -55,13 +57,9 @@ function daysAgo(days: number): Date {
   return date;
 }
 
-/** "25 sep. 2026" for a YYYY-MM-DD string; noon UTC so no time zone moves the day. */
+/** "25 sep. 2026" for a YYYY-MM-DD string. */
 function formatDate(date: string, locale: string): string {
-  return new Intl.DateTimeFormat(locale, {
-    day: "numeric",
-    month: "short",
-    year: "numeric"
-  }).format(new Date(`${date}T12:00:00Z`));
+  return formatCalendarDate(date, locale, { day: "numeric", month: "short", year: "numeric" });
 }
 
 /** The filters the "Filter" button counts: user, each action and the period (search is visible). */
@@ -82,7 +80,7 @@ const CLEARED: Partial<AuditFilters> = {
   userLabel: undefined
 };
 
-/** Actor-by-user filter: finds a user by email and pins the per-user (GDPR) log view. */
+/** Finds an actor by email while preserving the other log filters. */
 function UserField({
   userId,
   userLabel,
@@ -119,13 +117,13 @@ function UserField({
       onChange={(item) =>
         onChange(
           item
-            ? // The per-user endpoint takes only a date range: the other filters go.
-              { userId: item.id, userLabel: item.label, actions: [], search: "" }
+            ? { userId: item.id, userLabel: item.label }
             : { userId: undefined, userLabel: undefined }
         )
       }
       minQueryLength={MIN_SEARCH_LENGTH}
-      emptySearchResultsText={t("audit_user_search_empty")}
+      debounceMs={SEARCH_DEBOUNCE_MS}
+      emptySearchText={t("audit_user_search_empty")}
       width="100%"
     />
   );
@@ -214,9 +212,7 @@ function AuditFilterFields({
     <div className="flex flex-col gap-4">
       <p className="text-ax-text-secondary text-sm">{t("audit_filters_description")}</p>
       <UserField userId={filters.userId} userLabel={filters.userLabel} onChange={onChange} />
-      {!filters.userId && (
-        <ActionField selected={filters.actions} onChange={(actions) => onChange({ actions })} />
-      )}
+      <ActionField selected={filters.actions} onChange={(actions) => onChange({ actions })} />
       <PeriodField from={filters.from_date} to={filters.to_date} onChange={onChange} />
       <div className="flex justify-end">
         <Button variant="primary" label={t("done")} onClick={onDone} />
@@ -229,7 +225,7 @@ function AuditFilterFields({
 function FilterButton({ filters, onChange }: { filters: AuditFilters; onChange: OnChange }) {
   const t = useTranslations();
   const [open, setOpen] = useState(false);
-  const wide = useMediaQuery("(min-width: 768px)");
+  const wide = useMediaQuery(MEDIA.md);
   const count = activeFilterCount(filters);
   const label = count > 0 ? t("audit_filters_button_count", { count }) : t("audit_filters_button");
   const fields = (
@@ -269,6 +265,7 @@ function FilterButton({ filters, onChange }: { filters: AuditFilters; onChange: 
         onOpenChange={setOpen}
         label={t("audit_filters_button")}
         height="tall"
+        padding={0}
       >
         <div className="p-4">{fields}</div>
       </BottomSheet>
@@ -287,14 +284,13 @@ function chipsFor(filters: AuditFilters, t: Translate, locale: string): Chip[] {
       icon: <User aria-hidden="true" className="size-3.5" />,
       remove: { userId: undefined, userLabel: undefined }
     });
-  } else {
-    for (const action of filters.actions) {
-      chips.push({
-        key: `action:${action}`,
-        label: actionLabel(t, action),
-        remove: { actions: filters.actions.filter((item) => item !== action) }
-      });
-    }
+  }
+  for (const action of filters.actions) {
+    chips.push({
+      key: `action:${action}`,
+      label: actionLabel(t, action),
+      remove: { actions: filters.actions.filter((item) => item !== action) }
+    });
   }
   const { from_date: from, to_date: to } = filters;
   if (from || to) {
@@ -325,7 +321,6 @@ export function AuditFilterBar({
 }) {
   const t = useTranslations();
   const locale = useLocale();
-  const filteringByUser = Boolean(filters.userId);
   const chips = chipsFor(filters, t, locale);
   const hasFilters = chips.length > 0 || filters.search !== "";
 
@@ -333,14 +328,11 @@ export function AuditFilterBar({
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-end gap-3">
         <div className="min-w-56 flex-1">
-          {/* The per-user endpoint has no free text: the field says why it waits. */}
           <TextInput
             label={t("search")}
             placeholder={t("audit_search_placeholder_entity")}
             value={filters.search}
             onChange={(value) => onChange({ search: value })}
-            isDisabled={filteringByUser}
-            disabledMessage={filteringByUser ? t("audit_filtering_by_user") : undefined}
             hasClear
             width="100%"
           />

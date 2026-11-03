@@ -58,6 +58,35 @@ async def second_tenant_token(db_container, patch_auth_service_jwt, second_tenan
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_notification_constraints_belong_to_the_authenticated_tenant(
+    client,
+    default_user_token: str,
+    second_tenant_token: str,
+):
+    policies = []
+    for token, maximum in [(default_user_token, 21), (second_tenant_token, 90)]:
+        response = await client.put(
+            "/api/v1/admin/api-keys/notification-policy",
+            json={"max_days_before_expiry": maximum},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200, response.text
+        policies.append(response.json())
+
+    assert policies[0] != policies[1]
+    for token, policy in zip(
+        [default_user_token, second_tenant_token], policies, strict=True
+    ):
+        response = await client.get(
+            "/api/v1/api-keys/policy-constraints",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["notification_policy"] == policy
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_api_key_tenant_isolation_for_management_endpoints(
     client,
     default_user_token: str,

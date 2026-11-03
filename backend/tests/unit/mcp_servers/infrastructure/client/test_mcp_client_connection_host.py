@@ -18,8 +18,10 @@ import anyio
 import httpx
 import pytest
 import uvicorn
+from mcp import ClientSession
 from mcp.client.streamable_http import StreamableHTTPTransport
 from mcp.server.fastmcp import FastMCP
+from mcp.types import InitializeResult
 
 from eneo.main import stream_lifecycle
 from eneo.main.exceptions import MCPClientError
@@ -62,6 +64,11 @@ async def _mcp_server() -> AsyncIterator[str]:
     port = server.servers[0].sockets[0].getsockname()[1]
     try:
         yield f"http://127.0.0.1:{port}/mcp"
+    except BaseException:
+        # A failed assertion can leave a client connected. Let shutdown finish
+        # so its open stream cannot hide the original test failure.
+        server.config.timeout_graceful_shutdown = 1
+        raise
     finally:
         server.should_exit = True
         await serving
@@ -292,16 +299,34 @@ async def test_a_cancelled_connect_does_not_disturb_the_next_one(
 ):
     warnings = Mock()
     monkeypatch.setattr(client_module.logger, "warning", warnings)
+    first_handshake = asyncio.Event()
+    release_first_handshake = asyncio.Event()
+    initialize = ClientSession.initialize
+
+    async def pause_first_handshake(session: ClientSession) -> InitializeResult:
+        result = await initialize(session)
+        if not first_handshake.is_set():
+            first_handshake.set()
+            await release_first_handshake.wait()
+        return result
+
+    monkeypatch.setattr(ClientSession, "initialize", pause_first_handshake)
     async with _mcp_server() as url:
         client = MCPClient(_server_row(url), None)
 
         connecting = asyncio.create_task(client.connect())
-        await asyncio.sleep(0.01)  # mid-handshake
-        connecting.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await connecting
+        try:
+            async with asyncio.timeout(5):
+                await first_handshake.wait()
+                connecting.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await connecting
 
-        await client.connect()
+                # Keep the abandoned handshake pending until its replacement
+                # is connected, so it cannot accidentally overwrite that session.
+                await client.connect()
+        finally:
+            release_first_handshake.set()
         async with asyncio.timeout(5):  # the abandoned host finishes unwinding
             while len(_live_hosts()) > 1:
                 await asyncio.sleep(0.01)

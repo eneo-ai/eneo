@@ -485,6 +485,8 @@ def test_only_the_password_change_routes_are_exempt_from_the_gate():
         and policy.reachable_before_password_change
     }
     assert exempt == {
+        # Checks which browser session the cookie holds; reveals only that.
+        "/api/v1/auth/session/",
         "/api/v1/users/me/",
         "/api/v1/users/me/password/",
         "/api/v1/users/me/sessions/invalidate/",

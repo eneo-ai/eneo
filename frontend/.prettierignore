@@ -6,4 +6,5 @@ apps/web-next/src/theme/eneo.js
 apps/web-next/src/theme/eneo.d.ts
 apps/web-next/src/theme/eneo.variants.d.ts
 apps/web-next/src/lib/i18n/messages
+apps/web-next/src/routeTree.gen.ts
 apps/web-next/eslint-suppressions.json

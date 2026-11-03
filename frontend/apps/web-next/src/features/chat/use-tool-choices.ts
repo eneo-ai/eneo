@@ -1,20 +1,19 @@
-"use client";
-
 import { useAppContext } from "@/components/providers/app-context";
 import type { Capability } from "@/features/capabilities/capabilities";
 import { useConversationSettings } from "./conversation-settings";
 
 export function useToolChoices() {
-  const { featureFlags, can } = useAppContext();
+  const { can } = useAppContext();
   const { resolution, update } = useConversationSettings();
   const settings = resolution?.settings;
   const modelSupportsTools = resolution?.supports_tool_calling ?? false;
   const allCapabilities = (resolution?.capabilities ?? []).filter((capability) =>
     can(capability.purpose)
   );
-  const capabilities = allCapabilities
-    .filter((capability) => capability.purpose !== "web_search" || featureFlags.showWebSearch)
-    .map((capability) => ({ ...capability, reason: capability.reason ?? null }));
+  const capabilities = allCapabilities.map((capability) => ({
+    ...capability,
+    reason: capability.reason ?? null
+  }));
   const mcpServers = (resolution?.mcp_servers ?? []).map((server) => ({
     ...server,
     description: server.description ?? null,

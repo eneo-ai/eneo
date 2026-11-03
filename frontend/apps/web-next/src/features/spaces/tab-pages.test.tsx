@@ -2,7 +2,8 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderInApp } from "@/test/render";
+import { setViewport } from "@/test/setup-dom";
+import { recordAnnouncements, renderInApp } from "@/test/render";
 import type { Space } from "./space";
 import { makeAssistant, makeSpace } from "./testing/space-fixture";
 
@@ -12,7 +13,7 @@ const state = vi.hoisted(() => ({
   deleted: [] as string[]
 }));
 
-vi.mock("next/navigation", () => ({
+vi.mock("@/lib/navigation", () => ({
   useRouter: () => ({ push: (href: string) => state.pushed.push(href), prefetch: () => {} })
 }));
 vi.mock("@/features/spaces/use-space", async () => {
@@ -31,10 +32,10 @@ vi.mock("@/lib/api/browser", () => ({
 
 import { AppsPage } from "@/features/apps/apps-page";
 import { AssistantsPage } from "@/features/assistants/assistants-page";
-import { ServicesPage } from "@/features/services/services-page";
 
 afterEach(() => {
   cleanup();
+  window.localStorage.clear();
   state.pushed = [];
   state.deleted = [];
 });
@@ -61,6 +62,13 @@ describe("AssistantsPage", () => {
 
     expect(screen.getByRole("heading", { level: 2, name: "Assistenter" })).toBeTruthy();
     expect(screen.getAllByRole("button", { name: "Skapa assistent" })).toHaveLength(1);
+    // Docked at the bottom on a phone, like the apps tab. It is the tab's
+    // primary action, so it stays filled (the overview's are secondary).
+    expect(
+      within(screen.getByRole("group", { name: "Assistenter, åtgärder" })).getByRole("button", {
+        name: "Skapa assistent"
+      }).dataset.variant
+    ).toBe("primary");
     const published = screen.getByRole("region", { name: "Publicerad" });
     const card = within(published).getByRole("link", { name: "Upphandlingsassistenten" });
     expect(card.getAttribute("href")).toBe("/spaces/space-1/chat?type=assistant&id=assistant-1");
@@ -73,27 +81,31 @@ describe("AssistantsPage", () => {
     ).toBeTruthy();
     await expectNoAxeViolations(container);
 
+    const said = recordAnnouncements();
     fireEvent.change(screen.getByRole("textbox", { name: "Filtrera assistenter" }), {
       target: { value: "avtal" }
     });
     expect(screen.queryByRole("link", { name: "Upphandlingsassistenten" })).toBeNull();
-    await waitFor(() => expect(liveRegion()?.textContent).toBe("1 träff"));
+    await waitFor(() => expect(said).toEqual(["1 träff"]));
     fireEvent.change(screen.getByRole("textbox", { name: "Filtrera assistenter" }), {
       target: { value: "saknas" }
     });
     // Under the tab's h2, the empty result is an h3.
     expect(screen.getByRole("heading", { level: 3, name: "Inga resultat hittades" })).toBeTruthy();
-    await waitFor(() => expect(liveRegion()?.textContent).toBe("Inga träffar"));
+    // The count owns the empty result: its empty state does not say it again.
+    await waitFor(() => expect(said).toEqual(["1 träff", "Inga träffar"]));
+    expect(liveRegion()?.textContent).toBe("Inga träffar");
   });
 
-  it("keeps each card's named menu apart from the card's link", () => {
+  it.each(["cards", "list"])("keeps each %s menu apart from the resource link", (view) => {
     show(makeSpace({ assistants }), <AssistantsPage />);
+    if (view === "list") fireEvent.click(screen.getByRole("button", { name: "Lista" }));
     const card = screen.getByRole("link", { name: "Upphandlingsassistenten" });
     const menu = screen.getByRole("button", {
       name: "Fler åtgärder för Upphandlingsassistenten"
     });
     // Tab order: the card's link, then its menu (document order, no tabindex tricks).
-    const item = card.closest("li")!;
+    const item = card.closest("li, tr")!;
     expect(Array.from(item.querySelectorAll("a[href], button"))).toEqual([card, menu]);
     expect(item.querySelector("[tabindex]:not([tabindex='-1']):not([tabindex='0'])")).toBeNull();
 
@@ -105,29 +117,33 @@ describe("AssistantsPage", () => {
     expect(state.pushed).toEqual(["/spaces/space-1/assistants/assistant-1/edit"]);
   });
 
-  it("moves focus to the heading when a deleted assistant's card goes away", async () => {
-    show(makeSpace({ assistants }), <AssistantsPage />);
-    const menu = screen.getByRole("button", {
-      name: "Fler åtgärder för Upphandlingsassistenten"
-    });
-    menu.focus();
-    fireEvent.click(menu);
-    fireEvent.click(menuOf(menu).getByRole("menuitem", { name: "Ta bort" }));
-    const dialog = await screen.findByRole("alertdialog", { name: "Radera assistent" });
-    // What the space holds once the assistant is gone.
-    state.space = makeSpace({ assistants: [assistants[1]!] });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Ta bort" }));
+  it.each(["cards", "list"])(
+    "moves focus to the heading after deleting an assistant from %s",
+    async (view) => {
+      show(makeSpace({ assistants }), <AssistantsPage />);
+      if (view === "list") fireEvent.click(screen.getByRole("button", { name: "Lista" }));
+      const menu = screen.getByRole("button", {
+        name: "Fler åtgärder för Upphandlingsassistenten"
+      });
+      menu.focus();
+      fireEvent.click(menu);
+      fireEvent.click(menuOf(menu).getByRole("menuitem", { name: "Ta bort" }));
+      const dialog = await screen.findByRole("alertdialog", { name: "Radera assistent" });
+      // What the space holds once the assistant is gone.
+      state.space = makeSpace({ assistants: [assistants[1]!] });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Ta bort" }));
 
-    await waitFor(() => expect(state.deleted).toEqual(["/api/v1/assistants/{id}/ assistant-1"]));
-    await waitFor(() =>
-      expect(screen.queryByRole("link", { name: "Upphandlingsassistenten" })).toBeNull()
-    );
-    await waitFor(() =>
-      expect(document.activeElement).toBe(
-        screen.getByRole("heading", { level: 2, name: "Assistenter" })
-      )
-    );
-  });
+      await waitFor(() => expect(state.deleted).toEqual(["/api/v1/assistants/{id}/ assistant-1"]));
+      await waitFor(() =>
+        expect(screen.queryByRole("link", { name: "Upphandlingsassistenten" })).toBeNull()
+      );
+      await waitFor(() =>
+        expect(document.activeElement).toBe(
+          screen.getByRole("heading", { level: 2, name: "Assistenter" })
+        )
+      );
+    }
+  );
 
   it("shows the status on each card for users who cannot publish", () => {
     show(
@@ -151,8 +167,8 @@ describe("AssistantsPage", () => {
   });
 });
 
-describe("AppsPage and ServicesPage", () => {
-  it("render the same card grid", async () => {
+describe("AppsPage", () => {
+  it("renders its card grid", async () => {
     const space = makeSpace({
       apps: [
         {
@@ -160,16 +176,6 @@ describe("AppsPage and ServicesPage", () => {
           name: "Protokollsammanfattning",
           description: "Sammanfattar protokoll.",
           published: true,
-          user_id: "u",
-          permissions: ["read", "edit", "delete"]
-        }
-      ],
-      services: [
-        {
-          id: "service-1",
-          name: "Klassificering",
-          prompt: "…",
-          output_format: "json",
           user_id: "u",
           permissions: ["read", "edit", "delete"]
         }
@@ -185,26 +191,123 @@ describe("AppsPage and ServicesPage", () => {
     expect(
       screen.getByRole("button", { name: "Fler åtgärder för Protokollsammanfattning" })
     ).toBeTruthy();
+    // The tab's primary action stays filled (the overview's are secondary).
+    expect(screen.getByRole("button", { name: "Skapa app" }).dataset.variant).toBe("primary");
     await expectNoAxeViolations(apps.container);
-    cleanup();
-
-    const services = show(space, <ServicesPage />);
-    expect(screen.getByRole("link", { name: "Klassificering" }).getAttribute("href")).toBe(
-      "/spaces/space-1/services/service-1?tab=playground"
-    );
-    expect(screen.getByText("JSON")).toBeTruthy();
-    expect(screen.getByRole("textbox", { name: "Filtrera tjänster" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Fler åtgärder för Klassificering" })).toBeTruthy();
-    await expectNoAxeViolations(services.container);
   });
 
-  it("explain empty lists and offer the create action", () => {
-    show(makeSpace(), <ServicesPage />);
-    expect(screen.getByRole("heading", { level: 3, name: "Inga tjänster ännu" })).toBeTruthy();
-    expect(screen.getAllByRole("button", { name: "Skapa tjänst" })).toHaveLength(1);
-    cleanup();
-
+  it("explains an empty list", () => {
     show(makeSpace(), <AppsPage />);
     expect(screen.getByRole("heading", { level: 3, name: "Inga appar ännu" })).toBeTruthy();
   });
+});
+
+describe("Collection tabs on a phone (decision 9)", () => {
+  it("list assistants as rows in their groups", async () => {
+    setViewport("phone");
+    const { container } = show(makeSpace({ assistants }), <AssistantsPage />);
+    expect(screen.queryByRole("button", { name: "Lista" })).toBeNull();
+    const published = screen.getByRole("region", { name: "Publicerad" });
+    const row = within(published).getByRole("link", { name: /^Upphandlingsassistenten/ });
+    expect(row.getAttribute("href")).toBe("/spaces/space-1/chat?type=assistant&id=assistant-1");
+    expect(row.closest(".astryx-item")).toBeTruthy();
+    expect(row.textContent).toContain("Svarar på frågor om LOU.");
+    expect(
+      within(row.closest("li")!).getByRole("button", {
+        name: "Fler åtgärder för Upphandlingsassistenten"
+      })
+    ).toBeTruthy();
+    expect(
+      within(screen.getByRole("region", { name: "Utkast" })).getByRole("link", {
+        name: /^Avtalsgranskaren/
+      })
+    ).toBeTruthy();
+    await expectNoAxeViolations(container);
+  });
+});
+
+for (const [Page, space] of [
+  [AssistantsPage, makeSpace({ assistants })],
+  [
+    AppsPage,
+    makeSpace({
+      apps: [
+        {
+          id: "published-app",
+          name: "Zeta",
+          published: true,
+          user_id: "u",
+          permissions: ["read", "edit"]
+        },
+        { id: "draft-app", name: "Alfa", published: false, user_id: "u", permissions: ["read"] }
+      ]
+    })
+  ]
+] as const) {
+  it(`${Page.name} switches to sortable lists, collapses groups and restores its view`, async () => {
+    show(space, <Page />);
+    const list = screen.getByRole("button", { name: "Lista" });
+    list.focus();
+    fireEvent.click(list);
+    expect(list.getAttribute("aria-pressed")).toBe("true");
+    expect(document.activeElement).toBe(list);
+    const published = screen.getByRole("region", { name: "Publicerad" });
+    const table = within(published).getByRole("table");
+    const status = within(table).getByRole("columnheader", { name: /Status/ });
+    fireEvent.click(within(status).getByRole("button"));
+    fireEvent.click(within(status).getByRole("button"));
+    expect(
+      screen
+        .getAllByRole("region")
+        .filter((region) =>
+          ["Publicerad", "Utkast"].includes(
+            region.getAttribute("aria-label") ?? region.querySelector("h3")?.textContent ?? ""
+          )
+        )
+        .map((region) => region.querySelector("h3")?.textContent)
+    ).toEqual(["Utkast", "Publicerad"]);
+    const name = within(table).getByRole("columnheader", { name: /Namn/ });
+    fireEvent.click(within(name).getByRole("button"));
+    const collapse = within(published).getByRole("button", { name: "Publicerad" });
+    fireEvent.click(collapse);
+    expect(collapse.getAttribute("aria-expanded")).toBe("false");
+    expect(within(published).queryByRole("table")).toBeNull();
+    fireEvent.click(collapse);
+    expect(within(published).getByRole("table")).toBeTruthy();
+    cleanup();
+    show(space, <Page />);
+    expect(screen.getByRole("button", { name: "Lista" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getAllByRole("table")).toHaveLength(2);
+  });
+}
+
+it("keeps an assistant with the schema's omitted publication default in Drafts", () => {
+  const draft = makeAssistant({
+    id: "default-draft",
+    name: "Draft by default",
+    published: undefined
+  });
+  show(makeSpace({ assistants: [draft] }), <AssistantsPage />);
+  expect(
+    within(screen.getByRole("region", { name: "Utkast" })).getByRole("link", { name: draft.name })
+  ).toBeTruthy();
+});
+
+it("exposes card sort choices as a checked radio group and applies the chosen direction", async () => {
+  const app = { id: "z", name: "Zeta", published: true, user_id: "u", permissions: ["read"] };
+  show(makeSpace({ apps: [app, { ...app, id: "a", name: "Alfa" }] }), <AppsPage />);
+  const sort = screen.getByRole("button", { name: /^Sortera: Namn/ });
+  fireEvent.click(sort);
+  expect(
+    (await screen.findByRole("menuitemradio", { name: "Namn · Stigande" })).getAttribute(
+      "aria-checked"
+    )
+  ).toBe("true");
+  fireEvent.click(screen.getByRole("menuitemradio", { name: "Namn · Fallande" }));
+  expect(screen.getByRole("button", { name: "Sortera: Namn · Fallande" })).toBeTruthy();
+  expect(
+    within(screen.getByRole("region", { name: "Publicerad" }))
+      .getAllByRole("link")
+      .map((link) => link.getAttribute("aria-label"))
+  ).toEqual(["Zeta", "Alfa"]);
 });

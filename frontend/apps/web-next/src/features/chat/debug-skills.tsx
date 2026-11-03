@@ -1,12 +1,10 @@
-"use client";
-
 import { Badge } from "@astryxdesign/core/Badge";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { ProgressBar } from "@astryxdesign/core/ProgressBar";
 import { ChevronDown } from "lucide-react";
-import { useFormatter, useTranslations } from "next-intl";
+import { useFormatter, useTranslations } from "use-intl";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { CopyableValue, DebugSection } from "./debug-section";
@@ -263,7 +261,10 @@ export function SkillActivationSection({
       >
         {stats.map(([label, value]) => (
           <div key={label} className="bg-ax-surface min-w-0 px-3 py-1.5">
-            <dt className="text-ax-text-secondary truncate text-xs leading-4" title={label}>
+            <dt
+              className="text-ax-text-secondary truncate text-xs leading-4 pointer-coarse:break-words pointer-coarse:whitespace-normal"
+              title={label}
+            >
               {label}
             </dt>
             <dd className="mt-0.5 text-sm font-semibold tabular-nums">{value}</dd>

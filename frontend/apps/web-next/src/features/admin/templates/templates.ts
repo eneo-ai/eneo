@@ -92,28 +92,121 @@ export function rollbackAppTemplate(api: EneoClient, templateId: string) {
   );
 }
 
+export type TemplateKind = "assistants" | "apps";
+
+type CategoryTitleKey =
+  | "template_category_communication"
+  | "template_category_qa"
+  | "template_category_advice"
+  | "template_category_misc"
+  | "template_category_transcription";
+
+type CategoryDescriptionKey =
+  | "template_category_communication_description"
+  | "template_category_qa_description"
+  | "template_category_advice_description"
+  | "template_category_misc_assistants_description"
+  | "template_category_transcription_description"
+  | "template_category_misc_apps_description";
+
+export type TemplateCategory = {
+  /** What is stored: an English slug. */
+  value: string;
+  title: CategoryTitleKey;
+  description: CategoryDescriptionKey;
+};
+
 /**
- * The predefined template categories (the Svelte app's TemplateCategories)
- * are stored as English slugs; admins can also type their own. Known slugs
- * get their translated name, anything else is shown as typed.
+ * The predefined categories per template kind (the Svelte app's
+ * TemplateCategories), in the order the editor offers them; the first is a
+ * new template's category. Admins can also type their own.
  */
-const TEMPLATE_CATEGORY_KEYS = {
-  communication: "template_category_communication",
-  "q&a": "template_category_qa",
-  advice: "template_category_advice",
-  misc: "template_category_misc",
-  transcription: "template_category_transcription"
-} as const;
+export const TEMPLATE_CATEGORIES: Record<TemplateKind, readonly TemplateCategory[]> = {
+  assistants: [
+    {
+      value: "communication",
+      title: "template_category_communication",
+      description: "template_category_communication_description"
+    },
+    {
+      value: "q&a",
+      title: "template_category_qa",
+      description: "template_category_qa_description"
+    },
+    {
+      value: "advice",
+      title: "template_category_advice",
+      description: "template_category_advice_description"
+    },
+    {
+      value: "misc",
+      title: "template_category_misc",
+      description: "template_category_misc_assistants_description"
+    }
+  ],
+  apps: [
+    {
+      value: "transcription",
+      title: "template_category_transcription",
+      description: "template_category_transcription_description"
+    },
+    {
+      value: "misc",
+      title: "template_category_misc",
+      description: "template_category_misc_apps_description"
+    }
+  ]
+};
 
-export type TemplateCategoryKey =
-  (typeof TEMPLATE_CATEGORY_KEYS)[keyof typeof TEMPLATE_CATEGORY_KEYS];
+/** The predefined category stored as `value` for this kind, if it is one. */
+export function predefinedCategory(
+  kind: TemplateKind,
+  value: string
+): TemplateCategory | undefined {
+  return TEMPLATE_CATEGORIES[kind].find((category) => category.value === value);
+}
 
-export function templateCategoryLabel(
+/** A custom slug as a title: `customer-service` → `Customer Service`. */
+function formatCategoryTitle(category: string): string {
+  return category
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ");
+}
+
+/**
+ * What a list shows for a stored category: a predefined one's translated
+ * title and description (matched case-insensitively), or a custom slug as a
+ * title without a description.
+ */
+export function templateCategoryInfo(
+  kind: TemplateKind,
   category: string,
-  t: (key: TemplateCategoryKey) => string
-): string {
-  const key = (TEMPLATE_CATEGORY_KEYS as Record<string, TemplateCategoryKey | undefined>)[
-    category.trim().toLowerCase()
-  ];
-  return key ? t(key) : category;
+  t: (key: CategoryTitleKey | CategoryDescriptionKey) => string
+): { title: string; description: string | null } {
+  const predefined = predefinedCategory(kind, category.trim().toLowerCase());
+  if (predefined) return { title: t(predefined.title), description: t(predefined.description) };
+  const other = TEMPLATE_CATEGORIES.assistants
+    .concat(TEMPLATE_CATEGORIES.apps)
+    .find((candidate) => candidate.value === category.trim().toLowerCase());
+  return { title: other ? t(other.title) : formatCategoryTitle(category), description: null };
+}
+
+/**
+ * The completion model a template form starts with: the template's own by id,
+ * else by name (a model since replaced), else the first available. The id
+ * goes first: models may share a name.
+ */
+export function findTemplateModel<T extends { id: string; name: string }>(
+  models: readonly T[],
+  template?: { completion_model_id?: string | null; completion_model_name?: string | null }
+): T | null {
+  const byId = template?.completion_model_id
+    ? models.find((model) => model.id === template.completion_model_id)
+    : undefined;
+  const byName = template?.completion_model_name
+    ? models.find((model) => model.name === template.completion_model_name)
+    : undefined;
+  return byId ?? byName ?? models[0] ?? null;
 }

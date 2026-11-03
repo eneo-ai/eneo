@@ -1,5 +1,3 @@
-"use client";
-
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { Layout, LayoutContent } from "@astryxdesign/core/Layout";
 import { ProgressBar } from "@astryxdesign/core/ProgressBar";
@@ -15,7 +13,7 @@ import {
   Paperclip,
   X
 } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { useEffect, useRef, useState } from "react";
 import { useReturnFocus } from "@/components/ui/dialog-focus";
 import { browserApi } from "@/lib/api/browser";
@@ -67,7 +65,7 @@ function DownloadPreviewLink({ url }: { url: string }) {
       href={url}
       target="_blank"
       rel="noreferrer"
-      className="bg-primary text-primary-foreground hover:bg-primary/90 focus-visible:outline-ring inline-flex min-h-9 items-center gap-2 rounded-md px-4 py-2 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11"
+      className="bg-primary text-primary-foreground hover:bg-ax-hover-overlay focus-visible:outline-ring inline-flex min-h-9 items-center gap-2 rounded-md px-4 py-2 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11"
     >
       <Download aria-hidden="true" className="size-4" />
       {t("download")}
@@ -172,7 +170,6 @@ export function AttachmentPreviewDialog({
               ) : !url ? (
                 <Spinner size="lg" aria-label={t("loading")} />
               ) : isImage ? (
-                // eslint-disable-next-line @next/next/no-img-element -- signed/object URL
                 <img
                   src={url}
                   alt={name}
@@ -286,13 +283,15 @@ function AttachmentChip({
   const body = (
     <>
       <FileTypeTile mimetype={item.mimetype} size="sm" uploading={item.uploading} />
-      <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold">{item.name}</span>
+      <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold pointer-coarse:break-words pointer-coarse:whitespace-normal">
+        {item.name}
+      </span>
       <span className="text-ax-text-secondary shrink-0 text-[11.5px] tabular-nums">{detail}</span>
     </>
   );
   return (
     <div
-      className="border-ax-border bg-ax-surface rounded-ax-element flex h-8 max-w-full min-w-0 items-center gap-1 border ps-1 pe-0.5 pointer-coarse:h-11"
+      className="border-ax-border bg-ax-surface rounded-ax-element flex h-8 max-w-full min-w-0 items-center gap-1 border ps-1 pe-0.5 pointer-coarse:h-auto pointer-coarse:min-h-11"
       title={item.name}
     >
       {item.previewUrl ? (

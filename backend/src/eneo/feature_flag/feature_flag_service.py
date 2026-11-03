@@ -74,7 +74,7 @@ class FeatureFlagService:
         tenant_id: UUID | None,
         missing_default: bool,
     ) -> bool:
-        feature_flag = await self.feature_flag_repo.one_or_none(name=feature_name)
-        if feature_flag is None:
-            return missing_default
-        return feature_flag.is_enabled(tenant_id=tenant_id)
+        enabled = await self.feature_flag_repo.is_enabled_for_tenant(
+            feature_name, tenant_id
+        )
+        return missing_default if enabled is None else enabled

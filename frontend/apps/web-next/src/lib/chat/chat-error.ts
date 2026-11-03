@@ -1,4 +1,11 @@
-import { EneoApiError, getErrorMessageForCode } from "@/lib/api/errors";
+import {
+  EneoApiError,
+  errorReferenceLines,
+  getErrorMessageForCode,
+  getErrorMessageForReason
+} from "@/lib/api/errors";
+
+import type { EneoDataParts } from "./types";
 
 type Translate = (key: string, values?: Record<string, string | number>) => string;
 
@@ -8,10 +15,11 @@ export type ChatFailure = {
   message: string;
   /**
    * Technical lines for support (HTTP status, backend code, the backend's
-   * own message, trace id), kept behind a disclosure. Empty when the sentence
+   * own message, error id and trace id), kept behind a disclosure. Empty when the sentence
    * already says everything there is to know.
    */
   details: string[];
+  context?: ContextErrorInfo;
 };
 
 /** Longer backend text is cut so a stack trace or HTML page never fills the chat. */
@@ -23,7 +31,9 @@ const DETAIL_MAX_LENGTH = 300;
  * JSON body can arrive as an error message. Pull the message and code out of
  * it; anything unparseable stays as it is.
  */
-function parseJsonMessage(text: string): { message?: string; code?: number } | null {
+function parseJsonMessage(
+  text: string
+): { message?: string; code?: number; reason?: string; details?: unknown } | null {
   const trimmed = text.trim();
   if (!trimmed.startsWith("{")) return null;
   try {
@@ -42,10 +52,45 @@ function parseJsonMessage(text: string): { message?: string; code?: number } | n
             ? ((detail as Record<string, unknown>).message as string)
             : undefined;
     const code = typeof record.eneo_error_code === "number" ? record.eneo_error_code : undefined;
-    return { message, code };
+    const reason = typeof record.code === "string" ? record.code : undefined;
+    return { message, code, reason, details: record.details };
   } catch {
     return null;
   }
+}
+
+export type ContextErrorInfo = { used?: number; limit?: number };
+
+/** Facts from the rejection itself; token-usage events are not rejection counts. */
+export function getContextErrorInfo(
+  error: unknown,
+  streamError: EneoDataParts["error"] | null | undefined
+): ContextErrorInfo | null {
+  const raw = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  const parsed = parseJsonMessage(raw);
+  const code = streamError?.code ?? (error instanceof EneoApiError ? error.code : parsed?.code);
+  const message = parsed?.message ?? raw;
+  if (
+    code !== 9003 &&
+    !/context window|context length|maximum context|too many tokens|tokens used|too long/i.test(
+      message
+    )
+  )
+    return null;
+  const details = error instanceof EneoApiError ? error.details : parsed?.details;
+  const fields =
+    details && typeof details === "object" ? (details as Record<string, unknown>) : null;
+  const match = message.match(/(\d[\d,]*)\s*tokens?\s*used.*?limit\s*(?:is\s*)?(\d[\d,]*)/i);
+  const used = fields?.tokens_used ?? (match ? Number(match[1]!.replaceAll(",", "")) : undefined);
+  const limit = fields?.token_limit ?? (match ? Number(match[2]!.replaceAll(",", "")) : undefined);
+  return typeof used === "number" &&
+    typeof limit === "number" &&
+    Number.isSafeInteger(used) &&
+    Number.isSafeInteger(limit) &&
+    limit > 0 &&
+    used > limit
+    ? { used, limit }
+    : {};
 }
 
 function truncate(text: string): string {
@@ -76,37 +121,39 @@ function sentenceForStatus(status: number, t: Translate): string {
   if (status === 404) return t("chat_error_not_found");
   if (status === 413) return t("chat_error_too_large");
   if (status === 400 || status === 422) return t("chat_error_invalid");
-  if (status === 429) return t("chat_error_rate_limited");
+  if (status === 429) return t("request_rate_limited");
   if (status >= 500) return t("chat_error_server");
   return t("request_failed");
 }
 
 /**
  * One human sentence for any failed question, never the backend's raw JSON.
- * Resolution: a known backend error code (from the stream's `data-error`
+ * Resolution: a public provider/quota reason, then a known backend error code (from the stream's `data-error`
  * part, the refused response, or a JSON error text) → its catalog sentence;
  * a refused response → a sentence for its HTTP status; a lost connection or
  * broken stream → "connection lost"; anything else → the generic sentence.
  * The technical facts go to `details`, for "Visa detaljer".
  */
-export function describeChatFailure(
+function describeGeneralFailure(
   error: unknown,
-  streamErrorCode: number | null | undefined,
+  streamError: EneoDataParts["error"] | null | undefined,
   t: Translate
 ): ChatFailure {
   if (error instanceof EneoApiError) {
-    const code = streamErrorCode ?? error.code;
+    const code = streamError?.code ?? error.code;
+    const reason = streamError?.reason ?? error.reason;
     const details = [t("chat_error_detail_status", { status: error.status })];
     if (code !== undefined && code !== null) {
-      details.push(
-        t("chat_error_detail_code", { code: error.reason ? `${code} (${error.reason})` : code })
-      );
+      details.push(t("chat_error_detail_code", { code: reason ? `${code} (${reason})` : code }));
     }
     const backendMessage = parseJsonMessage(error.message)?.message ?? error.message;
     if (backendMessage) details.push(truncate(backendMessage));
-    if (error.traceId) details.push(t("chat_error_detail_trace", { traceId: error.traceId }));
+    details.push(...errorReferenceLines(error, t));
     return {
-      message: getErrorMessageForCode(code, t) ?? sentenceForStatus(error.status, t),
+      message:
+        getErrorMessageForReason(reason, t) ??
+        getErrorMessageForCode(code, t) ??
+        sentenceForStatus(error.status, t),
       details
     };
   }
@@ -114,17 +161,29 @@ export function describeChatFailure(
   const rawMessage =
     error instanceof Error ? error.message : typeof error === "string" ? error : "";
   const parsed = parseJsonMessage(rawMessage);
-  const code = streamErrorCode ?? parsed?.code ?? null;
+  const code = streamError?.code ?? parsed?.code ?? null;
+  const reason = streamError?.reason ?? parsed?.reason;
   const details: string[] = [];
-  if (code !== null) details.push(t("chat_error_detail_code", { code }));
+  if (code !== null)
+    details.push(t("chat_error_detail_code", { code: reason ? `${code} (${reason})` : code }));
   const backendMessage = parsed ? parsed.message : rawMessage;
   if (backendMessage) {
     const name = error instanceof Error && error.name !== "Error" ? `${error.name}: ` : "";
     details.push(truncate(`${name}${backendMessage}`));
   }
 
-  const mapped = getErrorMessageForCode(code, t);
+  const mapped = getErrorMessageForReason(reason, t) ?? getErrorMessageForCode(code, t);
   if (mapped) return { message: mapped, details };
   if (isConnectionFailure(error)) return { message: t("chat_error_connection_lost"), details };
   return { message: t("request_failed"), details };
+}
+
+export function describeChatFailure(
+  error: unknown,
+  streamError: EneoDataParts["error"] | null | undefined,
+  t: Translate
+): ChatFailure {
+  const failure = describeGeneralFailure(error, streamError, t);
+  const context = getContextErrorInfo(error, streamError);
+  return context ? { ...failure, message: t("context_window_exceeded"), context } : failure;
 }

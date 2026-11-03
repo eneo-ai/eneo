@@ -1,5 +1,3 @@
-"use client";
-
 import { useAppContext } from "@/components/providers/app-context";
 import { useSpace } from "@/features/spaces/use-space";
 

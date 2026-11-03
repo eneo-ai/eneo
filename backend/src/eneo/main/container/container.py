@@ -51,6 +51,7 @@ from eneo.authentication.api_key_resolver import ApiKeyAuthResolver
 from eneo.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
 from eneo.authentication.api_key_v2_repo import ApiKeysV2Repository
 from eneo.authentication.auth_service import AuthService
+from eneo.authentication.browser_session_service import BrowserSessionService
 from eneo.collections.application.collection_crud_service import CollectionCRUDService
 from eneo.completion_models.application import CompletionModelCRUDService
 from eneo.completion_models.application.completion_model_migration_history_service import (
@@ -378,6 +379,7 @@ from eneo.templates.assistant_template.assistant_template_service import (
 )
 from eneo.templates.templates_service import TemplateService
 from eneo.tenants.tenant import TenantInDB
+from eneo.tenants.tenant_federation_service import TenantFederationService
 from eneo.tenants.tenant_repo import TenantRepository
 from eneo.tenants.tenant_service import TenantService
 from eneo.token_usage.application.token_usage_service import TokenUsageService
@@ -897,6 +899,12 @@ class Container(containers.DeclarativeContainer):
         audit_config_service=audit_config_service,
         feature_flag_service=feature_flag_service,
     )
+    tenant_federation_service = providers.Factory(
+        TenantFederationService,
+        tenant_repo=tenant_repo,
+        encryption_service=encryption_service,
+        audit_service=audit_service,
+    )
 
     # Completion model adapters
     context_builder = providers.Factory(ContextBuilder)
@@ -1014,6 +1022,12 @@ class Container(containers.DeclarativeContainer):
         transcription_model_repo=transcription_model_repo,
     )
     auth_service = providers.Factory(AuthService)
+    browser_session_service = providers.Factory(
+        BrowserSessionService,
+        session=session,
+        auth_service=auth_service,
+        audit_service=audit_service,
+    )
     scim_token_repository = providers.Factory(
         ScimTokenRepository,
         session=session,
@@ -1407,6 +1421,7 @@ class Container(containers.DeclarativeContainer):
         api_key_rate_limiter=api_key_rate_limiter,
         feature_flag_service=feature_flag_service,
         session=session,
+        browser_session_service=browser_session_service,
     )
     module_auth_broker = providers.Factory(
         ModuleAuthBroker,

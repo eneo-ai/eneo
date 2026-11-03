@@ -1,5 +1,3 @@
-"use client";
-
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   readConversationDraft,
@@ -54,7 +52,7 @@ export function ConversationSettingsProvider({
   partner: ChatPartner;
   initialSessionId?: string | null;
   hasHistory?: boolean;
-  onNewConversation?: () => void;
+  onNewConversation?: (prepare?: () => void) => void;
   children: ReactNode;
 }) {
   const { user, tenant } = useAppContext();
@@ -215,12 +213,13 @@ export function ConversationSettingsProvider({
     else void reload();
   }
 
+  // Remembered only once leaving is confirmed: a cancelled leave keeps the old start choices.
   const startConversation = onNewConversation
-    ? (patch: Partial<Settings>) => {
-        if (current.current)
-          rememberConversationDraft(scope, withPatch(current.current.settings, patch));
-        onNewConversation();
-      }
+    ? (patch: Partial<Settings>) =>
+        onNewConversation(() => {
+          if (current.current)
+            rememberConversationDraft(scope, withPatch(current.current.settings, patch));
+        })
     : null;
 
   return (

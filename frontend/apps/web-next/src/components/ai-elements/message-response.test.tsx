@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { useMemo } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 import { resolveInrefs } from "@/lib/chat/inref";
@@ -12,9 +12,12 @@ import {
   remarkCitations
 } from "./citation";
 import { answerHeadingLevel } from "./markdown-components";
+import { katexStore } from "./math";
 import { MessageResponse } from "./message";
 
 afterEach(cleanup);
+// Typeset formulas from the first render; math-load.test.tsx covers KaTeX arriving later.
+beforeAll(() => katexStore.load());
 
 const SOURCES = [
   { title: "Upphandlingspolicy 2024", url: "https://intranat.kommun.se/policy" },
@@ -151,6 +154,75 @@ describe("MessageResponse", () => {
     expect(external.getAttribute("target")).toBe("_blank");
     expect(screen.getByText("ett annat svar")).toBeTruthy();
     expect(screen.getByText("en saknad källa")).toBeTruthy();
+  });
+
+  it.each(["irc://chat.example/room", "xmpp:user@example.com", "streamdown:external"])(
+    "keeps URLs outside the content policy inert: %s",
+    (href) => {
+      const { container } = renderAnswer(vi.fn(), `[Källtext](${href}) ![Bildtext](${href})`);
+      expect(screen.getByText("Källtext")).toBeTruthy();
+      expect(screen.queryByRole("link", { name: "Källtext" })).toBeNull();
+      expect(container.querySelector("img[src]")).toBeNull();
+    }
+  );
+
+  it.each([
+    "javascript:alert(1)",
+    "JaVaScRiPt:alert(1)",
+    "java&#x09;script:alert(1)",
+    "data:text/html;base64,PHNjcmlwdD4="
+  ])("removes unsafe URLs from answer links and images: %s", (url) => {
+    const { container } = renderAnswer(
+      vi.fn(),
+      `<a href="${url}">Källtext</a><img src="${url}" alt="Bildtext" />`
+    );
+    expect(container.textContent).toContain("Källtext");
+    expect(container.querySelector("a[href], img[src]")).toBeNull();
+  });
+
+  it("keeps safe links, relative citations and image URLs usable", () => {
+    renderAnswer(
+      vi.fn(),
+      [
+        "[Webb](https://example.com/source)",
+        "[E-post](mailto:user@example.com)",
+        "[Telefon](tel:+461234567)",
+        "[Avsnitt](#section)",
+        "![Bildtext](https://example.com/image.png)"
+      ].join("\n\n")
+    );
+    for (const [name, href] of [
+      ["Webb", "https://example.com/source"],
+      ["E-post", "mailto:user@example.com"],
+      ["Telefon", "tel:+461234567"],
+      ["Avsnitt", "#section"]
+    ]) {
+      expect(screen.getByRole("link", { name }).getAttribute("href")).toBe(href);
+    }
+    expect(screen.getByRole("img", { name: "Bildtext" }).getAttribute("src")).toBe(
+      "https://example.com/image.png"
+    );
+  });
+
+  it("keeps an incomplete streaming link inert until its destination arrives", () => {
+    const { rerender } = renderAnswer(vi.fn(), "[Källtext](");
+    expect(screen.getByText("Källtext")).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Källtext" })).toBeNull();
+    rerender(<Answer text="[Källtext](https://example.com)" onOpenSource={vi.fn()} />);
+    expect(screen.getByRole("link", { name: "Källtext" }).getAttribute("href")).toBe(
+      "https://example.com/"
+    );
+  });
+
+  it("keeps the inert image loading placeholder until the image URL arrives", () => {
+    const { container, rerender } = renderAnswer(vi.fn(), "![Bildtext](");
+    expect(container.querySelector('[data-streamdown="image-placeholder"]')).not.toBeNull();
+    expect(container.querySelector("img[src]")).toBeNull();
+    rerender(<Answer text="![Bildtext](https://example.com/image.png)" onOpenSource={vi.fn()} />);
+    expect(container.querySelector('[data-streamdown="image-placeholder"]')).toBeNull();
+    expect(screen.getByRole("img", { name: "Bildtext" }).getAttribute("src")).toBe(
+      "https://example.com/image.png"
+    );
   });
 
   it("matches only this message's markers within its sources", () => {

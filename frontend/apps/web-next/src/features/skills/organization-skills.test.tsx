@@ -10,12 +10,14 @@ import { deriveSkillSlug, normalizedSkillContent } from "./skill-model";
 const get = vi.hoisted(() => vi.fn());
 const post = vi.hoisted(() => vi.fn());
 const push = vi.hoisted(() => vi.fn());
+const removedFilter = vi.hoisted(() => ({ value: false }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: { GET: get, POST: post } }));
-vi.mock("next/navigation", () => ({
+vi.mock("@/lib/navigation", async () => ({
+  ...(await import("@/test/navigation")),
   useRouter: () => ({ push }),
-  useSearchParams: () => new URLSearchParams()
+  useSearchParams: () => new URLSearchParams(removedFilter.value ? "removed=true" : "")
 }));
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
   useLocale: () => "en"
 }));
@@ -45,6 +47,7 @@ const skill = {
 } as OrganizationSkill;
 
 beforeEach(() => {
+  removedFilter.value = false;
   get.mockImplementation(() => ok({ items: [skill], next_cursor: null }));
   post.mockImplementation(() =>
     ok({
@@ -68,6 +71,14 @@ function show(page: "list" | "new") {
 }
 
 describe("organisation skill catalogue", () => {
+  it("shows the removal timestamp in removed list rows", async () => {
+    removedFilter.value = true;
+    get.mockImplementation(() =>
+      ok({ items: [{ ...skill, removed_at: "2026-10-01T10:00:00Z" }], next_cursor: null })
+    );
+    show("list");
+    expect(await screen.findByText("organization_skills_removed_at")).toBeTruthy();
+  });
   it("sends search terms as a query and requests the removed view separately", async () => {
     show("list");
     await screen.findByText("Search reports");

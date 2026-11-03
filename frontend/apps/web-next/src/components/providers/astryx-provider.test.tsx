@@ -1,14 +1,14 @@
 // @vitest-environment jsdom
 import { Link } from "@astryxdesign/core/Link";
 import { render, screen } from "@testing-library/react";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 import { ThemeProvider } from "next-themes";
 import { describe, expect, it } from "vitest";
 import { renderInApp } from "@/test/render";
 import { AstryxProvider } from "./astryx-provider";
 
 describe("AstryxProvider", () => {
-  it("renders Astryx links with next/link and without Astryx's router prop `to`", () => {
+  it("renders Astryx links through the app's Link without Astryx's router prop `to`", () => {
     renderInApp(<Link href="/spaces/list">Ytor</Link>);
 
     const link = screen.getByRole("link", { name: "Ytor" });
@@ -23,11 +23,11 @@ describe("AstryxProvider", () => {
     // class on <html> through globals.css instead.
     const { container } = render(
       <ThemeProvider attribute="class" forcedTheme="dark">
-        <NextIntlClientProvider locale="sv" messages={{}}>
+        <IntlProvider locale="sv" messages={{}}>
           <AstryxProvider>
             <p>Innehåll</p>
           </AstryxProvider>
-        </NextIntlClientProvider>
+        </IntlProvider>
       </ThemeProvider>
     );
 

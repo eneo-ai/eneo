@@ -269,6 +269,9 @@ class AssistantUpdatePublic(AssistantCreatePublic):
         ),
     )
     prompt: Optional[PromptCreate] = None
+    completion_model: Optional[ModelId] = None
+    completion_model_kwargs: Optional[ModelKwargs] = None
+    logging_enabled: Optional[bool] = None
     attachments: Optional[list[AssistantAttachmentInput]] = None
     groups: Optional[list[ModelId]] = None  # type: ignore[assignment]
     websites: Optional[list[ModelId]] = None  # type: ignore[assignment]

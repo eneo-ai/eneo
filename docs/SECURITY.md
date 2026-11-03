@@ -82,7 +82,7 @@ The repository uses GitHub security features and CI to prevent regressions:
   setup that gives developers useful feedback without high false-positive noise.
   Re-enable code scanning only after the query set and triage process are tuned
   enough that alerts are actionable for maintainers.
-- Release SBOMs are generated from the published backend, Svelte frontend, Next frontend, and bundled
+- Release SBOMs are generated from the published backend (including the React web build), Svelte frontend, tools runtime, and bundled
   SeaweedFS container
   image digests and attached to GitHub Releases as CycloneDX JSON, SPDX JSON,
   and human-readable table files. The backend release also includes a narrower

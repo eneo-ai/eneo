@@ -1,10 +1,8 @@
-"use client";
-
 import { Button } from "@astryxdesign/core/Button";
 import { referenceAuditRows } from "@eneo/skill-instructions/audit";
 import { referenceUri } from "@eneo/skill-instructions";
 import { useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import type { Schema } from "@/lib/api/models";
 
 export function DebugSkillReferences({

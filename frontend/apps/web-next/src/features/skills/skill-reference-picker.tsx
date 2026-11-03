@@ -1,5 +1,3 @@
-"use client";
-
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { Item } from "@astryxdesign/core/Item";
 import { Badge } from "@astryxdesign/core/Badge";
@@ -18,7 +16,7 @@ import {
 } from "@eneo/skill-instructions";
 import type { ReferenceSelection } from "@eneo/skill-instructions/editor";
 import { useEffect, useId, useRef, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { TextInput } from "@/components/astryx/text-input";
 import { getErrorMessage } from "@/lib/api/errors";
 
@@ -187,7 +185,7 @@ export function SkillReferencePicker({
           )}
         </div>
       )}
-      <div className="flex min-h-0 flex-col gap-3 overflow-x-hidden overflow-y-auto overscroll-contain p-4 [@media(max-height:30rem)]:shrink-0 [@media(max-height:30rem)]:overflow-visible">
+      <div className="short:shrink-0 short:overflow-visible flex min-h-0 flex-col gap-3 overflow-x-hidden overflow-y-auto overscroll-contain p-4">
         {selected ? (
           <>
             <section aria-labelledby={`${id}-preview`} className="flex min-w-0 flex-col gap-3">

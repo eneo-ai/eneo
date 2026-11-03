@@ -45,7 +45,7 @@ describe("JobIndicator", () => {
 
     fireEvent.keyDown(panel, { key: "Escape" });
     await waitFor(() => expect(bell.getAttribute("aria-expanded")).toBe("false"));
-    expect(document.activeElement).toBe(bell);
+    await waitFor(() => expect(document.activeElement).toBe(bell));
   });
 
   it("says how many jobs run and lists uploads, jobs and failures", async () => {

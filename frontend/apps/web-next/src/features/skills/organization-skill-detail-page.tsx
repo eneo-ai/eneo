@@ -1,17 +1,17 @@
-"use client";
-
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import Link from "next/link";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { useState } from "react";
+import { BackLink } from "@/components/composites/back-link";
+import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { blockingError, ListError, RefreshError } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { ORGANIZATION_SKILLS_KEY, type SkillRemovalResult } from "./organization-skills";
-import { SkillRemovalDialog } from "./organization-skills-page";
+import { SkillRemovalDialog, skillRemovalMessage } from "./organization-skills-page";
 import { SkillForm } from "./skill-form";
 import { skillReferenceCatalog } from "./skill-reference-catalog";
 import { SkillRevisionHistory } from "./skill-revision-history";
@@ -42,33 +42,23 @@ export function OrganizationSkillDetailPage({ skillId }: { skillId: string }) {
 
   async function removed(result: SkillRemovalResult) {
     setRemovalOpen(false);
-    setAnnouncement(
-      t("organization_skills_removed_success", { count: String(result.removed_ids.length) })
-    );
+    setAnnouncement(skillRemovalMessage(result, t));
     await queryClient.invalidateQueries({ queryKey: ORGANIZATION_SKILLS_KEY });
   }
 
-  if (skill.isPending)
+  if (blockingError(skill))
     return (
-      <p role="status" className="text-muted-foreground p-6 text-sm">
-        {t("loading")}
-      </p>
+      <ListError
+        error={skill.error}
+        isRetrying={skill.isFetching}
+        onRetry={() => void skill.refetch()}
+      />
     );
-  if (skill.isError)
-    return (
-      <Alert variant="destructive" role="alert">
-        <AlertTitle>{t("request_failed")}</AlertTitle>
-        <AlertDescription>
-          <Button variant="outline" onClick={() => void skill.refetch()}>
-            {t("retry")}
-          </Button>
-        </AlertDescription>
-      </Alert>
-    );
+  if (!skill.data) return <LoadingState rows={4} />;
   const value = skill.data;
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-7 pb-16">
+    <div className="flex w-full flex-col gap-7 pb-16">
       <PageHeader title={value.display_name}>
         {!value.removed_at && (
           <Button
@@ -81,9 +71,10 @@ export function OrganizationSkillDetailPage({ skillId }: { skillId: string }) {
           </Button>
         )}
       </PageHeader>
-      <Button asChild variant="link" className="w-fit px-0">
-        <Link href={LIST_PATH}>{t("skills")}</Link>
-      </Button>
+      <RefreshError queries={[skill]} />
+      <BackLink href={LIST_PATH} hideOnPhone>
+        {t("skills")}
+      </BackLink>
       <p role="status" className={announcement ? "text-sm" : "sr-only"}>
         {announcement}
       </p>
@@ -168,7 +159,7 @@ export function OrganizationSkillDetailPage({ skillId }: { skillId: string }) {
         <OrganizationSkillAdoption skill={value} rolloutRunning={rolloutRunning} />
       )}
       <SkillRevisionHistory
-        key={value.current_revision_id}
+        key={value.id}
         skill={value}
         unsaved={dirty}
         scope={{ type: "organization" }}

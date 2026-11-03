@@ -33,8 +33,8 @@
     "zod": "^4.6.6"
   },
   "devDependencies": {
-    "@astryxdesign/core": "0.6.4",
-    "@astryxdesign/theme-neutral": "0.6.4",
+    "@astryxdesign/core": "0.7.5",
+    "@astryxdesign/theme-neutral": "0.7.5",
     "@modelcontextprotocol/client": "2.3.1",
     "@modelcontextprotocol/core": "2.3.1",
     "@modelcontextprotocol/ext-apps": "2.0.3",

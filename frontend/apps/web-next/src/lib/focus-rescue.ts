@@ -25,14 +25,18 @@ import { useEffect, useState } from "react";
 
 /**
  * A menu that is still in the page but not shown: a closed Astryx menu (a
- * hidden popover) or a Radix menu playing its close animation. Focus left on
- * one of its items is on nothing the user can see.
+ * hidden popover). Focus left on one of its items is on nothing the user can
+ * see.
  */
 function isHiddenMenu(menu: Element): boolean {
-  if (menu.closest('[hidden], [data-state="closed"]')) return true;
+  if (menu.closest("[hidden]")) return true;
   const popover = menu.closest("[popover]");
-  // Without the Popover API (jsdom) a popover's state cannot be read.
-  if (!popover || typeof HTMLElement.prototype.showPopover !== "function") return false;
+  if (!(popover instanceof HTMLElement)) return false;
+  // Without the Popover API (Safari < 17, Firefox < 125, jsdom) Astryx hides a
+  // closed popover with an inline display: none.
+  if (typeof HTMLElement.prototype.showPopover !== "function") {
+    return popover.style.display === "none";
+  }
   return !popover.matches(":popover-open");
 }
 

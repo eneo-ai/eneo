@@ -1,5 +1,3 @@
-"use client";
-
 import { BottomSheet } from "@astryxdesign/core/BottomSheet";
 import { Button } from "@astryxdesign/core/Button";
 import { useMediaQuery } from "@astryxdesign/core/hooks";
@@ -7,7 +5,7 @@ import { IconButton } from "@astryxdesign/core/IconButton";
 import { Popover } from "@astryxdesign/core/Popover";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { BookOpenCheck, Lock, Plus, RefreshCw, Search, Settings, X } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import {
   useEffect,
   useLayoutEffect,
@@ -16,7 +14,7 @@ import {
   type ReactNode,
   type RefObject
 } from "react";
-import { QuietBanner } from "@/components/astryx/banner";
+import { Banner } from "@astryxdesign/core/Banner";
 import { TextInput } from "@/components/astryx/text-input";
 import { LoadingState } from "@/components/composites/loading-state";
 import { ListError, QueryStateBoundary } from "@/components/composites/query-state";
@@ -33,6 +31,7 @@ import { SkillDependencies } from "@/features/skills/skill-dependencies";
 import { useFocusRescue } from "@/lib/focus-rescue";
 import { cn } from "@/lib/utils";
 import { COMPOSER_PILL_CLASS, COMPOSER_PILL_COUNT_CLASS } from "./mcp-controls";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
 type PersonalChatSkills = ReturnType<typeof usePersonalChatSkills>;
 /** The library search: as typed, and the query the rows follow after a pause. */
@@ -216,6 +215,7 @@ function OwnSkills({
             value={search.value}
             onChange={search.onChange}
             startIcon={Search}
+            {...KEYBOARD.search}
             hasClear
             size="sm"
             width="100%"
@@ -353,7 +353,7 @@ function SkillsPanel({
             )}
           >
             {layer?.status === "suspended" && layer.reason && (
-              <QuietBanner
+              <Banner
                 status="warning"
                 title={t("personal_chat_skills_paused_title")}
                 description={layerReasonText(layer.reason, layer.detail, t)}
@@ -438,7 +438,7 @@ export function ChatSkills() {
   const searchField = { value: searchInput, onChange: setSearchInput, query: search };
 
   const label = skills.running
-    ? t("personal_chat_skills_button_label", { count: skills.running.total })
+    ? t("chat_skills_named", { count: skills.running.total })
     : t("personal_chat_skills_button");
   const pill = (props: { onClick?: () => void }) => (
     <button
@@ -451,7 +451,7 @@ export function ChatSkills() {
       {...props}
     >
       <BookOpenCheck aria-hidden="true" className="size-[15px]" />
-      <span className="max-sm:sr-only">{t("personal_chat_skills_button")}</span>
+      <span className="max-sm:sr-only">{t("personal_chat_skills_button")}</span>{" "}
       {skills.running && (
         <span aria-hidden="true" className={COMPOSER_PILL_COUNT_CLASS}>
           {skills.running.total}
@@ -490,6 +490,7 @@ export function ChatSkills() {
         label={t("personal_chat_skills_button")}
         // A search field brings up the keyboard: only a tall sheet makes room for it.
         height={skills.searchable ? "tall" : "80dvh"}
+        padding={0}
       >
         <SkillsPanel
           skills={skills}

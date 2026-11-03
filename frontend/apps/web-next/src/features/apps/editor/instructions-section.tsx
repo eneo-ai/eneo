@@ -1,26 +1,34 @@
-"use client";
-
 import { History } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useState } from "react";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
-import { useAutosave, useAutosaveField } from "@/components/composites/use-autosave";
+import { useAutosaveField } from "@/components/composites/use-autosave";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { formatDateTime } from "@/lib/format";
 import { PromptVersionDialog } from "@/features/prompts/prompt-version-dialog";
+import { promptDraftsMatch, type PromptDraft } from "@/features/prompts/prompt-draft";
 import type { App } from "../apps";
 import { useUpdateApp } from "./use-app";
 
 export function InstructionsSection({ app }: { app: App }) {
   const t = useTranslations();
   const update = useUpdateApp(app.id);
-  const restorePrompt = useAutosave("app-prompt");
   const [showHistory, setShowHistory] = useState(false);
 
-  const prompt = useAutosaveField({
+  const savedText = app.prompt?.text ?? "";
+  const savedDescription = app.prompt?.description ?? "";
+  const prompt = useAutosaveField<PromptDraft>({
     key: "app-prompt",
-    value: app.prompt?.text ?? "",
-    save: (value) => update.mutateAsync({ prompt: { text: value } }),
+    value: { kind: "server", text: savedText, description: savedDescription },
+    equals: promptDraftsMatch,
+    save: (value) =>
+      update.mutateAsync({
+        prompt: {
+          text: value.text,
+          ...(value.kind === "manual" ? {} : { description: value.description })
+        }
+      }),
     commitDebounceMs: 1500,
     commitOnVisibilityChange: true
   });
@@ -41,9 +49,12 @@ export function InstructionsSection({ app }: { app: App }) {
       >
         <Textarea
           id="app-prompt"
-          value={prompt.value}
+          value={prompt.value.text}
           rows={6}
-          onChange={(event) => prompt.setValue(event.target.value)}
+          onChange={(event) => {
+            const text = event.target.value;
+            prompt.setValue({ kind: "manual", text });
+          }}
           onBlur={() => prompt.commit()}
         />
       </SettingsRow>
@@ -51,9 +62,16 @@ export function InstructionsSection({ app }: { app: App }) {
         resource={{ type: "app", id: app.id }}
         open={showHistory}
         onOpenChange={setShowHistory}
-        onUseVersion={(text) => {
-          prompt.setValue(text);
-          void restorePrompt(() => update.mutateAsync({ prompt: { text } }));
+        onUseVersion={(version) => {
+          const value: PromptDraft = {
+            kind: "annotated",
+            text: version.text,
+            description: t("prompt_restored_from_date", {
+              date: version.created_at ? formatDateTime(version.created_at) : t("unknown")
+            })
+          };
+          prompt.setValue(value);
+          void prompt.commit(value);
         }}
       />
     </SettingsGroup>

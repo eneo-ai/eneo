@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { router } from "@/test/navigation";
 import { renderInApp, testAppContext } from "@/test/render";
+import { setViewport } from "@/test/setup-dom";
 import {
   spaceHasPermission,
   type ResourcePermission,
@@ -21,7 +22,7 @@ import {
 
 const state = vi.hoisted(() => ({ space: null as unknown, progress: [] as unknown[] }));
 
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 vi.mock("@/features/spaces/use-space", () => ({
   useSpace: () => ({
     space: state.space,
@@ -43,7 +44,7 @@ vi.mock("@/features/jobs/use-jobs", () => ({
   useJobs: () => ({ trackJob: () => {}, queueUploads: () => {} })
 }));
 
-import { SpaceOverview } from "@/app/(app)/spaces/[spaceId]/overview/space-overview.client";
+import { SpaceOverview } from "@/features/spaces/overview/space-overview.client";
 
 afterEach(() => {
   cleanup();
@@ -66,6 +67,17 @@ const appContext = testAppContext({
 function show(space: Space) {
   state.space = space;
   return renderInApp(<SpaceOverview />, { appContext });
+}
+
+/**
+ * The overview's create controls are small and secondary, like "Ladda upp":
+ * the tabs' docked create buttons stay each screen's one primary action.
+ */
+function expectSecondaryCreate(scope: HTMLElement, name: string) {
+  const create = within(scope).getByRole("button", { name });
+  const more = within(scope).getByRole("button", { name: "Fler sätt att skapa" });
+  expect([create.dataset.variant, create.dataset.size]).toEqual(["secondary", "sm"]);
+  expect([more.dataset.variant, more.dataset.size]).toEqual(["secondary", "sm"]);
 }
 
 const busySpace = () =>
@@ -94,6 +106,13 @@ const busySpace = () =>
   });
 
 describe("SpaceOverview", () => {
+  it("leaves knowledge to the Kunskap tab on a phone, where the overview lists what to act on", () => {
+    setViewport("phone");
+    show(busySpace());
+    expect(screen.getByRole("region", { name: "Assistenter" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Kunskap" })).toBeNull();
+  });
+
   it("shows the newest assistants and a compact knowledge list", async () => {
     const { container } = show(busySpace());
 
@@ -109,7 +128,7 @@ describe("SpaceOverview", () => {
     expect(within(cards[1]!).getByText("Publicerad")).toBeTruthy();
     expect(within(cards[1]!).getByText("Haiku 4.5")).toBeTruthy();
     expect(within(cards[2]!).getByText("Börja från en mall eller från noll")).toBeTruthy();
-    expect(within(cards[2]!).getByRole("button", { name: "Skapa assistent" })).toBeTruthy();
+    expectSecondaryCreate(cards[2]!, "Skapa assistent");
     expect(within(assistants).queryByRole("link", { name: "Äldst" })).toBeNull();
 
     const knowledge = screen.getByRole("region", { name: "Kunskap" });
@@ -189,7 +208,10 @@ describe("SpaceOverview", () => {
 
     const assistants = screen.getByRole("region", { name: "Assistenter" });
     expect(within(assistants).getByRole("heading", { name: "Inga assistenter ännu" })).toBeTruthy();
-    expect(within(assistants).getByRole("button", { name: "Skapa assistent" })).toBeTruthy();
+    // An empty section's one next step stays the filled button.
+    expect(
+      within(assistants).getByRole("button", { name: "Skapa assistent" }).dataset.variant
+    ).toBe("primary");
     expect(within(assistants).queryByRole("link", { name: "Visa alla assistenter" })).toBeNull();
 
     const knowledge = screen.getByRole("region", { name: "Kunskap" });
@@ -220,5 +242,146 @@ describe("SpaceOverview", () => {
     show(makeSpace({ overrides: { organization: true } }));
     expect(screen.queryByRole("region", { name: "Assistenter" })).toBeNull();
     expect(screen.getByRole("region", { name: "Kunskap" })).toBeTruthy();
+  });
+});
+
+describe("SpaceOverview on a phone: Hantera ytan (decision 24)", () => {
+  const manage = () => screen.getByRole("region", { name: "Hantera ytan" });
+  const rows = () =>
+    within(manage())
+      .getAllByRole("link")
+      .map((link) => [link.textContent, link.getAttribute("href")]);
+
+  it("lists what manages the space, each opening its screen", async () => {
+    setViewport("phone");
+    const { container } = show(
+      makeSpace({ members: [makeMember(), makeMember({ id: "u2", email: "erik@example.com" })] })
+    );
+    expect(rows()).toEqual([
+      ["Medlemmar (2)", "/spaces/space-1/members"],
+      ["Inställningar", "/spaces/space-1/settings"],
+      ["Skills", "/spaces/space-1/skills"]
+    ]);
+    // After the space's content.
+    const regions = screen
+      .getAllByRole("region")
+      .map((region) => region.getAttribute("aria-labelledby"));
+    expect(regions.at(-1)).toBe(manage().getAttribute("aria-labelledby"));
+    await expectNoAxeViolations(container);
+  });
+
+  it("lists only what the user may manage", () => {
+    setViewport("phone");
+    show(makeSpace({ permissions: ["read"], skillPermissions: [] }));
+    expect(rows().map(([label]) => label)).toEqual(["Medlemmar (0)"]);
+  });
+
+  it("lists the newest assistants as rows, with the create button in the heading instead of a card", () => {
+    setViewport("phone");
+    show(busySpace());
+    const assistants = screen.getByRole("region", { name: "Assistenter" });
+    const rows = within(within(assistants).getAllByRole("list")[0]!).getAllByRole("listitem");
+    // All three fit where the create card used to take the room of a row and a half.
+    expect(rows).toHaveLength(3);
+    expect(within(rows[0]!).getByRole("link", { name: /^Avtalsgranskaren/ })).toBeTruthy();
+    const heading = within(assistants).getByRole("heading", { name: "Assistenter" }).parentElement!;
+    expectSecondaryCreate(heading, "Skapa assistent");
+    expect(within(assistants).queryByText("Börja från en mall eller från noll")).toBeNull();
+  });
+
+  it("is not there on a tablet, which has a tab for each", () => {
+    setViewport("tablet-portrait");
+    show(makeSpace());
+    expect(screen.queryByRole("region", { name: "Hantera ytan" })).toBeNull();
+  });
+
+  it("is not there for the organisation space, which keeps them as tabs (F4)", () => {
+    setViewport("phone");
+    show(makeSpace({ overrides: { organization: true } }));
+    expect(screen.queryByRole("region", { name: "Hantera ytan" })).toBeNull();
+  });
+});
+
+const app = (overrides: Record<string, unknown> = {}) => ({
+  id: "app-1",
+  name: "Protokoll från möte",
+  description: "Gör ett protokoll av anteckningarna",
+  published: true,
+  permissions: ["read"],
+  updated_at: "2026-09-10T08:00:00Z",
+  ...overrides
+});
+
+const appSpace = (options: Parameters<typeof makeSpace>[0] = {}) =>
+  makeSpace({
+    apps: [
+      app(),
+      app({
+        id: "app-2",
+        name: "Anbudsutvärdering",
+        published: false,
+        updated_at: "2026-09-12T08:00:00Z"
+      }),
+      app({ id: "app-3", name: "Äldst", updated_at: "2025-01-01T00:00:00Z" })
+    ],
+    ...options
+  });
+
+describe("SpaceOverview apps", () => {
+  it("shows the newest apps, then the create card, and leads to the apps tab", () => {
+    show(appSpace());
+    const apps = screen.getByRole("region", { name: "Appar" });
+    expect(within(apps).getByRole("link", { name: "Visa alla appar" }).getAttribute("href")).toBe(
+      "/spaces/space-1/apps"
+    );
+    const cards = Array.from(within(apps).getAllByRole("list")[0]!.children) as HTMLElement[];
+    expect(cards).toHaveLength(3);
+    expect(within(cards[0]!).getByRole("link", { name: /Anbudsutvärdering/ })).toBeTruthy();
+    expect(within(cards[0]!).getByText("Utkast")).toBeTruthy();
+    expect(within(cards[1]!).getByRole("link", { name: /Protokoll från möte/ })).toBeTruthy();
+    expectSecondaryCreate(cards[2]!, "Skapa app");
+    expect(within(apps).queryByRole("link", { name: /Äldst/ })).toBeNull();
+    // The actions menu belongs to the apps tab.
+    expect(within(apps).queryByRole("button", { name: /Fler åtgärder|Åtgärder/ })).toBeNull();
+    // Assistants first, apps next, knowledge last: the order of the tabs.
+    const order = screen
+      .getAllByRole("heading", { level: 2 })
+      .map((heading) => heading.textContent);
+    expect(order.indexOf("Appar")).toBeGreaterThan(order.indexOf("Assistenter"));
+    expect(order.indexOf("Appar")).toBeLessThan(order.indexOf("Kunskap"));
+  });
+
+  it("puts the create button in the heading on a phone, and lists all three", () => {
+    setViewport("phone");
+    show(appSpace());
+    const apps = screen.getByRole("region", { name: "Appar" });
+    const rows = within(within(apps).getAllByRole("list")[0]!).getAllByRole("listitem");
+    expect(rows).toHaveLength(3);
+    const heading = within(apps).getByRole("heading", { name: "Appar" }).parentElement!;
+    expectSecondaryCreate(heading, "Skapa app");
+  });
+
+  it("offers no create control to someone who may only read", () => {
+    show(appSpace({ resourcePermissions: ["read"] }));
+    const apps = screen.getByRole("region", { name: "Appar" });
+    expect(within(apps).queryByRole("button", { name: "Skapa app" })).toBeNull();
+    expect(within(apps).getAllByRole("link", { name: /^(?!Visa alla)/ }).length).toBe(3);
+  });
+
+  it("is not there for someone with no apps to open and none to create", () => {
+    show(makeSpace({ resourcePermissions: ["read"] }));
+    expect(screen.queryByRole("region", { name: "Appar" })).toBeNull();
+  });
+
+  it("invites someone who may create to make the first one", () => {
+    show(makeSpace());
+    const apps = screen.getByRole("region", { name: "Appar" });
+    expect(within(apps).getByText("Inga appar ännu")).toBeTruthy();
+    expect(within(apps).getByRole("button", { name: "Skapa app" })).toBeTruthy();
+  });
+
+  it("is not there for the organisation space", () => {
+    show(appSpace({ overrides: { organization: true } }));
+    expect(screen.queryByRole("region", { name: "Appar" })).toBeNull();
   });
 });

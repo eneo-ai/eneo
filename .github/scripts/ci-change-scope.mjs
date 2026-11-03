@@ -17,13 +17,11 @@ const outputNames = [
   "docker_devcontainer",
   "web_next",
   "web_next_e2e",
-  "docker_web_next",
 ];
 
 const dockerImages = [
-  { image: "backend", context: "./backend", file: "./backend/Dockerfile" },
+  { image: "backend", context: "./backend", file: "./backend/Dockerfile", build_contexts: "web=./frontend" },
   { image: "frontend", context: "./frontend", file: "./frontend/Dockerfile" },
-  { image: "web-next", context: "./frontend", file: "./frontend/apps/web-next/Dockerfile" },
   { image: "devcontainer", context: "./.devcontainer", file: "./.devcontainer/Dockerfile" },
 ];
 
@@ -106,15 +104,13 @@ export function classify(rawFiles) {
     "frontend/packages/whats-new/version-order.cases.json",
     "frontend/packages/whats-new/releases.schema.json",
   ].includes(file));
-  const backend = full || whatsNewContract || files.some(isBackendFile)
+  const browserRedirectContract = files.includes("frontend/apps/web-next/src/lib/auth/safe-next.cases.json");
+  const backend = full || whatsNewContract || browserRedirectContract || files.some(isBackendFile)
     || files.includes("scripts/backend_test_shard.py");
-  // The release-notes check runs in the frontend job against the real file.
   // Shared workspace files (root manifests, the lockfile, patches, packages)
   // belong to both apps; each app's own directory only to that app.
   const frontend =
-    full
-    || files.some((file) => isShippedFrontendFile(file) && !isWebNextFile(file))
-    || files.includes("scripts/check_whats_new.py");
+    full || files.some((file) => isShippedFrontendFile(file) && !isWebNextFile(file));
   const webNext =
     full || files.some((file) => isShippedFrontendFile(file) && !isSvelteAppFile(file));
   const frontendE2e = full || backend || frontend || files.some(isE2eFile);
@@ -124,9 +120,9 @@ export function classify(rawFiles) {
   const scripts = full || whatsNewContract || files.some(isScriptTestFile)
     || files.includes("backend/src/eneo/roles/permissions.py");
   const routeMetadata = full || backend || files.includes("scripts/check_route_metadata.py");
-  const dockerBackend = full || backend;
+  // The backend image also contains the Vite app built from this source revision.
+  const dockerBackend = full || backend || webNext;
   const dockerFrontend = full || frontend;
-  const dockerWebNext = full || webNext;
   const dockerDevcontainer = full || files.some((file) => file.startsWith(".devcontainer/"));
 
   return {
@@ -142,7 +138,6 @@ export function classify(rawFiles) {
     docker_devcontainer: dockerDevcontainer,
     web_next: webNext,
     web_next_e2e: webNextE2e,
-    docker_web_next: dockerWebNext,
   };
 }
 

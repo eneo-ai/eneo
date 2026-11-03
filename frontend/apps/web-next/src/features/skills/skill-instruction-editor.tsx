@@ -1,6 +1,5 @@
-"use client";
-
 import { AtSign, Code } from "lucide-react";
+import { useMediaMatch } from "@/lib/hooks/use-media-match";
 import { Button } from "@astryxdesign/core/Button";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { parseInstructionReferences, type ReferenceCatalog } from "@eneo/skill-instructions";
@@ -10,7 +9,7 @@ import {
   type ReferenceSelection
 } from "@eneo/skill-instructions/editor";
 import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { SkillReferencePicker } from "./skill-reference-picker";
 import "@eneo/skill-instructions/editor.css";
 
@@ -36,6 +35,8 @@ export function SkillInstructionEditor({
   ref?: Ref<{ focus: () => void }>;
 }) {
   const t = useTranslations();
+  // A touch screen has no Shift, Ctrl or Enter key to point at.
+  const coarse = useMediaMatch("(pointer: coarse)");
   const announce = useAnnounce();
   const mount = useRef<HTMLDivElement>(null);
   const editor = useRef<InstructionEditor | null>(null);
@@ -43,7 +44,9 @@ export function SkillInstructionEditor({
   const [source, setSource] = useState(false);
   const [selection, setSelection] = useState<ReferenceSelection | null>(null);
   const label = t("skills_instructions_label");
-  const placeholder = t("skills_reference_placeholder");
+  const placeholder = t(
+    coarse ? "skills_reference_placeholder_touch" : "skills_reference_placeholder"
+  );
   const skillTypeLabel = t("skills_reference_kind_skill");
   const functionTypeLabel = t("skills_reference_kind_function");
   const mcpTypeLabel = t("skills_reference_kind_mcp");
@@ -133,7 +136,7 @@ export function SkillInstructionEditor({
         </div>
       </div>
       <p id={`${id}-reference-hint`} className="text-ax-text-secondary text-xs leading-5">
-        {t("skills_reference_hint")}
+        {t(coarse ? "skills_reference_hint_touch" : "skills_reference_hint")}
       </p>
       {malformed && (
         <p id={`${id}-reference-error`} className="text-ax-error text-sm">

@@ -58,17 +58,6 @@ jobs:
       version: ${{ needs.release.outputs.version }}
       revision: ${{ needs.release.outputs.revision }}
       backend_digest: ${{ needs.backend.outputs.digest }}
-  # The optional Next beta ships in every bundle; deployments enable it with
-  # the web-next Compose profile.
-  web-next:
-    needs: release
-    uses: ./.github/workflows/application_image.yml
-    with:
-      component: web-next
-      context: ./frontend
-      dockerfile: ./frontend/apps/web-next/Dockerfile
-      version: ${{ needs.release.outputs.version }}
-      revision: ${{ needs.release.outputs.revision }}
   tool-runtime:
     needs: release
     uses: ./.github/workflows/tool_runtime_image.yml
@@ -77,7 +66,7 @@ jobs:
       revision: ${{ needs.release.outputs.revision }}
       publish: true
   bundle:
-    needs: [release, checks, backend, frontend, web-next, tool-runtime]
+    needs: [release, checks, backend, frontend, tool-runtime]
     runs-on: ubuntu-latest
     permissions:
       contents: write

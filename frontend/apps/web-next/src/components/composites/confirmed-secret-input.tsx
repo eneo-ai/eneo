@@ -1,6 +1,5 @@
-"use client";
-
 import { TextInput } from "@/components/astryx/text-input";
+import { PasswordInput } from "@/components/astryx/password-input";
 import { useState } from "react";
 
 /** What is wrong with a secret and its confirmation, if anything. */
@@ -39,6 +38,8 @@ export type ConfirmedSecretInputProps = {
   describedBy?: string;
   isRequired?: boolean;
   isDisabled?: boolean;
+  /** Password forms can expose each value through the shared reveal control. */
+  allowReveal?: boolean;
   /** Password managers read it: "new-password" (default), "off" for API keys. */
   autoComplete?: string;
   placeholder?: string;
@@ -96,6 +97,7 @@ export function ConfirmedSecretInput({
   describedBy,
   isRequired = false,
   isDisabled = false,
+  allowReveal = false,
   autoComplete = "new-password",
   placeholder,
   requiredMessage,
@@ -105,6 +107,7 @@ export function ConfirmedSecretInput({
   valueRef,
   confirmationRef
 }: ConfirmedSecretInputProps) {
+  const SecretField = allowReveal ? PasswordInput : TextInput;
   const [confirmationLeft, setConfirmationLeft] = useState(false);
   const problem = confirmedSecretProblem({ value, confirmation, isRequired });
   const valueMessage =
@@ -113,7 +116,7 @@ export function ConfirmedSecretInput({
 
   return (
     <div className="flex flex-col gap-3">
-      <TextInput
+      <SecretField
         ref={valueRef}
         type="password"
         label={label}
@@ -127,7 +130,7 @@ export function ConfirmedSecretInput({
         placeholder={placeholder}
         status={valueMessage ? { type: "error", message: valueMessage } : undefined}
       />
-      <TextInput
+      <SecretField
         ref={confirmationRef}
         type="password"
         label={confirmLabel}

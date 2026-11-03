@@ -1,10 +1,9 @@
-"use client";
-
 import { useQueryClient } from "@tanstack/react-query";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
-import { useState } from "react";
+import Link from "@/lib/link";
+import { useRouter } from "@/lib/navigation";
+import { useTranslations } from "use-intl";
+import { useEffect, useRef, useState } from "react";
+import { BackLink } from "@/components/composites/back-link";
 import { PageHeader } from "@/components/composites/page-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -21,14 +20,20 @@ export function SpaceSkillNewPage() {
   const queryClient = useQueryClient();
   const { space, routeId } = useSpace();
   const [createdHref, setCreatedHref] = useState<string | null>(null);
+  const departureAccepted = useRef(false);
+  // Navigate after the saved state has unmounted the form and its leave guard.
+  // An accepted departure owns navigation even while its destination is loading.
+  useEffect(() => {
+    if (createdHref && !departureAccepted.current) router.push(createdHref);
+  }, [createdHref, router]);
   const base = `/spaces/${routeId}/skills`;
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 pb-16">
+    <div className="flex w-full max-w-5xl flex-col gap-6 pb-16">
       <PageHeader title={t("skills_library_new_heading")} />
-      <Button asChild variant="link" className="w-fit px-0">
-        <Link href={base}>{t("skills")}</Link>
-      </Button>
+      <BackLink href={base} hideOnPhone>
+        {t("skills")}
+      </BackLink>
       <p className="text-muted-foreground max-w-2xl text-sm">{t("skills_library_new_intro")}</p>
       {createdHref ? (
         <Alert>
@@ -41,6 +46,9 @@ export function SpaceSkillNewPage() {
         </Alert>
       ) : (
         <SkillForm
+          onLeave={() => {
+            departureAccepted.current = true;
+          }}
           referenceCatalog={skillReferenceCatalog({ type: "space", spaceId: space.id })}
           mode="create"
           onSubmit={async (value) => {
@@ -55,7 +63,6 @@ export function SpaceSkillNewPage() {
             await queryClient.invalidateQueries({
               queryKey: skillQueryKey({ type: "space", spaceId: space.id })
             });
-            router.push(href);
           }}
         />
       )}

@@ -2,6 +2,7 @@
 import { act, cleanup, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Schema } from "@/lib/api/models";
+import type { Permission } from "@/lib/auth/permissions";
 import type { ChatPartner } from "@/lib/chat/types";
 import { renderInApp, testAppContext } from "@/test/render";
 import {
@@ -13,7 +14,7 @@ import { useToolChoices } from "./use-tool-choices";
 
 const api = vi.hoisted(() => ({ POST: vi.fn(), PATCH: vi.fn() }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 let supportsTools = true;
 let saved: Schema<"ConversationSettingsState">;
 const defaults: Schema<"ConversationSettings"> = {
@@ -94,7 +95,11 @@ const personal: ChatPartner = {
   mcpServers: [server("diarium"), server("kalender")]
 };
 
-function renderChoices(partner: ChatPartner = personal, sessionId: string | null = null) {
+function renderChoices(
+  partner: ChatPartner = personal,
+  sessionId: string | null = null,
+  permissions: Permission[] = ["web_search", "image_generation"]
+) {
   let latest: {
     tools: ReturnType<typeof useToolChoices>;
     settings: ReturnType<typeof useConversationSettings>;
@@ -112,9 +117,7 @@ function renderChoices(partner: ChatPartner = personal, sessionId: string | null
     <ConversationSettingsProvider partner={partner} initialSessionId={sessionId}>
       <Probe />
     </ConversationSettingsProvider>,
-    {
-      appContext: testAppContext({ permissions: ["web_search", "image_generation"] })
-    }
+    { appContext: testAppContext({ permissions }) }
   );
   return {
     ...view,
@@ -228,6 +231,44 @@ describe("conversation choices", () => {
     await ready(existing);
     expect(existing.current.settings.resolution?.settings.completion_model_id).toBe("model-1");
     expect(existing.current.automatic).toBe(true);
+  });
+
+  it("offers the personal assistant web search when enabled, permitted and provided", async () => {
+    const view = renderChoices();
+    await ready(view);
+    expect(view.current.tools.capabilities).toEqual([
+      { purpose: "web_search", available: true, reason: null, selected: true },
+      { purpose: "image_generation", available: true, reason: null, selected: true }
+    ]);
+  });
+
+  it("hides web search when the user's role may not use it", async () => {
+    const view = renderChoices(personal, null, ["image_generation"]);
+    await ready(view);
+    expect(view.current.tools.capabilities.map((capability) => capability.purpose)).toEqual([
+      "image_generation"
+    ]);
+  });
+
+  it("asks before a capability runs, as before a server, when tools do not run automatically", async () => {
+    // Web search and image generation are external tools: the backend asks for them too.
+    api.POST.mockResolvedValueOnce({
+      data: {
+        ...saved,
+        supports_tool_calling: true,
+        mcp_servers: [],
+        capabilities: [{ purpose: "web_search", available: true, reason: null, selected: true }]
+      },
+      response: new Response()
+    });
+    const view = renderChoices(personal, "saved");
+    await ready(view);
+    expect(view.current.tools.mcpServers).toEqual([]);
+    expect(view.current.automatic).toBe(true);
+    await act(async () => view.current.tools.setAutoAcceptTools(false));
+    await ready(view);
+    expect(saved.settings.require_tool_approval).toBe(true);
+    expect(view.current.automatic).toBe(false);
   });
 
   it("keeps dormant choices while the model cannot call tools", async () => {

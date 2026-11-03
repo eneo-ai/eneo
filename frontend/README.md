@@ -1,7 +1,7 @@
 # Eneo Frontend
 
 **SvelteKit in `apps/web` is the primary frontend and the default for frontend
-development.** React/Next.js with Astryx in `apps/web-next` is an optional beta.
+development.** React/Vite with Astryx in `apps/web-next` is an optional beta.
 Implement ordinary frontend fixes and new features in Svelte; work in web-next
 must be explicitly intended for the beta. See
 [the frontend development policy](../AGENTS.md#frontend-development).
@@ -9,7 +9,7 @@ must be explicitly intended for the beta. See
 Multirepo containing:
 
 - The primary Eneo Web GUI, a SvelteKit app in `/apps/web`
-- The optional React/Next.js beta with Astryx in `/apps/web-next`
+- The optional React/Vite beta with Astryx in `/apps/web-next`
 - The Eneo.js API client, a plain JS client wrapping all Eneo endpoints used in the Web GUI in `packages/eneo.js`
 - The Eneo design tokens, themes and icons shared by the frontend apps in `packages/ui` (UI components live in `apps/web` on shadcn-svelte)
 
@@ -48,8 +48,8 @@ The stop and restart commands only signal a Vite process that is verified to bel
 checkout. If another application owns port 3000, they report the conflict and leave it running.
 Production build and runtime commands do not use this development lifecycle.
 
-For work explicitly targeting the React/Next.js beta, start it separately on port
-3100 with `bun run dev:web-next`.
+For work explicitly targeting the React/Vite beta, start it separately on port
+3101 with `bun run dev:web-next`.
 
 ### Formatting & Linting
 
@@ -77,10 +77,10 @@ The stack is **Vitest** (unit + component) and **Playwright** (E2E). From this d
 
 ```bash
 bun run test          # lifecycle and both web apps' unit + component tests
-bun run test:web-next # React/Next.js unit + component tests only
-bun run test:watch:web-next # React/Next.js watch mode for local dev
+bun run test:web-next # React/Vite unit + component tests only
+bun run test:watch:web-next # React/Vite watch mode for local dev
 bun run test:e2e      # E2E for both web apps against an isolated throwaway backend (needs Docker)
-bun run test:e2e:ui   # React/Next.js E2E in Playwright's interactive runner
+bun run test:e2e:ui   # React/Vite E2E in Playwright's interactive runner
 bun run test:all      # everything (installs Chromium if missing)
 ```
 

@@ -27,6 +27,8 @@ export type ChatPartner = {
   } | null;
   /** Group chats: assistants available for @mentions. */
   mentionableAssistants?: { id: string; handle: string }[];
+  /** Group chats: how many assistants take part (none: nobody can answer). */
+  assistantCount?: number;
   /** Group chats: label which assistant answered. */
   showResponseLabel?: boolean;
   /** MCP servers that can be toggled for this partner when no policy overrides them. */
@@ -37,6 +39,9 @@ export type ChatPartner = {
   effectiveConfig?: Schema<"EffectiveConfigPublic"> | null;
   /** Whether the partner exposes the conversation insights tab. */
   insightEnabled?: boolean;
+  /** Invalidate estimates when this partner's saved context configuration changes. */
+  preflightRevision?: string;
+  permissions?: Schema<"AssistantPublic">["permissions"];
   /** Short description shown on the start screen (assistants, group chats). */
   description?: string | null;
   /** Uploaded icon id (tile image), when the partner has one. */
@@ -49,6 +54,7 @@ export type ChatPartner = {
   securityClassification?: string | null;
   /** Collections and websites the partner searches (named activity steps and sources). */
   knowledge?: KnowledgeOrigin[];
+  knowledgeMode?: Schema<"KnowledgeMode">;
 };
 
 export type CompletionModelInfo = {
@@ -152,7 +158,7 @@ export type EneoDataParts = {
   "mcp-tool-references": { mcp_tool_references: Schema<"McpToolReferencePublic">[] };
   "token-usage": TokenUsageData;
   "tool-approval": ToolApprovalData;
-  error: { code?: number | null };
+  error: { code?: number | null; reason?: string | null };
 };
 
 /** A rating of one answer: 1 good, -1 bad, null not rated. */
@@ -178,7 +184,7 @@ export type EneoMessageMetadata = {
 
 export type EneoUIMessage = UIMessage<EneoMessageMetadata, EneoDataParts>;
 
-/** The request body the /api/chat proxy forwards to the backend (v3). */
+/** The request body of an answer request to the backend (v3). */
 export type ConversationBody = {
   question: string;
   settings?: Schema<"ConversationSettings">;

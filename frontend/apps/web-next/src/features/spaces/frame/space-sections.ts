@@ -10,7 +10,6 @@ export const SPACE_SECTION_IDS = [
   "apps",
   "knowledge",
   "skills",
-  "services",
   "members",
   "settings"
 ] as const;
@@ -42,7 +41,7 @@ export function ownKnowledgeCount(space: Space): number {
 
 /**
  * The tabs a user may see, gated exactly like the former space sidebar: the
- * organization space only has knowledge, skills, services and settings, and
+ * organization space only has knowledge, skills and settings, and
  * every tab needs the matching read (or, for settings, edit) permission.
  */
 export function spaceSections(space: Space, can: Can, routeId: SpaceRouteId): SpaceSection[] {
@@ -64,7 +63,6 @@ export function spaceSections(space: Space, can: Can, routeId: SpaceRouteId): Sp
     add("knowledge", ownKnowledgeCount(space));
   }
   if (can("read", "skill")) add("skills");
-  if (can("read", "service")) add("services");
   if (!isOrg && can("read", "member")) add("members", space.members.items.length);
   if (can("edit", "space")) add("settings");
   return sections;
@@ -92,8 +90,8 @@ function isEditorRoute(first: string | undefined, rest: readonly string[]): bool
 }
 
 /**
- * Classifies the route below `/spaces/[spaceId]` from its layout segments
- * (`useSelectedLayoutSegments()`). The chat and the editors render full-bleed
+ * Classifies the route below `/spaces/[spaceId]` from its path segments
+ * (`useSpaceSegments()`). The chat and the editors render full-bleed
  * with headers of their own; every other route gets the space header and tabs.
  */
 export function spaceRoute(segments: readonly string[]): SpaceRoute {
@@ -109,4 +107,30 @@ export function spaceRoute(segments: readonly string[]): SpaceRoute {
 /** Where the space crumb in the breadcrumbs points: the overview, or the first tab. */
 export function spaceLandingHref(sections: SpaceSection[], routeId: SpaceRouteId): string {
   return sections[0]?.href ?? `/spaces/${routeId}/overview`;
+}
+
+/** What a phone keeps as tabs: the space's content. */
+const CONTENT_SECTION_IDS: readonly SpaceSectionId[] = [
+  "overview",
+  "assistants",
+  "apps",
+  "knowledge"
+];
+/** What manages the space, in the order "Hantera ytan" lists it. */
+const MANAGE_SECTION_IDS: readonly SpaceSectionId[] = ["members", "settings", "skills"];
+
+/**
+ * The sections as a phone shows them (decision 24): the content as tabs, the
+ * rest in "Hantera ytan" on Översikt. A space without Översikt (the
+ * organisation space) has nowhere to list them, so it keeps every tab (F4).
+ */
+export function phoneSections(sections: SpaceSection[]): {
+  tabs: SpaceSection[];
+  manage: SpaceSection[];
+} {
+  if (!sections.some((section) => section.id === "overview")) return { tabs: sections, manage: [] };
+  return {
+    tabs: sections.filter((section) => CONTENT_SECTION_IDS.includes(section.id)),
+    manage: MANAGE_SECTION_IDS.flatMap((id) => sections.filter((section) => section.id === id))
+  };
 }

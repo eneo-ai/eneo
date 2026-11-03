@@ -1,6 +1,4 @@
-"use client";
-
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useAppContext } from "@/components/providers/app-context";
 import { useFileUploads, type FileUpload } from "@/features/files/use-file-uploads";
 export { releasePreviews } from "@/features/files/use-file-uploads";
@@ -15,11 +13,11 @@ import {
 export type Attachment = FileUpload;
 
 export type UseAttachmentsOptions = {
+  imageGenerationAvailable?: boolean;
   /**
    * A file already on the server that a picked file is a copy of, e.g. one
    * sent earlier in the conversation. It is attached again without an upload.
    */
-  imageGenerationAvailable?: boolean;
   findExisting?: (file: File) => ChatAttachmentUploaded | undefined;
 };
 
@@ -79,7 +77,13 @@ export function useAttachments(
   const canAddMore = maxFiles === Infinity || attachments.length < maxFiles;
 
   async function addFiles(files: File[]) {
-    const plan = planChatAttachmentUploads(files, attachments, formats, maxFiles, findExisting);
+    const plan = planChatAttachmentUploads(
+      files,
+      uploads.current(),
+      formats,
+      maxFiles,
+      findExisting
+    );
     toastRejections(plan.rejected, t);
     for (const { file, uploaded } of plan.reused) uploads.reuse(file, uploaded);
     await uploads.add(plan.accepted);

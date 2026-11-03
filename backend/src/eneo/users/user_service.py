@@ -91,6 +91,7 @@ from eneo.users.user import (
 from eneo.users.user_repo import UsersRepository
 
 if TYPE_CHECKING:
+    from eneo.authentication.browser_session_service import BrowserSessionService
     from eneo.database.database import AsyncSession
     from eneo.feature_flag.feature_flag_service import FeatureFlagService
     from eneo.spaces.space_service import SpaceService
@@ -282,6 +283,7 @@ class UserService:
         api_key_rate_limiter: Optional[ApiKeyRateLimiter] = None,
         feature_flag_service: Optional["FeatureFlagService"] = None,
         session: Optional["AsyncSession"] = None,
+        browser_session_service: Optional["BrowserSessionService"] = None,
     ):
         super().__init__()
         self.repo = user_repo
@@ -296,6 +298,8 @@ class UserService:
         self.api_key_rate_limiter = api_key_rate_limiter
         self.feature_flag_service = feature_flag_service
         self._session = session
+        # Without it, a browser session's token is refused.
+        self.browser_session_service = browser_session_service
 
     async def _validate_email(self, email: str | None):
         if email is None:
@@ -780,6 +784,11 @@ class UserService:
         )
 
     async def _get_user_from_payload(self, payload: JWTPayload):
+        if payload.sid is not None:
+            # A browser session's token, as the cookie or as Bearer.
+            if self.browser_session_service is None:
+                raise AuthenticationException("Could not validate token credentials.")
+            await self.browser_session_service.admit(payload)
         user = await self.repo.get_user_by_id_and_tenant_id(
             payload.user_id, tenant_id=payload.tenant_id
         )
@@ -788,6 +797,7 @@ class UserService:
                 payload.credential_version, user
             )
             user.session_auth_method = payload.auth_method
+            user.browser_session = payload if payload.sid is not None else None
         return user
 
     async def _get_user_from_token(self, token: str):
@@ -1972,18 +1982,39 @@ class UserService:
         elif api_key is not None:
             user_in_db, _ = await self._resolve_api_key(api_key, request=request)
 
-        if user_in_db is None:
-            raise AuthenticationException("No authenticated user.")
-
-        await self._check_user_and_tenant_state(user_in_db, correlation_id="api-auth")
-
-        authorize_user(request, user_in_db)
+        user_in_db = await self._admit_user(user_in_db, request)
 
         if with_quota_used:
             user_in_db.quota_used = await self.info_blob_repo.get_total_size_of_user(
                 user_id=user_in_db.id
             )
 
+        return user_in_db
+
+    async def authenticate_payload(
+        self, payload: JWTPayload, request: Request | None = None
+    ) -> "UserInDB":
+        """``authenticate`` for a local token verified earlier.
+
+        A response that stays open after its request authenticated (the
+        job-event stream) asks again with the token's claims, so what refuses
+        a new request ends it too: its browser session ended, the user's
+        credentials were invalidated (a password change, signing out
+        everywhere), or the account or tenant is restricted.
+        """
+        return await self._admit_user(
+            await self._get_user_from_payload(payload), request
+        )
+
+    async def _admit_user(
+        self, user_in_db: "UserInDB | None", request: Request | None
+    ) -> "UserInDB":
+        if user_in_db is None:
+            raise AuthenticationException("No authenticated user.")
+
+        await self._check_user_and_tenant_state(user_in_db, correlation_id="api-auth")
+
+        authorize_user(request, user_in_db)
         return user_in_db
 
     async def _check_user_and_tenant_state(
@@ -2104,13 +2135,7 @@ class UserService:
                 )
                 raise
 
-        if user_in_db is None:
-            raise AuthenticationException("No authenticated user.")
-
-        await self._check_user_and_tenant_state(user_in_db, correlation_id="api-auth")
-
-        authorize_user(request, user_in_db)
-        return user_in_db
+        return await self._admit_user(user_in_db, request)
 
     async def update_used_tokens(self, user_id: UUID, tokens_to_add: int):
         user_in_db = await self.repo.get_user_by_id(user_id)
@@ -2275,8 +2300,20 @@ class UserService:
         own row), which counts as a self-service change.
         """
 
-        await self._validate_email(user_update_public.email)
-        await self._validate_username(user_update_public.username)
+        # Repeating the user's own email or username is no change, so only a
+        # new value can be taken (email compares case-insensitively, as the
+        # uniqueness lookup does).
+        email = user_update_public.email
+        username = user_update_public.username
+        if email is not None or username is not None:
+            target = await self.repo.get_user_by_id(user_id, with_deleted=True)
+            if target is not None:
+                if email is not None and email.lower() == target.email.lower():
+                    email = None
+                if username is not None and username == target.username:
+                    username = None
+        await self._validate_email(email)
+        await self._validate_username(username)
 
         # If roles are being changed, check admin safety
         if user_update_public.roles is not None:

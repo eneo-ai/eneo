@@ -1,7 +1,9 @@
-"use client";
-
-import { useSelectedLayoutSegments } from "next/navigation";
+import { useSpaceSegments } from "@/lib/navigation";
+import { PAGE_COLUMN } from "@/components/composites/page-frame";
+import { usePhoneScreen } from "@/lib/hooks/use-media-match";
+import { cn } from "@/lib/utils";
 import { SpaceHeader } from "./space-header";
+import { SpacePhoneHeader } from "./space-phone-header";
 import { spaceRoute } from "./space-sections";
 
 /**
@@ -16,12 +18,20 @@ import { spaceRoute } from "./space-sections";
  * focus), Page Down works right after the skip link, and the page reflows at
  * 320 px / 400 %.
  *
- * Pages sit in a `p-6` inset. A page that spans the frame edge to edge, such
- * as the editors with their sticky header, marks its root element with
- * `data-space-full-bleed` and the inset goes away.
+ * Pages sit in a `p-6` inset (16 px on a phone), in the pages' shared column
+ * (`PAGE_COLUMN`), which the header's content shares too. A page that spans
+ * the frame edge to edge, such as the settings with their sticky header,
+ * marks its root element with `data-space-full-bleed` and the inset and the
+ * column go away.
+ *
+ * A phone, held either way, gets SpacePhoneHeader instead of the header
+ * (decision 24): a phone turned sideways has too little height for the
+ * breadcrumb, the title and seven tabs.
  */
 export function SpaceFrame({ children }: { children: React.ReactNode }) {
-  const route = spaceRoute(useSelectedLayoutSegments());
+  const segments = useSpaceSegments();
+  const route = spaceRoute(segments);
+  const phone = usePhoneScreen();
 
   if (route.kind === "chat") {
     return <div className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</div>;
@@ -33,9 +43,20 @@ export function SpaceFrame({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex min-w-0 flex-1 flex-col">
-      <SpaceHeader route={route} />
-      <div className="flex min-w-0 flex-1 flex-col p-6 has-[[data-space-full-bleed]]:p-0">
-        {children}
+      {phone ? (
+        <SpacePhoneHeader route={route} segments={segments} />
+      ) : (
+        <SpaceHeader route={route} />
+      )}
+      <div className="wide:p-6 flex min-w-0 flex-1 flex-col p-4 has-[[data-space-full-bleed]]:p-0">
+        <div
+          className={cn(
+            PAGE_COLUMN,
+            "flex min-w-0 flex-1 flex-col has-[[data-space-full-bleed]]:max-w-none"
+          )}
+        >
+          {children}
+        </div>
       </div>
     </div>
   );

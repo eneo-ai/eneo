@@ -103,7 +103,6 @@ export function ProviderLogo({
 
   if (url) {
     return (
-      // eslint-disable-next-line @next/next/no-img-element -- static SVG/PNG asset; next/image blocks SVG without dangerouslyAllowSVG
       <img
         src={url}
         alt=""

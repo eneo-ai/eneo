@@ -177,7 +177,7 @@ export interface paths {
     };
     /**
      * Get API key policy constraints
-     * @description Returns tenant policy limits relevant to key UX — applies to creation, rotation, and expiration changes (expiration, rate limit, rotation grace).
+     * @description Returns tenant policy limits relevant to key UX — applies to creation, rotation, expiration changes, and notification preferences.
      */
     get: operations["get_policy_constraints_api_v1_api_keys_policy_constraints_get"];
     put?: never;
@@ -1142,7 +1142,9 @@ export interface paths {
      *
      *     **Behavior:**
      *     - Updates the `audit_logging_enabled` feature flag for your tenant
-     *     - When disabled: No audit logs are created for any action (global kill switch)
+     *     - When disabled: No audit logs are created (global kill switch), except for
+     *       changes to the organisation's sign-in settings (`federation_updated`), which
+     *       are always logged
      *     - When enabled: Audit logging resumes with category and action-level filtering
      *     - This is independent from category/action configuration
      *     - Change takes effect immediately for all workers
@@ -3491,7 +3493,7 @@ export interface paths {
     };
     /**
      * Job Events
-     * @description Stream the current user's job updates as server-sent events. Each `job` event carries the job as GET /jobs/ returns it, sent whenever its status changes; the connection stays open until the client closes it.
+     * @description Stream the current user's job updates as server-sent events. Each `job` event carries the job as GET /jobs/ returns it, sent whenever its status changes; the connection stays open until the client closes it. A browser session's stream checks its token every 30 seconds (each check waits at most 5 seconds) and ends at the first check that finds it no longer authenticates (sign-out, a password change, signing out everywhere, a deactivated account), and at the token's expiry.
      */
     get: operations["job_events_api_v1_jobs_events__get"];
     put?: never;
@@ -6196,6 +6198,26 @@ export interface paths {
      * @description Download the completed export file for an async export job. Files are auto-deleted after 24 hours.
      */
     get: operations["download_export_api_v1_audit_logs_export__job_id__download_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/audit/logs/export/{job_id}/signed-download": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Download Export Signed
+     * @description Stream a completed export using the short-lived URL returned by its status.
+     */
+    get: operations["download_export_signed_api_v1_audit_logs_export__job_id__signed_download_get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -9103,6 +9125,30 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/federation": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get the organisation's sign-in settings
+     * @description The identity provider the operator registered for the caller's organisation. The client secret is never returned, only whether it is set and when it was last replaced.
+     */
+    get: operations["get_federation_api_v1_admin_federation_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Change the organisation's sign-in settings
+     * @description Change the label, client ID, client secret or allowed email domains of the registered identity provider. Send the revision from GET; a save against an older revision is refused with 409. Operator-owned fields are refused with 422. Every change is audited.
+     */
+    patch: operations["patch_federation_api_v1_admin_federation_patch"];
+    trace?: never;
+  };
   "/api/v1/module-auth/tickets/": {
     parameters: {
       query?: never;
@@ -9212,7 +9258,7 @@ export interface paths {
     };
     /**
      * List tenants for selector
-     * @description Public endpoint returning all active tenants for the tenant selector grid. Only returns tenants with slugs configured for federation. No authentication required.
+     * @description Public endpoint returning active tenants with slugs for the tenant selector. With federation enabled, only tenants with an IdP configuration are returned. No authentication required.
      */
     get: operations["list_tenants_api_v1_auth_tenants_get"];
     put?: never;
@@ -9489,6 +9535,106 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/runtime-config": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get the web app runtime config
+     * @description Links, switches and the backend version the web app reads at boot. Public and never cached.
+     */
+    get: operations["get_runtime_config_api_v1_runtime_config_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/auth/session/password/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Sign In The Browser
+     * @description Sign the browser in with email and password. Sets the HttpOnly session cookie and returns no body; failures are those of `/users/login/token/`. Only for requests from the site's own pages.
+     */
+    post: operations["Sign_in_the_browser_api_v1_auth_session_password__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/auth/session/logout/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Sign Out The Browser
+     * @description End the browser's Eneo session on the server and clear its cookies: a copy of the session token stops working at once. The identity provider's session stays. With `Eneo-Session-Generation`, a session other than the one named is left in place (401). When the session cannot be ended, nothing is cleared (503). Only for requests from the site's own pages.
+     */
+    post: operations["Sign_out_the_browser_api_v1_auth_session_logout__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/auth/session/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Check The Browser Session
+     * @description Authenticate the browser's session cookie, name its generation in `Eneo-Session-Generation`, the whole seconds it has left in `Eneo-Session-Expires-In` and the whole seconds it was issued for in `Eneo-Session-Lifetime`. A Bearer token is not a browser session (401).
+     */
+    get: operations["Check_the_browser_session_api_v1_auth_session__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/auth/session/extend/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Extend The Browser Session
+     * @description Renew the browser's session: the cookie gets a new token for the same session, user, organisation and sign-in method, valid for `JWT_EXPIRY_TIME` again, but never past `BROWSER_SESSION_MAX_AGE` after the original sign-in (401 once reached). A session that was signed out or has ended cannot renew itself (401). Needs the current `Eneo-Session-Generation`, which the renewal keeps. The token itself is only in the cookie. Only for requests from the site's own pages.
+     */
+    post: operations["Extend_the_browser_session_api_v1_auth_session_extend__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -9666,6 +9812,7 @@ export interface components {
       | "password_changed"
       | "password_change_failed"
       | "sessions_invalidated"
+      | "session_extended"
       | "assistant_created"
       | "assistant_deleted"
       | "assistant_updated"
@@ -10190,9 +10337,10 @@ export interface components {
     };
     /**
      * ApiKeyCreationConstraints
-     * @description Fields relevant to key creation UX, from tenant policy.
+     * @description Tenant policy limits for key forms and notification preferences.
      */
     ApiKeyCreationConstraints: {
+      notification_policy: components["schemas"]["ApiKeyNotificationPolicyResponse"];
       /**
        * Require Expiration
        * @default false
@@ -11995,6 +12143,30 @@ export interface components {
        */
       client_secret?: string | null;
     };
+    /** Body_Sign_in_the_browser_api_v1_auth_session_password__post */
+    Body_Sign_in_the_browser_api_v1_auth_session_password__post: {
+      /** Grant Type */
+      grant_type?: string | null;
+      /** Username */
+      username: string;
+      /**
+       * Password
+       * Format: password
+       */
+      password: string;
+      /**
+       * Scope
+       * @default
+       */
+      scope?: string;
+      /** Client Id */
+      client_id?: string | null;
+      /**
+       * Client Secret
+       * Format: password
+       */
+      client_secret?: string | null;
+    };
     /** Body_create_icon_api_v1_icons__post */
     Body_create_icon_api_v1_icons__post: {
       /** File */
@@ -12026,6 +12198,22 @@ export interface components {
     Body_upload_file_api_v1_groups__id__info_blobs_upload__post: {
       /** File */
       file: string;
+    };
+    /**
+     * BrowserSessionExtension
+     * @description The renewed browser session; its token travels only in the cookie.
+     */
+    BrowserSessionExtension: {
+      /**
+       * Generation
+       * @description The session's `Eneo-Session-Generation`, which a renewal keeps.
+       */
+      generation: string;
+      /**
+       * Expires In
+       * @description Whole seconds until the renewed session ends.
+       */
+      expires_in: number;
     };
     /**
      * BulkCrawlRequest
@@ -14719,7 +14907,8 @@ export interface components {
       | 9075
       | 9076
       | 9080
-      | 9081;
+      | 9081
+      | 9090;
     /**
      * ExpiringKeySummaryItem
      * @description Lightweight summary of a single expiring API key.
@@ -14884,6 +15073,11 @@ export interface components {
        * @description Download URL (when completed)
        */
       download_url?: string | null;
+      /**
+       * Signed Download Url
+       * @description Link valid for 60 seconds that streams the file without credentials, for browsers (when completed)
+       */
+      signed_download_url?: string | null;
       /**
        * Created At
        * Format: date-time
@@ -15076,7 +15270,7 @@ export interface components {
     GeneralError: {
       /** Message */
       message: string;
-      eneo_error_code: components["schemas"]["ErrorCodes"];
+      eneo_error_code?: components["schemas"]["ErrorCodes"] | null;
       /** Code */
       code?: string | null;
       /** Context */
@@ -15089,6 +15283,12 @@ export interface components {
       details?: {
         [key: string]: unknown;
       } | null;
+      /**
+       * Detail
+       * @deprecated
+       * @description Deprecated: the raised HTTPException detail (a string or an object), kept for one release for clients that read it. Read the top-level fields instead.
+       */
+      detail?: unknown;
     };
     /** GetModelsResponse */
     GetModelsResponse: {
@@ -19216,16 +19416,8 @@ export interface components {
     PartialAssistantUpdatePublic: {
       /** Name */
       name?: string | null;
-      /**
-       * @deprecated
-       * @description This field is deprecated and will be ignored
-       */
       completion_model_kwargs?: components["schemas"]["ModelKwargs"] | null;
-      /**
-       * Logging Enabled
-       * @deprecated
-       * @description This field is deprecated and will be ignored
-       */
+      /** Logging Enabled */
       logging_enabled?: boolean | null;
       /** Enabled Capabilities */
       enabled_capabilities?:
@@ -19254,10 +19446,6 @@ export interface components {
        * @description This field is deprecated and will be ignored
        */
       guardrail?: components["schemas"]["AssistantGuard"] | null;
-      /**
-       * @deprecated
-       * @description This field is deprecated and will be ignored
-       */
       completion_model?: components["schemas"]["ModelId"] | null;
       /** @description Which document template the file-creation capability renders with: the organisation's default, a selected template, or Eneo's built-in. */
       document_template?: components["schemas"]["DocumentTemplateChoicePublic"] | null;
@@ -23028,6 +23216,45 @@ export interface components {
       description?: string | null;
     };
     /**
+     * TenantAdminFederationPatch
+     * @description What an org admin may change in their tenant's registered IdP.
+     *
+     *     Every other field (the authorization server and its endpoints, redirect
+     *     topology, scopes, claim mapping, token auth method) is operator-owned and
+     *     refused as an unknown field.
+     */
+    TenantAdminFederationPatch: {
+      /**
+       * Revision
+       * @description The revision from GET that this change was made against. A save against an older revision is refused with 409.
+       */
+      revision: string;
+      /**
+       * Provider
+       * @description Identity provider label
+       */
+      provider?: string;
+      /**
+       * Client Id
+       * @description OAuth client ID
+       */
+      client_id?: string;
+      /**
+       * Client Secret
+       * @description Replacement OAuth client secret, at least 8 characters. Write-only: never returned.
+       */
+      client_secret?: string;
+      /**
+       * Allowed Domains
+       * @description Email domains allowed to sign in (e.g., ['stockholm.se'])
+       * @example [
+       *       "stockholm.se",
+       *       "stockholm.gov.se"
+       *     ]
+       */
+      allowed_domains?: string[];
+    };
+    /**
      * TenantAppTestResult
      * @description Result of testing tenant app credentials.
      */
@@ -23298,6 +23525,64 @@ export interface components {
       is_default?: boolean | null;
       /** @description Security classification reference (null clears it) */
       security_classification?: components["schemas"]["ModelId"] | null;
+    };
+    /**
+     * TenantFederationAdminView
+     * @description A tenant's federation settings as its admin sees them. Never the secret
+     *     or any part of it.
+     */
+    TenantFederationAdminView: {
+      /**
+       * Configured
+       * @description Whether the operator has registered an identity provider
+       */
+      configured: boolean;
+      /** Provider */
+      provider?: string | null;
+      /**
+       * Discovery Endpoint
+       * @description Operator-owned. Shown as text, never as a link.
+       */
+      discovery_endpoint?: string | null;
+      /**
+       * Issuer
+       * @description Operator-owned, from discovery
+       */
+      issuer?: string | null;
+      /** Client Id */
+      client_id?: string | null;
+      /**
+       * Client Secret Set
+       * @default false
+       */
+      client_secret_set?: boolean;
+      /** Client Secret Updated At */
+      client_secret_updated_at?: string | null;
+      /** Encryption Status */
+      encryption_status?: ("encrypted" | "plaintext") | null;
+      /** Allowed Domains */
+      allowed_domains?: string[];
+      /**
+       * Redirect Uris
+       * @description Operator-owned callback URIs to register at the IdP
+       */
+      redirect_uris?: string[];
+      /**
+       * Redirect Uris Problem
+       * @description Set when the redirect URIs cannot be computed
+       */
+      redirect_uris_problem?: "unresolvable" | null;
+      /** Scopes */
+      scopes?: string[];
+      /** Token Endpoint Auth Method */
+      token_endpoint_auth_method?: string | null;
+      /**
+       * Revision
+       * @description Send back with PATCH; changes whenever the settings do
+       */
+      revision?: string | null;
+      /** Configured At */
+      configured_at?: string | null;
     };
     /** TenantImageModelCreate */
     TenantImageModelCreate: {
@@ -25187,6 +25472,25 @@ export interface components {
       type?: "text";
       /** Text */
       text: string;
+    };
+    /** WebRuntimeConfig */
+    WebRuntimeConfig: {
+      /** Version */
+      version: string;
+      /** Revision */
+      revision: string;
+      /** Help Center Url */
+      help_center_url: string | null;
+      /** Legacy App Url */
+      legacy_app_url: string | null;
+      /** Accessibility Statement Url */
+      accessibility_statement_url: string | null;
+      /** Request Integration Form Url */
+      request_integration_form_url: string | null;
+      /** Mcp App Content Origin */
+      mcp_app_content_origin: string | null;
+      /** Federation Enabled */
+      federation_enabled: boolean;
     };
     /**
      * WebsiteBulkActionError
@@ -34639,6 +34943,8 @@ export interface operations {
       query?: {
         start_date?: string | null;
         end_date?: string | null;
+        /** @description IANA time zone for hourly buckets; omitted uses the database session time zone. */
+        time_zone?: string | null;
       };
       header?: never;
       path?: never;
@@ -34653,6 +34959,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["MetadataStatisticsAggregated"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -47496,6 +47811,77 @@ export interface operations {
       };
     };
   };
+  download_export_signed_api_v1_audit_logs_export__job_id__signed_download_get: {
+    parameters: {
+      query: {
+        /** @description Short-lived audit export token */
+        token: string;
+      };
+      header?: never;
+      path: {
+        job_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The completed export file */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/csv": string;
+          "application/x-ndjson": string;
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   cancel_export_api_v1_audit_logs_export__job_id__cancel_post: {
     parameters: {
       query?: never;
@@ -53138,6 +53524,15 @@ export interface operations {
           "text/plain": string;
         };
       };
+      /** @description validationToken is longer than 1024 characters. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -53186,9 +53581,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": {
-            detail: string;
-          };
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -57214,6 +57607,122 @@ export interface operations {
       };
     };
   };
+  get_federation_api_v1_admin_federation_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TenantFederationAdminView"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  patch_federation_api_v1_admin_federation_patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TenantAdminFederationPatch"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TenantFederationAdminView"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
   issue_module_ticket_api_v1_module_auth_tickets__post: {
     parameters: {
       query?: never;
@@ -58141,6 +58650,248 @@ export interface operations {
         };
         content: {
           "application/json": unknown;
+        };
+      };
+    };
+  };
+  get_runtime_config_api_v1_runtime_config_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Web app runtime config */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WebRuntimeConfig"];
+        };
+      };
+    };
+  };
+  Sign_in_the_browser_api_v1_auth_session_password__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/x-www-form-urlencoded": components["schemas"]["Body_Sign_in_the_browser_api_v1_auth_session_password__post"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  Sign_out_the_browser_api_v1_auth_session_logout__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  Check_the_browser_session_api_v1_auth_session__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  Extend_the_browser_session_api_v1_auth_session_extend__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["BrowserSessionExtension"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };

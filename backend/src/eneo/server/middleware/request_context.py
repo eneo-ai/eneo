@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
 from uuid import UUID
 
-from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import Response
-from starlette.types import ASGIApp
-from typing_extensions import override
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from eneo.authentication.api_key_request_context import resolve_client_ip
 from eneo.main.config import get_settings
@@ -31,7 +27,7 @@ def _current_trace_id() -> str | None:
     return None
 
 
-class RequestContextMiddleware(BaseHTTPMiddleware):
+class RequestContextMiddleware:
     """Populate per-request logging and audit context in contextvars.
 
     Sets ``trace_id`` (from the active OTEL span) and ``correlation_id``
@@ -41,18 +37,21 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
     X-Trace-Id / X-Correlation-ID response headers are injected by the
     pure-ASGI TraceIdResponseMiddleware which runs at the ASGI level where
     the server span is guaranteed to be active.
+
+    The context spans the complete response, including streaming and cleanup.
+    Direct ASGI forwarding preserves an interrupted body's failure semantics.
     """
 
-    def __init__(self, app: ASGIApp):
-        super().__init__(app)
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
 
-    @override
-    async def dispatch(
-        self,
-        request: Request,
-        call_next: Callable[[Request], Awaitable[Response]],
-    ) -> Response:
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
         clear_request_context()
+        request = Request(scope)
 
         # trace_id comes from the OTEL span created by the outer OTEL middleware
         trace_id = _current_trace_id()
@@ -94,8 +93,6 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
         )
 
         try:
-            response = await call_next(request)
+            await self.app(scope, receive, send)
         finally:
             clear_request_context()
-
-        return response
