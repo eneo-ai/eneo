@@ -5,8 +5,9 @@ import {
 } from "@astryxdesign/core/DropdownMenu";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { MoreMenu } from "@astryxdesign/core/MoreMenu";
-import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
-import { ChevronDown, History, Menu, SquarePen } from "lucide-react";
+import { Button } from "@astryxdesign/core/Button";
+import { Tab, TabList } from "@astryxdesign/core/TabList";
+import { Bug, ChevronDown, Menu, SquarePen } from "lucide-react";
 import { useRouter } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
 import { ClassificationToken } from "@/components/composites/classification-token";
@@ -20,6 +21,7 @@ import type { ChatPartner } from "@/lib/chat/types";
 import { cn } from "@/lib/utils";
 import type { ChatPartnerSwitcherItem } from "./partner-switcher";
 import { BrandMark } from "./start-state";
+import { CHAT_PANEL_IDS, type ChatTab } from "./chat-url";
 
 /**
  * Opens the app shell's navigation drawer on phones: the shell hides its own
@@ -346,47 +348,30 @@ export type ChatHeaderProps = {
   title: string | null;
   /** A fixed model, shown under the partner's name ("space · model"). */
   modelName?: string | null;
-  view?: { value: "chat" | "insights"; onChange: (value: "chat" | "insights") => void } | null;
+  /**
+   * The page's views as Svelte's chat page has them: Chatt, Historik and,
+   * where the partner has them, Insikter. Beside the SideNav they are tabs; a
+   * phone opens Historik as a sheet and switches Insikter from its menu.
+   */
+  view: { value: ChatTab; onChange: (value: ChatTab) => void; hasInsights: boolean };
   historyOpen: boolean;
   onToggleHistory: () => void;
   onNewConversation: () => void;
-  /** Session actions (rename, delete) and partner actions (edit). */
+  /** Session actions (rename, delete) and the context meter. */
   menuItems: HeaderMenuItem[];
+  /** The partner's editor: Redigera beside the SideNav, a menu row on a phone. */
+  editHref?: string | null;
+  /** Felsökning; isEnabled is false until a saved answer exists to inspect. */
+  debug?: { isEnabled: boolean; onOpen: (trigger: HTMLElement) => void } | null;
   /** Personal assistant start state: the selector lives in the composer instead. */
   minimal?: boolean;
 };
 
-/** Opens the partner's conversation list; named after what it opens, with aria-expanded for the state. */
-function HistoryButton({
-  partner,
-  open,
-  onToggle
-}: {
-  partner: ChatPartner;
-  open: boolean;
-  onToggle: () => void;
-}) {
-  const t = useTranslations();
-  const label = t("chat_history_with", { name: displayPartnerName(partner, t) });
-  return (
-    <IconButton
-      label={label}
-      tooltip={label}
-      icon={<History className="size-[18px]" />}
-      variant="ghost"
-      aria-expanded={open}
-      aria-controls={open ? "chat-history" : undefined}
-      onClick={onToggle}
-      className={cn(open && "bg-ax-selected")}
-    />
-  );
-}
-
 /**
- * Chat header. From 768px (56px): assistant selector, divider,
- * conversation title (h1), the space's security classification, the
- * Chatt/Insikter switch, new conversation, history and a menu for session
- * actions. Below 768px (decision 2): the app menu (opens the shell's
+ * Chat header. From 768px (56px), as Svelte's: "Personlig assistent" or the
+ * assistant selector, the conversation title (h1), the Chatt/Historik/Insikter
+ * tabs, the space's security classification, Felsökning, Redigera, Ny
+ * konversation and a menu for session actions. Below 768px (decision 2): the app menu (opens the shell's
  * drawer), the switcher with the conversation's title first and the
  * assistant and security class under it, new conversation and the same
  * menu.
@@ -401,6 +386,8 @@ export function ChatHeader({
   onToggleHistory,
   onNewConversation,
   menuItems,
+  editHref = null,
+  debug = null,
   minimal = false
 }: ChatHeaderProps) {
   const t = useTranslations();
@@ -412,62 +399,73 @@ export function ChatHeader({
         : t("chat_history_with", { name: displayPartnerName(partner, t) }),
       onClick: onToggleHistory
     },
-    ...(view
+    ...(view.hasInsights
       ? [
           {
-            label: view.value === "chat" ? t("insights") : t("chat"),
-            onClick: () => view.onChange(view.value === "chat" ? "insights" : "chat")
+            label: view.value === "insights" ? t("chat") : t("insights"),
+            onClick: () => view.onChange(view.value === "insights" ? "chat" : "insights")
           }
         ]
       : []),
+    ...(editHref ? [{ label: t("chat_edit_assistant"), href: editHref }] : []),
     ...menuItems
   ];
 
   return (
     <>
-      {/* Beside the SideNav (wide:, from 768px but not on a phone turned sideways) */}
-      <div className="border-ax-border wide:flex hidden min-h-14 shrink-0 items-center gap-3 border-b ps-2.5 pe-3">
-        {!minimal && (
-          <>
+      {/* Beside the SideNav, as Svelte's chat page header: who you talk to and
+          the conversation's title, the views as tabs in the middle, then
+          Felsökning, Redigera and Ny konversation. */}
+      <div className="border-ax-border wide:flex hidden min-h-14 shrink-0 items-center gap-3 border-b ps-4 pe-3">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          {partner.type === "default-assistant" || minimal ? (
+            <span className="shrink-0 text-lg font-bold">{t("personal_assistant")}</span>
+          ) : (
             <PartnerSwitcher
               partner={partner}
               items={switcherItems}
               subtitle={subtitle}
               variant="header"
             />
-            {title !== null && (
+          )}
+          {title !== null && (
+            <>
               <span aria-hidden="true" className="bg-ax-border-strong h-[22px] w-px shrink-0" />
-            )}
-          </>
-        )}
-        {title !== null ? (
-          <h1 className="text-ax-text-secondary min-w-0 flex-1 truncate text-sm font-medium">
-            {title}
-          </h1>
-        ) : (
-          <span className="flex-1" />
-        )}
-        <ClassificationToken name={partner.securityClassification} />
-        {view && (
-          <SegmentedControl
-            label={t("chat_view_label")}
-            value={view.value}
-            onChange={(value) => view.onChange(value === "insights" ? "insights" : "chat")}
-            size="sm"
-          >
-            <SegmentedControlItem value="chat" label={t("chat")} />
-            <SegmentedControlItem value="insights" label={t("insights")} />
-          </SegmentedControl>
-        )}
-        <div className="flex shrink-0 items-center gap-1">
-          <IconButton
-            label={t("new_conversation")}
-            tooltip={t("new_conversation")}
-            icon={<SquarePen className="size-[18px]" />}
-            variant="ghost"
-            onClick={onNewConversation}
-          />
-          <HistoryButton partner={partner} open={historyOpen} onToggle={onToggleHistory} />
+              <h1 className="text-ax-text-secondary min-w-0 truncate text-sm font-medium">
+                {title}
+              </h1>
+            </>
+          )}
+        </div>
+        <TabList
+          role="tablist"
+          aria-label={t("main_views_available_for_current_resource")}
+          value={view.value}
+          onChange={(value) =>
+            view.onChange(value === "history" || value === "insights" ? value : "chat")
+          }
+          size="sm"
+        >
+          <Tab value="chat" label={t("chat")} panelId={CHAT_PANEL_IDS.chat} />
+          <Tab value="history" label={t("history")} panelId={CHAT_PANEL_IDS.history} />
+          {view.hasInsights && (
+            <Tab value="insights" label={t("insights")} panelId={CHAT_PANEL_IDS.insights} />
+          )}
+        </TabList>
+        <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
+          <ClassificationToken name={partner.securityClassification} />
+          {debug && (
+            <Button
+              label={t("chat_debug_open")}
+              variant="secondary"
+              icon={<Bug aria-hidden="true" />}
+              isDisabled={!debug.isEnabled}
+              tooltip={debug.isEnabled ? undefined : t("chat_debug_no_turn_title")}
+              onClick={(event) => debug.onOpen(event.currentTarget)}
+            />
+          )}
+          {editHref && <Button label={t("edit")} variant="ghost" href={editHref} />}
+          <Button label={t("new_conversation")} variant="primary" onClick={onNewConversation} />
           {menuItems.length > 0 && (
             <MoreMenu label={t("chat_more_options")} items={menuItems} alignment="end" />
           )}

@@ -19,7 +19,8 @@ import {
   useSyncExternalStore,
   type ComponentProps,
   type Ref,
-  type ReactNode
+  type ReactNode,
+  useImperativeHandle
 } from "react";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
@@ -192,8 +193,13 @@ function previewFilesKey(files: readonly PreviewFile[]): string {
   );
 }
 
+/** Opens the latest answer's Felsökning tab; false when there is none to show yet. */
+export type ChatDebugHandle = { openDebug: (trigger: HTMLElement | null) => boolean };
+
 type ChatViewProps = {
   leaveConfirmationRef?: Ref<LeaveConfirmationHandle>;
+  /** The page header's Felsökning button opens the latest answer's debug view through it. */
+  debugRef?: Ref<ChatDebugHandle>;
   partner: ChatPartner;
   initialSessionId?: string | null;
   initialMessages?: EneoUIMessage[];
@@ -243,6 +249,7 @@ export function ChatView(props: ChatViewProps) {
 
 function ConversationView({
   leaveConfirmationRef,
+  debugRef,
   partner,
   initialSessionId = null,
   initialMessages = [],
@@ -983,6 +990,21 @@ function ConversationView({
       onActivityChange({ messageId, tab, source: request?.source ?? null });
     },
     [openActivityId, closeActivity, onActivityChange]
+  );
+  // The header's Felsökning: the latest saved answer's debug view, its focus
+  // returning to the button as from a pill.
+  useImperativeHandle(
+    debugRef,
+    () => ({
+      openDebug: (trigger) => {
+        const answer = messages.findLast((message) => message.role === "assistant");
+        if (!debugAvailable || sessionId === null || !answer) return false;
+        activityTrigger.current = trigger;
+        onActivityChange({ messageId: answer.id, tab: "debug", source: null });
+        return true;
+      }
+    }),
+    [messages, debugAvailable, sessionId, onActivityChange]
   );
   // A call waiting for a decision takes the dock on a phone (decision 26): a
   // sheet over the dock gives way to it, and the focus goes back to what

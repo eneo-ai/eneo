@@ -2,24 +2,24 @@ import { Button } from "@astryxdesign/core/Button";
 import { useQuery } from "@tanstack/react-query";
 import { replaceUrl, useSearchParams, type UrlOptions } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
-import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import { LoadingState } from "@/components/composites/loading-state";
 import type { LeaveConfirmationHandle } from "@/components/composites/leave-confirmation";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { mapSessionMessages } from "@/lib/chat/map-session";
-import { useElementWidth } from "@/lib/hooks/use-element-width";
 import type { ChatPartner, EneoUIMessage } from "@/lib/chat/types";
 import { ChatHeader, PartnerSwitcher, type HeaderMenuItem } from "./chat-header";
-import { ChatView, type ActivityState } from "./chat-view";
+import { ChatView, type ActivityState, type ChatDebugHandle } from "./chat-view";
 import { setContextUsagePinned, useContextUsagePinned } from "./context-usage-bar";
-import { HISTORY_WIDTH, HistoryAside } from "./history-panel";
+import { HistoryAside, HistoryTab } from "./history-panel";
 import { InsightsPanel } from "./insights-panel";
 import type { ChatPartnerSwitcherItem } from "./partner-switcher";
 import { DeleteSessionDialog, RenameSessionDialog, useSessionMutations } from "./session-actions";
-import { CONVERSATION_MIN_WIDTH, panelFitsBeside } from "./side-panel/side-panel";
-import { readChatTab } from "./chat-url";
+import { CHAT_PANEL_IDS, readChatTab, type ChatTab } from "./chat-url";
+import { useAppContext } from "@/components/providers/app-context";
+import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 
 type ActiveConversation = {
   /** Remount key: changes when the conversation context changes. */
@@ -41,19 +41,6 @@ function hasInsights(partner: ChatPartner): partner is ChatPartner & {
     partner.permissions?.includes("insight_view") &&
     partner.type !== "default-assistant"
   );
-}
-
-/**
- * How the history fits beside the conversation in a row of `width` px
- * (decision 14: the conversation keeps 480 px): not at all; only while no
- * side panel is open beside the conversation; or always (a panel fits next
- * to it too, or covers the conversation anyway). Where it does not fit, the
- * history is a sheet.
- */
-function fitOfHistory(width: number): "none" | "alone" | "always" {
-  const rest = width - HISTORY_WIDTH;
-  if (rest < CONVERSATION_MIN_WIDTH) return "none";
-  return panelFitsBeside(rest) || !panelFitsBeside(width) ? "always" : "alone";
 }
 
 let conversationCounter = 0;
@@ -129,11 +116,13 @@ export function ChatPage({
   const [historyOpen, setHistoryOpen] = useState(false);
   // The row that holds the conversation, its side panel and the history.
   const rowRef = useRef<HTMLDivElement>(null);
-  const [panelOpen, setPanelOpen] = useState(false);
   const [activity, setActivity] = useState<ActivityState | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
   const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(null);
   const historyTrigger = useRef<HTMLElement | null>(null);
+  const debugRef = useRef<ChatDebugHandle>(null);
+  const { can } = useAppContext();
+  const debugAvailable = can("assistant_debug") && partner.type !== "group-chat";
 
   /** Opens a saved conversation: the current view goes until it has loaded. */
   function openSession(sessionId: string) {
@@ -159,7 +148,7 @@ export function ChatPage({
     }
   }
   const searchParams = useSearchParams();
-  const tab = hasInsights(partner) ? readChatTab(searchParams) : "chat";
+  const tab = readChatTab(searchParams);
 
   // Loading a session (initial deep-link or history click) goes through
   // pendingSessionId; the mapped messages then become the active conversation.
@@ -187,23 +176,25 @@ export function ChatPage({
     setActive(savedConversationState(detail.data));
   }
 
-  function updateUrl(sessionId: string | null, options?: UrlOptions) {
+  /** The conversation's URL; the view stays unless `nextTab` changes it (a late session id keeps it). */
+  function updateUrl(sessionId: string | null, options?: UrlOptions, nextTab: ChatTab = viewTab) {
     // The navigation seam commits same-route updates without waiting for
     // background session refreshes, so streaming stays responsive.
     if (buildSessionUrl) {
       const url = new URL(buildSessionUrl(sessionId), window.location.href);
-      if (tab === "insights") url.searchParams.set("tab", "insights");
-      else url.searchParams.delete("tab");
+      if (nextTab === "chat") url.searchParams.delete("tab");
+      else url.searchParams.set("tab", nextTab);
       replaceUrl(url, options);
     }
   }
 
-  const selectTab = useCallback((next: "chat" | "insights") => {
+  const selectTab = useCallback((next: ChatTab) => {
     setActivity(null);
     const url = new URL(window.location.href);
-    if (next === "insights") url.searchParams.set("tab", "insights");
-    else url.searchParams.delete("tab");
-    replaceUrl(url);
+    if (next === "chat") url.searchParams.delete("tab");
+    else url.searchParams.set("tab", next);
+    // Not a departure: the conversation stays mounted with its draft, so the leave guard stays out.
+    replaceUrl(url, { ignoreBlocker: true });
   }, []);
 
   const closeHistory = useCallback(() => {
@@ -227,23 +218,27 @@ export function ChatPage({
   function selectSession(sessionId: string) {
     const showing = pendingSessionId ?? active?.sessionId ?? null;
     if (sessionId !== showing) {
+      // Picked from Historik, it opens in Chatt, as in Svelte.
       confirmConversationChange(() => {
         openSession(sessionId);
-        updateUrl(sessionId, { ignoreBlocker: true });
-        if (!historyInline) closeHistory();
+        updateUrl(sessionId, { ignoreBlocker: true }, "chat");
+        closeHistory();
       });
       return;
     }
-    // On phones the panel is an overlay over the chat; close it so the picked
-    // conversation is visible. On wider screens it sits inline, so keep it open.
-    if (!historyInline) closeHistory();
+    if (viewTab === "history") selectTab("chat");
+    // The phone's history sheet covers the chat: it closes so the conversation shows.
+    closeHistory();
   }
 
-  /** Starts a fresh conversation (`focusComposer`: it replaces a deleted one). */
-  function startConversation(focusComposer: boolean) {
+  /**
+   * Starts a fresh conversation (`focusComposer`: it replaces a deleted one).
+   * The view stays: deleting from Historik keeps Historik open, as in Svelte.
+   */
+  function startConversation(focusComposer: boolean, nextTab: ChatTab = viewTab) {
     setActive(newConversationState({ focusComposer }));
     setActivity(null);
-    updateUrl(null, { ignoreBlocker: true });
+    updateUrl(null, { ignoreBlocker: true }, nextTab);
   }
   function confirmConversationChange(action: () => void) {
     // The current view owns both document edits and unsent attachments. Keep
@@ -251,7 +246,8 @@ export function ChatPage({
     if (leaveConfirmation.current) leaveConfirmation.current.confirm(action);
     else action();
   }
-  const newConversation = () => confirmConversationChange(() => startConversation(false));
+  // Ny konversation opens Chatt, from any view.
+  const newConversation = () => confirmConversationChange(() => startConversation(false, "chat"));
 
   const onActivityChange = useCallback((next: ActivityState | null) => {
     if (next) setHistoryOpen(false);
@@ -272,38 +268,17 @@ export function ChatPage({
   });
 
   const insightPartner = hasInsights(partner) ? partner : null;
-  const effectiveTab = insightPartner ? tab : "chat";
+  // A phone has no tabs: Historik is its sheet, Insikter a menu row.
+  const phone = usePhoneScreen();
+  const viewTab: ChatTab =
+    tab === "insights"
+      ? insightPartner
+        ? "insights"
+        : "chat"
+      : tab === "history" && !phone
+        ? "history"
+        : "chat";
 
-  // Measured as how the history fits, so a resize re-renders the page only
-  // when that changes. A panel open in the conversation behind Insikter
-  // takes no room.
-  const historyFit = useElementWidth(rowRef, fitOfHistory);
-  const panelHere = panelOpen && effectiveTab === "chat";
-  const historyInline = historyFit === "always" || (historyFit === "alone" && !panelHere);
-  // The history beside the conversation would turn into a sheet only because
-  // a panel is open beside it (the panel opened, or the window narrowed): it
-  // gives way instead, in the same frame (ChatView reports the panel before
-  // paint), rather than become a modal sheet over the panel. Opened next to
-  // such a panel, it is a sheet; where it does not fit at all, it turns into
-  // one.
-  const historyBeside = historyOpen && historyInline;
-  const [historyWasBeside, setHistoryWasBeside] = useState(historyBeside);
-  const [gaveWay, setGaveWay] = useState(0);
-  if (historyBeside !== historyWasBeside) {
-    setHistoryWasBeside(historyBeside);
-    if (historyWasBeside && historyOpen && historyFit === "alone" && panelHere) {
-      setHistoryOpen(false);
-      setGaveWay((count) => count + 1);
-    }
-  }
-  // It had the focus (a view that opened by itself): the focus goes back to
-  // what opened the history.
-  useLayoutEffect(() => {
-    if (gaveWay === 0 || document.activeElement !== document.body) return;
-    const trigger = historyTrigger.current;
-    historyTrigger.current = null;
-    if (trigger?.isConnected) trigger.focus();
-  }, [gaveWay]);
   const sessionId = active?.sessionId ?? null;
   const started = Boolean(active?.started);
   // The page has one h1: the conversation title in the header, the start
@@ -330,7 +305,6 @@ export function ChatPage({
           }
         ]
       : []),
-    ...(editHref ? [{ label: t("chat_edit_assistant"), href: editHref }] : []),
     {
       label: contextUsagePinned ? t("context_usage_menu_hide") : t("context_usage_menu_show"),
       onClick: () => setContextUsagePinned(!contextUsagePinned)
@@ -356,28 +330,81 @@ export function ChatPage({
       <ChatHeader
         partner={partner}
         switcherItems={switcherItems}
-        title={effectiveTab === "insights" ? t("insights") : title}
+        title={viewTab === "insights" ? t("insights") : title}
         // The personal assistant picks its model in the composer.
         modelName={modelSelector ? null : (partner.completionModel?.name ?? null)}
-        view={insightPartner ? { value: effectiveTab, onChange: selectTab } : null}
+        view={{ value: viewTab, onChange: selectTab, hasInsights: insightPartner !== null }}
+        editHref={editHref}
+        debug={
+          debugAvailable
+            ? {
+                isEnabled: started && sessionId !== null,
+                onOpen: (trigger) => {
+                  // Felsökning shows in Chatt, beside the answer it explains.
+                  if (viewTab !== "chat") selectTab("chat");
+                  debugRef.current?.openDebug(trigger);
+                }
+              }
+            : null
+        }
         historyOpen={historyOpen}
         onToggleHistory={toggleHistory}
         onNewConversation={newConversation}
         menuItems={menuItems}
-        minimal={isPersonal && !started && pendingSessionId === null && effectiveTab === "chat"}
+        minimal={isPersonal && !started && pendingSessionId === null && viewTab === "chat"}
       />
       <div ref={rowRef} className="flex min-h-0 flex-1">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          {insightPartner && effectiveTab === "insights" && (
-            <InsightsPanel partner={insightPartner} />
+          {/* The tabs' panels are always there for aria-controls; only the
+              selected one renders its content (Historik loads on demand). */}
+          {insightPartner && (
+            <div
+              id={CHAT_PANEL_IDS.insights}
+              role={phone ? undefined : "tabpanel"}
+              aria-label={t("insights")}
+              hidden={viewTab !== "insights"}
+              className="flex min-h-0 min-w-0 flex-1 flex-col"
+            >
+              {viewTab === "insights" && <InsightsPanel partner={insightPartner} />}
+            </div>
           )}
+          <div
+            id={CHAT_PANEL_IDS.history}
+            role={phone ? undefined : "tabpanel"}
+            aria-label={t("history")}
+            hidden={viewTab !== "history"}
+            className="flex min-h-0 min-w-0 flex-1 flex-col p-6"
+          >
+            {viewTab === "history" && (
+              <HistoryTab
+                partner={partner}
+                activeSessionId={sessionId ?? pendingSessionId}
+                onSelect={selectSession}
+                onDeleted={(id) => {
+                  if (active?.sessionId === id) startConversation(false);
+                }}
+                onRenamed={(id, name) =>
+                  setActive((current) =>
+                    current?.sessionId === id ? { ...current, title: name } : current
+                  )
+                }
+              />
+            )}
+          </div>
           {/* The conversation stays mounted behind Insikter, so switching back
               keeps this visit's turns (and an answer still streaming). */}
-          <div hidden={effectiveTab !== "chat"} className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <div
+            id={CHAT_PANEL_IDS.chat}
+            role={phone ? undefined : "tabpanel"}
+            aria-label={t("chat")}
+            hidden={viewTab !== "chat"}
+            className="flex min-h-0 min-w-0 flex-1 flex-col"
+          >
             {active ? (
               <ChatView
                 key={active.key}
                 leaveConfirmationRef={leaveConfirmation}
+                debugRef={debugRef}
                 partner={partner}
                 initialSessionId={active.sessionId}
                 initialMessages={active.messages}
@@ -400,13 +427,10 @@ export function ChatPage({
                 }}
                 activity={activity}
                 onActivityChange={onActivityChange}
-                onPanelOpenChange={setPanelOpen}
                 layout={{
                   row: rowRef,
-                  aside: historyBeside
-                    ? { width: HISTORY_WIDTH, yields: historyFit === "alone" }
-                    : null,
-                  hidden: effectiveTab !== "chat"
+                  aside: null,
+                  hidden: viewTab !== "chat"
                 }}
               />
             ) : detail.isError ? (
@@ -427,7 +451,6 @@ export function ChatPage({
         </div>
         {historyOpen && (
           <HistoryAside
-            inline={historyInline}
             partner={partner}
             activeSessionId={sessionId ?? pendingSessionId}
             onSelect={selectSession}

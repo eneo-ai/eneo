@@ -7,7 +7,7 @@ import type { ChatPartner } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
 import { router } from "@/test/navigation";
 import { renderInApp, testQueryClient } from "@/test/render";
-import { HistoryAside } from "./history-panel";
+import { HistoryAside, HistoryTab } from "./history-panel";
 import { RenameSessionDialog } from "./session-actions";
 
 const now = Date.now();
@@ -110,31 +110,30 @@ async function rowMenuItem(row: string, item: string) {
   return within(menu!).getByRole("menuitem", { name: item });
 }
 
+/** The chat page's Historik tab: the list across the page (a sheet on a phone). */
 function renderHistory({
-  onClose = vi.fn(),
   onSelect = vi.fn(),
   onDeleted = vi.fn(),
   queryClient = testQueryClient()
 } = {}) {
   renderInApp(
-    <HistoryAside
-      inline
-      partner={partner}
-      activeSessionId="s1"
-      onSelect={onSelect}
-      onDeleted={onDeleted}
-      onClose={onClose}
-    />,
+    <section aria-label={HEADING}>
+      <HistoryTab
+        partner={partner}
+        activeSessionId="s1"
+        onSelect={onSelect}
+        onDeleted={onDeleted}
+      />
+    </section>,
     { queryClient }
   );
-  return { onClose, onSelect, onDeleted };
+  return { onSelect, onDeleted };
 }
 
-describe("HistoryAside", () => {
+describe("HistoryTab", () => {
   it("groups conversations by date, marks the open one and selects on click", async () => {
     const { onSelect } = renderHistory();
-    const aside = screen.getByRole("complementary", { name: HEADING });
-    await waitFor(() => expect(document.activeElement?.textContent).toBe(HEADING));
+    const aside = screen.getByRole("region", { name: HEADING });
 
     const today = await within(aside).findByRole("region", { name: "Idag" });
     const current = within(today).getByRole("button", { name: "Upphandlingsanalys" });
@@ -144,10 +143,23 @@ describe("HistoryAside", () => {
     expect(onSelect).toHaveBeenCalledWith("s2");
   });
 
-  it("closes on Escape", async () => {
-    const { onClose } = renderHistory();
-    const heading = await screen.findByRole("heading", { name: HEADING });
-    fireEvent.keyDown(heading, { key: "Escape" });
+  it("has no close button as a tab, and one in the phone's sheet", async () => {
+    renderHistory();
+    expect(screen.queryByRole("button", { name: "Stäng listan med konversationer" })).toBeNull();
+    cleanup();
+    const onClose = vi.fn();
+    renderInApp(
+      <HistoryAside
+        partner={partner}
+        activeSessionId="s1"
+        onSelect={vi.fn()}
+        onDeleted={vi.fn()}
+        onClose={onClose}
+      />,
+      { queryClient: testQueryClient() }
+    );
+    const sheet = await screen.findByRole("dialog", { name: HEADING });
+    fireEvent.click(within(sheet).getByRole("button", { name: "Stäng listan med konversationer" }));
     expect(onClose).toHaveBeenCalled();
   });
 
@@ -305,13 +317,11 @@ describe("HistoryAside", () => {
   it("names the personal assistant's list after the personal assistant", async () => {
     api.rows = [];
     renderInApp(
-      <HistoryAside
-        inline
+      <HistoryTab
         partner={{ type: "default-assistant", id: "d", name: "Default", personalSpace: true }}
         activeSessionId={null}
         onSelect={vi.fn()}
         onDeleted={vi.fn()}
-        onClose={vi.fn()}
       />,
       { queryClient: testQueryClient() }
     );
@@ -440,13 +450,11 @@ describe("HistoryAside scope (decision 29)", () => {
 
   it("scopes a group chat's list to the group chat", async () => {
     renderInApp(
-      <HistoryAside
-        inline
+      <HistoryTab
         partner={{ type: "group-chat", id: "g1", name: "Ledningsgruppen" }}
         activeSessionId={null}
         onSelect={vi.fn()}
         onDeleted={vi.fn()}
-        onClose={vi.fn()}
       />,
       { queryClient: testQueryClient() }
     );
