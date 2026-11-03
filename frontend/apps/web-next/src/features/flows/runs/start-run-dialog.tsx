@@ -13,11 +13,7 @@ import { useId, useImperativeHandle, useRef, useState, type Ref } from "react";
 import { flushSync } from "react-dom";
 import { blockingError, ListError, RefreshError } from "@/components/composites/query-state";
 import { LoadingState } from "@/components/composites/loading-state";
-import {
-  HANDHELD_QUERY,
-  PHONE_QUERY,
-  usePhoneScreen
-} from "@/lib/hooks/use-media-match";
+import { HANDHELD_QUERY, PHONE_QUERY, usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { restrictedBeforeApproval } from "../flow-form-fields";
