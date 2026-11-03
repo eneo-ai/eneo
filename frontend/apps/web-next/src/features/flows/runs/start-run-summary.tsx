@@ -1,3 +1,4 @@
+import { Banner } from "@astryxdesign/core/Banner";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { useLocale, useTranslations } from "use-intl";
 import { useId, type ReactNode, type Ref } from "react";
@@ -26,17 +27,20 @@ export function StartRunSummary({
   const headingId = useId();
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-4">
-      <div className="flex flex-col gap-1">
-        <h3
-          id={headingId}
-          ref={headingRef}
-          tabIndex={-1}
-          className="text-ax-text focus-visible:outline-ring m-0 text-base font-semibold outline-none focus-visible:outline-2 focus-visible:outline-offset-2"
-        >
-          {t("flow_runs_summary_title")}
-        </h3>
-        <p className="text-ax-text-secondary m-0 text-sm">{t("flow_runs_summary_ready")}</p>
-      </div>
+      <h3
+        id={headingId}
+        ref={headingRef}
+        tabIndex={-1}
+        className="text-ax-text focus-visible:outline-ring m-0 text-base font-semibold outline-none focus-visible:outline-2 focus-visible:outline-offset-2"
+      >
+        {t("flow_runs_summary_title")}
+      </h3>
+      <Banner
+        status="success"
+        title={t("flow_runs_start_ready_title")}
+        description={t("flow_runs_summary_ready")}
+        collapsible={false}
+      />
       {notices}
       {summaryIsEmpty(summary) ? (
         <p className="text-ax-text-secondary m-0 text-sm">{t("flow_runs_summary_empty")}</p>

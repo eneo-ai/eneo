@@ -1,5 +1,6 @@
 import { Collapsible } from "@/components/astryx/collapsible";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
+import { Token } from "@astryxdesign/core/Token";
 import { useLocale, useTranslations } from "use-intl";
 import { useState } from "react";
 import { formatBytes } from "@/lib/format";
@@ -113,7 +114,7 @@ export function StepTemplateProvenance({ payload }: { payload: RunStep["output_p
   );
 }
 
-/** What was sent in at run time: the text read out of the files and its format. */
+/** What was sent in at run time, as tags: how many files, the text read out of them and its format. */
 export function StepRuntimeInputSummary({
   result
 }: {
@@ -124,6 +125,7 @@ export function StepRuntimeInputSummary({
   const summary = runtimeInputSummary(result);
   if (!summary) return null;
   const facts = [
+    summary.fileCount > 0 ? t("flow_run_runtime_input_files", { count: summary.fileCount }) : null,
     summary.extractedTextLength !== null
       ? t("flow_run_extracted_text_badge", {
           count: formatCount(summary.extractedTextLength, locale)
@@ -136,9 +138,17 @@ export function StepRuntimeInputSummary({
             : summary.inputFormat
         })
       : null
-  ].filter(Boolean);
+  ].filter((fact): fact is string => fact !== null);
   if (facts.length === 0) return null;
-  return <p className="text-ax-text-secondary m-0 text-sm">{facts.join(" · ")}</p>;
+  return (
+    <ul className="m-0 flex list-none flex-wrap gap-1.5 p-0">
+      {facts.map((fact) => (
+        <li key={fact} className="min-w-0">
+          <Token size="sm" label={fact} />
+        </li>
+      ))}
+    </ul>
+  );
 }
 
 /**

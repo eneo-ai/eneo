@@ -250,6 +250,30 @@ describe("FlowPackageImportDialog", () => {
     await expectNoAxeViolations(container);
   }, 20_000);
 
+  it("shows the chosen package as a file and lets the person swap it", async () => {
+    api.POST.mockImplementation(() => Promise.resolve({ data: plan, response: json(200, plan) }));
+    const { container } = renderImport();
+    expect(screen.getByText("Dra hit ett flödespaket eller välj en .eneopkg-fil.")).toBeTruthy();
+    choose(container, new File(["zip"], "brev.eneopkg", { type: "application/zip" }));
+
+    expect(await screen.findByText("brev.eneopkg")).toBeTruthy();
+    expect(screen.queryByText("Dra hit ett flödespaket eller välj en .eneopkg-fil.")).toBeNull();
+    expect(screen.getByRole("button", { name: "Byt fil" })).toBeTruthy();
+    await screen.findByText("Välj en lokal resurs för Skrivmodell.");
+
+    // A file that is no package keeps the one already chosen.
+    choose(container, new File(["x"], "brev.zip", { type: "application/zip" }));
+    expect(await screen.findByText("Endast .eneopkg-filer kan importeras.")).toBeTruthy();
+    expect(screen.getByText("brev.eneopkg")).toBeTruthy();
+    expect(api.POST).toHaveBeenCalledTimes(1);
+
+    choose(container, new File(["zip"], "svar.eneopkg", { type: "application/zip" }));
+    expect(await screen.findByText("svar.eneopkg")).toBeTruthy();
+    expect(screen.queryByText("Endast .eneopkg-filer kan importeras.")).toBeNull();
+    await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(2));
+    await expectNoAxeViolations(container);
+  }, 20_000);
+
   it("says why the core refused the package", async () => {
     api.POST.mockResolvedValue({
       error: { message: "Bad", code: "flow_package_checksum_mismatch" },

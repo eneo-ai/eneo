@@ -3,13 +3,18 @@ import { Button } from "@astryxdesign/core/Button";
 import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { useAnnounce } from "@astryxdesign/core/hooks";
+import { FormLayout } from "@astryxdesign/core/FormLayout";
+import { Icon } from "@astryxdesign/core/Icon";
 import { Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
+import { List, ListItem } from "@astryxdesign/core/List";
 import { Text } from "@astryxdesign/core/Text";
 import { TextArea } from "@astryxdesign/core/TextArea";
+import { CircleCheck, Download, Minus, PackageOpen } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { TextInput } from "@/components/astryx/text-input";
+import { IconTile } from "@/components/composites/icon-tile";
 import { toast } from "@/lib/toast";
 import { saveBlob } from "@/features/files/signed-file-url";
 import type { FlowPublic } from "./flows-api";
@@ -145,74 +150,119 @@ export function FlowPackageExportDialog({
           <DialogHeader
             title={t("flow_editor_tools_package_export_title")}
             subtitle={t("flow_editor_tools_package_export_description")}
+            startContent={<IconTile icon={<PackageOpen />} />}
             onOpenChange={requestOpenChange}
           />
         }
         content={
           open ? (
             <LayoutContent>
-              <form id={formId} onSubmit={submit} noValidate className="flex flex-col gap-4">
-                <TextInput
-                  label={t("flow_editor_tools_package_id")}
-                  description={t("flow_editor_tools_package_id_help")}
-                  value={packageId}
-                  onChange={(value) => {
-                    setPackageId(value.slice(0, PACKAGE_ID_MAX_LENGTH));
-                    setIdEdited(true);
-                  }}
-                  isDisabled={locked}
-                  autoComplete="off"
-                />
-                <TextInput
-                  label={t("flow_editor_tools_package_version")}
-                  description={t("flow_editor_tools_package_version_help")}
-                  value={version}
-                  onChange={(value) => setVersion(value.slice(0, 64))}
-                  isRequired
-                  isDisabled={locked}
-                  autoComplete="off"
-                  status={
-                    showProblems && versionMissing
-                      ? { type: "error", message: t("flow_editor_tools_package_version_required") }
-                      : undefined
-                  }
-                />
-                <TextInput
-                  label={t("name")}
-                  value={name}
-                  onChange={(value) => {
-                    setName(value);
-                    if (!idEdited) setPackageId(defaultPackageId(value));
-                  }}
-                  isRequired
-                  isDisabled={locked}
-                  autoComplete="off"
-                  status={
-                    showProblems && nameMissing
-                      ? { type: "error", message: t("flows_new_name_required") }
-                      : undefined
-                  }
-                />
-                <TextArea
-                  label={t("description")}
-                  value={description}
-                  onChange={setDescription}
-                  isOptional
-                  isDisabled={locked}
-                  rows={3}
-                />
-                <div className="bg-ax-sunken rounded-ax-container flex flex-col gap-1 px-4 py-3">
-                  <Text type="label" as="p" display="block" className="m-0">
-                    {t("flow_editor_tools_package_export_contents_title", {
-                      count: flow.steps.length
-                    })}
-                  </Text>
-                  <Text type="supporting" size="sm" as="p" display="block" className="m-0">
-                    {t("flow_editor_tools_package_export_contents_includes")}
-                  </Text>
-                  <Text type="supporting" size="sm" as="p" display="block" className="m-0">
-                    {t("flow_editor_tools_package_export_contents_excludes")}
-                  </Text>
+              <form id={formId} onSubmit={submit} noValidate className="flex flex-col gap-6">
+                <fieldset>
+                  <legend className="text-ax-text mb-3 text-sm font-semibold">
+                    {t("flow_package_export_section_identity")}
+                  </legend>
+                  {/* Required is the default and unmarked; only the optional fields say so. */}
+                  <FormLayout defaultOptionality="required">
+                    {/* An empty ID is filled in from the name on export. */}
+                    <TextInput
+                      label={t("flow_editor_tools_package_id")}
+                      description={t("flow_editor_tools_package_id_help")}
+                      value={packageId}
+                      onChange={(value) => {
+                        setPackageId(value.slice(0, PACKAGE_ID_MAX_LENGTH));
+                        setIdEdited(true);
+                      }}
+                      isOptional
+                      isDisabled={locked}
+                      autoComplete="off"
+                    />
+                    <TextInput
+                      label={t("flow_editor_tools_package_version")}
+                      description={t("flow_editor_tools_package_version_help")}
+                      value={version}
+                      onChange={(value) => setVersion(value.slice(0, 64))}
+                      isRequired
+                      isDisabled={locked}
+                      autoComplete="off"
+                      status={
+                        showProblems && versionMissing
+                          ? {
+                              type: "error",
+                              message: t("flow_editor_tools_package_version_required")
+                            }
+                          : undefined
+                      }
+                    />
+                  </FormLayout>
+                </fieldset>
+                <fieldset>
+                  <legend className="text-ax-text mb-3 text-sm font-semibold">
+                    {t("flow_package_export_section_presentation")}
+                  </legend>
+                  <FormLayout defaultOptionality="required">
+                    <TextInput
+                      label={t("name")}
+                      value={name}
+                      onChange={(value) => {
+                        setName(value);
+                        if (!idEdited) setPackageId(defaultPackageId(value));
+                      }}
+                      isRequired
+                      isDisabled={locked}
+                      autoComplete="off"
+                      status={
+                        showProblems && nameMissing
+                          ? { type: "error", message: t("flows_new_name_required") }
+                          : undefined
+                      }
+                    />
+                    <TextArea
+                      label={t("description")}
+                      value={description}
+                      onChange={setDescription}
+                      isOptional
+                      isDisabled={locked}
+                      rows={3}
+                    />
+                  </FormLayout>
+                </fieldset>
+                <div className="bg-ax-sunken rounded-ax-container px-4 py-3">
+                  <List
+                    density="compact"
+                    edge="flush"
+                    header={
+                      <>
+                        <Text type="label" as="p" display="block" className="m-0">
+                          {t("flow_package_export_contents_title")}
+                        </Text>
+                        {flow.steps.length > 0 ? (
+                          <Text type="supporting" size="sm" as="p" display="block" className="m-0">
+                            {t("flow_package_export_step_count", { count: flow.steps.length })}
+                          </Text>
+                        ) : null}
+                      </>
+                    }
+                  >
+                    <ListItem
+                      align="first-line"
+                      startContent={<Icon icon={CircleCheck} size="sm" color="success" />}
+                      label={
+                        <Text type="supporting" size="sm" display="block">
+                          {t("flow_editor_tools_package_export_contents_includes")}
+                        </Text>
+                      }
+                    />
+                    <ListItem
+                      align="first-line"
+                      startContent={<Icon icon={Minus} size="sm" color="secondary" />}
+                      label={
+                        <Text type="supporting" size="sm" display="block">
+                          {t("flow_editor_tools_package_export_contents_excludes")}
+                        </Text>
+                      }
+                    />
+                  </List>
                 </div>
                 {templateSteps > 0 ? (
                   <CheckboxInput
@@ -290,6 +340,7 @@ export function FlowPackageExportDialog({
                       ? t("flow_editor_tools_package_save")
                       : t("flow_editor_tools_package_export")
                   }
+                  icon={<Icon icon={Download} />}
                   isLoading={exporting}
                   isInterruptible
                 />

@@ -227,13 +227,18 @@ describe("StartRunDialog", () => {
     pickFile(dialog, new File(["%PDF"], "brev.pdf", { type: "application/pdf" }));
     expect(await within(dialog).findByText(/Uppladdad/)).toBeTruthy();
     expect(FakeUpload.sent[0]?.url).toBe("/api/v1/flows/flow-1/steps/step-1/runtime-files/");
+    // The person sees which part of the dialog this is, and how many files the step has.
+    expect(within(dialog).getByText(messages.flow_runs_start_part_input)).toBeTruthy();
+    expect(within(dialog).getByText("Filer: 1 av 3")).toBeTruthy();
 
     fireEvent.click(button(dialog, messages.flow_runs_summary_next));
 
     // Nothing is sent until the person has seen what will be.
     const heading = within(dialog).getByRole("heading", { name: messages.flow_runs_summary_title });
     expect(document.activeElement).toBe(heading);
+    expect(within(dialog).getByText(messages.flow_runs_start_part_review)).toBeTruthy();
     const summary = within(dialog).getByRole("region", { name: messages.flow_runs_summary_title });
+    expect(within(summary).getByText(messages.flow_runs_start_ready_title)).toBeTruthy();
     expect(within(summary).getByText("Ärende")).toBeTruthy();
     expect(within(summary).getByText("Bygglov")).toBeTruthy();
     expect(within(summary).getByText("Brevet")).toBeTruthy();

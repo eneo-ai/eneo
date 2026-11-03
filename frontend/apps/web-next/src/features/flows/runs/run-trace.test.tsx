@@ -245,17 +245,23 @@ describe("RunTrace", () => {
       within(rows[0]!).getByText(new RegExp(messages.flow_run_token_usage_not_recorded))
     ).toBeTruthy();
     expect(within(rows[1]!).getByText(/1\s200 token \(1\s000 in, 200 ut\)/)).toBeTruthy();
-    expect(within(rows[1]!).queryByText("requested_model")).toBeNull();
+    expect(rows[1]!.querySelector(".astryx-code-block")).toBeNull();
 
     const trigger = within(rows[1]!).getByRole("button", { name: "Detaljer för försök 2" });
     trigger.focus();
     fireEvent.click(trigger);
     expect(document.activeElement).toBe(trigger);
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
-    expect(within(rows[1]!).getByText("model-large")).toBeTruthy();
-    expect(within(rows[1]!).getByText("model-large-2026")).toBeTruthy();
-    expect(within(rows[1]!).getByText("test-provider")).toBeTruthy();
-    expect(within(rows[1]!).getByText(messages.flow_runs_secret_stored)).toBeTruthy();
+    // The attempt as JSON, a stored credential as a word.
+    const json = rows[1]!.querySelector(".astryx-code-block")?.textContent ?? "";
+    for (const part of [
+      '"requested_model": "model-large"',
+      '"response_model": "model-large-2026"',
+      '"provider": "test-provider"',
+      `"credential": "‹${messages.flow_runs_secret_stored}›"`
+    ]) {
+      expect(json).toContain(part);
+    }
     fireEvent.click(within(rows[1]!).getByRole("button", { name: "Kopiera försök 2" }));
     await vi.waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
     expect(JSON.parse(writeText.mock.calls[0]![0] as string)).toEqual(completed);
@@ -263,7 +269,7 @@ describe("RunTrace", () => {
     await expectNoAxeViolations(container);
 
     fireEvent.click(trigger);
-    expect(within(rows[1]!).queryByText("requested_model")).toBeNull();
+    expect(rows[1]!.querySelector(".astryx-code-block")).toBeNull();
     expect(document.activeElement).toBe(trigger);
   });
 

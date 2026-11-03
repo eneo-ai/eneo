@@ -1,11 +1,13 @@
 import { Button } from "@astryxdesign/core/Button";
+import { IconButton } from "@astryxdesign/core/IconButton";
+import { Tooltip } from "@astryxdesign/core/Tooltip";
 import { Collapsible } from "@/components/astryx/collapsible";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { RefreshCw } from "lucide-react";
+import { Copy, Info, RefreshCw } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useEffect, useId, useRef, useState } from "react";
-import { flushSync } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import { Banner } from "@astryxdesign/core/Banner";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
 import { LoadingState } from "@/components/composites/loading-state";
@@ -16,8 +18,8 @@ import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
 import { hasAnswered, pollEvery } from "@/lib/api/query";
 import { useFocusRescue } from "@/lib/focus-rescue";
+import { useCopy } from "@/lib/hooks/use-copy";
 import { usePhoneScreen } from "@/lib/hooks/use-media-match";
-import { CopyableValue } from "@/features/chat/debug-section";
 import { useSpaceDisplayName, useSpaceSections } from "@/features/spaces/frame/space-header";
 import { spaceLandingHref } from "@/features/spaces/frame/space-sections";
 import { useSpace } from "@/features/spaces/use-space";
@@ -29,15 +31,15 @@ import { RunWebhookDeliveries } from "./run-webhooks";
 import { RunFiles } from "./run-files";
 import { JsonValue } from "./run-json";
 import { refusalText, runErrorText } from "./run-messages";
-import { progressSignature, runStepViews, type RunStepView } from "./run-progress";
+import { outputText, progressSignature, runStepViews, type RunStepView } from "./run-progress";
 import { RunLiveProgress } from "./run-live-progress";
 import { RunKnowledge } from "./run-knowledge";
 import { starterName } from "./run-starter";
-import { RunSteps, showRunStep, stepTitle } from "./run-steps";
+import { RunSteps, showRunStep, StepText, stepTitle } from "./run-steps";
 import { RunText } from "./run-text";
-import { RunUsage } from "./run-usage";
+import { RunUsage, RunUsageBrief } from "./run-usage";
 import { RunTrace } from "./run-trace";
-import { RunTranscripts } from "./run-transcript";
+import { RunTranscript, useTranscriptHosts } from "./run-transcript";
 import { reviewTranscriptTarget, transcriptTargets } from "./transcript";
 import { reviewDraftOf } from "./review-draft";
 import {
@@ -214,6 +216,47 @@ function RunProblem({
   return null;
 }
 
+/**
+ * A support id beside the run's status, short: its first characters, a
+ * button that copies all of it, and what it is for, with the whole id, behind
+ * an info button (hover, focus or tap).
+ */
+function RunId({ label, value, hint }: { label: string; value: string; hint: string }) {
+  const t = useTranslations();
+  const { copy } = useCopy();
+  return (
+    <span className="text-ax-text-secondary inline-flex min-w-0 items-center gap-1">
+      {label}
+      <code className="text-ax-text font-mono text-xs">
+        {value.length > 8 ? `${value.slice(0, 8)}…` : value}
+      </code>
+      <IconButton
+        label={t("chat_debug_copy_value", { label })}
+        icon={<Copy className="size-3.5" />}
+        variant="ghost"
+        size="sm"
+        onClick={() => void copy(value)}
+      />
+      <Tooltip
+        content={
+          <span className="flex flex-col gap-1">
+            <span>{hint}</span>
+            <code className="font-mono text-xs [overflow-wrap:anywhere]">{value}</code>
+          </span>
+        }
+        touchTrigger="tap"
+      >
+        <IconButton
+          label={t("chat_debug_value_about", { label })}
+          icon={<Info className="size-3.5" />}
+          variant="ghost"
+          size="sm"
+        />
+      </Tooltip>
+    </span>
+  );
+}
+
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   const headingId = useId();
   return (
@@ -359,8 +402,6 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
   const summary: RunSummary | undefined = progress.data?.status;
   const status = summary?.status ?? null;
   const [stepsOpen, setStepsOpen] = useState<boolean | null>(null);
-  // Only the first loaded status sets the default; finishing must not fold what someone is reading.
-  if (stepsOpen === null && status !== null) setStepsOpen(status !== "completed");
   function revealStep(order: number) {
     flushSync(() => setStepsOpen(true));
     showRunStep(order);
@@ -380,6 +421,14 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
           steps.data
         )
       : null;
+  // Each transcript shows once: in its step, or in the review while one is about a transcript.
+  const transcripts = reviewTranscript ? [] : transcriptTargets(steps.data);
+  const transcriptHost = useTranscriptHosts();
+  // The first status the page shows sets the default; finishing must not fold what someone is
+  // reading. A run with a transcript opens its steps on a phone too: the transcript is in them.
+  if (stepsOpen === null && shown && status !== null) {
+    setStepsOpen(status !== "completed" || transcripts.length > 0);
+  }
 
   // Announces a status the run moved to while the page is open.
   useEffect(() => {
@@ -483,7 +532,6 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
 
   const stepsSection = summary ? (
     <FoldSection
-      key="steps"
       title={t("flow_runs_steps_heading")}
       isOpen={stepsOpen ?? false}
       onOpenChange={setStepsOpen}
@@ -504,33 +552,37 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
             steps={stepViews}
             runStatus={status}
             canReadEvidence={run?.evidence_access.can_read_evidence ?? false}
+            transcripts={
+              new Map(transcripts.map((target) => [target.stepId, transcriptHost(target.stepId)]))
+            }
           />
         </>
       )}
     </FoldSection>
   ) : null;
-  const transcriptSection =
-    transcriptTargets(steps.data).length > 0 && !reviewTranscript ? (
-      <Section key="transcript" title={t("flow_runs_transcript_heading")}>
-        <RunTranscripts
-          flowId={flowId}
-          runId={runId}
-          targets={transcriptTargets(steps.data)}
-          labelFor={(target) =>
-            stepTitle(
-              stepViews.find((step) => step.order === target.stepOrder) ?? {
-                order: target.stepOrder,
-                label: ""
-              },
-              t
-            )
-          }
-          mayEdit={can("flows_manage")}
-          runCompleted={status === "completed"}
-          runRevision={summary?.revision ?? null}
-        />
-      </Section>
-    ) : null;
+  // Rendered here, where nothing moves, and shown in the steps (`useTranscriptHosts`).
+  const transcriptViews = transcripts.map((target) => {
+    const result = steps.data?.find((step) => step.step_id === target.stepId);
+    const text = result ? outputText(result.output_payload_json) : null;
+    return createPortal(
+      <RunTranscript
+        flowId={flowId}
+        runId={runId}
+        target={target}
+        mayEdit={can("flows_manage")}
+        runCompleted={status === "completed"}
+        runRevision={summary?.revision ?? null}
+        // A transcribing step whose transcript has no lines still shows what it wrote.
+        fallback={
+          text && stepViews.find((step) => step.order === target.stepOrder)?.transcribeOnly ? (
+            <StepText text={text} />
+          ) : undefined
+        }
+      />,
+      transcriptHost(target.stepId),
+      target.stepId
+    );
+  });
 
   const view = status ? runStatusView(status) : null;
   const duration = summary ? runDurationMs(summary) : null;
@@ -583,6 +635,17 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
             <span className="text-ax-text-secondary">
               {t("flow_runs_started_by_named", { name: starterName(summary, t) })}
             </span>
+            {run ? <RunUsageBrief run={run} /> : null}
+            <RunId
+              label={t("flow_run_more_run_id")}
+              value={summary.id}
+              hint={t("flow_run_more_run_id_hint")}
+            />
+            <RunId
+              label={t("flow_run_more_trace_id")}
+              value={summary.trace_id}
+              hint={t("flow_run_more_trace_id_hint")}
+            />
           </div>
         ) : null}
         {offers?.retryHeldBack === "version_changed" ? (
@@ -679,7 +742,8 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
                 <LoadingState rows={2} />
               )}
             </Section>
-            {phone ? [transcriptSection, stepsSection] : [stepsSection, transcriptSection]}
+            {stepsSection}
+            {transcriptViews}
             {run?.evidence_access.can_read_evidence ? (
               <FoldSection title={t("flow_runs_knowledge_heading")}>
                 <RunKnowledge
@@ -734,20 +798,6 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
                 steps={stepViews}
                 access={run?.evidence_access}
               />
-            ) : null}
-            {summary ? (
-              <dl className="m-0 grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2">
-                <CopyableValue
-                  label={t("flow_run_more_run_id")}
-                  value={summary.id}
-                  hint={t("flow_run_more_run_id_hint")}
-                />
-                <CopyableValue
-                  label={t("flow_run_more_trace_id")}
-                  value={summary.trace_id}
-                  hint={t("flow_run_more_trace_id_hint")}
-                />
-              </dl>
             ) : null}
           </>
         )}

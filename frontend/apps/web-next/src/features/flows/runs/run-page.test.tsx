@@ -389,7 +389,8 @@ describe("FlowRunPage", () => {
       name: messages.flow_runs_step_input_files
     });
     expect(within(files).getByText("underlag.pdf")).toBeTruthy();
-    expect(within(files).getByText("PDF")).toBeTruthy();
+    // The type as a tag beside the name; a file the core did not name keeps none.
+    expect(within(files).getByText("pdf")).toBeTruthy();
     expect(within(files).getByText("Fil 2")).toBeTruthy();
     expect(within(files).getByRole("button", { name: "Ladda ned underlag.pdf" })).toBeTruthy();
     expect(within(files).getByRole("button", { name: "Ladda ned fil 2" })).toBeTruthy();
@@ -476,7 +477,8 @@ describe("FlowRunPage", () => {
     answerRun(makeRunSummary());
     renderRun();
     await screen.findByText("Beslutet är fattat.");
-    expect(screen.getByText("trace-1")).toBeTruthy();
+    // Shown short beside the status, and whole in what the info button says.
+    expect(screen.getAllByText("trace-1")).toHaveLength(2);
 
     fireEvent.click(
       screen.getByRole("button", {
@@ -490,6 +492,28 @@ describe("FlowRunPage", () => {
       })
     );
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("run-1"));
+  });
+
+  it("says what the run used and its ids beside its status, short", async () => {
+    const summary = makeRunSummary({ id: "3f2a8c1d-7e4b-4c1a-9a0e-5b6c7d8e9f01" });
+    answerRun(
+      summary,
+      makeRunDetail({
+        ...summary,
+        transcription_usage: { audio_seconds: 125, completeness: "incomplete" }
+      })
+    );
+    renderRun();
+    await screen.findByText("Beslutet är fattat.");
+    const result = screen.getByRole("heading", {
+      level: 2,
+      name: messages.flow_runs_result_heading
+    });
+    const above = (node: Node) =>
+      Boolean(node.compareDocumentPosition(result) & Node.DOCUMENT_POSITION_FOLLOWING);
+    for (const text of [/^1\s500 token$/, /^Ljud: 2 min 5 s \(ofullständigt\)$/, "3f2a8c1d…"]) {
+      expect(above(screen.getByText(text))).toBe(true);
+    }
   });
 
   it("explains what the run id and the trace id are for", async () => {
@@ -1214,28 +1238,80 @@ describe("FlowRunPage", () => {
       state.routes[CORRECTIONS] = () => ({ body: [] });
     }
 
-    it("puts the transcript before the steps on a phone, and after them from a tablet up", async () => {
-      const before = (earlier: Node, later: Node) =>
-        Boolean(earlier.compareDocumentPosition(later) & Node.DOCUMENT_POSITION_FOLLOWING);
-      setViewport("phone");
+    it("shows the transcript once, in its step, and opens the steps for it on a phone", async () => {
+      for (const viewport of ["phone", "tablet-portrait"] as const) {
+        setViewport(viewport);
+        answerAudioRun();
+        renderRun(["flows_view", "flows_manage"]);
+        const lines = await screen.findByRole("list", {
+          name: messages.flow_runs_transcript_lines
+        });
+        expect(
+          screen.getAllByRole("list", { name: messages.flow_runs_transcript_lines })
+        ).toHaveLength(1);
+        expect(lines.closest("article")).toBe(
+          screen.getByRole("article", { name: "Steg 1: Sammanfatta" })
+        );
+        // No section of its own beside the steps.
+        expect(
+          screen.queryByRole("heading", { level: 2, name: messages.flow_runs_transcript_heading })
+        ).toBeNull();
+        if (viewport === "phone") {
+          const steps = screen.getByRole("button", { name: messages.flow_runs_steps_heading });
+          expect(steps.getAttribute("aria-expanded")).toBe("true");
+        }
+        cleanup();
+      }
+    });
+
+    it("shows a transcribing step's transcript as the step's result, and its text when it has no lines", async () => {
       answerAudioRun();
+      state.routes[GRAPH] = () => ({
+        body: {
+          ...graph,
+          nodes: graph.nodes.map((node) =>
+            node.step_order === 1 ? { ...node, output_mode: "transcribe_only" } : node
+          )
+        }
+      });
       renderRun(["flows_view", "flows_manage"]);
       const lines = await screen.findByRole("list", { name: messages.flow_runs_transcript_lines });
-      const steps = screen.getByRole("region", { name: messages.flow_runs_steps_heading });
-      expect(before(lines, steps)).toBe(true);
+      const card = screen.getByRole("article", { name: "Steg 1: Sammanfatta" });
+      const result = within(card).getByRole("button", { name: messages.flow_runs_step_output });
+      expect(result.getAttribute("aria-expanded")).toBe("true");
+      expect(card.contains(lines)).toBe(true);
+      expect(within(card).queryByText("Resultat från steg 1")).toBeNull();
+      expect(
+        within(card).queryByRole("button", { name: messages.flow_runs_transcript_heading })
+      ).toBeNull();
       cleanup();
 
-      setViewport("tablet-portrait");
       answerAudioRun();
+      state.routes[GRAPH] = () => ({
+        body: {
+          ...graph,
+          nodes: graph.nodes.map((node) =>
+            node.step_order === 1 ? { ...node, output_mode: "transcribe_only" } : node
+          )
+        }
+      });
+      state.routes[SOURCE] = () => ({
+        body: {
+          status: "omitted",
+          run_id: "run-1",
+          step_id: "step-1",
+          attempt_no: 1,
+          reason: 1,
+          bounds: { segments_bytes: 0, detail_bytes: 0, words_bytes: 0, segments_count: 0 }
+        }
+      });
       renderRun(["flows_view", "flows_manage"]);
-      const wideLines = await screen.findByRole("list", {
-        name: messages.flow_runs_transcript_lines
-      });
-      const stepsHeading = screen.getByRole("heading", {
-        level: 2,
-        name: messages.flow_runs_steps_heading
-      });
-      expect(before(stepsHeading, wideLines)).toBe(true);
+      expect(await screen.findByText(messages.flow_runs_transcript_omitted)).toBeTruthy();
+      expect(
+        within(screen.getByRole("article", { name: "Steg 1: Sammanfatta" })).getByText(
+          "Resultat från steg 1"
+        )
+      ).toBeTruthy();
     });
 
     it("keeps unsaved transcript text and speaker names when the layout changes", async () => {

@@ -1,5 +1,6 @@
 import { Collapsible } from "@/components/astryx/collapsible";
 import { HStack } from "@astryxdesign/core/HStack";
+import { ScrollableArea } from "@astryxdesign/core/ScrollableArea";
 import { Text } from "@astryxdesign/core/Text";
 import { Token } from "@astryxdesign/core/Token";
 import { VStack } from "@astryxdesign/core/VStack";
@@ -11,7 +12,7 @@ import { LongMaterialCoverage } from "../long-material-coverage";
 import { CitationSummary } from "./run-citations";
 import { CopyButton } from "./run-copy";
 import { formatCount, formatSeconds, stepInputFiles } from "./run-format";
-import { JsonValue } from "./run-json";
+import { JsonBlock, JsonValue } from "./run-json";
 import { flowErrorText, runErrorText } from "./run-messages";
 import {
   nextStepOrder,
@@ -32,9 +33,10 @@ import {
   StepTemplateProvenance,
   StepTranscriptionFacts
 } from "./run-step-extras";
-import { runtimeInputSummary, speakerMapping } from "./run-step-facts";
+import { runtimeInputSummary, speakerMapping, stepInputRest } from "./run-step-facts";
 import { StepSpeakerMapping } from "./run-step-speakers";
 import { RunText } from "./run-text";
+import { TranscriptSlot } from "./run-transcript";
 import type { RunStep } from "./runs-api";
 
 type Translate = ReturnType<typeof useTranslations>;
@@ -68,11 +70,23 @@ function stepDurationMs(result: RunStep): number | null {
 /**
  * What a step produced, expanded on demand beside a copy button: the speakers a
  * speaker-mapping step named, a structured value (marked as JSON), or text
- * (rendered as Markdown, its line breaks kept).
+ * (rendered as Markdown, its line breaks kept, in a box that scrolls past a
+ * height). A step whose text is its transcript shows the transcript
+ * (`transcript`), open from the start, as its own section did.
  */
-function StepOutput({ flowId, runId, result }: { flowId: string; runId: string; result: RunStep }) {
+function StepOutput({
+  flowId,
+  runId,
+  result,
+  transcript = null
+}: {
+  flowId: string;
+  runId: string;
+  result: RunStep;
+  transcript?: HTMLElement | null;
+}) {
   const t = useTranslations();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(transcript !== null);
   const payload = result.output_payload_json;
   const structured = outputStructured(payload);
   const text = outputText(payload);
@@ -101,9 +115,11 @@ function StepOutput({ flowId, runId, result }: { flowId: string; runId: string; 
                 <Token size="sm" label={t("flow_run_more_json")} />
                 <JsonValue value={structured} />
               </VStack>
+            ) : transcript ? (
+              <TranscriptSlot host={transcript} />
             ) : (
               <>
-                <RunText text={text ?? ""} />
+                <StepText text={text ?? ""} />
                 {payload?.text_overflow ? (
                   <Text type="supporting" as="p">
                     {t("flow_runs_output_overflow")}
@@ -119,26 +135,65 @@ function StepOutput({ flowId, runId, result }: { flowId: string; runId: string; 
   );
 }
 
+/** A step's text output in a soft box that wraps and, past a height, scrolls. */
+export function StepText({ text }: { text: string }) {
+  const t = useTranslations();
+  return (
+    <ScrollableArea
+      axis="block"
+      label={t("flow_runs_step_output")}
+      className="bg-ax-sunken rounded-ax-inner focus-visible:outline-ring max-h-96 min-w-0 px-3 py-2 [overflow-wrap:anywhere] focus-visible:outline-2 focus-visible:-outline-offset-2"
+    >
+      <RunText text={text} />
+    </ScrollableArea>
+  );
+}
+
 /**
- * What a step was sent, with a button that copies it: closed until asked
+ * What a step was sent, as JSON, less what the card already shows
+ * (`stepInputRest`), with a button that copies all of it: closed until asked
  * for, and rendered only while open, since a large input weighs on the page.
  */
-function StepInput({ payload }: { payload: NonNullable<RunStep["input_payload_json"]> }) {
+function StepInput({ result }: { result: RunStep }) {
   const t = useTranslations();
   const [open, setOpen] = useState(false);
+  const rest = stepInputRest(result);
+  if (!rest) return null;
   return (
     <Collapsible
+      className="min-w-0"
       isOpen={open}
       onOpenChange={setOpen}
       chevronPosition="start"
-      trigger={<span className="text-sm font-medium">{t("flow_runs_step_input")}</span>}
+      trigger={<span className="text-sm font-medium">{t("flow_run_step_input_show")}</span>}
     >
       {open ? (
-        <div className="flex items-start gap-2 pt-2">
-          <div className="min-w-0 flex-1">
-            <JsonValue value={payload} />
-          </div>
-          <CopyButton label={t("flow_run_more_copy_input")} value={payload} />
+        <div className="pt-2">
+          <JsonBlock
+            value={rest}
+            copy={{ label: t("flow_run_more_copy_input"), value: result.input_payload_json }}
+          />
+        </div>
+      ) : null}
+    </Collapsible>
+  );
+}
+
+/** The transcript of a step whose result is something else, open from the start. */
+function StepTranscriptSection({ host }: { host: HTMLElement }) {
+  const t = useTranslations();
+  const [open, setOpen] = useState(true);
+  return (
+    <Collapsible
+      className="min-w-0"
+      isOpen={open}
+      onOpenChange={setOpen}
+      chevronPosition="start"
+      trigger={<Text type="label">{t("flow_runs_transcript_heading")}</Text>}
+    >
+      {open ? (
+        <div className="pt-2">
+          <TranscriptSlot host={host} />
         </div>
       ) : null}
     </Collapsible>
@@ -152,7 +207,8 @@ function StepCard({
   isNext,
   notRun,
   canReadEvidence,
-  runSettled
+  runSettled,
+  transcript
 }: {
   flowId: string;
   runId: string;
@@ -163,6 +219,8 @@ function StepCard({
   canReadEvidence: boolean;
   /** The run has ended (`isTerminal`). */
   runSettled: boolean;
+  /** The element the step's transcript renders into, when it has one to show. */
+  transcript: HTMLElement | null;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -178,13 +236,20 @@ function StepCard({
     Boolean(result.started_at);
   const title = stepTitle(step, t);
   const warnings = (result?.diagnostics ?? []).filter((item) => item.severity !== "info");
+  // A transcribing step's text is its transcript: shown as its result. Any
+  // other step that transcribed shows its transcript beside its result.
+  const transcriptIsResult =
+    transcript !== null &&
+    Boolean(step.transcribeOnly) &&
+    result?.status === "completed" &&
+    outputText(result.output_payload_json) !== null;
 
   return (
     <article
       id={runStepAnchorId(step.order)}
       tabIndex={-1}
       aria-label={title}
-      className="border-ax-border rounded-ax-element focus-visible:outline-ring flex scroll-mt-4 flex-col gap-3 border p-4 focus-visible:outline-2 focus-visible:outline-offset-2"
+      className="border-ax-border rounded-ax-element focus-visible:outline-ring flex min-w-0 scroll-mt-4 flex-col gap-3 border p-4 focus-visible:outline-2 focus-visible:outline-offset-2"
     >
       <div className="flex flex-wrap items-start justify-between gap-2">
         <h3 className="text-ax-text text-base font-semibold break-words">{title}</h3>
@@ -245,7 +310,12 @@ function StepCard({
       {result?.long_material ? <LongMaterialCoverage coverage={result.long_material} /> : null}
       {result && result.status === "completed" ? (
         <div className="flex flex-col gap-2">
-          <StepOutput flowId={flowId} runId={runId} result={result} />
+          <StepOutput
+            flowId={flowId}
+            runId={runId}
+            result={result}
+            transcript={transcriptIsResult ? transcript : null}
+          />
           <StepSectionReading payload={result.output_payload_json} />
           <StepTemplateProvenance payload={result.output_payload_json} />
           <RunFiles
@@ -270,10 +340,9 @@ function StepCard({
           />
         </div>
       ) : null}
+      {transcript && !transcriptIsResult ? <StepTranscriptSection host={transcript} /> : null}
       {result ? <StepTranscriptionFacts result={result} /> : null}
-      {result?.input_payload_json && Object.keys(result.input_payload_json).length > 0 ? (
-        <StepInput payload={result.input_payload_json} />
-      ) : null}
+      {result ? <StepInput result={result} /> : null}
       {result ? <StepPromptDetails result={result} /> : null}
       {canReadEvidence && result?.started_at ? (
         <StepAttempts
@@ -296,16 +365,18 @@ function StepCard({
  * how it transcribed audio, and why it failed when it did, with the answer
  * it gave that was not accepted. A step of an ended run that never started
  * reads "did not run". A running step says what it is doing and the step
- * next in turn says so. A caller who may read the evidence can open each
- * step's attempts. Each card can be gone to (`showRunStep`), as the failure
- * notice does.
+ * next in turn says so. A step that transcribed audio shows its transcript
+ * (`transcripts`, rendered by the page). A caller who may read the evidence
+ * can open each step's attempts. Each card can be gone to (`showRunStep`), as
+ * the failure notice does.
  */
 export function RunSteps({
   flowId,
   runId,
   steps,
   runStatus = null,
-  canReadEvidence = false
+  canReadEvidence = false,
+  transcripts
 }: {
   flowId: string;
   runId: string;
@@ -314,6 +385,8 @@ export function RunSteps({
   runStatus?: string | null;
   /** The core would let the caller read the run's evidence (its attempts). */
   canReadEvidence?: boolean;
+  /** By step id, the element each step's transcript renders into (`useTranscriptHosts`). */
+  transcripts?: ReadonlyMap<string, HTMLElement>;
 }) {
   const t = useTranslations();
   if (steps.length === 0) {
@@ -333,6 +406,7 @@ export function RunSteps({
             notRun={stepNeverRan(step, runStatus)}
             canReadEvidence={canReadEvidence}
             runSettled={runSettled}
+            transcript={(step.result && transcripts?.get(step.result.step_id)) ?? null}
           />
         </li>
       ))}

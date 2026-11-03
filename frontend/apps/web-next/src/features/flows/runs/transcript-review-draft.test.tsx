@@ -7,7 +7,7 @@ import { renderInApp, testQueryClient } from "@/test/render";
 import { makeSpace } from "@/features/spaces/testing/space-fixture";
 import { ReviewPanel } from "./review-panel";
 import { makeCheckpoint } from "./run-fixtures";
-import { RunTranscripts } from "./run-transcript";
+import { RunTranscript } from "./run-transcript";
 import { runKeys, transcriptRevisionsQueryOptions } from "./runs-api";
 import { parseSegments, shownSegments, type TranscriptTarget } from "./transcript";
 
@@ -289,25 +289,24 @@ describe("A run's transcript", () => {
     answer();
     const queryClient = testQueryClient();
     queryClient.setQueryData(["spaces", "space-1"], makeSpace({}));
-    const page = (label: string) => (
-      <RunTranscripts
+    const page = (revision: number) => (
+      <RunTranscript
         flowId="flow-1"
         runId="run-1"
-        targets={[target]}
-        labelFor={() => label}
+        target={target}
         mayEdit={false}
         runCompleted
+        runRevision={revision}
       />
     );
-    const { rerender } = renderInApp(page("Transkribera"), { queryClient });
+    const { rerender } = renderInApp(page(3), { queryClient });
     const lines = await screen.findByRole("list", { name: messages.flow_runs_transcript_lines });
     expect(lines.textContent).toContain("Tack.");
 
     // The page renders again (a poll, Refresh) with the same transcript and corrections.
     vi.mocked(parseSegments).mockClear();
     vi.mocked(shownSegments).mockClear();
-    rerender(page("Transkribering"));
-    expect(screen.getByRole("heading", { name: "Transkribering" })).toBeTruthy();
+    rerender(page(4));
     expect(parseSegments).not.toHaveBeenCalled();
     expect(shownSegments).not.toHaveBeenCalled();
 

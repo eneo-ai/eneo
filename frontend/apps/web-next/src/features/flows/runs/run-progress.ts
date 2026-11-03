@@ -11,6 +11,8 @@ export type RunStepView = {
   outputType: string | null;
   /** An audio step whose transcription also labels who speaks. */
   speakerIdentification?: boolean;
+  /** An audio step whose result is its transcript and nothing else. */
+  transcribeOnly?: boolean;
   /** The step's audited result, when it has one. */
   result: RunStep | null;
 };
@@ -37,6 +39,7 @@ export function runStepViews(
       status: node.run_status ?? result?.status ?? null,
       outputType: node.output_type ?? null,
       ...(node.speaker_identification ? { speakerIdentification: true } : {}),
+      ...(node.output_mode === "transcribe_only" ? { transcribeOnly: true } : {}),
       result
     });
   }

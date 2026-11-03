@@ -7,8 +7,7 @@ import { formatCount, formatSeconds } from "./run-format";
 import { runErrorText } from "./run-messages";
 import { tokenTotal } from "./run-progress";
 import { attemptDurationMs, attemptsByStep } from "./run-trace-rules";
-import { CopyButton } from "./run-copy";
-import { JsonValue } from "./run-json";
+import { JsonBlock } from "./run-json";
 
 type Attempt = Schema<"FlowStepAttemptPublic">;
 
@@ -73,14 +72,12 @@ function AttemptRow({ attempt }: { attempt: Attempt }) {
         trigger={t("flow_run_extras_attempt_details", { number: attempt.attempt_no })}
       >
         {open ? (
-          <div className="flex min-w-0 flex-col gap-2 pt-2">
-            <div className="flex justify-end">
-              <CopyButton
-                label={t("flow_run_extras_attempt_copy", { number: attempt.attempt_no })}
-                value={attempt}
-              />
-            </div>
-            <JsonValue value={attempt} />
+          <div className="min-w-0 pt-2">
+            <JsonBlock
+              value={attempt}
+              maxHeight="20rem"
+              copy={{ label: t("flow_run_extras_attempt_copy", { number: attempt.attempt_no }) }}
+            />
           </div>
         ) : null}
       </Collapsible>

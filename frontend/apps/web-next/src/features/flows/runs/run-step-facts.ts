@@ -127,6 +127,37 @@ export function runtimeInputSummary(
   };
 }
 
+/** Keys of a step's input that only say whether the text beside them was cut. */
+const TRUNCATED: Record<string, string> = {
+  text_truncated: "text",
+  source_text_truncated: "source_text"
+};
+
+/**
+ * What a step was sent, less what its card already shows: how it transcribed
+ * (`transcription`), what it searched its knowledge for (`rag`), and the text
+ * it got where that is the text it gave back (a transcript, shown as its
+ * result), with the flag that says whether that text was cut. Null when
+ * nothing else is left.
+ */
+export function stepInputRest(
+  result: Pick<RunStep, "input_payload_json" | "output_payload_json">
+): Record<string, unknown> | null {
+  const input = asObject(result.input_payload_json);
+  if (!input) return null;
+  const output = asObject(result.output_payload_json)?.text;
+  const isOutput = (key: string) =>
+    (key === "text" || key === "source_text") &&
+    typeof input[key] === "string" &&
+    input[key] !== "" &&
+    input[key] === output;
+  const rest = Object.entries(input).filter(
+    ([key]) =>
+      key !== "transcription" && key !== "rag" && !isOutput(key) && !isOutput(TRUNCATED[key] ?? "")
+  );
+  return rest.length > 0 ? Object.fromEntries(rest) : null;
+}
+
 function count(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
 }

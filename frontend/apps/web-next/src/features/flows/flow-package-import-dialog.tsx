@@ -1,19 +1,24 @@
 import { Banner } from "@astryxdesign/core/Banner";
+import { IconTile } from "@/components/composites/icon-tile";
 import { Button } from "@astryxdesign/core/Button";
+import { Card } from "@astryxdesign/core/Card";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { FileInput } from "@astryxdesign/core/FileInput";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { Selector } from "@astryxdesign/core/Selector";
+import { Spinner } from "@astryxdesign/core/Spinner";
 import { Heading, Text } from "@astryxdesign/core/Text";
 import { Token } from "@astryxdesign/core/Token";
 import { useQueryClient } from "@tanstack/react-query";
+import { FileArchive, PackageOpen, RefreshCw, Upload } from "lucide-react";
 import { useRouter } from "@/lib/navigation";
-import { useTranslations } from "use-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { FieldMessage } from "./editor/editor-fields";
+import { formatBytes } from "@/lib/format";
 import { toast } from "@/lib/toast";
 import { useSpace } from "@/features/spaces/use-space";
 import { flowKeys } from "./flows-api";
@@ -38,6 +43,8 @@ import {
 } from "./flow-packages";
 
 const SKIP = "__skip";
+const PACKAGE_ACCEPT =
+  ".eneopkg,application/vnd.eneo.package+zip,application/zip,application/octet-stream";
 
 type Translate = ReturnType<typeof useTranslations>;
 
@@ -191,6 +198,7 @@ function Requirement({
     control = (
       <Selector
         label={t("flow_editor_tools_package_local_resource", { slot: label })}
+        isLabelHidden
         options={[
           ...(selection === null && resolution.required
             ? [{ value: SKIP, label: t("flow_editor_tools_package_select_local_resource") }]
@@ -211,25 +219,29 @@ function Requirement({
     );
   }
 
+  // What the package needs on the left, the answer on the right; stacked on a phone.
   return (
     <li className="list-none">
-      <article
-        aria-labelledby={titleId}
-        className="border-ax-border rounded-ax-container flex flex-col gap-3 border p-3"
-      >
-        <div className="flex flex-wrap items-center gap-2">
-          <Heading level={4} id={titleId} weight="semibold" className="text-sm">
-            {label}
-          </Heading>
-          <Token size="sm" label={kindLabel(resolution.kind, t)} />
-          <Token
-            size="sm"
-            color={status === t("flow_editor_tools_package_required") ? "orange" : "default"}
-            label={status}
-          />
-        </div>
-        {usedBy.length > 0 || sensitivity || guidance ? (
-          <div className="flex flex-col gap-1">
+      <article aria-labelledby={titleId} className="flex flex-col gap-3 p-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-5">
+          <div className="flex min-w-0 flex-1 flex-col gap-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <Heading
+                level={4}
+                id={titleId}
+                weight="semibold"
+                wordBreak="break-word"
+                className="min-w-0 text-sm"
+              >
+                {label}
+              </Heading>
+              <Token size="sm" label={kindLabel(resolution.kind, t)} />
+              <Token
+                size="sm"
+                color={status === t("flow_editor_tools_package_required") ? "orange" : "default"}
+                label={status}
+              />
+            </div>
             {usedBy.length > 0 ? (
               <Text type="supporting" size="sm" as="p" display="block" className="m-0">
                 {t("flow_editor_tools_package_used_by_steps", { steps: usedBy.join(", ") })}
@@ -250,13 +262,13 @@ function Requirement({
               </Text>
             ) : null}
             {guidance ? (
-              <Text type="body" size="sm" as="p" display="block" className="m-0">
+              <Text type="body" size="sm" as="p" display="block" className="m-0 pt-1">
                 {t("flow_editor_tools_package_guidance", { text: guidance })}
               </Text>
             ) : null}
           </div>
-        ) : null}
-        {control}
+          <div className="w-full min-w-0 sm:w-72 sm:shrink-0">{control}</div>
+        </div>
         {unusable.length > 0 ? (
           <ul className="m-0 flex list-none flex-col gap-1 p-0">
             {unusable.map((line) => (
@@ -288,11 +300,14 @@ export function FlowPackageImportDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const t = useTranslations();
+  const locale = useLocale();
   const announce = useAnnounce();
   const router = useRouter();
   const queryClient = useQueryClient();
   const { space, routeId } = useSpace();
   const errorRef = useRef<HTMLDivElement>(null);
+  const replaceButton = useRef<HTMLButtonElement>(null);
+  const replaceInput = useRef<HTMLInputElement>(null);
   const planRequest = useRef(0);
   const [file, setFile] = useState<File | null>(null);
   const [fileProblem, setFileProblem] = useState<string | null>(null);
@@ -372,14 +387,20 @@ export function FlowPackageImportDialog({
     if (!chosen) return;
     if (!isPackageFile(chosen)) {
       setFileProblem(t("flow_editor_tools_package_file_invalid"));
+      // The drop zone's own status speaks; under the file card it is plain text.
+      if (file) announce(t("flow_editor_tools_package_file_invalid"));
       return;
     }
-    setFileProblem(null);
-    setFile(chosen);
-    setPlan(null);
-    setSelections({});
-    setUploads({});
-    setTemplateProblems({});
+    // The drop zone gives way to the file card: keep focus on its "Byt fil".
+    flushSync(() => {
+      setFileProblem(null);
+      setFile(chosen);
+      setPlan(null);
+      setSelections({});
+      setUploads({});
+      setTemplateProblems({});
+    });
+    replaceButton.current?.focus();
     void loadPlan(chosen, {});
   }
 
@@ -448,12 +469,13 @@ export function FlowPackageImportDialog({
   }
 
   return (
-    <Dialog isOpen={open} onOpenChange={requestOpenChange} purpose="form" width={680}>
+    <Dialog isOpen={open} onOpenChange={requestOpenChange} purpose="form" width={760}>
       <Layout
         header={
           <DialogHeader
             title={t("flow_editor_tools_package_import_title")}
             subtitle={t("flow_editor_tools_package_import_description")}
+            startContent={<IconTile icon={<PackageOpen />} />}
             onOpenChange={requestOpenChange}
           />
         }
@@ -461,24 +483,75 @@ export function FlowPackageImportDialog({
           open ? (
             <LayoutContent>
               <div className="flex flex-col gap-5">
-                <FileInput
-                  label={
-                    file
-                      ? t("flow_editor_tools_package_file_replace")
-                      : t("flow_editor_tools_package_file")
-                  }
-                  description={
-                    file
-                      ? t("flow_editor_tools_package_file_chosen", { name: file.name })
-                      : t("flow_editor_tools_package_file_help")
-                  }
-                  value={null}
-                  onChange={choosePackage}
-                  accept=".eneopkg,application/vnd.eneo.package+zip,application/zip,application/octet-stream"
-                  isDisabled={importing}
-                  isLoading={loading}
-                  status={fileProblem ? { type: "error", message: fileProblem } : undefined}
-                />
+                {file ? (
+                  <div className="flex flex-col gap-2">
+                    <Card padding={3} className="flex items-center gap-3">
+                      <span
+                        aria-hidden="true"
+                        className="bg-ax-muted text-ax-text-secondary rounded-ax-element flex size-10 shrink-0 items-center justify-center"
+                      >
+                        <FileArchive className="size-5" />
+                      </span>
+                      <div className="flex min-w-0 flex-1 flex-col">
+                        <Text
+                          type="body"
+                          size="sm"
+                          weight="medium"
+                          as="p"
+                          display="block"
+                          wordBreak="break-all"
+                          className="m-0"
+                        >
+                          {file.name}
+                        </Text>
+                        <Text type="supporting" size="sm" as="p" display="block" className="m-0">
+                          {[
+                            formatBytes(file.size, locale),
+                            loading ? t("flow_editor_tools_package_loading_plan") : null
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </Text>
+                      </div>
+                      {loading ? <Spinner size="sm" aria-hidden="true" /> : null}
+                      <Button
+                        ref={replaceButton}
+                        variant="ghost"
+                        size="sm"
+                        icon={<RefreshCw aria-hidden="true" />}
+                        label={t("flow_editor_tools_package_file_replace")}
+                        isDisabled={importing}
+                        onClick={() => replaceInput.current?.click()}
+                      />
+                      <input
+                        ref={replaceInput}
+                        type="file"
+                        accept={PACKAGE_ACCEPT}
+                        className="hidden"
+                        onChange={(event) => {
+                          const picked = event.target.files?.[0] ?? null;
+                          event.target.value = "";
+                          choosePackage(picked);
+                        }}
+                      />
+                    </Card>
+                    <FieldMessage message={fileProblem} />
+                  </div>
+                ) : (
+                  <FileInput
+                    mode="dropzone"
+                    label={t("flow_editor_tools_package_file")}
+                    isLabelHidden
+                    placeholder={t("flow_package_import_dropzone")}
+                    value={null}
+                    onChange={choosePackage}
+                    accept={PACKAGE_ACCEPT}
+                    isDisabled={importing}
+                    status={fileProblem ? { type: "error", message: fileProblem } : undefined}
+                    width="100%"
+                    controlClassName="min-h-56"
+                  />
+                )}
 
                 {plan ? (
                   <>
@@ -515,55 +588,6 @@ export function FlowPackageImportDialog({
                       />
                     ) : null}
 
-                    {readiness &&
-                    (readiness.requiresTranscriptionModel ||
-                      readiness.blockingReasons.length > 0) ? (
-                      <Banner
-                        status="error"
-                        title={t("flow_editor_tools_package_blocks_import")}
-                        description={
-                          <ul className="m-0 list-disc pl-5">
-                            {readiness.requiresTranscriptionModel ? (
-                              <li>
-                                {t("flow_editor_tools_package_error_transcription_model_required")}
-                              </li>
-                            ) : null}
-                            {readiness.blockingReasons.map((reason) => (
-                              <li key={`${reason.slotKey}:${reason.code}`}>
-                                {blockingText(reason, t)}
-                              </li>
-                            ))}
-                          </ul>
-                        }
-                        collapsible={false}
-                      />
-                    ) : readiness ? (
-                      <Banner
-                        status="success"
-                        title={
-                          readiness.canPublishAfterImport
-                            ? t("flow_editor_tools_package_can_publish_after_import")
-                            : t("flow_editor_tools_package_needs_review_after_import")
-                        }
-                        description={
-                          [
-                            readiness.totalRequired > 0
-                              ? t("flow_editor_tools_package_required_progress", {
-                                  selected: readiness.selectedRequired,
-                                  total: readiness.totalRequired
-                                })
-                              : null,
-                            readiness.transcriptionModelToChoose
-                              ? t("flow_editor_tools_package_transcription_model_to_choose")
-                              : null
-                          ]
-                            .filter(Boolean)
-                            .join(" ") || undefined
-                        }
-                        collapsible={false}
-                      />
-                    ) : null}
-
                     <section className="flex flex-col gap-3">
                       <div className="flex flex-col gap-1">
                         <Heading level={3} weight="semibold" className="text-sm">
@@ -575,8 +599,58 @@ export function FlowPackageImportDialog({
                             : t("flow_editor_tools_package_dependency_mapping_description")}
                         </Text>
                       </div>
+                      {readiness &&
+                      (readiness.requiresTranscriptionModel ||
+                        readiness.blockingReasons.length > 0) ? (
+                        <Banner
+                          status="error"
+                          title={t("flow_editor_tools_package_blocks_import")}
+                          description={
+                            <ul className="m-0 list-disc pl-5">
+                              {readiness.requiresTranscriptionModel ? (
+                                <li>
+                                  {t(
+                                    "flow_editor_tools_package_error_transcription_model_required"
+                                  )}
+                                </li>
+                              ) : null}
+                              {readiness.blockingReasons.map((reason) => (
+                                <li key={`${reason.slotKey}:${reason.code}`}>
+                                  {blockingText(reason, t)}
+                                </li>
+                              ))}
+                            </ul>
+                          }
+                          collapsible={false}
+                        />
+                      ) : readiness ? (
+                        <Banner
+                          status="success"
+                          title={
+                            readiness.canPublishAfterImport
+                              ? t("flow_editor_tools_package_can_publish_after_import")
+                              : t("flow_editor_tools_package_needs_review_after_import")
+                          }
+                          description={
+                            [
+                              readiness.totalRequired > 0
+                                ? t("flow_editor_tools_package_required_progress", {
+                                    selected: readiness.selectedRequired,
+                                    total: readiness.totalRequired
+                                  })
+                                : null,
+                              readiness.transcriptionModelToChoose
+                                ? t("flow_editor_tools_package_transcription_model_to_choose")
+                                : null
+                            ]
+                              .filter(Boolean)
+                              .join(" ") || undefined
+                          }
+                          collapsible={false}
+                        />
+                      ) : null}
                       {resolutions.length > 0 ? (
-                        <ul className="m-0 flex flex-col gap-2 p-0">
+                        <ul className="border-ax-border divide-ax-border rounded-ax-container m-0 flex flex-col divide-y border p-0">
                           {resolutions.map((resolution) => {
                             const key = slotKey(resolution);
                             return (
@@ -626,6 +700,7 @@ export function FlowPackageImportDialog({
                 <Button
                   variant="primary"
                   label={t("flow_editor_tools_package_import_as_draft")}
+                  icon={<Upload aria-hidden="true" />}
                   isDisabled={!plan || !readiness?.canImport || loading}
                   isLoading={importing}
                   isInterruptible

@@ -179,7 +179,7 @@ describe("RunSteps copying", () => {
     );
     renderInApp(<RunSteps flowId="flow-1" runId="run-1" steps={steps} />);
     const card = screen.getByRole("article", { name: "Steg 1: Sammanfatta" });
-    fireEvent.click(within(card).getByRole("button", { name: messages.flow_runs_step_input }));
+    fireEvent.click(within(card).getByRole("button", { name: messages.flow_run_step_input_show }));
     fireEvent.click(within(card).getByRole("button", { name: messages.flow_run_more_copy_input }));
     await waitFor(() =>
       expect(writeText).toHaveBeenCalledWith(
@@ -195,7 +195,7 @@ describe("RunSteps copying", () => {
     );
     renderInApp(<RunSteps flowId="flow-1" runId="run-1" steps={steps} />);
     const card = screen.getByRole("article", { name: "Steg 1: Sammanfatta" });
-    const trigger = within(card).getByRole("button", { name: messages.flow_runs_step_input });
+    const trigger = within(card).getByRole("button", { name: messages.flow_run_step_input_show });
     expect(card.textContent).not.toContain("Ärendet gäller bygglov.");
     expect(
       within(card).queryByRole("button", { name: messages.flow_run_more_copy_input })
@@ -210,6 +210,102 @@ describe("RunSteps copying", () => {
     expect(
       within(card).getByRole("button", { name: messages.flow_run_more_copy_input })
     ).toBeTruthy();
+  });
+});
+
+describe("RunSteps input and output", () => {
+  const transcript = "[00:00:00 - 00:00:07] SPEAKER_00: Välkomna till mötet.";
+
+  it("shows what a step was sent as JSON, without what its card already shows", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    const input = {
+      text: transcript,
+      transcription: { file_ids: ["audio-1"], language: "sv" },
+      rag: { status: "skipped_transcribe_only", sources: [] },
+      input_source: "flow_input"
+    };
+    const steps = runStepViews(
+      makeRunGraph([{ order: 1, label: "Transkribera", status: "completed" }]),
+      [makeRunStep(1, { input_payload_json: input, output_payload_json: { text: transcript } })]
+    );
+    const { container } = renderInApp(<RunSteps flowId="flow-1" runId="run-1" steps={steps} />);
+    const card = screen.getByRole("article", { name: "Steg 1: Transkribera" });
+    expect(card.className).toContain("min-w-0");
+    fireEvent.click(within(card).getByRole("button", { name: messages.flow_run_step_input_show }));
+    const json = card.querySelector(".astryx-code-block")!.textContent;
+    expect(json).toContain('"input_source": "flow_input"');
+    for (const shown of ["transcription", "rag", "SPEAKER_00"]) expect(json).not.toContain(shown);
+    await expectNoAxeViolations(container);
+    // A copy is all of it, for support.
+    fireEvent.click(within(card).getByRole("button", { name: messages.flow_run_more_copy_input }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(JSON.stringify(input, null, 2)));
+  });
+
+  it("offers no input when the card already shows all of it", () => {
+    const steps = runStepViews(
+      makeRunGraph([{ order: 1, label: "Transkribera", status: "completed" }]),
+      [makeRunStep(1, { input_payload_json: { transcription: {}, rag: {} } })]
+    );
+    renderInApp(<RunSteps flowId="flow-1" runId="run-1" steps={steps} />);
+    expect(screen.queryByRole("button", { name: messages.flow_run_step_input_show })).toBeNull();
+  });
+
+  it("keeps a step's text in a box that wraps and scrolls past its height", () => {
+    const steps = runStepViews(
+      makeRunGraph([{ order: 1, label: "Sammanfatta", status: "completed" }]),
+      [makeRunStep(1)]
+    );
+    renderInApp(<RunSteps flowId="flow-1" runId="run-1" steps={steps} />);
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_runs_step_output }));
+    const box = screen.getByText("Resultat från steg 1").closest(".astryx-scrollable-area");
+    expect(box?.className).toContain("max-h-96");
+    expect(box?.className).toContain("[overflow-wrap:anywhere]");
+  });
+
+  it("shows a transcribing step's transcript as its result, open, and any other step's beside it", () => {
+    const host = (text: string) =>
+      Object.assign(document.createElement("div"), { textContent: text });
+    const transcripts = new Map([
+      ["step-1", host("Transkriptet från steg 1")],
+      ["step-2", host("Transkriptet från steg 2")]
+    ]);
+    const [first, second] = runStepViews(
+      makeRunGraph([
+        { order: 1, label: "Transkribera", status: "completed" },
+        { order: 2, label: "Sammanfatta mötet", status: "completed" }
+      ]),
+      [
+        makeRunStep(1, { output_payload_json: { text: transcript } }),
+        makeRunStep(2, { output_payload_json: { text: "Mötet beslutade." } })
+      ]
+    );
+    renderInApp(
+      <RunSteps
+        flowId="flow-1"
+        runId="run-1"
+        steps={[{ ...first!, transcribeOnly: true }, second!]}
+        transcripts={transcripts}
+      />
+    );
+    const one = screen.getByRole("article", { name: "Steg 1: Transkribera" });
+    const result = within(one).getByRole("button", { name: messages.flow_runs_step_output });
+    expect(result.getAttribute("aria-expanded")).toBe("true");
+    expect(within(one).getByText("Transkriptet från steg 1")).toBeTruthy();
+    // The transcript, not its raw lines.
+    expect(one.textContent).not.toContain("SPEAKER_00");
+
+    const two = screen.getByRole("article", { name: "Steg 2: Sammanfatta mötet" });
+    const section = within(two).getByRole("button", {
+      name: messages.flow_runs_transcript_heading
+    });
+    expect(section.getAttribute("aria-expanded")).toBe("true");
+    expect(within(two).getByText("Transkriptet från steg 2")).toBeTruthy();
+    // Folding it keeps the transcript's element, to show it again as it was.
+    fireEvent.click(section);
+    expect(transcripts.get("step-2")!.isConnected).toBe(false);
+    fireEvent.click(section);
+    expect(within(two).getByText("Transkriptet från steg 2")).toBe(transcripts.get("step-2"));
   });
 });
 
@@ -307,7 +403,9 @@ describe("RunSteps step details", () => {
       })
     ]);
     renderInApp(<RunSteps flowId="flow-1" runId="run-1" steps={steps} />);
-    expect(screen.getByText(/Utläst text: 1\s234 tecken · Format: Dokument/)).toBeTruthy();
+    for (const fact of ["1 fil", /^Utläst text: 1\s234 tecken$/, "Format: Dokument"]) {
+      expect(screen.getByText(fact)).toBeTruthy();
+    }
   });
 });
 

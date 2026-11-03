@@ -3,7 +3,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
-import { useId, useMemo, useRef, useState, type Ref } from "react";
+import { useCallback, useId, useMemo, useRef, useState, type ReactNode, type Ref } from "react";
 import { flushSync } from "react-dom";
 import { TextInput } from "@/components/astryx/text-input";
 import { LoadingState } from "@/components/composites/loading-state";
@@ -146,6 +146,7 @@ function StepTranscript({
   runCompleted,
   runRevision,
   review = false,
+  fallback,
   onUnsavedChange,
   draftRef
 }: {
@@ -158,6 +159,8 @@ function StepTranscript({
   runRevision: number | null;
   /** Shown in a review checkpoint: the lines can be corrected before the run goes on. */
   review?: boolean;
+  /** Shown under the reason when the transcript has no lines to show. */
+  fallback?: ReactNode;
   onUnsavedChange?: (unsaved: boolean) => void;
   /** In a review: the draft of the corrections, which the review flushes before approving. */
   draftRef?: Ref<TranscriptDraftHandle>;
@@ -203,11 +206,14 @@ function StepTranscript({
   }
   if (source.data.status !== "present") {
     return (
-      <p className="text-ax-text-secondary text-sm">
-        {source.data.status === "omitted" && source.data.tooLarge
-          ? t("flow_runs_transcript_omitted")
-          : t("flow_runs_transcript_unavailable")}
-      </p>
+      <div className="flex flex-col gap-2">
+        <p className="text-ax-text-secondary text-sm">
+          {source.data.status === "omitted" && source.data.tooLarge
+            ? t("flow_runs_transcript_omitted")
+            : t("flow_runs_transcript_unavailable")}
+        </p>
+        {fallback}
+      </div>
     );
   }
   const labels = speakerLabels(shown);
@@ -305,37 +311,34 @@ function StepTranscript({
 }
 
 /**
- * The transcripts of a run's audio steps: each line with its time and
+ * The transcript of one of a run's audio steps: each line with its time and
  * speaker, with the saved corrections and speaker names applied, playable
  * from any line. Someone who may review flows can, once the run has
  * completed, correct a line's text (and revert it) and name the speakers;
  * each change is saved with the step's other corrections, which are kept as
- * they are.
+ * they are. `fallback` shows when the transcript has no lines to show.
  */
-export function RunTranscripts({
+export function RunTranscript({
   flowId,
   runId,
-  targets,
-  labelFor,
+  target,
   mayEdit,
   runCompleted,
-  runRevision = null
+  runRevision = null,
+  fallback
 }: {
   flowId: string;
   runId: string;
-  targets: readonly TranscriptTarget[];
-  labelFor: (target: TranscriptTarget) => string;
+  target: TranscriptTarget;
   mayEdit: boolean;
   runCompleted: boolean;
   /** The run's revision, which starting a run from its reviewed transcript is fenced by. */
   runRevision?: number | null;
+  fallback?: ReactNode;
 }) {
   const t = useTranslations();
-  const corrections = useQuery({
-    ...transcriptCorrectionsQueryOptions(flowId, runId),
-    enabled: targets.length > 0
-  });
-  if (targets.length === 0) return null;
+  // One read for all of the run's transcripts: they share the query.
+  const corrections = useQuery(transcriptCorrectionsQueryOptions(flowId, runId));
   if (corrections.isPending) return <LoadingState rows={2} />;
   if (corrections.isError) {
     return (
@@ -348,23 +351,55 @@ export function RunTranscripts({
     );
   }
   return (
-    <div className="flex flex-col gap-6">
-      {targets.map((target) => (
-        <section key={target.stepId} className="flex flex-col gap-2">
-          <h3 className="text-ax-text text-base font-semibold">{labelFor(target)}</h3>
-          <StepTranscript
-            flowId={flowId}
-            runId={runId}
-            target={target}
-            corrections={corrections.data.find((item) => item.step_id === target.stepId) ?? null}
-            mayEdit={mayEdit}
-            runCompleted={runCompleted}
-            runRevision={runRevision}
-          />
-        </section>
-      ))}
-    </div>
+    <StepTranscript
+      flowId={flowId}
+      runId={runId}
+      target={target}
+      corrections={corrections.data.find((item) => item.step_id === target.stepId) ?? null}
+      mayEdit={mayEdit}
+      runCompleted={runCompleted}
+      runRevision={runRevision}
+      fallback={fallback}
+    />
   );
+}
+
+/**
+ * One element per step's transcript, made once and kept: the transcript
+ * renders into it (`createPortal`) from a place in the page that does not
+ * move, and the step's card shows it (`TranscriptSlot`). The card sits in
+ * the steps, which a phone folds in another tree than a wide screen, and in
+ * the step's result, which folds away; a correction not saved yet survives
+ * both, as it did when the transcript had a section of its own.
+ */
+export function useTranscriptHosts(): (stepId: string) => HTMLElement {
+  const [hosts] = useState(() => new Map<string, HTMLElement>());
+  return useCallback(
+    (stepId: string) => {
+      let host = hosts.get(stepId);
+      if (!host) {
+        host = document.createElement("div");
+        hosts.set(stepId, host);
+      }
+      return host;
+    },
+    [hosts]
+  );
+}
+
+/** Where a step's card shows its transcript's kept element (`useTranscriptHosts`). */
+export function TranscriptSlot({ host }: { host: HTMLElement }) {
+  const place = useCallback(
+    (slot: HTMLDivElement | null) => {
+      if (!slot) return;
+      slot.append(host);
+      return () => {
+        if (host.parentNode === slot) host.remove();
+      };
+    },
+    [host]
+  );
+  return <div ref={place} className="min-w-0" />;
 }
 
 /**

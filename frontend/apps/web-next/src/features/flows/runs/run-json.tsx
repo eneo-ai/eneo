@@ -1,4 +1,6 @@
+import { CodeBlock } from "@astryxdesign/core/CodeBlock";
 import { useTranslations } from "use-intl";
+import { CopyButton } from "./run-copy";
 
 /** The core's stand-in for a stored credential: `{ "$secret": "stored" }`. */
 export function isStoredSecret(value: unknown): boolean {
@@ -35,14 +37,51 @@ function Scalar({ value }: { value: unknown }) {
     return <span className="text-ax-text-secondary">{t("flow_runs_value_empty")}</span>;
   }
   if (typeof value === "boolean") return <>{value ? t("yes") : t("no")}</>;
-  return <span className="break-words whitespace-pre-wrap">{String(value)}</span>;
+  // `anywhere`, not `break-word`: a long id or hash then also lowers the width
+  // the value asks for, so it wraps instead of widening the page.
+  return <span className="[overflow-wrap:anywhere] whitespace-pre-wrap">{String(value)}</span>;
+}
+
+/**
+ * A value as JSON in a block of its own, as wide as its place: lines wrap, a
+ * long value scrolls within the block's height, and `copy` adds a button
+ * that copies the value (or the one it names instead).
+ */
+export function JsonBlock({
+  value,
+  copy,
+  maxHeight = "24rem"
+}: {
+  value: unknown;
+  copy?: { label: string; value?: unknown };
+  maxHeight?: string;
+}) {
+  const t = useTranslations();
+  return (
+    <CodeBlock
+      code={readableJson(value, t("flow_runs_secret_stored")) ?? ""}
+      language="json"
+      size="sm"
+      width="100%"
+      isWrapped
+      maxHeight={maxHeight}
+      hasCopyButton={false}
+      endContent={
+        copy ? (
+          <CopyButton label={copy.label} value={"value" in copy ? copy.value : value} />
+        ) : undefined
+      }
+    />
+  );
 }
 
 /**
  * A structured value (a form's answers, a step's JSON output) as nested
  * lists a person can read: an object's fields as name and value, a list as
- * a list. Deeper than three levels it falls back to indented JSON. A stored
- * credential shows as "Sparad, visas inte".
+ * a list. Deeper than three levels it falls back to a JSON block. A stored
+ * credential shows as "Sparad, visas inte". Nothing in it widens its place:
+ * the value's column starts at nothing, a name is held to 15rem, and long
+ * words wrap.
  */
 export function JsonValue({ value, depth = 0 }: { value: unknown; depth?: number }) {
   const t = useTranslations();
@@ -50,20 +89,16 @@ export function JsonValue({ value, depth = 0 }: { value: unknown; depth?: number
     return <span className="text-ax-text-secondary">{t("flow_runs_secret_stored")}</span>;
   }
   if (depth >= MAX_DEPTH && (isRecord(value) || Array.isArray(value))) {
-    return (
-      <pre className="bg-ax-sunken rounded-ax-inner overflow-x-auto p-2 text-xs">
-        {readableJson(value, t("flow_runs_secret_stored"))}
-      </pre>
-    );
+    return <JsonBlock value={value} maxHeight="16rem" />;
   }
   if (Array.isArray(value)) {
     if (value.length === 0) {
       return <span className="text-ax-text-secondary">{t("flow_runs_value_empty_list")}</span>;
     }
     return (
-      <ol className="flex list-decimal flex-col gap-1 pl-5">
+      <ol className="flex min-w-0 list-decimal flex-col gap-1 pl-5">
         {value.map((item, index) => (
-          <li key={index}>
+          <li key={index} className="min-w-0">
             <JsonValue value={item} depth={depth + 1} />
           </li>
         ))}
@@ -76,11 +111,13 @@ export function JsonValue({ value, depth = 0 }: { value: unknown; depth?: number
       return <span className="text-ax-text-secondary">{t("flow_runs_value_empty")}</span>;
     }
     return (
-      <dl className="grid grid-cols-1 gap-x-4 gap-y-1 sm:grid-cols-[minmax(8rem,max-content)_1fr]">
+      <dl className="grid min-w-0 grid-cols-1 gap-x-4 gap-y-1 sm:grid-cols-[minmax(8rem,max-content)_minmax(0,1fr)]">
         {entries.map(([key, item]) => (
           <div key={key} className="contents">
-            <dt className="text-ax-text-secondary text-sm font-medium break-words">{key}</dt>
-            <dd className="text-ax-text m-0 text-sm">
+            <dt className="text-ax-text-secondary max-w-60 text-sm font-medium [overflow-wrap:anywhere]">
+              {key}
+            </dt>
+            <dd className="text-ax-text m-0 min-w-0 text-sm">
               <JsonValue value={item} depth={depth + 1} />
             </dd>
           </div>

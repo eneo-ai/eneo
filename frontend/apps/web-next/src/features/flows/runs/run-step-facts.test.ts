@@ -4,6 +4,7 @@ import {
   runtimeInputSummary,
   sectionReading,
   speakerMapping,
+  stepInputRest,
   templateProvenance,
   transcriptionFacts,
   withGivenNames
@@ -197,5 +198,47 @@ describe("speakerMapping", () => {
     });
     // A name kept as the step gave it keeps the step's evidence.
     expect(withGivenNames(rows, { SPEAKER_00: "Anna Lind" })[0]).toEqual(rows[0]);
+  });
+});
+
+describe("stepInputRest", () => {
+  const transcript = "[00:00:00 - 00:00:07] SPEAKER_00: Välkomna.";
+
+  it("leaves out how the step transcribed, what it searched, and the transcript it gave back", () => {
+    expect(
+      stepInputRest({
+        input_payload_json: {
+          text: transcript,
+          text_truncated: false,
+          source_text: transcript,
+          source_text_truncated: false,
+          transcription: { file_ids: ["audio-1"], language: "sv" },
+          rag: { status: "skipped_transcribe_only" },
+          runtime_input: { file_ids: ["audio-1"], input_format: "audio" },
+          input_source: "flow_input"
+        },
+        output_payload_json: { text: transcript }
+      })
+    ).toEqual({
+      runtime_input: { file_ids: ["audio-1"], input_format: "audio" },
+      input_source: "flow_input"
+    });
+  });
+
+  it("keeps the text a step got when it gave back something else", () => {
+    const input = { text: "Ärendet gäller bygglov.", text_truncated: false };
+    expect(
+      stepInputRest({ input_payload_json: input, output_payload_json: { text: "Beviljas." } })
+    ).toEqual(input);
+  });
+
+  it("is nothing when nothing else is left", () => {
+    expect(
+      stepInputRest({
+        input_payload_json: { transcription: {}, rag: {} },
+        output_payload_json: null
+      })
+    ).toBeNull();
+    expect(stepInputRest({ input_payload_json: null, output_payload_json: null })).toBeNull();
   });
 });

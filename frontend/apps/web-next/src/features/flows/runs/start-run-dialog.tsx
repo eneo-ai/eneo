@@ -721,6 +721,12 @@ export function StartRunDialog({
           header={
             <DialogHeader
               title={t("flow_runs_start_title", { name: flow.name })}
+              // Where the person is: nothing starts until the second part.
+              subtitle={
+                contract.data
+                  ? t(summary ? "flow_runs_start_part_review" : "flow_runs_start_part_input")
+                  : undefined
+              }
               onOpenChange={requestOpenChange}
             />
           }
