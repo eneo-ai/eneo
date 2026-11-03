@@ -12,7 +12,6 @@ import {
   useCallback,
   useEffect,
   useEffectEvent,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -226,9 +225,7 @@ type ChatViewProps = {
   partnerToken?: ReactNode;
   activity: ActivityState | null;
   onActivityChange: (next: ActivityState | null) => void;
-  /** Whether the side panel holds a file, view or the overview (the activity is the page's). */
-  onPanelOpenChange?: (open: boolean) => void;
-  /** The row the side panel shares with the page's history. */
+  /** The row the side panel measures, and whether the conversation is on screen. */
   layout?: SidePanelLayout;
 };
 
@@ -263,7 +260,6 @@ function ConversationView({
   partnerToken,
   activity,
   onActivityChange,
-  onPanelOpenChange,
   layout
 }: ChatViewProps) {
   const t = useTranslations();
@@ -585,12 +581,6 @@ function ConversationView({
   useEffect(() => {
     if (panelOpen) onActivityChange(null);
   }, [panelOpen, onActivityChange]);
-  // Before paint: a history that gives way to the panel is gone in the same frame.
-  useLayoutEffect(() => {
-    if (!panelOpen) return;
-    onPanelOpenChange?.(true);
-    return () => onPanelOpenChange?.(false);
-  }, [panelOpen, onPanelOpenChange]);
 
   // The panel follows the answer being written: a document draft shows there
   // while the assistant writes it, and a file created in the live turn takes

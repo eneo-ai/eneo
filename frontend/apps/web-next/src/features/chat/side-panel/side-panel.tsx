@@ -108,16 +108,9 @@ const HANDLE_WIDTH = 4;
 export const panelFitsBeside = (width: number) =>
   width - HANDLE_WIDTH - CONVERSATION_MIN_WIDTH >= PANEL_MIN_WIDTH;
 
-/**
- * The row the panel shares with an aside of the page (the chat's history),
- * measured as a whole: what the aside takes from it is known before the
- * aside is gone, so the panel never shows in a presentation it is about to
- * leave.
- */
+/** The row the panel shares with the conversation, measured as a whole. */
 export type SidePanelLayout = {
   row: RefObject<HTMLElement | null>;
-  /** The aside beside the conversation; `yields`: it closes when the panel opens. */
-  aside: { width: number; yields: boolean } | null;
   /** The conversation is not on screen (another tab): nothing is laid over the page for it. */
   hidden?: boolean;
 };
@@ -212,11 +205,10 @@ export function SidePanel({
   const shownView = occupant.kind === "view" ? findAppCall(messages, occupant.callId) : null;
   const hasContents = panelContentsCount(contents) > 0;
   const shown = kind !== "closed" && !(kind === "overview" && !hasContents);
-  // The room beside the conversation: the row, less an aside that stays.
+  // The room beside the conversation: the row.
   const row = useElementWidth(layout?.row ?? region);
-  const asideTakes = layout?.aside && !(layout.aside.yields && shown) ? layout.aside.width : 0;
   const { width, fits, separatorProps } = useResizableSplit({
-    container: row === null ? null : row - asideTakes,
+    container: row,
     storageKey: WIDTH_STORAGE_KEY,
     defaultWidth: 520,
     minWidth: PANEL_MIN_WIDTH,

@@ -112,8 +112,7 @@ function HistoryPanel({
   onSelect,
   onDeleted,
   onRenamed,
-  onClose,
-  focusHeadingOnMount = false
+  onClose
 }: {
   partner: ChatPartner;
   activeSessionId: string | null;
@@ -122,8 +121,6 @@ function HistoryPanel({
   onRenamed?: (sessionId: string, name: string) => void;
   /** Without it (the Historik tab) there is no close button. */
   onClose?: () => void;
-  /** Side panel: focus moves to the heading when it opens. */
-  focusHeadingOnMount?: boolean;
 }) {
   const t = useTranslations();
   const router = useRouter();
@@ -149,10 +146,6 @@ function HistoryPanel({
       onDeleted(id);
     }
   });
-
-  useEffect(() => {
-    if (focusHeadingOnMount) headingRef.current?.focus();
-  }, [focusHeadingOnMount]);
 
   const isGroupChat = partner.type === "group-chat";
   const history = useInfiniteQuery({
@@ -380,9 +373,7 @@ function HistoryPanel({
  * History as the chat page's Historik tab, as in the Svelte app: the list
  * across the page's width. Picking a conversation opens it in Chatt.
  */
-export function HistoryTab(
-  props: Omit<Parameters<typeof HistoryPanel>[0], "onClose" | "focusHeadingOnMount">
-) {
+export function HistoryTab(props: Omit<Parameters<typeof HistoryPanel>[0], "onClose">) {
   return (
     <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col">
       <HistoryPanel {...props} />
@@ -397,7 +388,7 @@ export function HistoryTab(
 export function HistoryAside({
   onClose,
   ...props
-}: Omit<Parameters<typeof HistoryPanel>[0], "focusHeadingOnMount" | "onClose"> & {
+}: Omit<Parameters<typeof HistoryPanel>[0], "onClose"> & {
   onClose: () => void;
 }) {
   const t = useTranslations();

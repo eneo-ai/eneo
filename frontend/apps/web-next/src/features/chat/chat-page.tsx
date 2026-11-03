@@ -430,7 +430,6 @@ export function ChatPage({
                 onActivityChange={onActivityChange}
                 layout={{
                   row: rowRef,
-                  aside: null,
                   hidden: viewTab !== "chat"
                 }}
               />
