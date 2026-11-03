@@ -6,7 +6,6 @@ import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { FileInput } from "@astryxdesign/core/FileInput";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
-import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Spinner } from "@astryxdesign/core/Spinner";
 import { Heading, Text } from "@astryxdesign/core/Text";
@@ -19,6 +18,7 @@ import { useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { FieldMessage } from "./editor/editor-fields";
 import { formatBytes } from "@/lib/format";
+import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { toast } from "@/lib/toast";
 import { useSpace } from "@/features/spaces/use-space";
 import { flowKeys } from "./flows-api";
@@ -37,12 +37,13 @@ import {
   templateUploadChecksums,
   type BlockingReason,
   type ImportPlan,
+  type ImportReadiness,
   type Resolution,
   type Selections,
   type TemplateUpload
 } from "./flow-packages";
 
-const SKIP = "__skip";
+const STEP_KEY = /^step_(\d+)$/;
 const PACKAGE_ACCEPT =
   ".eneopkg,application/vnd.eneo.package+zip,application/zip,application/octet-stream";
 
@@ -107,6 +108,42 @@ function guidanceOf(resolution: Resolution): string | null {
     Extract<Resolution, { kind: "template_asset" }>["guidance"]
   >;
   return template.summary ?? template.replacement_notes ?? template.placeholder_notes ?? null;
+}
+
+/**
+ * What no answer in the rows below can lift. A choice or Word template still
+ * to be given is a step ahead, not a problem.
+ */
+function realBlockers(readiness: ImportReadiness, plan: ImportPlan): BlockingReason[] {
+  return readiness.blockingReasons.filter((reason) => {
+    const resolution = plan.dependency_resolutions?.find(
+      (item) => slotKey(item) === reason.slotKey
+    );
+    if (reason.code === "required_mapping_missing") return !resolution?.suggestions.length;
+    if (reason.code === "template_upload_missing") {
+      return resolution?.kind !== "template_asset" || Boolean(resolution.template?.asset_path);
+    }
+    return true;
+  });
+}
+
+/**
+ * The steps a resource is used by. The plan has no step names, only the
+ * package's keys (`step_3`): those read as numbers, a run of them as "Steg 3–8".
+ */
+function usedByText(steps: readonly string[], t: Translate): string {
+  const runs: [number, number][] = [];
+  const numbers = steps.flatMap((step) => STEP_KEY.exec(step)?.[1] ?? []).map(Number);
+  for (const number of numbers.sort((a, b) => a - b)) {
+    const last = runs.at(-1);
+    if (last && number === last[1] + 1) last[1] = number;
+    else runs.push([number, number]);
+  }
+  const numbered = runs.map(([from, to]) => (from === to ? `${from}` : `${from}–${to}`)).join(", ");
+  return [
+    ...(numbered ? [t("flows_step_label_unnamed", { order: numbered })] : []),
+    ...steps.filter((step) => !STEP_KEY.test(step))
+  ].join(", ");
 }
 
 /** One resource the package needs, and how the person answers it here. */
@@ -199,20 +236,18 @@ function Requirement({
       <Selector
         label={t("flow_editor_tools_package_local_resource", { slot: label })}
         isLabelHidden
-        options={[
-          ...(selection === null && resolution.required
-            ? [{ value: SKIP, label: t("flow_editor_tools_package_select_local_resource") }]
-            : []),
-          ...(!resolution.required
-            ? [{ value: SKIP, label: t("flow_editor_tools_package_skip_optional") }]
-            : []),
-          ...resolution.suggestions.map((candidate) => ({
-            value: candidateKey(candidate),
-            label: candidate.label
-          }))
-        ]}
-        value={selection ?? SKIP}
-        onChange={(value) => onSelect(value === SKIP ? null : value)}
+        placeholder={t(
+          resolution.required
+            ? "flow_editor_tools_package_select_local_resource"
+            : "flow_editor_tools_package_skip_optional"
+        )}
+        options={resolution.suggestions.map((candidate) => ({
+          value: candidateKey(candidate),
+          label: candidate.label
+        }))}
+        hasClear
+        value={selection}
+        onChange={onSelect}
         isDisabled={disabled}
         width="100%"
       />
@@ -244,7 +279,7 @@ function Requirement({
             </div>
             {usedBy.length > 0 ? (
               <Text type="supporting" size="sm" as="p" display="block" className="m-0">
-                {t("flow_editor_tools_package_used_by_steps", { steps: usedBy.join(", ") })}
+                {t("flow_editor_tools_package_used_by_steps", { steps: usedByText(usedBy, t) })}
               </Text>
             ) : null}
             {sensitivity ? (
@@ -309,6 +344,9 @@ export function FlowPackageImportDialog({
   const replaceButton = useRef<HTMLButtonElement>(null);
   const replaceInput = useRef<HTMLInputElement>(null);
   const planRequest = useRef(0);
+  // A phone gets the whole screen and a header without the tile, which would wrap the title and
+  // leave the list of what the package needs too little height (320 × 256 at 400 % zoom).
+  const whole = usePhoneScreen();
   const [file, setFile] = useState<File | null>(null);
   const [fileProblem, setFileProblem] = useState<string | null>(null);
   const [plan, setPlan] = useState<ImportPlan | null>(null);
@@ -320,6 +358,8 @@ export function FlowPackageImportDialog({
   const [failure, setFailure] = useState<string | null>(null);
 
   const readiness = plan ? importReadiness(plan, selections) : null;
+  const blockers = plan && readiness ? realBlockers(readiness, plan) : [];
+  const refused = blockers.length > 0 || readiness?.requiresTranscriptionModel === true;
   const resolutions = plan?.dependency_resolutions ?? [];
   const omittedMcp = plan?.omissions.find((item) => item.kind === "mcp_attachment")?.count ?? 0;
 
@@ -356,11 +396,13 @@ export function FlowPackageImportDialog({
       setPlan(next);
       setSelections((current) => ({ ...initialSelections(next), ...current }));
       setUploads(nextUploads);
-      const ready = importReadiness(next, initialSelections(next)).canImport;
+      const found = importReadiness(next, initialSelections(next));
       announce(
         [
           t("flow_editor_tools_package_plan_ready", { name: next.package_summary.name }),
-          ready ? null : t("flow_editor_tools_package_blocks_import")
+          found.requiresTranscriptionModel || realBlockers(found, next).length > 0
+            ? t("flow_editor_tools_package_blocks_import")
+            : null
         ]
           .filter(Boolean)
           .join(" ")
@@ -469,13 +511,20 @@ export function FlowPackageImportDialog({
   }
 
   return (
-    <Dialog isOpen={open} onOpenChange={requestOpenChange} purpose="form" width={760}>
+    <Dialog
+      isOpen={open}
+      onOpenChange={requestOpenChange}
+      purpose="form"
+      variant={whole ? "fullscreen" : "standard"}
+      width={760}
+      maxHeight="85dvh"
+    >
       <Layout
         header={
           <DialogHeader
             title={t("flow_editor_tools_package_import_title")}
             subtitle={t("flow_editor_tools_package_import_description")}
-            startContent={<IconTile icon={<PackageOpen />} />}
+            startContent={whole ? undefined : <IconTile icon={<PackageOpen />} />}
             onOpenChange={requestOpenChange}
           />
         }
@@ -486,12 +535,7 @@ export function FlowPackageImportDialog({
                 {file ? (
                   <div className="flex flex-col gap-2">
                     <Card padding={3} className="flex items-center gap-3">
-                      <span
-                        aria-hidden="true"
-                        className="bg-ax-muted text-ax-text-secondary rounded-ax-element flex size-10 shrink-0 items-center justify-center"
-                      >
-                        <FileArchive className="size-5" />
-                      </span>
+                      <IconTile icon={<FileArchive />} />
                       <div className="flex min-w-0 flex-1 flex-col">
                         <Text
                           type="body"
@@ -507,6 +551,14 @@ export function FlowPackageImportDialog({
                         <Text type="supporting" size="sm" as="p" display="block" className="m-0">
                           {[
                             formatBytes(file.size, locale),
+                            plan
+                              ? `${t("flow_editor_tools_package_version")} ${plan.package_version}`
+                              : null,
+                            plan
+                              ? t("flow_editor_tools_package_step_count", {
+                                  count: plan.package_summary.steps_count
+                                })
+                              : null,
                             loading ? t("flow_editor_tools_package_loading_plan") : null
                           ]
                             .filter(Boolean)
@@ -549,33 +601,27 @@ export function FlowPackageImportDialog({
                     isDisabled={importing}
                     status={fileProblem ? { type: "error", message: fileProblem } : undefined}
                     width="100%"
-                    controlClassName="min-h-56"
+                    controlClassName="phone:min-h-32 min-h-56"
                   />
                 )}
 
                 {plan ? (
                   <>
-                    <MetadataList
-                      title={plan.package_summary.name}
-                      label={{ position: "start", width: "8rem" }}
-                    >
+                    <div className="flex flex-col gap-1">
+                      <Heading
+                        level={3}
+                        weight="semibold"
+                        wordBreak="break-word"
+                        className="text-sm"
+                      >
+                        {plan.package_summary.name}
+                      </Heading>
                       {plan.package_summary.description ? (
-                        <MetadataListItem label={t("description")}>
+                        <Text type="body" size="sm" as="p" display="block" className="m-0">
                           {plan.package_summary.description}
-                        </MetadataListItem>
+                        </Text>
                       ) : null}
-                      <MetadataListItem label={t("flow_editor_tools_package_version")}>
-                        {plan.package_version}
-                      </MetadataListItem>
-                      <MetadataListItem label={t("flow_editor_tools_package_steps")}>
-                        {t("flow_editor_tools_package_step_count", {
-                          count: plan.package_summary.steps_count
-                        })}
-                      </MetadataListItem>
-                      <MetadataListItem label={t("flow_editor_tools_package_id")}>
-                        <span className="font-mono text-xs break-all">{plan.package_id}</span>
-                      </MetadataListItem>
-                    </MetadataList>
+                    </div>
 
                     {omittedMcp > 0 ? (
                       <Banner
@@ -599,22 +645,20 @@ export function FlowPackageImportDialog({
                             : t("flow_editor_tools_package_dependency_mapping_description")}
                         </Text>
                       </div>
-                      {readiness &&
-                      (readiness.requiresTranscriptionModel ||
-                        readiness.blockingReasons.length > 0) ? (
+                      {refused ? (
                         <Banner
                           status="error"
                           title={t("flow_editor_tools_package_blocks_import")}
                           description={
                             <ul className="m-0 list-disc pl-5">
-                              {readiness.requiresTranscriptionModel ? (
+                              {readiness?.requiresTranscriptionModel ? (
                                 <li>
                                   {t(
                                     "flow_editor_tools_package_error_transcription_model_required"
                                   )}
                                 </li>
                               ) : null}
-                              {readiness.blockingReasons.map((reason) => (
+                              {blockers.map((reason) => (
                                 <li key={`${reason.slotKey}:${reason.code}`}>
                                   {blockingText(reason, t)}
                                 </li>
@@ -623,7 +667,7 @@ export function FlowPackageImportDialog({
                           }
                           collapsible={false}
                         />
-                      ) : readiness ? (
+                      ) : readiness?.canImport ? (
                         <Banner
                           status="success"
                           title={
@@ -632,23 +676,19 @@ export function FlowPackageImportDialog({
                               : t("flow_editor_tools_package_needs_review_after_import")
                           }
                           description={
-                            [
-                              readiness.totalRequired > 0
-                                ? t("flow_editor_tools_package_required_progress", {
-                                    selected: readiness.selectedRequired,
-                                    total: readiness.totalRequired
-                                  })
-                                : null,
-                              readiness.transcriptionModelToChoose
-                                ? t("flow_editor_tools_package_transcription_model_to_choose")
-                                : null
-                            ]
-                              .filter(Boolean)
-                              .join(" ") || undefined
+                            readiness.transcriptionModelToChoose
+                              ? t("flow_editor_tools_package_transcription_model_to_choose")
+                              : undefined
                           }
                           collapsible={false}
                         />
-                      ) : null}
+                      ) : (
+                        <Banner
+                          status="info"
+                          title={t("flow_package_import_choose_required")}
+                          collapsible={false}
+                        />
+                      )}
                       {resolutions.length > 0 ? (
                         <ul className="border-ax-border divide-ax-border rounded-ax-container m-0 flex flex-col divide-y border p-0">
                           {resolutions.map((resolution) => {
@@ -691,21 +731,35 @@ export function FlowPackageImportDialog({
         footer={
           open ? (
             <LayoutFooter>
-              <div className="flex flex-wrap justify-end gap-2">
-                <Button
-                  label={t("cancel")}
-                  isDisabled={importing}
-                  onClick={() => requestOpenChange(false)}
-                />
-                <Button
-                  variant="primary"
-                  label={t("flow_editor_tools_package_import_as_draft")}
-                  icon={<Upload aria-hidden="true" />}
-                  isDisabled={!plan || !readiness?.canImport || loading}
-                  isLoading={importing}
-                  isInterruptible
-                  onClick={() => void submit()}
-                />
+              <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
+                {/* Beside the buttons, so why importing waits stays in view however far the list
+                    is scrolled. */}
+                <p role="status" className="text-ax-text-secondary m-0 mr-auto text-sm">
+                  {refused
+                    ? t("flow_package_import_footer_blocked")
+                    : readiness && readiness.totalRequired > 0
+                      ? t("flow_editor_tools_package_required_progress", {
+                          selected: readiness.selectedRequired,
+                          total: readiness.totalRequired
+                        })
+                      : null}
+                </p>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <Button
+                    label={t("cancel")}
+                    isDisabled={importing}
+                    onClick={() => requestOpenChange(false)}
+                  />
+                  <Button
+                    variant="primary"
+                    label={t("flow_editor_tools_package_import_as_draft")}
+                    icon={<Upload aria-hidden="true" />}
+                    isDisabled={!plan || !readiness?.canImport || loading}
+                    isLoading={importing}
+                    isInterruptible
+                    onClick={() => void submit()}
+                  />
+                </div>
               </div>
             </LayoutFooter>
           ) : null

@@ -4,7 +4,7 @@ import { Tooltip } from "@astryxdesign/core/Tooltip";
 import { Collapsible } from "@/components/astryx/collapsible";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { Copy, Info, RefreshCw } from "lucide-react";
+import { Info, RefreshCw } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useEffect, useId, useRef, useState } from "react";
 import { createPortal, flushSync } from "react-dom";
@@ -18,13 +18,13 @@ import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
 import { hasAnswered, pollEvery } from "@/lib/api/query";
 import { useFocusRescue } from "@/lib/focus-rescue";
-import { useCopy } from "@/lib/hooks/use-copy";
 import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { useSpaceDisplayName, useSpaceSections } from "@/features/spaces/frame/space-header";
 import { spaceLandingHref } from "@/features/spaces/frame/space-sections";
 import { useSpace } from "@/features/spaces/use-space";
 import { formFieldsOf } from "../flow-form-fields";
 import { flowQueryOptions, type FlowPublic } from "../flows-api";
+import { CopyButton } from "./run-copy";
 import { formatSeconds } from "./run-format";
 import { RunFailure } from "./run-failure";
 import { RunWebhookDeliveries } from "./run-webhooks";
@@ -35,7 +35,13 @@ import { outputText, progressSignature, runStepViews, type RunStepView } from ".
 import { RunLiveProgress } from "./run-live-progress";
 import { RunKnowledge } from "./run-knowledge";
 import { starterName } from "./run-starter";
-import { RunSteps, showRunStep, StepText, stepTitle } from "./run-steps";
+import {
+  RunSteps,
+  showRunStep,
+  StepText,
+  StepTextInsteadOfTranscript,
+  stepTitle
+} from "./run-steps";
 import { RunText } from "./run-text";
 import { RunUsage, RunUsageBrief } from "./run-usage";
 import { RunTrace } from "./run-trace";
@@ -100,6 +106,15 @@ function RunOtherFiles({ flowId, run }: { flowId: string; run: RunDetail }) {
   );
 }
 
+/**
+ * What a copy of the run's result gives: its text or value. A result in a
+ * file, a shortened text with it, is downloaded: a copy would be cut short.
+ */
+function copyableResult(result: RunDetail["result"] | undefined): unknown {
+  if (result?.kind === "inline_text") return result.text;
+  return result?.kind === "structured" ? result.value : null;
+}
+
 /** The run's final result, by its kind. */
 function RunResult({ flowId, run }: { flowId: string; run: RunDetail }) {
   const t = useTranslations();
@@ -159,6 +174,11 @@ function RunInput({ flow, run }: { flow: FlowPublic; run: RunDetail }) {
   const labels = new Map(
     formFieldsOf(flow.metadata_json).map((field) => [field.name, field.label.trim() || field.name])
   );
+  // Free text is sent as `{ text }`: no field to name, only the text.
+  const { text } = payload;
+  if (entries.length === 1 && !labels.has("text") && typeof text === "string" && text.trim()) {
+    return <StepText text={text} label={t("flow_runs_input_heading")} />;
+  }
   return (
     <JsonValue
       value={Object.fromEntries(entries.map(([key, value]) => [labels.get(key) ?? key, value]))}
@@ -223,20 +243,13 @@ function RunProblem({
  */
 function RunId({ label, value, hint }: { label: string; value: string; hint: string }) {
   const t = useTranslations();
-  const { copy } = useCopy();
   return (
     <span className="text-ax-text-secondary inline-flex min-w-0 items-center gap-1">
       {label}
       <code className="text-ax-text font-mono text-xs">
         {value.length > 8 ? `${value.slice(0, 8)}…` : value}
       </code>
-      <IconButton
-        label={t("chat_debug_copy_value", { label })}
-        icon={<Copy className="size-3.5" />}
-        variant="ghost"
-        size="sm"
-        onClick={() => void copy(value)}
-      />
+      <CopyButton label={t("chat_debug_copy_value", { label })} value={value} />
       <Tooltip
         content={
           <span className="flex flex-col gap-1">
@@ -257,13 +270,25 @@ function RunId({ label, value, hint }: { label: string; value: string; hint: str
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({
+  title,
+  action,
+  children
+}: {
+  title: string;
+  /** Beside the heading, at the row's end. */
+  action?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   const headingId = useId();
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-3">
-      <h2 id={headingId} className="text-ax-text text-lg font-semibold">
-        {title}
-      </h2>
+      <div className="flex items-center justify-between gap-2">
+        <h2 id={headingId} className="text-ax-text text-lg font-semibold">
+          {title}
+        </h2>
+        {action}
+      </div>
       {children}
     </section>
   );
@@ -475,6 +500,7 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
   });
 
   const run = detail.data;
+  const resultCopy = copyableResult(run?.result);
   const startedAt = summary ? (summary.started_at ?? summary.created_at) : null;
   const time = useClientTimeText(startedAt, "date_time");
   const title =
@@ -575,7 +601,7 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
         // A transcribing step whose transcript has no lines still shows what it wrote.
         fallback={
           text && stepViews.find((step) => step.order === target.stepOrder)?.transcribeOnly ? (
-            <StepText text={text} />
+            <StepTextInsteadOfTranscript payload={result?.output_payload_json} />
           ) : undefined
         }
       />,
@@ -725,7 +751,14 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
                 }
               />
             ) : null}
-            <Section title={t("flow_runs_result_heading")}>
+            <Section
+              title={t("flow_runs_result_heading")}
+              action={
+                resultCopy ? (
+                  <CopyButton label={t("flow_run_more_copy_output")} value={resultCopy} />
+                ) : null
+              }
+            >
               {blockingError(detail) ? (
                 <ListError
                   error={detail.error}

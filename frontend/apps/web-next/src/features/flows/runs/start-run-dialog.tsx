@@ -13,7 +13,7 @@ import { useId, useImperativeHandle, useRef, useState, type Ref } from "react";
 import { flushSync } from "react-dom";
 import { blockingError, ListError, RefreshError } from "@/components/composites/query-state";
 import { LoadingState } from "@/components/composites/loading-state";
-import { HANDHELD_QUERY, PHONE_QUERY, usePhoneScreen } from "@/lib/hooks/use-media-match";
+import { PHONE_QUERY, usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { restrictedBeforeApproval } from "../flow-form-fields";
@@ -92,6 +92,11 @@ type StartRunFormHandle = {
 /** The record without `key`. */
 function without(record: Record<string, string>, key: string): Record<string, string> {
   return Object.fromEntries(Object.entries(record).filter(([name]) => name !== key));
+}
+
+/** Whether the flow reads anything given at the start: one fed by an API or a tool may not. */
+function takesInput(flow: FlowPublic, contract: RunContract): boolean {
+  return !takesFreeText(contract) || flow.steps.some((step) => step.input_source === "flow_input");
 }
 
 /** The notices that keep the flow from running, or that the person should know first. */
@@ -410,10 +415,6 @@ function StartRunForm({
   }
 
   const maxSpeakerOption = contract.transcription?.max_speakers;
-  // What the run is called is optional: on a phone it comes last, so the input is what the
-  // first screen holds.
-  const handheld = useMediaQuery(HANDHELD_QUERY);
-  const labelField = <RunLabelField value={runLabel} onChange={setRunLabel} />;
 
   return (
     // Kept while the summary shows: the uploads and recordings live in it.
@@ -453,7 +454,6 @@ function StartRunForm({
           setServer((current) => ({ ...current, fields: {} }));
         }}
       />
-      {handheld ? null : labelField}
 
       {fields.map((field) => (
         <RunFormFieldControl
@@ -561,7 +561,8 @@ function StartRunForm({
           width="100%"
         />
       ) : null}
-      {handheld ? labelField : null}
+      {/* What the run is called is optional: it comes last, so the form opens with the input. */}
+      <RunLabelField value={runLabel} onChange={setRunLabel} />
     </form>
   );
 }
@@ -662,6 +663,7 @@ export function StartRunDialog({
           {summary ? (
             <StartRunSummary
               summary={summary}
+              takesInput={takesInput(flow, contract.data)}
               headingRef={summaryHeading}
               notices={<ContractNotices flow={flow} contract={contract.data} />}
             />

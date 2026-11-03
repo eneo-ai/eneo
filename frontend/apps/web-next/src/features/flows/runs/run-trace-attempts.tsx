@@ -69,7 +69,11 @@ function AttemptRow({ attempt }: { attempt: Attempt }) {
         isOpen={open}
         onOpenChange={setOpen}
         chevronPosition="start"
-        trigger={t("flow_run_extras_attempt_details", { number: attempt.attempt_no })}
+        trigger={
+          <span className="block py-1.5 text-sm font-medium">
+            {t("flow_run_extras_attempt_details", { number: attempt.attempt_no })}
+          </span>
+        }
       >
         {open ? (
           <div className="min-w-0 pt-2">

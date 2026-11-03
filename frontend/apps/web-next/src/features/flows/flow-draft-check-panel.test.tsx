@@ -126,6 +126,75 @@ describe("FlowDraftCheck", () => {
     });
   });
 
+  it("fixes the flow's own problems where they are fixed: its settings, or a first step", async () => {
+    route(ASSISTANTS);
+    const onOpenSettings = vi.fn();
+    const onAddStep = vi.fn();
+    const onProblemCount = vi.fn();
+    const audio = makeFlow({
+      steps: [
+        makeStep(1, { input_type: "audio", output_mode: "transcribe_only" }),
+        makeStep(2, {
+          output_mode: "speaker_mapping",
+          output_type: "json",
+          output_config: { speaker_mapping: { infer_names: true } }
+        })
+      ],
+      metadata_json: { wizard: { transcription_enabled: true } }
+    });
+    const { container } = renderInApp(
+      <FlowDraftCheck
+        flow={audio}
+        speakerServices={[]}
+        onOpenStep={vi.fn()}
+        onOpenSettings={onOpenSettings}
+        onAddStep={onAddStep}
+        onProblemCount={onProblemCount}
+      />
+    );
+
+    const model = await screen.findByText("Välj en transkriberingsmodell i flödets inställningar.");
+    const [first, second] = screen.getAllByRole("button", { name: "Öppna inställningar" });
+    // Each button is described by the problem beside it.
+    expect(first!.getAttribute("aria-describedby")).toBe(model.id);
+    await expectNoAxeViolations(container);
+    fireEvent.click(first!);
+    expect(onOpenSettings).toHaveBeenLastCalledWith("transcription_model");
+    fireEvent.click(second!);
+    expect(onOpenSettings).toHaveBeenLastCalledWith("speaker_service");
+    // The page is told the count once the check has an answer.
+    expect(onProblemCount).toHaveBeenLastCalledWith(2);
+    expect(screen.queryByRole("button", { name: "Lägg till steg" })).toBeNull();
+
+    cleanup();
+    renderInApp(
+      <FlowDraftCheck
+        flow={makeFlow({ steps: [] })}
+        speakerServices={[]}
+        onOpenStep={vi.fn()}
+        onAddStep={onAddStep}
+      />
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Lägg till steg" }));
+    expect(onAddStep).toHaveBeenCalledTimes(1);
+  });
+
+  it("holds the clean result's shape while it checks, so what follows stays put", async () => {
+    route(ASSISTANTS);
+    let answer!: (value: unknown) => void;
+    api.POST.mockReturnValue(new Promise((resolve) => (answer = resolve)));
+    renderInApp(<FlowDraftCheck flow={makeFlow()} speakerServices={[]} onOpenStep={vi.fn()} />);
+
+    const running = await screen.findByText("Kontrollerar utkastet…");
+    const description = screen.getByText("Publicera kontrollerar flödet en gång till.");
+    // A title over a description in one box, as the result will be.
+    expect(running.parentElement?.contains(description)).toBe(true);
+
+    answer(reply({ steps: [] }));
+    expect(await screen.findByText("Inget hindrar publicering just nu.")).toBeTruthy();
+    expect(screen.getByText("Publicera kontrollerar flödet en gång till.")).toBeTruthy();
+  });
+
   it("says nothing stops publishing, and announces it when checked again", async () => {
     route({
       "assistant-1": makeAssistant({ id: "assistant-1" }),

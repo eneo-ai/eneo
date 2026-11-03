@@ -13,8 +13,10 @@ import { CircleCheck, Download, Minus, PackageOpen } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
+import { Collapsible } from "@/components/astryx/collapsible";
 import { TextInput } from "@/components/astryx/text-input";
 import { IconTile } from "@/components/composites/icon-tile";
+import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { toast } from "@/lib/toast";
 import { saveBlob } from "@/features/files/signed-file-url";
 import type { FlowPublic } from "./flows-api";
@@ -47,6 +49,9 @@ export function FlowPackageExportDialog({
   const t = useTranslations();
   const announce = useAnnounce();
   const formId = useId();
+  // A phone gets the whole screen and a header without the tile, which would wrap the title and
+  // leave the form too little height (320 × 256 at 400 % zoom).
+  const whole = usePhoneScreen();
   const errorRef = useRef<HTMLDivElement>(null);
   const [packageId, setPackageId] = useState(() => defaultPackageId(flow.name));
   const [idEdited, setIdEdited] = useState(false);
@@ -54,6 +59,7 @@ export function FlowPackageExportDialog({
   const [name, setName] = useState(flow.name);
   const [description, setDescription] = useState(flow.description ?? "");
   const [includeTemplates, setIncludeTemplates] = useState(true);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   const [showProblems, setShowProblems] = useState(false);
@@ -74,6 +80,7 @@ export function FlowPackageExportDialog({
     setName(flow.name);
     setDescription(flow.description ?? "");
     setIncludeTemplates(true);
+    setAdvancedOpen(false);
     setFailure(null);
     setShowProblems(false);
     setPending(null);
@@ -106,7 +113,10 @@ export function FlowPackageExportDialog({
       return;
     }
     if (nameMissing || versionMissing) {
-      flushSync(() => setShowProblems(true));
+      flushSync(() => {
+        setShowProblems(true);
+        if (versionMissing) setAdvancedOpen(true);
+      });
       document.getElementById(formId)?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
       return;
     }
@@ -144,13 +154,20 @@ export function FlowPackageExportDialog({
   }
 
   return (
-    <Dialog isOpen={open} onOpenChange={requestOpenChange} purpose="form" width={600}>
+    <Dialog
+      isOpen={open}
+      onOpenChange={requestOpenChange}
+      purpose="form"
+      variant={whole ? "fullscreen" : "standard"}
+      width={600}
+      maxHeight="85dvh"
+    >
       <Layout
         header={
           <DialogHeader
             title={t("flow_editor_tools_package_export_title")}
             subtitle={t("flow_editor_tools_package_export_description")}
-            startContent={<IconTile icon={<PackageOpen />} />}
+            startContent={whole ? undefined : <IconTile icon={<PackageOpen />} />}
             onOpenChange={requestOpenChange}
           />
         }
@@ -158,12 +175,40 @@ export function FlowPackageExportDialog({
           open ? (
             <LayoutContent>
               <form id={formId} onSubmit={submit} noValidate className="flex flex-col gap-6">
-                <fieldset>
-                  <legend className="text-ax-text mb-3 text-sm font-semibold">
-                    {t("flow_package_export_section_identity")}
-                  </legend>
-                  {/* Required is the default and unmarked; only the optional fields say so. */}
-                  <FormLayout defaultOptionality="required">
+                {/* Required is the default and unmarked; only the optional fields say so. */}
+                <FormLayout defaultOptionality="required">
+                  <TextInput
+                    label={t("name")}
+                    value={name}
+                    onChange={(value) => {
+                      setName(value);
+                      if (!idEdited) setPackageId(defaultPackageId(value));
+                    }}
+                    isRequired
+                    isDisabled={locked}
+                    autoComplete="off"
+                    status={
+                      showProblems && nameMissing
+                        ? { type: "error", message: t("flows_new_name_required") }
+                        : undefined
+                    }
+                  />
+                  <TextArea
+                    label={t("description")}
+                    value={description}
+                    onChange={setDescription}
+                    isOptional
+                    isDisabled={locked}
+                    rows={3}
+                  />
+                </FormLayout>
+                <Collapsible
+                  trigger={t("advanced")}
+                  isOpen={advancedOpen}
+                  onOpenChange={setAdvancedOpen}
+                  chevronPosition="start"
+                >
+                  <FormLayout defaultOptionality="required" className="pt-2">
                     {/* An empty ID is filled in from the name on export. */}
                     <TextInput
                       label={t("flow_editor_tools_package_id")}
@@ -195,38 +240,7 @@ export function FlowPackageExportDialog({
                       }
                     />
                   </FormLayout>
-                </fieldset>
-                <fieldset>
-                  <legend className="text-ax-text mb-3 text-sm font-semibold">
-                    {t("flow_package_export_section_presentation")}
-                  </legend>
-                  <FormLayout defaultOptionality="required">
-                    <TextInput
-                      label={t("name")}
-                      value={name}
-                      onChange={(value) => {
-                        setName(value);
-                        if (!idEdited) setPackageId(defaultPackageId(value));
-                      }}
-                      isRequired
-                      isDisabled={locked}
-                      autoComplete="off"
-                      status={
-                        showProblems && nameMissing
-                          ? { type: "error", message: t("flows_new_name_required") }
-                          : undefined
-                      }
-                    />
-                    <TextArea
-                      label={t("description")}
-                      value={description}
-                      onChange={setDescription}
-                      isOptional
-                      isDisabled={locked}
-                      rows={3}
-                    />
-                  </FormLayout>
-                </fieldset>
+                </Collapsible>
                 <div className="bg-ax-sunken rounded-ax-container px-4 py-3">
                   <List
                     density="compact"

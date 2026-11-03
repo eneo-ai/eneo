@@ -16,6 +16,7 @@ const state = vi.hoisted(() => ({
   routes: {} as Record<string, (init: never) => { status?: number; body: unknown }>,
   stub: null as unknown as ReturnType<typeof import("../editor/testing/fixtures").apiStub>
 }));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 vi.mock("@/lib/api/browser", async () => {
   const { apiStub } = await import("../editor/testing/fixtures");
   state.stub = apiStub(new Proxy({}, { get: (_target, key: string) => state.routes[key] }));

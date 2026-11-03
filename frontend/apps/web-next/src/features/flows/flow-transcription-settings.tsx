@@ -189,7 +189,10 @@ export function TranscriptionFields({
           : t("flow_editor_tools_speaker_service_choose_hint");
 
   return (
-    <fieldset className="m-0 flex min-w-0 flex-col gap-4 border-0 p-0">
+    <fieldset
+      data-settings-field="transcription"
+      className="m-0 flex min-w-0 flex-col gap-4 border-0 p-0"
+    >
       <legend className="text-ax-text mb-1 p-0 text-sm font-semibold">
         {t("flow_editor_tools_transcription_heading")}
       </legend>
@@ -208,47 +211,49 @@ export function TranscriptionFields({
       {on ? (
         <>
           <div className="grid gap-4 sm:grid-cols-2">
-            <Selector
-              label={t("flow_editor_tools_transcription_model")}
-              description={
-                resources.models.length === 0
-                  ? t("flow_editor_tools_transcription_no_models")
-                  : undefined
-              }
-              options={[
-                { value: NONE, label: t("flow_editor_tools_transcription_model_none") },
-                ...resources.models.map((model) => ({
-                  value: model.id,
-                  label: modelDisplayName(model)
-                })),
-                ...(settings.modelId && !modelKnown
-                  ? [
-                      {
-                        value: settings.modelId,
-                        label: t("flow_editor_tools_transcription_model_gone")
-                      }
-                    ]
-                  : [])
-              ]}
-              value={settings.modelId ?? NONE}
-              onChange={(value) =>
-                onChange({ ...settings, modelId: value === NONE ? null : value })
-              }
-              status={
-                settings.modelId && !modelKnown
-                  ? {
-                      type: "warning",
-                      message: t("flow_editor_tools_transcription_model_unavailable")
-                    }
-                  : modelMissing
+            <div data-settings-field="transcription_model">
+              <Selector
+                label={t("flow_editor_tools_transcription_model")}
+                description={
+                  resources.models.length === 0
+                    ? t("flow_editor_tools_transcription_no_models")
+                    : undefined
+                }
+                options={[
+                  { value: NONE, label: t("flow_editor_tools_transcription_model_none") },
+                  ...resources.models.map((model) => ({
+                    value: model.id,
+                    label: modelDisplayName(model)
+                  })),
+                  ...(settings.modelId && !modelKnown
+                    ? [
+                        {
+                          value: settings.modelId,
+                          label: t("flow_editor_tools_transcription_model_gone")
+                        }
+                      ]
+                    : [])
+                ]}
+                value={settings.modelId ?? NONE}
+                onChange={(value) =>
+                  onChange({ ...settings, modelId: value === NONE ? null : value })
+                }
+                status={
+                  settings.modelId && !modelKnown
                     ? {
                         type: "warning",
-                        message: t("flow_editor_tools_transcription_model_missing")
+                        message: t("flow_editor_tools_transcription_model_unavailable")
                       }
-                    : undefined
-              }
-              width="100%"
-            />
+                    : modelMissing
+                      ? {
+                          type: "warning",
+                          message: t("flow_editor_tools_transcription_model_missing")
+                        }
+                      : undefined
+                }
+                width="100%"
+              />
+            </div>
             <Selector
               label={t("flow_editor_tools_transcription_language")}
               options={TRANSCRIPTION_LANGUAGES.map((language) => ({
@@ -268,18 +273,20 @@ export function TranscriptionFields({
             </Text>
           ) : (
             <>
-              <Selector
-                label={t("flow_editor_tools_speaker_service")}
-                description={serviceNote ?? undefined}
-                options={serviceOptions}
-                value={serviceValue}
-                onChange={(value) => {
-                  if (value === UNSET) return;
-                  onChange(withSpeakerService(settings, value === NONE ? null : value));
-                }}
-                status={lost ? { type: "warning", message: lost } : undefined}
-                width="100%"
-              />
+              <div data-settings-field="speaker_service">
+                <Selector
+                  label={t("flow_editor_tools_speaker_service")}
+                  description={serviceNote ?? undefined}
+                  options={serviceOptions}
+                  value={serviceValue}
+                  onChange={(value) => {
+                    if (value === UNSET) return;
+                    onChange(withSpeakerService(settings, value === NONE ? null : value));
+                  }}
+                  status={lost ? { type: "warning", message: lost } : undefined}
+                  width="100%"
+                />
+              </div>
               <Switch
                 label={t("flow_editor_tools_speaker_labels")}
                 description={

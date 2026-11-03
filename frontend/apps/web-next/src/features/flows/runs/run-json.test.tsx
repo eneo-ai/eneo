@@ -33,7 +33,7 @@ describe("JsonValue", () => {
 
   it("shows a value nested deeper than three levels as a JSON block that wraps", () => {
     const { container } = renderInApp(<JsonValue value={{ a: { b: { c: { d: id } } } }} />);
-    const block = container.querySelector(".astryx-code-block");
+    const block = container.querySelector("[data-json-block]");
     expect(block).toBeTruthy();
     expect(block?.textContent).toContain(`"d": "${id}"`);
     // Not a `<pre>` that scrolls sideways.

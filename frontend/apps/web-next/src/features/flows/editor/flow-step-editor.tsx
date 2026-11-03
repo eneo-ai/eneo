@@ -18,6 +18,7 @@ import { StatusLabel } from "@/components/composites/status-label";
 import { SuccessMark } from "@/components/composites/success-mark";
 import { SpaceProvider, useSpace } from "@/features/spaces/use-space";
 import { useSecretMutation } from "@/lib/api/use-secret-mutation";
+import { stepName } from "../flow-steps";
 import type { SuggestionDismissal, SuggestionFix } from "../flow-suggestion-item";
 import { StepSuggestions } from "../flow-suggestions-section";
 import {
@@ -143,6 +144,9 @@ export type StepMenuEntry = {
 export function FlowStepEditor({ navigation, ...props }: EditorProps): React.JSX.Element {
   const t = useTranslations();
   const current = navigation?.steps[navigation.position - 1];
+  // The menu's own label says "Steg 2: …" as well: "Steg 2 av 5" takes the bare name.
+  const openStep = findStep(props.flow, props.stepId);
+  const openStepName = openStep ? stepName(openStep) : null;
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* The way back, the step menu and the neighbouring steps: a bar that
@@ -167,11 +171,11 @@ export function FlowStepEditor({ navigation, ...props }: EditorProps): React.JSX
               menuWidth={320}
               presentation="adaptive"
               button={{
-                label: current
+                label: openStepName
                   ? t("flow_step_editor_position_named", {
                       position: navigation.position,
                       count: navigation.count,
-                      step: current.label
+                      step: openStepName
                     })
                   : t("flow_step_editor_position", {
                       position: navigation.position,

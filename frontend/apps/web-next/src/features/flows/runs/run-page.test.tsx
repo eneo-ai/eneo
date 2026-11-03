@@ -128,6 +128,15 @@ async function comeBack() {
   await act(() => vi.advanceTimersByTimeAsync(100));
 }
 
+/** The result's own section: each step has a copy button of the same name. */
+async function resultSection() {
+  const heading = await screen.findByRole("heading", {
+    level: 2,
+    name: messages.flow_runs_result_heading
+  });
+  return within(heading.closest("section")!);
+}
+
 function renderRun(
   permissions: Permission[] = ["flows_view", "flows_run"],
   onCommit: () => void = () => {},
@@ -182,6 +191,72 @@ describe("FlowRunPage", () => {
     expect(screen.getByText("Startad av Anna Lind")).toBeTruthy();
     expect(screen.queryByRole("button", { name: messages.flow_runs_cancel })).toBeNull();
     await expectNoAxeViolations(container);
+  });
+
+  it("copies the result from its heading: the text, or the structured value as JSON", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    answerRun(makeRunSummary());
+    renderRun();
+    await screen.findByText("Beslutet är fattat.");
+    const text = await resultSection();
+    fireEvent.click(text.getByRole("button", { name: messages.flow_run_more_copy_output }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("Beslutet är fattat."));
+    cleanup();
+
+    const summary = makeRunSummary();
+    answerRun(
+      summary,
+      makeRunDetail({
+        ...summary,
+        result: { kind: "structured", output_contract: null, value: { beslut: "bifall" } }
+      })
+    );
+    renderRun();
+    await screen.findByText("bifall");
+    const structured = await resultSection();
+    fireEvent.click(structured.getByRole("button", { name: messages.flow_run_more_copy_output }));
+    await waitFor(() =>
+      expect(writeText).toHaveBeenLastCalledWith(JSON.stringify({ beslut: "bifall" }, null, 2))
+    );
+  });
+
+  it("offers no copy of a result that is a file or a shortened text, or of none yet", async () => {
+    const file = makeResultFile();
+    const summary = makeRunSummary();
+    for (const result of [
+      { kind: "artifact", files: [file] },
+      { kind: "file_backed_text", preview: "Början av texten", file },
+      null
+    ] as RunDetail["result"][]) {
+      answerRun(summary, makeRunDetail({ ...summary, result }));
+      renderRun();
+      const section = await resultSection();
+      expect(
+        section.queryByRole("button", { name: messages.flow_run_more_copy_output })
+      ).toBeNull();
+      cleanup();
+    }
+  });
+
+  it("shows what a run was started with as plain text, under the page's word for it", async () => {
+    const summary = makeRunSummary();
+    answerRun(summary, makeRunDetail({ ...summary, input_payload_json: { text: "Ärendet." } }));
+    renderRun();
+
+    const heading = await screen.findByRole("heading", { level: 2, name: "Underlag" });
+    const section = heading.closest("section")!;
+    expect(within(section).getByText("Ärendet.")).toBeTruthy();
+    expect(within(section).queryByText("text")).toBeNull();
+  });
+
+  it("names a form's answers by their fields", async () => {
+    const summary = makeRunSummary();
+    answerRun(summary, makeRunDetail({ ...summary, input_payload_json: { ärende: "Bygglov" } }));
+    renderRun();
+
+    const heading = await screen.findByRole("heading", { level: 2, name: "Underlag" });
+    expect(within(heading.closest("section")!).getByText("ärende")).toBeTruthy();
   });
 
   it("offers neither knowledge nor trace when the core would not let the caller read the evidence", async () => {
@@ -350,7 +425,7 @@ describe("FlowRunPage", () => {
     );
     expect(within(first).getByText("Sammanfatta ärendet: Bygglov")).toBeTruthy();
     expect(within(first).getByText(messages.flow_run_extras_prompt_truncated)).toBeTruthy();
-    expect(within(first).getByText("temperature")).toBeTruthy();
+    expect(within(first).getByText(messages.temperature)).toBeTruthy();
     expect(
       within(first).getByRole("button", { name: messages.flow_run_more_copy_prompt })
     ).toBeTruthy();
@@ -1311,6 +1386,43 @@ describe("FlowRunPage", () => {
         within(screen.getByRole("article", { name: "Steg 1: Sammanfatta" })).getByText(
           "Resultat från steg 1"
         )
+      ).toBeTruthy();
+    });
+
+    it("keeps a transcribing step's text, and says it is shortened, when its transcript cannot be read", async () => {
+      answerAudioRun();
+      state.routes[GRAPH] = () => ({
+        body: {
+          ...graph,
+          nodes: graph.nodes.map((node) =>
+            node.step_order === 1 ? { ...node, output_mode: "transcribe_only" } : node
+          )
+        }
+      });
+      state.routes[STEPS] = () => ({
+        body: [
+          makeRunStep(1, {
+            input_payload_json: {
+              transcription: { file_ids: ["audio-1"], source: { attempt_no: 1 } }
+            },
+            output_payload_json: { text: "Resultat från steg 1", text_overflow: true }
+          }),
+          makeRunStep(2)
+        ]
+      });
+      state.routes[SOURCE] = () => ({
+        status: 503,
+        body: { message: "Unavailable", code: "unavailable" }
+      });
+      renderRun(["flows_view", "flows_manage"]);
+
+      expect(await screen.findByText(messages.flow_runs_transcript_failed)).toBeTruthy();
+      const card = screen.getByRole("article", { name: "Steg 1: Sammanfatta" });
+      expect(within(card).getByText("Resultat från steg 1")).toBeTruthy();
+      expect(within(card).getByText(messages.flow_runs_output_overflow)).toBeTruthy();
+      // What shows is the step's own text, so a copy of it is honest here.
+      expect(
+        within(card).getByRole("button", { name: messages.flow_run_more_copy_output })
       ).toBeTruthy();
     });
 

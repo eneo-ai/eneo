@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { makeSpace } from "@/features/spaces/testing/space-fixture";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testQueryClient } from "@/test/render";
+import { setViewport } from "@/test/setup-dom";
 import { makeFlow, makeStep } from "./flow-fixtures";
 
 const router = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn(), replace: vi.fn() }));
@@ -57,6 +58,7 @@ describe("FlowPackageExportDialog", () => {
     const { container } = renderInApp(
       <FlowPackageExportDialog flow={flow} open onOpenChange={vi.fn()} />
     );
+    fireEvent.click(screen.getByRole("button", { name: "Avancerat" }));
     expect((screen.getByRole("textbox", { name: /Paket-ID/ }) as HTMLInputElement).value).toBe(
       "local.brev-for-namnden"
     );
@@ -149,6 +151,10 @@ describe("FlowPackageImportDialog", () => {
     transcription_model_available: true
   };
 
+  const BLOCKED = "Paketet kan inte importeras förrän dessa punkter är lösta.";
+  const GUIDANCE = "Gör de obligatoriska valen nedan för att kunna importera paketet.";
+  const progress = (selected: number) => `${selected} av 1 obligatoriska val är gjorda.`;
+
   function renderImport() {
     const queryClient = testQueryClient();
     queryClient.setQueryData(["spaces", "space-1"], makeSpace({}));
@@ -169,7 +175,7 @@ describe("FlowPackageImportDialog", () => {
     expect(api.POST).not.toHaveBeenCalled();
   });
 
-  it("shows what the package needs, blocks until it is chosen and imports the draft", async () => {
+  it("shows what the package needs, guides until it is chosen and imports the draft", async () => {
     api.POST.mockImplementation((path: string) =>
       Promise.resolve(
         path.endsWith("/import-plan/")
@@ -183,7 +189,14 @@ describe("FlowPackageImportDialog", () => {
     const { container } = renderImport();
     choose(container, new File(["zip"], "brev.eneopkg", { type: "application/zip" }));
 
-    expect(await screen.findByText("Välj en lokal resurs för Skrivmodell.")).toBeTruthy();
+    // Nothing is wrong yet: the choice lies ahead, and the reason stays by the button.
+    expect(await screen.findByText(progress(0))).toBeTruthy();
+    expect(screen.getByText(GUIDANCE)).toBeTruthy();
+    expect(screen.queryByText(BLOCKED)).toBeNull();
+    // What the package is reads on the file's line, not as rows above the choices.
+    expect(screen.getByText(/ · Version 1\.0\.0 · 2 steg$/)).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Brev" })).toBeTruthy();
+    expect(screen.getByText("Besvarar brev.")).toBeTruthy();
     expect(screen.getByText("Används av: Skriv svar")).toBeTruthy();
     const importButton = screen.getByRole("button", { name: "Importera som utkast" });
     expect(
@@ -193,9 +206,8 @@ describe("FlowPackageImportDialog", () => {
 
     fireEvent.click(screen.getByRole("combobox", { name: /Lokal resurs för Skrivmodell/ }));
     fireEvent.click(await screen.findByRole("option", { name: "Modell A" }));
-    await waitFor(() =>
-      expect(screen.queryByText("Välj en lokal resurs för Skrivmodell.")).toBeNull()
-    );
+    expect(await screen.findByText(progress(1))).toBeTruthy();
+    expect(screen.queryByText(GUIDANCE)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Importera som utkast" }));
 
     await waitFor(() => expect(router.push).toHaveBeenCalledWith("/spaces/space-1/flows/flow-9"));
@@ -259,7 +271,7 @@ describe("FlowPackageImportDialog", () => {
     expect(await screen.findByText("brev.eneopkg")).toBeTruthy();
     expect(screen.queryByText("Dra hit ett flödespaket eller välj en .eneopkg-fil.")).toBeNull();
     expect(screen.getByRole("button", { name: "Byt fil" })).toBeTruthy();
-    await screen.findByText("Välj en lokal resurs för Skrivmodell.");
+    await screen.findByText(progress(0));
 
     // A file that is no package keeps the one already chosen.
     choose(container, new File(["x"], "brev.zip", { type: "application/zip" }));
@@ -273,6 +285,88 @@ describe("FlowPackageImportDialog", () => {
     await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(2));
     await expectNoAxeViolations(container);
   }, 20_000);
+
+  it("keeps the error for what no choice here can lift", async () => {
+    const [model] = plan.dependency_resolutions;
+    const noCandidates = {
+      ...plan,
+      dependency_resolutions: [{ ...model, suggestions: [], eligible_candidate_count: 0 }]
+    };
+    api.POST.mockImplementation(() =>
+      Promise.resolve({ data: noCandidates, response: json(200, noCandidates) })
+    );
+    const { container } = renderImport();
+    choose(container, new File(["zip"], "brev.eneopkg", { type: "application/zip" }));
+
+    expect(await screen.findByText(BLOCKED)).toBeTruthy();
+    expect(screen.getByText("Välj en lokal resurs för Skrivmodell.")).toBeTruthy();
+    expect(screen.queryByText(GUIDANCE)).toBeNull();
+    // Counting choices would promise what none can give: the footer points at the problem.
+    expect(screen.getByText("Paketet kan inte importeras än: se problemen ovan.")).toBeTruthy();
+    expect(screen.queryByText(progress(0))).toBeNull();
+  });
+
+  it("treats a Word template still to be given as a step ahead, not a problem", async () => {
+    const [model] = plan.dependency_resolutions;
+    const needsTemplate = {
+      ...plan,
+      dependency_resolutions: [
+        {
+          ...model,
+          kind: "template_asset",
+          slot_ref: { kind: "template_asset", slot: "brev", label: "Brevmall" },
+          suggestions: [],
+          template: { filename: "brev.docx", fields: [{ name: "namn" }], asset_path: null }
+        }
+      ]
+    };
+    api.POST.mockImplementation(() =>
+      Promise.resolve({ data: needsTemplate, response: json(200, needsTemplate) })
+    );
+    const { container } = renderImport();
+    choose(container, new File(["zip"], "brev.eneopkg", { type: "application/zip" }));
+
+    expect(await screen.findByText(progress(0))).toBeTruthy();
+    expect(screen.getByText(GUIDANCE)).toBeTruthy();
+    expect(screen.queryByText(BLOCKED)).toBeNull();
+  });
+
+  it("says which steps use a resource by number, not by the package's keys", async () => {
+    const [model] = plan.dependency_resolutions;
+    const keyed = {
+      ...plan,
+      dependency_resolutions: [
+        { ...model, used_by_steps: ["step_8", "step_3", "step_4", "step_5", "step_10"] }
+      ]
+    };
+    api.POST.mockImplementation(() => Promise.resolve({ data: keyed, response: json(200, keyed) }));
+    const { container } = renderImport();
+    choose(container, new File(["zip"], "brev.eneopkg", { type: "application/zip" }));
+
+    expect(await screen.findByText("Används av: Steg 3–5, 8, 10")).toBeTruthy();
+  });
+
+  it("does not offer its placeholder as a choice, and a choice can be cleared", async () => {
+    api.POST.mockImplementation(() => Promise.resolve({ data: plan, response: json(200, plan) }));
+    const { container } = renderImport();
+    choose(container, new File(["zip"], "brev.eneopkg", { type: "application/zip" }));
+
+    const selector = await screen.findByRole("combobox", { name: /Lokal resurs för Skrivmodell/ });
+    expect(selector.textContent).toContain("Välj lokal resurs");
+    fireEvent.click(selector);
+    fireEvent.click(await screen.findByRole("option", { name: "Modell A" }));
+    await screen.findByText(progress(1));
+    expect(screen.queryByRole("option", { name: "Välj lokal resurs" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Rensa/ }));
+    expect(await screen.findByText(progress(0))).toBeTruthy();
+  });
+
+  it("takes the whole screen on a phone, where a dialog's header would leave too little", () => {
+    setViewport("phone");
+    renderImport();
+    expect(screen.getByRole("dialog").getAttribute("data-variant")).toBe("fullscreen");
+  });
 
   it("says why the core refused the package", async () => {
     api.POST.mockResolvedValue({

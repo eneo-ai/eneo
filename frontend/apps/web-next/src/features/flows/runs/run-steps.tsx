@@ -72,7 +72,8 @@ function stepDurationMs(result: RunStep): number | null {
  * speaker-mapping step named, a structured value (marked as JSON), or text
  * (rendered as Markdown, its line breaks kept, in a box that scrolls past a
  * height). A step whose text is its transcript shows the transcript
- * (`transcript`), open from the start, as its own section did.
+ * (`transcript`), open until the person folds it, as its own section did, and
+ * leaves copying to the transcript's export: the text here has no corrections.
  */
 function StepOutput({
   flowId,
@@ -86,7 +87,9 @@ function StepOutput({
   transcript?: HTMLElement | null;
 }) {
   const t = useTranslations();
-  const [open, setOpen] = useState(transcript !== null);
+  const [toggled, setToggled] = useState<boolean | null>(null);
+  // A transcript can arrive after the card: the default follows it.
+  const open = toggled ?? transcript !== null;
   const payload = result.output_payload_json;
   const structured = outputStructured(payload);
   const text = outputText(payload);
@@ -102,9 +105,11 @@ function StepOutput({
       <Collapsible
         className="min-w-0 flex-1"
         isOpen={open}
-        onOpenChange={setOpen}
+        onOpenChange={setToggled}
         chevronPosition="start"
-        trigger={<Text type="label">{t("flow_runs_step_output")}</Text>}
+        trigger={
+          <span className="block py-1.5 text-sm font-medium">{t("flow_runs_step_output")}</span>
+        }
       >
         {open ? (
           <VStack gap={1} paddingBlockStart={2}>
@@ -118,30 +123,67 @@ function StepOutput({
             ) : transcript ? (
               <TranscriptSlot host={transcript} />
             ) : (
-              <>
-                <StepText text={text ?? ""} />
-                {payload?.text_overflow ? (
-                  <Text type="supporting" as="p">
-                    {t("flow_runs_output_overflow")}
-                  </Text>
-                ) : null}
-              </>
+              <StepOutputText payload={payload} />
             )}
           </VStack>
         ) : null}
       </Collapsible>
-      <CopyButton label={t("flow_run_more_copy_output")} value={structured ?? text} />
+      {transcript ? null : (
+        // Centred on the trigger's row, which is 4 px taller than the button.
+        <span className="pt-0.5">
+          <CopyButton label={t("flow_run_more_copy_output")} value={structured ?? text} />
+        </span>
+      )}
     </HStack>
   );
 }
 
-/** A step's text output in a soft box that wraps and, past a height, scrolls. */
-export function StepText({ text }: { text: string }) {
+/** A step's text output, and that it is shortened when the core cut it. */
+function StepOutputText({ payload }: { payload: RunStep["output_payload_json"] }) {
+  const t = useTranslations();
+  return (
+    <>
+      <StepText text={outputText(payload) ?? ""} />
+      {payload?.text_overflow ? (
+        <Text type="supporting" as="p">
+          {t("flow_runs_output_overflow")}
+        </Text>
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * What a transcribing step wrote, where its transcript cannot show: with the
+ * copy `StepOutput` leaves to the transcript, since this is the text on screen.
+ */
+export function StepTextInsteadOfTranscript({
+  payload
+}: {
+  payload: RunStep["output_payload_json"];
+}) {
+  const t = useTranslations();
+  return (
+    <HStack gap={2} vAlign="start">
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <StepOutputText payload={payload} />
+      </div>
+      <CopyButton label={t("flow_run_more_copy_output")} value={outputText(payload)} />
+    </HStack>
+  );
+}
+
+/**
+ * A step's text in a soft box that wraps and, past a height, scrolls. `label`
+ * names the box for a keyboard or screen reader; it is the step's output
+ * unless it says otherwise.
+ */
+export function StepText({ text, label }: { text: string; label?: string }) {
   const t = useTranslations();
   return (
     <ScrollableArea
       axis="block"
-      label={t("flow_runs_step_output")}
+      label={label ?? t("flow_runs_step_output")}
       className="bg-ax-sunken rounded-ax-inner focus-visible:outline-ring max-h-96 min-w-0 px-3 py-2 [overflow-wrap:anywhere] focus-visible:outline-2 focus-visible:-outline-offset-2"
     >
       <RunText text={text} />
@@ -149,30 +191,61 @@ export function StepText({ text }: { text: string }) {
   );
 }
 
+/** Keys of a step's input that say how its text got there, not what it says. */
+const INPUT_ORIGIN = new Set(["input_source", "used_question_binding"]);
+
 /**
- * What a step was sent, as JSON, less what the card already shows
- * (`stepInputRest`), with a button that copies all of it: closed until asked
- * for, and rendered only while open, since a large input weighs on the page.
+ * The text of an input that is nothing but a text: `text` and `source_text`
+ * (the core sends the same words in both, or one empty) beside its origin,
+ * flags that are off and empty lists. Null when it says anything more.
+ */
+function inputText({ text, source_text: source, ...rest }: Record<string, unknown>) {
+  const words = text || source;
+  if (typeof words !== "string" || !words.trim() || (text && source && text !== source)) {
+    return null;
+  }
+  const nothingMore = Object.entries(rest).every(
+    ([key, value]) =>
+      INPUT_ORIGIN.has(key) || !value || (Array.isArray(value) && value.length === 0)
+  );
+  return nothingMore ? words : null;
+}
+
+/**
+ * What a step was sent, less what the card already shows (`stepInputRest`):
+ * only a text as that text, anything else as JSON, with a button that copies
+ * it, or all of the JSON: closed until asked for, and rendered only while open,
+ * since a large input weighs on the page.
  */
 function StepInput({ result }: { result: RunStep }) {
   const t = useTranslations();
   const [open, setOpen] = useState(false);
   const rest = stepInputRest(result);
   if (!rest) return null;
+  const text = inputText(rest);
+  const copyLabel = t("flow_run_more_copy_input");
   return (
     <Collapsible
       className="min-w-0"
       isOpen={open}
       onOpenChange={setOpen}
       chevronPosition="start"
-      trigger={<span className="text-sm font-medium">{t("flow_run_step_input_show")}</span>}
+      trigger={
+        <span className="block py-1.5 text-sm font-medium">{t("flow_run_step_input_show")}</span>
+      }
     >
       {open ? (
         <div className="pt-2">
-          <JsonBlock
-            value={rest}
-            copy={{ label: t("flow_run_more_copy_input"), value: result.input_payload_json }}
-          />
+          {text !== null ? (
+            <HStack gap={2} vAlign="start">
+              <div className="min-w-0 flex-1">
+                <StepText text={text} label={t("flow_runs_input_heading")} />
+              </div>
+              <CopyButton label={copyLabel} value={text} />
+            </HStack>
+          ) : (
+            <JsonBlock value={rest} copy={{ label: copyLabel, value: result.input_payload_json }} />
+          )}
         </div>
       ) : null}
     </Collapsible>
@@ -189,7 +262,11 @@ function StepTranscriptSection({ host }: { host: HTMLElement }) {
       isOpen={open}
       onOpenChange={setOpen}
       chevronPosition="start"
-      trigger={<Text type="label">{t("flow_runs_transcript_heading")}</Text>}
+      trigger={
+        <span className="block py-1.5 text-sm font-medium">
+          {t("flow_runs_transcript_heading")}
+        </span>
+      }
     >
       {open ? (
         <div className="pt-2">

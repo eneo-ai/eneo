@@ -5,7 +5,7 @@ import { Heading, Text } from "@astryxdesign/core/Text";
 import { useQueries, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { Lightbulb } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { useId, useRef } from "react";
+import { useEffect, useId, useRef } from "react";
 import { Banner } from "@astryxdesign/core/Banner";
 import { useFocusRescue } from "@/lib/focus-rescue";
 import {
@@ -109,6 +109,13 @@ function flowProblemText(problem: FlowProblem, t: Translate): string {
   }
 }
 
+/** The settings field that fixes a flow problem, for the ones fixed in the flow's settings. */
+export type SettingsField = "transcription_model" | "speaker_service";
+const SETTINGS_FIELD: Partial<Record<FlowProblem["code"], SettingsField>> = {
+  transcription_model_missing: "transcription_model",
+  speaker_service_missing: "speaker_service"
+};
+
 function resultSentence(check: DraftCheck, t: Translate): string {
   const count = problemCount(check);
   return count === 0
@@ -207,8 +214,9 @@ function RemovedReadRepair({
 /**
  * "Före publicering": what would stop the draft from being published, per
  * step, worked out again whenever the draft changes. Each step's problems
- * link to the step in the editor; the flow's own (no steps, no transcription
- * model) say where they are fixed. A read of a removed step in a step's
+ * link to the step in the editor; the flow's own lead to where they are
+ * fixed: the settings field (`onOpenSettings`), or a first step (`onAddStep`).
+ * The page is told the problem count (`onProblemCount`). A read of a removed step in a step's
  * underlag can be replaced here in one choice (`onRepair` saves it). The
  * core's suggestions are not listed here, they sit on the step cards: while
  * the draft has some, one line says how many (the dismissed ones not
@@ -220,7 +228,10 @@ export function FlowDraftCheck({
   suggestionRuns = 0,
   speakerServices,
   onOpenStep,
-  onRepair
+  onRepair,
+  onOpenSettings,
+  onAddStep,
+  onProblemCount
 }: {
   flow: FlowPublic;
   /**
@@ -233,6 +244,12 @@ export function FlowDraftCheck({
   onOpenStep: (step: FlowStep) => void;
   /** Saves the step's repaired underlag; resolves to whether it was saved. */
   onRepair?: (step: FlowStep, inputBindings: JsonObject | null) => Promise<boolean>;
+  /** Opens the flow's settings at the field that fixes a flow problem. */
+  onOpenSettings?: (field: SettingsField) => void;
+  /** Adds a first step to a flow that has none. */
+  onAddStep?: () => void;
+  /** Told the problem count, or null while the draft is being checked or could not be. */
+  onProblemCount?: (count: number | null) => void;
 }) {
   const t = useTranslations();
   const announce = useAnnounce();
@@ -275,6 +292,11 @@ export function FlowDraftCheck({
     speakerServices
   });
   const count = problemCount(check);
+  const reported = pending || unchecked ? null : count;
+  useEffect(() => {
+    onProblemCount?.(reported);
+    return () => onProblemCount?.(null);
+  }, [reported, onProblemCount]);
 
   async function recheck() {
     const results = await Promise.all([
@@ -319,9 +341,13 @@ export function FlowDraftCheck({
         />
       </div>
       {pending ? (
-        <Text type="supporting" size="sm" as="p" display="block" className="m-0">
-          {t("flow_editor_tools_check_running")}
-        </Text>
+        // The clean result's shape, so what follows does not move when it lands.
+        <Banner
+          status="info"
+          title={t("flow_editor_tools_check_running")}
+          description={t("flow_editor_tools_check_clean_description")}
+          collapsible={false}
+        />
       ) : count === 0 ? (
         <Banner
           status={unchecked ? "warning" : "success"}
@@ -339,11 +365,38 @@ export function FlowDraftCheck({
           collapsible={false}
         >
           <ul className="m-0 flex list-none flex-col gap-3 p-0">
-            {check.flow.map((problem) => (
-              <li key={problem.code} className="text-ax-text text-sm">
-                {flowProblemText(problem, t)}
-              </li>
-            ))}
+            {check.flow.map((problem) => {
+              const field = SETTINGS_FIELD[problem.code];
+              const textId = `${headingId}-${problem.code}`;
+              const fix =
+                field && onOpenSettings
+                  ? {
+                      label: t("flow_editor_tools_check_open_settings"),
+                      run: () => onOpenSettings(field)
+                    }
+                  : problem.code === "no_steps" && onAddStep
+                    ? { label: t("flows_add_step"), run: onAddStep }
+                    : null;
+              return (
+                <li
+                  key={problem.code}
+                  className="flex flex-wrap items-center justify-between gap-2"
+                >
+                  <span id={textId} className="text-ax-text text-sm">
+                    {flowProblemText(problem, t)}
+                  </span>
+                  {fix ? (
+                    <Button
+                      label={fix.label}
+                      aria-describedby={textId}
+                      size="sm"
+                      variant="ghost"
+                      onClick={fix.run}
+                    />
+                  ) : null}
+                </li>
+              );
+            })}
             {check.steps.map(({ step, problems }) => {
               const label = stepLabel(step, t);
               return (

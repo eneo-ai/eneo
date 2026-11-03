@@ -1,3 +1,4 @@
+import { Badge } from "@astryxdesign/core/Badge";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { useAnnounce, useMediaQuery } from "@astryxdesign/core/hooks";
@@ -7,7 +8,16 @@ import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { goHistory, pushUrl, readUrlState, replaceUrl, useSearchParams } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
-import { useCallback, useEffect, useLayoutEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentProps
+} from "react";
 import { flushSync } from "react-dom";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { PageHeader } from "@/components/composites/page-header";
@@ -17,6 +27,7 @@ import { unwrap } from "@/lib/api/errors";
 import { focusAfterRemoval } from "@/lib/focus-after-removal";
 import { useFocusRescue } from "@/lib/focus-rescue";
 import { HANDHELD_QUERY } from "@/lib/hooks/use-media-match";
+import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { useSpaceDisplayName, useSpaceSections } from "@/features/spaces/frame/space-header";
 import { spaceLandingHref } from "@/features/spaces/frame/space-sections";
@@ -85,6 +96,7 @@ type PageTab = "definition" | "runs";
 type EditorChange = Omit<FlowEditorUpdate, "expected_revision" | "definition"> & {
   definition?: FlowDefinitionUpdate;
 };
+type SettingsRequest = NonNullable<ComponentProps<typeof FlowSettings>["openRequest"]>;
 
 const CHAT_WIDTH_STORAGE_KEY = "eneo:flow-chat-width";
 /** How long a card the chat touched stays marked. */
@@ -120,6 +132,8 @@ function focusMoveControl(stepId: string, delta: -1 | 1) {
  * flow traces can have the suggestions measured over the latest runs for
  * the visit ("Räkna med de senaste körningarna"). An editor can dismiss a
  * suggestion for the flow ("Ignorera") and show the dismissed ones again.
+ * The header's "Inställningar" and what "Före publicering" says is fixed in
+ * the settings open them; the header says while they hold unsaved changes.
  */
 function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => void }) {
   const t = useTranslations();
@@ -168,6 +182,11 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
   const [unsavedEdits, setUnsavedEdits] = useState(false);
   const [confirmUnpublish, setConfirmUnpublish] = useState(false);
   const [exporting, setExporting] = useState(false);
+  // The last ask to bring the settings up, whether their form holds changes
+  // not saved, and the problem count "Före publicering" last came to.
+  const [settingsRequest, setSettingsRequest] = useState<SettingsRequest>();
+  const [settingsDirty, setSettingsDirty] = useState(false);
+  const [draftProblems, setDraftProblems] = useState<number | null>(null);
   // The chat's composer while it is on screen (the chat panel reports it).
   const [chatComposer, setChatComposer] = useState<ComposerInsert | null>(null);
   const searchParams = useSearchParams();
@@ -188,6 +207,13 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
     if (next === "runs") url.searchParams.set("tab", "runs");
     else url.searchParams.delete("tab");
     replaceUrl(url);
+  }
+
+  /** Brings the settings up, from the runs or the chat too, at `focus` when given. */
+  function openSettings(focus?: SettingsRequest["focus"]) {
+    if (tab === "runs") selectTab("definition");
+    if (!beside) setView("definition");
+    setSettingsRequest((last) => ({ nonce: (last?.nonce ?? 0) + 1, focus }));
   }
 
   /** A refusal above both columns; a stale draft is reloaded first. */
@@ -601,7 +627,7 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
   async function saveSettings(definition: FlowDefinitionUpdate): Promise<boolean> {
     try {
       await edit.mutateAsync({ definition });
-      announce(t("flows_settings_saved"));
+      toast.success(t("flows_settings_saved"));
       return true;
     } catch {
       return false;
@@ -673,9 +699,6 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
   const actions =
     mayEdit || canPublish || canRun ? (
       <div className="flex flex-wrap items-center gap-2">
-        {canRun ? (
-          <Button label={t("flow_runs_start")} variant="primary" onClick={onStart} />
-        ) : null}
         {mayEdit ? (
           <Button
             label={t("flow_editor_tools_package_export")}
@@ -698,6 +721,9 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
             isLoading={publish.isPending}
             isInterruptible
           />
+        ) : null}
+        {canRun ? (
+          <Button label={t("flow_runs_start")} variant="primary" onClick={onStart} />
         ) : null}
       </div>
     ) : undefined;
@@ -727,6 +753,12 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
             actions={
               <>
                 <FlowStatusBadge publishedVersion={flow.published_version} />
+                {settingsDirty ? (
+                  <Badge variant="warning" label={t("flow_page_settings_unsaved")} />
+                ) : null}
+                {editorOpen ? null : (
+                  <Button label={t("flows_settings_heading")} onClick={() => openSettings()} />
+                )}
                 {actions}
               </>
             }
@@ -848,17 +880,22 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
                           : t("flows_published_read_only")
                       }
                       collapsible={false}
-                      endContent={
-                        canUnpublishToEdit ? (
-                          <Button
-                            label={t("flows_unpublish_to_edit")}
-                            size="sm"
-                            onClick={() => setConfirmUnpublish(true)}
-                          />
-                        ) : undefined
-                      }
                     />
                   ) : null}
+                  <FlowSettings
+                    flow={flow}
+                    canEdit={canEdit}
+                    transcription={{
+                      models: space.transcription_models,
+                      services: space.transcription_services ?? []
+                    }}
+                    onSave={saveSettings}
+                    onEditingChange={setUnsavedEdits}
+                    openRequest={settingsRequest}
+                    stepCount={steps.length}
+                    problemCount={draftProblems}
+                    onDirtyChange={setSettingsDirty}
+                  />
                   {canEdit ? (
                     <FlowDraftCheck
                       flow={flow}
@@ -866,6 +903,9 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
                       speakerServices={space.transcription_services ?? []}
                       onOpenStep={openStep}
                       onRepair={repairReference}
+                      onOpenSettings={openSettings}
+                      onAddStep={() => setAddAt(steps.length + 1)}
+                      onProblemCount={setDraftProblems}
                     />
                   ) : null}
                   <FlowStepList
@@ -893,16 +933,6 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
                           }
                         : null
                     }
-                  />
-                  <FlowSettings
-                    flow={flow}
-                    canEdit={canEdit}
-                    transcription={{
-                      models: space.transcription_models,
-                      services: space.transcription_services ?? []
-                    }}
-                    onSave={saveSettings}
-                    onEditingChange={setUnsavedEdits}
                   />
                 </>
               )}

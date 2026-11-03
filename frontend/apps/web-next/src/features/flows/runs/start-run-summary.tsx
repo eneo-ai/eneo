@@ -10,21 +10,27 @@ import { summaryIsEmpty, type StartSummary } from "./start-run-checks";
 /**
  * The start dialog's last step: what the run is sent (its name, the fields
  * given a value, the free text and the files), with the notices that still
- * apply. Its heading takes focus when the step opens, so a screen reader
- * reads from there.
+ * apply. With no input it says so: a warning when the flow takes input (the
+ * run can still start), else that all is ready. Its heading takes focus when
+ * the step opens, so a screen reader reads from there.
  */
 export function StartRunSummary({
   summary,
+  takesInput,
   headingRef,
   notices
 }: {
   summary: StartSummary;
+  /** Whether the flow reads anything given at the start. */
+  takesInput: boolean;
   headingRef: Ref<HTMLHeadingElement>;
   notices: ReactNode;
 }) {
   const t = useTranslations();
   const locale = useLocale();
   const headingId = useId();
+  // The run's name is no material for it.
+  const filled = summary.fields.length > 0 || summary.freeText !== null || summary.files.length > 0;
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-4">
       <h3
@@ -35,16 +41,16 @@ export function StartRunSummary({
       >
         {t("flow_runs_summary_title")}
       </h3>
-      <Banner
-        status="success"
-        title={t("flow_runs_start_ready_title")}
-        description={t("flow_runs_summary_ready")}
-        collapsible={false}
-      />
+      {filled ? null : (
+        <Banner
+          status={takesInput ? "warning" : "success"}
+          title={t(takesInput ? "flow_runs_start_no_input_title" : "flow_runs_start_ready_title")}
+          description={takesInput ? t("flow_runs_start_no_input_body") : undefined}
+          collapsible={false}
+        />
+      )}
       {notices}
-      {summaryIsEmpty(summary) ? (
-        <p className="text-ax-text-secondary m-0 text-sm">{t("flow_runs_summary_empty")}</p>
-      ) : (
+      {summaryIsEmpty(summary) ? null : (
         <MetadataList label={{ position: "top" }}>
           {summary.runLabel ? (
             <MetadataListItem label={t("flow_run_extras_run_label")}>

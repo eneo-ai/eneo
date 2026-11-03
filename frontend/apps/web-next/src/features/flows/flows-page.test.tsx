@@ -134,17 +134,44 @@ describe("FlowsPage", () => {
     expect(bare.children).toHaveLength(1);
   });
 
-  it("fits an iPad held upright with every column, its name pinned on the page's colour", () => {
+  it("fits a 1024 px window with every column, its name pinned on the page's colour", () => {
+    setViewport({ width: 1024, height: 768, pointer: "fine" });
     renderPage(dated());
     const table = screen.getByRole("table", { name: "Flöden" });
     // The delete column is there (every flow here can be deleted): the widest the table gets.
     expect(within(table).getAllByRole("button", { name: /^Ta bort / })).toHaveLength(3);
-    // About 770 px of an upright 820 px iPad are left for the table (AGENTS.md, Tables).
+    expect(within(table).getByRole("columnheader", { name: "Steg" })).toBeTruthy();
+    expect(within(table).getByRole("columnheader", { name: "Ägare" })).toBeTruthy();
     expect(Number.parseFloat(table.style.minWidth)).toBeLessThanOrEqual(770);
     // A pinned column takes its container's colour; on the page that is the surface.
     expect(
       table.closest('[class*="[--table-sticky-background:var(--color-ax-surface)]"]')
     ).not.toBeNull();
+  });
+
+  it.each([
+    ["an upright iPad", "tablet-portrait"],
+    ["a narrow window", { width: 768, height: 1024, pointer: "fine" }]
+  ] as const)(
+    "moves the steps and owner under the name on %s, keeping delete in reach",
+    (_, size) => {
+      setViewport(size);
+      renderPage(dated());
+      const table = screen.getByRole("table", { name: "Flöden" });
+      expect(within(table).queryByRole("columnheader", { name: "Steg" })).toBeNull();
+      expect(within(table).queryByRole("columnheader", { name: "Ägare" })).toBeNull();
+      expect(within(table).getAllByRole("button", { name: /^Ta bort / })).toHaveLength(3);
+      // Beside the icon rail an upright iPad leaves 682 px (AGENTS.md, Tables), a 768 px window 630.
+      expect(Number.parseFloat(table.style.minWidth)).toBeLessThanOrEqual(630);
+    }
+  );
+
+  it("says a flow's steps and owner in its name's subline when the columns are gone", async () => {
+    setViewport("tablet-portrait");
+    renderPage(dated());
+    const table = screen.getByRole("table", { name: "Flöden" });
+    const cell = within(table).getByRole("link", { name: "Mötesprotokoll" }).parentElement!;
+    expect(within(cell).getByText(/^\d+ steg · Ägare: /)).toBeTruthy();
   });
 
   it("says whose each flow is, by the names the space's members go by", async () => {

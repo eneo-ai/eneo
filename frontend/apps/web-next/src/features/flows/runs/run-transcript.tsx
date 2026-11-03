@@ -6,8 +6,14 @@ import { useTranslations } from "use-intl";
 import { useCallback, useId, useMemo, useRef, useState, type ReactNode, type Ref } from "react";
 import { flushSync } from "react-dom";
 import { TextInput } from "@/components/astryx/text-input";
+import { LeaveConfirmation } from "@/components/composites/leave-confirmation";
 import { LoadingState } from "@/components/composites/loading-state";
-import { ListError } from "@/components/composites/query-state";
+import {
+  blockingError,
+  ListError,
+  RefreshError,
+  type QueryLike
+} from "@/components/composites/query-state";
 import { useAppContext } from "@/components/providers/app-context";
 import { useSpace } from "@/features/spaces/use-space";
 import { isStaleRefusal, refusalText } from "./run-messages";
@@ -137,11 +143,26 @@ function SpeakerNames({
   );
 }
 
+/** Why a transcript cannot be shown at all, above what can stand in for it. */
+function TranscriptReadFailed({ read, fallback }: { read: QueryLike; fallback?: ReactNode }) {
+  const t = useTranslations();
+  return (
+    <div className="flex flex-col gap-2">
+      <ListError
+        error={read.error}
+        title={t("flow_runs_transcript_failed")}
+        onRetry={() => void read.refetch()}
+        isRetrying={read.isFetching}
+      />
+      {fallback}
+    </div>
+  );
+}
+
 function StepTranscript({
   flowId,
   runId,
   target,
-  corrections,
   mayEdit,
   runCompleted,
   runRevision,
@@ -153,13 +174,12 @@ function StepTranscript({
   flowId: string;
   runId: string;
   target: TranscriptTarget;
-  corrections: TranscriptCorrections | null;
   mayEdit: boolean;
   runCompleted: boolean;
   runRevision: number | null;
   /** Shown in a review checkpoint: the lines can be corrected before the run goes on. */
   review?: boolean;
-  /** Shown under the reason when the transcript has no lines to show. */
+  /** Shown under the reason when the transcript has no lines to show or cannot be read. */
   fallback?: ReactNode;
   onUnsavedChange?: (unsaved: boolean) => void;
   /** In a review: the draft of the corrections, which the review flushes before approving. */
@@ -171,6 +191,9 @@ function StepTranscript({
   const userId = user.id;
   const { routeId } = useSpace();
   const queryClient = useQueryClient();
+  // One read for all of the run's transcripts: they share the query.
+  const correctionsRead = useQuery(transcriptCorrectionsQueryOptions(flowId, runId));
+  const corrections = correctionsRead.data?.find((item) => item.step_id === target.stepId) ?? null;
   const source = useQuery(transcriptQueryOptions(flowId, runId, target));
   const correctionsKey = runKeys.corrections(flowId, runId);
   const save = useMutation({
@@ -193,16 +216,11 @@ function StepTranscript({
   const segments = useMemo(() => (raw ? parseSegments(raw) : []), [raw]);
   const shown = useMemo(() => shownSegments(segments, corrections), [segments, corrections]);
 
-  if (source.isPending) return <LoadingState rows={3} label={t("flow_runs_transcript_loading")} />;
-  if (source.isError) {
-    return (
-      <ListError
-        error={source.error}
-        title={t("flow_runs_transcript_failed")}
-        onRetry={() => void source.refetch()}
-        isRetrying={source.isFetching}
-      />
-    );
+  // A failed read again keeps what was read, and with it the corrections being made.
+  const failed = [correctionsRead, source].find(blockingError);
+  if (failed) return <TranscriptReadFailed read={failed} fallback={fallback} />;
+  if (!correctionsRead.data || !source.data) {
+    return <LoadingState rows={3} label={t("flow_runs_transcript_loading")} />;
   }
   if (source.data.status !== "present") {
     return (
@@ -220,93 +238,105 @@ function StepTranscript({
   const multiFile = new Set(shown.map((segment) => segment.fileIndex)).size > 1;
   const sourceHash = source.data.sourceHash;
   const editable = mayEdit && (runCompleted || review) && !corrections?.stale;
+  const refreshProblem = <RefreshError queries={[correctionsRead, source]} />;
   if (review && editable) {
     // A review corrects a local draft that saves itself.
     return (
-      <ReviewDraftLines
-        flowId={flowId}
-        runId={runId}
-        target={target}
-        corrections={corrections}
-        segments={segments}
-        sourceHash={sourceHash}
-        speakerReview={source.data.speakerReview}
-        onUnsavedChange={onUnsavedChange}
-        draftRef={draftRef}
-      />
-    );
-  }
-  return (
-    <TranscriptLines
-      flowId={flowId}
-      runId={runId}
-      target={target}
-      shown={shown}
-      sourceHash={sourceHash}
-      multiFile={multiFile}
-      speakerReview={source.data.speakerReview}
-      onUnsavedChange={onUnsavedChange}
-      editing={
-        editable
-          ? {
-              set: correctionSet(corrections, segments),
-              speakers: knownSpeakers(segments, corrections?.speaker_edits ?? []),
-              saving: save.isPending,
-              save: async (next, done) => {
-                try {
-                  await save.mutateAsync(editRequest(corrections, next, segments, sourceHash));
-                  announce(done);
-                  return null;
-                } catch (error) {
-                  if (isStaleRefusal(error)) {
-                    void queryClient.invalidateQueries({ queryKey: correctionsKey });
-                    void queryClient.invalidateQueries({
-                      queryKey: runKeys.revisions(flowId, runId, target.stepId)
-                    });
-                  }
-                  return refusalText(error, t);
-                }
-              }
-            }
-          : null
-      }
-    >
-      {corrections?.stale ? (
-        <Banner
-          status="warning"
-          title={t("flow_runs_transcript_stale_title")}
-          description={t("flow_runs_transcript_stale")}
-          collapsible={false}
-        />
-      ) : null}
-      {mayEdit && runCompleted && !review && corrections && !corrections.stale ? (
-        <div className="flex flex-col gap-3">
-          <CorrectionHistory flowId={flowId} runId={runId} stepId={target.stepId} userId={userId} />
-          {runRevision !== null ? (
-            <RegenerateFromTranscript
-              flowId={flowId}
-              runId={runId}
-              stepId={target.stepId}
-              runRevision={runRevision}
-              correctionRevision={corrections.revision}
-              sourceHash={sourceHash}
-              runHref={(id) => runHref(routeId, flowId, id)}
-            />
-          ) : null}
-        </div>
-      ) : null}
-      {mayEdit && runCompleted && !review && labels.length > 0 ? (
-        <SpeakerNames
-          key={`${corrections?.revision ?? 0}`}
+      <>
+        {refreshProblem}
+        <ReviewDraftLines
           flowId={flowId}
           runId={runId}
           target={target}
-          labels={labels}
           corrections={corrections}
-          sourceHash={source.data.sourceHash}
+          segments={segments}
+          sourceHash={sourceHash}
+          speakerReview={source.data.speakerReview}
+          onUnsavedChange={onUnsavedChange}
+          draftRef={draftRef}
         />
-      ) : null}
-    </TranscriptLines>
+      </>
+    );
+  }
+  return (
+    <>
+      {refreshProblem}
+      <TranscriptLines
+        flowId={flowId}
+        runId={runId}
+        target={target}
+        shown={shown}
+        sourceHash={sourceHash}
+        multiFile={multiFile}
+        speakerReview={source.data.speakerReview}
+        onUnsavedChange={onUnsavedChange}
+        editing={
+          editable
+            ? {
+                set: correctionSet(corrections, segments),
+                speakers: knownSpeakers(segments, corrections?.speaker_edits ?? []),
+                saving: save.isPending,
+                save: async (next, done) => {
+                  try {
+                    await save.mutateAsync(editRequest(corrections, next, segments, sourceHash));
+                    announce(done);
+                    return null;
+                  } catch (error) {
+                    if (isStaleRefusal(error)) {
+                      void queryClient.invalidateQueries({ queryKey: correctionsKey });
+                      void queryClient.invalidateQueries({
+                        queryKey: runKeys.revisions(flowId, runId, target.stepId)
+                      });
+                    }
+                    return refusalText(error, t);
+                  }
+                }
+              }
+            : null
+        }
+      >
+        {corrections?.stale ? (
+          <Banner
+            status="warning"
+            title={t("flow_runs_transcript_stale_title")}
+            description={t("flow_runs_transcript_stale")}
+            collapsible={false}
+          />
+        ) : null}
+        {mayEdit && runCompleted && !review && corrections && !corrections.stale ? (
+          <div className="flex flex-col gap-3">
+            <CorrectionHistory
+              flowId={flowId}
+              runId={runId}
+              stepId={target.stepId}
+              userId={userId}
+            />
+            {runRevision !== null ? (
+              <RegenerateFromTranscript
+                flowId={flowId}
+                runId={runId}
+                stepId={target.stepId}
+                runRevision={runRevision}
+                correctionRevision={corrections.revision}
+                sourceHash={sourceHash}
+                runHref={(id) => runHref(routeId, flowId, id)}
+              />
+            ) : null}
+          </div>
+        ) : null}
+        {mayEdit && runCompleted && !review && labels.length > 0 ? (
+          <SpeakerNames
+            key={`${corrections?.revision ?? 0}`}
+            flowId={flowId}
+            runId={runId}
+            target={target}
+            labels={labels}
+            corrections={corrections}
+            sourceHash={source.data.sourceHash}
+          />
+        ) : null}
+      </TranscriptLines>
+    </>
   );
 }
 
@@ -316,7 +346,8 @@ function StepTranscript({
  * from any line. Someone who may review flows can, once the run has
  * completed, correct a line's text (and revert it) and name the speakers;
  * each change is saved with the step's other corrections, which are kept as
- * they are. `fallback` shows when the transcript has no lines to show.
+ * they are, and a correction not saved yet asks before the app leaves it.
+ * `fallback` shows when the transcript has no lines to show or cannot be read.
  */
 export function RunTranscript({
   flowId,
@@ -336,31 +367,21 @@ export function RunTranscript({
   runRevision?: number | null;
   fallback?: ReactNode;
 }) {
-  const t = useTranslations();
-  // One read for all of the run's transcripts: they share the query.
-  const corrections = useQuery(transcriptCorrectionsQueryOptions(flowId, runId));
-  if (corrections.isPending) return <LoadingState rows={2} />;
-  if (corrections.isError) {
-    return (
-      <ListError
-        error={corrections.error}
-        title={t("flow_runs_transcript_failed")}
-        onRetry={() => void corrections.refetch()}
-        isRetrying={corrections.isFetching}
-      />
-    );
-  }
+  const [unsaved, setUnsaved] = useState(false);
   return (
-    <StepTranscript
-      flowId={flowId}
-      runId={runId}
-      target={target}
-      corrections={corrections.data.find((item) => item.step_id === target.stepId) ?? null}
-      mayEdit={mayEdit}
-      runCompleted={runCompleted}
-      runRevision={runRevision}
-      fallback={fallback}
-    />
+    <>
+      <LeaveConfirmation active={unsaved} />
+      <StepTranscript
+        flowId={flowId}
+        runId={runId}
+        target={target}
+        mayEdit={mayEdit}
+        runCompleted={runCompleted}
+        runRevision={runRevision}
+        fallback={fallback}
+        onUnsavedChange={setUnsaved}
+      />
+    </>
   );
 }
 
@@ -387,14 +408,29 @@ export function useTranscriptHosts(): (stepId: string) => HTMLElement {
   );
 }
 
-/** Where a step's card shows its transcript's kept element (`useTranscriptHosts`). */
+/** What had focus in a host that just left its slot, for a slot that takes it in the same commit. */
+const focusBeingMoved = new WeakMap<HTMLElement, HTMLElement>();
+
+/**
+ * Where a step's card shows its transcript's kept element (`useTranscriptHosts`).
+ * Leaving the document takes focus from what is in it, so a turn across the
+ * phone's width puts it back in the new place; a transcript folded away takes
+ * none with it to when it is opened again.
+ */
 export function TranscriptSlot({ host }: { host: HTMLElement }) {
   const place = useCallback(
     (slot: HTMLDivElement | null) => {
       if (!slot) return;
       slot.append(host);
+      focusBeingMoved.get(host)?.focus();
       return () => {
-        if (host.parentNode === slot) host.remove();
+        if (host.parentNode !== slot) return;
+        const focused = document.activeElement;
+        if (focused instanceof HTMLElement && host.contains(focused)) {
+          focusBeingMoved.set(host, focused);
+          queueMicrotask(() => focusBeingMoved.delete(host));
+        }
+        host.remove();
       };
     },
     [host]
@@ -426,25 +462,11 @@ export function ReviewTranscript({
   /** The corrections' draft, which the review flushes before it approves. */
   draftRef?: Ref<TranscriptDraftHandle>;
 }) {
-  const t = useTranslations();
-  const corrections = useQuery(transcriptCorrectionsQueryOptions(flowId, runId));
-  if (corrections.isPending) return <LoadingState rows={2} />;
-  if (corrections.isError) {
-    return (
-      <ListError
-        error={corrections.error}
-        title={t("flow_runs_transcript_failed")}
-        onRetry={() => void corrections.refetch()}
-        isRetrying={corrections.isFetching}
-      />
-    );
-  }
   return (
     <StepTranscript
       flowId={flowId}
       runId={runId}
       target={target}
-      corrections={corrections.data.find((item) => item.step_id === target.stepId) ?? null}
       mayEdit={mayEdit}
       runCompleted={false}
       runRevision={null}

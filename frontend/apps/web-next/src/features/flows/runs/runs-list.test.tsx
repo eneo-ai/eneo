@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, screen, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import messages from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
 import { router } from "@/test/navigation";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
-import { setViewport } from "@/test/setup-dom";
+import { reportResize, setViewport } from "@/test/setup-dom";
 import { makeRunDetail, makeRunSummary } from "./run-fixtures";
 import type { RunListItem } from "./runs-api";
 
@@ -28,7 +28,7 @@ vi.mock("@astryxdesign/core/hooks", async (importOriginal) => ({
   useAnnounce: () => state.announce
 }));
 
-import { FlowRunsList } from "./runs-list";
+import { FlowRunsList, RUNS_TABLE_WIDTH } from "./runs-list";
 import { rememberStartedRun } from "./runs-optimistic";
 
 const LIST = "GET /api/v1/flows/{id}/runs/";
@@ -728,7 +728,9 @@ describe("FlowRunsList on a phone", () => {
     expect(row.textContent).not.toContain("–");
   });
 
-  it("leaves out the filters while there is nothing to filter, and keeps them for a search that finds nothing", async () => {
+  const fourRuns = () => ["run-1", "run-2", "run-3", "run-4"].map((id) => makeRunSummary({ id }));
+
+  it("leaves out the filters while there is little to filter, and keeps them for a search that finds nothing", async () => {
     setViewport("phone");
     answerList([]);
     withRun();
@@ -737,14 +739,61 @@ describe("FlowRunsList on a phone", () => {
     expect(screen.queryByRole("checkbox", { name: messages.flow_runs_only_mine })).toBeNull();
     cleanup();
 
-    answerList([makeRunSummary({ id: "run-1" })]);
+    // Three runs fit on the screen by themselves.
+    answerList(fourRuns().slice(0, 3));
+    withRun();
+    await screen.findByRole("list", { name: messages.flow_runs_heading });
+    expect(screen.queryByRole("textbox", { name: /Sök körningar/ })).toBeNull();
+    cleanup();
+
+    answerList(fourRuns());
     withRun();
     const search = await screen.findByRole("textbox", { name: /Sök körningar/ });
     // Searching for something that is not there leaves an empty list: the field stays.
     answerList([]);
     fireEvent.change(search, { target: { value: "finns inte" } });
     await screen.findByText(/finns inte/);
-    expect(screen.getByRole("textbox", { name: /Sök körningar/ })).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: /Sök körningar/ })).toBe(search);
+  });
+
+  it("keeps the search field while the whole list comes back after a cleared search", async () => {
+    setViewport("phone");
+    answerList(fourRuns());
+    const { queryClient } = withRun();
+    const search = await screen.findByRole("textbox", { name: /Sök körningar/ });
+    answerList(fourRuns().slice(0, 1));
+    fireEvent.change(search, { target: { value: "ett" } });
+    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(1));
+    // The whole list has left the cache by the time the search is cleared.
+    queryClient.removeQueries({ predicate: (query) => !query.isActive() });
+
+    // The one row stays until the answer is in, and so must the field the person is in.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const get = state.stub.client.GET;
+    const spy = vi.spyOn(state.stub.client, "GET").mockImplementation((path, init) => {
+      const answer = get(path, init);
+      return `GET ${path}` === LIST ? held.then(() => answer) : answer;
+    });
+    onTestFinished(() => spy.mockRestore());
+    answerList(fourRuns());
+    fireEvent.change(search, { target: { value: "" } });
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+    expect(screen.getByRole("textbox", { name: /Sök körningar/ })).toBe(search);
+    release();
+    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(4));
+    expect(screen.getByRole("textbox", { name: /Sök körningar/ })).toBe(search);
+  });
+
+  it("gives the search field the whole width, without its hint", async () => {
+    setViewport("phone");
+    answerList(fourRuns());
+    withRun();
+    const search = await screen.findByRole("textbox", { name: /Sök körningar/ });
+    expect(screen.queryByText(messages.flow_run_journey_search_hint)).toBeNull();
+    expect(search.closest(".astryx-field")?.getAttribute("style")).toContain("100%");
   });
 
   it("keeps the table on a tablet", async () => {
@@ -752,5 +801,54 @@ describe("FlowRunsList on a phone", () => {
     answerList([makeRunSummary({ id: "run-f", status: "failed" })]);
     withRun();
     expect(await screen.findByRole("table", { name: messages.flow_runs_heading })).toBeTruthy();
+  });
+});
+
+describe("FlowRunsList in a narrow panel", () => {
+  const measured = () => {
+    const list = renderInApp(<List />, {
+      appContext: testAppContext({ permissions: ["flows_view", "flows_run"] })
+    });
+    return list.container.querySelector("section")!;
+  };
+  const withUsage = () => {
+    answerList([
+      {
+        ...makeRunSummary({ id: "run-1" }),
+        token_usage: {
+          num_tokens_input: 1000,
+          num_tokens_output: 200,
+          num_tokens_total: 1200,
+          input_completeness: "complete",
+          output_completeness: "complete"
+        }
+      }
+    ]);
+  };
+
+  it("stacks the rows by the room it has, not the window's, with no column's footnote", async () => {
+    withUsage();
+    const section = measured();
+    expect(await screen.findByRole("table", { name: messages.flow_runs_heading })).toBeTruthy();
+    expect(screen.getByText(messages.flow_runs_usage_tokens_explainer)).toBeTruthy();
+
+    act(() => reportResize(section, { width: 560 }));
+    expect(screen.queryByRole("table")).toBeNull();
+    const list = screen.getByRole("list", { name: messages.flow_runs_heading });
+    const [row] = within(list).getAllByRole("listitem");
+    expect(within(row!).getByText("Anna Lind · 1 min 5 s · Version 3")).toBeTruthy();
+    expect(screen.queryByText(messages.flow_runs_usage_tokens_explainer)).toBeNull();
+  });
+
+  it("keeps the table where all its columns fit, and asks for no more room than it stacks at", async () => {
+    withUsage();
+    const section = measured();
+    const table = await screen.findByRole("table", { name: messages.flow_runs_heading });
+    expect(Number.parseFloat(table.style.minWidth)).toBeLessThanOrEqual(RUNS_TABLE_WIDTH);
+
+    act(() => reportResize(section, { width: RUNS_TABLE_WIDTH }));
+    expect(screen.getByRole("table", { name: messages.flow_runs_heading })).toBeTruthy();
+    act(() => reportResize(section, { width: RUNS_TABLE_WIDTH - 1 }));
+    expect(screen.queryByRole("table")).toBeNull();
   });
 });

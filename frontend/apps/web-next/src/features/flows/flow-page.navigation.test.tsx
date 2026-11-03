@@ -13,7 +13,7 @@ import { renderWithRouter } from "@/test/router";
 import { testAppContext, testQueryClient } from "@/test/render";
 import messages from "@/lib/i18n/messages/sv.json";
 import { makeAssistant } from "./editor/testing/fixtures";
-import { makeFlow } from "./flow-fixtures";
+import { makeFlow, makeStep } from "./flow-fixtures";
 import { FlowPage } from "./flow-page";
 import { flowKeys, type FlowPublic } from "./flows-api";
 import { parseFlowSearch } from "./flow-search";
@@ -123,6 +123,47 @@ it("uses native Back/Forward and All steps returns across the visited steps", as
   expect(router.state.location.search).toEqual({});
   act(() => history.back());
   expect(await screen.findByRole("heading", { name: "Utanför flödet" })).toBeTruthy();
+});
+
+// These two are here, not in flow-page.test.tsx: an empty step list and a field's error announce
+// themselves, and Astryx's live regions outlive a test, so the empty role="alert" one would answer
+// that file's later alert queries.
+it("opens the settings at the field that fixes what the check found", async () => {
+  flow = makeFlow({
+    steps: [makeStep(1, { input_type: "audio", output_mode: "transcribe_only" })],
+    metadata_json: { wizard: { transcription_enabled: true } }
+  });
+  await renderPage();
+  const check = await screen.findByRole("region", { name: "Före publicering" });
+  fireEvent.click(
+    await within(check).findByRole("button", {
+      name: messages.flow_editor_tools_check_open_settings
+    })
+  );
+  await screen.findByRole("button", { name: messages.flows_settings_save });
+  await waitFor(() =>
+    expect(
+      document.activeElement?.closest('[data-settings-field="transcription_model"]')
+    ).toBeTruthy()
+  );
+});
+
+it("puts what the check found in the settings summary", async () => {
+  flow = makeFlow({
+    steps: [makeStep(1, { input_type: "audio", output_mode: "transcribe_only" })],
+    metadata_json: { wizard: { transcription_enabled: true } }
+  });
+  await renderPage();
+  const settings = await screen.findByRole("region", { name: messages.flows_settings_heading });
+  expect(await within(settings).findByText("1 problem")).toBeTruthy();
+});
+
+it("adds a first step from the check of a flow that has none", async () => {
+  flow = makeFlow({ steps: [] });
+  await renderPage();
+  const check = await screen.findByRole("region", { name: "Före publicering" });
+  fireEvent.click(await within(check).findByRole("button", { name: "Lägg till steg" }));
+  expect(await screen.findByRole("dialog", { name: "Lägg till steg" })).toBeTruthy();
 });
 
 it("closes a direct step link in the same flow without traversing earlier history", async () => {

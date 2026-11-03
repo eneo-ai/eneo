@@ -1,16 +1,20 @@
+import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { Selector } from "@astryxdesign/core/Selector";
+import { Switch } from "@astryxdesign/core/Switch";
 import { Heading, Text } from "@astryxdesign/core/Text";
 import { TextArea } from "@astryxdesign/core/TextArea";
-import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, CircleCheck, Plus, Trash2 } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { TextInput } from "@/components/astryx/text-input";
+import { EmptyState } from "@/components/composites/empty-state";
+import { LeaveConfirmation } from "@/components/composites/leave-confirmation";
 import type { FlowDefinitionUpdate, FlowPublic } from "./flows-api";
 import {
   evidenceExportAllowed,
@@ -19,6 +23,7 @@ import {
   formFieldsOf,
   hasOptions,
   metadataWithSettings,
+  persistedFormFields,
   renamedFormFields,
   roleFor,
   suggestedFieldName,
@@ -61,25 +66,65 @@ const PROBLEM_KEYS: Record<FormFieldProblem["problem"], string> = {
   options_required: "flows_field_problem_options"
 };
 
-/** Whether the flow shows transcription settings: it takes audio, or has them turned on. */
-function showsTranscription(flow: FlowPublic): boolean {
-  return flowTakesAudio(flow.steps) || transcriptionSettingsOf(flow.metadata_json).enabled;
+/** The field a page can ask the form to focus. */
+type RequestedField = "name" | "transcription_model" | "speaker_service";
+
+type SettingsOpenRequest = { nonce: number; focus?: RequestedField };
+
+/** Requests already answered, by object: the section remounts when a step closes. */
+const answeredRequests = new WeakSet<SettingsOpenRequest>();
+
+/** The form's values. */
+type SettingsDraft = {
+  name: string;
+  description: string;
+  fields: FormFieldDraft[];
+  allowExport: boolean;
+  transcription: TranscriptionSettings;
+};
+
+function draftOf(flow: FlowPublic): SettingsDraft {
+  return {
+    name: flow.name,
+    description: flow.description ?? "",
+    fields: formFieldsOf(flow.metadata_json),
+    allowExport: evidenceExportAllowed(flow.metadata_json),
+    transcription: transcriptionSettingsOf(flow.metadata_json)
+  };
+}
+
+/** What a draft saves, to compare by: a row's key or a space the save trims is no change. */
+function savedValues(draft: SettingsDraft): string {
+  return JSON.stringify({
+    ...draft,
+    name: draft.name.trim(),
+    description: draft.description.trim(),
+    fields: persistedFormFields(draft.fields)
+  });
 }
 
 /**
- * The read view: what a run asks for, how its audio is transcribed and
- * whether its evidence may be exported.
+ * The read view: the flow at a glance, what a run asks for, how its audio is
+ * transcribed and whether its evidence may be downloaded. Without
+ * `transcription` (a page that has not read the space) it says only whether
+ * the flow transcribes.
  */
-function SettingsSummary({
+export function SettingsSummary({
   flow,
-  transcription
+  transcription,
+  stepCount,
+  problemCount
 }: {
   flow: FlowPublic;
-  transcription: TranscriptionResources;
+  transcription?: TranscriptionResources;
+  stepCount?: number;
+  /** The draft check's problem count; null while unchecked. */
+  problemCount?: number | null;
 }) {
   const t = useTranslations();
   const fields = formFieldsOf(flow.metadata_json);
   const settings = transcriptionSettingsOf(flow.metadata_json);
+  const transcribes = flowTakesAudio(flow.steps) || settings.enabled;
   return (
     <MetadataList label={{ position: "start", width: "11rem" }}>
       <MetadataListItem label={t("name")}>{flow.name}</MetadataListItem>
@@ -88,11 +133,13 @@ function SettingsSummary({
           <span className="text-ax-text-secondary">{t("flows_no_description")}</span>
         )}
       </MetadataListItem>
-      <MetadataListItem label={t("flows_form_heading")}>
-        {fields.length === 0 ? (
-          <span className="text-ax-text-secondary">{t("flows_form_empty")}</span>
-        ) : (
-          <ul className="flex flex-col gap-0.5">
+      <MetadataListItem label={t("flows_settings_steps")}>
+        {stepCount ?? flow.steps.length}
+      </MetadataListItem>
+      <MetadataListItem label={t("flows_settings_form_fields")}>
+        {fields.length}
+        {fields.length > 0 ? (
+          <ul className="text-ax-text-secondary mt-0.5 flex flex-col gap-0.5">
             {fields.map((field) => (
               <li key={field.key}>
                 {t(
@@ -105,9 +152,12 @@ function SettingsSummary({
               </li>
             ))}
           </ul>
-        )}
+        ) : null}
       </MetadataListItem>
-      {showsTranscription(flow) ? (
+      <MetadataListItem label={t("flow_editor_tools_transcription_heading")}>
+        {t(transcribes ? "flow_editor_tools_on" : "flow_editor_tools_off")}
+      </MetadataListItem>
+      {transcribes && transcription ? (
         <TranscriptionSummary
           settings={settings}
           resources={transcription}
@@ -116,10 +166,24 @@ function SettingsSummary({
         />
       ) : null}
       <MetadataListItem label={t("flows_evidence_export")}>
-        {evidenceExportAllowed(flow.metadata_json)
-          ? t("flows_evidence_export_allowed")
-          : t("flows_evidence_export_not_allowed")}
+        {t(
+          evidenceExportAllowed(flow.metadata_json)
+            ? "flow_editor_tools_on"
+            : "flow_editor_tools_off"
+        )}
       </MetadataListItem>
+      {problemCount == null ? null : (
+        <MetadataListItem label={t("flows_settings_check")}>
+          {problemCount === 0 ? (
+            <span className="inline-flex items-center gap-1.5">
+              <CircleCheck className="text-ax-success size-4 shrink-0" aria-hidden="true" />
+              {t("flows_settings_check_ok")}
+            </span>
+          ) : (
+            t("flows_settings_check_problems", { count: problemCount })
+          )}
+        </MetadataListItem>
+      )}
     </MetadataList>
   );
 }
@@ -266,16 +330,22 @@ function FormFieldRow({
 
 /**
  * The flow's settings: its name, description, the run form people fill in
- * when they start a run, how audio is transcribed (for a flow that takes
- * audio) and whether run evidence may be exported. Shown as facts; editors
- * change them in a form that saves them as one revision.
+ * when they start a run, how audio is transcribed and whether run evidence
+ * may be downloaded. Shown as facts; editors change them in a form that saves
+ * them as one revision. The form saves only what it was loaded from: settings
+ * changed meanwhile (the chat, another tab) are never overwritten, the form
+ * says so and offers them instead.
  */
 export function FlowSettings({
   flow,
   canEdit,
   transcription,
   onSave,
-  onEditingChange
+  onEditingChange,
+  openRequest,
+  stepCount,
+  problemCount,
+  onDirtyChange
 }: {
   flow: FlowPublic;
   canEdit: boolean;
@@ -285,30 +355,58 @@ export function FlowSettings({
   onSave: (definition: FlowDefinitionUpdate) => Promise<boolean>;
   /** Told true while the form is open (its edits are not saved), and false once it closes. */
   onEditingChange?: (editing: boolean) => void;
+  /**
+   * Opens the form (if closed), scrolls to the named field and focuses it. A
+   * new object asks again.
+   */
+  openRequest?: SettingsOpenRequest;
+  /** Shown in the read view. */
+  stepCount?: number;
+  /** The draft check's problem count (null while unchecked), shown in the read view. */
+  problemCount?: number | null;
+  /** Told true while the open form differs from the flow it was loaded from. */
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const t = useTranslations();
   const announce = useAnnounce();
   const headingId = useId();
   const formId = useId();
+  const sectionRef = useRef<HTMLElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const editButtonRef = useRef<HTMLDivElement>(null);
+  const reloadRef = useRef<HTMLButtonElement>(null);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [fields, setFields] = useState<FormFieldDraft[]>([]);
-  const [savedFields, setSavedFields] = useState<FormFieldDraft[]>([]);
   const [allowExport, setAllowExport] = useState(false);
   const [showProblems, setShowProblems] = useState(false);
   const [transcriptionDraft, setTranscriptionDraft] = useState<TranscriptionSettings>(() =>
     transcriptionSettingsOf(flow.metadata_json)
   );
   const [maxSpeakersInvalid, setMaxSpeakersInvalid] = useState(false);
+  // What the form was loaded from.
+  const [loaded, setLoaded] = useState(() => draftOf(flow));
   const nextKey = useRef(0);
 
   const problems = formFieldProblems(fields);
   const nameMissing = !name.trim();
   const takesAudio = flowTakesAudio(flow.steps);
+  const loadedValues = savedValues(loaded);
+  const dirty =
+    editing &&
+    (maxSpeakersInvalid ||
+      savedValues({
+        name,
+        description,
+        fields,
+        allowExport,
+        transcription: transcriptionDraft
+      }) !== loadedValues);
+  // The settings changed since the form loaded them; a revision that left them
+  // alone (a moved step) is no reason, and the form's own save closes it.
+  const stale = editing && !saving && savedValues(draftOf(flow)) !== loadedValues;
 
   useEffect(() => {
     if (!editing) return;
@@ -316,17 +414,71 @@ export function FlowSettings({
     return () => onEditingChange?.(false);
   }, [editing, onEditingChange]);
 
-  function startEditing() {
-    setName(flow.name);
-    setDescription(flow.description ?? "");
-    const saved = formFieldsOf(flow.metadata_json);
-    setSavedFields(saved);
-    setFields(saved);
-    setAllowExport(evidenceExportAllowed(flow.metadata_json));
-    setTranscriptionDraft(transcriptionSettingsOf(flow.metadata_json));
+  useEffect(() => {
+    if (!dirty) return;
+    onDirtyChange?.(true);
+    return () => onDirtyChange?.(false);
+  }, [dirty, onDirtyChange]);
+
+  useEffect(() => {
+    if (stale) announce(t("flows_settings_stale_title"));
+  }, [stale, announce, t]);
+
+  const answerRequest = useEffectEvent((request: SettingsOpenRequest) => {
+    if (canEdit && !editing) flushSync(startEditing);
+    focusField(request.focus ?? "name");
+  });
+
+  useEffect(() => {
+    if (!openRequest || answeredRequests.has(openRequest)) return;
+    // After this commit: a page may mount the section and ask in one go.
+    const frame = requestAnimationFrame(() => {
+      answeredRequests.add(openRequest);
+      answerRequest(openRequest);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [openRequest]);
+
+  function loadForm(from: FlowPublic) {
+    const saved = draftOf(from);
+    setLoaded(saved);
+    setName(saved.name);
+    setDescription(saved.description);
+    setFields(saved.fields);
+    setAllowExport(saved.allowExport);
+    setTranscriptionDraft(saved.transcription);
     setMaxSpeakersInvalid(false);
     setShowProblems(false);
+  }
+
+  function startEditing() {
+    loadForm(flow);
     setEditing(true);
+  }
+
+  /**
+   * Scrolls to a field of the form and focuses it; a transcription field not
+   * on screen falls back to the first control there. Read-only, the section.
+   */
+  function focusField(field: RequestedField) {
+    const form = formRef.current;
+    const wrapper =
+      form?.querySelector(`[data-settings-field="${field}"]`) ??
+      form?.querySelector('[data-settings-field="transcription"]');
+    const control = wrapper?.querySelector<HTMLElement>("input, textarea, button");
+    if (!control) {
+      sectionRef.current?.scrollIntoView({ block: "start" });
+      return;
+    }
+    control.scrollIntoView({ block: "center" });
+    control.focus({ preventScroll: true });
+  }
+
+  function reload() {
+    flushSync(() => loadForm(flow));
+    announce(t("flows_settings_reloaded"));
+    // The banner and its button are gone: the form's first field takes focus.
+    focusField("name");
   }
 
   function stopEditing() {
@@ -337,18 +489,24 @@ export function FlowSettings({
 
   function addField() {
     nextKey.current += 1;
-    setFields((current) => [
-      ...current,
-      {
-        key: `new-${nextKey.current}`,
-        name: "",
-        label: "",
-        type: "text",
-        required: false,
-        options: [],
-        nameEdited: false
-      }
-    ]);
+    flushSync(() =>
+      setFields((current) => [
+        ...current,
+        {
+          key: `new-${nextKey.current}`,
+          name: "",
+          label: "",
+          type: "text",
+          required: false,
+          options: [],
+          nameEdited: false
+        }
+      ])
+    );
+    // The first field replaces the empty state, and the add button with it.
+    if (fields.length === 0) {
+      formRef.current?.querySelector<HTMLElement>("[data-add-field] button")?.focus();
+    }
   }
 
   const moveId = (key: string, direction: "up" | "down") => `${formId}-${key}-${direction}`;
@@ -375,6 +533,11 @@ export function FlowSettings({
   async function submit(event: React.SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     if (saving) return;
+    if (stale) {
+      // Saving would overwrite what changed: the banner says what to do first.
+      reloadRef.current?.focus();
+      return;
+    }
     if (nameMissing || problems.length > 0 || maxSpeakersInvalid) {
       // Rendered before focus moves, so the first field is read with its error.
       flushSync(() => setShowProblems(true));
@@ -384,7 +547,7 @@ export function FlowSettings({
       return;
     }
     setSaving(true);
-    const renames = renamedFormFields(savedFields, fields);
+    const renames = renamedFormFields(loaded.fields, fields);
     const saved = await onSave({
       name: name.trim(),
       description: description.trim() || null,
@@ -400,8 +563,24 @@ export function FlowSettings({
     if (saved) stopEditing();
   }
 
+  const addFieldButton = (
+    <div data-add-field>
+      <Button
+        label={t("flows_form_add_field")}
+        icon={<Plus aria-hidden="true" />}
+        size="sm"
+        onClick={addField}
+      />
+    </div>
+  );
+
   return (
-    <section aria-labelledby={headingId} className="flex flex-col gap-3">
+    <section
+      id="flow-settings"
+      ref={sectionRef}
+      aria-labelledby={headingId}
+      className="flex flex-col gap-3"
+    >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <Heading level={2} id={headingId} weight="semibold" className="text-lg">
           {t("flows_settings_heading")}
@@ -413,33 +592,58 @@ export function FlowSettings({
         ) : null}
       </div>
       {!editing ? (
-        <SettingsSummary flow={flow} transcription={transcription} />
+        <SettingsSummary
+          flow={flow}
+          transcription={transcription}
+          stepCount={stepCount}
+          problemCount={problemCount}
+        />
       ) : (
         <form
           id={formId}
           ref={formRef}
           onSubmit={submit}
           noValidate
-          className="border-ax-border bg-ax-card rounded-ax-container flex flex-col gap-4 border p-4"
+          className="border-ax-border bg-ax-card rounded-ax-container flex max-w-3xl flex-col gap-4 border p-4"
         >
-          <TextInput
-            label={t("name")}
-            value={name}
-            onChange={setName}
-            isRequired
-            autoComplete="off"
-            status={
-              showProblems && nameMissing
-                ? { type: "error", message: t("flows_new_name_required") }
-                : undefined
-            }
-          />
-          <TextArea
-            label={t("description")}
-            value={description}
-            onChange={setDescription}
-            rows={3}
-          />
+          {stale ? (
+            <Banner
+              status="warning"
+              title={t("flows_settings_stale_title")}
+              description={t("flows_settings_stale_description")}
+              collapsible={false}
+              endContent={
+                <Button
+                  ref={reloadRef}
+                  label={t("flows_settings_reload")}
+                  size="sm"
+                  onClick={reload}
+                />
+              }
+            />
+          ) : null}
+          <div className="flex max-w-xl flex-col gap-4">
+            <div data-settings-field="name">
+              <TextInput
+                label={t("name")}
+                value={name}
+                onChange={setName}
+                isRequired
+                autoComplete="off"
+                status={
+                  showProblems && nameMissing
+                    ? { type: "error", message: t("flows_new_name_required") }
+                    : undefined
+                }
+              />
+            </div>
+            <TextArea
+              label={t("description")}
+              value={description}
+              onChange={setDescription}
+              rows={3}
+            />
+          </div>
           <fieldset className="flex flex-col gap-3">
             <legend className="text-ax-text mb-1 text-sm font-semibold">
               {t("flows_form_heading")}
@@ -447,6 +651,19 @@ export function FlowSettings({
             <Text type="supporting" size="sm" as="p" display="block" className="m-0">
               {t("flows_form_description")}
             </Text>
+            {fields.length === 0 ? (
+              <EmptyState
+                title={t("flows_form_empty")}
+                description={t("flows_settings_form_empty_example", {
+                  token: "{{flow_input.extern_referens}}"
+                })}
+                actions={addFieldButton}
+                headingLevel={3}
+                isCompact
+                // Opening the form is no news, and removing the last field moves focus here.
+                isAnnounced={false}
+              />
+            ) : null}
             {fields.map((field, index) => {
               const title = fieldTitle(field, index + 1);
               return (
@@ -479,29 +696,20 @@ export function FlowSettings({
                 />
               );
             })}
-            <div data-add-field>
-              <Button
-                label={t("flows_form_add_field")}
-                icon={<Plus aria-hidden="true" />}
-                size="sm"
-                onClick={addField}
-              />
-            </div>
+            {fields.length > 0 ? addFieldButton : null}
           </fieldset>
-          {showsTranscription(flow) ? (
-            <TranscriptionFields
-              settings={transcriptionDraft}
-              resources={transcription}
-              takesAudio={takesAudio}
-              required={speakersRequired(flow.steps)}
-              modelMissing={transcriptionModelMissing(transcriptionDraft, flow.steps)}
-              maxSpeakersProblem={maxSpeakersInvalid}
-              onChange={setTranscriptionDraft}
-              onMaxSpeakersInvalid={setMaxSpeakersInvalid}
-            />
-          ) : null}
-          <CheckboxInput
-            label={t("flows_evidence_export_allow")}
+          <TranscriptionFields
+            settings={transcriptionDraft}
+            resources={transcription}
+            takesAudio={takesAudio}
+            required={speakersRequired(flow.steps)}
+            modelMissing={transcriptionModelMissing(transcriptionDraft, flow.steps)}
+            maxSpeakersProblem={maxSpeakersInvalid}
+            onChange={setTranscriptionDraft}
+            onMaxSpeakersInvalid={setMaxSpeakersInvalid}
+          />
+          <Switch
+            label={t("flows_evidence_export")}
             description={t("flows_evidence_export_hint")}
             value={allowExport}
             onChange={setAllowExport}
@@ -518,6 +726,7 @@ export function FlowSettings({
           </div>
         </form>
       )}
+      {editing ? <LeaveConfirmation active={dirty} /> : null}
     </section>
   );
 }

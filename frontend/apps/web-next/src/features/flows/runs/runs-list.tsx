@@ -3,6 +3,7 @@ import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { Selector } from "@astryxdesign/core/Selector";
 import {
+  pixel,
   proportional,
   useTableSortable,
   type TableColumn,
@@ -36,6 +37,7 @@ import { useAppContext } from "@/components/providers/app-context";
 import { pollEvery } from "@/lib/api/query";
 import { toastApiError } from "@/lib/api/toast";
 import { useFocusRescue } from "@/lib/focus-rescue";
+import { useElementWidth } from "@/lib/hooks/use-element-width";
 import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { toast } from "@/lib/toast";
 import { useDebouncedValue } from "../editor/use-debounced-value";
@@ -77,6 +79,10 @@ const ANY_STATUS = "any";
 const DEFAULT_SORT: RunsSort = { key: "started_at", order: "desc" };
 /** How long a search waits for the typing to stop before it asks again. */
 const SEARCH_DELAY_MS = 300;
+/** The room the table's six columns need; with less, the rows stack as on a phone. */
+export const RUNS_TABLE_WIDTH = 936;
+/** Runs a phone shows at a glance: filters above them would take more room than they do. */
+const FEW_RUNS = 3;
 
 // Where a run's own page is; kept here for the screens that link to runs.
 export { runHref };
@@ -245,6 +251,10 @@ export function FlowRunsList({
   const linkId = (runId: string) => `${headingId}-run-${runId}`;
   // A phone lists the runs as rows: six columns do not fit, and what it needs is the run, how it went, and the buttons.
   const phone = usePhoneScreen();
+  // So does a panel beside the chat: what counts is the room here, not the window's.
+  const sectionRef = useRef<HTMLElement>(null);
+  const narrow = useElementWidth(sectionRef, (width) => width < RUNS_TABLE_WIDTH) ?? false;
+  const stacked = phone || narrow;
   const person = { canRun: can("flows_run"), userId: user.id, publishedVersion };
   const [mine, setMine] = useState(false);
   const [status, setStatus] = useState<RunStatusValue | null>(null);
@@ -276,9 +286,16 @@ export function FlowRunsList({
     runs.dataUpdatedAt
   );
   const items = shown.items;
-  // A phone with nothing to filter yet (no runs, none being searched for) has no use for the
-  // three controls: they would be most of its screen. A search that finds nothing keeps them.
-  const showFilters = !phone || items.length > 0 || search !== "" || status !== null || mine;
+  // A phone with next to nothing to filter has no use for the three controls: they would be most
+  // of its screen. A search that finds little keeps them, and so does the list on its way back
+  // from one (`isPlaceholderData`), or the field being typed in would go.
+  const showFilters =
+    !phone ||
+    items.length > FEW_RUNS ||
+    search !== "" ||
+    status !== null ||
+    mine ||
+    runs.isPlaceholderData;
 
   // Announces each run that moved on since the last answer; comparing with
   // what was seen makes a repeated pass over the same answer a no-op.
@@ -387,13 +404,15 @@ export function FlowRunsList({
     {
       key: "usage",
       header: t("flow_runs_usage_heading"),
-      width: proportional(3, { minWidth: 240 }),
+      // In pixels, as is the version: a share's floor scales with the other shares, so these two
+      // would set the whole table's width. `RUNS_TABLE_WIDTH` is the sum of the floors.
+      width: pixel(240),
       renderCell: (run) => <RunUsage run={run} compact />
     },
     {
       key: "version",
       header: t("flow_runs_column_version"),
-      width: proportional(1),
+      width: pixel(96),
       renderCell: (run) => t("flow_runs_version", { version: run.flow_version })
     }
   ];
@@ -403,7 +422,7 @@ export function FlowRunsList({
   const capped = !runs.hasNextPage && runs.data?.pages.at(-1)?.has_more === true;
 
   return (
-    <section aria-labelledby={headingId} className="flex flex-col gap-3">
+    <section ref={sectionRef} aria-labelledby={headingId} className="flex flex-col gap-3">
       <Heading
         id={headingId}
         ref={headingRef}
@@ -416,9 +435,9 @@ export function FlowRunsList({
         <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
           <TextInput
             label={t("flow_run_journey_search")}
-            description={t("flow_run_journey_search_hint")}
+            description={phone ? undefined : t("flow_run_journey_search_hint")}
             size="sm"
-            width={280}
+            width={phone ? "100%" : 280}
             startIcon={Search}
             value={searchInput}
             onChange={setSearchInput}
@@ -426,7 +445,7 @@ export function FlowRunsList({
           <Selector
             label={t("flow_run_extras_status_filter")}
             size="sm"
-            width={240}
+            width={phone ? "100%" : 240}
             value={status ?? ANY_STATUS}
             onChange={(value) => setStatus(value === ANY_STATUS ? null : (value as RunStatusValue))}
             options={[
@@ -480,7 +499,7 @@ export function FlowRunsList({
         />
       ) : (
         <>
-          {phone ? (
+          {stacked ? (
             <ul aria-labelledby={headingId} className="m-0 flex list-none flex-col p-0">
               {(items as Row[]).map((run) => (
                 <li
@@ -495,7 +514,13 @@ export function FlowRunsList({
                   {statusCell(run)}
                   <span className="text-ax-text-secondary text-sm">
                     {/* No header names the time here, so a missing one is left out, not a bare dash. */}
-                    {[starterName(run, t), durationOrNull(run)].filter(Boolean).join(" · ")}
+                    {[
+                      starterName(run, t),
+                      durationOrNull(run),
+                      phone ? null : t("flow_runs_version", { version: run.flow_version })
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
                   </span>
                 </li>
               ))}
@@ -509,7 +534,7 @@ export function FlowRunsList({
               plugins={{ sort: sortPlugin }}
             />
           )}
-          {!phone && items.some((run) => run.token_usage) ? (
+          {!stacked && items.some((run) => run.token_usage) ? (
             <p className="text-ax-text-secondary m-0 max-w-prose text-xs">
               {t("flow_runs_usage_tokens_explainer")}
             </p>

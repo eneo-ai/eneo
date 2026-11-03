@@ -18,7 +18,7 @@ import { PageHeader } from "@/components/composites/page-header";
 import { QueryStateBoundary } from "@/components/composites/query-state";
 import { useAppContext } from "@/components/providers/app-context";
 import { useAnnounceChange } from "@/lib/hooks/use-announce-change";
-import { HANDHELD_QUERY } from "@/lib/hooks/use-media-match";
+import { HANDHELD_QUERY, MOBILE_QUERY } from "@/lib/hooks/use-media-match";
 import { useSearchDraft } from "@/lib/hooks/use-search-draft";
 import { browserApi } from "@/lib/api/browser";
 import { toastApiError } from "@/lib/api/toast";
@@ -66,6 +66,8 @@ export function FlowsPage() {
   // A phone runs and reviews flows; building one (many settings, prompts and
   // steps) is for a computer, so nothing here offers to.
   const phone = useMediaQuery(HANDHELD_QUERY);
+  // Below `lg` the table has no room for every column: the steps and the owner go under the name.
+  const compact = useMediaQuery(MOBILE_QUERY);
   const base = `/spaces/${routeId}/flows`;
 
   const pathname = usePathname();
@@ -94,9 +96,9 @@ export function FlowsPage() {
     replaceUrl(flowListHref(pathname, searchParams, { status: next }));
   }
 
-  function ownerLabel(flow: FlowSparse): string {
+  function ownerLabel(flow: FlowSparse): string | null {
     const owner = flowOwner(flow, user.id, space.members.items);
-    if (!owner) return "—";
+    if (!owner) return null;
     if (owner.kind === "member") return owner.name;
     return owner.kind === "you" ? t("flow_list_owner_you") : t("flow_list_owner_unknown");
   }
@@ -137,6 +139,8 @@ export function FlowsPage() {
       width: proportional(3),
       renderCell: (flow) => {
         const kind = kindLine(flow);
+        const owner = ownerLabel(flow);
+        const steps = t("flows_step_count", { count: flow.step_count });
         return (
           <span className="flex min-w-0 flex-col gap-0.5 py-1">
             <Link
@@ -149,6 +153,11 @@ export function FlowsPage() {
               <span className="text-ax-text-secondary text-xs break-words">{flow.description}</span>
             ) : null}
             {kind ? <span className="text-ax-text-secondary text-xs">{kind}</span> : null}
+            {compact ? (
+              <span className="text-ax-text-secondary text-xs">
+                {owner ? `${steps} · ${t("flows_row_owner", { name: owner })}` : steps}
+              </span>
+            ) : null}
           </span>
         );
       }
@@ -159,19 +168,24 @@ export function FlowsPage() {
       width: pixel(170),
       renderCell: (flow) => <FlowStatusBadge publishedVersion={flow.published_version} />
     },
-    {
-      key: "steps",
-      header: t("flows_steps_heading"),
-      width: pixel(110),
-      renderCell: (flow) => t("flows_step_count", { count: flow.step_count })
-    },
-    {
-      key: "owner",
-      header: t("flow_list_owner"),
-      // Names wrap; with the name's 120 px the table fits an upright iPad (about 770 px).
-      width: pixel(120),
-      renderCell: (flow) => <span className="break-words">{ownerLabel(flow)}</span>
-    },
+    ...(compact
+      ? []
+      : [
+          {
+            key: "steps",
+            header: t("flows_steps_heading"),
+            width: pixel(110),
+            renderCell: (flow: FlowSparse) => t("flows_step_count", { count: flow.step_count })
+          },
+          {
+            key: "owner",
+            header: t("flow_list_owner"),
+            width: pixel(120),
+            renderCell: (flow: FlowSparse) => (
+              <span className="break-words">{ownerLabel(flow) ?? "—"}</span>
+            )
+          }
+        ]),
     {
       key: "updated",
       header: t("flows_updated"),

@@ -107,6 +107,19 @@ describe("FlowPage on a phone", () => {
     await expectNoAxeViolations(container);
   });
 
+  it("shows how the flow is set up, read only", async () => {
+    const { container } = renderPhonePage();
+    const settings = await screen.findByRole("region", { name: "Inställningar" });
+    expect(within(settings).getByText("Medborgarbrev")).toBeTruthy();
+    // What the flow is for is said here, once, above the runs.
+    expect(within(settings).getByText("Skriver ut mötet och gör ett protokoll.")).toBeTruthy();
+    const runs = screen.getByRole("heading", { name: "Körningar" });
+    expect(settings.compareDocumentPosition(runs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(settings).queryByRole("button")).toBeNull();
+    expect(within(settings).queryByRole("textbox")).toBeNull();
+    await expectNoAxeViolations(container);
+  });
+
   it("offers no editing, only where it is done", async () => {
     renderPhonePage();
     await screen.findByRole("heading", { level: 1, name: "Medborgarbrev" });

@@ -245,7 +245,7 @@ describe("RunTrace", () => {
       within(rows[0]!).getByText(new RegExp(messages.flow_run_token_usage_not_recorded))
     ).toBeTruthy();
     expect(within(rows[1]!).getByText(/1\s200 token \(1\s000 in, 200 ut\)/)).toBeTruthy();
-    expect(rows[1]!.querySelector(".astryx-code-block")).toBeNull();
+    expect(rows[1]!.querySelector("[data-json-block]")).toBeNull();
 
     const trigger = within(rows[1]!).getByRole("button", { name: "Detaljer för försök 2" });
     trigger.focus();
@@ -253,7 +253,7 @@ describe("RunTrace", () => {
     expect(document.activeElement).toBe(trigger);
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
     // The attempt as JSON, a stored credential as a word.
-    const json = rows[1]!.querySelector(".astryx-code-block")?.textContent ?? "";
+    const json = rows[1]!.querySelector("[data-json-block]")?.textContent ?? "";
     for (const part of [
       '"requested_model": "model-large"',
       '"response_model": "model-large-2026"',
@@ -269,7 +269,7 @@ describe("RunTrace", () => {
     await expectNoAxeViolations(container);
 
     fireEvent.click(trigger);
-    expect(rows[1]!.querySelector(".astryx-code-block")).toBeNull();
+    expect(rows[1]!.querySelector("[data-json-block]")).toBeNull();
     expect(document.activeElement).toBe(trigger);
   });
 

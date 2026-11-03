@@ -32,6 +32,7 @@ const refused = (status: number, body: Record<string, unknown>): Reply => ({
 
 const state = vi.hoisted(() => ({
   announce: vi.fn(),
+  toastSuccess: vi.fn(),
   flow: null as unknown,
   chat: null as unknown,
   editor: null as unknown,
@@ -116,6 +117,10 @@ const api = vi.hoisted(() => ({
 
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 vi.mock("@/lib/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/toast", async (importOriginal) => {
+  const { toast } = await importOriginal<typeof import("@/lib/toast")>();
+  return { toast: { ...toast, success: state.toastSuccess } };
+});
 vi.mock("@astryxdesign/core/hooks", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@astryxdesign/core/hooks")>()),
   useAnnounce: () => state.announce
@@ -604,6 +609,63 @@ describe("FlowPage", () => {
     });
   });
 
+  it("puts the settings above the check and the steps, and the header brings them up", async () => {
+    renderPage();
+    const settings = screen.getByRole("region", { name: messages.flows_settings_heading });
+    const before = (later: Element) =>
+      settings.compareDocumentPosition(later) & Node.DOCUMENT_POSITION_FOLLOWING;
+    expect(before(draftCheck())).toBeTruthy();
+    expect(before(stepsRegion())).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: messages.flows_settings_heading }));
+    expect(await screen.findByRole("button", { name: messages.flows_settings_save })).toBeTruthy();
+  });
+
+  it("leaves the runs for the settings the header asks for, once", async () => {
+    state.runs = ok({ count: 0, items: [], has_more: false });
+    renderPage();
+    fireEvent.click(screen.getByRole("tab", { name: "Körningar" }));
+    fireEvent.click(screen.getByRole("button", { name: messages.flows_settings_heading }));
+    expect(await screen.findByRole("button", { name: messages.flows_settings_save })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Definition", selected: true })).toBeTruthy();
+
+    // Off to the runs and back: the ask is spent, the form stays closed.
+    fireEvent.click(screen.getByRole("button", { name: messages.cancel }));
+    fireEvent.click(screen.getByRole("tab", { name: "Körningar" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "Definition" }));
+    expect(await screen.findByRole("button", { name: messages.flows_settings_edit })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: messages.flows_settings_save })).toBeNull();
+  });
+
+  it("offers no way to the settings while a step is open: the settings are not there", () => {
+    setRoute("/?step=step-1");
+    window.history.replaceState(null, "", "/?step=step-1");
+    renderPage();
+    expect(screen.getByText("Redigerar step-1")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: messages.flows_settings_heading })).toBeNull();
+  });
+
+  it("marks the settings as unsaved while they differ, and shows that they were saved", async () => {
+    const renamed = makeFlow({ name: "Nytt namn", steps, draft_revision: 5 });
+    state.editor = ok(renamed);
+    renderPage();
+    const unsaved = () => screen.queryByText(messages.flow_page_settings_unsaved);
+    expect(unsaved()).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: messages.flows_settings_edit }));
+    expect(unsaved()).toBeNull();
+    fireEvent.change(await screen.findByRole("textbox", { name: /^Namn/ }), {
+      target: { value: "Nytt namn" }
+    });
+    expect(await screen.findByText(messages.flow_page_settings_unsaved)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: messages.flows_settings_save }));
+    await waitFor(() =>
+      expect(state.toastSuccess).toHaveBeenCalledWith(messages.flows_settings_saved)
+    );
+    await waitFor(() => expect(unsaved()).toBeNull());
+  });
+
   it("publishes nothing while the settings form is open, and says to save or cancel it", async () => {
     state.publish = ok(makeFlow({ steps, published_version: 1 }));
     renderPage();
@@ -625,7 +687,9 @@ describe("FlowPage", () => {
     expect(screen.getByText("Publicerad, version 3")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Flytta/ })).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Avpublicera för att ändra" }));
+    // One way to unpublish, in the header: the banner only says it is needed.
+    expect(screen.getAllByRole("button", { name: /^Avpublicera/ })).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Avpublicera" }));
     const dialog = await screen.findByRole("alertdialog", { name: "Avpublicera flödet?" });
     fireEvent.click(within(dialog).getByRole("button", { name: "Avpublicera" }));
 
@@ -650,8 +714,21 @@ describe("FlowPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Kör flödet" }));
     expect(await screen.findByRole("dialog", { name: "Kör Medborgarbrev" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Avpublicera" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Avpublicera för att ändra" })).toBeNull();
     expect(screen.getByText("Ett publicerat flöde kan inte ändras.")).toBeTruthy();
+  });
+
+  it("ends the header's actions with the primary one, published or not", () => {
+    const comesAfter = (first: string, last: string) =>
+      screen
+        .getByRole("button", { name: first })
+        .compareDocumentPosition(screen.getByRole("button", { name: last })) &
+      Node.DOCUMENT_POSITION_FOLLOWING;
+    renderPage(makeFlow({ steps, published_version: 3 }));
+    expect(comesAfter(messages.flow_editor_tools_package_export, "Kör flödet")).toBeTruthy();
+    expect(comesAfter("Avpublicera", "Kör flödet")).toBeTruthy();
+    cleanup();
+    renderPage(makeFlow({ steps }));
+    expect(comesAfter(messages.flow_editor_tools_package_export, "Publicera")).toBeTruthy();
   });
 
   it("offers no run of a draft, nor to someone who may not run the flow", () => {

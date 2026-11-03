@@ -526,7 +526,7 @@ describe("FlowStepEditor", () => {
 
     // The step menu names the open step and lists every step, with what it
     // does and the suggestions about it; the open step goes nowhere.
-    const trigger = within(bar).getByRole("button", { name: "Steg 1 av 2: Steg 1: Sammanfatta" });
+    const trigger = within(bar).getByRole("button", { name: "Steg 1 av 2: Sammanfatta" });
     fireEvent.click(trigger);
     const menu = document.getElementById(trigger.getAttribute("aria-controls") ?? "")!;
     const current = within(menu).getByRole("menuitem", { name: /Steg 1: Sammanfatta/ });

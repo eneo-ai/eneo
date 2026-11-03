@@ -181,11 +181,7 @@ describe("RunSteps copying", () => {
     const card = screen.getByRole("article", { name: "Steg 1: Sammanfatta" });
     fireEvent.click(within(card).getByRole("button", { name: messages.flow_run_step_input_show }));
     fireEvent.click(within(card).getByRole("button", { name: messages.flow_run_more_copy_input }));
-    await waitFor(() =>
-      expect(writeText).toHaveBeenCalledWith(
-        JSON.stringify({ text: "Ärendet gäller bygglov." }, null, 2)
-      )
-    );
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("Ärendet gäller bygglov."));
   });
 
   it("renders what a step was sent only while it is open", () => {
@@ -233,13 +229,58 @@ describe("RunSteps input and output", () => {
     const card = screen.getByRole("article", { name: "Steg 1: Transkribera" });
     expect(card.className).toContain("min-w-0");
     fireEvent.click(within(card).getByRole("button", { name: messages.flow_run_step_input_show }));
-    const json = card.querySelector(".astryx-code-block")!.textContent;
+    const json = card.querySelector("[data-json-block]")!.textContent;
     expect(json).toContain('"input_source": "flow_input"');
     for (const shown of ["transcription", "rag", "SPEAKER_00"]) expect(json).not.toContain(shown);
     await expectNoAxeViolations(container);
     // A copy is all of it, for support.
     fireEvent.click(within(card).getByRole("button", { name: messages.flow_run_more_copy_input }));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(JSON.stringify(input, null, 2)));
+  });
+
+  /** The core's payload for a step sent a text: the text twice, and how it got there. */
+  const textInput = (text: string, more: Record<string, unknown> = {}) => ({
+    text,
+    text_truncated: false,
+    source_text: text,
+    source_text_truncated: false,
+    material_aliases: [],
+    input_source: "flow_input",
+    used_question_binding: false,
+    effective_prompt_truncated: false,
+    ...more
+  });
+
+  function openInput(input: Record<string, unknown>) {
+    const steps = runStepViews(
+      makeRunGraph([{ order: 1, label: "Sammanfatta", status: "completed" }]),
+      [makeRunStep(1, { input_payload_json: input })]
+    );
+    renderInApp(<RunSteps flowId="flow-1" runId="run-1" steps={steps} />);
+    const card = screen.getByRole("article", { name: "Steg 1: Sammanfatta" });
+    fireEvent.click(within(card).getByRole("button", { name: messages.flow_run_step_input_show }));
+    return card;
+  }
+
+  it("shows a step sent only a text as that text, once, not as JSON", () => {
+    const card = openInput(textInput("Ärendet gäller bygglov."));
+    expect(card.querySelector("[data-json-block]")).toBeNull();
+    const [text, ...repeats] = within(card).getAllByText("Ärendet gäller bygglov.");
+    expect(text?.closest(".astryx-scrollable-area")).not.toBeNull();
+    expect(repeats).toEqual([]);
+  });
+
+  it("keeps the JSON when the input says more than its text", () => {
+    for (const input of [
+      textInput("Ärendet.", { source_text: "Originalet." }),
+      textInput("Ärendet.", { text_truncated: true }),
+      textInput("Ärendet.", { material_aliases: [{ alias: "step_1" }] }),
+      textInput("Ärendet.", { other: "något" })
+    ]) {
+      const card = openInput(input);
+      expect(card.querySelector("[data-json-block]")).not.toBeNull();
+      cleanup();
+    }
   });
 
   it("offers no input when the card already shows all of it", () => {
@@ -307,6 +348,49 @@ describe("RunSteps input and output", () => {
     fireEvent.click(section);
     expect(within(two).getByText("Transkriptet från steg 2")).toBe(transcripts.get("step-2"));
   });
+
+  /** A finished transcribing step, and the element its transcript renders into. */
+  function transcribed() {
+    const [step] = runStepViews(
+      makeRunGraph([{ order: 1, label: "Transkribera", status: "completed" }]),
+      [makeRunStep(1, { output_payload_json: { text: transcript } })]
+    );
+    const host = Object.assign(document.createElement("div"), { textContent: "Transkriptet" });
+    return {
+      steps: [{ ...step!, transcribeOnly: true }],
+      transcripts: new Map([["step-1", host]])
+    };
+  }
+
+  it("leaves the copy of a transcribing step to the transcript, whose export has the corrections", () => {
+    renderInApp(<RunSteps flowId="flow-1" runId="run-1" {...transcribed()} />);
+    const card = screen.getByRole("article", { name: "Steg 1: Transkribera" });
+    expect(
+      within(card).queryByRole("button", { name: messages.flow_run_more_copy_output })
+    ).toBeNull();
+  });
+
+  it("opens a step's result for a transcript that arrives after its card", () => {
+    const { steps, transcripts } = transcribed();
+    const { rerender } = renderInApp(<RunSteps flowId="flow-1" runId="run-1" steps={steps} />);
+    const result = () => screen.getByRole("button", { name: messages.flow_runs_step_output });
+    expect(result().getAttribute("aria-expanded")).toBe("false");
+
+    rerender(<RunSteps flowId="flow-1" runId="run-1" steps={steps} transcripts={transcripts} />);
+    expect(result().getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("Transkriptet")).toBeTruthy();
+  });
+
+  it("keeps a result the person folded folded when its transcript arrives", () => {
+    const { steps, transcripts } = transcribed();
+    const { rerender } = renderInApp(<RunSteps flowId="flow-1" runId="run-1" steps={steps} />);
+    const result = () => screen.getByRole("button", { name: messages.flow_runs_step_output });
+    fireEvent.click(result());
+    fireEvent.click(result());
+
+    rerender(<RunSteps flowId="flow-1" runId="run-1" steps={steps} transcripts={transcripts} />);
+    expect(result().getAttribute("aria-expanded")).toBe("false");
+  });
 });
 
 describe("RunLiveProgress", () => {
@@ -350,6 +434,63 @@ describe("RunLiveProgress", () => {
 });
 
 describe("RunSteps step details", () => {
+  function openSettings(parameters: Record<string, unknown>) {
+    const steps = runStepViews(
+      makeRunGraph([{ order: 1, label: "Sammanfatta", status: "completed" }]),
+      [makeRunStep(1, { model_parameters_json: parameters })]
+    );
+    renderInApp(<RunSteps flowId="flow-1" runId="run-1" steps={steps} />);
+    const card = screen.getByRole("article", { name: "Steg 1: Sammanfatta" });
+    const trigger = within(card).queryByRole("button", {
+      name: messages.flow_run_extras_prompt_heading
+    });
+    if (trigger) fireEvent.click(trigger);
+    return card;
+  }
+
+  it("names a step's model settings in words and leaves out what is empty or the core's own", () => {
+    const card = openSettings({
+      model_id: "11111111-2222-3333-4444-555555555555",
+      model_name: "GPT-5",
+      provider: "openai",
+      temperature: 0,
+      top_p: null,
+      top_k: 40,
+      reasoning_effort: null,
+      verbosity: "",
+      response_format: null,
+      presence_penalty: null,
+      frequency_penalty: null,
+      parameter_semantics: { temperature: { mode: "configured" } },
+      per_source_call_count: 3,
+      a_setting_of_tomorrow: "på"
+    });
+
+    expect(within(card).getByText(messages.model)).toBeTruthy();
+    expect(within(card).getByText("GPT-5")).toBeTruthy();
+    expect(within(card).getByText(messages.provider)).toBeTruthy();
+    // A value of 0 is a setting, not an empty one.
+    expect(within(card).getByText(messages.temperature)).toBeTruthy();
+    expect(within(card).getByText("0")).toBeTruthy();
+    expect(within(card).getByText(messages.top_k)).toBeTruthy();
+    expect(within(card).getByText(messages.flow_run_setting_per_source_calls)).toBeTruthy();
+    // A setting the catalog does not know yet still shows.
+    expect(within(card).getByText("a_setting_of_tomorrow")).toBeTruthy();
+
+    expect(within(card).queryByText(messages.flow_runs_value_empty)).toBeNull();
+    for (const hidden of [messages.top_p, messages.verbosity, "parameter_semantics"]) {
+      expect(within(card).queryByText(hidden)).toBeNull();
+    }
+    expect(card.textContent).not.toContain("11111111-2222");
+  });
+
+  it("offers no model settings for a step whose parameters are only the core's bookkeeping", () => {
+    const card = openSettings({ mode: "transcribe_only" });
+    expect(
+      within(card).queryByRole("button", { name: messages.flow_run_extras_prompt_heading })
+    ).toBeNull();
+  });
+
   it("says how a step read long material and which template it filled", () => {
     const steps = runStepViews(
       makeRunGraph([{ order: 1, label: "Skriv beslut", status: "completed" }]),

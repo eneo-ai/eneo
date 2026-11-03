@@ -9,7 +9,8 @@ import { toast } from "@/lib/toast";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 import { setViewport } from "@/test/setup-dom";
-import { makeFlow } from "../flow-fixtures";
+import { makeFlow, makeStep } from "../flow-fixtures";
+import type { FlowStep } from "../flows-api";
 import { makeContract, makeInput, makeRunDetail, makeRunSummary } from "./run-fixtures";
 import { runKeys, type RunContract, type RunPublic } from "./runs-api";
 
@@ -47,6 +48,7 @@ const CONTRACT = "GET /api/v1/flows/{id}/run-contract/";
 const START = "POST /api/v1/flows/{id}/runs/";
 const LIST = "GET /api/v1/flows/{id}/runs/";
 const DETAIL = "GET /api/v1/flows/{id}/runs/{run_id}/";
+const NO_INPUT = "Inget underlag är ifyllt";
 
 /** Answers runtime uploads as the core does, at once. */
 class FakeUpload {
@@ -96,10 +98,12 @@ const contract = makeContract({
 
 function Harness({
   onStarted,
-  metadata = null
+  metadata = null,
+  steps
 }: {
   onStarted: (run: RunPublic) => void;
   metadata?: Record<string, unknown> | null;
+  steps?: FlowStep[];
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -108,7 +112,7 @@ function Harness({
         Kör
       </button>
       <StartRunDialog
-        flow={makeFlow({ published_version: 4, metadata_json: metadata })}
+        flow={makeFlow({ published_version: 4, metadata_json: metadata, ...(steps && { steps }) })}
         open={open}
         onOpenChange={setOpen}
         onStarted={onStarted}
@@ -119,14 +123,17 @@ function Harness({
 
 async function openDialog(
   withContract: RunContract = contract,
-  metadata: Record<string, unknown> | null = null
+  metadata: Record<string, unknown> | null = null,
+  steps?: FlowStep[]
 ) {
   api.routes[CONTRACT] = () => ({ body: withContract });
   const onStarted = vi.fn();
-  const { queryClient } = renderInApp(<Harness onStarted={onStarted} metadata={metadata} />);
+  const { queryClient } = renderInApp(
+    <Harness onStarted={onStarted} metadata={metadata} steps={steps} />
+  );
   fireEvent.click(screen.getByRole("button", { name: "Kör" }));
   const dialog = await screen.findByRole("dialog", { name: "Kör Medborgarbrev" });
-  await within(dialog).findByLabelText(/^Ärende/);
+  await within(dialog).findByRole("button", { name: messages.flow_runs_summary_next });
   return { dialog, onStarted, queryClient };
 }
 
@@ -238,7 +245,9 @@ describe("StartRunDialog", () => {
     expect(document.activeElement).toBe(heading);
     expect(within(dialog).getByText(messages.flow_runs_start_part_review)).toBeTruthy();
     const summary = within(dialog).getByRole("region", { name: messages.flow_runs_summary_title });
-    expect(within(summary).getByText(messages.flow_runs_start_ready_title)).toBeTruthy();
+    // What is sent is the content here: no notice stands before it.
+    expect(within(summary).queryByText(messages.flow_runs_start_ready_title)).toBeNull();
+    expect(within(summary).queryByText(NO_INPUT)).toBeNull();
     expect(within(summary).getByText("Ärende")).toBeTruthy();
     expect(within(summary).getByText("Bygglov")).toBeTruthy();
     expect(within(summary).getByText("Brevet")).toBeTruthy();
@@ -410,13 +419,44 @@ describe("StartRunDialog", () => {
     expect(
       within(dialog).queryByRole("heading", { name: messages.flow_runs_summary_title })
     ).toBeNull();
-    // Focus goes to the form's first control, the run's name.
-    expect(document.activeElement).toBe(
-      within(dialog).getByRole("textbox", {
-        name: new RegExp(`^${messages.flow_run_extras_run_label}`)
+    // Focus goes to the form's first control, the input.
+    expect(document.activeElement).toBe(field);
+    expect(button(dialog, messages.cancel)).toBeTruthy();
+  });
+
+  it("says when nothing is filled in, and the run can still start", async () => {
+    const run = makeRunSummary({ id: "run-9", status: "queued" });
+    api.routes[START] = () => ({ status: 201, body: run });
+    const { dialog, onStarted } = await openDialog(
+      makeContract({
+        form_fields: [{ name: "arende", label: "Ärende", type: "text", required: false }]
       })
     );
-    expect(button(dialog, messages.cancel)).toBeTruthy();
+    // A name for the run is no material for it.
+    fireEvent.change(within(dialog).getByLabelText(/^Namn på körningen/), {
+      target: { value: "Prov" }
+    });
+    fireEvent.click(button(dialog, messages.flow_runs_summary_next));
+
+    const summary = within(dialog).getByRole("region", { name: messages.flow_runs_summary_title });
+    expect(within(summary).getByText(NO_INPUT)).toBeTruthy();
+    expect(within(summary).queryByText(messages.flow_runs_start_ready_title)).toBeNull();
+    expect(within(summary).getByText("Prov")).toBeTruthy();
+    await expectNoAxeViolations(document.body);
+
+    fireEvent.click(button(dialog, messages.flow_runs_start_submit));
+    await waitFor(() => expect(onStarted).toHaveBeenCalledWith(run));
+  });
+
+  it("is ready without input when the flow reads none", async () => {
+    const { dialog } = await openDialog(makeContract(), null, [
+      makeStep(1, { input_source: "http_get" })
+    ]);
+    fireEvent.click(button(dialog, messages.flow_runs_summary_next));
+
+    const summary = within(dialog).getByRole("region", { name: messages.flow_runs_summary_title });
+    expect(within(summary).getByText(messages.flow_runs_start_ready_title)).toBeTruthy();
+    expect(within(summary).queryByText(NO_INPUT)).toBeNull();
   });
 
   it("asks before closing a form with something filled in, and closes an empty one", async () => {
@@ -616,18 +656,17 @@ describe("StartRunDialog on a phone", () => {
       expect(group.contains(file)).toBe(true);
     });
 
-    it("keeps the run's name first and the file above the recording for a mouse", async () => {
+    it("keeps the file above the recording and the run's name last for a mouse", async () => {
       const { dialog } = await openDialog(audio);
       const { recording, file, name } = pieces(dialog);
-      expect(before(name, file)).toBe(true);
       expect(before(file, recording)).toBe(true);
+      expect(before(recording, name)).toBe(true);
     });
 
     it("keeps the file above the recording on a narrow window with a mouse", async () => {
       setViewport({ width: 600, height: 800, pointer: "fine" });
       const { dialog } = await openDialog(audio);
-      const { recording, file, name } = pieces(dialog);
-      expect(before(name, file)).toBe(true);
+      const { recording, file } = pieces(dialog);
       expect(before(file, recording)).toBe(true);
     });
   });

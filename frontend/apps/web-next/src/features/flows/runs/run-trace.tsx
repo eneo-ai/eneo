@@ -154,9 +154,6 @@ export function RunTrace({
       >
         {t("flow_run_extras_trace_heading")}
       </h2>
-      <Part title={t("flow_run_extras_export_heading")}>
-        <RunEvidenceExport flowId={flow.id} runId={summary.id} access={access} />
-      </Part>
       {!requested ? (
         <div className="flex flex-col items-start gap-2">
           <p className="text-ax-text-secondary text-sm">{t("flow_run_extras_trace_hint")}</p>
@@ -180,6 +177,9 @@ export function RunTrace({
           stepName={stepName}
         />
       )}
+      <Part title={t("flow_run_extras_export_heading")}>
+        <RunEvidenceExport flowId={flow.id} runId={summary.id} access={access} />
+      </Part>
     </section>
   );
 }

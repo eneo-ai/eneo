@@ -1,4 +1,4 @@
-import { CodeBlock } from "@astryxdesign/core/CodeBlock";
+import { ScrollableArea } from "@astryxdesign/core/ScrollableArea";
 import { useTranslations } from "use-intl";
 import { CopyButton } from "./run-copy";
 
@@ -58,20 +58,23 @@ export function JsonBlock({
 }) {
   const t = useTranslations();
   return (
-    <CodeBlock
-      code={readableJson(value, t("flow_runs_secret_stored")) ?? ""}
-      language="json"
-      size="sm"
-      width="100%"
-      isWrapped
-      maxHeight={maxHeight}
-      hasCopyButton={false}
-      endContent={
-        copy ? (
+    <div data-json-block className="relative min-w-0">
+      {copy && (
+        <div className="absolute end-2 top-2 z-10">
           <CopyButton label={copy.label} value={"value" in copy ? copy.value : value} />
-        ) : undefined
-      }
-    />
+        </div>
+      )}
+      <ScrollableArea
+        axis="block"
+        label={t("flow_runs_json_label")}
+        className="bg-ax-sunken rounded-ax-inner focus-visible:outline-ring min-w-0 focus-visible:outline-2 focus-visible:-outline-offset-2"
+        style={{ maxHeight }}
+      >
+        <pre className="m-0 px-3 py-2 font-mono text-xs [overflow-wrap:anywhere] break-words whitespace-pre-wrap">
+          {readableJson(value, t("flow_runs_secret_stored"))}
+        </pre>
+      </ScrollableArea>
+    </div>
   );
 }
 

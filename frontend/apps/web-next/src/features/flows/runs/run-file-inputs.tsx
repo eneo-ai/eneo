@@ -250,7 +250,11 @@ export function RunFileInput({
       {handheld ? [recording, fileField] : [fileField, recording]}
       {entries.length > 0 && input.max_files != null && input.max_files > 1 ? (
         <p className="text-ax-text-secondary m-0 text-xs tabular-nums">
-          {t("flow_runs_start_files_count", { count: entries.length, max: input.max_files })}
+          {t("flow_runs_start_files_count", {
+            // As the step's limit counts: a failed row holds no place.
+            count: entries.filter((entry) => entry.state !== "failed").length,
+            max: input.max_files
+          })}
         </p>
       ) : null}
       {entries.length > 0 ? (

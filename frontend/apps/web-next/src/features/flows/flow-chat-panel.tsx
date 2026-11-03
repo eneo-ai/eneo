@@ -14,7 +14,7 @@ import { Banner } from "@astryxdesign/core/Banner";
 import { LoadingState } from "@/components/composites/loading-state";
 import { ListError } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
-import { EneoApiError, unwrap } from "@/lib/api/errors";
+import { EneoApiError, getErrorMessageForCode, unwrap } from "@/lib/api/errors";
 import { mapSessionMessages } from "@/lib/chat/map-session";
 import type { ChatPartner } from "@/lib/chat/types";
 import { cn } from "@/lib/utils";
@@ -36,6 +36,7 @@ import {
   type FlowAuthoringChat,
   type FlowPublic
 } from "./flows-api";
+import { flowErrorText } from "./runs/run-messages";
 
 type ChatPanelProps = {
   flow: FlowPublic;
@@ -273,17 +274,31 @@ function AuthoringConversation({
   );
 }
 
-/** Why the chat cannot be opened, as the core said it: no edit access, or no model with tools. */
-function unavailableMessage(error: unknown, t: ReturnType<typeof useTranslations>): string | null {
+type Unavailable = { status: "info" | "warning"; text: string };
+
+/**
+ * Why the chat cannot be opened: no edit access, no model with tools, or a
+ * model whose limits nobody declared, which an administrator can put right.
+ * Always in the catalog's words: the core's own message is English.
+ */
+function unavailableReason(
+  error: unknown,
+  t: ReturnType<typeof useTranslations>
+): Unavailable | null {
   if (!(error instanceof EneoApiError)) return null;
-  if (error.status === 403) return t("flows_chat_no_access");
-  if (error.status === 400) {
-    // The core names the refusal; only a missing model has a text of its own.
-    return error.reason === "flow_authoring_chat_no_model" || !error.message
-      ? t("flows_chat_no_model")
-      : error.message;
+  if (error.status === 403) return { status: "info", text: t("flows_chat_no_access") };
+  if (error.status !== 400) return null;
+  if (error.reason === "unknown_model_capacity") {
+    return { status: "warning", text: t("flows_chat_model_capacity_unknown") };
   }
-  return null;
+  if (error.reason === "flow_authoring_chat_no_model") {
+    return { status: "info", text: t("flows_chat_no_model") };
+  }
+  return {
+    status: "info",
+    text:
+      flowErrorText(error.reason, t) ?? getErrorMessageForCode(error.code, t) ?? t("request_failed")
+  };
 }
 
 /**
@@ -304,10 +319,10 @@ export function FlowChatPanel({
   // still says so, should the flag be out of date).
   const mayEdit = flow.permissions.can_edit;
   const chat = useQuery({ ...authoringChatQueryOptions(flow.id), enabled: mayEdit });
-  const unavailable = !mayEdit
-    ? t("flows_chat_no_access")
+  const unavailable: Unavailable | null = !mayEdit
+    ? { status: "info", text: t("flows_chat_no_access") }
     : chat.isError
-      ? unavailableMessage(chat.error, t)
+      ? unavailableReason(chat.error, t)
       : null;
 
   return (
@@ -346,9 +361,9 @@ export function FlowChatPanel({
         <div className="p-4">
           {unavailable ? (
             <Banner
-              status="info"
+              status={unavailable.status}
               title={t("flows_chat_unavailable")}
-              description={unavailable}
+              description={unavailable.text}
               collapsible={false}
             />
           ) : (

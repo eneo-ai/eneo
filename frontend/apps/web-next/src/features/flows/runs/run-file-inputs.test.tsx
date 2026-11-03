@@ -45,6 +45,26 @@ describe("RunFileInput", () => {
     expect(screen.getByRole("button", { name: /^Spelar in/ })).not.toBe(document.activeElement);
   });
 
+  it("counts the files as the step's limit does, not the rows that failed", () => {
+    const entry = { name: "brev.pdf", size: 1, mimetype: "application/pdf" };
+    renderInApp(
+      <RunFileInput
+        formId="form"
+        input={makeInput({ max_files: 3 })}
+        entries={[
+          { ...entry, key: "a", state: "done", progress: 1, fileId: "file-1" },
+          { ...entry, key: "b", state: "uploading", progress: 0.5 },
+          { ...entry, key: "c", state: "failed", progress: 0, problem: "För stor" }
+        ]}
+        message={null}
+        onAdd={() => {}}
+        onRemove={() => {}}
+        singleRecording={{ offered: false, value: false, onChange: () => {} }}
+      />
+    );
+    expect(screen.getByText("Filer: 2 av 3")).toBeTruthy();
+  });
+
   it("keeps a recording running when a tablet is split down to a phone width", () => {
     const mounted = vi.fn();
     renderInput(mounted);

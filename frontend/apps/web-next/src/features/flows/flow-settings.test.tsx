@@ -4,8 +4,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 import { makeFlow, makeStep } from "./flow-fixtures";
-import { FlowSettings } from "./flow-settings";
+import { FlowSettings, SettingsSummary } from "./flow-settings";
 import type { TranscriptionResources } from "./flow-transcription-settings";
+
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 
 const announce = vi.hoisted(() => vi.fn());
 vi.mock("@astryxdesign/core/hooks", async (importOriginal) => ({
@@ -62,13 +64,25 @@ const audioFlow = makeFlow({
   }
 });
 
+/** What a row of the read view says. */
+function rowValue(label: string): string | null | undefined {
+  return screen.getByText(label).closest("dt")?.nextElementSibling?.textContent;
+}
+
+/** What the browser asks before a reload or a closed tab: a cancelled beforeunload means "ask". */
+function asksBeforeUnload(): boolean {
+  const event = new Event("beforeunload", { cancelable: true });
+  window.dispatchEvent(event);
+  return event.defaultPrevented;
+}
+
 describe("FlowSettings", () => {
   it("shows the settings as facts", async () => {
     const { container } = renderInApp(
       <FlowSettings flow={flow} canEdit={false} transcription={noTranscription} onSave={vi.fn()} />
     );
     expect(screen.getByText("Diarienummer (Text, obligatoriskt)")).toBeTruthy();
-    expect(screen.getByText("Inte tillåten")).toBeTruthy();
+    expect(rowValue("Nedladdning av bevisunderlag")).toBe("Av");
     expect(screen.queryByRole("button", { name: "Ändra inställningar" })).toBeNull();
     await expectNoAxeViolations(container);
   });
@@ -92,7 +106,7 @@ describe("FlowSettings", () => {
     expect(
       (within(field).getByRole("textbox", { name: /Tekniskt namn/ }) as HTMLInputElement).value
     ).toBe("ärendetyp");
-    fireEvent.click(screen.getByRole("checkbox", { name: /Tillåt export av bevisunderlag/ }));
+    fireEvent.click(screen.getByRole("switch", { name: /Nedladdning av bevisunderlag/ }));
     await expectNoAxeViolations(container);
     fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
 
@@ -374,4 +388,271 @@ describe("FlowSettings", () => {
       })
     );
   }, 20_000);
+  it("sums up the flow: steps, fields, transcription, download and the check", () => {
+    const { rerender } = renderInApp(
+      <FlowSettings
+        flow={flow}
+        canEdit={false}
+        transcription={noTranscription}
+        onSave={vi.fn()}
+        stepCount={7}
+        problemCount={null}
+      />
+    );
+    expect(rowValue("Steg")).toBe("7");
+    expect(rowValue("Formulärfält")).toContain("1");
+    expect(rowValue("Transkribering")).toBe("På");
+    expect(rowValue("Nedladdning av bevisunderlag")).toBe("Av");
+    // Unchecked says nothing rather than a guess.
+    expect(screen.queryByText("Kontroll")).toBeNull();
+
+    rerender(
+      <FlowSettings
+        flow={flow}
+        canEdit={false}
+        transcription={noTranscription}
+        onSave={vi.fn()}
+        problemCount={0}
+      />
+    );
+    expect(rowValue("Kontroll")).toBe("Inga kända fel");
+
+    rerender(
+      <FlowSettings
+        flow={flow}
+        canEdit={false}
+        transcription={noTranscription}
+        onSave={vi.fn()}
+        problemCount={3}
+      />
+    );
+    expect(rowValue("Kontroll")).toBe("3 problem");
+  });
+
+  it("sums up a flow for a page without the space's transcription resources", () => {
+    renderInApp(<SettingsSummary flow={audioFlow} stepCount={2} problemCount={0} />);
+    expect(rowValue("Transkribering")).toBe("På");
+    // No model list here: a chosen model is not called unavailable.
+    expect(screen.queryByText("Transkriberingsmodell")).toBeNull();
+    expect(rowValue("Steg")).toBe("2");
+    expect(rowValue("Kontroll")).toBe("Inga kända fel");
+  });
+
+  it("always offers transcription: off in the read view, a switch in the form", async () => {
+    const onSave = vi.fn(async () => true);
+    const textFlow = makeFlow();
+    renderInApp(<FlowSettings flow={textFlow} canEdit transcription={resources} onSave={onSave} />);
+    expect(rowValue("Transkribering")).toBe("Av");
+    expect(screen.queryByText("Transkriberingsmodell")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Ändra inställningar" }));
+    expect(
+      screen.getByText(
+        "Inget steg tar emot ljud just nu. Inställningarna gäller när ett steg gör det."
+      )
+    ).toBeTruthy();
+    expect(screen.queryByRole("combobox", { name: /Transkriberingsmodell/ })).toBeNull();
+    fireEvent.click(screen.getByRole("switch", { name: /Transkribera ljud/ }));
+    expect(screen.getByRole("combobox", { name: /Transkriberingsmodell/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({ metadata_json: { wizard: { transcription_enabled: true } } })
+    );
+  });
+
+  it("names the model and the language in the read view when transcription is on", () => {
+    const on = makeFlow({
+      metadata_json: {
+        wizard: {
+          transcription_enabled: true,
+          transcription_model: { id: "tm-1" },
+          transcription_language: "en"
+        }
+      }
+    });
+    renderInApp(<FlowSettings flow={on} canEdit transcription={resources} onSave={vi.fn()} />);
+    expect(rowValue("Transkribering")).toBe("På");
+    expect(rowValue("Transkriberingsmodell")).toBe("Tal till text");
+    expect(rowValue("Språk")).toBe("English");
+  });
+
+  it("asks before leaving only while the form differs from the saved flow", async () => {
+    const onDirtyChange = vi.fn();
+    renderInApp(
+      <FlowSettings
+        flow={flow}
+        canEdit
+        transcription={noTranscription}
+        onSave={vi.fn(async () => true)}
+        onDirtyChange={onDirtyChange}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Ändra inställningar" }));
+    // An open form with nothing changed has nothing to lose.
+    expect(asksBeforeUnload()).toBe(false);
+
+    const name = screen.getByRole("textbox", { name: /^Namn/ });
+    fireEvent.change(name, { target: { value: "Medborgarbrev 2" } });
+    await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(true));
+    expect(asksBeforeUnload()).toBe(true);
+
+    // Changed back, or only by a space the save trims: nothing is unsaved.
+    fireEvent.change(name, { target: { value: "Medborgarbrev " } });
+    await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false));
+    expect(asksBeforeUnload()).toBe(false);
+
+    fireEvent.change(name, { target: { value: "Medborgarbrev 3" } });
+    await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(true));
+    fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
+    await screen.findByRole("button", { name: "Ändra inställningar" });
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+    expect(asksBeforeUnload()).toBe(false);
+  });
+
+  it("refuses to save over settings the chat changed, and loads them again", async () => {
+    const onSave = vi.fn(async () => true);
+    const view = (current: typeof flow) => (
+      <FlowSettings flow={current} canEdit transcription={noTranscription} onSave={onSave} />
+    );
+    const { container, rerender } = renderInApp(view(flow));
+    fireEvent.click(screen.getByRole("button", { name: "Ändra inställningar" }));
+    fireEvent.change(screen.getByRole("textbox", { name: /^Namn/ }), {
+      target: { value: "Mitt namn" }
+    });
+
+    rerender(
+      view({
+        ...flow,
+        draft_revision: flow.draft_revision + 1,
+        description: "Chatten skrev det här."
+      })
+    );
+    expect(await screen.findByText("Inställningarna har ändrats någon annanstans")).toBeTruthy();
+    expect(announce).toHaveBeenCalledWith("Inställningarna har ändrats någon annanstans");
+    await expectNoAxeViolations(container);
+
+    // The save would overwrite the chat's description: it stays here, at the way out.
+    fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
+    const reload = screen.getByRole("button", { name: "Läs in igen" });
+    await waitFor(() => expect(document.activeElement).toBe(reload));
+    expect(onSave).not.toHaveBeenCalled();
+
+    fireEvent.click(reload);
+    expect(screen.queryByText("Inställningarna har ändrats någon annanstans")).toBeNull();
+    const name = screen.getByRole("textbox", { name: /^Namn/ }) as HTMLInputElement;
+    expect(name.value).toBe("Medborgarbrev");
+    expect(
+      (screen.getByRole("textbox", { name: /Beskrivning/ }) as HTMLTextAreaElement).value
+    ).toBe("Chatten skrev det här.");
+    await waitFor(() => expect(document.activeElement).toBe(name));
+    expect(announce).toHaveBeenCalledWith("De senaste inställningarna är inlästa");
+
+    fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+  });
+
+  it("leaves the form alone when a new revision changed no setting", () => {
+    const view = (current: typeof flow) => (
+      <FlowSettings flow={current} canEdit transcription={noTranscription} onSave={vi.fn()} />
+    );
+    const { rerender } = renderInApp(view(flow));
+    fireEvent.click(screen.getByRole("button", { name: "Ändra inställningar" }));
+    // A step moved: nothing in the form is out of date.
+    rerender(view({ ...flow, draft_revision: flow.draft_revision + 1 }));
+    expect(screen.queryByText("Inställningarna har ändrats någon annanstans")).toBeNull();
+  });
+
+  it("opens the form on request and focuses the field asked for", async () => {
+    const view = (openRequest?: { nonce: number; focus?: "name" | "transcription_model" }) => (
+      <FlowSettings
+        flow={audioFlow}
+        canEdit
+        transcription={resources}
+        onSave={vi.fn()}
+        openRequest={openRequest}
+      />
+    );
+    const { rerender } = renderInApp(view());
+    expect(screen.queryByRole("textbox", { name: /^Namn/ })).toBeNull();
+
+    rerender(view({ nonce: 1, focus: "transcription_model" }));
+    const model = await screen.findByRole("combobox", { name: /Transkriberingsmodell/ });
+    await waitFor(() => expect(document.activeElement).toBe(model));
+
+    // Asked again with the form open: what is typed stays, focus moves.
+    const name = screen.getByRole("textbox", { name: /^Namn/ }) as HTMLInputElement;
+    fireEvent.change(name, { target: { value: "Pågående ändring" } });
+    rerender(view({ nonce: 2, focus: "name" }));
+    await waitFor(() => expect(document.activeElement).toBe(name));
+    expect(name.value).toBe("Pågående ändring");
+  });
+
+  it("goes to the transcription switch when the field asked for is not shown", async () => {
+    renderInApp(
+      <FlowSettings
+        flow={makeFlow()}
+        canEdit
+        transcription={resources}
+        onSave={vi.fn()}
+        openRequest={{ nonce: 1, focus: "speaker_service" }}
+      />
+    );
+    const toggle = await screen.findByRole("switch", { name: /Transkribera ljud/ });
+    await waitFor(() => expect(document.activeElement).toBe(toggle));
+  });
+
+  it("answers a request once, not again when the section comes back", async () => {
+    const request = { nonce: 1 };
+    const view = (
+      <FlowSettings
+        flow={flow}
+        canEdit
+        transcription={noTranscription}
+        onSave={vi.fn()}
+        openRequest={request}
+      />
+    );
+    const { unmount } = renderInApp(view);
+    await screen.findByRole("textbox", { name: /^Namn/ });
+    unmount();
+
+    renderInApp(view);
+    await new Promise(requestAnimationFrame);
+    expect(screen.queryByRole("textbox", { name: /^Namn/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "Ändra inställningar" })).toBeTruthy();
+  });
+
+  it("offers no form on request to someone who cannot edit", async () => {
+    renderInApp(
+      <FlowSettings
+        flow={flow}
+        canEdit={false}
+        transcription={noTranscription}
+        onSave={vi.fn()}
+        openRequest={{ nonce: 1, focus: "name" }}
+      />
+    );
+    await new Promise(requestAnimationFrame);
+    expect(screen.queryByRole("textbox", { name: /^Namn/ })).toBeNull();
+  });
+
+  it("explains an empty run form with an example, and adds the first field", async () => {
+    const { container } = renderInApp(
+      <FlowSettings flow={makeFlow()} canEdit transcription={noTranscription} onSave={vi.fn()} />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Ändra inställningar" }));
+    expect(screen.getByText(/\{\{flow_input\.extern_referens\}\}/)).toBeTruthy();
+    await expectNoAxeViolations(container);
+
+    fireEvent.click(screen.getByRole("button", { name: "Lägg till fält" }));
+    expect(screen.queryByText(/\{\{flow_input\.extern_referens\}\}/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Ta bort fältet Fält 1" }));
+    expect(screen.getByText(/\{\{flow_input\.extern_referens\}\}/)).toBeTruthy();
+    // The row is gone: the add button, now in the empty state, keeps focus in the form.
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole("button", { name: "Lägg till fält" }))
+    );
+  });
 });
