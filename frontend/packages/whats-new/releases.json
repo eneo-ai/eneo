@@ -6,6 +6,9 @@
       "entries": [
         {
           "id": "conversation-settings",
+          "permissions": {
+            "anyOf": ["personal_chat", "assistants", "group_chats"]
+          },
           "type": "improved",
           "area": "chat",
           "title": {

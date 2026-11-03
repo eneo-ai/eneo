@@ -1226,6 +1226,39 @@ describe("ChatService saved conversation choices", () => {
     expect(chat.settingsBusy).toBe(false);
   });
 
+  it("settles once the changes queued behind each other have all landed", async () => {
+    const saves: (() => void)[] = [];
+    const updateSettings = vi
+      .fn()
+      .mockImplementation(
+        (_conversation, settings, revision) =>
+          new Promise((resolve) => saves.push(() => resolve({ settings, revision: revision + 1 })))
+      );
+    const chat = chatService(vi.fn(), {
+      initialConversation: {
+        id: "saved",
+        name: "Saved",
+        messages: [],
+        settings: { revision: 1, settings: { completion_model_id: "model-1" } }
+      },
+      updateSettings
+    });
+    await chat.loadSettings();
+    await chat.settingsSettled();
+
+    void chat.updateSettings({ completion_model_id: "model-2", reasoning_effort: null });
+    void chat.updateSettings({ require_tool_approval: true });
+    let settled = false;
+    void chat.settingsSettled().then(() => (settled = true));
+    await vi.waitFor(() => expect(saves).toHaveLength(1));
+    saves[0]();
+    await vi.waitFor(() => expect(saves).toHaveLength(2));
+    expect(settled).toBe(false);
+    saves[1]();
+    await vi.waitFor(() => expect(settled).toBe(true));
+    expect(chat.settingsBusy).toBe(false);
+  });
+
   it("reports a model pick that has no loaded choices to apply to", async () => {
     const updateSettings = vi.fn();
     const chat = chatService(vi.fn(), {
@@ -1291,6 +1324,51 @@ describe("ChatService saved conversation choices", () => {
     expect(chat.settingsError).toBeNull();
     expect(chat.currentConversation.settings?.revision).toBe(3);
     expect(chat.settings?.require_tool_approval).toBe(true);
+  });
+
+  it("keeps the model when a switch would pause own Skills, and the conversation goes on", async () => {
+    const ask = completedAsk();
+    const refusal = new EneoError("Would pause own Skills", "RESPONSE", 400, 9080, {
+      details: { reason: "on_demand_unavailable", detail: "model_lacks_tool_calling" }
+    });
+    const updateSettings = vi
+      .fn()
+      .mockImplementation(async (_conversation, settings, revision) => ({
+        settings,
+        revision: revision + 1
+      }))
+      .mockRejectedValueOnce(refusal)
+      .mockRejectedValueOnce(refusal);
+    const chat = chatService(vi.fn(), {
+      ask,
+      initialConversation: {
+        id: "saved",
+        name: "Saved",
+        messages: [],
+        settings: { revision: 2, settings: { completion_model_id: "model-1" } }
+      },
+      updateSettings
+    });
+    await chat.loadSettings();
+    await chat.updateSettings({ completion_model_id: "model-2", reasoning_effort: null });
+    expect(chat.settingsRefusal).toBe(refusal);
+    expect(chat.settingsError).toBeNull();
+    expect(chat.settings?.completion_model_id).toBe("model-1");
+    await chat.askQuestion("hello");
+    expect(ask).toHaveBeenCalledOnce();
+    // The settings read after the turn retires the notice.
+    expect(chat.settingsRefusal).toBeNull();
+
+    await chat.updateSettings({ completion_model_id: "model-2", reasoning_effort: null });
+    expect(chat.settingsRefusal).toBe(refusal);
+    // So does the next change, refused or not.
+    await chat.updateSettings({ require_tool_approval: true });
+    expect(chat.settingsRefusal).toBeNull();
+    expect(updateSettings).toHaveBeenLastCalledWith(
+      expect.anything(),
+      { completion_model_id: "model-1", require_tool_approval: true },
+      2
+    );
   });
 });
 

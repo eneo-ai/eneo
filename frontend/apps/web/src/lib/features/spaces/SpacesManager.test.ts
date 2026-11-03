@@ -89,6 +89,38 @@ describe("SpacesManager.updateDefaultAssistantSkills", () => {
     expect(get(m.state.currentSpace).default_assistant).toMatchObject({ name: "Saved" });
   });
 
+  it("reads a conversation's model when the save's turn comes, before building the list", async () => {
+    const calls: unknown[] = [];
+    const m = manager(async (args) => {
+      calls.push(args);
+      return { id: "assistant-1", completion_model: modelA };
+    });
+    const order: string[] = [];
+    let model = "model-before";
+
+    const saved = m.updateDefaultAssistantSkills(
+      { id: "assistant-1" },
+      async () => {
+        order.push("bindings");
+        return skillBindings;
+      },
+      async () => {
+        order.push("model");
+        return model;
+      }
+    );
+    model = "model-after";
+    await saved;
+
+    expect(order).toEqual(["model", "bindings"]);
+    expect(calls).toEqual([
+      {
+        assistant: { id: "assistant-1" },
+        update: { skill_bindings: skillBindings, conversation_model_id: "model-after" }
+      }
+    ]);
+  });
+
   it("rejects to the caller, which owns the rollback, and still settles the queue", async () => {
     const m = manager(() => Promise.reject(new Error("refused")));
 

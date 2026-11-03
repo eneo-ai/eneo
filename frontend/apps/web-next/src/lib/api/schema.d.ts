@@ -19495,6 +19495,11 @@ export interface components {
       rerank_model_id?: string | null;
       /** Skill Bindings */
       skill_bindings?: components["schemas"]["AssistantSkillBindingInput"][] | null;
+      /**
+       * Conversation Model Id
+       * @description Personal chat only: the model of the conversation own Skills are changed from. The change is judged against it, as that conversation's turns run them, instead of the assistant's model, which stays as it is. A model the personal chat can no longer use is ignored. Only with skill_bindings and no other field.
+       */
+      conversation_model_id?: string | null;
     };
     /** PartialCompletionModelUpdate */
     PartialCompletionModelUpdate: {
@@ -52186,7 +52191,10 @@ export interface operations {
   };
   get_assistant_skill_configuration_api_v1_spaces__space_id__assistants__assistant_id__skills_configuration__get: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Personal chat only: the model of a conversation, to show the configuration as that conversation's turns run it. A model the personal chat can no longer use is ignored. */
+        conversation_model_id?: string | null;
+      };
       header?: never;
       path: {
         space_id: string;
@@ -52203,6 +52211,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["AssistantSkillConfigurationPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */

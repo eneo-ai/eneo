@@ -34,6 +34,9 @@ const spies = vi.hoisted(() => ({
   /** The conversation's choices re-read for a saved session wait for this, or fail. */
   holdResolve: null as Promise<void> | null,
   failResolve: false,
+  /** The same for a new conversation's choices. */
+  holdDraftResolve: null as Promise<void> | null,
+  failDraftResolve: false,
   resolves: [] as (string | null)[],
   /** The conversation's model as the backend resolves it: gone when set. */
   modelUnavailable: false
@@ -171,8 +174,10 @@ vi.mock("@/lib/api/browser", () => ({
       ) => {
         if (path.endsWith("/settings/resolve/")) {
           spies.resolves.push(init?.body?.session_id ?? null);
-          if (init?.body?.session_id && spies.holdResolve) await spies.holdResolve;
-          if (init?.body?.session_id && spies.failResolve)
+          const saved = Boolean(init?.body?.session_id);
+          const hold = saved ? spies.holdResolve : spies.holdDraftResolve;
+          if (hold) await hold;
+          if (saved ? spies.failResolve : spies.failDraftResolve)
             return {
               data: undefined,
               error: { message: "Gone" },
@@ -234,6 +239,8 @@ afterEach(() => {
   spies.holdUpload = null;
   spies.holdResolve = null;
   spies.failResolve = false;
+  spies.holdDraftResolve = null;
+  spies.failDraftResolve = false;
   spies.resolves.length = 0;
   spies.modelUnavailable = false;
   spies.contextStream = null;
@@ -271,7 +278,7 @@ function Harness({
 
 /**
  * The conversation's choices are in (the tools fieldset is enabled and not
- * busy): until then Send is not disabled but holds the question back.
+ * busy): until then a question sent waits for them.
  */
 async function settingsLoaded() {
   await waitFor(() =>
@@ -320,6 +327,98 @@ describe("ChatView streaming an answer", () => {
       release();
       await save;
     }
+  });
+
+  it("sends a question asked while the conversation's choices load once they are in, with them", async () => {
+    spies.mode = "answer";
+    let release!: () => void;
+    spies.holdDraftResolve = new Promise((resolve) => {
+      release = resolve;
+    });
+    renderInApp(<Harness />);
+    const textarea = screen.getByRole("textbox", { name: /^Fråga / }) as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "Vilken gräns gäller?" } });
+    fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
+
+    // The question left the composer and waits in the conversation; nothing refused it.
+    const docked = screen.getByRole<HTMLTextAreaElement>("textbox", { name: /^Fråga / });
+    expect(docked.value).toBe("");
+    expect(docked.getAttribute("aria-invalid")).not.toBe("true");
+    expect(
+      within(screen.getByRole("log", { name: "Konversation" })).getByText("Vilken gräns gäller?")
+    ).toBeTruthy();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(spies.sent).toHaveLength(0);
+    expect(spies.announce).not.toHaveBeenCalled();
+
+    await act(async () => release());
+    await waitFor(() => expect(spies.sent).toHaveLength(1));
+    expect(spies.sent[0]).toMatchObject({
+      text: "Vilken gräns gäller?",
+      body: {
+        assistant_id: "assistant-1",
+        session_id: null,
+        settings: { require_tool_approval: false }
+      }
+    });
+    await waitFor(() => expect(spies.announce).toHaveBeenCalledWith("Svaret är klart"));
+  });
+
+  it("puts a question asked while the choices load back when they cannot be read", async () => {
+    spies.mode = "answer";
+    let release!: () => void;
+    spies.holdDraftResolve = new Promise((resolve) => {
+      release = resolve;
+    });
+    spies.failDraftResolve = true;
+    renderInApp(<Harness />);
+    const textarea = screen.getByRole("textbox", { name: /^Fråga / }) as HTMLTextAreaElement;
+    textarea.focus();
+    fireEvent.change(textarea, { target: { value: "Vilken gräns gäller?" } });
+    fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
+    const docked = screen.getByRole<HTMLTextAreaElement>("textbox", { name: /^Fråga / });
+    expect(docked.value).toBe("");
+    // A browser leaves focus on the button that was pressed, now Stop.
+    screen.getByRole("button", { name: "Stoppa generering" }).focus();
+    expect(document.activeElement).not.toBe(docked);
+
+    await act(async () => release());
+    const notice = "Inställningarna kunde inte sparas eller hämtas.";
+    expect(await screen.findByText(notice)).toBeTruthy();
+    // A first question goes back to the start state, its draft and the focus in that composer.
+    await waitFor(() => expect(screen.queryByRole("log")).toBeNull());
+    const field = screen.getByRole<HTMLTextAreaElement>("textbox", { name: /^Fråga / });
+    expect(field.value).toBe("Vilken gräns gäller?");
+    expect(document.activeElement).toBe(field);
+    expect(spies.sent).toHaveLength(0);
+    // The notice says it once, as it appears.
+    expect(spies.announce.mock.calls.filter(([text]) => text === notice)).toHaveLength(1);
+    expect(spies.announce).not.toHaveBeenCalledWith("Assistenten skriver ett svar");
+  });
+
+  it("gives the start composer the focus a first question's conversation had when it is taken back", async () => {
+    let release!: () => void;
+    spies.holdDraftResolve = new Promise((resolve) => {
+      release = resolve;
+    });
+    spies.failDraftResolve = true;
+    renderInApp(<Harness />);
+    const textarea = screen.getByRole("textbox", { name: /^Fråga / });
+    textarea.focus();
+    fireEvent.change(textarea, { target: { value: "Vilken gräns gäller?" } });
+    fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
+    // The user reads the waiting question in the conversation.
+    const log = screen.getByRole("log", { name: "Konversation" });
+    log.focus();
+    expect(document.activeElement).toBe(log);
+
+    await act(async () => release());
+    await waitFor(() => expect(screen.queryByRole("log")).toBeNull());
+    const field = screen.getByRole<HTMLTextAreaElement>("textbox", { name: /^Fråga / });
+    expect(field.value).toBe("Vilken gräns gäller?");
+    expect(document.activeElement).toBe(field);
   });
 
   it("renders the answer, announces it once, reports the session and asks for a title", async () => {
@@ -940,5 +1039,268 @@ describe("ChatView when generation fails", () => {
     });
     expect(spies.sent).toHaveLength(0);
     vi.unstubAllGlobals();
+  });
+
+  const pdfContext = () =>
+    testAppContext({
+      limits: {
+        attachments: {
+          formats: [
+            { mimetype: "application/pdf", extensions: ["pdf"], size: 10_000_000, vision: false }
+          ]
+        }
+      }
+    });
+
+  it("keeps a first question in the conversation, and the focus in its composer, from its uploads through a Skills save", async () => {
+    vi.stubGlobal(
+      "URL",
+      Object.assign(URL, { createObjectURL: () => "blob:policy", revokeObjectURL: vi.fn() })
+    );
+    spies.mode = "answer";
+    spies.holdUpload = () => {};
+    let release!: () => void;
+    const saving = new Promise<void>((resolve) => (release = resolve));
+    let save = Promise.resolve();
+    try {
+      const { container } = renderInApp(<Harness />, { appContext: pdfContext() });
+      const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+      fireEvent.change(input, {
+        target: { files: [new File(["%PDF"], "Policy.pdf", { type: "application/pdf" })] }
+      });
+      await screen.findByRole("list", { name: "1 bilaga bifogad" });
+      await ask("Sammanfatta policyn");
+      await screen.findByText("Laddar upp bilagor (0 av 1)...");
+      const composer = screen.getByRole("textbox", { name: /^Fråga / });
+      expect(document.activeElement).toBe(composer);
+
+      // A Skills change is being saved when the upload lands: the question waits on, in view.
+      save = queuePartnerUpdate(() => saving);
+      await act(async () => {
+        spies.holdUpload!({ id: "file-1", name: "Policy.pdf" });
+      });
+      const log = screen.getByRole("log", { name: "Konversation" });
+      expect(within(log).getByText("Sammanfatta policyn")).toBeTruthy();
+      // Its file is shown, but not as a control: the stored message replaces it.
+      expect(within(log).getByText("Policy.pdf")).toBeTruthy();
+      expect(within(log).queryByRole("button", { name: /Policy\.pdf/ })).toBeNull();
+      expect(screen.queryByText(/Laddar upp bilagor/)).toBeNull();
+      expect(document.activeElement).toBe(composer);
+      expect(spies.sent).toHaveLength(0);
+
+      await act(async () => {
+        release();
+        await save;
+      });
+      await waitFor(() => expect(spies.sent).toHaveLength(1));
+      expect(spies.sent[0]?.body).toMatchObject({ files: [{ id: "file-1" }] });
+      expect(await within(log).findByText("Gränsen är 700 000 kr.")).toBeTruthy();
+      expect(within(log).getAllByText("Sammanfatta policyn")).toHaveLength(1);
+      expect(document.activeElement).toBe(composer);
+    } finally {
+      // The save queue is module state: never leave it waiting for the next test.
+      release();
+      await save;
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("takes a first question back to the start, with the focus, its file and the notice said again, when its choices still cannot be read", async () => {
+    vi.stubGlobal(
+      "URL",
+      Object.assign(URL, { createObjectURL: () => "blob:policy", revokeObjectURL: vi.fn() })
+    );
+    spies.failDraftResolve = true;
+    spies.holdUpload = () => {};
+    const failed = "Inställningarna kunde inte sparas eller hämtas.";
+    const said = () => spies.announce.mock.calls.filter(([text]) => text === failed).length;
+    try {
+      const { container } = renderInApp(<Harness />, { appContext: pdfContext() });
+      await screen.findByText(failed);
+      expect(said()).toBe(1);
+      const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+      fireEvent.change(input, {
+        target: { files: [new File(["%PDF"], "Policy.pdf", { type: "application/pdf" })] }
+      });
+      await screen.findByRole("list", { name: "1 bilaga bifogad" });
+
+      // Read again, still failing; the question goes while it is read, not refused.
+      let read!: () => void;
+      spies.holdDraftResolve = new Promise<void>((resolve) => (read = resolve));
+      fireEvent.click(screen.getByRole("button", { name: "Läs in sparade val" }));
+      const start = screen.getByRole("textbox", { name: /^Fråga / });
+      start.focus();
+      fireEvent.change(start, { target: { value: "Sammanfatta policyn" } });
+      fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
+      await screen.findByText("Laddar upp bilagor (0 av 1)...");
+      const docked = screen.getByRole("textbox", { name: /^Fråga / });
+      expect(document.activeElement).toBe(docked);
+
+      // Uploaded while the read runs: it waits on in the conversation.
+      await act(async () => {
+        spies.holdUpload!({ id: "file-1", name: "Policy.pdf" });
+      });
+      expect(within(screen.getByRole("log")).getByText("Sammanfatta policyn")).toBeTruthy();
+      expect(document.activeElement).toBe(docked);
+
+      await act(async () => read());
+      await waitFor(() => expect(screen.queryByRole("log")).toBeNull());
+      const back = screen.getByRole<HTMLTextAreaElement>("textbox", { name: /^Fråga / });
+      expect(back.value).toBe("Sammanfatta policyn");
+      expect(document.activeElement).toBe(back);
+      expect(screen.getByRole("button", { name: "Ta bort Policy.pdf" })).toBeTruthy();
+      // The notice reads as it did, so it is said again for the question it refused.
+      expect(said()).toBe(2);
+      expect(spies.sent).toHaveLength(0);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("gives a stopped question back with the group chat member it named", async () => {
+    let release!: () => void;
+    const save = queuePartnerUpdate(() => new Promise<void>((resolve) => (release = resolve)));
+    try {
+      renderInApp(
+        <Harness
+          chatPartner={{
+            type: "group-chat",
+            id: "group-1",
+            name: "Upphandlingsgruppen",
+            mentionableAssistants: [{ id: "assistant-9", handle: "juristen" }]
+          }}
+        />
+      );
+      fireEvent.click(screen.getByRole("combobox", { name: "Nämn" }));
+      fireEvent.click(await screen.findByRole("option", { name: "@juristen" }));
+      await ask("Är avtalet förenligt med LOU?");
+      fireEvent.click(await screen.findByRole("button", { name: "Stoppa generering" }));
+
+      await waitFor(() =>
+        expect(
+          (screen.getByRole("textbox", { name: /^Fråga / }) as HTMLTextAreaElement).value
+        ).toBe("Är avtalet förenligt med LOU?")
+      );
+      expect(screen.getByRole("combobox", { name: "Nämn" }).textContent).toContain("@juristen");
+    } finally {
+      // The save queue is module state: never leave it waiting for the next test.
+      release();
+      await save;
+    }
+  });
+
+  it("leaves a draft typed while a question waited without the member the stopped question named", async () => {
+    let release!: () => void;
+    const save = queuePartnerUpdate(() => new Promise<void>((resolve) => (release = resolve)));
+    try {
+      renderInApp(
+        <Harness
+          chatPartner={{
+            type: "group-chat",
+            id: "group-1",
+            name: "Upphandlingsgruppen",
+            mentionableAssistants: [{ id: "assistant-9", handle: "juristen" }]
+          }}
+        />
+      );
+      fireEvent.click(screen.getByRole("combobox", { name: "Nämn" }));
+      fireEvent.click(await screen.findByRole("option", { name: "@juristen" }));
+      await ask("Är avtalet förenligt med LOU?");
+      fireEvent.change(screen.getByRole("textbox", { name: /^Fråga / }), {
+        target: { value: "En fråga till hela gruppen" }
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Stoppa generering" }));
+
+      // The newer draft stays, and nobody it did not name is asked.
+      await waitFor(() => expect(screen.queryByRole("log")).toBeNull());
+      expect((screen.getByRole("textbox", { name: /^Fråga / }) as HTMLTextAreaElement).value).toBe(
+        "En fråga till hela gruppen"
+      );
+      expect(screen.getByRole("combobox", { name: "Nämn" }).textContent).toContain("Omnämnanden");
+    } finally {
+      // The save queue is module state: never leave it waiting for the next test.
+      release();
+      await save;
+    }
+  });
+
+  it("keeps the member picked for a draft beside a retry that is stopped while it waits", async () => {
+    const group: ChatPartner = {
+      type: "group-chat",
+      id: "group-1",
+      name: "Upphandlingsgruppen",
+      mentionableAssistants: [{ id: "assistant-9", handle: "juristen" }]
+    };
+    renderInApp(<Harness chatPartner={group} />);
+    await ask("Vilken gräns gäller?");
+    await screen.findByRole("button", { name: "Försök igen" });
+    // A new draft, for the member it names, while the failed question waits for a retry.
+    fireEvent.change(screen.getByRole("textbox", { name: /^Fråga / }), {
+      target: { value: "Gäller det kommuner?" }
+    });
+    fireEvent.click(screen.getByRole("combobox", { name: "Nämn" }));
+    fireEvent.click(await screen.findByRole("option", { name: "@juristen" }));
+
+    let release!: () => void;
+    const save = queuePartnerUpdate(() => new Promise<void>((resolve) => (release = resolve)));
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "Försök igen" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Stoppa generering" }));
+
+      await waitFor(() => expect(screen.queryByRole("log")).toBeNull());
+      expect((screen.getByRole("textbox", { name: /^Fråga / }) as HTMLTextAreaElement).value).toBe(
+        "Gäller det kommuner?"
+      );
+      expect(screen.getByRole("combobox", { name: "Nämn" }).textContent).toContain("@juristen");
+    } finally {
+      // The save queue is module state: never leave it waiting for the next test.
+      release();
+      await save;
+    }
+  });
+
+  it("says the notice again when a question that waited for its uploads is taken back over it", async () => {
+    vi.stubGlobal(
+      "URL",
+      Object.assign(URL, { createObjectURL: () => "blob:policy", revokeObjectURL: vi.fn() })
+    );
+    spies.holdUpload = () => {};
+    let read!: () => void;
+    spies.holdDraftResolve = new Promise<void>((resolve) => (read = resolve));
+    spies.failDraftResolve = true;
+    const failed = "Inställningarna kunde inte sparas eller hämtas.";
+    const said = () => spies.announce.mock.calls.filter(([text]) => text === failed).length;
+    try {
+      const { container } = renderInApp(<Harness />, { appContext: pdfContext() });
+      const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+      fireEvent.change(input, {
+        target: { files: [new File(["%PDF"], "Policy.pdf", { type: "application/pdf" })] }
+      });
+      await screen.findByRole("list", { name: "1 bilaga bifogad" });
+      // Asked while the choices are first read: nothing refuses it yet.
+      const start = screen.getByRole("textbox", { name: /^Fråga / });
+      start.focus();
+      fireEvent.change(start, { target: { value: "Sammanfatta policyn" } });
+      fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
+      await screen.findByText("Laddar upp bilagor (0 av 1)...");
+
+      // The read fails while the file uploads: the notice says so as it appears.
+      await act(async () => read());
+      await screen.findByText(failed);
+      expect(said()).toBe(1);
+
+      // The upload lands later, and the question is taken back over that notice.
+      await act(async () => {
+        spies.holdUpload!({ id: "file-1", name: "Policy.pdf" });
+      });
+      await waitFor(() => expect(screen.queryByRole("log")).toBeNull());
+      expect((screen.getByRole("textbox", { name: /^Fråga / }) as HTMLTextAreaElement).value).toBe(
+        "Sammanfatta policyn"
+      );
+      expect(said()).toBe(2);
+      expect(spies.sent).toHaveLength(0);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

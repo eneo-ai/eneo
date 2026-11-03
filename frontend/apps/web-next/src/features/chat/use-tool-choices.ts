@@ -1,15 +1,34 @@
-import { useAppContext } from "@/components/providers/app-context";
+import { useAppContext, type AppContextValue } from "@/components/providers/app-context";
 import type { Capability } from "@/features/capabilities/capabilities";
+import type { Schema } from "@/lib/api/models";
 import { useConversationSettings } from "./conversation-settings";
+
+/** The capabilities the user may use, as this conversation's settings choose them. */
+function permittedCapabilities(
+  resolution: Schema<"ConversationSettingsResolution"> | null,
+  can: AppContextValue["can"]
+) {
+  return (resolution?.capabilities ?? []).filter((capability) => can(capability.purpose));
+}
+
+/** The capabilities the user may use that this conversation has switched off. */
+export function disabledCapabilitiesOf(
+  resolution: Schema<"ConversationSettingsResolution"> | null,
+  can: AppContextValue["can"]
+) {
+  return new Set(
+    permittedCapabilities(resolution, can)
+      .filter(({ selected }) => !selected)
+      .map(({ purpose }) => purpose)
+  );
+}
 
 export function useToolChoices() {
   const { can } = useAppContext();
   const { resolution, update } = useConversationSettings();
   const settings = resolution?.settings;
   const modelSupportsTools = resolution?.supports_tool_calling ?? false;
-  const allCapabilities = (resolution?.capabilities ?? []).filter((capability) =>
-    can(capability.purpose)
-  );
+  const allCapabilities = permittedCapabilities(resolution, can);
   const capabilities = allCapabilities.map((capability) => ({
     ...capability,
     reason: capability.reason ?? null
@@ -19,9 +38,7 @@ export function useToolChoices() {
     description: server.description ?? null,
     icon_url: server.icon_url ?? null
   }));
-  const disabledCapabilities = new Set(
-    allCapabilities.filter(({ selected }) => !selected).map(({ purpose }) => purpose)
-  );
+  const disabledCapabilities = disabledCapabilitiesOf(resolution, can);
   const disabledMcpServerIds = new Set(
     mcpServers.filter(({ selected }) => !selected).map(({ id }) => id)
   );

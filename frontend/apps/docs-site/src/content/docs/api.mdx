@@ -174,7 +174,20 @@ settings do not replace them.
 - `PATCH /api/v1/conversations/{session_id}/settings/` takes
   `{ "expected_revision": 0, "settings": { ... } }`. Revision zero initializes a
   conversation without saved settings; subsequent writes use the current revision.
-  A concurrent change returns `409` instead of overwriting it.
+  A concurrent change returns `409` instead of overwriting it. In the personal
+  chat, a model change that would pause the user's own Skills running in the
+  conversation returns `400` with error code `9080` and the reason in
+  `details.reason` and `details.detail`; nothing is saved. Skills that are
+  already paused never block a change.
+- The personal chat's own Skills run on the conversation's model. Pass
+  `conversation_model_id` to
+  `GET /api/v1/spaces/{space_id}/assistants/{assistant_id}/skills/configuration/`
+  to read the configuration as that model runs it, and with `skill_bindings` to
+  `POST /api/v1/assistants/{id}/` to judge a change against that model instead
+  of the assistant's. A model the personal chat can no longer use is ignored,
+  and the assistant's model judges, as outside a conversation. The `POST` is
+  refused with `400` without `skill_bindings` or together with any other
+  field, and both calls are refused with `400` for any other assistant.
 - Preflight and sending accept `settings_revision: 0` for an existing conversation
   that has no saved settings yet. Sending checks that observed revision before
   initializing revision one. A concurrent initialization returns `409` to a

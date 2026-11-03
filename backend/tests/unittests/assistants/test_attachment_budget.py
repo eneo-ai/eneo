@@ -1384,6 +1384,24 @@ async def test_skill_configuration_projects_saved_modes_and_exact_runtime(
 
 
 @pytest.mark.asyncio
+async def test_skill_configuration_takes_a_conversation_model_only_in_the_personal_chat():
+    assistant = _assistant_with_runtime_model()
+    space = MagicMock()
+    space.is_personal.return_value = False
+    space.get_assistant.return_value = assistant
+    service = _service()
+    service.space_repo.get_space_by_assistant.return_value = space
+    service.skill_service.list_assistant_binding_projections.return_value = []
+
+    with pytest.raises(BadRequestException, match="only be selected for personal chat"):
+        await service.get_skill_configuration(
+            space_id=assistant.space_id,
+            assistant_id=assistant.id,
+            conversation_model_id=assistant.completion_model.id,
+        )
+
+
+@pytest.mark.asyncio
 async def test_personal_chat_configuration_shows_both_layers_and_the_decision():
     organisation = replace(
         _resolved_skill(

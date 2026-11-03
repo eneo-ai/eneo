@@ -10,14 +10,27 @@ import { EneoApiError, unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import type { ChatPartner } from "@/lib/chat/types";
 
+/** ErrorCodes.PERSONAL_SKILLS_REJECTED: the change would pause the person's own Skills. */
+export const PERSONAL_SKILLS_REJECTED = 9080;
+
 type Settings = Schema<"ConversationSettings">;
 type Resolution = Schema<"ConversationSettingsResolution">;
 type State = Schema<"ConversationSettingsState">;
+
+/** The settings as the last read or save left them, for work that runs between renders. */
+export type ConversationSettingsSnapshot = { resolution: Resolution | null; error: unknown };
 
 type ConversationSettingsContext = {
   resolution: Resolution | null;
   busy: boolean;
   error: unknown;
+  /** A change refused because it would pause the person's own Skills: nothing was saved. */
+  refusal: EneoApiError | null;
+  /** Whether a read or save that shows as busy has yet to finish. */
+  pending: () => boolean;
+  snapshot: () => ConversationSettingsSnapshot;
+  /** Resolves once every queued read and save has run, with what they left. */
+  settled: () => Promise<ConversationSettingsSnapshot>;
   hasMessages: boolean;
   running: boolean;
   setRunning: (running: boolean) => void;
@@ -65,10 +78,12 @@ export function ConversationSettingsProvider({
   const [resolution, setResolution] = useState<Resolution | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState<unknown>(null);
+  const [refusal, setRefusal] = useState<EneoApiError | null>(null);
   const [hasMessages, setHasMessages] = useState(hasHistory);
   const [running, setRunning] = useState(false);
   const sessionId = useRef(initialSessionId ?? null);
   const current = useRef<Resolution | null>(null);
+  const failure = useRef<unknown>(null);
   // Reads and saves run one after another, each on top of the latest
   // revision, so a change made during a save is sent after it, not dropped.
   const chain = useRef<Promise<void>>(Promise.resolve());
@@ -86,6 +101,15 @@ export function ConversationSettingsProvider({
     if (!mounted.current) return;
     current.current = next;
     setResolution(next);
+  }
+
+  function fail(cause: unknown) {
+    failure.current = cause;
+    if (mounted.current) setError(cause);
+  }
+
+  function refuse(cause: EneoApiError | null) {
+    if (mounted.current) setRefusal(cause);
   }
 
   // The browser's start choices follow what the user set up: a change made
@@ -148,11 +172,10 @@ export function ConversationSettingsProvider({
       readSettings().then(
         (next) => {
           install(next);
-          if (mounted.current) setError(null);
+          fail(null);
+          refuse(null);
         },
-        (cause: unknown) => {
-          if (mounted.current) setError(cause);
-        }
+        (cause: unknown) => fail(cause)
       )
     );
   }
@@ -181,7 +204,8 @@ export function ConversationSettingsProvider({
     if (running) return Promise.resolve();
     return enqueue(async () => {
       if (!current.current || current.current.settings_compatible === false) return;
-      if (mounted.current) setError(null);
+      fail(null);
+      refuse(null);
       const settings = withPatch(current.current.settings, patch);
       try {
         if (sessionId.current) {
@@ -201,9 +225,24 @@ export function ConversationSettingsProvider({
         install(next);
         remember(next);
       } catch (cause) {
-        if (mounted.current) setError(cause);
+        if (cause instanceof EneoApiError && cause.code === PERSONAL_SKILLS_REJECTED) refuse(cause);
+        else fail(cause);
       }
     });
+  }
+
+  function snapshot() {
+    return { resolution: current.current, error: failure.current };
+  }
+
+  async function settled() {
+    // Work queued while waiting (a reload after a conflict) is waited for too.
+    let tail: Promise<void>;
+    do {
+      tail = chain.current;
+      await tail;
+    } while (tail !== chain.current);
+    return snapshot();
   }
 
   function adoptSession(id: string, state: State | null | undefined) {
@@ -228,6 +267,10 @@ export function ConversationSettingsProvider({
         resolution,
         busy,
         error,
+        refusal,
+        pending: () => saving.current > 0,
+        snapshot,
+        settled,
         hasMessages,
         running,
         setRunning,
@@ -247,6 +290,29 @@ export function useConversationSettings() {
   const context = useContext(Context);
   if (!context) throw new Error("Conversation settings require a conversation provider.");
   return context;
+}
+
+/**
+ * The model a conversation's turns run on: null while its settings load,
+ * undefined outside a conversation or when it has none to run on.
+ */
+export function useConversationModel(): string | null | undefined {
+  const context = useContext(Context);
+  if (!context) return undefined;
+  if (context.resolution) return context.resolution.effective_model?.id ?? undefined;
+  // A failed read leaves nothing to wait for.
+  return context.error ? undefined : null;
+}
+
+/**
+ * Waits for the conversation's queued reads and saves, then gives the model
+ * its turns run on (see useConversationModel); undefined outside a conversation.
+ */
+export function useSettledConversationModel(): (() => Promise<string | undefined>) | undefined {
+  const context = useContext(Context);
+  if (!context) return undefined;
+  const { settled } = context;
+  return async () => (await settled()).resolution?.effective_model?.id ?? undefined;
 }
 
 /** Interactive views outside a conversation always ask before executing a tool. */

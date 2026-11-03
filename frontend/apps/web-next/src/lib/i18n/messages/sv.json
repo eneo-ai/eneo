@@ -5249,6 +5249,7 @@
   "conversation_settings_model_unavailable": "Den sparade modellen är inte tillgänglig",
   "conversation_settings_loading": "Konversationens inställningar läses fortfarande in.",
   "conversation_settings_incompatible": "Den här appversionen stöder inte alla sparade inställningar. Du kan läsa historiken, men behöver en kompatibel appversion för att fortsätta chatta eller ändra inställningar.",
+  "conversation_settings_model_kept_for_skills": "Modellen byttes inte: dina egna skills skulle då pausas i den här konversationen.",
   "personal_chat_skills_button": "Skills",
   "personal_chat_skills_button_label": "Skills i din personliga chatt: {count}",
   "personal_chat_skills_scope": "Gäller alla dina personliga chattar",

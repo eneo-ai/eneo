@@ -184,15 +184,23 @@ function SpacesManager(data: SpacesManagerParams) {
    * rejects to its caller, which shows the choice at once and rolls it back
    * itself; the queue still settles. The assistant is passed in, not read
    * when the save runs, so leaving the personal space cannot redirect it.
+   * A change made in a conversation is judged against that conversation's
+   * model, as its turns run the Skills; `conversationModelId` gives it when
+   * the save's turn comes, before the list is built.
    */
   function updateDefaultAssistantSkills(
     assistant: { id: string },
-    skillBindings: () => Promise<AssistantSkillBindingInput[]>
+    skillBindings: () => Promise<AssistantSkillBindingInput[]>,
+    conversationModelId?: () => Promise<string | undefined>
   ): Promise<void> {
     const run = async () => {
+      const conversation_model_id = await conversationModelId?.();
       const updatedAssistant = await eneo.assistants.update({
         assistant,
-        update: { skill_bindings: await skillBindings() }
+        update: {
+          skill_bindings: await skillBindings(),
+          ...(conversation_model_id ? { conversation_model_id } : {})
+        }
       });
       currentSpace.update(($currentSpace) => {
         if ($currentSpace.default_assistant?.id === assistant.id) {

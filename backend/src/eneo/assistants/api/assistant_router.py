@@ -778,6 +778,7 @@ async def update_assistant(
         rerank_model_id=rerank_model_id,
         skill_binding_intents=skill_binding_intents,
         document_template=document_template,
+        conversation_model_id=assistant.conversation_model_id,
     )
 
     changes, change_summary = _build_assistant_update_changes(

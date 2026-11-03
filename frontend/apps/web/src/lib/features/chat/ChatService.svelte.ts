@@ -11,6 +11,7 @@ import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
 import { createClassContext } from "$lib/core/helpers/createClassContext";
 import { m } from "$lib/paraglide/messages";
 import { selectEffectiveChatModel } from "$lib/features/chat/selectEffectiveChatModel";
+import { isPersonalSkillsRejection } from "$lib/features/skills/personalChatSkills";
 import {
   type ConversationSparse,
   type ConversationSettings,
@@ -150,6 +151,9 @@ export class ChatService {
   #settingsPending = $state(0);
   settingsBusy = $derived(this.#settingsPending > 0);
   settingsError = $state<unknown>(null);
+  // A change the server refused because it would pause the person's own
+  // Skills. Nothing was saved, so the conversation stays usable.
+  settingsRefusal = $state<EneoError | null>(null);
   #settingsEnabled = false;
   #draftOwner?: { tenantId: string; userId: string };
 
@@ -403,6 +407,12 @@ export class ChatService {
     this.#settingsQueue = null;
     this.#settingsPending = 0;
     this.settingsError = null;
+    this.settingsRefusal = null;
+  }
+
+  /** Settles once every queued load and save of the conversation's settings has. */
+  async settingsSettled(): Promise<void> {
+    while (this.#settingsQueue) await this.#settingsQueue;
   }
 
   #queueSettings(conversation: Conversation, task: () => Promise<void>): Promise<void> {
@@ -479,6 +489,7 @@ export class ChatService {
         }
         if (conversation !== this.currentConversation) return;
         this.settingsError = null;
+        this.settingsRefusal = null;
         this.#setResolvedSettings(conversation, resolution);
       } catch (error) {
         if (conversation === this.currentConversation) this.settingsError = error;
@@ -497,6 +508,7 @@ export class ChatService {
       return;
     this.#pendingUpdates = [...this.#pendingUpdates, update];
     this.settingsError = null;
+    this.settingsRefusal = null;
     await this.#queueSettings(conversation, async () => {
       try {
         // An earlier save of this conversation failed: its revision is stale
@@ -530,7 +542,9 @@ export class ChatService {
         this.#setResolvedSettings(conversation, resolution);
         this.#rememberDraft(resolution);
       } catch (error) {
-        if (conversation === this.currentConversation) this.settingsError = error;
+        if (conversation !== this.currentConversation) return;
+        if (isPersonalSkillsRejection(error)) this.settingsRefusal = error;
+        else this.settingsError = error;
       } finally {
         this.#pendingUpdates = this.#pendingUpdates.filter((pending) => pending !== update);
       }

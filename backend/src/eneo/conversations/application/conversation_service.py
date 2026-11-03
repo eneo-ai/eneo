@@ -377,8 +377,15 @@ class ConversationService:
         assistant_id: "UUID | None",
         group_chat_id: "UUID | None",
         previous_settings: ConversationSettings | None = None,
+        running_settings: ConversationSettings | None = None,
         context: _AssistantContext | None = None,
     ) -> None:
+        """Refuse choices the conversation's target cannot take.
+
+        ``running_settings`` are the choices a saved conversation without saved
+        ones runs on (its defaults); a model switch away from them is judged
+        like a switch away from saved choices.
+        """
         if group_chat_id is not None:
             await self.group_chat_service.get_group_chat(group_chat_id)
             if (
@@ -402,12 +409,24 @@ class ConversationService:
             ) = await self.assistant_service.get_assistant_with_effective_config(
                 assistant_id
             )
-        if settings.completion_model_id is not None:
-            space = (
+        switched_from = (
+            previous_settings if previous_settings is not None else running_settings
+        )
+        model_switched = (
+            switched_from is not None
+            and settings.completion_model_id != switched_from.completion_model_id
+        )
+        space = (
+            (
                 context.space
                 if context is not None
                 else await self.space_service.get_space_by_assistant(assistant_id)
             )
+            if settings.completion_model_id is not None or model_switched
+            else None
+        )
+        if settings.completion_model_id is not None:
+            assert space is not None
             model = self.assistant_service.resolve_personal_chat_model_override(
                 space=space,
                 assistant=assistant,
@@ -418,6 +437,27 @@ class ConversationService:
             model = select_effective_completion_model(
                 current_model=assistant.completion_model, effective_config=config
             )
+        if model_switched:
+            assert space is not None and switched_from is not None
+            # A saved conversation's switch may not pause the person's own
+            # Skills that run in it now, as a switch of the assistant's may not.
+            # Choices that cannot run (an unavailable model) run no Skills.
+            after = self._choice_model(
+                settings, space=space, assistant=assistant, config=config
+            )
+            if after is not None:
+                await self.assistant_service.assert_model_switch_keeps_own_skills(
+                    space=space,
+                    assistant=assistant,
+                    effective_config=config,
+                    before=self._choice_model(
+                        switched_from,
+                        space=space,
+                        assistant=assistant,
+                        config=config,
+                    ),
+                    after=after,
+                )
         # A stored preference may become inactive after a policy/model change.
         # Runtime policy resolution still governs its use; validate new choices
         # without blocking unrelated edits to an existing conversation.
@@ -454,6 +494,12 @@ class ConversationService:
             assistant_id=session.assistant_id,
             group_chat_id=session.group_chat_id,
             previous_settings=session.settings.settings if session.settings else None,
+            running_settings=None
+            if session.settings
+            else await self.settings_defaults(
+                assistant_id=session.assistant_id,
+                group_chat_id=session.group_chat_id,
+            ),
         )
         return await self.session_service.update_settings(
             session_id, settings, expected_revision
@@ -496,15 +542,17 @@ class ConversationService:
                 if group_chat_id is None and assistant_id is not None
                 else None
             )
-            choices = settings or await self.settings_defaults(
+            defaults = await self.settings_defaults(
                 assistant_id=assistant_id,
                 group_chat_id=group_chat_id,
                 context=context,
             )
+            choices = settings or defaults
             await self.validate_settings(
                 choices,
                 assistant_id=assistant_id,
                 group_chat_id=group_chat_id,
+                running_settings=defaults if session_id is not None else None,
                 context=context,
             )
             if session_id is not None:
@@ -950,6 +998,39 @@ class ConversationService:
             selection_prompt, _litellm_token_counter_name(selector_model)
         )
         return min(models, key=lambda model: model.token_limit), selector_tokens
+
+    def _choice_model(
+        self,
+        settings: ConversationSettings,
+        *,
+        space: "Space",
+        assistant: "Assistant",
+        config: "EffectiveConfig | None",
+    ) -> "CompletionModel | None":
+        """The model these choices run with, or None when they cannot run.
+
+        Following the default is judged as the settings resolution judges it:
+        a default the personal chat cannot use leaves the choices unrunnable.
+        """
+        model_id = settings.completion_model_id
+        if model_id is None:
+            default = select_effective_completion_model(
+                current_model=assistant.completion_model, effective_config=config
+            )
+            if default is None:
+                return None
+            model_id = default.id
+        if (
+            self.assistant_service.personal_chat_model_rejection(
+                space=space,
+                assistant=assistant,
+                effective_config=config,
+                completion_model_id=model_id,
+            )
+            is not None
+        ):
+            return None
+        return space.get_completion_model(model_id)
 
     def _conversation_model(
         self, context: _AssistantContext, state: ConversationSettingsState | None

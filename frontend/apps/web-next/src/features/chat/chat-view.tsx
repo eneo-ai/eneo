@@ -33,7 +33,7 @@ import { displayPartnerName } from "@/lib/chat/partner-name";
 import { createChatTransport, type ChatSendOptions } from "@/lib/chat/transport";
 import type { AnswerRating, ChatPartner, EneoDataParts, EneoUIMessage } from "@/lib/chat/types";
 import { deriveContextUsage, usePreflight } from "@/lib/chat/use-preflight";
-import { useFocusRescue } from "@/lib/focus-rescue";
+import { isFocusLost, useFocusRescue } from "@/lib/focus-rescue";
 import {
   LeaveConfirmation,
   type LeaveConfirmationHandle
@@ -60,6 +60,7 @@ import { composeQuotedQuestion } from "./side-panel/question-quote";
 import { SidePanel, type SidePanelLayout } from "./side-panel/side-panel";
 import { SidePanelProvider, useSidePanel } from "./side-panel/use-side-panel";
 import { appViewSubject, appViewTitle, messageAppViewCalls } from "@/features/mcp-apps/mcp-apps";
+import { personalSkillsRefusalText } from "@/features/skills/personal-chat-skills";
 import type { PreviewFile } from "@/features/workspace/preview/preview-kind";
 import { useAnswerFeedback } from "./answer-feedback";
 import { disabledCapabilitiesForRequest } from "./chat-capabilities";
@@ -76,13 +77,17 @@ import {
 import { ContextUsageBar } from "./context-usage-bar";
 import { ChatTools } from "./mcp-controls";
 import type { PendingUpload } from "./message-files";
-import { ConversationSettingsProvider, useConversationSettings } from "./conversation-settings";
+import {
+  ConversationSettingsProvider,
+  useConversationSettings,
+  type ConversationSettingsSnapshot
+} from "./conversation-settings";
 import { partnerCannotAnswer } from "./partner-model";
 import { awaitPartnerUpdates, hasPendingPartnerUpdates } from "./partner-updates";
 import { historyQueryKey } from "./session-actions";
 import { StartState } from "./start-state";
 import { releasePreviews, useAttachments, type Attachment } from "./use-attachments";
-import { useToolChoices } from "./use-tool-choices";
+import { disabledCapabilitiesOf, useToolChoices } from "./use-tool-choices";
 import { chatDraftOwner, useChatDraft } from "./use-chat-draft";
 
 const NO_MENTION = "__none__";
@@ -93,7 +98,10 @@ function isoNow(): string {
 
 type SentFiles = NonNullable<NonNullable<EneoUIMessage["metadata"]>["files"]>;
 
-/** The request options of a question as they stood when it left the composer. */
+/**
+ * The request options of a question: whom it asks as that stood when it left
+ * the composer, the conversation's settings as they stand when it goes.
+ */
 type SendRequest = Omit<ChatSendOptions, "files" | "session_id" | "assistant_id" | "group_chat_id">;
 
 /**
@@ -111,6 +119,12 @@ type PendingQuestionState = {
   /** The composer attachments it was sent with. */
   keys: string[];
   request: SendRequest;
+};
+
+/** What a question that is not sent returns to the composer. */
+type QuestionDraft = Pick<PendingQuestionState, "question" | "quote" | "request"> & {
+  /** The composer's own draft a retry left in place, which its mention was picked for. */
+  keptDraft?: string;
 };
 
 /**
@@ -141,6 +155,35 @@ export type ActivityState = { messageId: string; tab: ActivityTab; source: numbe
  */
 function quietLog(element: HTMLDivElement | null) {
   element?.setAttribute("aria-live", "off");
+}
+
+/**
+ * What the conversation's settings say about sending: the notice they show,
+ * the refusal they hold a question back with (only lasting states: a
+ * failure, choices this app cannot use, an unavailable model; loading and
+ * saving are waited for), and whether an unavailable model has none to
+ * pick instead, which leaves nobody to answer.
+ */
+function settingsVerdict(
+  { resolution, error }: ConversationSettingsSnapshot,
+  t: ReturnType<typeof useTranslations>
+) {
+  const noModelToPick =
+    Boolean(resolution?.model_unavailable) && !resolution?.available_models?.length;
+  // A revision conflict (9065) says what happened and what to do; any other
+  // failure gets the general sentence.
+  const notice = error
+    ? error instanceof EneoApiError && error.code === 9065
+      ? getErrorMessage(error, t)
+      : t("conversation_settings_save_failed")
+    : resolution?.settings_compatible === false
+      ? t("conversation_settings_incompatible")
+      : resolution?.model_unavailable && !noModelToPick
+        ? t("conversation_settings_model_unavailable")
+        : null;
+  const refusal =
+    notice ?? (resolution?.model_unavailable ? t("no_completion_model_description") : null);
+  return { notice, refusal, noModelToPick };
 }
 
 /**
@@ -282,6 +325,12 @@ function ConversationView({
     `${partner.type}:${partner.id}:${initialSessionId ?? "new"}`
   );
   const [mentionId, setMentionId] = useState<string>(NO_MENTION);
+  // The composer's text as last shown, for a question taken back later: whom
+  // it asked comes back only with its text, never onto a newer draft.
+  const shownInput = useRef(input);
+  useLayoutEffect(() => {
+    shownInput.current = input;
+  }, [input]);
   const fileInput = useRef<HTMLInputElement>(null);
   // Ref for event-time reads (send body, onFinish); state for render-time
   // consumers (preflight). Both are set together when data-session arrives.
@@ -295,18 +344,23 @@ function ConversationView({
   // composer, put back if it fails before the answer starts.
   const pendingSendRef = useRef<{ text: string; attachments: Attachment[] } | null>(null);
   const [pendingQuestion, setPendingQuestion] = useState<PendingQuestionState | null>(null);
+  // A question whose files are on the server, waiting in the conversation for
+  // saves and the conversation's choices to land before its request is issued.
+  const [queuedQuestion, setQueuedQuestion] = useState<{ text: string; files: SentFiles } | null>(
+    null
+  );
   // A reload or a closed tab ends what is typed or attached and not yet sent: the
   // draft survives a reload but not a closed tab, and files survive neither.
-  // A question taken out of the composer is still unsent while it waits for a Skills
-  // change to be saved (`queuedSend`) or for its uploads (`pendingQuestion`).
-  const [queuedSend, setQueuedSend] = useState(false);
+  // A question taken out of the composer is still unsent while it waits for
+  // saves (`queuedQuestion`) or for its uploads (`pendingQuestion`).
   useBeforeUnloadWarning(
     input.trim() !== "" ||
       attachments.attachments.length > 0 ||
-      queuedSend ||
+      queuedQuestion !== null ||
       pendingQuestion !== null
   );
-  // Ends the wait for the pending question's uploads (a stop while it waits).
+  // Ends the wait of a question not yet sent, for its uploads or for saves
+  // (a stop while it waits).
   const pendingAbort = useRef<AbortController | null>(null);
   // The last question and its files, for "Försök igen" after an error.
   const [lastQuestion, setLastQuestion] = useState<{ text: string; files: SentFiles } | null>(null);
@@ -491,13 +545,14 @@ function ConversationView({
     });
 
   const busy = status === "submitted" || status === "streaming";
-  // The composer is taken from the moment a question leaves it, uploads included.
-  const sending = busy || pendingQuestion !== null;
-  // A question waiting for a Skills save already carries the settings
-  // revision, so the choices hold still until it is sent.
+  // The composer is taken from the moment a question leaves it, uploads and
+  // saves included: one question at a time.
+  const sending = busy || pendingQuestion !== null || queuedQuestion !== null;
+  // A question waiting for a save is sent with the choices it leaves, so
+  // they hold still until it is sent.
   useEffect(() => {
-    setRunning(sending || queuedSend);
-  }, [sending, queuedSend, setRunning]);
+    setRunning(sending);
+  }, [sending, setRunning]);
 
   // Record client-side step timings for the answer being streamed.
   useEffect(() => {
@@ -657,7 +712,9 @@ function ConversationView({
     fileInput.current?.click();
   }, []);
 
-  const started = messages.length > 0 || pendingQuestion !== null;
+  // A question that has left the composer keeps the view in the conversation while
+  // it waits, for its uploads and then for saves, until `sendMessage` adds it.
+  const started = messages.length > 0 || pendingQuestion !== null || queuedQuestion !== null;
 
   // A tool waiting for a decision in the latest answer: on a phone the
   // decision takes the composer's place (decision 26); wider, the card in
@@ -694,11 +751,17 @@ function ConversationView({
     wasDeciding.current = deciding;
   }, [deciding]);
   const reportStarted = useEffectEvent((value: boolean) => onStartedChange?.(value));
+  const wasStarted = useRef(started);
   useEffect(() => {
     reportStarted(started);
+    const swappedBack = wasStarted.current && !started;
+    wasStarted.current = started;
     if (refocusComposer.current) {
       refocusComposer.current = false;
       (started ? dockTextareaRef.current : startField())?.focus();
+    } else if (swappedBack && isFocusLost()) {
+      // Focus went with the conversation's view (its log, a waiting question).
+      startField()?.focus();
     }
   }, [started]);
 
@@ -717,43 +780,43 @@ function ConversationView({
         : []
     ) as SentFiles;
 
+  const verdict = settingsVerdict({ resolution, error: conversationSettings.error }, t);
+  const settingsNoticeText = verdict.notice;
+  // The notice as last shown: it is announced only when its text changes.
+  const shownNotice = useRef<string | null>(null);
+  // A read or save under way may lift it: a question sent meanwhile waits
+  // for it and is judged on what it leaves.
+  const settingsRefusal = conversationSettings.busy ? null : verdict.refusal;
   // An unavailable model with none to pick instead (an assistant, or a
   // personal chat without models) means nobody can answer; one that can be
-  // swapped for another is the settings notice's to explain.
-  const noModelToPick =
-    Boolean(resolution?.model_unavailable) && !resolution?.available_models?.length;
-  // A revision conflict (9065) says what happened and what to do; any other
-  // failure gets the general sentence.
-  const settingsNoticeText = conversationSettings.error
-    ? conversationSettings.error instanceof EneoApiError && conversationSettings.error.code === 9065
-      ? getErrorMessage(conversationSettings.error, t)
-      : t("conversation_settings_save_failed")
-    : resolution?.settings_compatible === false
-      ? t("conversation_settings_incompatible")
-      : resolution?.model_unavailable && !noModelToPick
-        ? t("conversation_settings_model_unavailable")
-        : null;
+  // swapped for another is the settings notice's to explain. A group chat's
+  // members do not depend on the settings, so its notice shows from the start.
+  const nobodyAnswers = (noModelToPick: boolean) =>
+    (partner.type === "group-chat" ? partnerCannotAnswer(partner) : noModelToPick)
+      ? t("no_completion_model_description")
+      : null;
+  const unavailable = nobodyAnswers(verdict.noModelToPick);
 
-  // Settings that are loading, saving or unusable hold the question back.
-  const settingsRefusal = settingsBlocked
-    ? (settingsNoticeText ?? t(resolution ? "saving" : "conversation_settings_loading"))
-    : null;
-  // A group chat's members do not depend on the settings, so its notice shows from the start.
-  const unavailable = (partner.type === "group-chat" ? partnerCannotAnswer(partner) : noModelToPick)
-    ? t("no_completion_model_description")
-    : null;
-
-  /** The request options as they stand now, for the question leaving the composer. */
+  /** The partner the question goes to, for the question leaving the composer. */
   function requestOptions(): SendRequest {
     const mention =
       partner.type === "group-chat" && mentionId !== NO_MENTION
         ? partner.mentionableAssistants?.find((assistant) => assistant.id === mentionId)
         : undefined;
     return {
-      tools: mention ? { assistants: [{ id: mention.id, handle: mention.handle }] } : null,
-      disabled_capabilities: disabledCapabilitiesForRequest(toolChoices.disabledCapabilities),
-      settings: sessionIdRef.current ? undefined : resolution?.settings,
-      settings_revision: sessionIdRef.current ? resolution?.revision || undefined : undefined
+      tools: mention ? { assistants: [{ id: mention.id, handle: mention.handle }] } : null
+    };
+  }
+
+  /**
+   * What the request takes from the conversation's settings, read as it is
+   * sent: a save or reload may have landed since the question left the composer.
+   */
+  function settingsRequest(current: ConversationSettingsSnapshot["resolution"]): SendRequest {
+    return {
+      disabled_capabilities: disabledCapabilitiesForRequest(disabledCapabilitiesOf(current, can)),
+      settings: sessionIdRef.current ? undefined : current?.settings,
+      settings_revision: sessionIdRef.current ? current?.revision || undefined : undefined
     };
   }
 
@@ -779,15 +842,19 @@ function ConversationView({
     const quote = resendFiles ? null : panel.quote;
     const text = resendFiles ? question : composeQuotedQuestion(quote, question);
     if (!resendFiles) panel.clearQuote();
-    if (!started) {
+    const first = !started;
+    if (first) {
       // A tapped Send button holds no focus in Safari: a question from the
       // composer keeps it in the composer whatever has focus now.
       refocusComposer.current =
         fromComposer || Boolean(document.activeElement?.closest("[data-start-composer]"));
     }
     const request = requestOptions();
-    // A retry leaves the composer alone unless it holds the retried question.
+    // A retry leaves the composer alone unless it holds the retried question;
+    // the mention it takes was then picked for the draft left there.
     setInput((current) => (resendFiles && current.trim() !== question ? current : ""));
+    const shown = shownInput.current.trim();
+    const keptDraft = resendFiles && shown && shown !== question ? shown : undefined;
     setMentionId(NO_MENTION);
 
     const batch = attachments.attachments;
@@ -799,7 +866,6 @@ function ConversationView({
         keys: batch.map((attachment) => attachment.key),
         request
       };
-      const first = !started;
       const controller = new AbortController();
       pendingAbort.current = controller;
       setPendingQuestion(pending);
@@ -811,7 +877,7 @@ function ConversationView({
           if (!mounted.current) return;
           pendingAbort.current = null;
           setPendingQuestion(null);
-          issue(pending.text, sentFiles(ready), pending.request);
+          issue(pending.text, sentFiles(ready), pending.request, pending, first);
         },
         () => {
           if (!mounted.current) return;
@@ -821,11 +887,27 @@ function ConversationView({
       );
       return;
     }
-    issue(text, resendFiles ?? sentFiles(batch), request);
+    issue(
+      text,
+      resendFiles ?? sentFiles(batch),
+      request,
+      { question, quote, request, keptDraft },
+      first
+    );
   }
 
-  /** Issues the request for a question whose files are all on the server. */
-  function issue(text: string, files: SentFiles, request: SendRequest) {
+  /**
+   * Issues the request for a question whose files are all on the server;
+   * `draft` is what goes back to the composer should it not be sent, and
+   * `first` whether that takes the view back to the start state.
+   */
+  function issue(
+    text: string,
+    files: SentFiles,
+    request: SendRequest,
+    draft: QuestionDraft,
+    first: boolean
+  ) {
     clearError();
     setStreamError(null);
     streamErrorRef.current = null;
@@ -840,43 +922,105 @@ function ConversationView({
     };
     setLastQuestion({ text, files });
 
-    // The backend wants exactly ONE of session_id/assistant_id/group_chat_id:
-    // continuing a session identifies the partner through the session.
-    const continuing = sessionIdRef.current !== null;
-    const body: ChatSendOptions = {
-      session_id: sessionIdRef.current,
-      assistant_id: continuing || partner.type === "group-chat" ? null : partner.id,
-      group_chat_id: !continuing && partner.type === "group-chat" ? partner.id : null,
-      files: files.map((file) => ({ id: file.id })),
-      ...request
-    };
-
     timings.markSent();
-    const send = () => {
+    const send = (current: ConversationSettingsSnapshot["resolution"]) => {
+      // The backend wants exactly ONE of session_id/assistant_id/group_chat_id:
+      // continuing a session identifies the partner through the session.
+      const continuing = sessionIdRef.current !== null;
+      const body: ChatSendOptions = {
+        session_id: sessionIdRef.current,
+        assistant_id: continuing || partner.type === "group-chat" ? null : partner.id,
+        group_chat_id: !continuing && partner.type === "group-chat" ? partner.id : null,
+        files: files.map((file) => ({ id: file.id })),
+        ...request,
+        ...settingsRequest(current)
+      };
       // The log is not live (aria-live off), so a screen reader hears nothing between
       // pressing Send and the finished answer unless this says that one is coming.
-      // Said when the request goes, not while it still waits for a Skills save.
+      // Said when the request goes, not while it still waits for a save.
       announce(t("chat_announce_generating"));
       return sendMessage({ text, metadata: { files, createdAt: isoNow() } }, { body });
     };
-    // A Skills change made in the composer is saved on the assistant; the
-    // backend answers with what is stored, so that save lands first.
-    if (hasPendingPartnerUpdates()) {
-      setQueuedSend(true);
-      void awaitPartnerUpdates().then(() => {
-        // Sent from here on: the request itself outlasts the answer, not the wait.
-        setQueuedSend(false);
-        void send();
-      });
-    } else void send();
+    /** Sends with the choices as they stand, or takes the question back when they cannot be used. */
+    const deliver = (settled: ConversationSettingsSnapshot) => {
+      const { notice, refusal } = settingsVerdict(settled, t);
+      if (!refusal) {
+        void send(settled.resolution);
+        return;
+      }
+      // Choices that cannot be used (a failed read or save, an unavailable
+      // model): the question goes back to the composer, files included.
+      const taken = pendingSendRef.current;
+      pendingSendRef.current = null;
+      if (taken) attachments.restore(taken.attachments);
+      // To the composer on screen now, from the composer or from nowhere; never
+      // from where the user went while it waited. A first question's swap back
+      // to the start state carries the focus over.
+      const active = document.activeElement;
+      if (
+        !active ||
+        active === document.body ||
+        dockElement.current?.contains(active) ||
+        active.closest("[data-start-composer]")
+      ) {
+        (dockTextareaRef.current ?? startTextarea())?.focus();
+      }
+      withdrawQuestion(draft, first);
+      // A notice not yet on screen says itself as it appears; one already
+      // shown is said again for the question it takes back.
+      if (refusal !== notice || notice === shownNotice.current) announce(refusal);
+    };
+    if (!hasPendingPartnerUpdates() && !conversationSettings.pending()) {
+      deliver(conversationSettings.snapshot());
+      return;
+    }
+    // A Skills change made in the composer is saved on the assistant, and the
+    // backend answers with what is stored; the conversation's own choices may
+    // still be loading or saving. Both land first, and the question goes with
+    // what they left. The question waits in the conversation meanwhile, and a
+    // stop takes it back, files included.
+    const controller = new AbortController();
+    pendingAbort.current = controller;
+    controller.signal.addEventListener("abort", () => {
+      pendingAbort.current = null;
+      setQueuedQuestion(null);
+      const taken = pendingSendRef.current;
+      pendingSendRef.current = null;
+      if (taken) attachments.restore(taken.attachments);
+      withdrawQuestion(draft, first);
+    });
+    setQueuedQuestion({ text, files });
+    void (async () => {
+      await awaitPartnerUpdates();
+      const settled = await conversationSettings.settled();
+      if (controller.signal.aborted) return;
+      pendingAbort.current = null;
+      // Sent from here on: the request itself outlasts the answer, not the wait.
+      setQueuedQuestion(null);
+      // A view that has gone sends nothing, as for a question waiting for its
+      // uploads; its uploaded files are let go.
+      if (!mounted.current) {
+        const taken = pendingSendRef.current;
+        pendingSendRef.current = null;
+        if (taken) attachments.restore(taken.attachments);
+        return;
+      }
+      deliver(settled);
+    })();
   }
 
   /** Takes a waiting question back out of the conversation; nothing was sent. */
-  function withdrawQuestion(pending: PendingQuestionState, first: boolean) {
+  function withdrawQuestion(draft: QuestionDraft, first: boolean) {
     setPendingQuestion(null);
     // The draft comes back unless the user has already started a new one.
-    setInput((current) => (current.trim() ? current : pending.question));
-    panel.restoreQuote(pending.quote);
+    setInput((current) => (current.trim() ? current : draft.question));
+    // Whom it asked comes back with the text that mention was picked for.
+    const mentioned = draft.request.tools?.assistants?.[0]?.id;
+    const shown = shownInput.current.trim() || draft.question.trim();
+    if (mentioned && shown === (draft.keptDraft ?? draft.question.trim())) {
+      setMentionId((current) => (current === NO_MENTION ? mentioned : current));
+    }
+    panel.restoreQuote(draft.quote);
     // A first question takes the view back to the start state; keep focus in
     // the composer across that swap.
     if (first) {
@@ -899,6 +1043,10 @@ function ConversationView({
         }))
     : [];
   const pendingDone = pendingUploads.filter((upload) => !upload.uploading).length;
+  // A question waiting for saves shows its files as they were once uploaded.
+  const queuedUploads: PendingUpload[] = (queuedQuestion?.files ?? []).map(
+    ({ id, name, size, mimetype }) => ({ key: id, name, size, mimetype, uploading: false })
+  );
   const composerAttachments = pendingQuestion
     ? {
         ...attachments,
@@ -997,7 +1145,7 @@ function ConversationView({
     // A save never disables the switches: a disabled control drops keyboard
     // focus (WCAG 2.4.3), and presses made during a save are saved after it.
     <fieldset
-      disabled={sending || queuedSend || !resolution || resolution.settings_compatible === false}
+      disabled={sending || !resolution || resolution.settings_compatible === false}
       aria-busy={conversationSettings.busy}
     >
       <ChatTools
@@ -1083,8 +1231,27 @@ function ConversationView({
     </ChatSystemMessage>
   ) : null;
   useEffect(() => {
+    shownNotice.current = settingsNoticeText;
     if (settingsNoticeText) announce(settingsNoticeText);
   }, [settingsNoticeText, announce]);
+
+  // A model switch refused for the person's own Skills: nothing was saved and
+  // the conversation goes on, so there is nothing to reload. Shown beside an
+  // unavailable model's notice, as it says why the way out did not work; a
+  // failed read or save says enough on its own.
+  const skillsRefusal = conversationSettings.error ? null : conversationSettings.refusal;
+  const skillsRefusalText = skillsRefusal
+    ? `${t("conversation_settings_model_kept_for_skills")} ${personalSkillsRefusalText(skillsRefusal, t)}`
+    : null;
+  const skillsRefusalNotice = skillsRefusalText ? (
+    <ChatSystemMessage icon={<CircleAlert aria-hidden="true" className="text-ax-error size-4" />}>
+      {skillsRefusalText}
+    </ChatSystemMessage>
+  ) : null;
+  // Keyed on the refusal too: a second one worded as the first is news again.
+  useEffect(() => {
+    if (skillsRefusalText) announce(skillsRefusalText);
+  }, [skillsRefusal, skillsRefusalText, announce]);
 
   // Generation failed: one sentence (also announced), a retry of the same
   // question and, for support, the technical facts behind "Visa detaljer".
@@ -1176,6 +1343,7 @@ function ConversationView({
                   className="flex w-full flex-col gap-3"
                 >
                   {settingsNotice}
+                  {skillsRefusalNotice}
                   {errorNotice}
                   <Composer
                     {...composerProps}
@@ -1198,6 +1366,7 @@ function ConversationView({
               className="mx-auto flex w-full max-w-[680px] flex-col gap-3"
             >
               {settingsNotice}
+              {skillsRefusalNotice}
               {errorNotice}
               <Composer
                 {...composerProps}
@@ -1278,7 +1447,7 @@ function ConversationView({
         {({ sheetOver }) => (
           <ConversationLayout
             className="min-w-0 flex-1"
-            followKey={`${messages.filter((message) => message.role === "user").length}:${pendingQuestion ? "pending" : ""}`}
+            followKey={`${messages.filter((message) => message.role === "user").length}:${pendingQuestion || queuedQuestion ? "pending" : ""}`}
             sheetOver={sheetOver}
             sheetOpener={activityTrigger}
             composer={
@@ -1332,7 +1501,14 @@ function ConversationView({
                   conversationFiles={allFiles}
                 />
               )}
-              {(status === "submitted" || pendingQuestion) && (
+              {queuedQuestion && (
+                <PendingQuestion
+                  text={queuedQuestion.text}
+                  uploads={queuedUploads}
+                  conversationFiles={allFiles}
+                />
+              )}
+              {(status === "submitted" || pendingQuestion || queuedQuestion) && (
                 <PendingAnswer
                   assistant={assistantIdentity}
                   status={
@@ -1346,6 +1522,7 @@ function ConversationView({
                 />
               )}
               {settingsNotice}
+              {skillsRefusalNotice}
               {errorNotice}
             </ChatMessageList>
           </ConversationLayout>

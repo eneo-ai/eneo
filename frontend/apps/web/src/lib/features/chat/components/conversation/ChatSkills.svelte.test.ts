@@ -17,7 +17,8 @@ const mocks = vi.hoisted(() => ({
   permissions: new Set<string>(),
   getAssistantConfiguration: vi.fn(),
   list: vi.fn(),
-  updateDefaultAssistantSkills: vi.fn()
+  updateDefaultAssistantSkills: vi.fn(),
+  chat: undefined as unknown
 }));
 
 vi.mock("$app/paths", () => ({ resolve: (path: string) => path }));
@@ -54,6 +55,8 @@ vi.mock("$lib/features/spaces/SpacesManager", async () => {
     })
   };
 });
+
+vi.mock("../../ChatService.svelte", () => ({ getChatService: () => mocks.chat }));
 
 import ChatSkills from "./ChatSkills.svelte";
 
@@ -126,13 +129,15 @@ function configuration(
 /**
  * The personal chat as the backend holds it, behind the default-assistant
  * queue: each save builds its list when its turn comes and replaces the saved
- * Skills unless `refuse` turns it down. `hold` keeps the save in flight.
+ * Skills unless `refuse` turns it down. `hold` keeps the save in flight;
+ * `models` holds the conversation model each save was judged against.
  */
 function personalChatServer(overrides: Partial<AssistantSkillConfiguration> = {}) {
   let saved = configuration(overrides).bindings;
   let queue = Promise.resolve();
   const server = {
     sent: [] as AssistantSkillBindingInput[][],
+    models: [] as (string | undefined)[],
     hold: null as Promise<void> | null,
     refuse: (_bindings: AssistantSkillBindingInput[]): unknown => null
   };
@@ -140,8 +145,13 @@ function personalChatServer(overrides: Partial<AssistantSkillConfiguration> = {}
     configuration({ ...overrides, bindings: saved })
   );
   mocks.updateDefaultAssistantSkills.mockImplementation(
-    (_assistant: unknown, build: () => Promise<AssistantSkillBindingInput[]>) => {
+    (
+      _assistant: unknown,
+      build: () => Promise<AssistantSkillBindingInput[]>,
+      conversationModelId?: () => Promise<string | undefined>
+    ) => {
       const run = async () => {
+        server.models.push(await conversationModelId?.());
         const bindings = await build();
         server.sent.push(bindings);
         if (server.hold) await server.hold;
@@ -168,6 +178,22 @@ function refusal(reason: string, detail: string | null = null) {
     eneo_error_code: 9080,
     details: { reason, detail }
   });
+}
+
+/**
+ * The conversation around the control: its resolved settings, and `saving`
+ * while a change of them is still being saved.
+ */
+function conversation(settingsResolution: { effective_model: { id: string } } | null) {
+  const chat = $state({
+    settingsResolution,
+    saving: null as Promise<void> | null,
+    async settingsSettled() {
+      while (chat.saving) await chat.saving;
+    }
+  });
+  mocks.chat = chat;
+  return chat;
 }
 
 function libraryPage(items: SkillSparse[]) {
@@ -205,6 +231,7 @@ describe("ChatSkills", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.permissions = new Set(["personal_chat", "personal_skills"]);
+    mocks.chat = undefined;
     mocks.list.mockResolvedValue(libraryPage(LIBRARY));
     server = personalChatServer();
   });
@@ -268,15 +295,67 @@ describe("ChatSkills", () => {
         ]
       ])
     );
+    // Outside a conversation the assistant's own model judges the change.
     expect(mocks.updateDefaultAssistantSkills).toHaveBeenCalledWith(
       { id: "default-assistant" },
-      expect.any(Function)
+      expect.any(Function),
+      undefined
     );
     release();
     await expect
       .element(page.getByText(m.personal_chat_skills_counts({ always: 3, on_demand: 1 })))
       .toBeVisible();
     await expect.element(always).toBeChecked();
+  });
+
+  it("reads and saves the person's own Skills against the conversation's model", async () => {
+    const chat = conversation(null);
+    const read = (conversationModelId: string) => ({
+      spaceId: "personal-space",
+      assistantId: "default-assistant",
+      conversationModelId
+    });
+    renderControl();
+
+    await expect
+      .element(page.getByRole("button", { name: m.personal_chat_skills_button(), exact: true }))
+      .toBeVisible();
+    // Not judged against the assistant's model while the conversation's is unknown.
+    expect(mocks.getAssistantConfiguration).not.toHaveBeenCalled();
+
+    chat.settingsResolution = { effective_model: { id: "conversation-model" } };
+    await openControl(3);
+    expect(mocks.getAssistantConfiguration).toHaveBeenCalledWith(read("conversation-model"));
+    await mode("Engelsk översättning", m.skills_activation_mode_always()).click();
+    await vi.waitFor(() => expect(server.models).toEqual(["conversation-model"]));
+
+    chat.settingsResolution = { effective_model: { id: "other-model" } };
+    await vi.waitFor(() =>
+      expect(mocks.getAssistantConfiguration).toHaveBeenLastCalledWith(read("other-model"))
+    );
+  });
+
+  it("judges a change made while a model switch is saved against the model that won", async () => {
+    const chat = conversation({ effective_model: { id: "conversation-model" } });
+    renderControl();
+    await openControl(3);
+    let switched!: () => void;
+    chat.saving = new Promise((resolve) => (switched = resolve));
+
+    const always = mode("Engelsk översättning", m.skills_activation_mode_always());
+    await always.click();
+    await expect.element(always).toBeChecked();
+    // Neither judged nor built before the switch has landed.
+    expect(server.models).toEqual([]);
+    expect(server.sent).toEqual([]);
+
+    chat.settingsResolution = { effective_model: { id: "other-model" } };
+    chat.saving = null;
+    switched();
+    await vi.waitFor(() => expect(server.models).toEqual(["other-model"]));
+    expect(mocks.getAssistantConfiguration).toHaveBeenLastCalledWith(
+      expect.objectContaining({ conversationModelId: "other-model" })
+    );
   });
 
   it("moves the choice with the arrow keys, one tab stop per Skill", async () => {

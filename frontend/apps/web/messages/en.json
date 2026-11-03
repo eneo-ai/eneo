@@ -5250,6 +5250,7 @@
   "conversation_settings_model_unavailable": "The saved model is unavailable",
   "conversation_settings_loading": "Conversation settings are still loading.",
   "conversation_settings_incompatible": "This app version does not support all saved settings. You can read the history, but need a compatible app version to continue chatting or change settings.",
+  "conversation_settings_model_kept_for_skills": "The model was not changed: your own skills would then pause in this conversation.",
   "personal_chat_skills_button": "Skills",
   "personal_chat_skills_button_label": "Skills in your personal chat: {count}",
   "personal_chat_skills_scope": "Applies to all your personal chats",

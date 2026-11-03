@@ -550,6 +550,11 @@ test("Assistant binding list and configuration preserve their independent contra
     await skills.getAssistantConfiguration({ spaceId: "space-1", assistantId: "assistant-1" }),
     configuration
   );
+  await skills.getAssistantConfiguration({
+    spaceId: "space-1",
+    assistantId: "assistant-1",
+    conversationModelId: "model-2"
+  });
   assert.deepEqual(calls, [
     {
       endpoint: "/api/v1/spaces/{space_id}/assistants/{assistant_id}/skills/",
@@ -563,6 +568,16 @@ test("Assistant binding list and configuration preserve their independent contra
       request: {
         method: "get",
         params: { path: { space_id: "space-1", assistant_id: "assistant-1" } }
+      }
+    },
+    {
+      endpoint: "/api/v1/spaces/{space_id}/assistants/{assistant_id}/skills/configuration/",
+      request: {
+        method: "get",
+        params: {
+          path: { space_id: "space-1", assistant_id: "assistant-1" },
+          query: { conversation_model_id: "model-2" }
+        }
       }
     }
   ]);

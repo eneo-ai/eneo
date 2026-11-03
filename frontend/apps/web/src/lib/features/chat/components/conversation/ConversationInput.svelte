@@ -17,6 +17,7 @@
   import ChatKnowledge from "./ChatKnowledge.svelte";
   import ChatMcpServers from "./ChatMcpServers.svelte";
   import ChatSkills from "./ChatSkills.svelte";
+  import { personalSkillsSaveErrorMessage } from "$lib/features/skills/personalChatSkills";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getChatService } from "../../ChatService.svelte";
   import { effectiveKnowledgeMode, internalMcpServerNames } from "../../internalMcpAvailability";
@@ -491,6 +492,13 @@
     </div>
   {/if}
 
+  {#if chat.settingsRefusal && !chat.settingsError}
+    <p class="text-destructive px-3 py-2 text-sm" role="alert">
+      {m.conversation_settings_model_kept_for_skills()}
+      {personalSkillsSaveErrorMessage(chat.settingsRefusal)}
+    </p>
+  {/if}
+
   {#if $uploadError}
     <div
       class="text-destructive bg-destructive/10 mx-1.5 mt-1 flex items-start justify-between gap-2 rounded-md px-2 py-1.5 text-sm"
@@ -582,7 +590,7 @@
       {/if}
 
       {#if showModelSelect}
-        <!-- Saves to the default assistant through the same SpacesManager as the model picker. -->
+        <!-- Saves to the default assistant, judged against this conversation's model. -->
         <ChatSkills />
       {/if}
     </PromptInput.Tools>

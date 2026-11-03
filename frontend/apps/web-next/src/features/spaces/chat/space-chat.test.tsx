@@ -449,11 +449,12 @@ describe("SpaceChat", () => {
   it("holds the model and reasoning still while a question waits for a Skills save", async () => {
     Object.assign(route.space, personalSpace);
     renderRoute("/spaces/personal/chat");
-    const effort = await screen.findByRole("combobox", { name: "Resonemangsnivå: Medel" });
-    const picker = screen.getByRole("button", { name: /^Chattmodell: GPT-5/ });
+    await screen.findByRole("combobox", { name: "Resonemangsnivå: Medel" });
+    // Read anew: the waiting question takes the view from the start state to the conversation.
     const held = () => [
-      picker.getAttribute("aria-disabled") === "true",
-      effort.closest("fieldset")!.disabled
+      screen.getByRole("button", { name: /^Chattmodell: GPT-5/ }).getAttribute("aria-disabled") ===
+        "true",
+      screen.getByRole("combobox", { name: "Resonemangsnivå: Medel" }).closest("fieldset")!.disabled
     ];
     expect(held()).toEqual([false, false]);
     let saved!: () => void;

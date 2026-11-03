@@ -612,24 +612,160 @@ describe("ChatView conversation", () => {
     expect(screen.getByRole("button", { name: "Läs in sparade val" })).toBeTruthy();
   });
 
-  it("holds sends until the conversation's choices have loaded", async () => {
+  it("keeps the saved choices when a change would pause own skills, and the conversation goes on", async () => {
+    api.POST.mockResolvedValueOnce(withServer(true)).mockResolvedValue(withServer(true));
+    api.PATCH.mockResolvedValueOnce({
+      data: undefined,
+      error: {
+        message: "Would pause own Skills",
+        eneo_error_code: 9080,
+        details: { reason: "on_demand_unavailable", detail: "model_lacks_tool_calling" }
+      },
+      response: new Response(null, { status: 400 })
+    });
+    renderInApp(<Harness partner={assistant} messages={history} sessionId="session-1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Verktyg: 1 av 1 aktiva" }));
+    const popover = await screen.findByRole("dialog", { name: "Verktyg" });
+    fireEvent.click(within(popover).getByRole("switch", { name: "Diarium" }));
+    const notice = await screen.findByText(
+      "Modellen byttes inte: dina egna skills skulle då pausas i den här konversationen. Modellen kan inte använda skills vid behov. Välj Alltid eller en annan modell."
+    );
+    expect(spies.announce).toHaveBeenCalledWith(notice.textContent);
+    // Nothing was saved, so there is nothing to reload.
+    expect(screen.queryByRole("button", { name: "Läs in sparade val" })).toBeNull();
+    expect(
+      (within(popover).getByRole("switch", { name: "Diarium" }) as HTMLInputElement).checked
+    ).toBe(true);
+
+    const field = screen.getByRole("textbox", { name: /^Fråga / }) as HTMLTextAreaElement;
+    fireEvent.change(field, { target: { value: "Fortsätt" } });
+    fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
+    await waitFor(() =>
+      expect(spies.announce).toHaveBeenCalledWith("Assistenten skriver ett svar")
+    );
+  });
+
+  it("lets a question go while the conversation's choices load and sends it once they are in", async () => {
     const load = deferred<{ data: unknown; response: Response }>();
     api.POST.mockReturnValueOnce(load.promise);
     renderInApp(<Harness partner={assistant} messages={history} sessionId="session-1" />);
     const field = screen.getByRole("textbox", { name: /^Fråga / }) as HTMLTextAreaElement;
     fireEvent.change(field, { target: { value: "Fortsätt" } });
     fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
-    expect(field.value).toBe("Fortsätt");
-    expect(field.getAttribute("aria-invalid")).toBe("true");
-    expect(spies.announce).toHaveBeenCalledWith(
-      "Konversationens inställningar läses fortfarande in."
-    );
+    // The question left the composer and waits for the choices, unrefused.
+    expect(field.value).toBe("");
+    expect(field.getAttribute("aria-invalid")).not.toBe("true");
+    expect(spies.announce).not.toHaveBeenCalled();
 
     await act(async () => load.resolve(withServer(true)));
-    await settingsLoaded();
+    await waitFor(() =>
+      expect(spies.announce).toHaveBeenCalledWith("Assistenten skriver ett svar")
+    );
+  });
+
+  /** How many questions went out: each request is announced as it goes. */
+  const requestsSent = () =>
+    spies.announce.mock.calls.filter(([message]) => message === "Assistenten skriver ett svar")
+      .length;
+  const flush = () => act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+
+  it("sends one question at a time while the conversation's choices load", async () => {
+    const load = deferred<{ data: unknown; response: Response }>();
+    api.POST.mockReturnValueOnce(load.promise);
+    renderInApp(<Harness partner={assistant} messages={history} sessionId="session-1" />);
+    const field = screen.getByRole("textbox", { name: /^Fråga / }) as HTMLTextAreaElement;
+    fireEvent.change(field, { target: { value: "Första frågan" } });
     fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
-    // The question left the composer.
+
+    // The first question waits for the choices: a second stays in the composer.
+    fireEvent.change(field, { target: { value: "Andra frågan" } });
+    fireEvent.keyDown(field, { key: "Enter", ctrlKey: true });
+    expect(field.value).toBe("Andra frågan");
+
+    await act(async () => load.resolve(withServer(true)));
+    await waitFor(() => expect(requestsSent()).toBe(1));
+    await flush();
+    expect(requestsSent()).toBe(1);
+  });
+
+  it("leaves the focus where the user went when a waiting question is taken back", async () => {
+    const load = deferred<{ data: unknown; error?: unknown; response: Response }>();
+    api.POST.mockReturnValueOnce(load.promise);
+    renderInApp(<Harness partner={assistant} messages={history} sessionId="session-1" />);
+    const field = screen.getByRole("textbox", { name: /^Fråga / }) as HTMLTextAreaElement;
+    field.focus();
+    fireEvent.change(field, { target: { value: "Fortsätt" } });
+    fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
+    // While it waits, the user works elsewhere on the page.
+    const elsewhere = document.body.appendChild(document.createElement("button"));
+    elsewhere.focus();
+
+    try {
+      await act(async () =>
+        load.resolve({
+          data: undefined,
+          error: { message: "Gone" },
+          response: new Response(null, { status: 500 })
+        })
+      );
+      await waitFor(() => expect(field.value).toBe("Fortsätt"));
+      expect(document.activeElement).toBe(elsewhere);
+      expect(requestsSent()).toBe(0);
+      expect(spies.announce).toHaveBeenCalledWith(
+        "Inställningarna kunde inte sparas eller hämtas."
+      );
+    } finally {
+      elsewhere.remove();
+    }
+  });
+
+  it("takes a question waiting for the conversation's choices back when it is stopped", async () => {
+    const load = deferred<{ data: unknown; response: Response }>();
+    api.POST.mockReturnValueOnce(load.promise);
+    renderInApp(<Harness partner={assistant} messages={history} sessionId="session-1" />);
+    const field = screen.getByRole("textbox", { name: /^Fråga / }) as HTMLTextAreaElement;
+    fireEvent.change(field, { target: { value: "Skicka när valen är inlästa" } });
+    fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
     expect(field.value).toBe("");
+
+    fireEvent.click(screen.getByRole("button", { name: "Stoppa generering" }));
+    expect(field.value).toBe("Skicka när valen är inlästa");
+    expect(screen.getByRole("button", { name: "Skicka meddelande" })).toBeTruthy();
+
+    // Read after the stop: nothing goes out.
+    await act(async () => load.resolve(withServer(true)));
+    await flush();
+    expect(requestsSent()).toBe(0);
+  });
+
+  it("lets a question go while saved choices are read again, instead of refusing it with the old notice", async () => {
+    api.POST.mockResolvedValueOnce(withServer(true));
+    api.PATCH.mockResolvedValueOnce({
+      data: undefined,
+      error: { message: "Conflict", eneo_error_code: 9065 },
+      response: new Response(null, { status: 409 })
+    });
+    renderInApp(<Harness partner={assistant} messages={history} sessionId="session-1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Verktyg: 1 av 1 aktiva" }));
+    const popover = await screen.findByRole("dialog", { name: "Verktyg" });
+    fireEvent.click(within(popover).getByRole("switch", { name: "Diarium" }));
+    const conflict =
+      "Valen för den här konversationen ändrades någon annanstans, till exempel i en annan flik. Läs in de sparade valen och försök igen.";
+    await screen.findByText(conflict);
+
+    const reload = deferred<{ data: unknown; response: Response }>();
+    api.POST.mockReturnValueOnce(reload.promise);
+    fireEvent.click(screen.getByRole("button", { name: "Läs in sparade val" }));
+    const field = screen.getByRole("textbox", { name: /^Fråga / }) as HTMLTextAreaElement;
+    fireEvent.change(field, { target: { value: "Fortsätt" } });
+    fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
+    // It waits for the read rather than being refused by what it may replace.
+    expect(field.value).toBe("");
+    expect(field.getAttribute("aria-invalid")).not.toBe("true");
+    expect(spies.announce.mock.calls.filter(([text]) => text === conflict)).toHaveLength(1);
+
+    await act(async () => reload.resolve(withServer(false)));
+    await waitFor(() => expect(requestsSent()).toBe(1));
   });
 
   it("names the message list and keeps it out of live announcements", () => {
