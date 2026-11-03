@@ -253,16 +253,12 @@ export function AdminUserGroupsPage() {
   );
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-5">
+    <div className="flex w-full flex-col gap-5">
       <PageHeader
         title={t("user_groups")}
         description={t("admin_user_groups_description")}
         headingId={headingId}
         headingRef={headingRef}
-        breadcrumbs={[
-          { label: t("admin_breadcrumb_root"), href: "/admin" },
-          { label: t("admin_section_organisation") }
-        ]}
         actions={groups.data?.length ? createButton : undefined}
       />
       <QueryStateBoundary query={groups} rows={4}>

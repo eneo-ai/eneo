@@ -1,7 +1,7 @@
 import { createContext, use } from "react";
 
 /**
- * Where the legacy Radix popups (Select, DropdownMenu, Popover, Tooltip)
+ * Where the legacy Radix popups (Select, Popover, Tooltip)
  * portal their content. Dialogs are native modal `<dialog>`s
  * (Astryx Dialog): they sit in the top layer and make the rest of the page
  * inert, so a popup portalled to `<body>` would open behind the dialog and

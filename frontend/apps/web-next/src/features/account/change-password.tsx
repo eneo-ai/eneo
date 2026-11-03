@@ -9,6 +9,7 @@ import { revealProblems } from "@/components/composites/field-problem";
 import { ConfirmedSecretInput } from "@/components/composites/confirmed-secret-input";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { useAppContext } from "@/components/providers/app-context";
+import { DockedActions } from "@/components/shell/docked-actions";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError, unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
@@ -30,7 +31,8 @@ export function ChangePasswordForm({
   policy,
   email,
   currentPasswordHint,
-  afterChangeHref = passwordChangedLogoutUrl(null)
+  afterChangeHref = passwordChangedLogoutUrl(null),
+  docked = false
 }: {
   policy: PasswordPolicy;
   email: string;
@@ -38,6 +40,8 @@ export function ChangePasswordForm({
   currentPasswordHint?: string;
   /** Where the browser goes once the password is changed; signs out by default. */
   afterChangeHref?: string;
+  /** Spara docked at the bottom on a phone: only in the app shell, which reserves room for it. */
+  docked?: boolean;
 }) {
   const t = useTranslations();
   const [current, setCurrent] = useState("");
@@ -101,6 +105,18 @@ export function ChangePasswordForm({
       }
     }
   });
+
+  const save = (
+    <Button
+      type="submit"
+      variant="primary"
+      label={t("save")}
+      className={docked ? undefined : "self-start"}
+      // Keeps focus while saving; a second press is ignored above.
+      isLoading={change.isPending}
+      isInterruptible
+    />
+  );
 
   return (
     <form
@@ -173,15 +189,12 @@ export function ChangePasswordForm({
           confirmationRef={confirmRef}
         />
         <Text type="supporting">{t("password_change_sign_out_notice")}</Text>
-        <Button
-          type="submit"
-          variant="primary"
-          label={t("save")}
-          className="self-start"
-          // Keeps focus while saving; a second press is ignored above.
-          isLoading={change.isPending}
-          isInterruptible
-        />
+        {/* In the form either way, so it submits it. */}
+        {docked ? (
+          <DockedActions label={t("account_password_actions")}>{save}</DockedActions>
+        ) : (
+          save
+        )}
       </FormLayout>
     </form>
   );
@@ -195,9 +208,11 @@ export function ChangePasswordForm({
  * Problems show at their fields on submit, and focus moves to the first
  * (WCAG 3.3.1); what the backend refuses (a wrong current password, a reused
  * one) shows at its field too. Password managers get what they need to
- * update the saved login.
+ * update the saved login. `docked` only on its own page: a hidden bar (the
+ * copy /account keeps below 1024 px) would still make the shell and the
+ * toasts reserve room for it.
  */
-export function ChangePasswordCard() {
+export function ChangePasswordCard({ docked = false }: { docked?: boolean }) {
   const t = useTranslations();
   const { user } = useAppContext();
   const capability = passwordCapability(user.password_change);
@@ -216,7 +231,7 @@ export function ChangePasswordCard() {
         }
       >
         {capability.source === "eneo" ? (
-          <ChangePasswordForm policy={capability.policy} email={user.email} />
+          <ChangePasswordForm policy={capability.policy} email={user.email} docked={docked} />
         ) : null}
       </SettingsRow>
     </SettingsGroup>

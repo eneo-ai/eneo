@@ -4,7 +4,9 @@ import {
   ChartColumn,
   Cpu,
   Database,
+  Fingerprint,
   Globe,
+  Group,
   History,
   KeyRound,
   LayoutDashboard,
@@ -39,7 +41,7 @@ export type AdminNavGroup = {
 
 /**
  * The administration navigation in four groups (UX review B6):
- * Översikt (what is going on), Styrning (what the organisation allows),
+ * Uppföljning (what is going on), Styrning (what the organisation allows),
  * Anslutningar (what Eneo talks to) and Organisation (who and what it
  * manages). Every admin route is here, with the same gating as before:
  * templates only when the tenant uses templates, modules only with the
@@ -47,6 +49,7 @@ export type AdminNavGroup = {
  * (`settings.flows_enabled`, whatever the admin's own flow permissions; the
  * admin layout admits admins only), federation only when enabled by the
  * deployment. No group exceeds seven items, so none needs to collapse.
+ * Every item has its own icon, the only thing the icon rail shows.
  * The admin layout still redirects non-admins.
  */
 export function adminNavGroups({
@@ -63,7 +66,8 @@ export function adminNavGroups({
   return [
     {
       id: "overview",
-      labelKey: "admin_section_overview",
+      // Not "Översikt": the group's first page already has that name.
+      labelKey: "admin_section_monitoring",
       items: [
         { href: "/admin", icon: LayoutDashboard, labelKey: "overview" },
         { href: "/admin/insights", icon: ChartColumn, labelKey: "insights" },
@@ -98,7 +102,7 @@ export function adminNavGroups({
         { href: "/admin/models", icon: Cpu, labelKey: "models" },
         { href: "/admin/integrations", icon: Plug, labelKey: "integrations" },
         ...(federationEnabled
-          ? [{ href: "/admin/federation", icon: KeyRound, labelKey: "federation_admin_nav" }]
+          ? [{ href: "/admin/federation", icon: Fingerprint, labelKey: "federation_admin_nav" }]
           : []),
         ...(canManageModules
           ? [{ href: "/admin/modules", icon: Blocks, labelKey: "module_admin_title" }]
@@ -114,7 +118,7 @@ export function adminNavGroups({
       labelKey: "admin_section_organisation",
       items: [
         { href: "/admin/users", icon: Users, labelKey: "users" },
-        { href: "/admin/user-groups", icon: Users, labelKey: "user_groups" },
+        { href: "/admin/user-groups", icon: Group, labelKey: "user_groups" },
         { href: "/admin/roles", icon: UserCheck, labelKey: "roles" },
         {
           href: "/admin/help-assistants",

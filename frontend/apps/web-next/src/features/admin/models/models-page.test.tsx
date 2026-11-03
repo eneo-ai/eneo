@@ -196,17 +196,17 @@ describe("ModelsPage", () => {
   it("shows the header, the tabs and one section per provider", async () => {
     renderPage();
     expect(screen.getByRole("heading", { level: 1, name: "Modeller" })).toBeTruthy();
-    const trail = screen.getByRole("navigation");
-    expect(within(trail).getByRole("link", { name: "Administration" })).toBeTruthy();
-    // "Anslutningar" is the menu section, not this page.
-    expect(within(trail).getByText("Anslutningar").closest("[aria-current]")).toBeNull();
+    // No "Administration / Anslutningar" trail: the admin menu already says where this is.
+    expect(screen.queryByRole("navigation")).toBeNull();
     expect(screen.getByRole("button", { name: "Lägg till leverantör" })).toBeTruthy();
 
     // The smoke e2e looks this tab up by role and name.
     expect(screen.getByRole("tab", { name: "Migreringshistorik" })).toBeTruthy();
-    expect(screen.getByRole("tab", { name: "Modeller" }).getAttribute("aria-selected")).toBe(
+    expect(screen.getByRole("tab", { name: "Leverantörer" }).getAttribute("aria-selected")).toBe(
       "true"
     );
+    // The first tab lists the providers; it does not repeat the page title.
+    expect(screen.queryByRole("tab", { name: "Modeller" })).toBeNull();
 
     const anthropic = screen.getByRole("region", { name: "Anthropic" });
     expect(within(anthropic).getByText("2 modeller · nyckel ...4f2a")).toBeTruthy();
@@ -414,7 +414,7 @@ describe("ModelsPage", () => {
 
   it("moves between tabs with the arrow keys and opens them with Enter", async () => {
     renderPage();
-    const models = screen.getByRole("tab", { name: "Modeller" });
+    const models = screen.getByRole("tab", { name: "Leverantörer" });
     const speakers = screen.getByRole("tab", { name: "Ordtider och talaridentifiering" });
     const history = screen.getByRole("tab", { name: "Migreringshistorik" });
     // Roving tabindex: the tab strip is one tab stop.
@@ -436,11 +436,11 @@ describe("ModelsPage", () => {
     expect(await within(panel).findByText("Inga migreringar utförda ännu")).toBeTruthy();
 
     // Back and forth: the model filters are kept while another tab is open.
-    fireEvent.click(screen.getByRole("tab", { name: "Modeller" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Leverantörer" }));
     const types = screen.getByRole("radiogroup", { name: "Modelltyp" });
     fireEvent.click(within(types).getByRole("radio", { name: "Chatt (2)" }));
     fireEvent.click(history);
-    fireEvent.click(screen.getByRole("tab", { name: "Modeller" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Leverantörer" }));
     expect(
       within(screen.getByRole("radiogroup", { name: "Modelltyp" }))
         .getByRole("radio", { name: "Chatt (2)" })

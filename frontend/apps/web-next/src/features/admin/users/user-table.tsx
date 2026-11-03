@@ -1,12 +1,15 @@
 import { Avatar } from "@astryxdesign/core/Avatar";
 import { Badge } from "@astryxdesign/core/Badge";
+import { List, ListItem } from "@astryxdesign/core/List";
 import { pixel, proportional, type TableColumn } from "@astryxdesign/core/Table";
 import { Table } from "@/components/astryx/table";
 import { Text } from "@astryxdesign/core/Text";
-import { useTranslations } from "use-intl";
+import { useFormatter, useTranslations } from "use-intl";
 import { StatusLabel, type StatusTone } from "@/components/composites/status-label";
+import { TableFrame } from "@/components/composites/table-frame";
+import { personToneClass } from "@/features/spaces/members/member-avatar";
+import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
 import { UserActions } from "./user-actions";
-import type { IssuedPassword } from "./user-editor";
 import type { AdminUser, UserState } from "./users";
 
 const STATE_TONE: Record<UserState, StatusTone> = {
@@ -52,26 +55,103 @@ function BadgeList({ items }: { items: { id: string; name: string }[] }) {
   );
 }
 
-/**
- * Users as a table: username and email (with an initials avatar from 768
- * px), role and user group badges, status dot with its label, and the row menu. Every
- * column stays on a phone (decision 9): the table scrolls sideways in its
- * own named region with the name pinned, so a row is always named. Long
- * names and emails truncate with a tooltip.
- */
-export function UserTable({
-  users,
-  label,
-  onRemoved,
-  onIssued
-}: {
+type UsersProps = {
   users: AdminUser[];
-  /** Accessible name of the table (the selected tab). */
+  /** Accessible name of the list or table (the selected tab). */
   label: string;
   onRemoved?: () => void;
-  /** A password a row's editor set, for the page's one-time view. */
-  onIssued: (issued: IssuedPassword) => void;
-}) {
+};
+
+/**
+ * The users of the selected tab: rows on a phone, like a space's members, so
+ * the first screen shows users; a table from 768 px. Their menus' dialogs are
+ * in `UserActionScope` above, so a turn across 768 px keeps an open one.
+ */
+export function UserList(props: UsersProps) {
+  const phone = useMediaMatch(PHONE_QUERY);
+  return phone ? (
+    <UserRows {...props} />
+  ) : (
+    <TableFrame>
+      <UserTable {...props} />
+    </TableFrame>
+  );
+}
+
+/**
+ * A user as a phone row: avatar, name, the e-mail under a username, roles and
+ * groups in words, a state other than active and a pending password change,
+ * and the menu at the end, the row's one control.
+ */
+function UserRows({ users, label, onRemoved }: UsersProps) {
+  const t = useTranslations();
+  const format = useFormatter();
+  const stateLabel = useStateLabel();
+  const names = (items: { name: string }[]) => format.list(items.map((item) => item.name));
+  return (
+    <List hasDividers edge="outset" aria-label={label}>
+      {users.map((user) => {
+        const name = user.username || user.email;
+        return (
+          <ListItem
+            key={user.id}
+            startContent={
+              <Avatar
+                name={name}
+                size="md"
+                tooltip={false}
+                aria-hidden="true"
+                className={personToneClass(user.id)}
+              />
+            }
+            label={<span className="block font-semibold break-words">{name}</span>}
+            description={
+              <>
+                {user.username ? (
+                  <span className="block [overflow-wrap:anywhere]">{user.email}</span>
+                ) : null}
+                {user.roles.length > 0 ? (
+                  <span className="block">
+                    {t("admin_users_row_roles", {
+                      count: user.roles.length,
+                      names: names(user.roles)
+                    })}
+                  </span>
+                ) : null}
+                {user.user_groups.length > 0 ? (
+                  <span className="block">
+                    {t("admin_users_row_groups", {
+                      count: user.user_groups.length,
+                      names: names(user.user_groups)
+                    })}
+                  </span>
+                ) : null}
+                {user.state !== "active" || user.password_change_required ? (
+                  <span className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                    {user.state !== "active" ? (
+                      <StatusLabel status={STATE_TONE[user.state]} label={stateLabel(user.state)} />
+                    ) : null}
+                    {user.password_change_required ? (
+                      <Badge label={t("admin_password_change_required_badge")} />
+                    ) : null}
+                  </span>
+                ) : null}
+              </>
+            }
+            endContent={<UserActions user={user} onRemoved={onRemoved} />}
+          />
+        );
+      })}
+    </List>
+  );
+}
+
+/**
+ * Users as a table from 768 px: username and email with an initials avatar,
+ * role and user group badges, status dot with its label, and the row menu.
+ * Long names and emails truncate with a tooltip.
+ */
+function UserTable({ users, label, onRemoved }: UsersProps) {
   const t = useTranslations();
   const stateLabel = useStateLabel();
 
@@ -79,15 +159,12 @@ export function UserTable({
     {
       key: "name",
       header: t("user"),
-      width: proportional(1.5, { minWidth: 208 }),
+      width: proportional(1.5, { minWidth: 176 }),
       renderCell: (user) => {
         const name = user.username || user.email;
         return (
           <div className="flex min-w-0 items-center gap-3">
-            {/* Decorative next to the visible name; a phone keeps the room. */}
-            <span className="hidden md:contents">
-              <Avatar name={name} size="md" tooltip={false} aria-hidden="true" />
-            </span>
+            <Avatar name={name} size="md" tooltip={false} aria-hidden="true" />
             <div className="flex min-w-0 flex-col">
               <Text weight="semibold" maxLines={1}>
                 {name}
@@ -97,18 +174,6 @@ export function UserTable({
                   {user.email}
                 </Text>
               )}
-              {/* On a phone the exceptions are in view with the name, so no
-                  account's state waits on a sideways scroll. */}
-              {user.state !== "active" || user.password_change_required ? (
-                <div className="flex flex-wrap items-center gap-1.5 pt-0.5 md:hidden">
-                  {user.state !== "active" ? (
-                    <StatusLabel status={STATE_TONE[user.state]} label={stateLabel(user.state)} />
-                  ) : null}
-                  {user.password_change_required ? (
-                    <Badge label={t("admin_password_change_required_badge")} />
-                  ) : null}
-                </div>
-              ) : null}
             </div>
           </div>
         );
@@ -118,13 +183,13 @@ export function UserTable({
       key: "roles",
       header: t("roles"),
       // Roles and groups share the remaining room, with badges wrapping on tablets.
-      width: proportional(1, { minWidth: 144 }),
+      width: proportional(1, { minWidth: 120 }),
       renderCell: (user) => <BadgeList items={user.roles} />
     },
     {
       key: "groups",
       header: t("user_groups"),
-      width: proportional(1, { minWidth: 144 }),
+      width: proportional(1, { minWidth: 120 }),
       renderCell: (user) => <BadgeList items={user.user_groups} />
     },
     {
@@ -148,7 +213,7 @@ export function UserTable({
       header: <span className="sr-only">{t("actions")}</span>,
       width: pixel(72),
       align: "end",
-      renderCell: (user) => <UserActions user={user} onRemoved={onRemoved} onIssued={onIssued} />
+      renderCell: (user) => <UserActions user={user} onRemoved={onRemoved} />
     }
   ];
 

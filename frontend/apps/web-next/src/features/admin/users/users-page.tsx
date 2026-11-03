@@ -1,3 +1,4 @@
+import { BottomSheet } from "@astryxdesign/core/BottomSheet";
 import { Button } from "@astryxdesign/core/Button";
 import { useAnnounce, useMediaQuery } from "@astryxdesign/core/hooks";
 import { Pagination } from "@astryxdesign/core/Pagination";
@@ -5,22 +6,24 @@ import { Selector, type SelectorOptionType } from "@astryxdesign/core/Selector";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { TextInput } from "@/components/astryx/text-input";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { UserPlus } from "lucide-react";
+import { ListFilter, Search, UserPlus } from "lucide-react";
 import { replaceUrl, usePathname, useSearchParams } from "@/lib/navigation";
 import { useFormatter, useTranslations } from "use-intl";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
 import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
-import { TableFrame } from "@/components/composites/table-frame";
 import { browserApi } from "@/lib/api/browser";
 import { MEDIA } from "@/lib/breakpoints";
 import { rolesQueryOptions } from "@/features/admin/roles/roles";
 import { useFocusRescue } from "@/lib/focus-rescue";
+import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
 import { useSearchDraft } from "@/lib/hooks/use-search-draft";
+import { cn } from "@/lib/utils";
 import { PasswordPolicyPanel } from "./password-policy-panel";
 import { IssuedPasswordDialog, UserEditorDialog, type IssuedPassword } from "./user-editor";
-import { UserTable } from "./user-table";
+import { UserActionScope } from "./user-actions";
+import { UserList } from "./user-table";
 import {
   adminUsersQueryOptions,
   isSearchable,
@@ -93,6 +96,13 @@ export function AdminUsersPage() {
   const rescue = useFocusRescue();
   const announce = useAnnounce();
   const isNarrow = useMediaQuery(NARROW_QUERY);
+  // A phone searches by e-mail and keeps username and role in a sheet, so
+  // its first screen shows users rather than filters.
+  const phone = useMediaMatch(PHONE_QUERY);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  // The sheet goes with a turn past 768 px; turning back must not reopen it.
+  if (!phone && filtersOpen) setFiltersOpen(false);
+  const sheetHintId = `${baseId}-sheet-hint`;
 
   const roles = useQuery(rolesQueryOptions(browserApi));
   const predefined = roles.data?.predefined ?? [];
@@ -159,6 +169,9 @@ export function AdminUsersPage() {
     announce(t("admin_users_count", { count: total }));
   }, [announce, resultsFor, t, total]);
 
+  // The sheet's filters as applied, so the button's count matches the list.
+  const sheetFilterCount = (searchName ? 1 : 0) + (roleId ? 1 : 0);
+
   function selectTab(next: StateFilter) {
     changeFilters({ stateFilter: next, page: 1 });
   }
@@ -191,26 +204,42 @@ export function AdminUsersPage() {
     results = <EmptyState isAnnounced={false} title={t("no_users_found")} />;
   } else {
     results = (
-      <TableFrame>
-        <UserTable
-          users={users}
-          label={tabLabel(stateFilter)}
-          onRemoved={() => rescue(panelRef.current)}
-          onIssued={showIssued}
-        />
-      </TableFrame>
+      <UserList
+        users={users}
+        label={tabLabel(stateFilter)}
+        onRemoved={() => rescue(panelRef.current)}
+      />
     );
   }
 
+  const nameField = (describedBy: string) => (
+    <TextInput
+      label={t("username")}
+      {...KEYBOARD.identifier}
+      value={nameBox.draft}
+      onChange={nameBox.setDraft}
+      hasClear
+      autoComplete="off"
+      aria-describedby={describedBy}
+      width="100%"
+    />
+  );
+  const roleField = (
+    <Selector
+      label={t("roles_filter_label")}
+      options={roleOptions}
+      value={roleId ?? ALL_ROLES}
+      onChange={selectRole}
+      isLoading={roles.isPending}
+      width="100%"
+    />
+  );
+
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-5">
+    <div className="flex w-full flex-col gap-5">
       <PageHeader
         title={t("users")}
         description={t("admin_users_description")}
-        breadcrumbs={[
-          { label: t("admin_breadcrumb_root"), href: "/admin" },
-          { label: t("admin_section_organisation") }
-        ]}
         tour="admin-users"
         actions={
           <Button
@@ -262,39 +291,80 @@ export function AdminUsersPage() {
       >
         {/* The filters search the whole list (the backend filters), not the page. */}
         <div role="search" aria-label={t("users")} className="flex flex-col gap-3">
-          <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3">
-            <TextInput
-              label={t("email")}
-              {...KEYBOARD.email}
-              value={emailBox.draft}
-              onChange={emailBox.setDraft}
-              hasClear
-              autoComplete="off"
-              aria-describedby={hintId}
-              width="100%"
-            />
-            <TextInput
-              label={t("username")}
-              {...KEYBOARD.identifier}
-              value={nameBox.draft}
-              onChange={nameBox.setDraft}
-              hasClear
-              autoComplete="off"
-              aria-describedby={hintId}
-              width="100%"
-            />
-            <Selector
-              label={t("roles_filter_label")}
-              options={roleOptions}
-              value={roleId ?? ALL_ROLES}
-              onChange={selectRole}
-              isLoading={roles.isPending}
-              width="100%"
-            />
+          {/* One e-mail field for both layouts: a turn across 768 px keeps it,
+              with the focus and what was typed. */}
+          <div
+            className={
+              phone ? "flex flex-wrap items-end gap-2" : "grid gap-3 sm:grid-cols-2 md:grid-cols-3"
+            }
+          >
+            <div className={phone ? "min-w-40 flex-1" : undefined}>
+              <TextInput
+                label={phone ? t("admin_users_email_search") : t("email")}
+                isLabelHidden={phone}
+                placeholder={phone ? t("admin_users_email_search") : undefined}
+                startIcon={phone ? Search : undefined}
+                {...(phone ? KEYBOARD.search : KEYBOARD.email)}
+                value={emailBox.draft}
+                onChange={emailBox.setDraft}
+                hasClear
+                autoComplete="off"
+                aria-describedby={hintId}
+                width="100%"
+              />
+            </div>
+            {phone ? (
+              <>
+                <Button
+                  label={
+                    sheetFilterCount > 0
+                      ? t("audit_filters_button_count", { count: sheetFilterCount })
+                      : t("audit_filters_button")
+                  }
+                  icon={<ListFilter aria-hidden="true" />}
+                  aria-haspopup="dialog"
+                  aria-expanded={filtersOpen}
+                  onClick={() => setFiltersOpen(true)}
+                />
+                <BottomSheet
+                  isOpen={filtersOpen}
+                  onOpenChange={setFiltersOpen}
+                  label={t("audit_filters_button")}
+                  height="tall"
+                >
+                  {/* Each change applies at once, as in the fields above the table. */}
+                  <div className="flex flex-col gap-4 p-4">
+                    <p id={sheetHintId} className="text-ax-text-secondary text-sm">
+                      {t("admin_users_filters_description")}
+                    </p>
+                    {nameField(sheetHintId)}
+                    {roleField}
+                    <div className="flex justify-end">
+                      <Button
+                        variant="primary"
+                        label={t("done")}
+                        onClick={() => setFiltersOpen(false)}
+                      />
+                    </div>
+                  </div>
+                </BottomSheet>
+              </>
+            ) : (
+              <>
+                {nameField(hintId)}
+                {roleField}
+              </>
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-3">
-            <p id={hintId} className="text-ax-text-secondary max-w-xl text-sm">
-              {t("admin_users_search_hint")}
+            {/* On a phone for screen readers only, so the first screen keeps its room
+                for users, and for the e-mail field alone; the sheet states the rule
+                for usernames. */}
+            <p
+              id={hintId}
+              className={cn("text-ax-text-secondary max-w-xl text-sm", phone && "sr-only")}
+            >
+              {phone ? t("admin_users_email_search_hint") : t("admin_users_search_hint")}
             </p>
             {/* Only while there is something to clear, as the crawler's filters. */}
             {filtered ? (
@@ -306,7 +376,9 @@ export function AdminUsersPage() {
           </div>
         </div>
 
-        <div aria-busy={isPlaceholderData || undefined}>{results}</div>
+        <UserActionScope focusTarget={panelRef} onIssued={showIssued}>
+          <div aria-busy={isPlaceholderData || undefined}>{results}</div>
+        </UserActionScope>
 
         {capped ? (
           <p className="text-ax-text-secondary text-sm">{t("admin_users_refine_search")}</p>

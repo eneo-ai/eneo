@@ -86,8 +86,10 @@ are validated separately during OIDC login and exchanged for an Eneo session.
 
 The backend-served web app remains disabled by default. With
 `BROWSER_SESSION_ENABLED`, an authenticated cookie response includes
-`Eneo-Session-Generation`, a fingerprint of the selected session credential.
-It is neither an authentication credential nor a CSRF token.
+`Eneo-Session-Generation`, a fingerprint of the selected session: of its
+server-side session id for a browser sign-in, which staying signed in keeps, and
+of the credential itself otherwise. It is neither an authentication credential
+nor a CSRF token.
 
 A document must remember its initial generation and send it on subsequent
 cookie-authenticated requests. Only GET and HEAD may omit it for bootstrap;
@@ -125,6 +127,28 @@ and requests a new document; if the user cancels navigation, a blocking screen
 offers an explicit reload. A temporary network failure preserves the binding
 and unsaved form state, blocking new requests until a session check succeeds.
 Signed downloads use their resource token instead of adopting the current cookie.
+
+The session check also answers `Eneo-Session-Expires-In`, the whole seconds the
+session has left, and `Eneo-Session-Lifetime`, the whole seconds its token was
+issued for. Two minutes before the end (half the lifetime for a session shorter
+than four minutes, never less than 20 seconds) the web app asks whether to stay
+signed in. `POST /api/v1/auth/session/extend/`, sent from the site's own page
+with the current generation, renews the same session: the cookie gets a new
+token with the same `sid`, user, organisation and sign-in method, valid for
+`JWT_EXPIRY_TIME` again. The body answers the generation, which a renewal keeps
+because it is derived from the `sid`, and the seconds the new token has left;
+the token stays in the cookie. The server-side session now ends with the new
+token, and a renewal recorded after a later one never moves that end earlier.
+Each renewal writes a `session_extended` audit entry. The token carries the
+original sign-in time (`auth_time`), so renewal never reaches past
+`BROWSER_SESSION_MAX_AGE` (by default 30 days) after sign-in. Bearer tokens and API keys cannot renew a session. Other open tabs of
+the same session follow the new end through a `BroadcastChannel` message that
+carries only the generation and that end (`{generation, expiresAt}`). A lost
+renewal answer is harmless: the cookie still names the same session, so the
+page keeps working and can renew again, and a tab that misses the message
+learns the new end at its next session check. Because the session stays the
+same, logout with the token a renewal replaced still ends it, provided that
+token expired no longer ago than it was valid for.
 
 The retained Next frontend does not use this transport. The Vite route migration
 must still be completed before enabling the backend-served app in production.

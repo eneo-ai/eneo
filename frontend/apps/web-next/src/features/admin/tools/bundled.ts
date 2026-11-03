@@ -19,6 +19,14 @@ export const SOURCE_KINDS: Record<SourceKind, { icon: typeof Server; label: stri
   external: { icon: Server, label: "tools_source_external" }
 };
 
+/**
+ * An outline Astryx button, like every button on the Verktyg page: Astryx has
+ * no outline variant, so a ghost button with the control border the shadcn
+ * outline has in dark mode (`border-ax-border` is decorative, never a
+ * control's only edge: ACCESSIBILITY.md → Colour and contrast).
+ */
+export const OUTLINE_BUTTON_CLASS = "border border-ax-border-control";
+
 /** The kind of source a server row is, decided by its auth type, never its name. */
 export function sourceKindOf(httpAuthType: string | null | undefined): SourceKind {
   if (httpAuthType === "internal") return "internal";

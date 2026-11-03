@@ -82,6 +82,8 @@ describe("AuditTable", () => {
       .getAllByRole("columnheader")
       .filter((cell) => cell.style.insetInlineStart);
     expect(pinned.map((cell) => cell.textContent)).toEqual(["Händelse"]);
+    // An iPad held upright leaves it 682 px beside the icon rail: it fits whole.
+    expect(Number.parseFloat(table.style.minWidth)).toBeLessThanOrEqual(682);
     // What happened, to what, and a failure: all in the pinned cell.
     const [, ok, failed] = within(table).getAllByRole("row");
     const event = within(ok!).getByRole("button", { name: /^Användare skapad/ });

@@ -25,7 +25,7 @@ import { filterSpaceResources } from "@/features/spaces/resource-filter";
 import { ResourceFilterInput, useFilterShown } from "@/features/spaces/resource-filter-input";
 import { useSpace } from "@/features/spaces/use-space";
 import { chatPartnerHref, spaceChatItems, type ChatAppItem } from "./assistants";
-import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
+import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { ChatAppActionScope } from "./actions";
 import { CreateChatAppMenu } from "./create-menu";
 import { ChatAppActions } from "./actions";
@@ -39,7 +39,7 @@ export function AssistantsPage() {
   const panelRef = useRef<HTMLDivElement>(null);
   // On a phone the title is for screen readers only (the space's active tab names the page), so
   // focus that a removal or an action needs to put somewhere goes to the visible page instead.
-  const phone = useMediaMatch(PHONE_QUERY);
+  const phone = usePhoneScreen();
   const focusTarget = phone ? panelRef : headingRef;
   const [filter, setFilter] = useState("");
 

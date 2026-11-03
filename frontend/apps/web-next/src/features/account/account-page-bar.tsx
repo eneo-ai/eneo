@@ -14,8 +14,8 @@ const TITLES: Record<string, string> = {
 /**
  * Below 1024 px a page under Konto is a pushed screen (decisions 20, 22): its
  * PageBar goes back to Konto and names the page, and the page's heading is
- * here, for assistive technology (from 1024 px "Mitt konto" and its tabs head
- * every account page). Konto keeps the shell's top bar and its menu.
+ * here, for assistive technology (from 1024 px the frame's "Konto" and its
+ * tabs head every account page). Konto keeps the shell's top bar and its menu.
  */
 export function AccountPageBar() {
   const t = useTranslations();

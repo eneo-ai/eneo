@@ -90,3 +90,14 @@ describe("frontend release identity", () => {
     });
   });
 });
+
+describe("JSON modules", () => {
+  // The locale catalogues hold about 7,000 keys. Named exports would compile
+  // each key into its own binding next to the default object; a catalogue is
+  // only read as a whole, so it ships as one JSON.parse string.
+  it("compiles JSON imports without named exports", () => {
+    expect(config({ command: "build", mode: "production" }).json).toEqual({
+      namedExports: false
+    });
+  });
+});

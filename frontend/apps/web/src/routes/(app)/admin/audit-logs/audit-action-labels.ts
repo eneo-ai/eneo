@@ -29,6 +29,10 @@ const ACTION_MESSAGES = {
     name: m.audit_action_sessions_invalidated,
     description: m.audit_action_sessions_invalidated_description
   },
+  session_extended: {
+    name: m.audit_action_session_extended,
+    description: m.audit_action_session_extended_description
+  },
   role_created: {
     name: m.audit_action_role_created,
     description: m.audit_action_role_created_description

@@ -1,4 +1,4 @@
-import { expect, type Page, type Route } from "@playwright/test";
+import { expect, type BrowserContext, type Page, type Route } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { BundleReport } from "../scripts/vite-bundle-report";
@@ -71,6 +71,29 @@ export function sessionResponseHeaders(route: Route): Record<string, string> {
   const generation = route.request().headers()["eneo-session-generation"];
   if (!generation) throw new Error("Fixture request must identify its browser session");
   return { "Eneo-Session-Generation": generation };
+}
+
+/**
+ * The real session check, saying the session was issued for `lifetime` seconds
+ * and has `left` of them, so a test can reach its warning with the page clock
+ * instead of waiting a day. Renewal still goes to the backend.
+ */
+export async function shortenSession(
+  target: Page | BrowserContext,
+  { left, lifetime }: { left: number; lifetime: number }
+) {
+  await target.route("**/api/v1/auth/session/", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    const response = await route.fetch();
+    await route.fulfill({
+      response,
+      headers: {
+        ...response.headers(),
+        "eneo-session-expires-in": String(left),
+        "eneo-session-lifetime": String(lifetime)
+      }
+    });
+  });
 }
 
 /** The chat composer's accessible name ("Fråga <assistent>"). */

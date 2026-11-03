@@ -1,7 +1,8 @@
-"""A federation change is audited whatever the tenant's audit configuration says.
+"""Some security events are audited whatever the tenant's audit configuration says.
 
 A tenant admin can switch off audit categories, single actions and the whole
-audit log; none of those may hide a change to how the organisation signs in.
+audit log; none of those may hide a change to how the organisation signs in or
+a browser session renewing itself.
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -15,12 +16,18 @@ from eneo.audit.domain.action_types import ALWAYS_AUDITED_ACTIONS, ActionType
 from eneo.audit.schemas.audit_config_schemas import ActionUpdate
 
 
-def test_federation_updated_is_always_audited():
-    assert ActionType.FEDERATION_UPDATED in ALWAYS_AUDITED_ACTIONS
+@pytest.mark.parametrize(
+    "action", [ActionType.FEDERATION_UPDATED, ActionType.SESSION_EXTENDED]
+)
+def test_is_always_audited(action: ActionType):
+    assert action in ALWAYS_AUDITED_ACTIONS
 
 
 @pytest.mark.asyncio
-async def test_switched_off_audit_still_logs_federation_changes():
+@pytest.mark.parametrize(
+    "action", [ActionType.FEDERATION_UPDATED, ActionType.SESSION_EXTENDED]
+)
+async def test_switched_off_audit_still_logs_it(action: ActionType):
     flags = AsyncMock()
     flags.check_is_feature_enabled.return_value = False
     config = AsyncMock()
@@ -29,7 +36,7 @@ async def test_switched_off_audit_still_logs_federation_changes():
         AsyncMock(), audit_config_service=config, feature_flag_service=flags
     )
 
-    assert await service._should_log_action(uuid4(), ActionType.FEDERATION_UPDATED)
+    assert await service._should_log_action(uuid4(), action)
     assert not await service._should_log_action(uuid4(), ActionType.USER_CREATED)
     flags.check_is_feature_enabled.assert_awaited_once()
 

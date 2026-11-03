@@ -281,7 +281,7 @@ export function InsightsPage() {
   const [compare, setCompare] = useState(false);
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl min-w-0 flex-col gap-6">
+    <div className="flex w-full min-w-0 flex-col gap-6">
       <PageHeader title={t("insights")} />
       <Card className="flex flex-wrap items-end gap-4 p-4 sm:p-6">
         <div className="min-w-0 flex-1">

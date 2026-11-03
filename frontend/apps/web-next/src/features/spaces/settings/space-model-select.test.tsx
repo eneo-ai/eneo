@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, screen } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { expectNoAxeViolations } from "@/test/axe";
+import { expectNameToHoldVisibleText, expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 import messages from "@/lib/i18n/messages/sv.json";
 import { SpaceModelSelect, type SelectableModel } from "./space-model-select";
@@ -23,7 +23,7 @@ const models: SelectableModel[] = [
 
 /** Model controls sit behind the card's "choose" button. */
 function openCard() {
-  fireEvent.click(screen.getByRole("button", { name: "Välj Chattmodeller" }));
+  fireEvent.click(screen.getByRole("button", { name: "Välj modeller, Chattmodeller" }));
 }
 
 function renderModels(
@@ -135,10 +135,12 @@ describe("SpaceModelSelect", () => {
     expect(screen.getByText("Aurora")).toBeTruthy();
     expect(screen.queryByRole("switch", { name: "Borealis" })).toBeNull();
 
-    const choose = screen.getByRole("button", { name: "Välj Chattmodeller" });
+    const choose = screen.getByRole("button", { name: "Välj modeller, Chattmodeller" });
     expect(choose.getAttribute("aria-expanded")).toBe("false");
+    // The name starts with what it shows, then the card it opens (WCAG 2.5.3).
+    expectNameToHoldVisibleText(choose, "Välj modeller, Chattmodeller");
     fireEvent.click(choose);
-    expect(screen.getByRole("button", { name: "Dölj Chattmodeller" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Dölj listan, Chattmodeller" })).toBeTruthy();
     expect(screen.getByRole("switch", { name: "Aurora" })).toBeTruthy();
     await expectNoAxeViolations(container);
   });

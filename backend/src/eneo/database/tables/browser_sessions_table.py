@@ -14,7 +14,8 @@ class BrowserSessions(CreatedAtMixin, BaseWithTableName):
 
     A token with a sid claim is admitted only while its row exists, matches
     the token's user and tenant, and is unexpired. Sign-out deletes the row;
-    expired rows are deleted too. Rows never change after the sign-in.
+    expired rows are deleted too. Only a renewal changes a row, moving
+    expires_at later.
     """
 
     sid: Mapped[str] = mapped_column(primary_key=True)

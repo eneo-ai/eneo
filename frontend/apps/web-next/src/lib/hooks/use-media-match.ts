@@ -2,14 +2,15 @@ import { MEDIA } from "@/lib/breakpoints";
 import { useCallback, useSyncExternalStore } from "react";
 
 /**
- * A phone (decision 1: below 768 px, Tailwind `md`): a space is a pushed
- * screen with content tabs, collections are list rows.
+ * Narrower than 768 px (Tailwind `md`), whatever the pointer. A phone's layout
+ * also covers a phone turned sideways: `usePhoneScreen`, `PHONE_SCREEN_QUERY`.
  */
 export const PHONE_QUERY = `not all and ${MEDIA.md}`;
 
 /**
- * The drawer's layouts (decision 1: below 1024 px, Tailwind `lg`; a phone, an
- * iPad held upright): pushed screens have a PageBar, Konto is a page.
+ * Compact page layouts below 1024 px (Tailwind `lg`; a phone, an iPad held
+ * upright): Konto is a page, and its pushed screens have a PageBar. The shell's
+ * drawer is the phone's only (`PHONE_SCREEN_QUERY`).
  */
 export const MOBILE_QUERY = `not all and ${MEDIA.lg}`;
 
@@ -23,13 +24,18 @@ export const HANDHELD_QUERY =
   "(pointer: coarse) and (width < 48rem), (pointer: coarse) and (height < 31.25rem) and (width < 64rem)";
 
 /**
- * A phone's layout: narrower than a phone, or a phone in a hand held sideways. A screen built for a
- * phone with this stays built for one when the phone is turned, and keeps what is open on it.
+ * A phone's layout: narrower than a phone, or a phone in a hand held sideways. The shell, a
+ * space's header and tabs, an editor's index and the collections all switch on it; CSS has it as
+ * the `phone:` and `wide:` variants (globals.css; a test keeps them in step).
+ */
+export const PHONE_SCREEN_QUERY = `${PHONE_QUERY}, ${HANDHELD_QUERY}`;
+
+/**
+ * Whether the layout is a phone's (`PHONE_SCREEN_QUERY`). A screen built for a phone with this
+ * stays built for one when the phone is turned, and keeps what is open on it.
  */
 export function usePhoneScreen(): boolean {
-  const narrow = useMediaMatch(PHONE_QUERY);
-  const handheld = useMediaMatch(HANDHELD_QUERY);
-  return narrow || handheld;
+  return useMediaMatch(PHONE_SCREEN_QUERY);
 }
 
 /** Match the current viewport immediately and follow changes.

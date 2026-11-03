@@ -292,6 +292,44 @@ describe("form controls use the 3:1 control border", () => {
   });
 });
 
+// Segmented controls and the legacy tabs: the selected option is a plate on a
+// track (--color-neutral over the host). It is raised in both modes, lighter
+// than the track as the white plate is in light mode; in dark mode its 1px edge
+// (3:1) is what identifies it, and light mode marks it by the label's colour
+// and weight, as it always has.
+describe("selected segment (1.4.3, 1.4.11)", () => {
+  const PLATE = "--eneo-color-segment-selected";
+  const EDGE = "--eneo-color-segment-selected-edge";
+  const HOSTS: Surface[] = [...RAISED, "muted"];
+  const DARK = MODES[1];
+  const track = (host: Surface, mode: Mode) => over(color(SELECTED, mode), surface(host, mode));
+  const plate = (host: Surface, mode: Mode) => over(color(PLATE, mode), track(host, mode));
+
+  it.each(MODES)("labels read on the plate and on the track, $name mode", (mode) => {
+    for (const host of HOSTS) {
+      expect(
+        contrastRatio(color("--color-text-primary", mode), plate(host, mode))
+      ).toBeGreaterThanOrEqual(TEXT);
+      expect(
+        contrastRatio(color("--color-text-secondary", mode), track(host, mode))
+      ).toBeGreaterThanOrEqual(TEXT);
+    }
+  });
+
+  it.each(HOSTS)("is raised in dark mode, edged at 3:1 against the track, on %s", (host) => {
+    expect(luminance(plate(host, DARK))).toBeGreaterThan(luminance(track(host, DARK)));
+    expect(contrastRatio(color(EDGE, DARK), track(host, DARK))).toBeGreaterThanOrEqual(NON_TEXT);
+  });
+
+  it("is what the Astryx segmented control draws (the legacy tabs: tabs.test.tsx)", () => {
+    const item = (eneoTheme.components as Record<string, { selected?: Record<string, string> }>)[
+      "segmented-control-item"
+    ];
+    expect(item?.selected?.backgroundColor).toBe(`var(${PLATE})`);
+    expect(item?.selected?.boxShadow).toBe(`inset 0 0 0 1px var(${EDGE})`);
+  });
+});
+
 describe("contrast helpers", () => {
   it("match the WCAG reference values", () => {
     const white = parseColor("#FFFFFF");

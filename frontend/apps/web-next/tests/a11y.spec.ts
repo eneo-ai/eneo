@@ -5,6 +5,7 @@ import sv from "../src/lib/i18n/messages/sv.json";
 import type { FederationView } from "../src/features/admin/federation/federation";
 import { SIDE_NAV_COLLAPSED_COOKIE } from "../src/components/shell/side-nav-preference";
 import { assertDocumented, AXE_PAGE_RULES, WCAG_22_AA_TAGS } from "../src/test/wcag";
+import { contrastIncomplete } from "./contrast-incomplete";
 import { expect, test } from "./csp";
 import {
   activityPill,
@@ -20,25 +21,24 @@ import {
   MOCK_REPLY,
   openCreateCollectionDialog,
   sessionResponseHeaders,
+  shortenSession,
   spaceWithWork,
   uniqueName
 } from "./helpers";
+import { DEV_ONLY } from "./ui-probes";
 
 // Page-level WCAG 2.2 A/AA scans (ACCESSIBILITY.md → How it is enforced).
 // axe-core runs in real Chromium, so colour contrast (1.4.3, 1.4.11) and
 // target size (2.5.8) are measured on the rendered page, in both colour modes,
 // on the desktop and on a phone. Pages are scanned once they show their
 // content, and also with a dialog, a menu, the drawer or a panel open. Any
-// violation fails the test.
+// violation fails the test, and so does more text whose contrast axe could not
+// judge than tests/contrast-incomplete.baseline.json allows.
 //
 // Fix instead of excluding. A region or rule that must be left out of one
 // scan goes in that scan's `exclude` / `disableRules`, each with the reason
 // and the issue link (ACCESSIBILITY.md → Exceptions); the helper refuses
 // entries without them. Nothing is excluded globally.
-
-// Development-only tooling, absent from production builds (what CI scans):
-// the Vite error overlay and the TanStack Query devtools button.
-const DEV_ONLY = ["vite-error-overlay", ".tsqd-parent-container"];
 
 // Best-practice rules on top of the WCAG tags (src/test/wcag.ts): one h1, one main
 // landmark, headings in order, table and landmark structure. While a modal is open axe
@@ -87,6 +87,18 @@ async function expectNoCollapsedTableColumns(page: Page) {
   expect(collapsed, `Collapsed table columns on ${page.url()}`).toEqual([]);
 }
 
+// Scans made so far by each test: the contrast-incomplete baseline keys a test's
+// scans by their order (`<describe path>|<test> #<n>`), stable where a URL is not.
+const scansByTest = new Map<string, number>();
+
+function scanKey(): string {
+  const info = test.info();
+  const n = (scansByTest.get(info.testId) ?? 0) + 1;
+  scansByTest.set(info.testId, n);
+  const [, ...describes] = info.titlePath.slice(0, -1);
+  return `${describes.join(" › ")}|${info.title} #${n}`;
+}
+
 /** Scans the page as it is now: axe, then what axe cannot check. */
 async function expectNoAxeViolations(
   page: Page,
@@ -114,7 +126,7 @@ async function expectNoAxeViolations(
   // navigation streams after the page is interactive; scanning before it
   // lands reports a false "document-title" violation.
   await expect(page).toHaveTitle(/\S/);
-  const { violations } = await builder.analyze();
+  const { violations, incomplete } = await builder.analyze();
   const report = violations.map((violation) => ({
     rule: violation.id,
     impact: violation.impact,
@@ -123,6 +135,7 @@ async function expectNoAxeViolations(
     targets: violation.nodes.map((node) => node.target.join(" "))
   }));
   expect(report, `WCAG 2.2 A/AA violations on ${page.url()}`).toEqual([]);
+  expect(contrastIncomplete(scanKey(), incomplete), page.url()).toEqual([]);
   await expectNoCollapsedTableColumns(page);
 }
 
@@ -334,7 +347,8 @@ async function openPalette(page: Page) {
 
 /**
  * The touch layouts the page scans run at: phones and iPads, held both ways.
- * `drawer`: below 1024 px the SideNav is a drawer behind the top bar's menu.
+ * `drawer`: on a phone the SideNav is a drawer behind the top bar's menu; from
+ * 768 px it is beside the page, an icon rail below 1280 px unless the user chose.
  */
 const TOUCH_LAYOUTS = [
   { name: "phone (390 × 844)", viewport: { width: 390, height: 844 }, phone: true, drawer: true },
@@ -342,7 +356,7 @@ const TOUCH_LAYOUTS = [
     name: "iPad portrait (820 × 1180)",
     viewport: { width: 820, height: 1180 },
     phone: false,
-    drawer: true
+    drawer: false
   },
   {
     name: "iPad landscape (1180 × 820)",
@@ -469,6 +483,22 @@ for (const colorScheme of ["light", "dark"] as const) {
         .click();
       const dialog = page.getByRole("dialog", { name: /skapa en ny yta|create a new space/i });
       await expect(dialog.getByLabel(/namn|name/i)).toBeVisible();
+      await expectNoAxeViolations(page);
+    });
+
+    test("a dialog open: the session is about to end", async ({ page }) => {
+      // Ten minutes long; the page clock reaches the warning two minutes before the end.
+      await page.clock.install();
+      await shortenSession(page, { left: 600, lifetime: 600 });
+      await spacesList(page);
+      await page.clock.fastForward("08:01");
+      const dialog = page.getByRole("dialog", {
+        name: /^(Din session går snart ut|Your session is about to end)$/
+      });
+      await expect(dialog).toBeVisible({ timeout: 15_000 });
+      await expect(
+        dialog.getByRole("button", { name: /^(Fortsätt vara inloggad|Stay signed in)$/ })
+      ).toBeFocused();
       await expectNoAxeViolations(page);
     });
 
@@ -972,9 +1002,9 @@ for (const colorScheme of ["light", "dark"] as const) {
     });
 
     // Touch layouts: a phone, and an iPad upright and sideways. All report a
-    // coarse pointer, so the 44 px touch targets apply; below 1024 px (the
-    // phone, the iPad upright) the top bar or the chat's own header replaces
-    // the SideNav.
+    // coarse pointer, so the 44 px touch targets apply; on the phone the top
+    // bar or the chat's own header replaces the SideNav, which an iPad shows
+    // as an icon rail either way.
     for (const layout of TOUCH_LAYOUTS) {
       test.describe(layout.name, () => {
         test.use({ viewport: layout.viewport, hasTouch: true, isMobile: true });
@@ -1052,6 +1082,19 @@ for (const colorScheme of ["light", "dark"] as const) {
           });
         });
 
+        if (!layout.drawer) {
+          test("the side navigation as an icon rail", async ({ page }) => {
+            await spacesList(page);
+            await expect(
+              page.getByRole("button", { name: /fäll ut sidomenyn|expand the side menu/i })
+            ).toBeVisible();
+            await expect(page.getByRole("button", { name: /öppna menyn|open menu/i })).toHaveCount(
+              0
+            );
+            await expectNoAxeViolations(page);
+          });
+        }
+
         if (layout.drawer) {
           test("the navigation drawer open", async ({ page }) => {
             await spacesList(page);
@@ -1071,14 +1114,11 @@ for (const colorScheme of ["light", "dark"] as const) {
         }
 
         test("account", { tag: "@vite" }, async ({ page }) => {
-          // Where the drawer is, Konto is a page (decision 22); sideways,
-          // "Mitt konto" and its tabs.
+          // Below 1024 px Konto is a page (decision 22); sideways, the profile
+          // under the same title and its tabs.
           await scan(page, "/account", async () => {
             await expect(
-              page.getByRole("heading", {
-                level: 1,
-                name: layout.drawer ? /^(Konto|Account)$/ : /^(Mitt konto|My account)$/
-              })
+              page.getByRole("heading", { level: 1, name: /^(Konto|Account)$/ })
             ).toBeVisible();
           });
           await scan(page, "/account/appearance", async () => {
@@ -1209,11 +1249,11 @@ for (const colorScheme of ["light", "dark"] as const) {
             ["/account/integrations", /^(Integrationer|Integrations)$/]
           ] as const) {
             await scan(page, path, async () => {
-              // Below 1024 px the page's own heading; sideways, "Mitt konto".
+              // Below 1024 px the page's own heading; sideways, "Konto".
               await expect(
                 page.getByRole("heading", {
                   level: 1,
-                  name: layout.drawer ? title : /^(Mitt konto|My account)$/
+                  name: layout.viewport.width < 1024 ? title : /^(Konto|Account)$/
                 })
               ).toBeAttached();
             });

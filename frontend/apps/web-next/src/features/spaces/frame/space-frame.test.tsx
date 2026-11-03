@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testAppContext } from "@/test/render";
@@ -117,14 +117,17 @@ describe("SpaceFrame", () => {
     expect(within(tabs).getByRole("link", { name: "Översikt" }).getAttribute("aria-current")).toBe(
       "true"
     );
-    expect(within(tabs).getByRole("link", { name: "Assistenter (2)" })).toBeTruthy();
+    // Named by what it shows, the count with it, so the name holds the visible label (WCAG 2.5.3).
+    const assistants = within(tabs).getByRole("link", { name: "Assistenter 2" });
+    expect(assistants.hasAttribute("aria-label")).toBe(false);
     expect(within(tabs).getByRole("link", { name: "Skills" })).toBeTruthy();
 
     expect(screen.getByRole("group", { name: "4 medlemmar" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Lägg till medlem" })).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Ny chatt" }).getAttribute("href")).toBe(
-      "/spaces/space-1/chat"
-    );
+    const newChat = screen.getByRole("link", { name: "Ny chatt" });
+    expect(newChat.getAttribute("href")).toBe("/spaces/space-1/chat");
+    // Each tab's own create button is the one primary action; a new chat stays in reach.
+    expect(newChat.getAttribute("data-variant")).toBe("secondary");
     expect(screen.getByText("Sidans innehåll")).toBeTruthy();
 
     await expectNoAxeViolations(container);
@@ -146,10 +149,26 @@ describe("SpaceFrame", () => {
     // main#main-content (the app shell) is the one scroll container, so Page
     // Down works after the skip link and nothing inside can trap the scroll.
     expect(container.querySelector(".overflow-y-auto, .overflow-auto")).toBeNull();
-    const content = screen.getByText("Sidans innehåll").parentElement!;
-    // The page inset, which a full-bleed page (the assistant editor) drops.
-    expect(content.className).toContain("p-6");
-    expect(content.className).toContain("has-[[data-space-full-bleed]]:p-0");
+    const column = screen.getByText("Sidans innehåll").parentElement!;
+    const inset = column.parentElement!;
+    // The page inset, which a full-bleed page (the space settings) drops.
+    expect(inset.className).toContain("p-6");
+    expect(inset.className).toContain("has-[[data-space-full-bleed]]:p-0");
+    // The pages' shared column, which a full-bleed page spans edge to edge.
+    expect(column.className).toContain("max-w-6xl");
+    expect(column.className).toContain("has-[[data-space-full-bleed]]:max-w-none");
+  });
+
+  it("lines the header up with the page below it, in the pages' shared column", () => {
+    show(sharedSpace(), ["overview"]);
+    const header = screen
+      .getByRole("heading", { level: 1, name: "Upphandling" })
+      .closest("header")!;
+    // The band and its border span the frame; the name, actions and tabs start on the page's line.
+    expect(header.className).toContain("border-b");
+    expect(header.className).not.toContain("max-w-6xl");
+    expect(header.firstElementChild!.className).toContain("max-w-6xl");
+    expect(header.firstElementChild!.className).toContain("mx-auto");
   });
 
   it("leaves the h1 to a detail page and marks its tab as current", async () => {
@@ -165,9 +184,9 @@ describe("SpaceFrame", () => {
       "/spaces/space-1/overview"
     );
     const tabs = screen.getByRole("navigation", { name: "Ytans innehåll" });
-    expect(
-      within(tabs).getByRole("link", { name: "Kunskap (0)" }).getAttribute("aria-current")
-    ).toBe("true");
+    expect(within(tabs).getByRole("link", { name: "Kunskap 0" }).getAttribute("aria-current")).toBe(
+      "true"
+    );
 
     await expectNoAxeViolations(container);
   });
@@ -202,9 +221,9 @@ describe("SpaceFrame", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Personligt" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Lägg till medlem" })).toBeNull();
     expect(screen.queryByRole("group", { name: /medlem/ })).toBeNull();
-    expect(screen.getByRole("link", { name: "Ny chatt" }).getAttribute("href")).toBe(
-      "/spaces/personal/chat"
-    );
+    const newChat = screen.getByRole("link", { name: "Ny chatt" });
+    expect(newChat.getAttribute("href")).toBe("/spaces/personal/chat");
+    expect(newChat.getAttribute("data-variant")).toBe("secondary");
     const tabs = screen.getByRole("navigation", { name: "Ytans innehåll" });
     expect(within(tabs).queryByRole("link", { name: /Medlemmar/ })).toBeNull();
     expect(within(tabs).queryByRole("link", { name: "Inställningar" })).toBeNull();
@@ -249,7 +268,7 @@ describe("SpaceFrame", () => {
   it("keeps the tabs one tab stop that arrow keys move through", () => {
     show(sharedSpace(), ["knowledge"]);
     const tabs = screen.getByRole("navigation", { name: "Ytans innehåll" });
-    const current = within(tabs).getByRole("link", { name: "Kunskap (0)" });
+    const current = within(tabs).getByRole("link", { name: "Kunskap 0" });
     const others = within(tabs)
       .getAllByRole("link")
       .filter((link) => link !== current);
@@ -420,6 +439,26 @@ describe("SpaceFrame on a phone (decision 24)", () => {
   it("is not on a tablet, which keeps the header with every tab", () => {
     setViewport("tablet-portrait");
     show(sharedSpace(), ["overview"]);
+    expect(phoneHeader()).toBeNull();
+    expect(tabHrefs()).toHaveLength(7);
+  });
+
+  it("is on a phone turned sideways, which has no height for the breadcrumb and seven tabs", () => {
+    setViewport("phone-landscape");
+    show(sharedSpace(), ["overview"]);
+    expect(phoneHeader()).not.toBeNull();
+    expect(tabHrefs()).toHaveLength(4);
+    expect(screen.queryByRole("navigation", { name: /brödsmulor|breadcrumb/i })).toBeNull();
+  });
+
+  it("turns with the phone: the header swaps for the phone's when it is laid sideways", () => {
+    setViewport("tablet-portrait");
+    show(sharedSpace(), ["overview"]);
+    act(() => setViewport("phone-landscape"));
+    expect(phoneHeader()).not.toBeNull();
+    expect(tabHrefs()).toHaveLength(4);
+    // An iPad turned with its keyboard up is short too, but as wide as a laptop: the tablet's.
+    act(() => setViewport({ width: 1180, height: 470, pointer: "coarse" }));
     expect(phoneHeader()).toBeNull();
     expect(tabHrefs()).toHaveLength(7);
   });

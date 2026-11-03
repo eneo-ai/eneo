@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useTranslations } from "use-intl";
+import { PageFrame } from "@/components/composites/page-frame";
 import { PageHeader } from "@/components/composites/page-header";
 import { DashboardList } from "@/features/dashboard/dashboard-list.client";
 import { dashboardQueryOptions } from "@/features/dashboard/queries";
@@ -16,9 +17,9 @@ export const Route = createFileRoute("/_app/dashboard/")({
 function DashboardPage() {
   const t = useTranslations();
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-4 sm:p-6">
+    <PageFrame className="gap-6">
       <PageHeader title={t("assistants")} description={t("shell_catalog_description")} />
       <DashboardList />
-    </div>
+    </PageFrame>
   );
 }

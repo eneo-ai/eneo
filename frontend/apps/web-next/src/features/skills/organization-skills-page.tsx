@@ -150,7 +150,7 @@ export function OrganizationSkillsPage() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 pb-16">
+    <div className="flex w-full flex-col gap-6 pb-16">
       {/* A tab of the organization space: the space header holds the h1. */}
       <PageHeader
         headingLevel={2}

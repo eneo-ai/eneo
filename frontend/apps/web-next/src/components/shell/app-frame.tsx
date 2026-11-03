@@ -13,7 +13,8 @@ export function AppFrame({
   children
 }: {
   env: AppContextEnv;
-  sideNavCollapsed: boolean;
+  /** The stored SideNav choice; undefined when none was made. */
+  sideNavCollapsed: boolean | undefined;
   children: React.ReactNode;
 }) {
   return (

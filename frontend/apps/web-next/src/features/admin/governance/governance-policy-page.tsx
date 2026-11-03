@@ -47,7 +47,7 @@ export function GovernancePolicyPage() {
 
   return (
     <>
-      <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 [&_*]:scroll-mb-24">
+      <div className="flex w-full max-w-4xl flex-col gap-6 [&_*]:scroll-mb-24">
         <PageHeader title={t("governance_title")} tour="admin-personal-assistant" />
         <ModelRestrictionSection draft={draft} />
         <ReasoningPolicySection draft={draft} />

@@ -3,7 +3,7 @@ import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { EneoUIMessage } from "@/lib/chat/types";
 import { katexStore } from "@/components/ai-elements/math";
-import { renderInApp } from "@/test/render";
+import { renderInApp, testAppContext } from "@/test/render";
 import messages from "@/lib/i18n/messages/sv.json";
 import { ChatMessage } from "./chat-message";
 
@@ -46,11 +46,17 @@ async function expectCopied() {
   expect(toast.success).not.toHaveBeenCalled();
 }
 
-function renderAnswer(message = answer) {
+function renderAnswer(message = answer, appContext = testAppContext()) {
   renderInApp(
-    <ChatMessage message={message} assistant={{ id: "assistant-1", name: "Upphandling" }} />
+    <ChatMessage message={message} assistant={{ id: "assistant-1", name: "Upphandling" }} />,
+    { appContext }
   );
 }
+
+/** A user who chose Markdown under Konto. */
+const choseMarkdown = testAppContext({
+  settings: { chatbot_widget: { preferred_text_format: "markdown" } }
+});
 
 const mathAnswer: EneoUIMessage = {
   id: "a-2",
@@ -62,7 +68,7 @@ function copyAsRichText() {
   const more = screen.getByRole("button", { name: "Fler åtgärder" });
   fireEvent.click(more);
   const menu = document.getElementById(more.getAttribute("aria-controls") ?? "")!;
-  fireEvent.click(within(menu).getByRole("menuitem", { name: "Kopiera som Rich text" }));
+  fireEvent.click(within(menu).getByRole("menuitem", { name: "Kopiera som formaterad text" }));
 }
 
 beforeEach(() => {
@@ -79,14 +85,42 @@ afterEach(() => {
 });
 
 describe("copying an answer", () => {
-  it("copies the markdown without source tags and confirms it", async () => {
+  it("copies formatted text with the main button until the user chooses otherwise", async () => {
+    vi.stubGlobal("ClipboardItem", TestClipboardItem);
+    clipboard.write.mockImplementation(writeItems);
+    renderAnswer();
+
+    fireEvent.click(screen.getByRole("button", { name: "Kopiera svaret" }));
+
+    await expectCopied();
+    const [item] = clipboard.write.mock.calls[0]![0] as TestClipboardItem[];
+    expect(await readBlob(await item!.items["text/html"]!)).toContain(
+      "<strong>700 000 kr</strong>"
+    );
+    expect(await readBlob(await item!.items["text/plain"]!)).toBe("Gränsen är 700 000 kr.");
+    expect(clipboard.writeText).not.toHaveBeenCalled();
+  });
+
+  it("gives a browser that copies only plain text the text without Markdown signs", async () => {
     clipboard.writeText.mockResolvedValue();
     renderAnswer();
 
     fireEvent.click(screen.getByRole("button", { name: "Kopiera svaret" }));
 
     await expectCopied();
+    expect(clipboard.writeText).toHaveBeenCalledWith("Gränsen är 700 000 kr.");
+  });
+
+  it("copies the markdown without source tags for a user who chose it", async () => {
+    vi.stubGlobal("ClipboardItem", TestClipboardItem);
+    clipboard.writeText.mockResolvedValue();
+    renderAnswer(answer, choseMarkdown);
+
+    fireEvent.click(screen.getByRole("button", { name: "Kopiera svaret" }));
+
+    await expectCopied();
     expect(clipboard.writeText).toHaveBeenCalledWith("Gränsen är **700 000 kr**.");
+    expect(clipboard.write).not.toHaveBeenCalled();
   });
 
   it("says so when the browser refuses the clipboard", async () => {

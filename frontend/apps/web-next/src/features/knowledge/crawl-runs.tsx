@@ -13,7 +13,7 @@ import { useState } from "react";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
 import { EmptyState } from "@/components/composites/empty-state";
 import { formatDuration } from "@/lib/format";
-import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
+import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { useFilterShown } from "@/features/spaces/resource-filter-input";
 import { TableFrame } from "@/components/composites/table-frame";
 import { CrawlRunDetailsDialog } from "./crawl-run-details";
@@ -139,7 +139,7 @@ export function CrawlRunsTable({ runs, onRerun }: { runs: CrawlRun[]; onRerun?: 
   const [filter, setFilter] = useState("");
   const [selection, setSelection] = useState<RunSelection | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const phone = useMediaMatch(PHONE_QUERY);
+  const phone = usePhoneScreen();
   // A phone shows the filter only for a long history; a hidden filter no longer applies.
   const filterShown = useFilterShown(runs.length);
   const { sortedData, sortConfig } = useTableSortableState<CrawlRun, CrawlRunSortKey>({
@@ -162,9 +162,16 @@ export function CrawlRunsTable({ runs, onRerun }: { runs: CrawlRun[]; onRerun?: 
     {
       key: "started",
       header: t("fix_crawl_started_column"),
-      width: pixel(216),
+      // The widest English date, "Mar 30, 2026, 12:59 AM", on one line: about 147 px at
+      // 14 px and 158 px at a touch screen's 15 px, plus the button's 4 px padding.
+      width: pixel(184),
       sortable: true,
-      renderCell: (run) => <CrawlStartedCell run={run} onSelect={() => select(run, null)} />
+      // The ghost button's padding shrinks to 4 px and is pulled back by as much: the
+      // date starts on its header's line, and the focus ring stays inside the cell
+      // (a full 12 px pull-back would put it on the frame's clipped edge).
+      renderCell: (run) => (
+        <CrawlStartedCell run={run} onSelect={() => select(run, null)} className="-ms-1 px-1" />
+      )
     },
     {
       key: "status",
@@ -176,7 +183,9 @@ export function CrawlRunsTable({ runs, onRerun }: { runs: CrawlRun[]; onRerun?: 
     {
       key: "results",
       header: t("results"),
-      width: proportional(1, { minWidth: 200 }),
+      // The four columns fit 682 px, an upright iPad beside the icon rail, without
+      // scrolling sideways; the results wrap first.
+      width: proportional(1, { minWidth: 138 }),
       sortable: true,
       renderCell: (run) => (
         <CrawlResultCell run={run} onShowFailures={(kind) => select(run, kind)} />
@@ -185,7 +194,9 @@ export function CrawlRunsTable({ runs, onRerun }: { runs: CrawlRun[]; onRerun?: 
     {
       key: "duration",
       header: t("duration"),
-      width: pixel(128),
+      // A running crawl's "Startad för 59 minuter sedan" on one line, also at a touch
+      // screen's 15 px (about 194 px).
+      width: pixel(224),
       sortable: true,
       renderCell: (run) => <CrawlDurationCell crawl={run} />
     }

@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import type { JSHandle, Page } from "@playwright/test";
 
 /**
  * What a phone user would trip over on the screen that is open, measured in the
@@ -19,6 +19,37 @@ export type PageMeasure = {
   violations: Violation[];
 };
 
+/**
+ * A control's name in a finding key, the same in every check that keys by it (the responsive
+ * contract, the UI probes). It runs in the page, so it uses nothing outside itself.
+ */
+export function controlName(element: Element): string {
+  // A link is named by where it goes, ids dropped: a list's rows carry the names of
+  // whatever the stack holds, so naming them by text makes the baseline depend on data.
+  if (element instanceof HTMLAnchorElement && element.getAttribute("href")?.startsWith("/")) {
+    const url = new URL(element.href, location.href);
+    if (url.origin !== location.origin) return `a:${url.host}`;
+    const id =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$|^[0-9a-f]{20,}$|^[0-9]{4,}$/i;
+    const path = url.pathname
+      .split("/")
+      .map((segment) => (id.test(segment) ? "$" : segment))
+      .join("/");
+    return `a:${path}${url.hash ? "#" : ""}`;
+  }
+  const role = element.getAttribute("role");
+  // What follows a comma or a dot is state (loading, a count, a status), which
+  // differs from one run to the next; the leading label names the control.
+  const text = (element.getAttribute("aria-label") ?? element.textContent ?? "")
+    .split(/[,·]/)[0]!
+    .replace(/[0-9]+/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase()
+    .slice(0, 28);
+  return `${element.tagName.toLowerCase()}${role ? `[${role}]` : ""}:${text}`;
+}
+
 /** Targets under this many px, measured on a touch pointer (the Eneo standard). */
 export const MIN_TARGET = 44;
 
@@ -28,9 +59,10 @@ export const MIN_TARGET = 44;
  * contract, which only has the screen as it opens; the text-size specs turn it
  * on and compare with the screen before the text grew.
  */
-export function measure(page: Page, { vertical = false } = {}): Promise<PageMeasure> {
+export async function measure(page: Page, { vertical = false } = {}): Promise<PageMeasure> {
+  const name = (await page.evaluateHandle(`(${controlName})`)) as JSHandle<typeof controlName>;
   return page.evaluate(
-    ([minTarget, withVertical]) => {
+    ([minTarget, withVertical, name]) => {
       const width = innerWidth;
       const shown = (element: Element) => {
         // What a closed <details> holds is not on screen, whatever box it kept from before.
@@ -41,38 +73,10 @@ export function measure(page: Page, { vertical = false } = {}): Promise<PageMeas
         const style = getComputedStyle(element);
         return style.visibility !== "hidden" && style.display !== "none" && style.opacity !== "0";
       };
-      // A link is named by where it goes, ids dropped: a list's rows carry the names of
-      // whatever the stack holds, so naming them by text makes the baseline depend on data.
-      const linkName = (link: HTMLAnchorElement) => {
-        const url = new URL(link.href, location.href);
-        if (url.origin !== location.origin) return `a:${url.host}`;
-        const id =
-          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$|^[0-9a-f]{20,}$|^[0-9]{4,}$/i;
-        const path = url.pathname
-          .split("/")
-          .map((segment) => (id.test(segment) ? "$" : segment))
-          .join("/");
-        return `a:${path}${url.hash ? "#" : ""}`;
-      };
-      const name = (element: Element) => {
-        if (element instanceof HTMLAnchorElement && element.getAttribute("href")?.startsWith("/"))
-          return linkName(element);
-        const role = element.getAttribute("role");
-        // What follows a comma or a dot is state (loading, a count, a status), which
-        // differs from one run to the next; the leading label names the control.
-        const text = (element.getAttribute("aria-label") ?? element.textContent ?? "")
-          .split(/[,·]/)[0]!
-          .replace(/[0-9]+/g, "")
-          .replace(/\s+/g, " ")
-          .trim()
-          .toLowerCase()
-          .slice(0, 28);
-        return `${element.tagName.toLowerCase()}${role ? `[${role}]` : ""}:${text}`;
-      };
       const controls =
         "a[href], button, [role=button], [role=tab], [role=menuitem], [role=option], [role=switch], [role=checkbox], [role=radio], input:not([type=hidden]), select, textarea, summary";
       const violations: Violation[] = [];
-      const targets: { element: Element; box: DOMRect }[] = [];
+      const targets: { element: Element; box: DOMRect; shows: Box }[] = [];
       // A text field is tapped anywhere in its frame, not only on the <input>
       // inside it: Astryx draws the 44 px frame around a 23 px input. A number
       // field's frame focuses its spinbutton the same way (useInputContainer).
@@ -137,6 +141,31 @@ export function measure(page: Page, { vertical = false } = {}): Promise<PageMeas
         }
         return false;
       };
+      // The part of a box its scrolling and clipping ancestors leave on screen: a tab that a
+      // strip has scrolled away runs, as a box, under whatever is beside the strip, but is
+      // neither seen nor tapped there. Ancestors above a fixed element do not clip it.
+      type Box = { left: number; top: number; right: number; bottom: number };
+      const showing = (element: Element, box: DOMRect): Box => {
+        let { left, top, right, bottom } = box;
+        for (
+          let node = element;
+          node.parentElement && getComputedStyle(node).position !== "fixed";
+          node = node.parentElement
+        ) {
+          const parent = node.parentElement;
+          const style = getComputedStyle(parent);
+          const port = parent.getBoundingClientRect();
+          if (style.overflowX !== "visible") {
+            left = Math.max(left, port.left + parent.clientLeft);
+            right = Math.min(right, port.left + parent.clientLeft + parent.clientWidth);
+          }
+          if (style.overflowY !== "visible") {
+            top = Math.max(top, port.top + parent.clientTop);
+            bottom = Math.min(bottom, port.top + parent.clientTop + parent.clientHeight);
+          }
+        }
+        return { left, top, right, bottom };
+      };
       for (const element of document.querySelectorAll(controls)) {
         if (!shown(element) || element.closest("[inert], [aria-hidden=true]")) continue;
         const area = hitArea(element);
@@ -183,9 +212,9 @@ export function measure(page: Page, { vertical = false } = {}): Promise<PageMeas
           parseFloat(getComputedStyle(element).fontSize) < 16
         )
           violations.push({ kind: "zoom", key: name(element) });
-        targets.push({ element: area, box });
+        targets.push({ element: area, box, shows: showing(area, box) });
       }
-      // A key hint (⌘ ↵, ⌘K) points at keys a touch screen does not have.
+      // A key hint (↵, ⌘K) points at keys a touch screen does not have.
       for (const key of document.querySelectorAll("kbd")) {
         if (shown(key))
           violations.push({ kind: "hint", key: `kbd:${(key.textContent ?? "").trim()}` });
@@ -207,8 +236,8 @@ export function measure(page: Page, { vertical = false } = {}): Promise<PageMeas
             return cell !== null && getComputedStyle(cell).position === "sticky";
           };
           if (pinned(a.element) !== pinned(b.element)) continue;
-          const w = Math.min(a.box.right, b.box.right) - Math.max(a.box.left, b.box.left);
-          const h = Math.min(a.box.bottom, b.box.bottom) - Math.max(a.box.top, b.box.top);
+          const w = Math.min(a.shows.right, b.shows.right) - Math.max(a.shows.left, b.shows.left);
+          const h = Math.min(a.shows.bottom, b.shows.bottom) - Math.max(a.shows.top, b.shows.top);
           if (w > 4 && h > 4)
             violations.push({ kind: "overlap", key: `${name(a.element)} x ${name(b.element)}` });
         }
@@ -241,6 +270,6 @@ export function measure(page: Page, { vertical = false } = {}): Promise<PageMeas
         violations
       };
     },
-    [MIN_TARGET, vertical] as const
+    [MIN_TARGET, vertical, name] as const
   );
 }

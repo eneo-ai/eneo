@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MEDIA } from "@/lib/breakpoints";
-import { expectNoAxeViolations } from "@/test/axe";
+import { PHONE_SCREEN_QUERY } from "@/lib/hooks/use-media-match";
+import { expectNameToHoldVisibleText, expectNoAxeViolations } from "@/test/axe";
 import { router, setRoute } from "@/test/navigation";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
 import { setViewport } from "@/test/setup-dom";
@@ -144,11 +144,19 @@ describe("AppShellFrame", () => {
 });
 
 describe("AppShellFrame breakpoint", () => {
-  it("switches to mobile navigation below MEDIA.lg, the shell's CSS breakpoint", () => {
+  it("switches to the phone's navigation on a phone's layout, the shell's CSS `phone:` variant", () => {
     const matchMedia = vi.spyOn(window, "matchMedia");
     renderShell();
-    expect(matchMedia.mock.calls.map(([query]) => query)).toContain(`not all and ${MEDIA.lg}`);
+    expect(matchMedia.mock.calls.map(([query]) => query)).toContain(PHONE_SCREEN_QUERY);
     matchMedia.mockRestore();
+  });
+
+  it("gives a phone turned sideways the top bar's menu and the drawer, not the icon rail", async () => {
+    setViewport("phone-landscape");
+    renderShell();
+    fireEvent.click(screen.getByRole("button", { name: "Öppna menyn" }));
+    const drawer = await screen.findByRole("dialog", { name: "Meny" });
+    expect(within(drawer).getByRole("navigation", { name: "Huvudmeny" })).toBeTruthy();
   });
 });
 
@@ -171,7 +179,7 @@ describe("AppShellFrame on a phone", () => {
     const topBar = container.querySelector("header");
     expect(topBar?.className).toContain("group-has-[[data-own-mobile-header]]/shell:hidden");
     // A space's header replaces it on phones only (OWN_PHONE_HEADER).
-    expect(topBar?.className).toContain("max-md:group-has-[[data-own-phone-header]]/shell:hidden");
+    expect(topBar?.className).toContain("phone:group-has-[[data-own-phone-header]]/shell:hidden");
     expect(
       topBar?.closest('[class~="group/shell"]')?.querySelector("[data-own-mobile-header]")
     ).toBeTruthy();
@@ -200,10 +208,10 @@ describe("AppShellFrame on a phone", () => {
     fireEvent.click(menuButton);
     const drawer = await screen.findByRole("dialog", { name: "Meny" });
 
-    const profile = within(drawer).getByRole("link", {
-      name: "Anna Lind, Sundsvalls kommun: konto och inställningar"
-    });
+    const name = "Anna Lind, Sundsvalls kommun: konto och inställningar";
+    const profile = within(drawer).getByRole("link", { name });
     expect(profile.getAttribute("href")).toBe("/account");
+    expectNameToHoldVisibleText(profile, name);
     expect(within(drawer).queryByRole("button", { name: /konto och inställningar/ })).toBeNull();
     // Already on Konto, so no new path closes the drawer: the row does. (jsdom
     // cannot follow the link itself.)
@@ -267,23 +275,25 @@ describe("AppShellFrame on a phone", () => {
 });
 
 describe("AppShellFrame on an iPad", () => {
-  it("uses the drawer held upright and the SideNav sideways", () => {
-    setViewport("tablet-portrait");
-    renderShell();
-    expect(screen.getByRole("button", { name: "Öppna menyn" })).toBeTruthy();
+  it.each(["tablet-portrait", "tablet-landscape"] as const)(
+    "shows the side navigation as an icon rail, without a menu button (%s)",
+    (viewport) => {
+      setViewport(viewport);
+      renderShell();
+      expect(screen.queryByRole("button", { name: "Öppna menyn" })).toBeNull();
+      expect(screen.getByRole("navigation", { name: "Huvudmeny" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Fäll ut sidomenyn" })).toBeTruthy();
+    }
+  );
 
-    act(() => setViewport("tablet-landscape"));
-    expect(screen.queryByRole("button", { name: "Öppna menyn" })).toBeNull();
-  });
-
-  it("closes the open drawer when the iPad turns sideways and hands focus to the page", async () => {
-    setViewport("tablet-portrait");
+  it("closes the open drawer when a phone's window widens to a tablet's and hands focus to the page", async () => {
+    setViewport("phone");
     renderShell();
     fireEvent.click(screen.getByRole("button", { name: "Öppna menyn" }));
     const drawer = await screen.findByRole("dialog", { name: "Meny" });
     within(drawer).getByRole("link", { name: "Alla ytor" }).focus();
 
-    act(() => setViewport("tablet-landscape"));
+    act(() => setViewport("tablet-portrait"));
     expect(screen.queryByRole("dialog", { name: "Meny" })).toBeNull();
     expect(document.activeElement).toBe(screen.getByRole("main"));
   });

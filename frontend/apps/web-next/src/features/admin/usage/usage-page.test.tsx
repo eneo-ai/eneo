@@ -146,12 +146,24 @@ async function findError() {
 
 async function openUsers(route = "/admin/usage") {
   const view = renderInApp(<UsagePage />, { route });
-  // Radix tabs switch on mouse down.
-  fireEvent.mouseDown(screen.getByRole("tab", { name: "Användare" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Användare" }));
   return { ...view, table: await screen.findByRole("table", { name: "Användning per användare" }) };
 }
 
 describe("UsagePage", () => {
+  it("switches its views with the admin's underlined tabs, each naming its panel", async () => {
+    renderInApp(<UsagePage />, { route: "/admin/usage" });
+    const tabs = screen.getByRole("tablist", { name: "Vyer för användning" });
+    const users = within(tabs).getByRole("tab", { name: "Användare" });
+    fireEvent.click(users);
+    await screen.findByRole("table", { name: "Användning per användare" });
+    expect(users.getAttribute("aria-selected")).toBe("true");
+    const panel = screen.getByRole("tabpanel");
+    expect(users.getAttribute("aria-controls")).toBe(panel.id);
+    expect(panel.getAttribute("aria-labelledby")).toBe(users.id);
+    expect(window.location.search).toBe("?tab=users");
+  });
+
   it("keeps same-named models distinct and names each tab's table", async () => {
     const consoleError = vi.spyOn(console, "error");
     const { container } = renderInApp(<UsagePage />, { route: "/admin/usage" });
@@ -167,7 +179,7 @@ describe("UsagePage", () => {
     expect(within(tokens).queryByRole("button", { name: /Inmatning|Utmatning/ })).toBeNull();
     await expectNoAxeViolations(container);
 
-    fireEvent.mouseDown(screen.getByRole("tab", { name: "Användare" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Användare" }));
     const users = await screen.findByRole("table", { name: "Användning per användare" });
     expect(within(users).getByRole("link", { name: /Anna Lind/ })).toBeTruthy();
     for (const name of [/Indata/, /Utdata/, /Totalt tokens/]) {
@@ -175,7 +187,7 @@ describe("UsagePage", () => {
     }
     expect(within(users).queryByRole("button", { name: /Inmatning|Utmatning/ })).toBeNull();
 
-    fireEvent.mouseDown(screen.getByRole("tab", { name: "Lagring" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Lagring" }));
     const storage = await screen.findByRole("table", { name: "Offentliga ytor" });
     expect(within(storage).getAllByText("Upphandling")).toHaveLength(2);
     expect(consoleError.mock.calls.flat().join(" ")).not.toContain("same key");
@@ -239,7 +251,7 @@ describe("UsagePage", () => {
     // The overview stays on the last 30 days.
     expect(screen.getByText(/senaste 30 dagarna/)).toBeTruthy();
 
-    fireEvent.mouseDown(screen.getByRole("tab", { name: "Användare" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Användare" }));
     await screen.findByRole("table", { name: "Användning per användare" });
     expect(usersCalls().at(-1)?.query.start_date).toBe("2026-09-01");
     // 15 days halve the thresholds of 30.
@@ -438,10 +450,10 @@ describe("UsagePage", () => {
     expect(screen.getByText("Spårnings-ID: trace-123")).toBeTruthy();
     await expectNoAxeViolations(container);
 
-    fireEvent.mouseDown(screen.getByRole("tab", { name: "Lagring" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Lagring" }));
     expect(await screen.findByRole("table", { name: "Offentliga ytor" })).toBeTruthy();
 
-    fireEvent.mouseDown(screen.getByRole("tab", { name: "Tokens" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Tokens" }));
     // Back on the tab the failed read retries on mount; its retry button stays, busy.
     const retry = await screen.findByRole("button", { name: "Försök igen" });
     await waitFor(() => expect(retry.getAttribute("aria-busy")).not.toBe("true"));
@@ -455,14 +467,14 @@ describe("UsagePage", () => {
     renderInApp(<UsagePage />, { route: "/admin/usage" });
 
     expect(await screen.findByRole("table", { name: "Användning per modell" })).toBeTruthy();
-    fireEvent.mouseDown(screen.getByRole("tab", { name: "Lagring" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Lagring" }));
     expect(await findError()).toBeTruthy();
 
     apiState.failingPaths.delete("/api/v1/storage/spaces/");
     fireEvent.click(screen.getByRole("button", { name: "Försök igen" }));
     expect(await screen.findByRole("table", { name: "Offentliga ytor" })).toBeTruthy();
 
-    fireEvent.mouseDown(screen.getByRole("tab", { name: "Tokens" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Tokens" }));
     expect(await screen.findByRole("table", { name: "Användning per modell" })).toBeTruthy();
   });
 
@@ -470,7 +482,7 @@ describe("UsagePage", () => {
     apiState.failingPaths.add("/api/v1/token-usage/users");
     renderInApp(<UsagePage />, { route: "/admin/usage" });
 
-    fireEvent.mouseDown(screen.getByRole("tab", { name: "Användare" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Användare" }));
     expect(await findError()).toBeTruthy();
 
     apiState.failingPaths.delete("/api/v1/token-usage/users");

@@ -7,7 +7,7 @@ import { DockedActions } from "@/components/shell/docked-actions";
 import { PageBar } from "@/components/shell/page-bar";
 import { browserApi } from "@/lib/api/browser";
 import { PageHeader } from "@/components/composites/page-header";
-import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
+import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { useSpaceDisplayName, useSpaceSections } from "@/features/spaces/frame/space-header";
 import { spaceLandingHref } from "@/features/spaces/frame/space-sections";
 import { useSpace } from "@/features/spaces/use-space";
@@ -27,10 +27,9 @@ export function FlowPhonePage({ flowId, onStart }: { flowId: string; onStart: ()
   const { routeId } = useSpace();
   const spaceName = useSpaceDisplayName();
   const sections = useSpaceSections();
-  // Below 768 px the space's phone header and a page bar above are the chrome; a phone held
-  // sideways is wider, gets the tablet's chrome, and so a header of the page's own (breadcrumbs
-  // back to Flöden, "Kör flödet" at the top instead of docked).
-  const narrow = useMediaMatch(PHONE_QUERY);
+  // On a phone's layout (held either way) a page bar is the chrome and "Kör flödet" is docked;
+  // elsewhere the page has a header of its own (breadcrumbs back to Flöden, "Kör flödet" at the top).
+  const narrow = usePhoneScreen();
   const { data: flow } = useSuspenseQuery(flowQueryOptions(browserApi, flowId));
   const isPublished = flow.published_version != null;
   const canRun = isPublished && flow.permissions.can_run;
@@ -38,7 +37,7 @@ export function FlowPhonePage({ flowId, onStart }: { flowId: string; onStart: ()
 
   return (
     <div className="flex min-w-0 flex-1 flex-col">
-      <PageBar until="md" parent={{ label: t("flows"), href: `/spaces/${routeId}/flows` }} />
+      <PageBar until="phone" parent={{ label: t("flows"), href: `/spaces/${routeId}/flows` }} />
       <div className="flex flex-col gap-6 px-4 py-4 md:px-6">
         {narrow ? (
           <header className="flex flex-col gap-2">

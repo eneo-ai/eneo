@@ -61,7 +61,7 @@ export function CrawlFailureActions({
         <Button
           variant="ghost"
           size="sm"
-          label={t("crawl_view_failed_pages", { count: pagesFailed })}
+          label={t("crawl_view_failed_pages_named", { count: pagesFailed })}
           onClick={() => onSelect("page")}
         >
           {t("crawl_failed_pages_count", { count: pagesFailed })}
@@ -71,7 +71,7 @@ export function CrawlFailureActions({
         <Button
           variant="ghost"
           size="sm"
-          label={t("crawl_view_failed_files", { count: filesFailed })}
+          label={t("crawl_view_failed_files_named", { count: filesFailed })}
           onClick={() => onSelect("file")}
         >
           {t("crawl_failed_files_count", { count: filesFailed })}

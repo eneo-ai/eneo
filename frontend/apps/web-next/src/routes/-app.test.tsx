@@ -1124,11 +1124,11 @@ it("renders the existing account profile and local password form in the Vite she
     }
   });
   await renderRoute("/account");
-  await screen.findByRole("heading", { name: messages.my_account, level: 1 });
+  await screen.findByRole("heading", { name: messages.account, level: 1 });
   expect(screen.getByLabelText(messages.current_password, { selector: "input" })).toBeTruthy();
   expect(screen.getByLabelText(messages.new_password, { selector: "input" })).toBeTruthy();
   expect(screen.getByRole("button", { name: messages.save })).toBeTruthy();
-  await waitFor(() => expect(document.title).toBe(`${messages.my_account} · Eneo`));
+  await waitFor(() => expect(document.title).toBe(`${messages.account} · Eneo`));
 });
 
 it.each([false, true])(
@@ -1372,7 +1372,7 @@ it("waits for a fresh existence check before re-entering a cached space route", 
     router.state.matches.find((match) => match.routeId === "/_app/spaces/$spaceId")?.status
   ).toBe("success");
   await act(() => router.navigate({ to: "/account" }));
-  await screen.findByRole("heading", { name: messages.my_account, level: 1 });
+  await screen.findByRole("heading", { name: messages.account, level: 1 });
   await queryClient.invalidateQueries({ queryKey: ["spaces", "space-1"], refetchType: "none" });
   let release!: (response: Response) => void;
   replies.set(

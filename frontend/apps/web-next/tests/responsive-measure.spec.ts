@@ -8,10 +8,12 @@ import { measure, type Violation } from "./responsive-measure";
  * `E2E_BASE_URL=http://127.0.0.1:1 bun run test:e2e tests/responsive-measure.spec.ts --no-deps`.
  */
 
+// Hand-made pages have no session to check.
 test.use({
   viewport: { width: 390, height: 844 },
   hasTouch: true,
-  storageState: { cookies: [], origins: [] }
+  storageState: { cookies: [], origins: [] },
+  sharedSession: async ({}, run) => run()
 });
 
 const BUTTON = "flex:none;width:96px;height:48px";
@@ -93,6 +95,35 @@ test.describe("the responsive measure", () => {
       ])
     );
     expect(outside(violations)).toEqual([]);
+  });
+
+  test("counts an overlap only where both controls show, not what a strip has scrolled away", async ({
+    page
+  }) => {
+    // A tab strip scrolled to its current tab: its first tab runs under the side rail
+    // beside it, where the strip clips it and a finger lands on the rail.
+    await page.setContent(
+      `<body style="margin:0">
+        <button style="position:fixed;left:8px;top:8px;width:48px;height:48px">Rail</button>
+        <div id="strip" style="margin:8px 0 0 80px;width:200px;overflow-x:auto">
+          <div style="display:flex;width:600px">
+            <button style="${BUTTON}">First</button>
+            <button style="${BUTTON};margin-left:300px">Current</button>
+          </div>
+        </div>
+      </body>`
+    );
+    const overlaps = async () =>
+      (await measure(page)).violations.filter((violation) => violation.kind === "overlap");
+    expect(await overlaps()).toEqual([]);
+    await page.locator("#strip").evaluate((strip) => (strip.scrollLeft = 60));
+    expect(await overlaps()).toEqual([]);
+    // Unclipped, the same tab over the rail is an overlap.
+    await page.locator("#strip").evaluate((strip) => {
+      strip.style.overflowX = "visible";
+      (strip.firstElementChild as HTMLElement).style.marginLeft = "-60px";
+    });
+    expect(await overlaps()).toEqual([{ kind: "overlap", key: "button:rail x button:first" }]);
   });
 
   test("measures a radio by the label that checks it, and only by that", async ({ page }) => {

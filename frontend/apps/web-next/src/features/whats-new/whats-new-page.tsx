@@ -100,7 +100,7 @@ export function WhatsNewPage({ title }: { title: string }) {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col gap-5 p-4 sm:gap-8 sm:p-6">
+    <div className="flex w-full max-w-4xl flex-col gap-5 sm:gap-8">
       <PageHeader title={title} description={t("whats_new_intro")} />
       {releases.length === 0 ? (
         <p className="text-muted-foreground flex items-center gap-2">

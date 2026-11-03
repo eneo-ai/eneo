@@ -4,6 +4,7 @@ import { useTranslations } from "use-intl";
 import { useEffect, useRef, useSyncExternalStore, type ReactNode } from "react";
 import { DeactivatedNotice } from "@/features/auth/deactivated-page";
 import { runtimeConfig } from "@/lib/runtime-config";
+import { SessionExpiryDialog } from "./session-expiry";
 import {
   checkBrowserSession,
   getSessionSnapshot,
@@ -73,6 +74,11 @@ export function BrowserSessionBoundary({ children }: { children: ReactNode }) {
         />
       )}
       {children}
+      {session.status === "bound" &&
+        session.generation !== null &&
+        session.expiresAt !== undefined && (
+          <SessionExpiryDialog expiresAt={session.expiresAt} lifetime={session.lifetime} />
+        )}
     </>
   );
 }

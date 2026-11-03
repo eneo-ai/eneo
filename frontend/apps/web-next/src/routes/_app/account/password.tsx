@@ -6,7 +6,7 @@ export const Route = createFileRoute("/_app/account/password")({
   head: routeTitle("change_password"),
   component: () => (
     <div data-pushed-section="">
-      <ChangePasswordCard />
+      <ChangePasswordCard docked />
     </div>
   )
 });

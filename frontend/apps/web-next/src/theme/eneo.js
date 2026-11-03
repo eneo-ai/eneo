@@ -141,9 +141,9 @@ export const eneoTheme = {
     "--color-icon-primary": "light-dark(#0F1217, #F1F3F6)",
     "--color-icon-secondary": "light-dark(#6B7280, #8B93A1)",
     "--color-icon-disabled": "light-dark(#9AA0AB, #5C6470)",
-    "--color-success": "light-dark(#1E7A32, #6CC382)",
-    "--color-warning": "light-dark(#8A5A00, #E9B949)",
-    "--color-error": "light-dark(#B42330, #FF8177)",
+    "--color-success": "light-dark(#1A6B2C, #6CC382)",
+    "--color-warning": "light-dark(#805400, #E9B949)",
+    "--color-error": "light-dark(#B22330, #FF8177)",
     "--color-success-muted": "light-dark(#E2F2E5, rgba(108, 195, 130, 0.15))",
     "--color-error-muted": "light-dark(#FBE5E6, rgba(255, 129, 119, 0.15))",
     "--color-warning-muted": "light-dark(#FCF0D4, rgba(233, 185, 73, 0.15))",
@@ -154,20 +154,20 @@ export const eneoTheme = {
     "--color-tint-hover": "light-dark(#000000, #ffffff)",
     "--color-background-red": "light-dark(#FBE5E6, rgba(255, 129, 119, 0.15))",
     "--color-border-red": "light-dark(#ffaea7, #fa6762)",
-    "--color-icon-red": "light-dark(#B42330, #FF8177)",
-    "--color-text-red": "light-dark(#B42330, #FF8177)",
+    "--color-icon-red": "light-dark(#B22330, #FF8177)",
+    "--color-text-red": "light-dark(#B22330, #FF8177)",
     "--color-background-orange": "light-dark(#FBEEDB, rgba(241, 180, 92, 0.14))",
     "--color-border-orange": "light-dark(#ffc7a1, #df843f)",
     "--color-icon-orange": "light-dark(#94590A, #F1B45C)",
     "--color-text-orange": "light-dark(#94590A, #F1B45C)",
     "--color-background-yellow": "light-dark(#FCF0D4, rgba(233, 185, 73, 0.15))",
     "--color-border-yellow": "light-dark(#e3c36c, #c29900)",
-    "--color-icon-yellow": "light-dark(#8A5A00, #E9B949)",
-    "--color-text-yellow": "light-dark(#8A5A00, #E9B949)",
+    "--color-icon-yellow": "light-dark(#805400, #E9B949)",
+    "--color-text-yellow": "light-dark(#805400, #E9B949)",
     "--color-background-green": "light-dark(#E2F2E5, rgba(108, 195, 130, 0.15))",
     "--color-border-green": "light-dark(#aad4a9, #6ab26b)",
-    "--color-icon-green": "light-dark(#1E7A32, #6CC382)",
-    "--color-text-green": "light-dark(#1E7A32, #6CC382)",
+    "--color-icon-green": "light-dark(#1A6B2C, #6CC382)",
+    "--color-text-green": "light-dark(#1A6B2C, #6CC382)",
     "--color-background-teal": "light-dark(#DCF2EF, rgba(82, 209, 198, 0.14))",
     "--color-border-teal": "light-dark(#90d7c8, #4fb1a0)",
     "--color-icon-teal": "light-dark(#0B6E69, #52D1C6)",
@@ -214,13 +214,17 @@ export const eneoTheme = {
     "--astryx-theme-neutral-color-status-fill-accent": "light-dark(#0074e2, #6d9cfe)",
     "--eneo-color-background-sunken": "light-dark(#F8F9FB, #0D1014)",
     "--eneo-color-text-tertiary": "light-dark(#646A77, #939BA8)",
-    "--eneo-color-border-control": "light-dark(#7E8593, #747C8B)"
+    "--eneo-color-border-control": "light-dark(#7E8593, #747C8B)",
+    "--eneo-color-segment-selected": "light-dark(#FFFFFF, rgba(255, 255, 255, 0.14))",
+    "--eneo-color-segment-selected-edge": "light-dark(rgba(0, 0, 0, 0), var(--eneo-color-border-control))"
   },
   __localTokenOwners: {
     "--astryx-theme-neutral-color-status-fill-accent": "neutral",
     "--eneo-color-background-sunken": "eneo",
     "--eneo-color-text-tertiary": "eneo",
-    "--eneo-color-border-control": "eneo"
+    "--eneo-color-border-control": "eneo",
+    "--eneo-color-segment-selected": "eneo",
+    "--eneo-color-segment-selected-edge": "eneo"
   },
   __localTokenLineage: ["neutral","eneo"],
   components: {
@@ -387,7 +391,8 @@ export const eneoTheme = {
         "height": "calc(var(--size-element-lg) - 8px)"
       },
       "selected": {
-        "boxShadow": "none"
+        "boxShadow": "inset 0 0 0 1px var(--eneo-color-segment-selected-edge)",
+        "backgroundColor": "var(--eneo-color-segment-selected)"
       }
     },
     "switch": {
@@ -593,6 +598,11 @@ export const eneoTheme = {
               }
             },
             "selector-option-row": {
+              "base": {
+                "minHeight": "44px"
+              }
+            },
+            "dropdown-menu-item": {
               "base": {
                 "minHeight": "44px"
               }

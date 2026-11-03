@@ -80,11 +80,11 @@ describe("PageHeader", () => {
       />
     );
     const title = screen.getByRole("heading", { level: 2, name: "Appar" });
-    const hidden = title.closest(".max-md\\:sr-only");
+    const hidden = title.closest(".phone\\:sr-only");
     expect(hidden).toBeTruthy();
-    expect(screen.getByText("Alla appar i ytan").closest(".max-md\\:sr-only")).toBe(hidden);
+    expect(screen.getByText("Alla appar i ytan").closest(".phone\\:sr-only")).toBe(hidden);
     const create = screen.getByRole("button", { name: "Skapa app" });
-    expect(create.closest(".max-md\\:sr-only")).toBeNull();
+    expect(create.closest(".phone\\:sr-only")).toBeNull();
   });
 
   it("keeps the legacy children actions slot", () => {
@@ -186,7 +186,9 @@ describe("EntityAvatar", () => {
       expect(tile.classList.contains(cls)).toBe(true);
     }
     expect(tile.getAttribute("aria-hidden")).toBe("true");
-    expect(tile.textContent).toBe("MY");
+    // Drawn, not text: a control's visible label, as axe reads it, never starts with them (WCAG 2.5.3).
+    expect(tile.getAttribute("data-initials")).toBe("MY");
+    expect(tile.textContent).toBe("");
   });
 
   it("is an image with an accessible name when labelled", () => {

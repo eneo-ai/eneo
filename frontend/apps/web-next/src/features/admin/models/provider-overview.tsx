@@ -137,7 +137,7 @@ function AttentionBanner({
 }
 
 /**
- * The "Modeller" tab: search, type and security-class filters, the attention
+ * The "Leverantörer" tab: search, type and security-class filters, the attention
  * banner and one card per provider with its models.
  */
 export function ProviderOverview({

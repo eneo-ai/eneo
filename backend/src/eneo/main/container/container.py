@@ -1268,6 +1268,7 @@ class Container(containers.DeclarativeContainer):
         BrowserSessionService,
         session=session,
         auth_service=auth_service,
+        audit_service=audit_service,
     )
     scim_token_repository = providers.Factory(
         ScimTokenRepository,

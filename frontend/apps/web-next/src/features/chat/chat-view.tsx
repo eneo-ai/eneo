@@ -25,6 +25,7 @@ import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
 import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
 import { useMediaMatch } from "@/lib/hooks/use-media-match";
+import { MEDIA } from "@/lib/breakpoints";
 import { useOnline } from "@/lib/hooks/use-online";
 import { invalidateConversationLists } from "@/lib/api/conversations";
 import { describeChatFailure } from "@/lib/chat/chat-error";
@@ -128,6 +129,14 @@ type PendingQuestionState = {
  * (decision 26).
  */
 const PHONE = "(width < 40rem)";
+
+/**
+ * Where the start state docks the composer from the first frame, so nothing
+ * moves when the question is sent: a phone (decision 5), and a touch screen
+ * from an upright iPad's width, where the thumb reaches it. Elsewhere (a
+ * mouse, or a touch window from 640 to 768px) it is centred.
+ */
+const DOCK_START = `${PHONE}, ${MEDIA.md} and (pointer: coarse) and (hover: none)`;
 
 /** Which answer's activity is shown, on which tab, and which source to focus. */
 
@@ -386,15 +395,13 @@ function ConversationView({
   const dockInputRef = useRef<ComposerHandle>(null);
   const startInputRef = useRef<ComposerHandle>(null);
   const startDockInputRef = useRef<ComposerHandle>(null);
-  // Phones dock the start composer where it stays (decision 5): CSS picks
-  // from the first paint, and once the width is known the other place goes.
   const phone = useMediaMatch(PHONE);
-  /** The start composer's field the user has: docked on phones, centred from 640px. */
-  const startInput = () =>
-    ((phone ?? window.matchMedia(PHONE).matches) ? startDockInputRef : startInputRef).current;
+  const startDocked = useMediaMatch(DOCK_START);
+  /** The start composer's field the user has: docked or centred (DOCK_START). */
+  const startInput = () => (startDocked ? startDockInputRef : startInputRef).current;
   const startField = useEffectEvent(startInput);
   const refocusComposer = useRef(false);
-  // Crossing 640px (a phone turned, a window resized) swaps the start
+  // Crossing DOCK_START (a window or an iPad's split view resized) swaps the start
   // composer's place, and the field being typed in goes with it: the new
   // one takes the focus. A removed field fires no blur, so this stays set.
   const startHadFocus = useRef(false);
@@ -404,7 +411,7 @@ function ConversationView({
   };
   useEffect(() => {
     if (startHadFocus.current && document.activeElement === document.body) startField()?.focus();
-  }, [phone]);
+  }, [startDocked]);
   const rescue = useFocusRescue();
   useEffect(() => {
     if (focusComposerIfLost) rescue(() => startField()?.element ?? null);
@@ -1185,12 +1192,12 @@ function ConversationView({
             partner={partner}
             headingLevel={startHeadingLevel}
             composer={
-              phone !== true && (
-                // From 640px: centred under the greeting until the conversation starts.
+              !startDocked && (
+                // Centred under the greeting until the conversation starts.
                 <div
                   data-start-composer=""
                   {...trackStartFocus}
-                  className="flex w-full flex-col gap-3 max-sm:hidden"
+                  className="flex w-full flex-col gap-3"
                 >
                   {errorNotice}
                   <Composer
@@ -1204,10 +1211,10 @@ function ConversationView({
             }
           />
         </div>
-        {phone !== false && (
-          // Phones: docked from the first frame where it stays once the
-          // conversation starts, so nothing moves when the question is sent.
-          <ComposerDock className="sm:hidden">
+        {startDocked && (
+          // Docked from the first frame where it stays once the conversation
+          // starts, so nothing moves when the question is sent.
+          <ComposerDock>
             <div
               data-start-composer=""
               {...trackStartFocus}

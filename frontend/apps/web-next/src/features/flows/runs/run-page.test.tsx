@@ -2129,8 +2129,8 @@ describe("FlowRunPage on a phone", () => {
     act(() => setViewport({ width: 844, height: 390, pointer: "coarse" }));
     expect(screen.getByRole("button", { name: messages.flow_runs_steps_heading })).toBe(steps);
     expect(steps.getAttribute("aria-expanded")).toBe("true");
-    // The tablet's chrome has no flow crumb, so the page keeps its own.
-    expect(screen.getByRole("link", { name: "Flöden" })).toBeTruthy();
+    // Still a phone's layout: the space's phone header stands in for the breadcrumbs.
+    expect(screen.queryByRole("link", { name: "Flöden" })).toBeNull();
   });
 
   it("gives each fold its own heading, so what is inside does not read as part of the result", async () => {

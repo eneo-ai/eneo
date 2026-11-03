@@ -76,7 +76,7 @@ export function SpaceSkillDetailPage({ skillId }: { skillId: string }) {
   const editable = can("edit", "skill");
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-7 pb-16">
+    <div className="flex w-full flex-col gap-7 pb-16">
       <PageHeader title={value.display_name} headingRef={headingRef} />
       <RefreshError queries={[skill]} />
       <BackLink href={base} hideOnPhone>

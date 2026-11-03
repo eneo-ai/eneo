@@ -73,3 +73,48 @@ test.describe("an answer's sources on a phone (decision 28)", () => {
     await expect(chatComposer(page)).toBeVisible();
   });
 });
+
+// A touch screen from an upright iPad's width docks the start composer as a
+// phone does: the greeting and lists above it, and nothing moves on sending.
+// A desktop with a mouse keeps it centred under the greeting.
+for (const tablet of [
+  { name: "upright", width: 820, height: 1180 },
+  { name: "sideways", width: 1180, height: 820 }
+]) {
+  test.describe(`the start screen on an iPad held ${tablet.name}`, () => {
+    test.use({
+      viewport: { width: tablet.width, height: tablet.height },
+      hasTouch: true,
+      isMobile: true
+    });
+
+    test("docks the composer under the greeting, where it stays once the question is sent", async ({
+      page
+    }) => {
+      await page.goto("/spaces/personal/chat");
+      const field = chatComposer(page);
+      await expect(field).toBeVisible();
+      const before = await field.boundingBox();
+      const greeting = await page.getByRole("heading", { level: 1 }).boundingBox();
+      expect(before!.y + before!.height).toBeGreaterThan(tablet.height - 200);
+      expect(greeting!.y).toBeLessThan(before!.y);
+
+      await askChatQuestion(page, uniqueName("e2e dock"));
+      await expect(conversationLog(page)).toBeVisible();
+      const after = await chatComposer(page).boundingBox();
+      expect(Math.abs(after!.y - before!.y)).toBeLessThanOrEqual(2);
+    });
+  });
+}
+
+test.describe("the start screen with a mouse", () => {
+  test.use({ viewport: { width: 1280, height: 800 }, hasTouch: false, isMobile: false });
+
+  test("keeps the composer centred under the greeting", async ({ page }) => {
+    await page.goto("/spaces/personal/chat");
+    const field = chatComposer(page);
+    await expect(field).toBeVisible();
+    const box = await field.boundingBox();
+    expect(box!.y + box!.height).toBeLessThan(800 - 200);
+  });
+});

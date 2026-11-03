@@ -1,10 +1,11 @@
 import { LoadingState } from "@/components/composites/loading-state";
+import { PageFrame } from "@/components/composites/page-frame";
 
 /** Route-level loading inside the page panel: a busy status region, announced once. */
 export function PagePending() {
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col p-4 sm:p-6">
+    <PageFrame>
       <LoadingState rows={4} />
-    </div>
+    </PageFrame>
   );
 }

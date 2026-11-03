@@ -6,7 +6,7 @@ import { AREA_HUES } from "@/components/composites/icon-tile";
 import { ResourceCollection } from "@/components/composites/resource-tile";
 import { CreateAppButton } from "@/features/apps/create-app";
 import { AppTile } from "@/features/apps/tile";
-import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
+import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { useSpace } from "../use-space";
 import { recentApps } from "./overview-data";
 import { OverviewCreateCard, OverviewLink, OverviewSection } from "./overview-section";
@@ -14,6 +14,7 @@ import { OverviewCreateCard, OverviewLink, OverviewSection } from "./overview-se
 /**
  * The newest apps as cards (one row), plus the create card for users who may
  * create; on a phone the create button sits in the heading instead of a card.
+ * Both are small and secondary: the tab's docked button is the primary action.
  * Nothing for someone who has no apps to open and none to create. "Visa alla"
  * leads to the apps tab.
  */
@@ -21,7 +22,7 @@ export function OverviewApps() {
   const t = useTranslations();
   const { space, routeId, can } = useSpace();
   const collator = useCollator();
-  const phone = useMediaMatch(PHONE_QUERY);
+  const phone = usePhoneScreen();
   const items = recentApps(space, collator.compare);
   const canCreate = can("create", "app");
   const createCard = canCreate && !phone;
@@ -36,7 +37,7 @@ export function OverviewApps() {
       end={
         items.length > 0 ? (
           <>
-            {canCreate && phone ? <CreateAppButton /> : null}
+            {canCreate && phone ? <CreateAppButton secondary /> : null}
             <OverviewLink href={`/spaces/${routeId}/apps`} label={t("space_view_all_apps")}>
               {t("space_view_all")}
             </OverviewLink>
@@ -60,7 +61,10 @@ export function OverviewApps() {
           gridClassName="grid gap-3 @lg:grid-cols-2 @xl:grid-cols-3"
           trailing={
             createCard ? (
-              <OverviewCreateCard hint={t("space_new_app_hint")} action={<CreateAppButton />} />
+              <OverviewCreateCard
+                hint={t("space_new_app_hint")}
+                action={<CreateAppButton secondary />}
+              />
             ) : undefined
           }
         >

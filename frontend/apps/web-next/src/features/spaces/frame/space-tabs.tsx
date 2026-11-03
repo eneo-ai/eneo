@@ -8,7 +8,8 @@ function ignoreSelection() {}
 /**
  * The space's sections as an Astryx TabList in its navigation pattern: a named
  * <nav> of links, the current one marked with aria-current. Counts sit after
- * the label; the accessible name spells them out ("Assistenter (3)"). On a
+ * the label and are read with it: the name is what the tab shows
+ * ("Assistenter 3"), so it holds the visible label (WCAG 2.5.3). On a
  * phone the strip is narrower than its tabs: Astryx scrolls it with edge
  * fades, keeps the current tab in view and moves through it with the arrow
  * keys; `globals.css` (section 12) adds scroll snapping to the tabs.
@@ -47,16 +48,14 @@ export function SpaceTabs({
             value={section.id}
             href={section.href}
             label={label}
-            {...(count === undefined
-              ? {}
-              : {
-                  "aria-label": t("space_section_with_count", { label, count }),
-                  endContent: (
-                    <span aria-hidden="true" className="text-xs font-medium tabular-nums">
-                      {count}
-                    </span>
-                  )
-                })}
+            endContent={
+              count === undefined ? undefined : (
+                <>
+                  {" "}
+                  <span className="text-xs font-medium tabular-nums">{count}</span>
+                </>
+              )
+            }
           />
         );
       })}

@@ -231,7 +231,7 @@ def test_callback_sets_session_and_clears_transaction(
         parsed.load(cookie)
     assert 0 < int(parsed["__Host-eneo_web"]["max-age"]) <= 900
     # The cookie carries the callback's token once the store recorded it.
-    federation.start.assert_awaited_once_with(federation.token)
+    federation.start.assert_awaited_once_with(federation.token, replacing=None)
     assert parsed["__Host-eneo_web"].value == federation.session_token
     assert any(
         cookie.startswith("__Host-eneo_web=")
@@ -589,7 +589,7 @@ async def test_real_federation_admits_one_callback_and_fails_closed(
         container._auth_service, "create_access_token_for_user", lambda user: token
     )
     sessions = AsyncMock(spec=BrowserSessionService)
-    sessions.start.side_effect = lambda issued: issued
+    sessions.start.side_effect = lambda issued, replacing=None: issued
     container.browser_session_service = lambda: sessions
     app = get_application()
     for route in endpoint_routes(app.routes):

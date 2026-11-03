@@ -16,7 +16,7 @@ import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
 import { hasAnswered, pollEvery } from "@/lib/api/query";
 import { useFocusRescue } from "@/lib/focus-rescue";
-import { PHONE_QUERY, useMediaMatch, usePhoneScreen } from "@/lib/hooks/use-media-match";
+import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { CopyableValue } from "@/features/chat/debug-section";
 import { useSpaceDisplayName, useSpaceSections } from "@/features/spaces/frame/space-header";
 import { spaceLandingHref } from "@/features/spaces/frame/space-sections";
@@ -285,8 +285,6 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
   // A phone has the space's header above the page already: no breadcrumbs here, no gutter of
   // its own (the space's frame gives one), and the sections after the result folded.
   const phone = usePhoneScreen();
-  // The space's phone header stands in for the breadcrumbs below 768 px; sideways, the tablet's does not.
-  const narrow = useMediaMatch(PHONE_QUERY);
   const { data: flow } = useSuspenseQuery(flowQueryOptions(browserApi, flowId));
   const [clock] = useState(() => createPollClock());
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -554,7 +552,8 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
           title={title}
           headingRef={headingRef}
           breadcrumbs={
-            narrow
+            // The space's phone header stands in for the breadcrumbs, held either way.
+            phone
               ? undefined
               : [
                   { label: spaceName, href: spaceLandingHref(sections, routeId) },

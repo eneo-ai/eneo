@@ -69,6 +69,17 @@ function show(space: Space) {
   return renderInApp(<SpaceOverview />, { appContext });
 }
 
+/**
+ * The overview's create controls are small and secondary, like "Ladda upp":
+ * the tabs' docked create buttons stay each screen's one primary action.
+ */
+function expectSecondaryCreate(scope: HTMLElement, name: string) {
+  const create = within(scope).getByRole("button", { name });
+  const more = within(scope).getByRole("button", { name: "Fler sätt att skapa" });
+  expect([create.dataset.variant, create.dataset.size]).toEqual(["secondary", "sm"]);
+  expect([more.dataset.variant, more.dataset.size]).toEqual(["secondary", "sm"]);
+}
+
 const busySpace = () =>
   makeSpace({
     assistants: [
@@ -117,7 +128,7 @@ describe("SpaceOverview", () => {
     expect(within(cards[1]!).getByText("Publicerad")).toBeTruthy();
     expect(within(cards[1]!).getByText("Haiku 4.5")).toBeTruthy();
     expect(within(cards[2]!).getByText("Börja från en mall eller från noll")).toBeTruthy();
-    expect(within(cards[2]!).getByRole("button", { name: "Skapa assistent" })).toBeTruthy();
+    expectSecondaryCreate(cards[2]!, "Skapa assistent");
     expect(within(assistants).queryByRole("link", { name: "Äldst" })).toBeNull();
 
     const knowledge = screen.getByRole("region", { name: "Kunskap" });
@@ -197,7 +208,10 @@ describe("SpaceOverview", () => {
 
     const assistants = screen.getByRole("region", { name: "Assistenter" });
     expect(within(assistants).getByRole("heading", { name: "Inga assistenter ännu" })).toBeTruthy();
-    expect(within(assistants).getByRole("button", { name: "Skapa assistent" })).toBeTruthy();
+    // An empty section's one next step stays the filled button.
+    expect(
+      within(assistants).getByRole("button", { name: "Skapa assistent" }).dataset.variant
+    ).toBe("primary");
     expect(within(assistants).queryByRole("link", { name: "Visa alla assistenter" })).toBeNull();
 
     const knowledge = screen.getByRole("region", { name: "Kunskap" });
@@ -271,7 +285,7 @@ describe("SpaceOverview on a phone: Hantera ytan (decision 24)", () => {
     expect(rows).toHaveLength(3);
     expect(within(rows[0]!).getByRole("link", { name: /^Avtalsgranskaren/ })).toBeTruthy();
     const heading = within(assistants).getByRole("heading", { name: "Assistenter" }).parentElement!;
-    expect(within(heading).getByRole("button", { name: "Skapa assistent" })).toBeTruthy();
+    expectSecondaryCreate(heading, "Skapa assistent");
     expect(within(assistants).queryByText("Börja från en mall eller från noll")).toBeNull();
   });
 
@@ -325,7 +339,7 @@ describe("SpaceOverview apps", () => {
     expect(within(cards[0]!).getByRole("link", { name: /Anbudsutvärdering/ })).toBeTruthy();
     expect(within(cards[0]!).getByText("Utkast")).toBeTruthy();
     expect(within(cards[1]!).getByRole("link", { name: /Protokoll från möte/ })).toBeTruthy();
-    expect(within(cards[2]!).getByRole("button", { name: "Skapa app" })).toBeTruthy();
+    expectSecondaryCreate(cards[2]!, "Skapa app");
     expect(within(apps).queryByRole("link", { name: /Äldst/ })).toBeNull();
     // The actions menu belongs to the apps tab.
     expect(within(apps).queryByRole("button", { name: /Fler åtgärder|Åtgärder/ })).toBeNull();
@@ -344,7 +358,7 @@ describe("SpaceOverview apps", () => {
     const rows = within(within(apps).getAllByRole("list")[0]!).getAllByRole("listitem");
     expect(rows).toHaveLength(3);
     const heading = within(apps).getByRole("heading", { name: "Appar" }).parentElement!;
-    expect(within(heading).getByRole("button", { name: "Skapa app" })).toBeTruthy();
+    expectSecondaryCreate(heading, "Skapa app");
   });
 
   it("offers no create control to someone who may only read", () => {

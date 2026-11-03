@@ -3571,7 +3571,7 @@ export interface paths {
     };
     /**
      * Get per-action audit configuration
-     * @description Retrieve all 212 actions with their enabled status for the modal UI.
+     * @description Retrieve all 213 actions with their enabled status for the modal UI.
      */
     get: operations["get_action_config_api_v1_audit_config_actions_get"];
     put?: never;
@@ -3839,11 +3839,31 @@ export interface paths {
     };
     /**
      * Check The Browser Session
-     * @description Authenticate the browser's session cookie and name its generation in `Eneo-Session-Generation`. A Bearer token is not a browser session (401).
+     * @description Authenticate the browser's session cookie, name its generation in `Eneo-Session-Generation`, the whole seconds it has left in `Eneo-Session-Expires-In` and the whole seconds it was issued for in `Eneo-Session-Lifetime`. A Bearer token is not a browser session (401).
      */
     get: operations["Check_the_browser_session_api_v1_auth_session__get"];
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/auth/session/extend/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Extend The Browser Session
+     * @description Renew the browser's session: the cookie gets a new token for the same session, user, organisation and sign-in method, valid for `JWT_EXPIRY_TIME` again, but never past `BROWSER_SESSION_MAX_AGE` after the original sign-in (401 once reached). A session that was signed out or has ended cannot renew itself (401). Needs the current `Eneo-Session-Generation`, which the renewal keeps. The token itself is only in the cookie. Only for requests from the site's own pages.
+     */
+    post: operations["Extend_the_browser_session_api_v1_auth_session_extend__post"];
     delete?: never;
     options?: never;
     head?: never;
@@ -12224,6 +12244,7 @@ export interface components {
       | "password_changed"
       | "password_change_failed"
       | "sessions_invalidated"
+      | "session_extended"
       | "assistant_created"
       | "assistant_deleted"
       | "assistant_updated"
@@ -14799,6 +14820,22 @@ export interface components {
        * @description Portable `.eneopkg` bundle. The server validates the package structure, checksum, schema versions, and local-resource portability.
        */
       package_file: string;
+    };
+    /**
+     * BrowserSessionExtension
+     * @description The renewed browser session; its token travels only in the cookie.
+     */
+    BrowserSessionExtension: {
+      /**
+       * Expires In
+       * @description Whole seconds until the renewed session ends.
+       */
+      expires_in: number;
+      /**
+       * Generation
+       * @description The session's `Eneo-Session-Generation`, which a renewal keeps.
+       */
+      generation: string;
     };
     /**
      * BulkCrawlRequest
@@ -56463,6 +56500,53 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  Extend_the_browser_session_api_v1_auth_session_extend__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["BrowserSessionExtension"];
+        };
       };
       /** @description Unauthorized */
       401: {

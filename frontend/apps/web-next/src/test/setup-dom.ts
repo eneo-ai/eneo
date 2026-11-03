@@ -54,10 +54,13 @@ export const PHONE_VIEWPORT: Viewport = { width: 390, height: 844, pointer: "coa
 export const TABLET_PORTRAIT_VIEWPORT: Viewport = { width: 820, height: 1180, pointer: "coarse" };
 /** The same iPad turned sideways. */
 export const TABLET_LANDSCAPE_VIEWPORT: Viewport = { width: 1180, height: 820, pointer: "coarse" };
+/** A phone turned sideways (iPhone 14): wider than 768 px, but a phone's layout. */
+export const PHONE_LANDSCAPE_VIEWPORT: Viewport = { width: 844, height: 390, pointer: "coarse" };
 
 const PRESETS = {
   desktop: DESKTOP_VIEWPORT,
   phone: PHONE_VIEWPORT,
+  "phone-landscape": PHONE_LANDSCAPE_VIEWPORT,
   "tablet-portrait": TABLET_PORTRAIT_VIEWPORT,
   "tablet-landscape": TABLET_LANDSCAPE_VIEWPORT
 } as const;
@@ -224,6 +227,7 @@ function applyViewportSize() {
  * already mounted. Resets to the desktop after each test.
  *
  * @example setViewport("phone"); // 390 × 844, touch
+ * @example setViewport("phone-landscape"); // 844 × 390, touch
  * @example setViewport("tablet-portrait"); // 820 × 1180, touch
  * @example setViewport({ width: 600, height: 800, pointer: "fine" }); // a narrow window
  */

@@ -178,7 +178,8 @@ describe("DesktopSideNav (main)", () => {
   });
 
   it("puts who a recent conversation is with into its label on a touch screen, which has no tooltip", () => {
-    setViewport(PHONE_VIEWPORT);
+    // A 13" iPad held sideways: wide enough for the full nav with nothing stored.
+    setViewport({ ...PHONE_VIEWPORT, width: 1366, height: 1024 });
     renderNav();
     const recent = screen.getByRole("group", { name: "Senaste" });
 
@@ -377,6 +378,88 @@ describe("DesktopSideNav (main)", () => {
   });
 });
 
+describe("DesktopSideNav on a tablet or a small laptop", () => {
+  const expanded = () => screen.queryByRole("button", { name: "Fäll ihop sidomenyn" }) !== null;
+  const renderStored = (defaultCollapsed?: boolean) =>
+    renderInApp(
+      <DesktopSideNav variant="main" navId="side-nav" defaultCollapsed={defaultCollapsed} />,
+      { queryClient: seededClient() }
+    );
+
+  it.each([
+    ["an iPad held upright", "tablet-portrait"],
+    ["an iPad held sideways", "tablet-landscape"]
+  ] as const)("is an icon rail on %s when nothing is stored", (_, viewport) => {
+    setViewport(viewport);
+    renderStored();
+    expect(screen.getByRole("button", { name: "Fäll ut sidomenyn" })).toBeTruthy();
+    // A rail item keeps its name: the space's name, not its initial.
+    expect(screen.getByRole("link", { name: "Upphandling" })).toBeTruthy();
+  });
+
+  it("is the full nav from 1280 px when nothing is stored", () => {
+    setViewport({ width: 1280, height: 800, pointer: "fine" });
+    renderStored();
+    expect(expanded()).toBe(true);
+  });
+
+  it("follows the width until the user chooses, then keeps the choice", () => {
+    setViewport("tablet-landscape");
+    renderStored();
+    expect(expanded()).toBe(false);
+    act(() => setViewport("desktop"));
+    expect(expanded()).toBe(true);
+    act(() => setViewport("tablet-landscape"));
+    expect(expanded()).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Fäll ut sidomenyn" }));
+    expect(document.cookie).toContain(`${SIDE_NAV_COLLAPSED_COOKIE}=0`);
+    act(() => setViewport("tablet-portrait"));
+    expect(expanded()).toBe(true);
+  });
+
+  it("moves focus to the toggle when narrowing below 1280 px removes the focused link", async () => {
+    setViewport({ width: 1280, height: 800, pointer: "fine" });
+    renderStored();
+    const link = within(screen.getByRole("group", { name: "Senaste" })).getByRole("link", {
+      name: "Veckomöte"
+    });
+    link.focus();
+
+    act(() => setViewport({ width: 1279, height: 800, pointer: "fine" }));
+
+    expect(screen.queryByRole("group", { name: "Senaste" })).toBeNull();
+    const toggle = screen.getByRole("button", { name: "Fäll ut sidomenyn" });
+    await waitFor(() => expect(document.activeElement).toBe(toggle));
+  });
+
+  it("leaves focus outside the nav where it was when the width collapses the nav", async () => {
+    setViewport({ width: 1280, height: 800, pointer: "fine" });
+    renderStored();
+    const outside = document.createElement("button");
+    document.body.append(outside);
+    outside.focus();
+
+    act(() => setViewport({ width: 1279, height: 800, pointer: "fine" }));
+
+    expect(screen.getByRole("button", { name: "Fäll ut sidomenyn" })).toBeTruthy();
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    expect(document.activeElement).toBe(outside);
+    outside.remove();
+  });
+
+  it.each([
+    ["expanded", false],
+    ["collapsed", true]
+  ])("keeps a stored %s nav at every width", (_, collapsed) => {
+    setViewport("tablet-landscape");
+    renderStored(collapsed);
+    expect(expanded()).toBe(!collapsed);
+    act(() => setViewport("desktop"));
+    expect(expanded()).toBe(!collapsed);
+  });
+});
+
 describe("DesktopSideNav (admin)", () => {
   it("lists every admin section under the Administration landmark", async () => {
     setRoute("/admin/models");
@@ -384,7 +467,7 @@ describe("DesktopSideNav (admin)", () => {
     const navigation = screen.getByRole("navigation", { name: "Administration" });
 
     // Four groups in this order, each with its pages in the design's order.
-    const groupNames = ["Översikt", "Styrning", "Anslutningar", "Organisation"];
+    const groupNames = ["Uppföljning", "Styrning", "Anslutningar", "Organisation"];
     const groups = groupNames.map((name) => within(navigation).getByRole("group", { name }));
     for (const [index, group] of groups.entries()) {
       const next = groups[index + 1];
@@ -397,11 +480,14 @@ describe("DesktopSideNav (admin)", () => {
       back.compareDocumentPosition(groups[0]!) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
     const links = within(navigation).getAllByRole("link");
+    // No group shares its name with a page: a screen reader would hear the same word twice in a row.
+    const linkNames = links.map((link) => link.textContent);
+    expect(groupNames.filter((name) => linkNames.includes(name))).toEqual([]);
     const hrefsIn = (name: string) =>
       within(within(navigation).getByRole("group", { name }))
         .getAllByRole("link")
         .map((link) => link.getAttribute("href"));
-    expect(hrefsIn("Översikt")).toEqual(["/admin", "/admin/insights", "/admin/usage"]);
+    expect(hrefsIn("Uppföljning")).toEqual(["/admin", "/admin/insights", "/admin/usage"]);
     expect(hrefsIn("Styrning")).toEqual([
       "/admin/personal-assistant",
       "/admin/prompt-library",
@@ -453,7 +539,7 @@ describe("DesktopSideNav (admin)", () => {
     const governance = within(navigation).getByRole("group", { name: "Styrning" });
     expect(within(connections).getByRole("link", { name: "Moduler" })).toBeTruthy();
     expect(within(governance).getByRole("link", { name: "Mallar" })).toBeTruthy();
-    for (const name of ["Översikt", "Styrning", "Anslutningar", "Organisation"]) {
+    for (const name of ["Uppföljning", "Styrning", "Anslutningar", "Organisation"]) {
       const group = within(navigation).getByRole("group", { name });
       expect(within(group).getAllByRole("link").length).toBeLessThanOrEqual(7);
     }

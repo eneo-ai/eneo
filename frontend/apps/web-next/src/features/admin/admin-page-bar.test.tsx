@@ -39,16 +39,19 @@ describe("AdminPageBar on a phone", () => {
   it("keeps the federation title in the bar", () => {
     setViewport("phone");
     renderAdminPage("/admin/federation");
-    expect(screen.getByText("Inloggning (SSO)").closest("[data-own-mobile-header]")).toBeTruthy();
+    expect(screen.getByText("Inloggning (SSO)").closest("[data-own-phone-header]")).toBeTruthy();
   });
 
   it("takes an admin area back to Administration, in place of the top bar", async () => {
     setViewport("phone");
     const { container } = renderAdminPage("/admin/users");
     expect(back("Administration").getAttribute("href")).toBe("/admin");
-    // Pushed screen: the bar marks itself, and the shell's top bar gives way
-    // to it in CSS (tests/shell-headers.spec.ts checks it in a browser).
-    expect(back("Administration").closest("[data-own-mobile-header]")).toBeTruthy();
+    // Pushed screen on a phone: the bar marks itself, and the shell's top bar gives way
+    // to it in CSS (tests/shell-headers.spec.ts checks it in a browser). Where the side
+    // navigation shows (wide:) it lists every area, so the bar is a phone's only.
+    const bar = back("Administration").closest<HTMLElement>("[data-own-phone-header]")!;
+    expect(bar.className).toContain("wide:hidden");
+    expect(bar.hasAttribute("data-own-mobile-header")).toBe(false);
     // The page keeps the one h1; the bar's title is decoration.
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
     await expectNoAxeViolations(container);
@@ -77,6 +80,6 @@ describe("AdminPageBar on a phone", () => {
     setViewport("phone");
     const { container } = renderAdminPage("/admin");
     expect(screen.queryByRole("link", { name: "Tillbaka till Administration" })).toBeNull();
-    expect(container.querySelector("[data-own-mobile-header]")).toBeNull();
+    expect(container.querySelector("[data-own-phone-header]")).toBeNull();
   });
 });

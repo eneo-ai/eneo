@@ -135,14 +135,10 @@ describe("FlowPage on a phone", () => {
     expect(screen.getByRole("dialog", { name: "Kör Medborgarbrev" })).toBe(dialog);
     expect(within(dialog).getByLabelText(/^Namn på körningen/)).toBe(name);
     expect((name as HTMLInputElement).value).toBe("Budgetmötet");
-    // The tablet's chrome is there, so the page brings what a page bar would: a way back to Flöden,
-    // and "Kör flödet" at the top (a dock is the phone's, below 768 px).
-    expect(screen.queryByRole("group", { name: "Åtgärder för flödet" })).toBeNull();
-    expect(
-      within(screen.getByRole("navigation", { name: "Sökväg" }))
-        .getByRole("link", { name: "Flöden" })
-        .getAttribute("href")
-    ).toBe("/spaces/space-1/flows");
+    // A phone's layout held either way: the page bar leads back to Flöden and "Kör flödet" stays
+    // docked, so the page brings no breadcrumbs of its own.
+    expect(screen.getByRole("group", { name: "Åtgärder för flödet" })).toBeTruthy();
+    expect(screen.queryByRole("navigation", { name: "Sökväg" })).toBeNull();
     expect(screen.getAllByRole("button", { name: "Kör flödet" })).toHaveLength(1);
     expect(screen.queryByRole("tab", { hidden: true })).toBeNull();
   });

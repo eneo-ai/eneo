@@ -189,8 +189,14 @@ class AuthService:
         key: str,
         aud: str = JWT_AUDIENCE,
         algs: list[str] | None = None,
+        *,
+        verify_exp: bool = True,
     ) -> dict[str, object]:
-        """Verified raw claims, including ones ``JWTPayload`` does not model."""
+        """Verified raw claims, including ones ``JWTPayload`` does not model.
+
+        ``verify_exp=False`` still requires ``exp`` but accepts one that has
+        passed. Only sign-out uses it (``BrowserSessionService.end``).
+        """
         algs = algs or [JWT_ALGORITHM]
         try:
             return jwt.decode(
@@ -204,7 +210,8 @@ class AuthService:
                         name
                         for name, field in JWTPayload.model_fields.items()
                         if field.is_required()
-                    ]
+                    ],
+                    "verify_exp": verify_exp,
                 },
             )
         except jwt.PyJWTError:
@@ -228,10 +235,14 @@ class AuthService:
         key: str,
         aud: str = JWT_AUDIENCE,
         algs: list[str] | None = None,
+        *,
+        verify_exp: bool = True,
     ) -> tuple[JWTPayload, dict[str, object]]:
         """Validate the session contract and retain extra module/MCP claims."""
 
-        claims = self.get_verified_claims(token, key=key, aud=aud, algs=algs)
+        claims = self.get_verified_claims(
+            token, key=key, aud=aud, algs=algs, verify_exp=verify_exp
+        )
         try:
             payload = JWTPayload.model_validate(claims)
         except ValidationError:
@@ -243,7 +254,8 @@ class AuthService:
         """A session token this process just issued, re-signed with ``sid``.
 
         Every other claim stays, the expiry included. Only
-        ``BrowserSessionService.start`` calls it, after recording the session.
+        ``BrowserSessionService`` calls it: ``start`` after recording the
+        session, ``renew`` for the token that renews it.
         """
         settings = get_settings()
         key = str(settings.jwt_secret)

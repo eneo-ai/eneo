@@ -179,7 +179,7 @@ describe("BlobTable", () => {
     renderInApp(<BlobTable blobs={[blob("1", "a.pdf", 1)]} canEdit labelledBy="files" />);
     const table = screen.getByRole("table");
     // The Created column stays available on a phone through horizontal scrolling.
-    expect(Number.parseFloat(table.style.minWidth)).toBeLessThanOrEqual(700);
+    expect(Number.parseFloat(table.style.minWidth)).toBeLessThanOrEqual(682);
     // The row-status gutter (Astryx offsets pinned cells from the start) and the name.
     const pinned = within(table)
       .getAllByRole("columnheader")

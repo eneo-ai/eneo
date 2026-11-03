@@ -1,11 +1,11 @@
 import { useLayoutEffect, useRef, type ReactNode } from "react";
 
 /**
- * A screen's primary action, docked at the bottom on a phone (one primary per
- * screen, in the thumb zone: the artifact's DockedActions) and in its place
- * in the page from 768 px. One element that CSS moves, so nothing remounts
- * when a turn crosses 768 px: a dialog the action opened stays open with
- * what was typed in it.
+ * A screen's primary action, docked at the bottom on a phone, held either way
+ * (one primary per screen, in the thumb zone: the artifact's DockedActions),
+ * and in its place in the page otherwise. One element that CSS moves, so
+ * nothing remounts when a turn changes the layout: a dialog the action opened
+ * stays open with what was typed in it.
  *
  * On a phone it is fixed over the page's bottom edge and padded clear of the
  * home indicator. Its buttons share a row (below 640 px) while their labels fit and
@@ -45,7 +45,7 @@ export function DockedActions({ label, children }: { label: string; children: Re
       role="group"
       aria-label={label}
       data-docked-actions=""
-      className="max-md:border-ax-border max-md:bg-ax-surface flex flex-wrap justify-end gap-2 max-md:fixed max-md:inset-x-0 max-md:bottom-0 max-md:z-10 max-md:border-t max-md:px-4 max-md:pt-3 max-md:pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] max-md:[&>*]:min-w-0 max-sm:[&>*]:flex-[1_1_auto]"
+      className="phone:border-ax-border phone:bg-ax-surface phone:fixed phone:inset-x-0 phone:bottom-0 phone:z-10 phone:border-t phone:px-4 phone:pt-3 phone:pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] phone:[&>*]:min-w-0 flex flex-wrap justify-end gap-2 max-sm:[&>*]:flex-[1_1_auto]"
     >
       {children}
     </div>

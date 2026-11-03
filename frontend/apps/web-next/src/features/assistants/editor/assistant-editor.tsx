@@ -149,6 +149,14 @@ function AssistantEditorContent({ assistantId }: { assistantId: string }) {
       node: <McpSection assistant={assistant} />
     },
     {
+      id: "attachments",
+      label: t("attachments"),
+      icon: Paperclip,
+      group: content,
+      summary: summary.files(assistant.attachments.length),
+      node: <AttachmentsSection assistant={assistant} model={ai.toolModel} />
+    },
+    {
       id: "ai",
       label: t("ai_settings"),
       icon: Sparkles,
@@ -163,14 +171,6 @@ function AssistantEditorContent({ assistantId }: { assistantId: string }) {
       group: model,
       summary: summary.chosen(selectedCapabilities(assistant).length),
       node: <CapabilitiesSection assistant={assistant} />
-    },
-    {
-      id: "attachments",
-      label: t("attachments"),
-      icon: Paperclip,
-      group: model,
-      summary: summary.files(assistant.attachments.length),
-      node: <AttachmentsSection assistant={assistant} model={ai.toolModel} />
     },
     {
       id: "security",

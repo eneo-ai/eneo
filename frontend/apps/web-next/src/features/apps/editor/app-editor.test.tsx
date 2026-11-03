@@ -61,3 +61,18 @@ it("mounts the existing API keys section and queries for an app editor", async (
     ).toBe(true)
   );
 });
+
+it("lists its sections on a phone's index under the same groups as the assistant editor", () => {
+  show(["read", "edit", "publish"]);
+  const groups = [...document.querySelectorAll("[data-editor-index] > div")].map((group) => [
+    group.querySelector("h2")?.textContent,
+    [...group.querySelectorAll("[data-editor-row]")].map((row) =>
+      row.getAttribute("data-editor-row")
+    )
+  ]);
+  expect(groups).toEqual([
+    ["Innehåll", ["general", "input", "instructions", "attachments"]],
+    ["Modell och funktioner", ["ai"]],
+    ["Åtkomst", ["security", "api-keys", "publishing"]]
+  ]);
+});

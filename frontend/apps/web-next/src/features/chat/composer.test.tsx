@@ -82,8 +82,12 @@ describe("Composer", () => {
     const textarea = screen.getByRole("textbox", { name: "Fråga Upphandlingsassistenten" });
     expect(textarea.tagName).toBe("TEXTAREA");
     expect(descriptionOf(textarea)).toBe(
-      "Retur ger en ny rad. Skicka med Skicka-knappen, Kommando+Retur eller Ctrl+Retur."
+      "Retur skickar och Skift+Retur ger en ny rad. Kommando+Retur, Ctrl+Retur och Skicka-knappen skickar också."
     );
+    // Beside Send, the two keys and what they do (hidden from assistive tech: the description says it).
+    const hint = screen.getByText("Ny rad").closest("[aria-hidden]");
+    expect(hint?.textContent).toContain("Skicka");
+    expect(hint?.querySelectorAll("kbd").length).toBeGreaterThan(1);
   });
 
   it("does not point a touch screen at keys it does not have in the field's description", () => {
@@ -115,36 +119,99 @@ describe("Composer", () => {
     ).toContain("max-md:hidden");
   });
 
-  it("adds a line on Return and sends on ⌘ or Ctrl+Return and with Send (decision 3)", () => {
+  it("sends on Return with a keyboard, adds a line on Shift+Return, and still sends on ⌘ or Ctrl+Return and Send", () => {
     const onSubmit = vi.fn();
     renderComposer({ onSubmit, initial: "Hej" });
     const textarea = screen.getByRole("textbox");
 
-    // Return and Shift+Return keep the textarea's own newline.
-    expect(fireEvent.keyDown(textarea, { key: "Enter" })).toBe(true);
+    // Shift+Return keeps the textarea's own newline.
     expect(fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true })).toBe(true);
     expect(onSubmit).not.toHaveBeenCalled();
 
+    expect(fireEvent.keyDown(textarea, { key: "Enter" })).toBe(false);
     expect(fireEvent.keyDown(textarea, { key: "Enter", metaKey: true })).toBe(false);
     expect(fireEvent.keyDown(textarea, { key: "Enter", ctrlKey: true })).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
-    expect(onSubmit).toHaveBeenCalledTimes(3);
+    expect(onSubmit).toHaveBeenCalledTimes(4);
   });
 
-  it.each([false, true])("does not send during composition (references: %s)", (references) => {
+  it.each(["phone", "tablet-portrait", "tablet-landscape"] as const)(
+    "adds a line on Return on a touch screen (%s), where Send and ⌘ or Ctrl+Return send",
+    (viewport) => {
+      setViewport(viewport);
+      const onSubmit = vi.fn();
+      renderComposer({ onSubmit, initial: "Hej" });
+      const textarea = screen.getByRole("textbox");
+      expect(fireEvent.keyDown(textarea, { key: "Enter" })).toBe(true);
+      expect(onSubmit).not.toHaveBeenCalled();
+      expect(fireEvent.keyDown(textarea, { key: "Enter", ctrlKey: true })).toBe(false);
+      expect(onSubmit).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it("keeps the same Return keys in the reference input, with a keyboard and on a touch screen", () => {
     const onSubmit = vi.fn();
-    renderComposer({
+    const { unmount } = renderComposer({
       onSubmit,
-      initial: "にほん",
-      inputRef: references ? createRef<ComposerHandle>() : undefined
+      initial: "Hej",
+      inputRef: createRef<ComposerHandle>()
     });
-    const textarea = screen.getByRole("textbox");
-    fireEvent.compositionStart(textarea);
-    fireEvent.keyDown(textarea, { key: "Enter", ctrlKey: true });
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter", shiftKey: true });
     expect(onSubmit).not.toHaveBeenCalled();
-    fireEvent.compositionEnd(textarea);
-    fireEvent.keyDown(textarea, { key: "Enter", ctrlKey: true });
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
     expect(onSubmit).toHaveBeenCalledOnce();
+    unmount();
+
+    setViewport("phone");
+    renderComposer({ onSubmit, initial: "Hej", inputRef: createRef<ComposerHandle>() });
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
+    expect(onSubmit).toHaveBeenCalledOnce();
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter", ctrlKey: true });
+    expect(onSubmit).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([false, true])(
+    "does not send a word being composed with an input method (references: %s)",
+    (references) => {
+      const onSubmit = vi.fn();
+      renderComposer({
+        onSubmit,
+        initial: "にほん",
+        inputRef: references ? createRef<ComposerHandle>() : undefined
+      });
+      const textarea = screen.getByRole("textbox");
+      // Return that commits a candidate: flagged, or keyCode 229 (Safari, after compositionend).
+      for (const ctrlKey of [false, true]) {
+        expect(fireEvent.keyDown(textarea, { key: "Enter", ctrlKey, isComposing: true })).toBe(
+          true
+        );
+        expect(fireEvent.keyDown(textarea, { key: "Enter", ctrlKey, keyCode: 229 })).toBe(true);
+      }
+      fireEvent.compositionStart(textarea);
+      // The reference input also keeps Astryx's own Return from sending meanwhile.
+      expect(fireEvent.keyDown(textarea, { key: "Enter" })).toBe(!references);
+      expect(fireEvent.keyDown(textarea, { key: "Enter", ctrlKey: true })).toBe(!references);
+      expect(onSubmit).not.toHaveBeenCalled();
+      fireEvent.compositionEnd(textarea);
+      fireEvent.keyDown(textarea, { key: "Enter", ctrlKey: true });
+      expect(onSubmit).toHaveBeenCalledOnce();
+    }
+  );
+
+  it("says what is missing at the field when Return sends an empty draft, and sends nothing while answering", () => {
+    const onSubmit = vi.fn();
+    const { unmount } = renderComposer({ onSubmit });
+    const textarea = screen.getByRole("textbox");
+    textarea.focus();
+    expect(fireEvent.keyDown(textarea, { key: "Enter" })).toBe(false);
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(descriptionOf(textarea)).toContain("Skriv en fråga först.");
+    expect(document.activeElement).toBe(textarea);
+    unmount();
+
+    renderComposer({ onSubmit, busy: true, initial: "Nästa fråga" });
+    expect(fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" })).toBe(false);
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 
   it("keeps Send enabled and says at the field what is missing, with focus in it (decision 44)", async () => {

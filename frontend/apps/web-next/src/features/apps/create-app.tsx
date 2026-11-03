@@ -1,15 +1,10 @@
+import { Button } from "@astryxdesign/core/Button";
+import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, LayoutTemplate } from "lucide-react";
 import { useRouter } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
 import { useState } from "react";
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger
-} from "@/components/ui/dropdown-menu";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
@@ -25,10 +20,12 @@ import { TemplateGalleryDialog } from "@/features/templates/template-gallery-dia
  * Creates a blank app at once, named "Ny app" (numbered on a collision), and
  * opens its editor, which focuses the name: no name dialog in between. With
  * templates enabled, a split-button menu also offers the template gallery.
+ * `secondary` makes it small and unfilled where it is not the screen's primary
+ * action (the space overview; the tabs' docked button is).
  * An app cannot run without both a completion and a transcription model, so
  * until the space has them, either way says what is missing instead.
  */
-export function CreateAppButton() {
+export function CreateAppButton({ secondary = false }: { secondary?: boolean }) {
   const t = useTranslations();
   const router = useRouter();
   const { settings } = useAppContext();
@@ -80,36 +77,47 @@ export function CreateAppButton() {
   const openGallery = () => {
     if (!blocked()) setDialog("template");
   };
-  const busy = create.isPending || undefined;
+  const variant = secondary ? "secondary" : "primary";
+  const size = secondary ? "sm" : "md";
+  const createButton = (className?: string) => (
+    <Button
+      label={t("create_app")}
+      variant={variant}
+      size={size}
+      className={className}
+      isLoading={create.isPending}
+      isInterruptible
+      onClick={createBlank}
+    />
+  );
 
   return (
     <>
       {settings.using_templates ? (
         <div className="flex">
-          <Button className="rounded-r-none" aria-busy={busy} onClick={createBlank}>
-            {t("create_app")}
-          </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                size="icon"
-                className="rounded-l-none border-l"
-                aria-label={t("ui_more_ways_to_create")}
-              >
-                <ChevronDown className="size-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onSelect={openGallery}>
-                <LayoutTemplate className="size-4" /> {t("start_with_template")}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {createButton("rounded-r-none")}
+          <DropdownMenu
+            button={{
+              label: t("ui_more_ways_to_create"),
+              icon: <ChevronDown aria-hidden="true" />,
+              isIconOnly: true,
+              variant,
+              size,
+              className: "rounded-l-none border-l"
+            }}
+            hasChevron={false}
+            alignment="end"
+            items={[
+              {
+                label: t("start_with_template"),
+                icon: <LayoutTemplate aria-hidden="true" />,
+                onClick: openGallery
+              }
+            ]}
+          />
         </div>
       ) : (
-        <Button aria-busy={busy} onClick={createBlank}>
-          {t("create_app")}
-        </Button>
+        createButton()
       )}
       <TemplateGalleryDialog
         templateKind="app"

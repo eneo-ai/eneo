@@ -81,27 +81,36 @@ function partnerSpace(partner: ChatPartner): string | null {
 const asSentence = (text: string) => (/[.!?…]$/.test(text) ? text : `${text}.`);
 
 /**
- * The phone switcher's accessible name (decision 2): what its two lines show,
- * with the space they leave out for room, then what it does. "Upphandlings-
- * analys mot LOU. Upphandlingsassistenten i Upphandling, säkerhetsklass
- * Intern. Byt assistent"
+ * The switcher's accessible name: what its face shows, in the face's order, so
+ * a voice command that says what is seen reaches it (WCAG 2.5.3), then what the
+ * face leaves out for room and what the button does. On a phone (decision 2):
+ * "Upphandlingsanalys mot LOU. Upphandlingsassistenten Intern. I Upphandling.
+ * Byt assistent"; from 768 px: "Upphandlingsassistenten. Upphandling · Claude
+ * Haiku 4.5. Byt assistent"; the composer's token: "Upphandlingsassistenten. Byt
+ * assistent".
  */
-function phoneSwitcherName(
+function switcherName(
   t: ReturnType<typeof useTranslations>,
   partner: ChatPartner,
-  title: string | null
+  variant: SwitcherVariant,
+  title: string | null,
+  subtitle: string | null
 ): string {
   const name = displayPartnerName(partner, t);
   const space = partnerSpace(partner);
-  const who = [
-    space ? t("chat_header_in_space", { assistant: name, space }) : name,
-    partner.securityClassification
-      ? t("chat_header_classified", { classification: partner.securityClassification })
-      : null
-  ]
-    .filter(Boolean)
-    .join(", ");
-  return [title, who]
+  const parts =
+    variant === "token"
+      ? [name]
+      : variant === "header"
+        ? [name, subtitle]
+        : [
+            title,
+            [name, title === null ? space : null, partner.securityClassification]
+              .filter(Boolean)
+              .join(" "),
+            title !== null && space ? t("chat_header_space_tail", { space }) : null
+          ];
+  return parts
     .filter((part): part is string => !!part)
     .map(asSentence)
     .concat(t("chat_header_switch"))
@@ -131,6 +140,8 @@ function SwitcherFace({
     // Two start-aligned lines: the title (or, before a conversation, the
     // assistant), then who answers and the space's security class. The
     // chevron sits beside the assistant, which is what the menu switches.
+    // The spaces between the spans keep shown words apart for axe, which
+    // joins text with no separator (flex drops them from the layout).
     const space = partnerSpace(partner);
     const classification = (
       <ClassificationToken
@@ -148,11 +159,10 @@ function SwitcherFace({
           <span className={cn(line, "gap-1 text-[1.0625rem] leading-snug font-semibold")}>
             <span className="truncate">{name}</span>
             {chevron}
-          </span>
+          </span>{" "}
           {(space || partner.securityClassification) && (
             <span className={second}>
-              {space && <span className="truncate">{space}</span>}
-              {classification}
+              {space && <span className="truncate">{space}</span>} {classification}
             </span>
           )}
         </span>
@@ -162,14 +172,14 @@ function SwitcherFace({
       <span className="flex min-w-0 flex-col items-start text-start">
         <span className="max-w-full truncate text-[1.0625rem] leading-snug font-semibold">
           {title}
-        </span>
+        </span>{" "}
         <span className={second}>
           <span className="flex min-w-0 items-center gap-0.5">
             <span className="truncate">{name}</span>
             {/* Left out for room at 390px; the switcher's name and its menu say it. */}
             {space && <span className="sr-only">, {space}</span>}
             {chevron}
-          </span>
+          </span>{" "}
           {classification}
         </span>
       </span>
@@ -188,7 +198,7 @@ function SwitcherFace({
     <span className="flex min-w-0 items-center gap-2.5">
       <PartnerTile partner={partner} size="md" />
       <span className="flex min-w-0 flex-col items-start leading-tight">
-        <span className="max-w-full truncate font-semibold">{name}</span>
+        <span className="max-w-full truncate font-semibold">{name}</span>{" "}
         {subtitle && (
           <span className="text-ax-text-secondary max-w-full truncate text-xs font-normal">
             {subtitle}
@@ -260,10 +270,7 @@ export function PartnerSwitcher({
   return (
     <DropdownMenu
       button={{
-        label:
-          variant === "mobile"
-            ? phoneSwitcherName(t, partner, title)
-            : t("chat_switch_assistant_named", { name: displayPartnerName(partner, t) }),
+        label: switcherName(t, partner, variant, title, subtitle),
         variant: "ghost",
         className: SWITCHER_CLASS[variant],
         children: (
@@ -374,10 +381,10 @@ function HistoryButton({
 }
 
 /**
- * Chat header. From 1024px (56px): assistant selector, divider,
+ * Chat header. From 768px (56px): assistant selector, divider,
  * conversation title (h1), the space's security classification, the
  * Chatt/Insikter switch, new conversation, history and a menu for session
- * actions. Below 1024px (decision 2): the app menu (opens the shell's
+ * actions. Below 768px (decision 2): the app menu (opens the shell's
  * drawer), the switcher with the conversation's title first and the
  * assistant and security class under it, new conversation and the same
  * menu.
@@ -416,8 +423,8 @@ export function ChatHeader({
 
   return (
     <>
-      {/* From 1024px, beside the SideNav */}
-      <div className="border-ax-border hidden min-h-14 shrink-0 items-center gap-3 border-b ps-2.5 pe-3 lg:flex">
+      {/* Beside the SideNav (wide:, from 768px but not on a phone turned sideways) */}
+      <div className="border-ax-border wide:flex hidden min-h-14 shrink-0 items-center gap-3 border-b ps-2.5 pe-3">
         {!minimal && (
           <>
             <PartnerSwitcher
@@ -465,11 +472,11 @@ export function ChatHeader({
         </div>
       </div>
 
-      {/* Below 1024px. It carries the menu button, so the shell's top bar
-          gives way to it (OWN_MOBILE_HEADER). */}
+      {/* On a phone, held either way. It carries the menu button, so the
+          shell's top bar gives way to it (OWN_MOBILE_HEADER). */}
       <div
         {...OWN_MOBILE_HEADER}
-        className="border-ax-border flex min-h-14 shrink-0 items-center gap-0.5 border-b px-1 lg:hidden"
+        className="border-ax-border wide:hidden flex min-h-14 shrink-0 items-center gap-0.5 border-b px-1"
       >
         <AppMenuButton />
         {/* The page's heading, met before the switcher that shows it. */}
@@ -494,7 +501,6 @@ export function ChatHeader({
           items={mobileMenu}
           alignment="end"
           presentation="adaptive"
-          className="size-11"
         />
       </div>
       {/* Offline: under the header at every width (the shell's gives way). */}

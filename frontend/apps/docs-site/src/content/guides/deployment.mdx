@@ -1618,6 +1618,7 @@ defaults; the reference Compose file sets both enable flags to `true` itself.
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `BROWSER_SESSION_ENABLED` | `false` | Accept the backend's browser session cookie. |
+| `BROWSER_SESSION_MAX_AGE` | `43200` | Minutes a browser session may last in total after sign-in, however often the user stays signed in. At least `JWT_EXPIRY_TIME`; set it equal to turn off staying signed in. At most 43200 (30 days). |
 | `WEB_APP_ENABLED` | `false` | Serve the web app from the backend. Requires `BROWSER_SESSION_ENABLED=true`. |
 | `SHOW_HELP_CENTER` | `false` | Show the configured help-center link. |
 | `HELP_CENTER_URL` | `https://www.eneo.ai/en/external-support-assistant` | Help-center destination. Set an empty value to hide the link even when `SHOW_HELP_CENTER` is enabled. |
@@ -1645,10 +1646,14 @@ container. Keep other active profiles and overlays.
 With `ENVIRONMENT=development`, the backend refuses to start with
 `BROWSER_SESSION_ENABLED=true` unless `PUBLIC_ORIGIN` is a `localhost` or
 `127.0.0.1` URL, so the development cookie, which is not marked Secure, never
-reaches a public host. The browser session lasts `JWT_EXPIRY_TIME`: an absolute
-lifetime with no inactivity limit. Signing out ends the Eneo session on the
-server at once, so a copy of its cookie stops working; the identity provider's
-session stays. A password change still ends every session of the user.
+reaches a public host. The browser session lasts `JWT_EXPIRY_TIME`, with no
+inactivity limit. Signing out ends the Eneo session on the server at once, so a
+copy of its cookie stops working; the identity provider's session stays. A
+password change still ends every session of the user. Two minutes before the
+session ends the web app offers to stay signed in, which renews the same session
+for `JWT_EXPIRY_TIME` again (audited as `session_extended`), never past
+`BROWSER_SESSION_MAX_AGE` after the original sign-in. To require a new sign-in
+every day, set `BROWSER_SESSION_MAX_AGE` to `1440`.
 
 ### Enable the invitation banner
 

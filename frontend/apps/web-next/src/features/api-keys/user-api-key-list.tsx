@@ -2,6 +2,7 @@ import { useNow, useTranslations } from "use-intl";
 import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { Button } from "@astryxdesign/core/Button";
+import { List, ListItem } from "@astryxdesign/core/List";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Banner } from "@astryxdesign/core/Banner";
@@ -23,7 +24,8 @@ import { RemovalFocusScope } from "@/features/spaces/removal";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { cursorPagination, flattenPages } from "@/lib/api/pagination";
-import { ApiKeyActions } from "./api-key-actions";
+import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
+import { ApiKeyActionScope, ApiKeyMenu } from "./api-key-actions";
 import {
   API_KEY_STATE_BADGE_VARIANT,
   API_KEY_STATE_FILTERS,
@@ -80,17 +82,8 @@ function ExpiringInView({ keys }: { keys: ApiKey[] }) {
   );
 }
 
-function KeyRow({
-  apiKey,
-  scopeName,
-  now,
-  onRotated
-}: {
-  apiKey: ApiKey;
-  scopeName?: string;
-  now: number;
-  onRotated: (secret: string) => void;
-}) {
+/** A key's state, when and why it changed, and a rotation's grace period, in the table and the rows. */
+function KeyStatus({ apiKey, now }: { apiKey: ApiKey; now: number }) {
   const t = useTranslations();
   const stateChange =
     apiKey.state === "suspended"
@@ -112,6 +105,92 @@ function KeyRow({
   ]
     .filter(Boolean)
     .join(" · ");
+  return (
+    <>
+      <Badge variant={API_KEY_STATE_BADGE_VARIANT[apiKey.state]}>
+        {t(`api_keys_status_${apiKey.state}`)}
+      </Badge>
+      {stateChange?.date && (
+        <span className="text-ax-text-secondary text-xs">
+          <ClientTime value={stateChange.date} format="date_time" />
+        </span>
+      )}
+      {reason && <span className="text-ax-text-secondary text-xs">{reason}</span>}
+      {apiKey.rotation_grace_until && new Date(apiKey.rotation_grace_until).getTime() > now && (
+        <span className="text-ax-text-secondary text-xs">
+          {t("api_keys_rotate_grace_period_label")}:{" "}
+          <ClientTime value={apiKey.rotation_grace_until} format="date_time" />
+        </span>
+      )}
+    </>
+  );
+}
+
+/**
+ * A key as a phone row: name, key, state, scope and permission, expiry and
+ * last use, and the menu at the end. Rate limit, allowed addresses and the
+ * creation date are in the menu's "Visa".
+ */
+function KeyListItem({
+  apiKey,
+  scopeName,
+  now
+}: {
+  apiKey: ApiKey;
+  scopeName?: string;
+  now: number;
+}) {
+  const t = useTranslations();
+  const scope = [
+    t(`api_keys_scope_${apiKey.scope_type}`),
+    apiKey.scope_id ? (scopeName ?? apiKey.scope_id) : null,
+    t(`api_keys_permission_${apiKey.permission}`)
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  return (
+    <ListItem
+      label={<span className="block font-semibold break-words">{apiKey.name}</span>}
+      description={
+        <>
+          <code className="block font-mono text-xs">
+            {apiKey.key_prefix}…{apiKey.key_suffix}
+          </code>
+          {apiKey.description && (
+            <span className="block [overflow-wrap:anywhere]">{apiKey.description}</span>
+          )}
+          <span className="flex flex-wrap items-center gap-x-2 gap-y-1 py-0.5">
+            {apiKey.ownership === "service" && (
+              <Badge variant="outline">{t("api_keys_ownership_service")}</Badge>
+            )}
+            <KeyStatus apiKey={apiKey} now={now} />
+          </span>
+          <span className="block [overflow-wrap:anywhere]">{scope}</span>
+          <span className="block">
+            {t("api_keys_expires")}:{" "}
+            {apiKey.expires_at ? (
+              <ClientTime value={apiKey.expires_at} format="date" />
+            ) : (
+              t("api_keys_never")
+            )}
+          </span>
+          <span className="block">
+            {t("api_keys_last_used")}:{" "}
+            {apiKey.last_used_at ? (
+              <ClientTime value={apiKey.last_used_at} format="auto" />
+            ) : (
+              t("api_keys_never")
+            )}
+          </span>
+        </>
+      }
+      endContent={<ApiKeyMenu apiKey={apiKey} scopeName={scopeName} />}
+    />
+  );
+}
+
+function KeyRow({ apiKey, scopeName, now }: { apiKey: ApiKey; scopeName?: string; now: number }) {
+  const t = useTranslations();
   const restrictions = apiKey.key_type === "pk_" ? apiKey.allowed_origins : apiKey.allowed_ips;
   return (
     <TableRow>
@@ -131,21 +210,7 @@ function KeyRow({
       </TableCell>
       <TableCell className="max-w-56 wrap-break-word whitespace-normal">
         <div className="flex flex-col items-start gap-1">
-          <Badge variant={API_KEY_STATE_BADGE_VARIANT[apiKey.state]}>
-            {t(`api_keys_status_${apiKey.state}`)}
-          </Badge>
-          {stateChange?.date && (
-            <span className="text-ax-text-secondary text-xs">
-              <ClientTime value={stateChange.date} format="date_time" />
-            </span>
-          )}
-          {reason && <p className="text-ax-text-secondary text-xs">{reason}</p>}
-          {apiKey.rotation_grace_until && new Date(apiKey.rotation_grace_until).getTime() > now && (
-            <span className="text-ax-text-secondary text-xs">
-              {t("api_keys_rotate_grace_period_label")}:{" "}
-              <ClientTime value={apiKey.rotation_grace_until} format="date_time" />
-            </span>
-          )}
+          <KeyStatus apiKey={apiKey} now={now} />
         </div>
       </TableCell>
       <TableCell className="max-w-48 wrap-break-word whitespace-normal">
@@ -200,7 +265,7 @@ function KeyRow({
       </TableCell>
       {/* Pinned: the menu is the only way to act on a key, and on a phone the wide table scrolls. */}
       <TableCell className="bg-ax-surface sticky end-0 text-end">
-        <ApiKeyActions apiKey={apiKey} mode="user" scopeName={scopeName} onRotated={onRotated} />
+        <ApiKeyMenu apiKey={apiKey} scopeName={scopeName} />
       </TableCell>
     </TableRow>
   );
@@ -227,6 +292,7 @@ export function UserApiKeyList({
   onLoaded?: () => void;
 }) {
   const t = useTranslations();
+  const phone = useMediaMatch(PHONE_QUERY);
   const [stateFilter, setStateFilter] = useState<ApiKeyStateFilter>("active");
   const now = useNow({ updateInterval: 60_000 });
   const [search, setSearch] = useState("");
@@ -269,6 +335,9 @@ export function UserApiKeyList({
       (key) => key.scope_type === "assistant" || key.scope_type === "app"
     )
   });
+
+  const scopeNameOf = (apiKey: ApiKey) =>
+    scope?.name ?? (apiKey.scope_id ? scopeNames.get(apiKey.scope_id) : undefined);
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
@@ -328,64 +397,75 @@ export function UserApiKeyList({
         className="focus-visible:outline-ring flex flex-col gap-4 rounded-md focus-visible:outline-2 focus-visible:outline-offset-2"
       >
         <RemovalFocusScope target={panelRef}>
-          <QueryStateBoundary query={keys} errorTitle={t("api_keys")}>
-            {() =>
-              loadedKeys.length === 0 ? (
-                <EmptyState
-                  title={t("api_keys_no_keys")}
-                  description={t("api_keys_no_keys_desc")}
-                />
-              ) : (
-                <>
-                  <ExpiringInView keys={visibleKeys} />
-                  {searchTerm && (
-                    <p className="text-ax-text-secondary text-sm">
-                      {t("api_keys_filtered", {
-                        filtered: visibleKeys.length,
-                        total: loadedKeys.length
-                      })}
-                    </p>
-                  )}
-                  {visibleKeys.length === 0 ? (
-                    <EmptyState title={t("api_keys_no_search_matches")} />
-                  ) : (
-                    <Table aria-label={t("api_keys")} className="min-w-[44rem]">
-                      <TableHeader>
-                        <TableRow>
-                          {/* A phone scrolls this table sideways: the name must not be crushed to a few letters. */}
-                          <TableHead className="min-w-40 md:min-w-0">{t("name")}</TableHead>
-                          <TableHead>{t("status")}</TableHead>
-                          <TableHead>{t("api_keys_scope")}</TableHead>
-                          <TableHead>{t("api_keys_permission_level")}</TableHead>
-                          <TableHead>{t("api_keys_last_used")}</TableHead>
-                          <TableHead>{t("api_keys_expires")}</TableHead>
-                          <TableHead>{t("api_keys_created")}</TableHead>
-                          <TableHead className="bg-ax-surface sticky end-0 w-14 min-w-14">
-                            <span className="sr-only">{t("actions")}</span>
-                          </TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
+          {/* Above the rows and the table: a turn that swaps them keeps an open dialog. */}
+          <ApiKeyActionScope mode="user" onRotated={onRotated} focusTarget={panelRef}>
+            <QueryStateBoundary query={keys} errorTitle={t("api_keys")}>
+              {() =>
+                loadedKeys.length === 0 ? (
+                  <EmptyState
+                    title={t("api_keys_no_keys")}
+                    description={t("api_keys_no_keys_desc")}
+                  />
+                ) : (
+                  <>
+                    <ExpiringInView keys={visibleKeys} />
+                    {searchTerm && (
+                      <p className="text-ax-text-secondary text-sm">
+                        {t("api_keys_filtered", {
+                          filtered: visibleKeys.length,
+                          total: loadedKeys.length
+                        })}
+                      </p>
+                    )}
+                    {visibleKeys.length === 0 ? (
+                      <EmptyState title={t("api_keys_no_search_matches")} />
+                    ) : phone ? (
+                      // Eight columns do not fit a phone: rows, as the other lists there.
+                      <List hasDividers edge="outset" aria-label={t("api_keys")}>
                         {visibleKeys.map((apiKey) => (
-                          <KeyRow
+                          <KeyListItem
                             key={apiKey.id}
                             apiKey={apiKey}
                             now={now.getTime()}
-                            scopeName={
-                              scope?.name ??
-                              (apiKey.scope_id ? scopeNames.get(apiKey.scope_id) : undefined)
-                            }
-                            onRotated={onRotated}
+                            scopeName={scopeNameOf(apiKey)}
                           />
                         ))}
-                      </TableBody>
-                    </Table>
-                  )}
-                  <LoadMore query={keys} label={t("load_more")} />
-                </>
-              )
-            }
-          </QueryStateBoundary>
+                      </List>
+                    ) : (
+                      <Table aria-label={t("api_keys")} className="min-w-[44rem]">
+                        <TableHeader>
+                          <TableRow>
+                            {/* A phone scrolls this table sideways: the name must not be crushed to a few letters. */}
+                            <TableHead className="min-w-40 md:min-w-0">{t("name")}</TableHead>
+                            <TableHead>{t("status")}</TableHead>
+                            <TableHead>{t("api_keys_scope")}</TableHead>
+                            <TableHead>{t("api_keys_permission_level")}</TableHead>
+                            <TableHead>{t("api_keys_last_used")}</TableHead>
+                            <TableHead>{t("api_keys_expires")}</TableHead>
+                            <TableHead>{t("api_keys_created")}</TableHead>
+                            <TableHead className="bg-ax-surface sticky end-0 w-14 min-w-14">
+                              <span className="sr-only">{t("actions")}</span>
+                            </TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {visibleKeys.map((apiKey) => (
+                            <KeyRow
+                              key={apiKey.id}
+                              apiKey={apiKey}
+                              now={now.getTime()}
+                              scopeName={scopeNameOf(apiKey)}
+                            />
+                          ))}
+                        </TableBody>
+                      </Table>
+                    )}
+                    <LoadMore query={keys} label={t("load_more")} />
+                  </>
+                )
+              }
+            </QueryStateBoundary>
+          </ApiKeyActionScope>
         </RemovalFocusScope>
       </div>
     </div>

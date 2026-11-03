@@ -149,7 +149,7 @@ describe("ResourceApiKeysSection", () => {
     });
     trigger.focus();
     fireEvent.keyDown(trigger, { key: "Enter" });
-    const menu = await screen.findByRole("menu");
+    const menu = document.getElementById(trigger.getAttribute("aria-controls") ?? "")!;
     expect(within(menu).getByRole("menuitem", { name: "Följs via scope" })).toBeTruthy();
   });
 

@@ -45,7 +45,7 @@ export async function createFixtures(
       (model) => model.name === "e2e-mock"
     )?.id ?? detail.completion_models[0].id
   );
-  // A key, so the tables of /admin/api-keys and /account/api-keys have a row to measure.
+  // A key, so the lists of /admin/api-keys and /account/api-keys have a row to measure.
   await apiPost(page, "/api-keys", {
     name: uniqueName("Kontrollnyckel"),
     key_type: "sk_",

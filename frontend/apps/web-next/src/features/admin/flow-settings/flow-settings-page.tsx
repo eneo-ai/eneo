@@ -56,7 +56,7 @@ export function FlowSettingsPage() {
   const t = useTranslations();
   const settings = useQuery(flowSettingsQueryOptions(browserApi));
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
+    <div className="flex w-full max-w-4xl flex-col gap-6">
       <PageHeader title={t("flow_admin_title")} description={t("flow_admin_description")} />
       <QueryStateBoundary query={settings} rows={6}>
         {(initial) => <FlowSettingsEditor initial={initial} />}

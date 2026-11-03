@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { ThemeProvider } from "next-themes";
 import { afterEach, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
@@ -20,9 +20,8 @@ afterEach(() => {
 const announced = () =>
   [...document.querySelectorAll("[aria-live]")].map((region) => region.textContent).join(" ");
 
-/** The theme's options are buttons (aria-checked), the languages' native radios. */
-const isChecked = (radio: HTMLElement) =>
-  radio.getAttribute("aria-checked") === "true" || (radio as HTMLInputElement).checked;
+/** Both choices are native radios. */
+const isChecked = (radio: HTMLElement) => (radio as HTMLInputElement).checked;
 
 function renderAppearance() {
   return renderInApp(
@@ -44,6 +43,12 @@ it("sets the theme at once, says so, and needs no save", async () => {
   await waitFor(() => expect(announced()).toContain("Tema: Mörkt"));
   expect(screen.queryByRole("button", { name: /Spara/ })).toBeNull();
   await expectNoAxeViolations(container);
+});
+
+it("lists the themes as native radios, like the languages, so no label is ever cut", () => {
+  renderAppearance();
+  const radios = within(screen.getByRole("radiogroup", { name: "Tema" })).getAllByRole("radio");
+  expect(radios.map((radio) => radio.getAttribute("type"))).toEqual(["radio", "radio", "radio"]);
 });
 
 it("switches the document language, each option named in its own", async () => {

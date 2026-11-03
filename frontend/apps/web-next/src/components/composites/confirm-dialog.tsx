@@ -10,6 +10,7 @@ import {
   cloneElement,
   isValidElement,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
   type MouseEvent,
@@ -24,7 +25,8 @@ import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 import { confirmationMatches } from "./confirmation-match";
 // Not shadcn: the focus return every Astryx Dialog in the app shares (menu
 // openers, Safari's unfocused clicks, an opener that is gone).
-import { useReturnFocus } from "@/components/ui/dialog-focus";
+import { returnTarget, useReturnFocus } from "@/components/ui/dialog-focus";
+import { isFocusLost } from "@/lib/focus-rescue";
 
 /** Astryx AlertDialog's breakpoint for stacking its actions. */
 const SMALL_SCREEN_QUERY = "(max-width: 640px)";
@@ -77,6 +79,27 @@ function ConfirmSurface({
   const [mounted, setMounted] = useState(open);
   if (open && !mounted) setMounted(true);
   useReturnFocus(open, triggerRef);
+  // Unmounted while open (ResourceActionScope drops a dialog once its action is
+  // done): once the dialog's own focus return in this commit has run, and before
+  // the page's focus rescue sees focus lost, focus goes to the opener, as when the
+  // dialog closes while kept. The rescue then waits for the opener to go too (a
+  // deleted row's menu). useReturnFocus does the same, but only after the rescue.
+  const opener = useRef<HTMLElement | null>(null);
+  const isOpen = useRef(open);
+  useLayoutEffect(() => {
+    isOpen.current = open;
+    if (open) opener.current = returnTarget() ?? triggerRef.current;
+  }, [open, triggerRef]);
+  useLayoutEffect(
+    () => () => {
+      const target = opener.current;
+      if (!isOpen.current || !target) return;
+      queueMicrotask(() => {
+        if (isFocusLost() && target.isConnected) target.focus();
+      });
+    },
+    []
+  );
 
   if (!mounted) return null;
 

@@ -4,8 +4,13 @@ import AxeBuilder from "@axe-core/playwright";
 import type { Browser, BrowserContext } from "@playwright/test";
 import { expect, test } from "./csp";
 import { STORAGE_STATE } from "../playwright.config";
+import { contrastIncomplete } from "./contrast-incomplete";
+import { contrastProbe } from "./contrast-probe";
+import { leftEdgeProbe } from "./left-edge-probe";
 import { createFixtures, openRoute } from "./responsive-fixtures";
 import { ROUTES, type Fixtures } from "./responsive-routes";
+import { selectedProbe } from "./selected-probe";
+import { DEV_ONLY, probeBaseline, type Cell } from "./ui-probes";
 import { AXE_PAGE_RULES, WCAG_22_AA_TAGS } from "../src/test/wcag";
 
 test.skip(!process.env.E2E_BASE_URL, "Requires the FastAPI-served Vite build");
@@ -24,12 +29,17 @@ test.skip(!process.env.E2E_BASE_URL, "Requires the FastAPI-served Vite build");
  * A11Y_ROUTES narrows a run to routes matching a regular expression,
  * A11Y_VARIANTS=phone-light,ipad-light to those variants, and
  * A11Y_SHOTS=<dir> saves a screenshot of every screen it opens.
+ * Contrast axe could not judge is held to tests/contrast-incomplete.baseline.json
+ * (tests/contrast-incomplete.ts; CONTRAST_UPDATE=1 rewrites it).
+ * The UI probes (tests/ui-probes.ts: contrast with hover, pressed and focus forced, selected
+ * states, the shared left edge) run on the same visit, each held to its own baseline
+ * (PROBES_UPDATE=1 rewrites them); what they could not judge is attached for review.
  */
 
 const WCAG_22_AA = WCAG_22_AA_TAGS;
 const PAGE_STRUCTURE = AXE_PAGE_RULES;
-// Development-only tooling, absent from the production build CI scans.
-const DEV_ONLY = ["vite-error-overlay", ".tsqd-parent-container"];
+// Contrast last: it forces states on the page, and the others read it at rest.
+const PROBES = { selected: selectedProbe, "left-edge": leftEdgeProbe, contrast: contrastProbe };
 
 /** route pattern → rule → reason. Fix instead of adding to this. */
 const EXCEPTIONS: Record<string, Record<string, string>> = {};
@@ -80,6 +90,12 @@ for (const variant of VARIANTS) {
     async ({ browser, baseURL }) => {
       test.setTimeout(15 * 60_000);
       const problems: string[] = [];
+      const reviews: string[] = [];
+      const cell: Cell = {
+        viewport: { width: variant.width, height: variant.height },
+        theme: variant.scheme,
+        touch: true
+      };
       const contexts: Record<string, BrowserContext> = {
         in: await contextFor(browser, baseURL, variant, true),
         out: await contextFor(browser, baseURL, variant, false)
@@ -112,7 +128,10 @@ for (const variant of VARIANTS) {
           .options({ rules })
           .withTags(WCAG_22_AA);
         for (const selector of DEV_ONLY) builder = builder.exclude(selector);
-        const { violations } = await builder.analyze();
+        const { violations, incomplete } = await builder.analyze();
+        const scan = `${variant.name}-${variant.scheme}|${pattern}`;
+        // Text axe could not judge (over a gradient, image or another element) may not grow.
+        problems.push(...contrastIncomplete(scan, incomplete));
         for (const violation of violations) {
           const targets = violation.nodes
             .slice(0, 3)
@@ -122,7 +141,19 @@ for (const variant of VARIANTS) {
             `${pattern}: ${violation.id} (${violation.impact}) × ${violation.nodes.length}: ${targets}`
           );
         }
+        for (const [name, probe] of Object.entries(PROBES)) {
+          try {
+            const found = await probe(page, cell);
+            problems.push(...probeBaseline(name, scan, found));
+            for (const { key, detail } of found.filter((problem) => problem.review))
+              reviews.push(`${scan}: ${name} ${key}: ${detail}`);
+          } catch (error) {
+            problems.push(`${scan}: the ${name} probe failed (${String(error).split("\n")[0]})`);
+          }
+        }
       }
+      if (reviews.length)
+        await test.info().attach("ui-probes-review.txt", { body: reviews.join("\n") });
       for (const context of Object.values(contexts)) await context.close();
       if (process.env.A11Y_OUT) {
         fs.appendFileSync(

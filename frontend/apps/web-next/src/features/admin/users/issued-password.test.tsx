@@ -2,6 +2,7 @@
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderInApp, testAppContext } from "@/test/render";
+import { setViewport } from "@/test/setup-dom";
 
 const api = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn(), DELETE: vi.fn() }));
 const toast = vi.hoisted(() => ({
@@ -117,6 +118,39 @@ describe("AdminUsersPage issued password", () => {
     within(reveal).getByText(body.password);
   });
 
+  it("keeps the editor's unsaved change and focus through a turn across 768 px and back", async () => {
+    serve();
+    setViewport("phone");
+    renderInApp(<AdminUsersPage />, {
+      appContext: testAppContext({ user: { id: "me" } }),
+      route: "/admin/users?search_name=bo.e"
+    });
+    const trigger = await screen.findByRole("button", {
+      name: "Fler åtgärder för bo.ek@kommun.se"
+    });
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    const menu = document.getElementById(trigger.getAttribute("aria-controls")!)!;
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Redigera användare" }));
+    const editor = await screen.findByRole("dialog", { name: "Redigera användare" });
+    await within(editor).findByRole("checkbox", { name: /^Generera ett nytt lösenord/ });
+    const username = within(editor).getByLabelText(/^Användarnamn/);
+    fireEvent.change(username, { target: { value: "bo.lind" } });
+    username.focus();
+
+    // The phone held sideways (the list becomes a table), then upright again.
+    act(() => setViewport({ width: 844, height: 390, pointer: "coarse" }));
+    await screen.findByRole("table");
+    act(() => setViewport("phone"));
+    await screen.findByRole("list");
+
+    const kept = within(screen.getByRole("dialog", { name: "Redigera användare" })).getByLabelText(
+      /^Användarnamn/
+    );
+    expect(kept).toHaveProperty("value", "bo.lind");
+    expect(document.activeElement).toBe(kept);
+  });
+
   it("shows a reset's password even when the row went while the reset saved", async () => {
     const backend = serve();
     let settle: () => void = () => {};
@@ -144,10 +178,13 @@ describe("AdminUsersPage issued password", () => {
     fireEvent.click(within(editor).getByRole("button", { name: "Spara ändringar" }));
     await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(1));
 
-    // The row, and the editor in it, go while the save is still running.
+    // The row goes while the save is still running; the editor is held above the list.
     backend.dropRenamed();
     await act(() => queryClient.invalidateQueries({ queryKey: ["admin-users"] }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /^Fler åtgärder/ })).toBeNull()
+    );
+    expect(screen.getByRole("dialog", { name: "Redigera användare" })).toBe(editor);
 
     await act(async () => settle());
     const password = (api.POST.mock.calls[0]?.[1] as { body: { password: string } }).body.password;
@@ -158,8 +195,8 @@ describe("AdminUsersPage issued password", () => {
 
   /**
    * Bo's password reset and a new account save at the same time: the reset's
-   * row (and its editor) went in a refetch while it saved, and the admin
-   * created an account meanwhile. Each password is shown in turn, in the
+   * row went in a refetch while it saved (its editor, held above the list,
+   * stayed), and the admin created an account meanwhile. Each password is shown in turn, in the
    * order the saves land, each with its own e-mail, and none replaces one not
    * yet handed over.
    */
@@ -192,7 +229,9 @@ describe("AdminUsersPage issued password", () => {
     await waitFor(() => expect(settle["/api/v1/admin/users/{username}/"]).toBeDefined());
     backend.dropRenamed();
     await act(() => queryClient.invalidateQueries({ queryKey: ["admin-users"] }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /^Fler åtgärder/ })).toBeNull()
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "Skapa användare" }));
     const create = await screen.findByRole("dialog", { name: "Skapa en ny användare" });

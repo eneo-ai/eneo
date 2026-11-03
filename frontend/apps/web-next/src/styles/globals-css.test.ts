@@ -25,6 +25,10 @@ async function compile(css: string, fileName: string): Promise<string> {
 // these classes (Tailwind scans src/, tests included).
 const cls = (...parts: string[]) => parts.join("-");
 
+/** The `phone` variant's media list as compiled: below 768 px, or a phone turned sideways. */
+const PHONE_MEDIA =
+  "(width < 48rem), (pointer: coarse) and (height < 31.25rem) and (width < 64rem)";
+
 let source = "";
 let css = "";
 
@@ -161,7 +165,9 @@ describe("globals.css", () => {
       "switch-field",
       "selector-search",
       "selector-option-row",
-      // A disclosure's trigger is as tall as its label, cut to the cap height.
+      // Every menu row: Astryx sizes it by text and padding, about 33 px.
+      "dropdown-menu-item",
+      // A Collapsible's trigger: its label and chevron, about 17 px.
       "collapsible-trigger"
     ]) {
       expect(coarse.get(`.astryx-${component}`)).toMatchObject({ "min-height": "44px" });
@@ -279,9 +285,27 @@ describe("globals.css", () => {
     expect(bars[0]![1]).toEqual({ display: "none" });
   });
 
+  it("compiles `phone:` and `wide:` to a phone's layout and exactly the rest", () => {
+    const WIDE_MEDIA =
+      "(width >= 64rem), (width >= 48rem) and (height >= 31.25rem), (width >= 48rem) and (pointer: fine), (width >= 48rem) and (pointer: none)";
+    const under = (selector: string) => {
+      const found: string[] = [];
+      postcss.parse(css).walkRules(selector, (rule: Rule) => {
+        const parent = rule.parent as AtRule;
+        found.push(parent.name === "media" ? parent.params.replace(/\s+/g, " ") : "");
+      });
+      return found;
+    };
+    // The shell's side navigation shows on `wide:`, a pushed screen's phone bar hides there.
+    expect(under(".wide\\:flex")).toEqual([WIDE_MEDIA]);
+    expect(under(".wide\\:hidden")).toEqual([WIDE_MEDIA]);
+    expect(under(".phone\\:hidden")).toEqual([PHONE_MEDIA]);
+  });
+
   it("hides the space's page bar on a phone while a settings section has its own", () => {
-    const rules = [...declarationsOf("components", "(width < 48rem)").entries()].filter(
-      ([selector]) => selector.includes('[data-editor-view="section"]')
+    // The `phone` variant: below 768 px, or a phone turned sideways.
+    const rules = [...declarationsOf("components", PHONE_MEDIA).entries()].filter(([selector]) =>
+      selector.includes('[data-editor-view="section"]')
     );
     expect(rules).toHaveLength(1);
     const [selector, declarations] = rules[0]!;
@@ -372,6 +396,13 @@ describe("globals.css", () => {
       "background-color": "Highlight",
       color: "HighlightText"
     });
+    // A filled button, and a ghost one raised into a plate (the rail's "Ny
+    // konversation"), keep a native button's border when the fill turns Canvas.
+    expect(
+      forced.get(
+        ':is(button, a)[data-variant][data-size]:not([data-variant="ghost"], [data-variant="link"]), :is(button, a)[data-variant="ghost"][data-elevation]:not([data-elevation="none"])'
+      )
+    ).toEqual({ border: "1px solid ButtonText" });
   });
 
   it("makes the toast close button a 24 px target (44 px on touch) with a full-strength focus outline", () => {
@@ -554,12 +585,29 @@ describe("globals.css", () => {
     expect(controls?.[1]).toMatchObject({ position: "relative", "z-index": "1" });
   });
 
+  it("lets a compensated list row's content start on the page's text line", () => {
+    // Astryx cancels a row's own inset (edge="outset") only as far
+    // as --container-padding-inline-* allows; the list publishes the 16 px gutter.
+    const gutter: Record<string, string> = {};
+    postcss.parse(css).walkRules(".astryx-list", (rule: Rule) => {
+      rule.walkDecls(/^--container-padding-inline-/, (decl) => {
+        gutter[decl.prop] = decl.value;
+      });
+    });
+    expect(gutter).toEqual({
+      "--container-padding-inline-start": "1rem",
+      "--container-padding-inline-end": "1rem"
+    });
+  });
+
   it("keeps a phone's toasts above its docked action bar", () => {
     let offsets: Record<string, string> = {};
+    let media: string | undefined;
     postcss.parse(css).walkRules((rule: Rule) => {
       if (!rule.selector.includes("[data-docked-actions]") || !rule.selector.includes("toaster")) {
         return;
       }
+      media = (rule.parent as AtRule).params;
       rule.walkDecls((decl) => {
         offsets = {
           ...offsets,
@@ -575,6 +623,18 @@ describe("globals.css", () => {
       "--mobile-offset-bottom": expect.stringMatching(
         /^calc\(\s*var\(--docked-actions-height[\s\S]* !important$/
       )
+    });
+    // Where the bar docks: a phone, held either way.
+    expect(media).toBe(PHONE_MEDIA);
+  });
+
+  it("wraps a menu row's label instead of cutting it off", () => {
+    // Astryx ends a string label in an ellipsis: on a narrow screen or at 200%
+    // text, "Kopiera som formaterad text" lost its end with no way to read it.
+    const components = declarationsOf("components");
+    expect(components.get(".astryx-dropdown-menu .astryx-item span")).toMatchObject({
+      "white-space": "normal",
+      "overflow-wrap": "anywhere"
     });
   });
 

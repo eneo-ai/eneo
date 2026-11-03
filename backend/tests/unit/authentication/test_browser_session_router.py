@@ -10,8 +10,10 @@ generation of the cookie session it admitted.
 import logging
 from collections.abc import Iterator
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 
+import jwt
 import pytest
 from dependency_injector import providers
 from fastapi import HTTPException
@@ -20,6 +22,9 @@ from freezegun import freeze_time
 from httpx import Response
 from starlette.requests import Request
 
+from eneo.audit.application.audit_service import AuditService
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication import browser_session
 from eneo.authentication.api_key_v2_repo import ApiKeysV2Repository
 from eneo.authentication.auth_models import AccessToken
@@ -28,6 +33,7 @@ from eneo.authentication.browser_session import session_generation
 from eneo.authentication.browser_session_router import (
     create_browser_session,
     end_browser_session,
+    extend_browser_session,
     get_browser_session,
 )
 from eneo.authentication.browser_session_service import BrowserSessionService
@@ -43,7 +49,12 @@ from eneo.database.database import (
     get_session_with_transaction,
 )
 from eneo.info_blobs.info_blob_repo import InfoBlobRepository
-from eneo.main.config import Settings, get_settings, set_settings
+from eneo.main.config import (
+    JWT_EXPIRY_TIME_MAXIMUM_MINUTES,
+    Settings,
+    get_settings,
+    set_settings,
+)
 from eneo.main.container.container import Container
 from eneo.main.exceptions import (
     AuthenticationException,
@@ -66,6 +77,9 @@ SESSION_LOGIN = "/api/v1/auth/session/password/"
 TOKEN_LOGIN = "/api/v1/users/login/token/"
 LOGOUT = "/api/v1/auth/session/logout/"
 PROBE = "/api/v1/auth/session/"
+EXTEND = "/api/v1/auth/session/extend/"
+EXPIRES_IN = "Eneo-Session-Expires-In"
+LIFETIME = "Eneo-Session-Lifetime"
 ME = "/api/v1/users/me/"
 ADMIN_ONLY = "/api/v1/admin/password-policy"
 SESSION = "__Host-eneo_web"
@@ -96,9 +110,9 @@ def mint(minutes: float = 15) -> str:
     return AuthService().create_access_token_for_user(TEST_USER, expires_in=minutes)
 
 
-def with_session(token: str) -> str:
+def with_session(token: str, sid: str = "s" * 43) -> str:
     """What the session store's ``start`` returns for a sign-in's token."""
-    return AuthService().add_session_id(token, "s" * 43)
+    return AuthService().add_session_id(token, sid)
 
 
 @dataclass
@@ -109,6 +123,7 @@ class Endpoints:
     user: UserInDB
     valid_tokens: set[str]
     sessions: AsyncMock
+    database: AsyncMock
 
 
 @pytest.fixture
@@ -123,7 +138,7 @@ def endpoints(
     monkeypatch.setattr(user_router, "count_login_attempt", count)
     monkeypatch.setattr(user_router, "clear_login_attempts", AsyncMock())
     sessions = AsyncMock(spec=BrowserSessionService)
-    sessions.start.side_effect = with_session
+    sessions.start.side_effect = lambda token, replacing=None: with_session(token)
     login_container = Container(
         user_service=providers.Object(service),
         redis_client=providers.Object(object()),
@@ -148,9 +163,10 @@ def endpoints(
         InfoBlobRepository, "get_total_size_of_user", AsyncMock(return_value=0)
     )
 
+    database = AsyncMock(spec=AsyncSession)
+    database.in_transaction.return_value = True
+
     async def session() -> AsyncSession:
-        database = AsyncMock(spec=AsyncSession)
-        database.in_transaction.return_value = True
         return database
 
     app = get_application()
@@ -176,7 +192,9 @@ def endpoints(
         logger.addHandler(caplog.handler)
     client = TestClient(app, client=("10.0.0.1", 50000))
     try:
-        yield Endpoints(client, service.login, count, user, valid_tokens, sessions)
+        yield Endpoints(
+            client, service.login, count, user, valid_tokens, sessions, database
+        )
     finally:
         client.close()
         for logger in loggers:
@@ -222,7 +240,7 @@ def test_password_session_sets_cookie_without_token_in_body(
     assert response.status_code == 204
     assert response.content == b""
     # The cookie carries the login's token once the store recorded its session.
-    endpoints.sessions.start.assert_awaited_once_with(token)
+    endpoints.sessions.start.assert_awaited_once_with(token, replacing=None)
     assert set_cookies(response) == [
         expected_set_cookie(SESSION, session_token, 15 * 60, production=True)
     ]
@@ -252,6 +270,8 @@ def test_password_session_replaces_a_planted_session(endpoints: Endpoints):
     [cookie] = set_cookies(response)
     assert cookie.startswith(f"{SESSION}={with_session(issued)};")
     assert planted not in cookie
+    # The store ends whatever session the planted cookie names.
+    endpoints.sessions.start.assert_awaited_once_with(issued, replacing=planted)
 
 
 @pytest.mark.parametrize(
@@ -518,6 +538,19 @@ def test_disabled_setting_returns_404(
     endpoints.login.assert_not_awaited()
 
 
+def test_extend_returns_404_while_the_setting_is_off(
+    endpoints: Endpoints, browser_settings: Settings
+):
+    set_settings(browser_settings.model_copy(update={"browser_session_enabled": False}))
+    token = mint_for(endpoints.user)
+    endpoints.valid_tokens.add(token)
+
+    response = endpoints.client.post(EXTEND, headers=extend_headers(token))
+
+    assert response.status_code == 404
+    assert set_cookies(response) == []
+
+
 def test_probe_names_the_admitted_cookie_session(endpoints: Endpoints):
     token = mint()
     endpoints.valid_tokens.add(token)
@@ -529,6 +562,26 @@ def test_probe_names_the_admitted_cookie_session(endpoints: Endpoints):
     assert response.status_code == 204
     assert response.headers[GENERATION] == session_generation(token)
     assert response.headers["cache-control"] == "no-store"
+
+
+def test_probe_names_the_remaining_life_of_the_session(endpoints: Endpoints):
+    with freeze_time(NOW) as clock:
+        token = mint(15)
+        endpoints.valid_tokens.add(token)
+        clock.tick(timedelta(minutes=5))
+
+        response = endpoints.client.get(
+            PROBE, headers=SAME_ORIGIN | {"Cookie": f"{SESSION}={token}"}
+        )
+
+    assert response.status_code == 204
+    # Relative seconds, so a wrong client clock does not move the warning.
+    assert response.headers[EXPIRES_IN] == str(10 * 60)
+    # And what it was issued for, so a page opened late still warns in time.
+    # Tokens are issued two seconds early (see AuthService).
+    assert response.headers[LIFETIME] == str(15 * 60 + 2)
+    # Checking is read-only: the cookie stays as it was.
+    assert set_cookies(response) == []
 
 
 @pytest.mark.parametrize("restricted", ["dead cookie", "suspended tenant"])
@@ -667,3 +720,326 @@ def test_cookie_authenticated_responses_name_their_generation(endpoints: Endpoin
     assert GENERATION not in with_bearer.headers
     assert rejected.status_code == 401
     assert GENERATION not in rejected.headers
+
+
+# --- Extending the session ---------------------------------------------------
+
+
+def mint_for(user: UserInDB, minutes: float = 15, **extra: object) -> str:
+    """A browser session's token, as sign-in sets it (with its ``sid``)."""
+    auth_method = extra.pop("auth_method", None)
+    return with_session(
+        AuthService().create_access_token_for_user(
+            user,
+            expires_in=minutes,
+            extra_claims=extra or None,
+            auth_method=auth_method,  # type: ignore[arg-type]
+        )
+    )
+
+
+def claims(token: str) -> dict[str, object]:
+    return jwt.decode(token, options={"verify_signature": False})
+
+
+def extend_headers(token: str) -> dict[str, str]:
+    return SAME_ORIGIN | {
+        "Cookie": f"{SESSION}={token}",
+        GENERATION: session_generation(token),
+    }
+
+
+@pytest.fixture
+def audit(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
+    log = AsyncMock(return_value=None)
+    monkeypatch.setattr(AuditService, "log", log)
+    return log
+
+
+def issued_cookie(response: Response) -> tuple[str, int]:
+    [cookie] = set_cookies(response)
+    token = cookie.removeprefix(f"{SESSION}=").split(";", 1)[0]
+    max_age = int(cookie.split("Max-Age=", 1)[1].split(";", 1)[0])
+    assert cookie == expected_set_cookie(SESSION, token, max_age, production=True)
+    return token, max_age
+
+
+def test_extend_is_declared_for_browser_sessions_behind_the_password_gate():
+    policy = access_for(extend_browser_session)
+    assert policy is not None
+    assert policy.authentication is Authentication.SESSION
+    assert policy.authorization is Authorization.AUTHENTICATED
+    # A session that must replace its password cannot extend itself.
+    assert not policy.reachable_before_password_change
+
+
+def test_extend_reissues_the_session_for_the_same_user_and_audits_it(
+    endpoints: Endpoints,
+    browser_settings: Settings,
+    audit: AsyncMock,
+    caplog: pytest.LogCaptureFixture,
+):
+    user = endpoints.user
+    stranger = make_user()
+    with freeze_time(NOW) as clock:
+        token = mint_for(user, 15, auth_method="password")
+        signed_in_at = claims(token)["iat"]
+        endpoints.valid_tokens.add(token)
+        clock.tick(timedelta(minutes=13))
+
+        # Nothing the request names reaches the new token.
+        response = endpoints.client.post(
+            EXTEND,
+            headers=extend_headers(token),
+            json={
+                "user_id": str(stranger.id),
+                "tenant_id": str(stranger.tenant_id),
+                "auth_time": datetime.now(timezone.utc).timestamp(),
+                "auth_method": None,
+                "expires_in": 999999,
+            },
+        )
+
+    assert response.status_code == 200, response.text
+    issued, max_age = issued_cookie(response)
+    assert issued != token
+    lifetime = browser_settings.jwt_expiry_time * 60
+    assert max_age == lifetime
+    # The page that renewed keeps its generation, which the new cookie names.
+    assert response.json() == {
+        "generation": session_generation(token),
+        "expires_in": lifetime,
+    }
+    assert session_generation(issued) == session_generation(token)
+    new = claims(issued)
+    assert new["user_id"] == str(user.id)
+    assert new["tenant_id"] == str(user.tenant_id)
+    # The same session: its row now ends with the new token, never earlier,
+    # and sign-out still finds it.
+    assert new["sid"] == claims(token)["sid"]
+    [moved] = [call.args[0] for call in endpoints.database.scalar.await_args_list]
+    assert moved.is_dml and moved.table.name == "browser_sessions"
+    assert "SET expires_at=greatest(browser_sessions.expires_at, " in str(
+        moved.compile()
+    )
+    assert datetime.fromtimestamp(new["exp"], timezone.utc) in (
+        moved.compile().params.values()
+    )
+    # The password lifecycle gate still sees a password session.
+    assert new["auth_method"] == "password"
+    # The sign-in time travels unchanged, so the total age stays bounded.
+    assert new["auth_time"] == signed_in_at
+    # The token only ever travels in the cookie.
+    assert issued not in response.text
+    assert all(
+        issued not in value
+        for name, value in response.headers.items()
+        if name != "set-cookie"
+    )
+    assert issued not in all_logs(caplog) and token not in all_logs(caplog)
+
+    audit.assert_awaited_once()
+    assert audit.await_args is not None
+    logged = audit.await_args.kwargs
+    assert logged["action"] == ActionType.SESSION_EXTENDED
+    assert logged["tenant_id"] == user.tenant_id
+    assert logged["user"] is user
+    assert logged["entity_type"] == EntityType.USER
+    assert logged["entity_id"] == user.id
+    # Which session was renewed, by its fingerprint, and until when.
+    assert logged["metadata"]["extra"] == {
+        "session_generation": session_generation(token),
+        "expires_at": datetime.fromtimestamp(new["exp"], timezone.utc).isoformat(),
+    }
+    assert issued not in repr(logged) and token not in repr(logged)
+    assert claims(token)["sid"] not in repr(logged)
+
+
+def test_a_federated_session_stays_federated_and_keeps_its_sign_in_time(
+    endpoints: Endpoints, audit: AsyncMock
+):
+    with freeze_time(NOW) as clock:
+        first = mint_for(endpoints.user, 15)
+        signed_in_at = claims(first)["iat"]
+        endpoints.valid_tokens.add(first)
+        clock.tick(timedelta(minutes=14))
+        second, _ = issued_cookie(
+            endpoints.client.post(EXTEND, headers=extend_headers(first))
+        )
+        endpoints.valid_tokens.add(second)
+        clock.tick(timedelta(hours=23))
+        third, _ = issued_cookie(
+            endpoints.client.post(EXTEND, headers=extend_headers(second))
+        )
+
+    assert claims(second)["auth_method"] is None
+    assert claims(third)["auth_method"] is None
+    assert claims(second)["auth_time"] == claims(third)["auth_time"] == signed_in_at
+    assert audit.await_count == 2
+
+
+def test_extend_never_outlives_the_maximum_session_age(
+    endpoints: Endpoints, audit: AsyncMock
+):
+    cap = JWT_EXPIRY_TIME_MAXIMUM_MINUTES * 60
+    with freeze_time(NOW):
+        now = datetime.now(timezone.utc).timestamp()
+        near_cap = mint_for(endpoints.user, 1, auth_time=now - cap + 60)
+        endpoints.valid_tokens.add(near_cap)
+
+        response = endpoints.client.post(EXTEND, headers=extend_headers(near_cap))
+
+    assert response.status_code == 200, response.text
+    issued, max_age = issued_cookie(response)
+    assert max_age == 60
+    assert response.json()["expires_in"] == 60
+    assert claims(issued)["exp"] == now - cap + 60 + cap
+    audit.assert_awaited_once()
+
+
+def test_extend_stops_at_the_configured_maximum_age(
+    endpoints: Endpoints, browser_settings: Settings, audit: AsyncMock
+):
+    # BROWSER_SESSION_MAX_AGE below the 30-day ceiling, here 20 minutes.
+    set_settings(browser_settings.model_copy(update={"browser_session_max_age": 20}))
+    with freeze_time(NOW) as clock:
+        token = mint_for(endpoints.user, 15)
+        signed_in_at = claims(token)["iat"]
+        endpoints.valid_tokens.add(token)
+        clock.tick(timedelta(minutes=13))
+        renewed_at = datetime.now(timezone.utc).timestamp()
+        renewed = endpoints.client.post(EXTEND, headers=extend_headers(token))
+
+    assert renewed.status_code == 200, renewed.text
+    issued, max_age = issued_cookie(renewed)
+    # Renewed only up to 20 minutes after sign-in, not for JWT_EXPIRY_TIME.
+    assert claims(issued)["exp"] == signed_in_at + 20 * 60
+    assert max_age == int(signed_in_at + 20 * 60 - renewed_at)
+    audit.assert_awaited_once()
+
+
+@pytest.mark.parametrize("age", ["at the cap", "past the cap", "old token past cap"])
+def test_extend_refuses_a_session_at_its_maximum_age(
+    endpoints: Endpoints, audit: AsyncMock, age: str
+):
+    cap = JWT_EXPIRY_TIME_MAXIMUM_MINUTES * 60
+    with freeze_time(NOW) as clock:
+        now = datetime.now(timezone.utc).timestamp()
+        if age == "old token past cap":
+            # Issued before auth_time existed: its iat is the sign-in time.
+            token = mint_for(endpoints.user, JWT_EXPIRY_TIME_MAXIMUM_MINUTES)
+            # iat is two seconds back: valid for one more second, yet older
+            # than the cap.
+            clock.tick(timedelta(seconds=cap - 1))
+        else:
+            started = now - cap - (1 if age == "past the cap" else 0)
+            token = mint_for(endpoints.user, 1, auth_time=started)
+        endpoints.valid_tokens.add(token)
+
+        response = endpoints.client.post(EXTEND, headers=extend_headers(token))
+
+    assert response.status_code == 401, response.text
+    assert set_cookies(response) == []
+    audit.assert_not_awaited()
+
+
+@pytest.mark.parametrize("case", ["signed out", "not recorded"])
+def test_only_a_recorded_session_renews_itself(
+    endpoints: Endpoints, audit: AsyncMock, case: str
+):
+    token = mint_for(endpoints.user, 15)
+    if case == "signed out":
+        # Sign-out deleted the row after this request was admitted.
+        endpoints.database.scalar.return_value = None
+    else:
+        # A cookie from before sessions were recorded has no row to renew.
+        token = AuthService().create_access_token_for_user(endpoints.user)
+    endpoints.valid_tokens.add(token)
+
+    response = endpoints.client.post(EXTEND, headers=extend_headers(token))
+
+    assert response.status_code == 401, response.text
+    assert set_cookies(response) == []
+    audit.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "cross-site",
+        "same-site",
+        "no fetch metadata",
+        "no generation",
+        "stale generation",
+        "bearer token",
+        "api key",
+        "dead cookie",
+        "no credential",
+        "inactive user",
+        "password change required",
+        "token of another user",
+    ],
+)
+def test_extend_is_refused_exactly_as_authentication_refuses(
+    endpoints: Endpoints,
+    audit: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
+    case: str,
+):
+    token = mint_for(endpoints.user, 15, auth_method="password")
+    endpoints.valid_tokens.add(token)
+    headers = extend_headers(token)
+    expected: tuple[int, int | None] = (401, None)
+    if case in ("cross-site", "same-site", "no fetch metadata"):
+        del headers["Sec-Fetch-Site"]
+        if case != "no fetch metadata":
+            headers["Sec-Fetch-Site"] = case
+        expected = (403, None)
+    elif case == "no generation":
+        del headers[GENERATION]
+        expected = (401, 9090)
+    elif case == "stale generation":
+        # Another sign-in: another session id.
+        headers[GENERATION] = session_generation(with_session(mint(), "t" * 43))
+        expected = (401, 9090)
+    elif case == "bearer token":
+        headers = SAME_ORIGIN | {"Authorization": f"Bearer {token}"}
+    elif case == "api key":
+        # A valid key for the same user, sent along with the session cookie.
+        keyed = endpoints.user.model_copy()
+        keyed.active_api_key = object()  # type: ignore[assignment]
+        monkeypatch.setattr(
+            UserService, "_resolve_api_key", AsyncMock(return_value=(keyed, None))
+        )
+        headers[get_settings().api_key_header_name] = "inp_a-valid-key"
+        expected = (403, None)
+    elif case == "dead cookie":
+        # An invalidated or signed-out session no longer authenticates.
+        endpoints.valid_tokens.clear()
+    elif case == "no credential":
+        headers = dict(SAME_ORIGIN)
+    elif case == "inactive user":
+        endpoints.user.state = UserState.INACTIVE
+        expected = (403, ErrorCodes.USER_INACTIVE.value)
+    elif case == "password change required":
+        endpoints.user.password = "stored-password-hash"
+        endpoints.user.password_change_required = True
+        endpoints.user.session_auth_method = "password"
+        expected = (403, ErrorCodes.PASSWORD_CHANGE_REQUIRED.value)
+    elif case == "token of another user":
+        # Canonical authentication resolved someone else for this cookie.
+        other = mint_for(make_user(), 15)
+        endpoints.valid_tokens.add(other)
+        headers = extend_headers(other)
+
+    response = endpoints.client.post(EXTEND, headers=headers)
+
+    status, code = expected
+    assert response.status_code == status, response.text
+    if case == "api key":
+        assert response.json()["code"] == "session_auth_required"
+    if code is not None:
+        assert response.json()["eneo_error_code"] == code
+    assert set_cookies(response) == []
+    assert token not in response.text
+    audit.assert_not_awaited()

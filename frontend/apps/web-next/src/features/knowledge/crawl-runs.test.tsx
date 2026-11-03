@@ -101,7 +101,7 @@ describe("CrawlRunsTable", () => {
     expect(errors.parentElement!.className).toContain("-ms-3");
     // A run whose line starts with a label ("Ej indexerade") is not pulled back.
     expect(
-      within(rows[0]!).getByRole("button", { name: /Visa sidor som inte kunde indexeras/ })
+      within(rows[0]!).getByRole("button", { name: /Sidor: 1, visa de som inte kunde indexeras/ })
         .parentElement!.className
     ).not.toContain("-ms-3");
   });
@@ -125,7 +125,8 @@ describe("CrawlRunsTable", () => {
     expect(screen.getByRole("table", { name: "Indexeringar" })).toBeTruthy();
     expect(statusColumn()).toEqual(["Delvis klar", "Misslyckades", "Klar"]);
     // On a phone the start time stays in view while the run scrolls sideways
-    // (Astryx offsets pinned cells); an iPad held upright (770 px) shows it whole.
+    // (Astryx offsets pinned cells); an iPad held upright (682 px beside the
+    // icon rail) shows it whole.
     const table = screen.getByRole("table");
     expect(
       within(table)
@@ -133,7 +134,18 @@ describe("CrawlRunsTable", () => {
         .filter((cell) => cell.style.insetInlineStart)
         .map((cell) => cell.textContent)
     ).toEqual(["Startad"]);
-    expect(Number.parseFloat(table.style.minWidth)).toBeLessThanOrEqual(770);
+    // The date's text starts on its header's line: the ghost button's padding shrinks to
+    // 4 px and is pulled back by as much, so its focus ring stays inside the cell.
+    const date = screen.getByRole("button", { name: /5 mars 2024|2024-03-05/ });
+    expect(date.className).toContain("-ms-1");
+    expect(date.className).toContain("px-1");
+    // The widest English date and a running crawl's "Startad för 59 minuter sedan" each
+    // fit one line, also at a touch screen's 15 px, and the four columns fit 682 px (an
+    // upright iPad beside the icon rail).
+    const width = (name: string) =>
+      within(table).getByRole("columnheader", { name: new RegExp(name) }).style.width;
+    expect([width("Startad"), width("Varaktighet")]).toEqual(["184px", "224px"]);
+    expect(Number.parseFloat(table.style.minWidth)).toBeLessThanOrEqual(682);
     expect(
       screen.getByRole("button", { name: "Sortera efter Startad, sorterat fallande" })
     ).toBeTruthy();
@@ -162,7 +174,7 @@ describe("CrawlRunsTable", () => {
 
     // The failed count is a link to the run's failed addresses of that kind.
     fireEvent.click(
-      within(cell).getByRole("button", { name: "Visa sidor som inte kunde indexeras (1)" })
+      within(cell).getByRole("button", { name: "Sidor: 1, visa de som inte kunde indexeras" })
     );
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByRole("radio", { name: "Sidor" }).getAttribute("aria-checked")).toBe(

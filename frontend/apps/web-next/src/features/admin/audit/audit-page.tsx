@@ -144,7 +144,7 @@ export function AuditPage() {
   const pathname = usePathname();
   const tab = parseAuditTab(searchParams.get("tab"));
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
+    <div className="flex w-full flex-col gap-6">
       <PageHeader title={t("audit_logs")} />
       <Tabs
         value={tab}

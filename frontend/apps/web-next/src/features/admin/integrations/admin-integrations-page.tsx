@@ -154,7 +154,7 @@ export function AdminIntegrationsPage() {
   });
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
+    <div className="flex w-full max-w-4xl flex-col gap-6">
       <PageHeader title={t("integrations")} />
       <p className="text-muted-foreground text-sm">{t("admin_integrations_grid_hint")}</p>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2" data-tour="admin-integrations">

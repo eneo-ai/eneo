@@ -7,6 +7,8 @@ import { Children, type ComponentProps, type ReactNode } from "react";
  * A phone's index of rows under a group heading (decisions 21 and 22): an
  * editor's sections, Konto's settings. The rows run edge to edge; their text
  * keeps to the page's gutter, `--index-inset` (16 px unless the page sets it).
+ * From 768 px, where only Konto shows an index (an editor's is phone-only),
+ * each group is an inset card, as in iPad Settings.
  */
 export function IndexGroup({ title, children }: { title?: string; children: ReactNode }) {
   // A group whose rows all depend on what the user may do can be empty.
@@ -18,7 +20,9 @@ export function IndexGroup({ title, children }: { title?: string; children: Reac
           {title}
         </h2>
       ) : null}
-      <ul className="border-ax-border divide-ax-border divide-y border-y">{children}</ul>
+      <ul className="border-ax-border divide-ax-border md:bg-ax-card divide-y border-y md:overflow-hidden md:rounded-xl md:border">
+        {children}
+      </ul>
     </div>
   );
 }

@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { replaceUrl, router, setRoute } from "@/test/navigation";
 import { renderInApp } from "@/test/render";
-import { setViewport } from "@/test/setup-dom";
+import { reportResize, setViewport } from "@/test/setup-dom";
 import { SaveStatusProvider, useSetSaveStatus } from "./save-status";
 import { SectionedSettings, type SettingsSection } from "./sectioned-settings";
 
@@ -29,13 +29,18 @@ const sections = [
   }
 ];
 
+/** The sticky header, with the title block and, below 1024 px, the section strip. */
+const header = () => document.querySelector<HTMLElement>("[data-space-full-bleed] > header")!;
+/** The section list beside the form from 1024 px. */
+const rail = () => document.querySelector<HTMLElement>("[data-editor-rail]")!;
+
 describe("SectionedSettings", () => {
   it("keeps navigation and content in the same section order and marks the selected anchor", () => {
     renderInApp(
       <SectionedSettings navigationLabel="Avsnitt" header={<h1>Redigera</h1>} sections={sections} />
     );
 
-    const navigation = screen.getByRole("navigation", { name: "Avsnitt" });
+    const navigation = within(header()).getByRole("navigation", { name: "Avsnitt" });
     const links = within(navigation).getAllByRole("link");
     const generalLink = within(navigation).getByRole("link", { name: "Allmänt" });
     const aiLink = within(navigation).getByRole("link", { name: "AI" });
@@ -57,7 +62,7 @@ describe("SectionedSettings", () => {
     const { container } = renderInApp(
       <SectionedSettings navigationLabel="Avsnitt" header={<h1>Redigera</h1>} sections={sections} />
     );
-    const navigation = screen.getByRole("navigation", { name: "Avsnitt" });
+    const navigation = within(header()).getByRole("navigation", { name: "Avsnitt" });
     const current = within(navigation).getByRole("link", { name: "Allmänt" });
     const others = within(navigation)
       .getAllByRole("link")
@@ -73,6 +78,76 @@ describe("SectionedSettings", () => {
     // long label is never truncated: it keeps its full accessible name.
     expect(container.querySelector(".astryx-tab-strip")).toBeTruthy();
     expect(within(navigation).getByRole("link", { name: "Säkerhet och integritet" })).toBeTruthy();
+  });
+
+  it("keeps anchors clear of the header at the height it has now", () => {
+    renderInApp(
+      <SectionedSettings navigationLabel="Avsnitt" header={<h1>Redigera</h1>} sections={sections} />
+    );
+    const surface = document.querySelector<HTMLElement>("[data-space-full-bleed]")!;
+    // The header is taller with the strip (below 1024 px) than without it.
+    act(() => reportResize(header(), { height: 167 }));
+    expect(surface.style.getPropertyValue("--editor-header-h")).toBe("167px");
+    act(() => reportResize(header(), { height: 127 }));
+    expect(surface.style.getPropertyValue("--editor-header-h")).toBe("127px");
+  });
+
+  it("lists the sections beside the form from 1024 px, the strip in the header below it", () => {
+    renderInApp(
+      <SectionedSettings navigationLabel="Avsnitt" header={<h1>Redigera</h1>} sections={sections} />
+    );
+    expect(rail().getAttribute("aria-label")).toBe("Avsnitt");
+    const links = within(rail()).getAllByRole("link");
+    expect(links.map((link) => link.getAttribute("href"))).toEqual([
+      "#general",
+      "#ai",
+      "#security"
+    ]);
+    // Sections without a group are listed without a heading.
+    expect(within(rail()).queryAllByRole("group")).toEqual([]);
+    // CSS shows one of the two.
+    expect(rail().className).toContain("max-lg:hidden");
+    const strip = within(header()).getByRole("navigation", { name: "Avsnitt" });
+    expect(strip.closest(".lg\\:hidden")).toBeTruthy();
+
+    const ai = within(rail()).getByRole("link", { name: "AI" });
+    expect(within(rail()).getByRole("link", { name: "Allmänt" }).getAttribute("aria-current")).toBe(
+      "page"
+    );
+    fireEvent.click(ai);
+    expect(ai.getAttribute("aria-current")).toBe("page");
+    expect(within(strip).getByRole("link", { name: "AI" }).getAttribute("aria-current")).toBe(
+      "true"
+    );
+  });
+
+  it("centres the editor, or lines it up under a frame's header in the pages' column", () => {
+    const layout = (isFramed: boolean) => {
+      renderInApp(
+        <SectionedSettings
+          navigationLabel="Avsnitt"
+          header={<h1>Redigera</h1>}
+          sections={sections}
+          isFramed={isFramed}
+        />
+      );
+      const column = document.getElementById("general")!.parentElement!.parentElement!;
+      const result = [header().firstElementChild!, column].map((element) =>
+        ["mx-auto", "max-w-4xl", "max-w-[75rem]"].filter((name) => element.classList.contains(name))
+      );
+      cleanup();
+      return result;
+    };
+    expect(layout(false)).toEqual([
+      ["mx-auto", "max-w-4xl"],
+      ["mx-auto", "max-w-4xl"]
+    ]);
+    // The pages' 72rem column with the editor's own 1.5rem inset on each side: its text starts
+    // on the line of the space header above.
+    expect(layout(true)).toEqual([
+      ["mx-auto", "max-w-[75rem]"],
+      ["mx-auto", "max-w-[75rem]"]
+    ]);
   });
 
   it("has no axe violations", async () => {
@@ -308,20 +383,23 @@ describe("SectionedSettings on a phone (decision 21)", () => {
     expect(view()).toBe("index");
   });
 
-  it("opens the section of a field whose save failed, from the save status's link", async () => {
-    setViewport("phone");
-    setRoute(EDIT);
-    vi.spyOn(window.history, "pushState");
-    renderEditor();
-    // The phone's strip shows the save state; its link names the field.
-    const strip = document.querySelector<HTMLElement>("[data-editor-strip]")!;
-    const failed = await within(strip).findByRole("link", { name: /Kunde inte spara/ });
-    act(() => {
-      fireEvent.click(failed);
-    });
-    expect(current()).toEqual(["ai"]);
-    expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "Modell" }));
-  });
+  it.each(["phone", "phone-landscape"] as const)(
+    "opens the section of a field whose save failed, from the save status's link (%s)",
+    async (phone) => {
+      setViewport(phone);
+      setRoute(EDIT);
+      vi.spyOn(window.history, "pushState");
+      renderEditor();
+      // The phone's strip shows the save state; its link names the field.
+      const strip = document.querySelector<HTMLElement>("[data-editor-strip]")!;
+      const failed = await within(strip).findByRole("link", { name: /Kunde inte spara/ });
+      act(() => {
+        fireEvent.click(failed);
+      });
+      expect(current()).toEqual(["ai"]);
+      expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "Modell" }));
+    }
+  );
 
   it("keeps the view through a move that only changes the hash (a skip link)", () => {
     setRoute(EDIT);
@@ -336,25 +414,29 @@ describe("SectionedSettings on a phone (decision 21)", () => {
     expect(current()).toEqual(["general"]);
   });
 
-  it("keeps a draft and its focus when a tablet turns into a phone", () => {
-    setViewport("tablet-portrait");
-    setRoute(`${EDIT}?section=ai`);
-    renderEditor();
-    const draft = screen.getByRole("textbox", { name: "Beskrivning" });
-    fireEvent.change(draft, { target: { value: "Oavslutat utkast" } });
-    act(() => draft.focus());
-    act(() => setViewport("phone"));
-    expect(current()).toEqual(["general"]);
-    expect(document.activeElement).toBe(draft);
-    expect(draft).toHaveProperty("value", "Oavslutat utkast");
-    // jsdom has no layout; the field stays visible on the wider layout.
-    vi.spyOn(draft, "getClientRects").mockReturnValue([
-      new DOMRect(0, 0, 200, 44)
-    ] as unknown as DOMRectList);
-    act(() => setViewport("tablet-portrait"));
-    expect(document.activeElement).toBe(draft);
-    expect(screen.getByRole("textbox", { name: "Beskrivning" })).toBe(draft);
-  });
+  // A phone turned sideways is wider than 768 px, and still a phone's layout.
+  it.each(["phone", "phone-landscape"] as const)(
+    "keeps a draft and its focus when a tablet turns into a phone (%s)",
+    (phone) => {
+      setViewport("tablet-portrait");
+      setRoute(`${EDIT}?section=ai`);
+      renderEditor();
+      const draft = screen.getByRole("textbox", { name: "Beskrivning" });
+      fireEvent.change(draft, { target: { value: "Oavslutat utkast" } });
+      act(() => draft.focus());
+      act(() => setViewport(phone));
+      expect(current()).toEqual(["general"]);
+      expect(document.activeElement).toBe(draft);
+      expect(draft).toHaveProperty("value", "Oavslutat utkast");
+      // jsdom has no layout; the field stays visible on the wider layout.
+      vi.spyOn(draft, "getClientRects").mockReturnValue([
+        new DOMRect(0, 0, 200, 44)
+      ] as unknown as DOMRectList);
+      act(() => setViewport("tablet-portrait"));
+      expect(document.activeElement).toBe(draft);
+      expect(screen.getByRole("textbox", { name: "Beskrivning" })).toBe(draft);
+    }
+  );
 
   it("goes back with the system back, focus on the row it came from", () => {
     setRoute(EDIT);
@@ -460,6 +542,47 @@ describe("SectionedSettings on a phone (decision 21)", () => {
     expect(document.activeElement).toBe(
       screen.getByRole("heading", { name: "Säkerhet och integritet" })
     );
+  });
+
+  it("lists the sections beside the form under the index's group headings", () => {
+    setRoute(EDIT);
+    renderEditor();
+    const groups = within(rail()).getAllByRole("group");
+    expect(
+      groups.map(
+        (group) => document.getElementById(group.getAttribute("aria-labelledby")!)!.textContent
+      )
+    ).toEqual(["Innehåll", "Modell och funktioner", "Åtkomst"]);
+    expect(
+      groups.map((group) =>
+        within(group)
+          .getAllByRole("link")
+          .map((link) => link.getAttribute("href"))
+      )
+    ).toEqual([["#general"], ["#ai"], ["#security"]]);
+  });
+
+  it("keeps focus on a section link turned across 1024 px, on the one now shown", () => {
+    setViewport("tablet-portrait");
+    setRoute(EDIT);
+    renderEditor();
+    const inStrip = within(header()).getByRole("link", { name: "AI-inställningar" });
+    const inRail = within(rail()).getByRole("link", { name: "AI-inställningar" });
+    // jsdom has no layout: the link CSS shows has a box, the hidden one none.
+    const shown = (link: HTMLElement) =>
+      vi
+        .spyOn(link, "getClientRects")
+        .mockReturnValue([new DOMRect(0, 0, 200, 44)] as unknown as DOMRectList);
+
+    act(() => inStrip.focus());
+    const railShown = shown(inRail);
+    act(() => setViewport("tablet-landscape"));
+    expect(document.activeElement).toBe(inRail);
+
+    railShown.mockRestore();
+    shown(inStrip);
+    act(() => setViewport("tablet-portrait"));
+    expect(document.activeElement).toBe(inStrip);
   });
 
   it("leaves a settings page without the phone index as it was", () => {

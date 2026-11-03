@@ -10,7 +10,7 @@ import { phoneSections, spaceLandingHref, type SpaceRoute } from "./space-sectio
 import { SpaceTabs } from "./space-tabs";
 
 /**
- * A space on a phone (decision 24), in place of the header with breadcrumbs.
+ * A space on a phone, held either way (decision 24), in place of the header with breadcrumbs.
  * A shared space is pushed from Ytor: a page bar back to Ytor and to the
  * space chat, then the name with its classification and the content tabs
  * (Översikt, Assistenter, Appar, Flöden where the tenant has them, Kunskap). What manages the space is listed
@@ -76,7 +76,7 @@ export function SpacePhoneHeader({
     <>
       {parent ? (
         <PageBar
-          until="md"
+          until="phone"
           parent={parent}
           title={
             tabbed ? name : route.isSectionRoot && route.section ? t(route.section) : undefined
@@ -97,7 +97,7 @@ export function SpacePhoneHeader({
         />
       ) : null}
       {tabbed ? (
-        <div className="border-ax-border flex flex-col gap-3 border-b pt-4 md:hidden [main:has([data-editor-view=section])_&]:pb-3">
+        <div className="border-ax-border flex flex-col gap-3 border-b pt-4 [main:has([data-editor-view=section])_&]:pb-3">
           <div className="flex flex-col items-start gap-2 px-4">
             <Heading
               level={1}
@@ -125,11 +125,9 @@ export function SpacePhoneHeader({
         </div>
       ) : route.isSectionRoot ? (
         // The screen's visible title is the page's own heading ("Medlemmar").
-        <div className="md:hidden">
-          <Heading level={1} className="sr-only">
-            {name}
-          </Heading>
-        </div>
+        <Heading level={1} className="sr-only">
+          {name}
+        </Heading>
       ) : null}
     </>
   );
