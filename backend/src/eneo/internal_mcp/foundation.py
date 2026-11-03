@@ -106,14 +106,14 @@ async def internal_tool_context(ctx: Context):
     """
     # Imported lazily: the Container pulls in the whole service graph, so a
     # top-level import would create a cycle.
-    from eneo.main.container.container import Container
     from eneo.main.container.container_overrides import override_user
+    from eneo.main.container.request_container import request_container
 
     token = bearer_from_ctx(ctx)
     assistant_id = assistant_id_from_token(token)
     async with sessionmanager.session() as session:
         async with session.begin():
-            container = Container(session=providers.Object(session))
+            container = request_container(session=providers.Object(session))
             user = await container.user_service().authenticate_internal_mcp_token(token)
             override_user(container=container, user=user)
             yield ToolContext(container=container, user=user, assistant_id=assistant_id)

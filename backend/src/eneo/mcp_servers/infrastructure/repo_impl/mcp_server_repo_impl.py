@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -171,10 +172,16 @@ class MCPServerRepoImpl(
         )
 
     async def query(  # type: ignore[override]
-        self, tags: list[str] | None = None, **filters: object
+        self,
+        tags: list[str] | None = None,
+        purposes: Iterable[str] | None = None,
+        **filters: object,
     ) -> list[MCPServer]:
-        """Query MCP servers with optional tag filtering."""
+        """Query MCP servers with optional tag and purpose filtering."""
         query = select(self._db_model)
+
+        if purposes is not None:
+            query = query.where(self._db_model.purpose.in_(tuple(purposes)))
 
         if tags:
             # Filter by tags using JSONB contains operator

@@ -349,11 +349,11 @@ class SessionWatch:
 
     async def _recheck(self) -> bool:
         # The container module imports this one.
-        from eneo.main.container.container import Container
+        from eneo.main.container.request_container import request_container
 
         try:
             async with sessionmanager.session() as session, _store_transaction(session):
-                container = Container(session=providers.Object(session))
+                container = request_container(session=providers.Object(session))
                 await container.user_service().authenticate_payload(
                     self._payload, self._request
                 )

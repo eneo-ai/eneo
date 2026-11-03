@@ -93,6 +93,7 @@ from eneo.spaces.space_factory import SpaceFactory
 from eneo.spaces.space_update import SpaceUpdate
 from eneo.spaces.utils.space_utils import effective_space_ids_for
 from eneo.user_groups.user_group import UserGroupState
+from eneo.user_groups.user_groups_repo import count_group_users
 
 logger = get_logger(__name__)
 
@@ -268,9 +269,9 @@ class SpaceRepository:
     def _options(self) -> list[Any]:
         return [
             selectinload(Spaces.members).selectinload(SpacesUsers.user),
-            selectinload(Spaces.group_members)
-            .selectinload(SpacesUserGroups.user_group)
-            .selectinload(UserGroups.users),
+            selectinload(Spaces.group_members).selectinload(
+                SpacesUserGroups.user_group
+            ),
             selectinload(Spaces.services).selectinload(Services.user),
             selectinload(Spaces.integration_knowledge_list).selectinload(
                 IntegrationKnowledge.embedding_model
@@ -774,10 +775,22 @@ class SpaceRepository:
                 override.mcp_server_tool_id
             ] = override.is_enabled
 
+        # Each assistant is projected over its own servers' rows only, so the
+        # work stays the size of what it returns, not assistants x catalog.
+        tools_by_server: dict[UUID, list[MCPServerToolsTable]] = {}
+        for tool in tools_db:
+            tools_by_server.setdefault(tool.mcp_server_id, []).append(tool)
+
         return {
             projection.assistant_id: self._project_assistant_mcp_server_tools(
                 mcp_servers=deepcopy(list(projection.mcp_servers)),
-                tools_db=tools_db,
+                tools_db=[
+                    tool
+                    for server_id in dict.fromkeys(
+                        server.id for server in projection.mcp_servers
+                    )
+                    for tool in tools_by_server.get(server_id, ())
+                ],
                 tenant_tool_settings=tenant_tool_settings,
                 space_tool_overrides=space_tool_overrides.get(projection.space_id, {}),
                 assistant_tool_overrides=assistant_tool_overrides.get(
@@ -852,27 +865,30 @@ class SpaceRepository:
                 None,
             )
 
-        # For each assistant, load MCP servers with tools and apply space+assistant overrides
-        for assistant in assistants:
-            if assistant.mcp_servers:
-                from eneo.mcp_servers.infrastructure.mappers.mcp_server_mapper import (
-                    MCPServerMapper,
+        # Each assistant's MCP servers with their tools, switched by the space
+        # and by that assistant, projected for all assistants in one pass.
+        from eneo.mcp_servers.infrastructure.mappers.mcp_server_mapper import (
+            MCPServerMapper,
+        )
+
+        with_mcp_servers = [
+            assistant for assistant in assistants if assistant.mcp_servers
+        ]
+        projected = await self.project_assistants_mcp_servers(
+            [
+                AssistantMCPServerProjection(
+                    space_id=space_id,
+                    assistant_id=assistant.id,
+                    mcp_servers=tuple(
+                        MCPServerMapper.to_entities(assistant.mcp_servers)
+                    ),
                 )
-
-                # Map to domain entities first
-                mcp_servers = MCPServerMapper.to_entities(assistant.mcp_servers)
-
-                # Apply space + assistant level overrides using same logic as space MCP loading
-                mcp_servers = (
-                    await self._load_assistant_mcp_server_tools_with_overrides(
-                        space_id=space_id,
-                        assistant_id=assistant.id,
-                        mcp_servers=mcp_servers,
-                    )
-                )
-
-                # Store the filtered entities back on the assistant for the factory
-                setattr(assistant, "_mcp_server_entities", mcp_servers)
+                for assistant in with_mcp_servers
+            ]
+        )
+        for assistant in with_mcp_servers:
+            # The factory takes these in place of the unfiltered relationship.
+            setattr(assistant, "_mcp_server_entities", projected[assistant.id])
 
         return assistants
 
@@ -1222,6 +1238,7 @@ class SpaceRepository:
         space = self.factory.create_space_from_db(
             entry_in_db,
             user=self.user,
+            group_user_counts=await self._group_user_counts([entry_in_db]),
             collections_in_db=collections,
             websites_in_db=websites,
             completion_models=completion_models,
@@ -1238,11 +1255,16 @@ class SpaceRepository:
             security_classification=entry_in_db.security_classification,
         )
         from eneo.mcp_servers.application.capability_resolver import (
-            capability_availability,
+            active_capability_providers,
+            availability_from_providers,
         )
 
-        space.available_capabilities = await capability_availability(
-            self.session, self.user.tenant_id, space.security_classification
+        # One provider load serves the tenant-wide and the user-scoped view.
+        capability_providers = await active_capability_providers(
+            self.session, self.user.tenant_id
+        )
+        space.available_capabilities = availability_from_providers(
+            capability_providers, space.security_classification
         )
         if space.is_personal():
             space.enabled_capabilities = [
@@ -1257,9 +1279,8 @@ class SpaceRepository:
                 allowed_capability_purposes,
             )
 
-            personal_availability = await capability_availability(
-                self.session,
-                self.user.tenant_id,
+            personal_availability = availability_from_providers(
+                capability_providers,
                 space.security_classification,
                 user_group_ids=self.user.user_groups_ids,
                 allowed_purposes=allowed_capability_purposes(self.user.permissions),
@@ -1299,6 +1320,12 @@ class SpaceRepository:
             query.execution_options(populate_existing=True)
         )
         return result.all()
+
+    async def _group_user_counts(self, records: Sequence[Spaces]) -> dict[UUID, int]:
+        return await count_group_users(
+            self.session,
+            {link.user_group_id for record in records for link in record.group_members},
+        )
 
     async def add(self, space: Space) -> Space:
         query = (
@@ -1486,6 +1513,7 @@ class SpaceRepository:
         )
 
         records = await self._get_records_with_options(query)
+        group_user_counts = await self._group_user_counts(records)
 
         spaces: list[Space] = []
         for record in records:
@@ -1512,6 +1540,7 @@ class SpaceRepository:
                 self.factory.create_space_from_db(
                     record,
                     user=self.user,
+                    group_user_counts=group_user_counts,
                     assistants_in_db=assistants,
                     assistant_attachments=assistant_attachments,
                     apps_in_db=apps,
