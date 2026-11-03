@@ -1,5 +1,5 @@
 import { Button } from "@astryxdesign/core/Button";
-import { Collapsible } from "@astryxdesign/core/Collapsible";
+import { Collapsible } from "@/components/astryx/collapsible";
 import { useClipboard } from "@astryxdesign/core/hooks";
 import { ScrollableArea } from "@astryxdesign/core/ScrollableArea";
 import { Text } from "@astryxdesign/core/Text";

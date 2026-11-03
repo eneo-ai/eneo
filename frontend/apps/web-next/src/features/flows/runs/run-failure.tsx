@@ -1,5 +1,5 @@
 import { Button } from "@astryxdesign/core/Button";
-import { Collapsible } from "@astryxdesign/core/Collapsible";
+import { Collapsible } from "@/components/astryx/collapsible";
 import { useTranslations } from "use-intl";
 import { useState } from "react";
 import { Banner } from "@astryxdesign/core/Banner";

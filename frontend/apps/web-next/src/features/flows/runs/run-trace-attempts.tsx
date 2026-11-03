@@ -1,5 +1,5 @@
 import { useLocale, useTranslations } from "use-intl";
-import { Collapsible } from "@astryxdesign/core/Collapsible";
+import { Collapsible } from "@/components/astryx/collapsible";
 import { useState } from "react";
 import { StatusLabel, type StatusTone } from "@/components/composites/status-label";
 import type { Schema } from "@/lib/api/models";
