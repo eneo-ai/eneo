@@ -85,6 +85,25 @@ test("one page link stays current across a saved chat and administration", async
   await expect(current).toHaveAttribute("href", savedChat);
 });
 
+test("a page in a menu is a link: a modified click opens it in a new tab", async ({
+  page,
+  context
+}) => {
+  await page.goto("/spaces/list");
+  await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+  const start = page.url();
+  await page.getByRole("button", { name: /: konto och inställningar$/ }).click();
+  const account = page.getByRole("menu").getByRole("menuitem", { name: "Mitt konto", exact: true });
+  await expect(account).toHaveAttribute("href", "/account");
+
+  const opened = context.waitForEvent("page");
+  await account.click({ modifiers: ["ControlOrMeta"] });
+  const tab = await opened;
+  await expect(tab).toHaveURL(/\/account$/);
+  await tab.close();
+  await expect(page).toHaveURL(start);
+});
+
 test("the session URL arrives during streaming without remounting or scrolling the conversation", async ({
   page
 }) => {

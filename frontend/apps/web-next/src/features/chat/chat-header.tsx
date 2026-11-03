@@ -327,9 +327,11 @@ export function PartnerSwitcher({
   );
 }
 
+/** A row of the chat menu: an action, or a page it links (`href`). */
 export type HeaderMenuItem = {
   label: string;
-  onClick: () => void;
+  onClick?: () => void;
+  href?: string;
   variant?: "destructive";
 };
 

@@ -2,7 +2,6 @@ import type { DropdownMenuOption } from "@astryxdesign/core/DropdownMenu";
 import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowDownToLine, ArrowUpToLine, Pencil, Trash2 } from "lucide-react";
-import { useRouter } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
 import type { ReactNode, RefObject } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
@@ -111,7 +110,6 @@ export function AppActionScope({
 /** Edit/publish/delete menu for an app, shown on its tile. */
 export function AppActions({ app }: { app: AppSparse }) {
   const t = useTranslations();
-  const router = useRouter();
   const { routeId } = useSpace();
   const open = useOpenResourceAction();
   const permissions = app.permissions ?? [];
@@ -126,7 +124,7 @@ export function AppActions({ app }: { app: AppSparse }) {
           {
             label: t("edit"),
             icon: <Pencil aria-hidden="true" />,
-            onClick: () => router.push(`/spaces/${routeId}/apps/${app.id}/edit`)
+            href: `/spaces/${routeId}/apps/${app.id}/edit`
           }
         ]
       : []),
