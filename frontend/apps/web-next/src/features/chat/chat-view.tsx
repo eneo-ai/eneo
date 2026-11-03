@@ -1413,6 +1413,7 @@ function ConversationView({
               {queuedQuestion && (
                 <PendingQuestion
                   text={queuedQuestion.text}
+                  references={references}
                   uploads={queuedUploads}
                   conversationFiles={allFiles}
                 />

@@ -4,8 +4,10 @@ import { useRef, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatPartner, EneoUIMessage } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
+import { chatComposer, typeIntoComposer } from "@/test/composer";
 import { renderInApp, testAppContext } from "@/test/render";
 import { observedElements, reportResize, setViewport } from "@/test/setup-dom";
+import type { ChatReferences } from "./chat-references";
 import { ChatView, type ActivityState } from "./chat-view";
 import { queuePartnerUpdate } from "./partner-updates";
 
@@ -132,11 +134,13 @@ const history: EneoUIMessage[] = [
 function Harness({
   partner,
   messages = [],
-  sessionId = null
+  sessionId = null,
+  references
 }: {
   partner: ChatPartner;
   messages?: EneoUIMessage[];
   sessionId?: string | null;
+  references?: ChatReferences;
 }) {
   const [activity, setActivity] = useState<ActivityState | null>(null);
   return (
@@ -147,6 +151,7 @@ function Harness({
         initialSessionId={sessionId}
         activity={activity}
         onActivityChange={setActivity}
+        references={references}
       />
     </div>
   );
@@ -418,6 +423,28 @@ describe("ChatView composer drafts", () => {
   const requestsSent = () =>
     spies.announce.mock.calls.filter(([message]) => message === "Assistenten skriver ett svar")
       .length;
+
+  it("draws a question's references while it waits for a model switch to be saved", async () => {
+    sessionStorage.clear();
+    const tokens = vi.fn<ChatReferences["tokens"]>(() => []);
+    renderInApp(
+      <Harness
+        partner={assistant}
+        references={{ triggers: [], tokens, remarkPlugins: [], components: {} }}
+      />
+    );
+    let saved!: () => void;
+    void queuePartnerUpdate(() => new Promise<void>((resolve) => (saved = resolve)));
+
+    typeIntoComposer(chatComposer("Fråga Upphandlingsassistenten"), "Jämför med @steg");
+    fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
+
+    expect(tokens).toHaveBeenCalledWith("Jämför med @steg");
+    await act(async () => {
+      await Promise.resolve();
+      saved();
+    });
+  });
 
   it("sends one question at a time while a model switch is being saved", async () => {
     sessionStorage.clear();
