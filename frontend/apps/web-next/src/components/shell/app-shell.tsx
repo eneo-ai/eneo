@@ -8,7 +8,8 @@ import { useTranslations } from "use-intl";
 import { AnimatedLayoutScope } from "@/components/astryx/collapsible";
 import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { CreateSpaceDialog } from "@/features/spaces/create-space-dialog";
-import { PHONE_SCREEN_QUERY } from "@/lib/hooks/use-media-match";
+import { PHONE_SCREEN_QUERY, useTouchTablet } from "@/lib/hooks/use-media-match";
+import { cn } from "@/lib/utils";
 import { ConnectionAnnouncer, ConnectionBanner } from "./connection-banner";
 import { MobileTopBar } from "./mobile-top-bar";
 import { isAdminRoute, OPEN_NAV_EVENT, sideNavKind, type NavVariant } from "./routes";
@@ -53,6 +54,13 @@ export function AppShellFrame({
   const t = useTranslations();
   const pathname = usePathname();
   const isMobile = useMediaQuery(PHONE_SCREEN_QUERY);
+  // A tablet keeps the touch shell: no top bar, the SideNav on every page.
+  const tablet = useTouchTablet();
+  // A tablet's space header is a chunk of its own (space-frame.tsx): fetch it
+  // before the first space page asks for it.
+  useEffect(() => {
+    if (tablet) void import("@/features/spaces/frame/space-header");
+  }, [tablet]);
   const navId = useId();
   const drawerId = useId();
   const rail = useSideNavRail(sideNavCollapsed);
@@ -152,14 +160,29 @@ export function AppShellFrame({
         <AppShellMobileContext value={mobileNav}>
           <MobileTopBar />
         </AppShellMobileContext>
-        {/* From 768 px, as in the Svelte app: one card holding the top bar
-            above the SideNav and the page panel. */}
-        <div className="wide:rounded-ax-page wide:shadow-ax-low wide:border wide:border-ax-border wide:overflow-hidden flex min-h-0 flex-1 flex-col">
-          {isMobile ? null : <TopBar railCollapsed={rail.collapsed} />}
-          <div className="flex min-h-0 flex-1">
+        {/* From 768 px with a mouse, as in the Svelte app: one card holding the
+            top bar above the SideNav and the page panel. A tablet keeps the
+            SideNav on the body colour beside the page panel, its own card. */}
+        <div
+          className={
+            tablet
+              ? "flex min-h-0 flex-1 gap-2"
+              : "wide:rounded-ax-page wide:shadow-ax-low wide:border wide:border-ax-border wide:overflow-hidden flex min-h-0 flex-1 flex-col"
+          }
+        >
+          {isMobile || tablet ? null : <TopBar railCollapsed={rail.collapsed} />}
+          <div className={tablet ? "contents" : "flex min-h-0 flex-1"}>
             <AppShellMobileContext value={mobileNav}>
-              {sideNav === null ? null : (
-                <div className="wide:flex wide:flex-col border-ax-border hidden min-h-0 shrink-0 border-e">
+              {sideNav === null && !tablet ? null : (
+                <div
+                  // Pages read the icon rail in CSS (`group-has-[[data-side-nav-rail]]/shell`).
+                  // A tablet's rail lists every space: its pages name theirs in their header.
+                  data-side-nav-rail={rail.collapsed && !tablet ? "" : undefined}
+                  className={cn(
+                    "wide:flex wide:flex-col hidden min-h-0 shrink-0",
+                    !tablet && "border-ax-border border-e"
+                  )}
+                >
                   <DesktopSideNav kind={sideNav} navId={navId} rail={rail} />
                 </div>
               )}
@@ -179,7 +202,10 @@ export function AppShellFrame({
               ref={mainRef}
               id="main-content"
               tabIndex={-1}
-              className="bg-ax-surface phone:has-[[data-docked-actions]]:scroll-pb-[var(--docked-actions-height,calc(4.5rem+env(safe-area-inset-bottom,0px)))] phone:has-[[data-docked-actions]]:pb-[var(--docked-actions-height,calc(4.5rem+env(safe-area-inset-bottom,0px)))] phone:has-[[data-phone-page-bar]]:scroll-pt-14 wide:pb-0 relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto pb-[env(safe-area-inset-bottom,0px)] focus:outline-none max-lg:has-[[data-page-bar]]:scroll-pt-14"
+              className={cn(
+                tablet && "rounded-ax-page shadow-ax-low",
+                "bg-ax-surface phone:has-[[data-docked-actions]]:scroll-pb-[var(--docked-actions-height,calc(4.5rem+env(safe-area-inset-bottom,0px)))] phone:has-[[data-docked-actions]]:pb-[var(--docked-actions-height,calc(4.5rem+env(safe-area-inset-bottom,0px)))] phone:has-[[data-phone-page-bar]]:scroll-pt-14 wide:pb-0 relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto pb-[env(safe-area-inset-bottom,0px)] focus:outline-none max-lg:has-[[data-page-bar]]:scroll-pt-14"
+              )}
             >
               {/* Under the top bar; a page with its own header shows its own
               under that header, and this one gives way. */}

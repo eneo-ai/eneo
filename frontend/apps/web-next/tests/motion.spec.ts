@@ -74,6 +74,9 @@ for (const reduced of [false, true]) {
         await page.waitForTimeout(600);
       };
 
+      // Its own space, so the list has a row with a menu whatever ran before.
+      const name = uniqueName("Rörelse");
+      await createSpace(page, name);
       await openRoute(page, "/spaces/list", true);
       await press("dialog open", () =>
         page
@@ -84,10 +87,7 @@ for (const reduced of [false, true]) {
       );
       await press("dialog close", () => page.keyboard.press("Escape"));
       await press("menu open", () =>
-        page
-          .getByRole("button", { name: /fler åtgärder för/i })
-          .first()
-          .click()
+        page.getByRole("button", { name: `Fler åtgärder för ${name}`, exact: true }).click()
       );
       await press("menu close", () => page.keyboard.press("Escape"));
 
@@ -136,8 +136,9 @@ for (const reduced of [false, true]) {
  * on a spring. With reduce motion it only fades on a coarse pointer and lands at once with a
  * mouse. Measured inside the nav's wrapper, which holds that copy too.
  */
-const RAIL = 'nav[aria-label="Ytans meny"]';
-const RAIL_AREA = `:has(> ${RAIL})`;
+// A tablet's nav is the touch shell's (#1328), a computer's holds the space list's place.
+const railOf = (touch: boolean) =>
+  touch ? 'nav[aria-label="Huvudmeny"]' : 'nav[aria-label="Ytans meny"]';
 // The toggle's own press scale is a CSS transition, named for its property; the rail's motion
 // is Web Animations, which have no name.
 const scripted = (runs: Run[]) => runs.filter((run) => run.name === "");
@@ -168,9 +169,10 @@ for (const { title, reduced, touch } of [
     const expanded = await toggle.getAttribute("aria-expanded");
     await toggle.click();
     await page.waitForTimeout(30);
-    const runs = (await running(page, RAIL_AREA)).filter((run) => run.ms > 1);
+    const RAIL = railOf(touch);
+    const runs = (await running(page, `:has(> ${RAIL})`)).filter((run) => run.ms > 1);
     await page.waitForTimeout(800);
-    const left = await running(page, RAIL_AREA);
+    const left = await running(page, `:has(> ${RAIL})`);
     const copies = await page.locator(RAIL).count();
     await expect(toggle).toHaveAttribute("aria-expanded", expanded === "true" ? "false" : "true");
     await context.close();

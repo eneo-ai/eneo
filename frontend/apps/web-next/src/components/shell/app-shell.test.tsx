@@ -9,6 +9,7 @@ import { setViewport } from "@/test/setup-dom";
 import { AppShellFrame } from "./app-shell";
 import { OPEN_NAV_EVENT } from "./routes";
 import { OWN_MOBILE_HEADER } from "./shell-context";
+import { SIDE_NAV_COLLAPSED_COOKIE } from "./side-nav-preference";
 
 vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 // Stand-ins that show where the bells are placed (they have their own tests).
@@ -283,7 +284,9 @@ describe("AppShellFrame on an iPad", () => {
       setViewport(viewport);
       renderShell();
       expect(screen.queryByRole("button", { name: "Öppna menyn" })).toBeNull();
-      expect(screen.getByRole("navigation", { name: "Ytans meny" })).toBeTruthy();
+      // Touch keeps the navigation built for it (#1328): every space, no top bar.
+      expect(screen.getByRole("navigation", { name: "Huvudmeny" })).toBeTruthy();
+      expect(screen.queryByRole("navigation", { name: "Huvudområden" })).toBeNull();
       expect(screen.getByRole("button", { name: "Fäll ut sidomenyn" })).toBeTruthy();
     }
   );
@@ -293,11 +296,21 @@ describe("AppShellFrame on an iPad", () => {
     renderShell();
     fireEvent.click(screen.getByRole("button", { name: "Öppna menyn" }));
     const drawer = await screen.findByRole("dialog", { name: "Meny" });
-    within(drawer).getByRole("link", { name: "Alla ytor" }).focus();
+    within(drawer).getByRole("link", { name: "Dina ytor" }).focus();
 
     act(() => setViewport("tablet-portrait"));
     expect(screen.queryByRole("dialog", { name: "Meny" })).toBeNull();
     expect(document.activeElement).toBe(screen.getByRole("main"));
+  });
+
+  it("marks the icon rail for pages that name their place while it is collapsed", () => {
+    // A small laptop, with a mouse: a tablet's rail lists every space instead.
+    setViewport({ width: 1024, height: 768, pointer: "fine" });
+    const { container } = renderShell();
+    expect(container.querySelector("[data-side-nav-rail]")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Fäll ut sidomenyn" }));
+    expect(container.querySelector("[data-side-nav-rail]")).toBeNull();
+    document.cookie = `${SIDE_NAV_COLLAPSED_COOKIE}=; max-age=0; path=/`;
   });
 
   it("leaves focus alone on first paint", () => {

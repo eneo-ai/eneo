@@ -167,16 +167,19 @@ describe("DesktopSideNav (main)", () => {
       "/dashboard"
     );
 
-    // Personligt first, the shared spaces (not the organisation space), Alla ytor last.
-    const spaces = within(navigation).getByRole("group", { name: "Ytor" });
+    // The areas in the top bar's order: Personligt, then Delat with the
+    // shared spaces (not the organisation space) and Dina ytor last.
+    expect(within(navigation).getByRole("link", { name: "Personligt" }).getAttribute("href")).toBe(
+      "/spaces/personal/overview"
+    );
+    const spaces = within(navigation).getByRole("group", { name: "Delat" });
     const spaceLinks = within(spaces).getAllByRole("link");
     expect(spaceLinks.map((link) => link.getAttribute("href"))).toEqual([
-      "/spaces/personal/overview",
       "/spaces/s1/overview",
       "/spaces/s2/overview",
       "/spaces/list"
     ]);
-    for (const name of ["Personligt", "Upphandling", "Socialtjänst", "Alla ytor"]) {
+    for (const name of ["Upphandling", "Socialtjänst", "Dina ytor"]) {
       expect(within(spaces).getByRole("link", { name })).toBeTruthy();
     }
 
@@ -238,11 +241,18 @@ describe("DesktopSideNav (main)", () => {
     expect(within(recent).getByRole("link", { name: "Upphandlingsanalys mot LOU" })).toBeTruthy();
   });
 
-  it("leaves Organisation, Administration and the profile to the top bar", () => {
-    renderNav({ permissions: ["admin"] });
-    // As in Svelte, the top bar (top-bar.tsx) carries them beside the SideNav.
-    expect(screen.queryByRole("link", { name: "Administration" })).toBeNull();
+  it("lists Organisation after Delat for admins, and leaves Administration and the profile to the top bar", () => {
+    renderNav();
     expect(screen.queryByRole("link", { name: "Organisation" })).toBeNull();
+    cleanup();
+    renderNav({ permissions: ["admin"] });
+    const organisation = screen.getByRole("link", { name: "Organisation" });
+    expect(
+      screen.getByRole("group", { name: "Delat" }).compareDocumentPosition(organisation) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    // With a mouse the top bar (top-bar.tsx) carries them beside the SideNav.
+    expect(screen.queryByRole("link", { name: "Administration" })).toBeNull();
     expect(screen.queryByRole("button", { name: /konto och inställningar/ })).toBeNull();
   });
 
@@ -335,11 +345,11 @@ describe("DesktopSideNav (main)", () => {
       });
       const spaces = within(screen.getByRole("navigation", { name: "Huvudmeny" })).getByRole(
         "group",
-        { name: "Ytor" }
+        { name: "Delat" }
       );
       expect(await within(spaces).findByText("Ytorna kunde inte laddas.")).toBeTruthy();
-      expect(within(spaces).getByRole("link", { name: "Personligt" })).toBeTruthy();
-      expect(within(spaces).getByRole("link", { name: "Alla ytor" })).toBeTruthy();
+      expect(screen.getByRole("link", { name: "Personligt" })).toBeTruthy();
+      expect(within(spaces).getByRole("link", { name: "Dina ytor" })).toBeTruthy();
       expect(Boolean(within(spaces).queryByRole("link", { name: "Upphandling" }))).toBe(cached);
 
       const retry = within(spaces).getByRole("button", { name: "Försök ladda ytorna igen" });

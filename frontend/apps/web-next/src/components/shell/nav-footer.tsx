@@ -1,27 +1,13 @@
 import { SideNavItem, useSideNavRenderMode } from "@astryxdesign/core/SideNav";
-import { Building2, CircleHelp, ExternalLink, Shield } from "lucide-react";
+import { CircleHelp, ExternalLink, Shield } from "lucide-react";
 import { useTranslations } from "use-intl";
 import type { ComponentProps } from "react";
 import { useAppContext } from "@/components/providers/app-context";
 import { cn } from "@/lib/utils";
-import { useNavTarget } from "./nav-data";
 import { NAV_ITEM_CLASSES, SECONDARY_LINK_CLASSES } from "./nav-styles";
-import { ProfileLink } from "./profile-menu";
+import { useTouchTablet } from "@/lib/hooks/use-media-match";
+import { ProfileLink, ProfileMenu } from "./profile-menu";
 import type { NavVariant } from "./routes";
-
-function OrganizationItem() {
-  const t = useTranslations();
-  // Not current while "Senaste" marks the conversation open in its chat.
-  const isCurrent = useNavTarget().kind === "organization";
-  return (
-    <SideNavItem
-      label={t("organization")}
-      icon={Building2}
-      href="/spaces/organization/knowledge"
-      isSelected={isCurrent}
-    />
-  );
-}
 
 /** A plain anchor to another site, in a new tab (SideNavItem's own link uses the app router). */
 function ExternalNavLink({ children, ...props }: ComponentProps<"a">) {
@@ -53,28 +39,26 @@ function HelpCenterItem({ href }: { href: string }) {
 
 /**
  * The help centre, as at the foot of Svelte's sidebar. In the phone's drawer
- * also "Organisation" and "Administration" (admins) and a link to Konto
- * (decision 22): on wider screens the top bar carries those.
+ * also "Administration" (admins) and a link to Konto (decision 22); in a
+ * tablet's SideNav those and the profile's menu. With a mouse the top bar
+ * carries them; Organisation sits with the areas (main-nav.tsx).
  */
 export function NavFooter({ variant }: { variant: NavVariant }) {
   const t = useTranslations();
   const { can, links } = useAppContext();
   const isAdmin = can("admin");
   const isInDrawer = useSideNavRenderMode() === "drawer-content";
+  // A tablet has no top bar: its SideNav carries them, and the profile's menu.
+  const tablet = useTouchTablet();
 
   return (
     <div className={cn("flex flex-col gap-0.5", NAV_ITEM_CLASSES, SECONDARY_LINK_CLASSES)}>
-      {isInDrawer && variant === "main" && isAdmin ? (
-        <>
-          <OrganizationItem />
-          <SideNavItem label={t("shell_administration")} icon={Shield} href="/admin" />
-        </>
+      {(isInDrawer || tablet) && variant === "main" && isAdmin ? (
+        <SideNavItem label={t("shell_administration")} icon={Shield} href="/admin" />
       ) : null}
       {links.helpCenter ? <HelpCenterItem href={links.helpCenter} /> : null}
-      {isInDrawer ? (
-        <div className="mt-1.5">
-          <ProfileLink />
-        </div>
+      {isInDrawer || tablet ? (
+        <div className="mt-1.5">{isInDrawer ? <ProfileLink /> : <ProfileMenu />}</div>
       ) : null}
     </div>
   );

@@ -40,7 +40,7 @@ for (const size of TURNED) {
 
       await page.goto(`${space}/overview`);
       await expect(
-        page.getByRole("link", { name: /^(Tillbaka till|Back to) (Ytor|Spaces)$/ })
+        page.getByRole("link", { name: /^(Tillbaka till|Back to) (Dina ytor|Your spaces)$/ })
       ).toBeVisible();
       await expect(page.locator(TOP_BAR)).toBeHidden();
       await expect(sideNav(page)).toBeHidden();

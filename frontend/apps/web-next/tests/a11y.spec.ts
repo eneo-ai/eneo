@@ -994,22 +994,16 @@ for (const colorScheme of ["light", "dark"] as const) {
           const name = uniqueName(`E2E A11y Touch Space ${colorScheme}`);
           const space = await createSpace(page, name);
           await scan(page, `${space}/overview`, async () => {
-            // A phone's space header names the space (h1); beside the sidebar the page is Översikt.
-            await expect(
-              page.getByRole("heading", { level: layout.phone ? 1 : 2, name })
-            ).toBeVisible();
+            // A phone's and a tablet's space header names the space (#1328).
+            await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
             // A phone lists what manages the space; tablets keep a tab for each.
             await expect(
               page.getByRole("region", { name: /^(Hantera ytan|Manage space)$/ })
             ).toHaveCount(layout.phone ? 1 : 0);
           });
           await scan(page, "/spaces/organization/knowledge", async () => {
-            // A phone's space header names the space; beside the sidebar the page is Kunskap.
             await expect(
-              page.getByRole("heading", {
-                level: 1,
-                name: layout.phone ? /^(Organisation|Organization)$/ : /^(Kunskap|Knowledge)$/
-              })
+              page.getByRole("heading", { level: 1, name: /^(Organisation|Organization)$/ })
             ).toBeVisible();
           });
         });
@@ -1111,10 +1105,8 @@ for (const colorScheme of ["light", "dark"] as const) {
               ["members", /^(Medlemmar|Members)$/]
             ] as const) {
               await scan(page, `${work.space}/${tab}`, async () => {
-                // The section's title is the h1 beside the sidebar, an h2 under a phone's space header.
-                await expect(
-                  page.getByRole("heading", { level: layout.phone ? 2 : 1, name })
-                ).toBeVisible();
+                // Under a phone's or a tablet's space header the section's title is an h2.
+                await expect(page.getByRole("heading", { level: 2, name })).toBeVisible();
               });
             }
             // A phone opens the editor on its index of sections (decision 21).

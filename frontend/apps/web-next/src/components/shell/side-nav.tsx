@@ -7,6 +7,7 @@ import { MEDIA } from "@/lib/breakpoints";
 import { useFocusRescue } from "@/lib/focus-rescue";
 import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { cn } from "@/lib/utils";
+import { useTouchTablet } from "@/lib/hooks/use-media-match";
 import { AdminSections, AdminTopContent } from "./admin-nav";
 import { EneoWordMark } from "./eneo-logo";
 import { MainSections, MainTopContent } from "./main-nav";
@@ -63,17 +64,25 @@ export function useSideNavRail(defaultCollapsed: boolean | undefined): SideNavRa
  * otherwise, so the page keeps its room; the rail's items keep their names
  * (accessible name and tooltip). The choice is a per-browser preference
  * (`useSideNavRail`), and a stored choice wins at every width.
+ *
+ * A tablet (`useTouchTablet`) has no top bar and keeps the navigation built
+ * for touch instead, on every page: the wordmark and the bells, Ny
+ * konversation, Sök, every space, Senaste, Organisation, Administration and
+ * the profile; administration's own navigation under /admin.
  */
 export function DesktopSideNav({
   kind,
   navId,
   rail
 }: {
-  kind: SideNavKind;
+  /** The place the page is in; null where a computer shows no sidebar. */
+  kind: SideNavKind | null;
   navId: string;
   rail: SideNavRail;
 }) {
   const t = useTranslations();
+  const tablet = useTouchTablet();
+  const variant: NavVariant = kind === "admin" ? "admin" : "main";
   const { collapsed, chosen } = rail;
 
   // The width collapsing or expanding the nav removes whole sections. If the
@@ -96,7 +105,7 @@ export function DesktopSideNav({
     );
   }, [shown, navId, rescueFocus]);
 
-  const content = SIDE_NAV_CONTENT[kind];
+  const content = tablet || kind === null ? TABLET_NAV_CONTENT[variant] : SIDE_NAV_CONTENT[kind];
   return (
     <SideNav
       id={navId}
@@ -104,14 +113,19 @@ export function DesktopSideNav({
       collapsible={{ isCollapsed: collapsed, onCollapsedChange: rail.change, hasButton: false }}
       header={
         <div className="flex flex-col gap-1">
-          <NavHeader navId={navId} />
+          <NavHeader navId={navId} withBrand={tablet} />
           {content.heading}
         </div>
       }
       topContent={content.top}
-      footer={<NavFooter variant={kind === "admin" ? "admin" : "main"} />}
-      // 17 rem wide as in the Svelte app, 64 px as an icon rail.
-      className={cn("bg-ax-surface", collapsed ? "w-16" : "w-68")}
+      footer={<NavFooter variant={variant} />}
+      className={
+        tablet
+          ? // ≈248 px wide, 64 px as an icon rail; the app body shows through.
+            cn("bg-ax-body", collapsed ? "w-16" : "w-62")
+          : // 17 rem wide as in the Svelte app, 64 px as an icon rail.
+            cn("bg-ax-surface", collapsed ? "w-16" : "w-68")
+      }
     >
       {content.items}
     </SideNav>
@@ -138,6 +152,15 @@ const SIDE_NAV_CONTENT: Record<
     heading: <AccountNavHeading />,
     items: <AccountNavSections />
   },
+  admin: { label: "shell_administration", top: <AdminTopContent />, items: <AdminSections /> }
+};
+
+/** A tablet's navigation, built for touch (#1328): the same as the phone's drawer. */
+const TABLET_NAV_CONTENT: Record<
+  NavVariant,
+  { label: string; heading?: React.ReactNode; top?: React.ReactNode; items: React.ReactNode }
+> = {
+  main: { label: "shell_nav_label", top: <MainTopContent />, items: <MainSections /> },
   admin: { label: "shell_administration", top: <AdminTopContent />, items: <AdminSections /> }
 };
 
