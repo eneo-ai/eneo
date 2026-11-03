@@ -268,20 +268,32 @@ jobs:
           TESTCONTAINERS_RYUK_DISABLED: "true"
           DOCKER_HOST: unix:///var/run/docker.sock
 
-      - name: Verify crawler and audit migration rollback
+      - name: Verify migration round trips
         if: matrix.suite == 'migrations'
-        # These tests own disposable databases and deliberately change their schema.
-        run: >-
-          uv run pytest -q -m migration_isolation
-          tests/integration/migrations/test_crawl_lifecycle_round_trip.py
-          tests/integration/migrations/test_website_source_url_identity.py
-          tests/integration/migrations/test_crawler_develop_rollback.py
-          tests/integration/migrations/test_audit_description_statistics_round_trip.py
+        # Each migration_isolation test owns a disposable database and changes its
+        # schema, so the parallel suite skips them. Discovery over all of tests/
+        # finds every one, new ones included, except the File/Icon tests of the
+        # next step. Each module runs in its own pytest process, so modules that
+        # share the session database each start from a fresh schema. Modules in
+        # tests/integration/quarantined-migration-tests.txt are not started.
+        run: |
+          uv run pytest -q --collect-only -m migration_isolation tests \
+            --ignore=tests/integration/migrations/test_file_icon_preflight.py \
+            --ignore=tests/integration/migrations/test_file_icon_legacy_cleanup.py \
+            --ignore=tests/integration/migrations/test_file_icon_bridge_rehearsal.py \
+            | grep '::' | cut -d: -f1 | sort -u > "$RUNNER_TEMP/migration-modules.txt"
+          mapfile -t modules < <(grep -vxFf tests/integration/quarantined-migration-tests.txt \
+            "$RUNNER_TEMP/migration-modules.txt")
+          status=0
+          for module in "${modules[@]}"; do
+            uv run pytest -q -m migration_isolation "$module" || status=1
+          done
+          exit "$status"
         env:
           TESTCONTAINERS_RYUK_DISABLED: "true"
           DOCKER_HOST: unix:///var/run/docker.sock
 
-      - name: Verify File/Icon upgrade, optional cleanup and widget migrations on PostgreSQL 13
+      - name: Verify File/Icon upgrade and optional cleanup on PostgreSQL 13
         if: matrix.suite == 'migrations'
         # Migration tests are opt-in and run outside the parallel suite. The
         # restore rehearsal needs its own application/database session.
@@ -289,8 +301,7 @@ jobs:
         run: |
           uv run pytest -v --durations=25 -m migration_isolation \
             tests/integration/migrations/test_file_icon_preflight.py \
-            tests/integration/migrations/test_file_icon_legacy_cleanup.py \
-            tests/integration/migrations/test_widget_migrations.py
+            tests/integration/migrations/test_file_icon_legacy_cleanup.py
           uv run pytest -v --durations=25 -o faulthandler_timeout=180 -m migration_isolation \
             tests/integration/migrations/test_file_icon_bridge_rehearsal.py
         env:
@@ -536,19 +547,21 @@ jobs:
     # Tighten it from the first run's leg durations.
     timeout-minutes: 60
     # The suite outgrew one 45-minute job (run 41297645205). Each leg runs one worker
-    # on its own stack. Playwright's --shard balances test counts, but a whole-route
-    # walk is one test of 1.5-13 minutes, so three legs take the walks by tag and the
-    # rest leg excludes all their tags: every case runs once. The split follows the
-    # measured test minutes of run 41491915398, about 22-23 per walk leg and 20 for
-    # the rest. A new route walk adds its tag to a walk leg and to the rest leg.
+    # on its own stack. Playwright's --shard splits by test count, which leaves the
+    # long route walks unbalanced, so four legs take the walks by tag and the rest
+    # leg excludes all their tags: every case runs once. The split follows the test
+    # minutes measured in run 41599944227 (after #1328): about 23 for walks-1 and
+    # the rest leg, 17-18 for the others. A new route walk adds its tag to a walk
+    # leg and to the rest leg.
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { leg: walks-1, grep: "@a11y-routes|@a11y-light|@forced-colors", grep_invert: "@upload-worker" }
-          - { leg: walks-2, grep: "@layout-shift|@contract|@turn", grep_invert: "@upload-worker" }
-          - { leg: walks-3, grep: "@keyboard|@a11y-dark|@text-size", grep_invert: "@upload-worker" }
-          - { leg: rest, grep: ".", grep_invert: "@upload-worker|@a11y-routes|@a11y-light|@forced-colors|@layout-shift|@contract|@turn|@keyboard|@a11y-dark|@text-size", upload_worker: true }
+          - { leg: walks-1, grep: "@a11y-routes|@forced-colors", grep_invert: "@upload-worker" }
+          - { leg: walks-2, grep: "@layout-shift|@text-size", grep_invert: "@upload-worker" }
+          - { leg: walks-3, grep: "@keyboard|@a11y-dark", grep_invert: "@upload-worker" }
+          - { leg: walks-4, grep: "@contract|@a11y-light|@turn", grep_invert: "@upload-worker" }
+          - { leg: rest, grep: ".", grep_invert: "@upload-worker|@a11y-routes|@forced-colors|@layout-shift|@text-size|@keyboard|@a11y-dark|@contract|@a11y-light|@turn", upload_worker: true }
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

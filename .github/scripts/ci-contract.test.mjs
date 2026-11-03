@@ -277,6 +277,23 @@ test("only develop pushes save the package download cache", () => {
   assert.ok(order.every((index, i) => index > (order[i - 1] ?? -1)), String(order));
 });
 
+test("the migrations leg runs every migration_isolation test file exactly once", () => {
+  // A round trip that only a hand-written list ran never ran once nobody added it to the list.
+  // Discovery over all of tests/ finds a marked file in any directory and under either name pattern.
+  const workflow = fs.readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8");
+  const step = (name) => workflow.split(`- name: ${name}\n`)[1]?.split(/\n      - name: /)[0] ?? "";
+  const roundTrips = step("Verify migration round trips");
+  const fileIcon = step("Verify File/Icon upgrade and optional cleanup on PostgreSQL 13");
+  assert.match(roundTrips, /^        if: matrix\.suite == 'migrations'$/m);
+  assert.match(roundTrips, /--collect-only -m migration_isolation tests \\$/m);
+  // One process per module: modules that share the session database start from a fresh schema.
+  assert.match(roundTrips, /for module in "\$\{modules\[@\]\}"; do\n\s+uv run pytest -q -m migration_isolation "\$module" \|\| status=1/);
+  const ignored = [...roundTrips.matchAll(/--ignore=(\S+)/g)].map(([, file]) => file);
+  const dedicated = [...fileIcon.matchAll(/(tests\/integration\/\S+\.py)/g)].map(([, file]) => file);
+  assert.ok(ignored.length > 0);
+  assert.deepEqual([...ignored].sort(), [...new Set(dedicated)].sort(), "ignored files run in the File/Icon step");
+});
+
 test("the memory check passes within budget and fails above it or without a measurement", () => {
   const report = (kb) => `\tCommand being timed: "bun run build"\n\tMaximum resident set size (kbytes): ${kb}\n\tExit status: 0\n`;
   assert.equal(readPeakRssMb(report(6_291_456)), 6144);

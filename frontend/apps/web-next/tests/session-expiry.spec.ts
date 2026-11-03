@@ -1,4 +1,5 @@
 import { expect, test } from "./csp";
+import { openRoute } from "./responsive-fixtures";
 import {
   askChatQuestion,
   chatComposer,
@@ -103,9 +104,11 @@ test(
     const other = await context.newPage();
     // A page from context.newPage() is not the fixture's: its goto returns before the app
     // has checked the session. Moving the clock first would let that check, answered after
-    // the jump, start the tab's session ten minutes later than the other's.
+    // the jump, start the tab's session ten minutes later than the other's. Each tab opens
+    // the way every route in the suite does: the second tab boots the whole app cold, which
+    // on a loaded runner takes longer than a single expect waits.
     for (const tab of [page, other]) {
-      await tab.goto("/spaces/personal/chat");
+      await openRoute(tab, "/spaces/personal/chat", true);
       await expect(chatComposer(tab)).toBeVisible();
     }
     const renewals: string[] = [];

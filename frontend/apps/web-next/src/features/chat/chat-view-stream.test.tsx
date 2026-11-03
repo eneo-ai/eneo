@@ -815,4 +815,60 @@ describe("ChatView when generation fails", () => {
     expect(spies.sent).toHaveLength(0);
     vi.unstubAllGlobals();
   });
+
+  it("takes a question waiting for a model save back, its attachment included, when it is stopped", async () => {
+    const revoke = vi.fn();
+    vi.stubGlobal(
+      "URL",
+      Object.assign(URL, { createObjectURL: () => "blob:policy", revokeObjectURL: revoke })
+    );
+    spies.mode = "answer";
+    let release!: () => void;
+    const save = queuePartnerUpdate(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        })
+    );
+    try {
+      const appContext = testAppContext({
+        limits: {
+          attachments: {
+            formats: [
+              { mimetype: "application/pdf", extensions: ["pdf"], size: 10_000_000, vision: false }
+            ]
+          }
+        }
+      });
+      const { container } = renderInApp(<Harness />, { appContext });
+      const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+      fireEvent.change(input, {
+        target: { files: [new File(["%PDF"], "Policy.pdf", { type: "application/pdf" })] }
+      });
+      const attachments = await screen.findByRole("list", { name: "1 bilaga bifogad" });
+      await waitFor(() => expect(within(attachments).queryByText("Laddar upp…")).toBeNull());
+
+      ask("Sammanfatta policyn");
+      // Waiting behind the save, the question has taken its attachment along.
+      expect(screen.queryByRole("button", { name: "Ta bort Policy.pdf" })).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Stoppa generering" }));
+
+      expect(screen.getByRole<HTMLTextAreaElement>("textbox", { name: /^Fråga / }).value).toBe(
+        "Sammanfatta policyn"
+      );
+      expect(screen.getByRole("button", { name: "Ta bort Policy.pdf" })).toBeTruthy();
+      expect(revoke).not.toHaveBeenCalled();
+      // The save landing later sends nothing.
+      await act(async () => {
+        release();
+        await save;
+      });
+      expect(spies.sent).toHaveLength(0);
+    } finally {
+      // The save queue is module state: never leave it waiting for the next test.
+      release();
+      await save;
+      vi.unstubAllGlobals();
+    }
+  });
 });
