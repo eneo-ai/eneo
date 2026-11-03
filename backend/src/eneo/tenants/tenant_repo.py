@@ -208,6 +208,23 @@ class TenantRepository:
             raise exceptions.NotFoundException(f"Tenant {tenant_id} not found.")
         return model
 
+    async def lock_widget_policy(self, tenant_id: UUID) -> dict[str, Any]:
+        """The stored widget policy, row-locked until the transaction ends.
+
+        A partial update merges into this value rather than into the policy
+        loaded with the user at request start, so two administrators saving
+        different fields at the same time never overwrite each other.
+        """
+        stmt = (
+            sa.select(Tenants.widget_policy)
+            .where(Tenants.id == tenant_id)
+            .with_for_update()
+        )
+        row = (await self.session.execute(stmt)).one_or_none()
+        if row is None:
+            raise exceptions.NotFoundException(f"Tenant {tenant_id} not found.")
+        return dict(row[0] or {})
+
     async def update_widget_policy(
         self,
         tenant_id: UUID,

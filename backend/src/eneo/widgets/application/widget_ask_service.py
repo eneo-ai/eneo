@@ -423,4 +423,7 @@ class WidgetAskService:
                 "public_id": widget.public_id,
                 "daily_token_budget": widget.limits.daily_token_budget,
             },
+            # The visitor who happened to trip the budget is not the actor:
+            # their address and browser stay out of the tenant's audit trail.
+            record_client=False,
         )

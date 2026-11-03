@@ -220,6 +220,22 @@ async def test_visitor_session_lifecycle(client, admin_token, active_widget):
     assert resp.json()["visitor_id"] == visitor_id
     rotated = resp.json()["token"]
 
+    # The replaced token is retired at once: it neither rotates again nor
+    # authorizes a request, however long its lifetime had left.
+    resp = await client.post(
+        f"/api/v1/widgets/{public_id}/visitor-sessions/",
+        json={"previous_token": token},
+    )
+    assert resp.status_code == 401, resp.text
+    assert resp.json()["detail"]["code"] == "visitor_token_invalid"
+    resp = await client.post(
+        f"/api/v1/widgets/{public_id}/ask/",
+        json={"question": "hej"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 401, resp.text
+    assert resp.json()["detail"]["code"] == "visitor_token_invalid"
+
     # A configuration change bumps the generation: old tokens are stale.
     resp = await client.patch(
         f"/api/v1/widgets/{active_widget['id']}/",

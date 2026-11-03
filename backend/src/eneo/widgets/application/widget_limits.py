@@ -5,7 +5,7 @@
 
 import ipaddress
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Optional
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
@@ -21,10 +21,12 @@ from eneo.redis.rate_limit import (
     check_rate_limit,
 )
 from eneo.widgets.domain.exceptions import (
+    VisitorTokenInvalidError,
     WidgetBudgetExhaustedError,
     WidgetProtectionUnavailableError,
     WidgetRateLimitedError,
 )
+from eneo.widgets.domain.visitor import VisitorClaims
 from eneo.widgets.domain.widget import Widget
 from eneo.widgets.infrastructure.widget_repo_impl import WidgetRepoImpl
 from eneo.widgets.infrastructure.widget_usage_repo_impl import WidgetUsageRepoImpl
@@ -136,6 +138,68 @@ class WidgetLimiter:
             raise WidgetRateLimitedError(
                 code, retry_after=result.retry_after_seconds, message=message
             )
+
+
+class VisitorTokenRevocations:
+    """Tokens a rotation has replaced, by ``jti``, until they could no longer
+    be used anyway.
+
+    Visitor tokens are stateless; this is the one piece of state behind them,
+    so that a token a visitor has already exchanged cannot keep serving a
+    second holder for the rest of its lifetime and grace window. Redis loss
+    follows the limiter's fail policy: closed unless the operator opted out.
+    """
+
+    def __init__(self, redis_client: Any, settings: Optional[Settings] = None) -> None:
+        self.redis = redis_client
+        self.settings = settings or get_settings()
+
+    @staticmethod
+    def _key(widget: Widget, jti: str) -> str:
+        return _widget_key(widget, "revoked", jti)
+
+    async def revoke(
+        self, widget: Widget, claims: VisitorClaims, *, grace_seconds: int
+    ) -> None:
+        """Retire ``claims`` for as long as a rotation could still accept it."""
+        if not claims.jti:
+            return
+        remaining = (
+            claims.expires_at
+            + timedelta(seconds=grace_seconds)
+            - datetime.now(timezone.utc)
+        )
+        ttl = int(remaining.total_seconds()) + 1
+        if ttl <= 0:
+            return
+        try:
+            await self.redis.set(self._key(widget, claims.jti), b"1", ex=ttl)
+        except Exception as exc:
+            if self.settings.widget_rate_limit_fail_open:
+                logger.warning(
+                    "Visitor token revocation skipped: Redis unavailable",
+                    extra={"widget_id": str(widget.id), "error": str(exc)},
+                )
+                return
+            raise WidgetProtectionUnavailableError() from exc
+
+    async def ensure_current(self, widget: Widget, claims: VisitorClaims) -> None:
+        """Refuse a token that a rotation has already replaced."""
+        if not claims.jti:
+            # Every minted token carries a jti; one without never came from here.
+            raise VisitorTokenInvalidError()
+        try:
+            revoked = await self.redis.exists(self._key(widget, claims.jti))
+        except Exception as exc:
+            if self.settings.widget_rate_limit_fail_open:
+                logger.warning(
+                    "Visitor token revocation check skipped: Redis unavailable",
+                    extra={"widget_id": str(widget.id), "error": str(exc)},
+                )
+                return
+            raise WidgetProtectionUnavailableError() from exc
+        if revoked:
+            raise VisitorTokenInvalidError("Visitor token has been replaced.")
 
 
 @dataclass(frozen=True)

@@ -89,8 +89,11 @@ class WidgetService:
 
     async def update_policy(self, updates: dict[str, Any]) -> WidgetPolicy:
         validate_permission(self.user, Permission.ADMIN)
-        before = self.get_policy()
-        merged = dict(self.user.tenant.widget_policy or {})
+        # Merge into the row as it is now, held until commit: the policy
+        # loaded with the user may predate another administrator's save.
+        current = await self.tenant_service.lock_widget_policy(self.user.tenant_id)
+        before = WidgetPolicy.from_tenant(current)
+        merged = dict(current)
         merged.update(updates)
         # Validate the merged document before persisting so a partial update
         # can never leave the tenant with an inconsistent window.
@@ -127,6 +130,17 @@ class WidgetService:
                 "You do not have permission to manage widgets in this space."
             )
         return space
+
+    async def _space_for_read(self, space_id: UUID) -> "Space":
+        """Widget configuration is read by those who may change it there.
+
+        The tenant-wide ``widgets`` permission alone does not open another
+        space's origins, limits and usage to a member who only views it;
+        tenant admins read every space they can see.
+        """
+        if Permission.ADMIN in self.user.permissions:
+            return await self.space_service.get_space(space_id)
+        return await self._space_for_edit(space_id)
 
     async def _space_as_admin(self, space_id: UUID) -> "Space":
         # Tenant admins run the lifecycle from the admin page, also for widgets
@@ -200,7 +214,7 @@ class WidgetService:
 
     async def list_widgets(self, space_id: UUID) -> list[WidgetView]:
         self._require_reader()
-        space = await self.space_service.get_space(space_id)
+        space = await self._space_for_read(space_id)
         widgets = await self.repo.list_by_space(space_id)
         templates = {
             template.id: template
@@ -214,7 +228,7 @@ class WidgetService:
     async def get_widget(self, widget_id: UUID) -> WidgetView:
         self._require_reader()
         widget = await self._owned_widget(widget_id)
-        space = await self.space_service.get_space(widget.space_id)
+        space = await self._space_for_read(widget.space_id)
         return await self._view_with_template(space, widget)
 
     # --- commands ---------------------------------------------------------

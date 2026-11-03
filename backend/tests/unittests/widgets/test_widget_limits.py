@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -8,11 +9,17 @@ from eneo.redis.rate_limit import (
     RateLimitServiceUnavailableError,
 )
 from eneo.widgets.application import widget_limits
-from eneo.widgets.application.widget_limits import WidgetLimiter, network_key
+from eneo.widgets.application.widget_limits import (
+    VisitorTokenRevocations,
+    WidgetLimiter,
+    network_key,
+)
 from eneo.widgets.domain.exceptions import (
+    VisitorTokenInvalidError,
     WidgetProtectionUnavailableError,
     WidgetRateLimitedError,
 )
+from eneo.widgets.domain.visitor import VisitorClaims
 from eneo.widgets.domain.widget import Widget, WidgetLimits
 
 
@@ -137,3 +144,92 @@ async def test_ip_limits_count_a_whole_ipv6_64(monkeypatch):
     assert exc.value.code == "rate_limited_mint"
     # The next /64 is another subscriber.
     await limiter.check_message(widget, uuid4(), "2001:db8:1:3::1")
+
+
+# ---------------------------------------------------------------------------
+# Token revocation on rotation
+# ---------------------------------------------------------------------------
+
+
+class _FakeRedis:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.keys: dict[str, int] = {}
+        self.fail = fail
+
+    async def set(self, key, value, ex=None, nx=False):
+        if self.fail:
+            raise ConnectionError("down")
+        self.keys[key] = ex
+        return True
+
+    async def exists(self, key):
+        if self.fail:
+            raise ConnectionError("down")
+        return 1 if key in self.keys else 0
+
+
+def _claims(
+    widget: Widget, *, jti: str = "abc", expires_in: int = 900
+) -> VisitorClaims:
+    now = datetime.now(timezone.utc)
+    return VisitorClaims(
+        widget_id=widget.id,
+        tenant_id=widget.tenant_id,
+        visitor_id=uuid4(),
+        generation=widget.token_generation,
+        issued_at=now,
+        expires_at=now + timedelta(seconds=expires_in),
+        jti=jti,
+        preview=False,
+    )
+
+
+async def test_a_rotated_token_is_refused_until_it_could_not_be_used_anyway():
+    redis = _FakeRedis()
+    revocations = VisitorTokenRevocations(redis_client=redis, settings=_settings())
+    widget = _widget()
+    claims = _claims(widget, expires_in=600)
+
+    await revocations.ensure_current(widget, claims)
+    await revocations.revoke(widget, claims, grace_seconds=900)
+    with pytest.raises(VisitorTokenInvalidError):
+        await revocations.ensure_current(widget, claims)
+
+    # Held for the remaining lifetime plus the grace window, not for ever.
+    (ttl,) = redis.keys.values()
+    assert 1_495 <= ttl <= 1_501
+    # Another widget's token with the same id is unaffected.
+    await revocations.ensure_current(_widget(), claims)
+    # A token already past its grace has nothing left to revoke.
+    await revocations.revoke(
+        widget, _claims(widget, jti="old", expires_in=-1_000), grace_seconds=900
+    )
+    assert len(redis.keys) == 1
+
+
+async def test_a_token_without_an_id_never_came_from_the_minting_service():
+    revocations = VisitorTokenRevocations(
+        redis_client=_FakeRedis(), settings=_settings()
+    )
+    widget = _widget()
+    with pytest.raises(VisitorTokenInvalidError):
+        await revocations.ensure_current(widget, _claims(widget, jti=""))
+
+
+async def test_revocation_follows_the_limiter_fail_policy():
+    widget = _widget()
+    claims = _claims(widget)
+    closed = VisitorTokenRevocations(
+        redis_client=_FakeRedis(fail=True), settings=_settings()
+    )
+    with pytest.raises(WidgetProtectionUnavailableError):
+        await closed.ensure_current(widget, claims)
+    with pytest.raises(WidgetProtectionUnavailableError):
+        await closed.revoke(widget, claims, grace_seconds=900)
+
+    opened = VisitorTokenRevocations(
+        redis_client=_FakeRedis(fail=True),
+        settings=_settings(widget_rate_limit_fail_open=True),
+    )
+    await opened.ensure_current(widget, claims)
+    await opened.revoke(widget, claims, grace_seconds=900)

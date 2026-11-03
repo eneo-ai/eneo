@@ -147,7 +147,10 @@ def normalize_origin_pattern(pattern: str) -> str:
         )
     if not _has_port_wildcard(parsed):
         _safe_port(parsed)
-        if parsed.port is None and ":" in parsed.netloc.rsplit("@", 1)[-1]:
+        # The colons inside a bracketed IPv6 literal are not a port separator.
+        host_and_port = parsed.netloc.rsplit("@", 1)[-1]
+        after_host = host_and_port.rsplit("]", 1)[-1]
+        if parsed.port is None and ":" in after_host:
             raise ValueError(f"Invalid origin '{pattern}': malformed port.")
     # The pattern ends up verbatim in a CSP frame-ancestors header, so the
     # host must be a plain DNS name (IDNA-encoded), an IP literal or a `*.`

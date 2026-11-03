@@ -266,3 +266,17 @@ def test_endpoint_declared_public():
     assert operation["responses"]["200"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/WebRuntimeConfig"
     }
+
+
+def test_visitor_token_grace_cannot_exceed_the_token_lifetime(test_settings: Settings):
+    _settings(
+        test_settings,
+        widget_visitor_token_ttl_seconds=900,
+        widget_visitor_token_grace_seconds=900,
+    )
+    with pytest.raises(ValueError, match="WIDGET_VISITOR_TOKEN_GRACE_SECONDS"):
+        _settings(
+            test_settings,
+            widget_visitor_token_ttl_seconds=900,
+            widget_visitor_token_grace_seconds=901,
+        )

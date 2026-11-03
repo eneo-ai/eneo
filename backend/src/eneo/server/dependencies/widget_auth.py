@@ -51,6 +51,10 @@ async def get_widget_principal(
     if token is None:
         raise VisitorTokenInvalidError("Visitor token required.")
     claims = container.widget_visitor_token_service().verify(token, widget)
+    # A rotated token is replaced, not merely superseded. Preview tokens are
+    # never rotated, so they have nothing to check.
+    if not claims.preview:
+        await container.widget_token_revocations().ensure_current(widget, claims)
     return WidgetPrincipal(widget=widget, visitor_id=claims.visitor_id, claims=claims)
 
 

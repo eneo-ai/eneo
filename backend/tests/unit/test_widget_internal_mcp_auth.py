@@ -151,8 +151,8 @@ async def test_visitor_tool_requests_keep_their_principals_isolated(
         Container.user_service.override(providers.Object(case.user_service)),
     ):
         async with (
-            internal_tool_context(_ctx(case.token())) as first,
-            internal_tool_context(_ctx(other_token)) as second,
+            internal_tool_context(_ctx(case.token()), visitors=True) as first,
+            internal_tool_context(_ctx(other_token), visitors=True) as second,
         ):
             assert first.container is not second.container
             assert first.container.user().id == case.user.id
@@ -309,8 +309,19 @@ async def test_live_revocation_and_scope_checks_at_tool_boundary(
             update={"state": TenantState.SUSPENDED}
         )
     with pytest.raises(expected):
-        async with internal_tool_context(_ctx(token)):
+        async with internal_tool_context(_ctx(token), visitors=True):
             pytest.fail("Invalid visitor reached the tool")
+
+
+async def test_visitor_delegation_is_refused_by_tools_not_opened_to_visitors(
+    case: WidgetAuthCase, tool_container: Container
+):
+    """The knowledge tools opt in; every other built-in server refuses a
+    delegated visitor before any lookup, whatever the resolver offered."""
+    with pytest.raises(ValueError, match="not available to widget visitors"):
+        async with internal_tool_context(_ctx(case.token())):
+            pytest.fail("Visitor reached a tool that is closed to visitors")
+    case.widget_repo.get.assert_not_awaited()
 
 
 async def test_preview_survives_delegation_but_cannot_revive_archived_widget(
@@ -436,7 +447,7 @@ async def test_public_preview_identity_reaches_internal_tools(
     delegated = AuthService().create_scoped_mcp_token(
         tool_container.user(), assistant_id=widget.target_id
     )
-    async with internal_tool_context(_ctx(delegated)) as context:
+    async with internal_tool_context(_ctx(delegated), visitors=True) as context:
         assert context.user.active_widget is not None
         assert context.user.active_widget.preview is True
         assert context.user.id == principal.visitor_id

@@ -115,14 +115,21 @@ def table_tools_from_token(token: str) -> bool:
     return claims.get("table_tools") is True
 
 
+VISITORS_NOT_SERVED_MESSAGE = "This tool is not available to widget visitors."
+
+
 @asynccontextmanager
-async def internal_tool_context(ctx: Context):
+async def internal_tool_context(ctx: Context, *, visitors: bool = False):
     """Bootstrap a user-bound container for the token's user + assistant.
 
     Yields :class:`ToolContext`. The container is bound to the authenticated
     user, so loading resources runs the normal permission checks (e.g.
     ``SpaceActor`` for assistants). The transaction closes on exit; tools
     retain their normal resource authorization checks.
+
+    ``visitors`` opens the tool to widget visitors. The ask-time resolver
+    already offers them only the knowledge tools; this refusal holds should
+    a delegated visitor token ever reach another built-in server.
     """
     # Imported lazily: the Container pulls in the whole service graph, so a
     # top-level import would create a cycle.
@@ -131,6 +138,8 @@ async def internal_tool_context(ctx: Context):
 
     token = bearer_from_ctx(ctx)
     claims = scoped_claims_from_token(token)
+    if claims.widget_visitor is not None and not visitors:
+        raise ValueError(VISITORS_NOT_SERVED_MESSAGE)
     async with sessionmanager.session() as session:
         async with session.begin():
             container = request_container(session=providers.Object(session))

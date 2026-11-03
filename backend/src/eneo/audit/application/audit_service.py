@@ -134,6 +134,7 @@ class AuditService:
         user_agent: Optional[str] = None,
         request_id: Optional[UUID] = None,
         error_message: Optional[str] = None,
+        record_client: bool = True,
     ) -> Optional[AuditLog]:
         """
         Create an audit log entry.
@@ -152,6 +153,10 @@ class AuditService:
             user_agent: Client user agent
             request_id: Request correlation ID
             error_message: Error details if outcome is failure
+            record_client: Fill a missing IP address and user agent from the
+                request. False for a system event raised inside a request
+                whose client is not the actor (an anonymous widget visitor),
+                so their address never enters the tenant's audit trail.
 
         Returns:
             Created audit log (or None if action is disabled)
@@ -172,9 +177,11 @@ class AuditService:
         if actor_type != ActorType.SYSTEM and actor_id is None:
             raise ValueError("actor_id required for non-system actions")
 
-        ip_address, user_agent, request_id = _fill_request_context(
+        filled_ip, filled_agent, request_id = _fill_request_context(
             ip_address, user_agent, request_id
         )
+        if record_client:
+            ip_address, user_agent = filled_ip, filled_agent
 
         audit_log = AuditLog(
             id=uuid4(),
@@ -288,6 +295,7 @@ class AuditService:
         user_agent: Optional[str] = None,
         request_id: Optional[UUID] = None,
         error_message: Optional[str] = None,
+        record_client: bool = True,
     ) -> Optional[UUID]:
         """
         Asynchronously create an audit log entry via ARQ worker.
@@ -313,6 +321,8 @@ class AuditService:
             user_agent: Client user agent
             request_id: Request correlation ID
             error_message: Error details if outcome is failure
+            record_client: See `log()`; False keeps a bystander's address and
+                browser out of a system event raised inside their request.
 
         Returns:
             Job ID for tracking the async operation, or None if action disabled
@@ -337,9 +347,11 @@ class AuditService:
         if outcome == Outcome.FAILURE and not error_message:
             raise ValueError("error_message required when outcome is failure")
 
-        ip_address, user_agent, request_id = _fill_request_context(
+        filled_ip, filled_agent, request_id = _fill_request_context(
             ip_address, user_agent, request_id
         )
+        if record_client:
+            ip_address, user_agent = filled_ip, filled_agent
 
         # Create job ID
         job_id = uuid4()

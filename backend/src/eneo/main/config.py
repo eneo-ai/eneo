@@ -586,6 +586,20 @@ class Settings(BaseSettings):
         return None if isinstance(value, str) and not value.strip() else value
 
     @model_validator(mode="after")
+    def validate_widget_token_grace(self):
+        # The grace window extends a token's usefulness past its expiry; longer
+        # than the lifetime itself, a leaked token would outlive its purpose.
+        if (
+            self.widget_visitor_token_grace_seconds
+            > self.widget_visitor_token_ttl_seconds
+        ):
+            raise ValueError(
+                "WIDGET_VISITOR_TOKEN_GRACE_SECONDS must not exceed "
+                "WIDGET_VISITOR_TOKEN_TTL_SECONDS"
+            )
+        return self
+
+    @model_validator(mode="after")
     def validate_browser_session_host(self):
         # A development cookie (eneo_web, not Secure) only on a local host: the
         # hosts validate_public_origin accepts over http.
@@ -697,8 +711,10 @@ class Settings(BaseSettings):
     widget_loader_dir: Path = Path("/app/widget-loader")
     # Tokens are short-lived and re-minted silently; the grace window lets an
     # expired token prove the visitor's identity without a new proof of work.
+    # It never exceeds the lifetime: a token is usable for at most twice its
+    # TTL, after which the visitor's stored key re-mints with a fresh proof.
     widget_visitor_token_ttl_seconds: int = Field(default=900, gt=0)
-    widget_visitor_token_grace_seconds: int = Field(default=3600, ge=0)
+    widget_visitor_token_grace_seconds: int = Field(default=900, ge=0)
     widget_preview_token_ttl_seconds: int = Field(default=3600, gt=0)
     # ALTCHA v2 proof of work: each attempt derives a key with `cost` hash
     # iterations and must land on `key_prefix`, so the expected work is

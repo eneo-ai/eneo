@@ -163,9 +163,20 @@ def _service(user, space, can_edit=True, repo=None, template_repo=None, icon_rep
     actor_manager = MagicMock()
     actor_manager.get_space_actor_from_space = MagicMock(return_value=actor)
     tenant_service = MagicMock()
-    tenant_service.update_widget_policy = AsyncMock(
-        side_effect=lambda tenant_id, policy: SimpleNamespace(widget_policy=policy)
-    )
+    # Stands in for the tenants row: the lock reads it and the update writes
+    # it, independently of the policy loaded with the user.
+    stored = {"widget_policy": dict(user.tenant.widget_policy or {})}
+
+    async def lock_widget_policy(tenant_id):
+        return dict(stored["widget_policy"])
+
+    async def update_widget_policy(tenant_id, policy):
+        stored["widget_policy"] = policy
+        return SimpleNamespace(widget_policy=policy)
+
+    tenant_service.lock_widget_policy = AsyncMock(side_effect=lock_widget_policy)
+    tenant_service.update_widget_policy = AsyncMock(side_effect=update_widget_policy)
+    tenant_service.stored = stored
     repo = repo or _InMemoryRepo()
     for assistant_id in space.assistant_ids:
         repo.target_spaces.setdefault(assistant_id, space.id)
@@ -439,6 +450,16 @@ async def test_reading_widget_configuration_needs_the_widgets_permission(assista
     with pytest.raises(UnauthorizedException):
         await reader.list_widgets(space.id)
 
+    # The tenant-wide permission, granted for another space, does not open
+    # this space's configuration to someone who only views it here.
+    viewer_elsewhere = _user(Permission.WIDGETS)
+    viewer_elsewhere.tenant_id = owner.tenant_id
+    viewer = _service(viewer_elsewhere, space, can_edit=False, repo=repo)
+    with pytest.raises(UnauthorizedException):
+        await viewer.get_widget(view.widget.id)
+    with pytest.raises(UnauthorizedException):
+        await viewer.list_widgets(space.id)
+
     admin = _user(Permission.ADMIN)
     admin.tenant_id = owner.tenant_id
     assert (
@@ -475,6 +496,30 @@ async def test_policy_update_merges_and_validates(assistant):
 
     with pytest.raises(UnauthorizedException):
         await _service(_user(Permission.WIDGETS), space).update_policy({})
+
+
+async def test_policy_update_merges_into_the_locked_row_not_the_request_snapshot(
+    assistant,
+):
+    """Two administrators saving different fields keep both changes."""
+    space, _ = _space(uuid4(), assistant)
+    service = _service(
+        _user(Permission.ADMIN, widget_policy={"max_retention_days": 90}), space
+    )
+    # Another request committed meanwhile; this user's snapshot is older.
+    service.tenant_service.stored["widget_policy"] = {
+        "max_retention_days": 30,
+        "allow_bot_protection_none": False,
+    }
+
+    policy = await service.update_policy({"max_daily_token_budget": 10_000})
+
+    assert policy.max_retention_days == 30
+    assert policy.allow_bot_protection_none is False
+    assert policy.max_daily_token_budget == 10_000
+    service.tenant_service.lock_widget_policy.assert_awaited_once_with(
+        service.user.tenant_id
+    )
 
 
 async def _linked_setup(assistant):

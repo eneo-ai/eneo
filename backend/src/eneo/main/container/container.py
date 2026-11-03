@@ -427,7 +427,11 @@ from eneo.widgets.application.widget_ask_service import WidgetAskService
 from eneo.widgets.application.widget_authentication_service import (
     WidgetAuthenticationService,
 )
-from eneo.widgets.application.widget_limits import WidgetBudget, WidgetLimiter
+from eneo.widgets.application.widget_limits import (
+    VisitorTokenRevocations,
+    WidgetBudget,
+    WidgetLimiter,
+)
 from eneo.widgets.application.widget_service import WidgetService
 from eneo.widgets.application.widget_template_service import WidgetTemplateService
 from eneo.widgets.infrastructure.widget_overview_repo_impl import (
@@ -709,6 +713,9 @@ class Container(containers.DeclarativeContainer):
     widget_visitor_identity = providers.Factory(VisitorIdentity)
     widget_altcha_service = providers.Factory(AltchaService, redis_client=redis_client)
     widget_limiter = providers.Factory(WidgetLimiter, redis_client=redis_client)
+    widget_token_revocations = providers.Factory(
+        VisitorTokenRevocations, redis_client=redis_client
+    )
     widget_budget = providers.Factory(WidgetBudget)
     org_space_assistant_role_repo = providers.Factory(
         OrgSpaceAssistantRoleRepo,

@@ -639,6 +639,8 @@ async def test_budget_exhaustion_is_recorded_and_audited_once(fake_db):
         "blocked_budget": 1,
     }
     deps.audit.log_async.assert_awaited_once()
+    # The visitor's address and browser never enter the tenant's audit trail.
+    assert deps.audit.log_async.await_args.kwargs["record_client"] is False
 
     deps.limiter.redis.set = AsyncMock(return_value=None)  # already audited today
     with pytest.raises(WidgetBudgetExhaustedError):
