@@ -90,6 +90,9 @@ describe("admin function sources", () => {
   it.each([false, true])(
     "shows the template library only inside a file-creation card with a provider (%s)",
     async (hasProvider) => {
+      // The library's heading shows at once; its actions wait for the templates.
+      let releaseTemplates!: () => void;
+      const templatesHeld = new Promise<void>((resolve) => (releaseTemplates = resolve));
       get.mockImplementation((path: string) => {
         if (path === "/api/v1/mcp-servers/settings/")
           return ok({
@@ -106,7 +109,7 @@ describe("admin function sources", () => {
           });
         if (path === "/api/v1/mcp-servers/bundled/") return ok(bundled);
         if (path === "/api/v1/document-templates/")
-          return ok({ items: [], runtime_configured: false });
+          return templatesHeld.then(() => ok({ items: [], runtime_configured: false }));
         return ok({ items: [] });
       });
       show();
@@ -115,7 +118,10 @@ describe("admin function sources", () => {
         const heading = await screen.findByRole("heading", { name: "document_templates" });
         const card = screen.getByRole("heading", { name: "file_creation" }).closest("section")!;
         expect(card.contains(heading)).toBe(true);
-        expect(within(card).getByRole("button", { name: "document_template_upload" })).toBeTruthy();
+        releaseTemplates();
+        expect(
+          await within(card).findByRole("button", { name: "document_template_upload" })
+        ).toBeTruthy();
         // No filled button anywhere on the page: the functions, the offers, the add menu
         // and the template library are all outlines, so none competes for attention.
         await waitFor(() => expect(document.querySelectorAll(FILLED_BUTTONS)).toHaveLength(0));

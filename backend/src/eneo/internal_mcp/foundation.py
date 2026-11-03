@@ -126,14 +126,14 @@ async def internal_tool_context(ctx: Context):
     """
     # Imported lazily: the Container pulls in the whole service graph, so a
     # top-level import would create a cycle.
-    from eneo.main.container.container import Container
     from eneo.main.container.container_overrides import override_user
+    from eneo.main.container.request_container import request_container
 
     token = bearer_from_ctx(ctx)
     claims = scoped_claims_from_token(token)
     async with sessionmanager.session() as session:
         async with session.begin():
-            container = Container(session=providers.Object(session))
+            container = request_container(session=providers.Object(session))
             if claims.widget_visitor is not None:
                 user = await container.widget_authentication_service().authenticate_internal(
                     claims.widget_visitor, assistant_id=claims.assistant_id

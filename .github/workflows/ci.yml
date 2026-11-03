@@ -542,26 +542,28 @@ jobs:
     needs: changes
     if: needs.changes.outputs.web_next_e2e == 'true'
     runs-on: ubuntu-24.04
-    # Headroom while layout-shift, responsive-contract and responsive-text-size have
-    # no CI timing: a job that times out also loses its !cancelled() report upload.
-    # Tighten it from the first run's leg durations.
+    # Legs take 21-28 minutes, but a route walk that hits its 15-minute test limit
+    # and its retry must still finish here: a job that times out also loses its
+    # !cancelled() report upload.
     timeout-minutes: 60
     # The suite outgrew one 45-minute job (run 41297645205). Each leg runs one worker
     # on its own stack. Playwright's --shard splits by test count, which leaves the
-    # long route walks unbalanced, so four legs take the walks by tag and the rest
-    # leg excludes all their tags: every case runs once. The split follows the test
-    # minutes measured in run 41599944227 (after #1328): about 23 for walks-1 and
-    # the rest leg, 17-18 for the others. A new route walk adds its tag to a walk
-    # leg and to the rest leg.
+    # long route walks unbalanced, so four legs take the walks by tag, the screens
+    # leg takes the admin, space and editor screens' specs (and the forced-colors
+    # walk) by file name, and the rest leg excludes both: every case runs once.
+    # The split follows the test minutes of runs 41640686762 and 41646343618:
+    # walks 17-20 each, screens about 13, rest about 13. A new route walk adds its
+    # tag to a walk leg and to the other legs' exclusions.
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { leg: walks-1, grep: "@a11y-routes|@forced-colors", grep_invert: "@upload-worker" }
+          - { leg: walks-1, grep: "@a11y-routes", grep_invert: "@upload-worker" }
           - { leg: walks-2, grep: "@layout-shift|@text-size", grep_invert: "@upload-worker" }
           - { leg: walks-3, grep: "@keyboard|@a11y-dark", grep_invert: "@upload-worker" }
           - { leg: walks-4, grep: "@contract|@a11y-light|@turn", grep_invert: "@upload-worker" }
-          - { leg: rest, grep: ".", grep_invert: "@upload-worker|@a11y-routes|@forced-colors|@layout-shift|@text-size|@keyboard|@a11y-dark|@contract|@a11y-light|@turn", upload_worker: true }
+          - { leg: screens, grep: " (admin|assistant|document|editor|forced|knowledge|mcp|resource|sharepoint|skills|space)-[^ ]*[.]spec[.]ts ", grep_invert: "@upload-worker|@a11y-routes|@layout-shift|@text-size|@keyboard|@a11y-dark|@contract|@a11y-light|@turn" }
+          - { leg: rest, grep: ".", grep_invert: "@upload-worker|@a11y-routes|@layout-shift|@text-size|@keyboard|@a11y-dark|@contract|@a11y-light|@turn| (admin|assistant|document|editor|forced|knowledge|mcp|resource|sharepoint|skills|space)-[^ ]*[.]spec[.]ts ", upload_worker: true }
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

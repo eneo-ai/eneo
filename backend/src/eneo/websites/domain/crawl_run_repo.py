@@ -18,6 +18,7 @@ from eneo.database.tables.websites_table import CrawlAttempts, CrawlRunFailures
 from eneo.database.tables.websites_table import CrawlRuns as CrawlRunsTable
 from eneo.database.tables.websites_table import Websites as WebsitesTable
 from eneo.jobs.job_models import Task
+from eneo.jobs.job_repo import JobRepository
 from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.main.logging import get_logger
 from eneo.main.models import Status
@@ -1304,6 +1305,7 @@ class CrawlRunRepository:
             .values(status=Status.IN_PROGRESS.value, updated_at=now)
         )
         await self.session.flush()
+        await JobRepository(self.session).announce(dispatch_id)
         return task
 
     async def renew_attempt_lease(
@@ -1820,6 +1822,7 @@ class CrawlRunRepository:
                 updated_at=finished_at,
             )
         )
+        await JobRepository(self.session).announce(dispatch_id)
 
     async def _database_now(self) -> datetime:
         now = await self.session.scalar(sa.select(sa.func.now()))

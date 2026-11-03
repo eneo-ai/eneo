@@ -146,6 +146,15 @@ test("both E2E jobs free disk before building their stack", () => {
   }
 });
 
+test("E2E stacks keep their network inside their compose project", () => {
+  // A fixed network name let stacks started side by side with their own -p resolve each other's e2e-db and e2e-redis.
+  for (const file of ["docker-compose.e2e.yml", "docker-compose.e2e.ci.yml"]) {
+    const networks = fs.readFileSync(path.join(root, file), "utf8").split("\nnetworks:\n")[1].split(/\n(?=\S)/)[0];
+    assert.match(networks, /^ {2}e2e: \{\}$/m, file);
+    assert.doesNotMatch(networks, /^ +name:/m, file);
+  }
+});
+
 test("the Svelte build is checked against a memory budget below its heap limit", () => {
   const workflow = fs.readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8");
   const stepBody = (name) => workflow.split(`- name: ${name}\n`)[1]?.split(/\n      - name: /)[0];
@@ -197,24 +206,35 @@ test("web-next runs all browser cases on FastAPI and has no Next runtime job", (
   assert.ok(legs.length >= 2 && legs.every(Boolean), include.join("\n"));
   assert.equal(new Set(legs.map(({ leg }) => leg)).size, legs.length, "artifact names are unique");
   assert.equal(legs.filter(({ worker }) => worker).length, 1, "the upload case runs once");
-  const walks = legs.filter(({ grep }) => grep !== ".");
+  // Walk legs select by tag; file legs select specs by name and exclude the walks; the rest
+  // leg excludes both.
+  const walks = legs.filter(({ grep }) => grep.startsWith("@"));
+  const files = legs.filter(({ grep }) => grep !== "." && !grep.startsWith("@"));
   const rest = legs.filter(({ grep }) => grep === ".");
   assert.equal(rest.length, 1);
   for (const { invert } of walks) assert.equal(invert, "@upload-worker");
-  assert.equal(rest[0].invert, ["@upload-worker", ...walks.map(({ grep }) => grep)].join("|"));
+  const notWalks = ["@upload-worker", ...walks.map(({ grep }) => grep)].join("|");
+  for (const { invert } of files) assert.equal(invert, notWalks);
+  assert.equal(rest[0].invert, [notWalks, ...files.map(({ grep }) => grep)].join("|"));
   const tags = walks.flatMap(({ grep }) => grep.split("|"));
+  assert.ok(tags.every((tag) => /^@[a-z0-9-]+$/.test(tag)), tags.join("|"));
   assert.equal(new Set(tags).size, tags.length);
-  // A tag that no test carries would quietly move its walk into the rest leg.
   const testsDir = path.join(root, "frontend/apps/web-next/tests");
   const specs = fs.readdirSync(testsDir).filter((file) => file.endsWith(".spec.ts"))
     .map((file) => [file, fs.readFileSync(path.join(testsDir, file), "utf8")]);
+  // Playwright matches --grep, case-insensitively, against the title path, which holds the
+  // spec's file name between spaces.
+  const selects = (grep, file) => new RegExp(grep, "i").test(` smoke ${file} `);
+  // A tag or file pattern that selects nothing would quietly move its walk into the rest leg.
   for (const tag of tags) assert.ok(specs.some(([, source]) => source.includes(`"${tag}"`)), tag);
+  for (const { leg, grep } of files) assert.ok(specs.some(([file]) => selects(grep, file)), leg);
   // A whole-route walk (a test limit of ten minutes or more) must not land in the rest leg.
   for (const [file, source] of specs) {
     const limits = [...source.matchAll(/test\.setTimeout\(([\d_]+)( \* 60_000)?\)/g)]
       .map(([, value, minutes]) => Number(value.replaceAll("_", "")) * (minutes ? 60_000 : 1));
     if (limits.some((ms) => ms >= 10 * 60_000)) {
-      assert.ok(tags.some((tag) => source.includes(`"${tag}"`)), `${file}: a route walk without a walk leg's tag`);
+      const led = tags.some((tag) => source.includes(`"${tag}"`)) || files.some(({ grep }) => selects(grep, file));
+      assert.ok(led, `${file}: a route walk outside the walk and file legs`);
     }
   }
   const workerIndex = job.indexOf("- name: Start and check the knowledge upload worker");

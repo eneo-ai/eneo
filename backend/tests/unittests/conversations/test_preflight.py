@@ -14,6 +14,7 @@ from eneo.conversations.application.conversation_service import ConversationServ
 from eneo.conversations.conversation_models import PreflightResponse
 from eneo.files.file_models import FileType
 from eneo.main.exceptions import BadRequestException
+from eneo.sessions.sessions_repo import SessionOwnership
 
 
 def _make_service(
@@ -59,7 +60,7 @@ def _make_service(
 
     session_service = AsyncMock()
     if session is not None:
-        session_service.get_session_by_uuid = AsyncMock(return_value=session)
+        session_service.get_session_ownership = AsyncMock(return_value=session)
 
     file_service = AsyncMock()
     file_service.get_files_by_ids = AsyncMock(return_value=files or [])
@@ -601,10 +602,14 @@ async def test_empty_assistant_preflight_baseline_includes_derived_images():
 async def test_preflight_baseline_zero_for_session_target():
     """An existing session already carries the prompt + attachments in its
     history, so the baseline fields stay 0 and the baseline is not fetched."""
-    session = MagicMock()
-    session.group_chat_id = None
-    session.assistant = MagicMock()
-    session.assistant.id = uuid4()
+    session = SessionOwnership(
+        user_id=uuid4(),
+        api_key_id=None,
+        widget_id=None,
+        visitor_id=None,
+        assistant_id=uuid4(),
+        group_chat_id=None,
+    )
 
     service = _make_service(session=session, assistant=_make_assistant())
 
@@ -645,10 +650,14 @@ async def test_preflight_resolves_session_assistant_model():
     session_id = uuid4()
     assistant_id = uuid4()
 
-    session = MagicMock()
-    session.group_chat_id = None
-    session.assistant = MagicMock()
-    session.assistant.id = assistant_id
+    session = SessionOwnership(
+        user_id=uuid4(),
+        api_key_id=None,
+        widget_id=None,
+        visitor_id=None,
+        assistant_id=assistant_id,
+        group_chat_id=None,
+    )
 
     service = _make_service(
         session=session,
@@ -663,7 +672,7 @@ async def test_preflight_resolves_session_assistant_model():
 
     assert result.input_tokens > 0
     assert result.model_name == "gpt-4o"
-    service.session_service.get_session_by_uuid.assert_awaited_once_with(session_id)
+    service.session_service.get_session_ownership.assert_awaited_once_with(session_id)
     service.assistant_service.get_assistant_with_effective_config.assert_awaited_once_with(
         assistant_id
     )
@@ -676,9 +685,14 @@ async def test_preflight_resolves_session_to_group_chat_model():
     session_id = uuid4()
     group_chat_id = uuid4()
 
-    session = MagicMock()
-    session.group_chat_id = group_chat_id
-    session.assistant = None
+    session = SessionOwnership(
+        user_id=uuid4(),
+        api_key_id=None,
+        widget_id=None,
+        visitor_id=None,
+        assistant_id=None,
+        group_chat_id=group_chat_id,
+    )
 
     member = MagicMock()
     member.assistant.completion_model = _make_completion_model(

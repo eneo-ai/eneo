@@ -31,7 +31,11 @@ from eneo.sessions.session import (
     SessionMetadataPublic,
     SessionUpdate,
 )
-from eneo.sessions.sessions_repo import OwnedChatPartner, SessionRepository
+from eneo.sessions.sessions_repo import (
+    OwnedChatPartner,
+    SessionOwnership,
+    SessionRepository,
+)
 from eneo.skills.domain.skill import (
     SkillActivationEvidence,
     SkillExecutionReference,
@@ -275,7 +279,7 @@ class SessionService:
             return None, key.id, None, None
         return self.user.id, None, None, None
 
-    def _is_owner(self, session: SessionInDB) -> bool:
+    def _is_owner(self, session: SessionInDB | SessionOwnership) -> bool:
         """Match the session's principal against the current request's principal.
 
         Every branch requires a non-None match; we never treat NULL == NULL
@@ -291,20 +295,20 @@ class SessionService:
             return session.api_key_id == api_key_id
         return False
 
-    def _check_exists_and_belongs_to_user(
+    def _check_owned(
         self,
-        session: SessionInDB | None,
+        owner: SessionOwnership | None,
         assistant_id: UUID | None = None,
         group_chat_id: UUID | None = None,
-    ) -> SessionInDB:
-        if session is None:
+    ) -> SessionOwnership:
+        if owner is None:
             raise NotFoundException("Session not found")
 
-        if not self._is_owner(session):
+        if not self._is_owner(owner):
             raise UnauthorizedException("Session belongs to other principal")
 
         # Handle cross-endpoint access attempt
-        if assistant_id is not None and session.group_chat_id is not None:
+        if assistant_id is not None and owner.group_chat_id is not None:
             raise BadRequestException(
                 "Cannot access a group chat session through the assistant endpoint. "
                 "Use the conversation endpoints instead."
@@ -313,13 +317,36 @@ class SessionService:
         # Verify the session belongs to the specified assistant/group chat
         if (
             assistant_id is not None
-            and session.assistant is not None
-            and session.assistant.id != assistant_id
+            and owner.assistant_id is not None
+            and owner.assistant_id != assistant_id
         ):
             raise NotFoundException("Session belongs to another assistant")
-        if group_chat_id is not None and session.group_chat_id != group_chat_id:
+        if group_chat_id is not None and owner.group_chat_id != group_chat_id:
             raise NotFoundException("Session belongs to another group chat")
 
+        return owner
+
+    def _check_exists_and_belongs_to_user(
+        self,
+        session: SessionInDB | None,
+        assistant_id: UUID | None = None,
+        group_chat_id: UUID | None = None,
+    ) -> SessionInDB:
+        self._check_owned(
+            None
+            if session is None
+            else SessionOwnership(
+                user_id=session.user_id,
+                api_key_id=session.api_key_id,
+                widget_id=session.widget_id,
+                visitor_id=session.visitor_id,
+                assistant_id=session.assistant.id if session.assistant else None,
+                group_chat_id=session.group_chat_id,
+            ),
+            assistant_id=assistant_id,
+            group_chat_id=group_chat_id,
+        )
+        assert session is not None
         return session
 
     async def get_session_by_uuid(
@@ -332,6 +359,20 @@ class SessionService:
 
         return self._check_exists_and_belongs_to_user(
             session, assistant_id=assistant_id, group_chat_id=group_chat_id
+        )
+
+    async def get_session_ownership(
+        self,
+        id: UUID,
+        assistant_id: UUID | None = None,
+        group_chat_id: UUID | None = None,
+    ) -> SessionOwnership:
+        """``get_session_by_uuid`` for callers that need only the owner and chat
+        partner: the same refusals, without reading the turns."""
+        return self._check_owned(
+            await self.session_repo.get_ownership(id),
+            assistant_id=assistant_id,
+            group_chat_id=group_chat_id,
         )
 
     async def get_tool_call_result(
@@ -377,11 +418,10 @@ class SessionService:
         assistant_id: UUID | None = None,
         group_chat_id: UUID | None = None,
     ) -> SessionInDB | None:
-        session = await self.session_repo.get(id)
-        owned_session = self._check_exists_and_belongs_to_user(
-            session, assistant_id=assistant_id, group_chat_id=group_chat_id
+        await self.get_session_ownership(
+            id, assistant_id=assistant_id, group_chat_id=group_chat_id
         )
-        return await self.session_repo.delete(owned_session.id)
+        return await self.session_repo.delete(id)
 
     async def create_session(
         self,
@@ -592,13 +632,12 @@ class SessionService:
         group_chat_id: UUID | None = None,
         keep_existing_text: bool = False,
     ) -> SessionInDB:
-        session = await self.session_repo.get(id=session_id)
-        owned_session = self._check_exists_and_belongs_to_user(
-            session, assistant_id=assistant_id, group_chat_id=group_chat_id
+        await self.get_session_ownership(
+            session_id, assistant_id=assistant_id, group_chat_id=group_chat_id
         )
         return await self.session_repo.add_feedback(
             feedback=feedback,
-            id=owned_session.id,
+            id=session_id,
             keep_existing_text=keep_existing_text,
         )
 

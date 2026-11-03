@@ -2,7 +2,7 @@ import AxeBuilder from "@axe-core/playwright";
 import type { Schema } from "../src/lib/api/models";
 import { WCAG_22_AA_TAGS } from "../src/test/wcag";
 import { expect, test } from "./csp";
-import { apiPost, createSpace, uniqueName } from "./helpers";
+import { animationsSettled, apiPost, createSpace, uniqueName } from "./helpers";
 
 // Template bytes come from the configured document runtime; no generated output is requested.
 test(
@@ -135,6 +135,8 @@ test(
       template_id: alternative.id
     });
     await picker.getByRole("button", { name: "Ändra dokumentmall" }).click();
+    // The disclosure fades its content in; axe reads the page once it is at rest.
+    await animationsSettled(page);
     const scan = await new AxeBuilder({ page })
       .include("#assistant-document-template")
       .withTags(WCAG_22_AA_TAGS)

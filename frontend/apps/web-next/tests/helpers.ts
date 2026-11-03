@@ -327,3 +327,57 @@ export async function auditLogs(page: Page) {
   await expect(table).toBeVisible();
   return { table, region: page.getByRole("group", { name: "Granskningsloggar" }) };
 }
+
+/**
+ * Resolves once every finite animation on the page has finished. A disclosure fades
+ * what it reveals in and glides what follows; a check that reads colours or positions
+ * (axe's contrast, a bounding box) mid-way reads a frame that is not the page at rest.
+ * Endless ones (a loading spinner) are left out, and so are those cancelled meanwhile.
+ */
+export async function animationsSettled(page: Page): Promise<void> {
+  await page.evaluate(() =>
+    Promise.all(
+      document
+        .getAnimations()
+        .filter((animation) => animation.effect?.getComputedTiming().endTime !== Infinity)
+        .map((animation) => animation.finished.catch(() => undefined))
+    )
+  );
+}
+
+const NOT_TEXT = ["checkbox", "radio", "range", "file", "hidden", "color", "button", "submit"];
+
+/**
+ * Visible text fields below 16 px, and visible controls that still take double-tap zoom
+ * (globals.css 14c, a touch screen's platform layer).
+ */
+export async function platformFaults(page: Page, screen: string) {
+  return page.evaluate(
+    ({ notText, screen }) => {
+      const shown = (element: Element) => element.getClientRects().length > 0;
+      const faults: string[] = [];
+      for (const field of document.querySelectorAll(
+        "input, textarea, select, [contenteditable='true']"
+      )) {
+        if (!shown(field) || notText.includes((field as HTMLInputElement).type)) continue;
+        const size = parseFloat(getComputedStyle(field).fontSize);
+        if (size < 16)
+          faults.push(
+            `${screen}: ${field.tagName} ${size}px ${field.id || field.getAttribute("name") || field.getAttribute("aria-label") || ""}`
+          );
+      }
+      const controls =
+        "a[href], button, input, select, textarea, [role=tab], [role=menuitem], [role=option]";
+      for (const control of document.querySelectorAll(controls)) {
+        if (!shown(control)) continue;
+        if (getComputedStyle(control).touchAction === "auto") {
+          faults.push(
+            `${screen}: ${control.tagName} touch-action auto ${(control.textContent ?? "").trim().slice(0, 30)}`
+          );
+        }
+      }
+      return faults;
+    },
+    { notText: NOT_TEXT, screen }
+  );
+}

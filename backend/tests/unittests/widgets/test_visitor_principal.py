@@ -2,9 +2,13 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
+import pytest
+
 from eneo.authentication.auth_models import is_service_api_key, is_widget_visitor
+from eneo.main.exceptions import UnauthorizedException
 from eneo.sessions import session_service as session_service_module
 from eneo.sessions.session_service import SessionService
+from eneo.sessions.sessions_repo import SessionOwnership
 from eneo.tenants.tenant import TenantInDB
 from eneo.widgets.application.visitor_user import build_visitor_user
 from eneo.widgets.domain.widget import Widget, WidgetPrivacy
@@ -95,6 +99,36 @@ def test_real_user_principal_is_unchanged():
             user_id=user.id, api_key_id=None, widget_id=None, visitor_id=None
         )  # type: ignore[arg-type]
     )
+
+
+async def test_ownership_projection_requires_both_widget_and_visitor():
+    widget = _widget()
+    visitor_id = uuid4()
+    user = build_visitor_user(widget, visitor_id, _tenant(widget.tenant_id))
+    repo = AsyncMock()
+    service = SessionService(session_repo=repo, question_repo=AsyncMock(), user=user)
+    owned = SessionOwnership(
+        user_id=None,
+        api_key_id=None,
+        widget_id=widget.id,
+        visitor_id=visitor_id,
+        assistant_id=widget.target_id,
+        group_chat_id=None,
+    )
+    repo.get_ownership.return_value = owned
+    assert (
+        await service.get_session_ownership(uuid4(), assistant_id=widget.target_id)
+        == owned
+    )
+
+    for foreign in (
+        owned._replace(visitor_id=uuid4()),
+        owned._replace(widget_id=uuid4()),
+        owned._replace(widget_id=None, visitor_id=None, user_id=visitor_id),
+    ):
+        repo.get_ownership.return_value = foreign
+        with pytest.raises(UnauthorizedException, match="belongs to other principal"):
+            await service.get_session_ownership(uuid4(), assistant_id=widget.target_id)
 
 
 class _Begin:

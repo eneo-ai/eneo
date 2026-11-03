@@ -1,6 +1,5 @@
-import type { Page } from "@playwright/test";
 import { expect, test } from "./csp";
-import { apiPost, createSpace, uniqueName } from "./helpers";
+import { createSpace, platformFaults, uniqueName } from "./helpers";
 
 test.skip(!process.env.E2E_BASE_URL, "Requires the FastAPI-served Vite build");
 
@@ -10,56 +9,14 @@ test.skip(!process.env.E2E_BASE_URL, "Requires the FastAPI-served Vite build");
 
 test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
 
-const NOT_TEXT = ["checkbox", "radio", "range", "file", "hidden", "color", "button", "submit"];
-
-/** Visible text fields below 16 px, and visible controls that still take double-tap zoom. */
-async function platformFaults(page: Page, screen: string) {
-  return page.evaluate(
-    ({ notText, screen }) => {
-      const shown = (element: Element) => element.getClientRects().length > 0;
-      const faults: string[] = [];
-      for (const field of document.querySelectorAll(
-        "input, textarea, select, [contenteditable='true']"
-      )) {
-        if (!shown(field) || notText.includes((field as HTMLInputElement).type)) continue;
-        const size = parseFloat(getComputedStyle(field).fontSize);
-        if (size < 16)
-          faults.push(
-            `${screen}: ${field.tagName} ${size}px ${field.id || field.getAttribute("name") || field.getAttribute("aria-label") || ""}`
-          );
-      }
-      const controls =
-        "a[href], button, input, select, textarea, [role=tab], [role=menuitem], [role=option]";
-      for (const control of document.querySelectorAll(controls)) {
-        if (!shown(control)) continue;
-        if (getComputedStyle(control).touchAction === "auto") {
-          faults.push(
-            `${screen}: ${control.tagName} touch-action auto ${(control.textContent ?? "").trim().slice(0, 30)}`
-          );
-        }
-      }
-      return faults;
-    },
-    { notText: NOT_TEXT, screen }
-  );
-}
-
-async function assistantEditor(page: Page) {
-  const space = await createSpace(page, uniqueName("Platform"));
-  const id = await apiPost(page, `/spaces/${space.split("/").pop()}/applications/assistants/`, {
-    name: uniqueName("Bygglov")
-  });
-  return { space, editor: `${space}/assistants/${id}/edit` };
-}
-
 test(
   "text fields are 16 px and controls skip double-tap zoom, screen by screen",
   { tag: "@vite" },
   async ({ page }) => {
-    // One test walks about 15 screens (24 s on CI's first run, 30 s on a slower one):
-    // its budget is its work, not the 30 s a single-screen test gets.
+    // One test walks several screens: its budget is its work, not the 30 s a
+    // single-screen test gets. An editor's sections are checked in editor-sections.spec.ts.
     test.setTimeout(90_000);
-    const { space, editor } = await assistantEditor(page);
+    const space = await createSpace(page, uniqueName("Platform"));
     const faults: string[] = [];
     const open = async (path: string) => {
       await page.goto(path);
@@ -77,15 +34,6 @@ test(
     ]) {
       await open(path);
     }
-
-    // Every section of the editor: instructions, model settings, knowledge, API keys, ...
-    await page.goto(editor);
-    await expect(page.locator("[data-editor-row]").first()).toBeVisible();
-    const ids = await page
-      .locator("[data-editor-row]")
-      .evaluateAll((rows) => rows.map((row) => row.getAttribute("data-editor-row")!));
-    expect(ids.length).toBeGreaterThan(5);
-    for (const id of ids) await open(`${editor}?section=${id}`);
 
     // The palette and the create-space dialog hold fields of their own.
     await page.goto("/spaces/list");

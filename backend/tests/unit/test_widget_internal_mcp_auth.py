@@ -21,8 +21,9 @@ from eneo.internal_mcp.foundation import (
 )
 from eneo.internal_mcp.knowledge import search_knowledge
 from eneo.main.config import get_settings
-from eneo.main.container import container as container_module
+from eneo.main.container import request_container as request_container_module
 from eneo.main.container.container import Container
+from eneo.main.container.request_container import request_container
 from eneo.main.exceptions import AuthenticationException
 from eneo.tenants.tenant import TenantInDB, TenantState
 from eneo.users.user import UserInDB
@@ -111,13 +112,7 @@ def _resign(token: str, **changes: object) -> str:
 
 
 @pytest.fixture
-def tool_container(case: WidgetAuthCase, monkeypatch: pytest.MonkeyPatch) -> Container:
-    container = Container()
-    container.widget_repo.override(providers.Object(case.widget_repo))
-    container.tenant_repo.override(providers.Object(case.tenant_repo))
-    container.user_service.override(providers.Object(case.user_service))
-    monkeypatch.setattr(container_module, "Container", lambda **_: container)
-
+def tool_session(monkeypatch: pytest.MonkeyPatch) -> None:
     @asynccontextmanager
     async def transaction():
         yield
@@ -127,7 +122,46 @@ def tool_container(case: WidgetAuthCase, monkeypatch: pytest.MonkeyPatch) -> Con
         yield SimpleNamespace(begin=transaction)
 
     monkeypatch.setattr("eneo.internal_mcp.foundation.sessionmanager.session", session)
+
+
+@pytest.fixture
+def tool_container(
+    case: WidgetAuthCase, monkeypatch: pytest.MonkeyPatch, tool_session: None
+) -> Container:
+    container = request_container()
+    container.widget_repo.override(providers.Object(case.widget_repo))
+    container.tenant_repo.override(providers.Object(case.tenant_repo))
+    container.user_service.override(providers.Object(case.user_service))
+    monkeypatch.setattr(
+        request_container_module, "request_container", lambda **_: container
+    )
     return container
+
+
+async def test_visitor_tool_requests_keep_their_principals_isolated(
+    case: WidgetAuthCase, tool_session: None
+):
+    other = build_visitor_user(case.widget, uuid4(), case.tenant)
+    other_token = AuthService().create_scoped_mcp_token(
+        other, assistant_id=case.widget.target_id
+    )
+    with (
+        Container.widget_repo.override(providers.Object(case.widget_repo)),
+        Container.tenant_repo.override(providers.Object(case.tenant_repo)),
+        Container.user_service.override(providers.Object(case.user_service)),
+    ):
+        async with (
+            internal_tool_context(_ctx(case.token())) as first,
+            internal_tool_context(_ctx(other_token)) as second,
+        ):
+            assert first.container is not second.container
+            assert first.container.user().id == case.user.id
+            assert second.container.user().id == other.id
+            assert first.container.user().active_widget == case.user.active_widget
+            assert second.container.user().active_widget == other.active_widget
+            assert first.container.user().permissions == set()
+            assert second.container.user().permissions == set()
+    case.user_service.repo.get_user_by_id_and_tenant_id.assert_not_awaited()
 
 
 async def test_demo_search_returns_knowledge_without_a_user_row(

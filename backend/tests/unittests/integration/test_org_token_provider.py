@@ -9,6 +9,7 @@ from uuid import uuid4
 import httpx
 import pytest
 import sqlalchemy as sa
+from freezegun import freeze_time
 from sqlalchemy.exc import OperationalError
 
 from eneo.integration.domain.entities.tenant_sharepoint_app import (
@@ -26,6 +27,17 @@ from eneo.integration.infrastructure.auth_service.org_token_provider import (
 
 _MODULE = "eneo.integration.infrastructure.auth_service.org_token_provider"
 _NOW = datetime.now(timezone.utc)
+
+
+@pytest.fixture(autouse=True)
+def _clock_from_now():
+    """Run each test from ``_NOW``, which the stamps here are relative to.
+
+    ``_NOW`` is read at import; a test that ran 15 minutes later in a long
+    run would otherwise see a "fresh" stamp as due for writing.
+    """
+    with freeze_time(_NOW, tick=True, real_asyncio=True):
+        yield
 
 
 def _app(auth_method: str = AUTH_METHOD_TENANT_APP, **overrides) -> TenantSharePointApp:
