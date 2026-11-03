@@ -204,6 +204,7 @@ export function CrawlRunsTable({ runs, onRerun }: { runs: CrawlRun[]; onRerun?: 
       ) : null}
       {sortedData.length === 0 ? (
         <EmptyState
+          isAnnounced={false}
           icon={<SearchX />}
           title={t("ui_no_items_matching", { resourceNamePlural: t("resource_crawls") })}
           isCompact

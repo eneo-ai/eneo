@@ -1,5 +1,8 @@
 services:
   e2e-backend:
+    build:
+      args:
+        WEB_APP_STAGE: web-build
     environment:
       BROWSER_SESSION_ENABLED: "true"
       WEB_APP_ENABLED: "true"

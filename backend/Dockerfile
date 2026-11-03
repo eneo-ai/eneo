@@ -1,5 +1,8 @@
 ARG APP_VERSION=0.0.0-dev
 ARG APP_REVISION=unknown
+# web-build bundles the Vite app. A stack that leaves WEB_APP_ENABLED off (the
+# Svelte E2E) passes no-web-app and skips that build.
+ARG WEB_APP_STAGE=web-build
 
 FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim AS builder
 
@@ -59,6 +62,12 @@ ARG APP_VERSION
 ARG APP_REVISION
 RUN npm run build:vite
 
+FROM python:3.11-slim-bookworm AS no-web-app
+RUN mkdir -p /repo/apps/web-next/dist /repo/apps/web-next/node_modules/.cache \
+    && echo '{}' > /repo/apps/web-next/node_modules/.cache/vite-bundle-report.json
+
+FROM ${WEB_APP_STAGE} AS web-app
+
 # Production stage
 FROM python:3.11-slim-bookworm
 
@@ -74,10 +83,10 @@ RUN apt-get update && apt-get install -y \
 COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /tiktoken /tiktoken
 COPY --from=builder /app /app
-COPY --from=web-build /repo/apps/web-next/dist /app/web-dist
+COPY --from=web-app /repo/apps/web-next/dist /app/web-dist
 # Browser tests resolve chunks from this exact build. Keep the map outside
 # web-dist so module metadata is not served by the web app.
-COPY --from=web-build /repo/apps/web-next/node_modules/.cache/vite-bundle-report.json /app/web-bundle-report.json
+COPY --from=web-app /repo/apps/web-next/node_modules/.cache/vite-bundle-report.json /app/web-bundle-report.json
 
 # Set PATH to use venv and environment variables.
 # LITELLM_LOCAL_MODEL_COST_MAP keeps LiteLLM on the model and price catalog

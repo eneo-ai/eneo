@@ -120,6 +120,13 @@ function liveRegion() {
   return document.querySelector("[data-astryx-live-region='polite']")?.textContent ?? "";
 }
 
+/** Lets a frame pass: Astryx writes an announcement into its region in the next frame. */
+function nextFrame() {
+  return act(
+    () => new Promise<void>((resolve) => requestAnimationFrame(() => setTimeout(resolve)))
+  );
+}
+
 afterEach(() => {
   cleanup();
   // Astryx keeps one live region on <body> (re-created on the next announce):
@@ -354,8 +361,9 @@ describe("AdminUsersPage", () => {
     serve((query) => ({ items: query.search_email ? [users[0]] : users }));
     renderUsers();
     await screen.findByText("2 användare");
-    // Not on first load.
-    expect(liveRegion()).toBe("");
+    // Not on first load. Astryx's spinner may still say "Läser in" there.
+    await nextFrame();
+    expect(liveRegion()).not.toContain("användare");
 
     fireEvent.change(screen.getByRole("textbox", { name: "E-post" }), {
       target: { value: "anna" }

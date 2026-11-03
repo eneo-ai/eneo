@@ -1044,8 +1044,9 @@ describe("WrapperDetail documents", () => {
     state.documents.i1 = documentPages(() => 60);
     show([mall, protokoll], "/spaces/space-1/knowledge/integrations/wrapper/w1?folder=i1");
     await screen.findByRole("button", { name: /Dokument 1\.docx/ });
-    // The first load is no result to announce.
-    expect(liveRegion()).toBe("");
+    // The first load is no result to announce. Astryx's spinner may still say "Läser in".
+    await nextFrame();
+    expect(liveRegion()).not.toContain("Visar");
 
     fireEvent.change(screen.getByLabelText("Sök dokument på namn eller sökväg"), {
       target: { value: "dokument" }
@@ -1254,6 +1255,7 @@ describe("WrapperDetail problems", () => {
     fireEvent.click(screen.getByRole("tab", { name: /Problem/ }));
     fireEvent.click(screen.getByRole("tab", { name: "Innehåll" }));
     expect(screen.getByText("Senaste synken av 1 mapp misslyckades")).toBeTruthy();
+    await nextFrame();
     expect(liveRegion()).toBe("");
 
     // Another folder fails while the page is open, by no sync seen here.
@@ -1264,6 +1266,7 @@ describe("WrapperDetail problems", () => {
     });
     await act(() => queryClient.invalidateQueries({ queryKey: ["spaces", "space-1"] }));
     expect(await screen.findByText("Senaste synken av 2 mappar misslyckades")).toBeTruthy();
+    await nextFrame();
     expect(liveRegion()).toBe("");
   });
 

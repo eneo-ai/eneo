@@ -100,6 +100,28 @@ jobs:
             APP_REVISION=${{ inputs.revision }}
           cache-from: type=gha,scope=${{ inputs.component }}
           cache-to: type=gha,mode=max,scope=${{ inputs.component }}
+      # Provenance records the build, not its CVE status. Attest before checks
+      # that can fail so retries can verify and rescan the same image digest.
+      - name: Attest component provenance
+        if: steps.reuse.outputs.exists != 'true'
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26
+        with:
+          subject-name: ghcr.io/eneo-ai/eneo-${{ inputs.component }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+      - name: Release build disk space before frontend verification
+        if: (inputs.component == 'frontend' || inputs.component == 'web-next') && steps.reuse.outputs.exists != 'true'
+        run: |
+          set -euo pipefail
+          df -h / /mnt
+          if [[ -f /mnt/eneo-frontend.swap ]]; then
+            sudo swapoff /mnt/eneo-frontend.swap
+            sudo rm /mnt/eneo-frontend.swap
+          fi
+          # The build cache has already been exported to GHA. Grype needs
+          # room for both its downloaded database and the hydrated SQLite DB.
+          docker buildx prune --all --force
+          df -h / /mnt
       # Cover reused images too; source/provenance checks do not establish CVE status.
       - name: Verify frontend runtime
         if: inputs.component == 'frontend'
@@ -123,10 +145,3 @@ jobs:
           only-fixed: true
           output-format: table
           grype-version: v0.117.0
-      - name: Attest component provenance
-        if: steps.reuse.outputs.exists != 'true'
-        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26
-        with:
-          subject-name: ghcr.io/eneo-ai/eneo-${{ inputs.component }}
-          subject-digest: ${{ steps.build.outputs.digest }}
-          push-to-registry: true

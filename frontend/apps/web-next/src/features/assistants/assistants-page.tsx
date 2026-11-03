@@ -194,6 +194,7 @@ export function AssistantsPage() {
               </div>
               {filteredItems.length === 0 ? (
                 <EmptyState
+                  isAnnounced={false}
                   icon={<SearchX />}
                   title={t("no_results_found")}
                   headingLevel={3}

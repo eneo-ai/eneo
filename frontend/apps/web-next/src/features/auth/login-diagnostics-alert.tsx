@@ -1,6 +1,6 @@
 import { useTranslations } from "use-intl";
-import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
+import { Banner } from "@astryxdesign/core/Banner";
 import { loginDiagnosticMessageKey, type LoginDiagnostics } from "@/lib/auth/login-diagnostics";
 import { useCopy } from "@/lib/hooks/use-copy";
 

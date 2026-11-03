@@ -3,7 +3,8 @@ import {
   Selector,
   SelectorOption,
   type SelectorOptionData,
-  type SelectorOptionType
+  type SelectorOptionType,
+  type SelectorProps
 } from "@astryxdesign/core/Selector";
 import { Lock } from "lucide-react";
 import { useTranslations } from "use-intl";
@@ -225,8 +226,9 @@ export function ModelSelector({
     size: compact ? "md" : "lg",
     width: compact ? undefined : "100%",
     presentation: "adaptive",
-    className
-  } as const;
+    controlClassName: className
+    // `satisfies` checks this spread object's keys, which the spread itself hides.
+  } as const satisfies Partial<SelectorProps>;
 
   if (locked) {
     return (

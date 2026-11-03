@@ -226,11 +226,13 @@ it("locks the fields while a save is answering, so nothing typed meanwhile is lo
   fillNew();
   fireEvent.click(button("Anslut"));
 
-  await waitFor(() => expect(field(KEY).disabled).toBe(true));
-  expect(field(NAME).disabled).toBe(true);
+  // Astryx keeps a disabled field focusable: aria-disabled and read-only.
+  await waitFor(() => expect(field(KEY).getAttribute("aria-disabled")).toBe("true"));
+  expect(field(KEY).readOnly).toBe(true);
+  expect(field(NAME).getAttribute("aria-disabled")).toBe("true");
   expect((button("Avbryt") as HTMLButtonElement).disabled).toBe(true);
   await act(async () => answer(saved));
-  await waitFor(() => expect(field(KEY).disabled).toBe(false));
+  await waitFor(() => expect(field(KEY).hasAttribute("aria-disabled")).toBe(false));
 });
 
 it("counts a saved classification as saved even when the service reads it back as none", async () => {

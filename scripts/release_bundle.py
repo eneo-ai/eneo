@@ -160,14 +160,24 @@ def main() -> None:
         assert args.component
         digest = verify_image(args.component, version, revision)
         if digest:
-            run(
-                "gh",
-                "attestation",
-                "verify",
-                f"oci://{REGISTRY}{args.component}@{digest}",
-                "--repo",
-                os.environ["GITHUB_REPOSITORY"],
-            )
+            try:
+                run(
+                    "gh",
+                    "attestation",
+                    "verify",
+                    f"oci://{REGISTRY}{args.component}@{digest}",
+                    "--repo",
+                    os.environ["GITHUB_REPOSITORY"],
+                )
+            except subprocess.CalledProcessError:
+                # A previous run can push the image and fail before attesting it.
+                # Rebuild from this checkout; never reuse an unverified digest.
+                # Version/source/platform mismatches above remain fatal.
+                print(
+                    f"Cannot verify provenance for {args.component}@{digest}; "
+                    "rebuilding from the matching source revision."
+                )
+                digest = None
         with open(os.environ["GITHUB_OUTPUT"], "a") as out:
             out.write(f"exists={str(bool(digest)).lower()}\ndigest={digest or ''}\n")
         return

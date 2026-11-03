@@ -149,8 +149,11 @@ start_store() {
     fi
     endpoint="http://object-content:8333"
 
+    # Ready means a signed bucket request succeeds: /status answers before the
+    # S3 identities and bucket are loaded, which emulated arm64 makes visible.
     for attempt in {1..90}; do
-        if container_curl --fail --silent "$endpoint/status" >/dev/null 2>&1; then
+        if container_curl --config /work/curl-valid.conf --fail --silent \
+            --output /dev/null "$endpoint/$OBJECT_CONTENT_BUCKET" >/dev/null 2>&1; then
             return 0
         fi
         if [[ "$attempt" -eq 90 ]]; then
@@ -159,6 +162,8 @@ start_store() {
             else
                 "${compose[@]}" logs object-content >&2
             fi
+            container_curl --config /work/curl-valid.conf --silent --show-error \
+                --write-out '\nHTTP %{http_code}\n' "$endpoint/$OBJECT_CONTENT_BUCKET" >&2 || true
             echo "Reference object-content service did not become ready." >&2
             return 1
         fi

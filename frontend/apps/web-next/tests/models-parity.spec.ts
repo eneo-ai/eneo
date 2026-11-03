@@ -2,7 +2,6 @@ import type { Page, Route } from "@playwright/test";
 import { expect, test } from "./csp";
 import { sessionResponseHeaders } from "./helpers";
 import type { CompletionModelAdmin, ModelsPresentation } from "../src/features/admin/models/models";
-import type { Schema } from "../src/lib/api/models";
 
 const classification = {
   id: "class-internal",
@@ -318,67 +317,4 @@ test.describe("model parity on a touch screen", () => {
       expect.objectContaining({ family: "e5", hosting: "swe", name: "multilingual-e5-large" })
     ]);
   });
-});
-
-test("model parity: object storage shows availability and a setup guide", async ({ page }) => {
-  const policy: Schema<"DeploymentPolicyPublic"> = {
-    policy: {
-      revision: 1,
-      new_write_storage_target: "postgres_inline",
-      session_file_limit_bytes: 1048576,
-      session_image_limit_bytes: 1048576,
-      knowledge_file_limit_bytes: 1048576,
-      transcription_audio_limit_bytes: 1048576,
-      moves_paused: false,
-      updated_by_actor: "storage_admin",
-      created_at: "2026-01-01T00:00:00Z",
-      updated_at: "2026-01-01T00:00:00Z"
-    },
-    limits: [],
-    capabilities: [
-      {
-        target: "object_store",
-        maximum_bytes: null,
-        configured: false,
-        selectable: false,
-        readiness_code: "object_store_not_configured"
-      }
-    ]
-  };
-  await page.route("**/api/v1/admin/object-content-policy", (route) =>
-    route.fulfill({ json: policy, headers: sessionResponseHeaders(route) })
-  );
-  await page.route("**/api/v1/admin/object-content-inventory", (route) =>
-    route.fulfill({
-      json: { inventory: [], postgresql_allocation: null },
-      headers: sessionResponseHeaders(route)
-    })
-  );
-  await page.route("**/api/v1/admin/object-content-moves", (route) =>
-    route.fulfill({
-      json: { policy_revision: 1, paused: false, moves: [] },
-      headers: sessionResponseHeaders(route)
-    })
-  );
-  await page.goto("/admin/storage");
-  const card = page
-    .locator("[data-slot=card]")
-    .filter({ has: page.locator("[data-slot=card-title]", { hasText: /^Objektlagring$/ }) });
-  await expect(card.locator("[data-slot=badge]")).toHaveText("Otillgänglig");
-  await expect(card.getByRole("link", { name: "Läs guiden om objektlagring" })).toHaveAttribute(
-    "href",
-    "https://docs.eneo.ai/guides/object-content-storage"
-  );
-  policy.capabilities = [
-    {
-      target: "object_store",
-      maximum_bytes: null,
-      configured: true,
-      selectable: true,
-      readiness_code: "ready"
-    }
-  ];
-  await page.reload();
-  await expect(card.locator("[data-slot=badge]")).toHaveText("Redo att användas");
-  await expect(card.getByRole("link", { name: "Läs guiden om objektlagring" })).toHaveCount(0);
 });

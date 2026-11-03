@@ -251,8 +251,7 @@ jobs:
         # the tool runtime's PDF sidecar (WeasyPrint) needs: document tests
         # render through a real tool runtime.
         run: >-
-          sudo apt-get update &&
-          sudo apt-get install -y --no-install-recommends ffmpeg fontconfig
+          "$GITHUB_WORKSPACE/.github/scripts/ci-apt-install.sh" ffmpeg fontconfig
           fonts-dejavu-core fonts-liberation libharfbuzz0b libharfbuzz-subset0
           libpango-1.0-0 libpangoft2-1.0-0 && sudo fc-cache -f
 
@@ -293,6 +292,7 @@ jobs:
           DOCKER_HOST: unix:///var/run/docker.sock
 
       - name: Verify crawler migration rollback
+        if: matrix.suite == 'migrations'
         # These tests own disposable databases and deliberately change their schema.
         run: >-
           uv run pytest -q -m migration_isolation
@@ -396,15 +396,14 @@ jobs:
     needs: changes
     if: needs.changes.outputs.web_next == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    # The job takes 12-20 minutes.
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: frontend
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          fetch-depth: 0
 
       - name: Set up frontend dependencies
         uses: ./.github/actions/setup-frontend
@@ -414,8 +413,6 @@ jobs:
         run: bun run --filter '@eneo/web-next' routes:generate && git diff --exit-code -- apps/web-next/src/routeTree.gen.ts
 
       - name: Lint
-        env:
-          ROUTE_PARITY_UPSTREAM: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || 'origin/develop' }}
         run: FORCE_COLOR=1 bun run --filter '@eneo/web-next' lint
 
       - name: Type check
@@ -423,28 +420,6 @@ jobs:
 
       - name: Test
         run: FORCE_COLOR=1 bun run --filter '@eneo/web-next' test
-
-      - name: Build (Vite)
-        run: /usr/bin/time -v -o "$RUNNER_TEMP/web-next-vite-build.txt" bun run --filter '@eneo/web-next' build
-
-      - name: Record Vite build memory
-        if: ${{ !cancelled() }}
-        run: |
-          if [ -f "$RUNNER_TEMP/web-next-vite-build.txt" ]; then
-            grep 'Maximum resident set size' "$RUNNER_TEMP/web-next-vite-build.txt" | tee -a "$GITHUB_STEP_SUMMARY"
-          fi
-
-      - name: Upload Vite build reports
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: web-next-vite-build-resources
-          include-hidden-files: true
-          path: |
-            ${{ runner.temp }}/web-next-vite-build.txt
-            frontend/apps/web-next/node_modules/.cache/vite-bundle-report.json
-          if-no-files-found: ignore
-          retention-days: 7
 
   frontend-e2e:
     name: Frontend E2E
@@ -455,6 +430,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Free disk for the E2E stack
+        uses: ./.github/actions/free-disk
 
       # Isolated, prod-safe stack: own postgres/redis, a deterministic mock model,
       # and the backend built from its Dockerfile. Nothing touches a real provider.
@@ -467,6 +445,10 @@ jobs:
         # uses the workers, the crawler or the realtime mock that the web-next
         # Flows specs need, and their health checks only load the runner.
         run: |
+          df -h
+          # Docker build space is freed again before the stack is healthy, so a
+          # snapshot afterwards misses the peak; sample free space while it builds.
+          nohup bash -c 'while :; do df --output=avail -BM / | tail -n1; sleep 5; done' > "$RUNNER_TEMP/disk-free.txt" 2>&1 &
           nohup bash -c 'docker compose -f docker-compose.e2e.ci.yml up -d --build --wait e2e-backend; echo $? > "$RUNNER_TEMP/e2e-stack.exit"' \
             > "$RUNNER_TEMP/e2e-stack.log" 2>&1 &
 
@@ -518,6 +500,9 @@ jobs:
             sleep 2
           done
           cat "$RUNNER_TEMP/e2e-stack.log"
+          df -h
+          docker system df
+          echo "Least free space on / since the stack started: $(sort -n "$RUNNER_TEMP/disk-free.txt" | head -n1)"
           [ "$(cat "$RUNNER_TEMP/e2e-stack.exit" 2>/dev/null)" = "0" ]
 
       - name: Run E2E tests
@@ -534,6 +519,11 @@ jobs:
         if: ${{ failure() }}
         run: |
           mkdir -p e2e-artifacts
+          {
+            df -h
+            docker system df
+            echo "Least free space on /: $(sort -n "$RUNNER_TEMP/disk-free.txt" | head -n1)"
+          } | tee e2e-artifacts/disk.txt
           docker compose -f docker-compose.e2e.ci.yml ps --all \
             > e2e-artifacts/compose-ps.txt
           docker compose -f docker-compose.e2e.ci.yml logs \
@@ -570,19 +560,24 @@ jobs:
     timeout-minutes: 60
     # The suite outgrew one 45-minute job (run 41297645205). Each leg runs one worker
     # on its own stack. Playwright's --shard balances test counts, but a whole-route
-    # walk is one test of 1.5-4 minutes, so two legs take the walks by tag and the
-    # rest leg excludes both tag lists: every case runs once, about 23-29 minutes of
-    # tests per leg. A new route walk adds its tag to a walk leg and to the rest leg.
+    # walk is one test of 1.5-13 minutes, so three legs take the walks by tag and the
+    # rest leg excludes all their tags: every case runs once. The split follows the
+    # measured test minutes of run 41491915398, about 22-23 per walk leg and 20 for
+    # the rest. A new route walk adds its tag to a walk leg and to the rest leg.
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { leg: walks-1, grep: "@a11y-routes|@layout-shift|@turn", grep_invert: "@upload-worker" }
-          - { leg: walks-2, grep: "@keyboard|@contract|@forced-colors|@text-size", grep_invert: "@upload-worker" }
-          - { leg: rest, grep: ".", grep_invert: "@upload-worker|@a11y-routes|@layout-shift|@turn|@keyboard|@contract|@forced-colors|@text-size", upload_worker: true }
+          - { leg: walks-1, grep: "@a11y-routes|@a11y-light|@forced-colors", grep_invert: "@upload-worker" }
+          - { leg: walks-2, grep: "@layout-shift|@contract|@turn", grep_invert: "@upload-worker" }
+          - { leg: walks-3, grep: "@keyboard|@a11y-dark|@text-size", grep_invert: "@upload-worker" }
+          - { leg: rest, grep: ".", grep_invert: "@upload-worker|@a11y-routes|@a11y-light|@forced-colors|@layout-shift|@contract|@turn|@keyboard|@a11y-dark|@text-size", upload_worker: true }
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Free disk for the E2E stack
+        uses: ./.github/actions/free-disk
 
       # Isolated, prod-safe stack: own postgres/redis, a deterministic mock model,
       # and the backend built from its Dockerfile. Nothing touches a real provider.
@@ -591,6 +586,10 @@ jobs:
         # browser setup. "Wait for the E2E stack" collects the exit status
         # before the tests start.
         run: |
+          df -h
+          # Docker build space is freed again before the stack is healthy, so a
+          # snapshot afterwards misses the peak; sample free space while it builds.
+          nohup bash -c 'while :; do df --output=avail -BM / | tail -n1; sleep 5; done' > "$RUNNER_TEMP/disk-free.txt" 2>&1 &
           nohup bash -c 'docker compose -f docker-compose.e2e.ci.yml -f docker-compose.e2e.web-app.yml up -d --build --wait; echo $? > "$RUNNER_TEMP/e2e-stack.exit"' \
             > "$RUNNER_TEMP/e2e-stack.log" 2>&1 &
 
@@ -609,6 +608,9 @@ jobs:
             sleep 2
           done
           cat "$RUNNER_TEMP/e2e-stack.log"
+          df -h
+          docker system df
+          echo "Least free space on / since the stack started: $(sort -n "$RUNNER_TEMP/disk-free.txt" | head -n1)"
           [ "$(cat "$RUNNER_TEMP/e2e-stack.exit" 2>/dev/null)" = "0" ]
 
       - name: Copy browser asset map from the running backend
@@ -657,6 +659,11 @@ jobs:
         if: ${{ failure() }}
         run: |
           mkdir -p e2e-artifacts
+          {
+            df -h
+            docker system df
+            echo "Least free space on /: $(sort -n "$RUNNER_TEMP/disk-free.txt" | head -n1)"
+          } | tee e2e-artifacts/disk.txt
           docker compose -f docker-compose.e2e.ci.yml -f docker-compose.e2e.web-app.yml ps --all \
             > e2e-artifacts/compose-ps.txt
           docker compose -f docker-compose.e2e.ci.yml -f docker-compose.e2e.web-app.yml logs \

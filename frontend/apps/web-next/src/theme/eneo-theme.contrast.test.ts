@@ -169,6 +169,8 @@ const onTintOverFill = (fg: string, tint: string, fill: string, min: number): Pa
 });
 
 const STATUS = ["success", "warning", "error"] as const;
+// Astryx status roles: the fills (status dots, badges) and their text roles.
+const STATUS_ROLES = ["info", ...STATUS] as const;
 // Eneo categorical hues plus the Neutral cyan/gray that Badge variants use.
 const HUES = ["blue", "teal", "purple", "orange", "pink", "green", "yellow", "red", "cyan", "gray"];
 
@@ -179,7 +181,8 @@ const GROUPS: Record<string, Pair[]> = {
       "--color-text-secondary",
       "--eneo-color-text-tertiary",
       "--color-text-accent",
-      ...STATUS.map((status) => `--color-${status}`)
+      ...STATUS.map((status) => `--color-${status}`),
+      ...STATUS_ROLES.map((status) => `--color-text-${status}`)
     ],
     ALL_SURFACES,
     TEXT
@@ -194,11 +197,7 @@ const GROUPS: Record<string, Pair[]> = {
   ],
   "on-colours on their fills (1.4.3)": [
     onFill("--color-on-accent", "--color-accent", TEXT),
-    ...STATUS.flatMap((status) => [
-      onFill(`--color-on-${status}`, `--color-${status}`, TEXT),
-      onFill(`--color-on-${status}`, `--astryx-theme-neutral-color-status-fill-${status}`, TEXT)
-    ]),
-    onFill("--color-on-accent", "--astryx-theme-neutral-color-status-fill-accent", TEXT)
+    ...STATUS_ROLES.map((status) => onFill(`--color-on-${status}`, `--color-${status}`, TEXT))
   ],
   // Legacy shadcn Button/Badge fills hover with the overlay painted over the
   // fill (bg-ax-hover-overlay, globals.css), never a faded fill: a 90% accent
@@ -211,6 +210,9 @@ const GROUPS: Record<string, Pair[]> = {
   "status and accent text on their muted fills (1.4.3)": [
     ...STATUS.flatMap((status) =>
       onTint(`--color-${status}`, `--color-${status}-muted`, RAISED, TEXT)
+    ),
+    ...STATUS_ROLES.flatMap((status) =>
+      onTint(`--color-on-${status}-muted`, `--color-${status}-muted`, RAISED, TEXT)
     ),
     ...onTint("--color-text-accent", "--color-accent-muted", RAISED, TEXT),
     ...onTint("--color-text-primary", "--color-accent-muted", RAISED, TEXT)
@@ -234,9 +236,7 @@ const GROUPS: Record<string, Pair[]> = {
     [
       "--color-icon-primary",
       "--color-icon-secondary",
-      ...(["accent", ...STATUS] as const).map(
-        (status) => `--astryx-theme-neutral-color-status-fill-${status}`
-      )
+      ...STATUS_ROLES.map((status) => `--color-${status}`)
     ],
     ALL_SURFACES,
     NON_TEXT

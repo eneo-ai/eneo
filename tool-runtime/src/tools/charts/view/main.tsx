@@ -217,7 +217,7 @@ function ChartView() {
           </>
         )
       }
-      notices={failed && <Banner status="error" container="section" title={text.error} />}
+      notices={failed && <Banner status="error" role="alert" container="section" title={text.error} />}
     >
       {names.length > 0 && (
         <div role="group" aria-label={text.legend} className="eneo-legend">

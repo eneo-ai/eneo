@@ -60,6 +60,9 @@ class DatabaseSessionManager:
             pool_pre_ping=settings.db_pool_pre_ping,
             pool_recycle=settings.db_pool_recycle,
             echo_pool=settings.db_pool_debug,
+            # Error text and tracebacks are logged; bound values (session ids,
+            # key hashes, emails) must not travel with them.
+            hide_parameters=True,
         )
         self._sessionmaker = async_sessionmaker(
             autocommit=False,

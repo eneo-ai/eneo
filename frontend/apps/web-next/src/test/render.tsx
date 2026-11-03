@@ -1,3 +1,4 @@
+import { onTestFinished } from "vitest";
 /**
  * Test-only: renders UI inside the app's providers, in Swedish (the default
  * locale), so tests query what users see and hear: use-intl with the real
@@ -6,7 +7,7 @@
  * context. Not imported by app code.
  */
 import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
-import { render, renderHook } from "@testing-library/react";
+import { act, render, renderHook } from "@testing-library/react";
 import { AppIntlProvider } from "@/components/providers/intl-provider";
 import { AppContextProvider, type AppContextData } from "@/components/providers/app-context";
 import { AstryxProvider } from "@/components/providers/astryx-provider";
@@ -177,4 +178,38 @@ export function renderInApp(ui: React.ReactNode, options: RenderInAppOptions = {
 export function renderHookInApp<Result>(hook: () => Result, options: RenderInAppOptions = {}) {
   const { queryClient, Providers } = providers(options);
   return { queryClient, ...renderHook(hook, { wrapper: Providers }) };
+}
+
+/**
+ * Every text Astryx's polite live region is given from now on, in order: one
+ * entry per announcement, so a message said again appears again and two said
+ * in one frame appear joined, as a screen reader hears them.
+ */
+export function recordAnnouncements(): string[] {
+  const said: string[] = [];
+  const observer = new MutationObserver((records) => {
+    for (const { target } of records) {
+      if (
+        target instanceof HTMLElement &&
+        target.matches("[data-astryx-live-region='polite']") &&
+        target.textContent
+      ) {
+        said.push(target.textContent);
+      }
+    }
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+  // Stops with the test, before the document it watches is torn down.
+  onTestFinished(() => observer.disconnect());
+  return said;
+}
+
+/**
+ * Lets Astryx's live region take what has been announced: it writes on the
+ * next animation frame, joining everything said before then into one
+ * message. Call it between something announced on its own (a list that
+ * loaded) and the action whose announcement the test reads.
+ */
+export function flushAnnouncements(): Promise<void> {
+  return act(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
 }

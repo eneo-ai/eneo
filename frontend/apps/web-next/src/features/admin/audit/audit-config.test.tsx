@@ -277,8 +277,8 @@ describe("AuditConfig", () => {
 
       failRefresh = false;
       fireEvent.click(screen.getByRole("button", { name: "Läs in serverläget" }));
-      await waitFor(() => expect(action.getAttribute("aria-disabled")).toBeNull());
-      expect(category.getAttribute("aria-disabled")).toBeNull();
+      await waitFor(() => expect(action.hasAttribute("aria-disabled")).toBe(false));
+      expect(category.hasAttribute("aria-disabled")).toBe(false);
       expect(enabled("Användare skapad")).toBe("false");
       act(() => action.click());
       expect(enabled("Användare skapad")).toBe("true");

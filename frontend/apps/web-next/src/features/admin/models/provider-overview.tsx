@@ -249,7 +249,7 @@ export function ProviderOverview({
           }
         />
       ) : (
-        <EmptyState title={t("no_providers_match")} />
+        <EmptyState isAnnounced={false} title={t("no_providers_match")} />
       );
   } else {
     content = rendered.map(({ section, models: sectionModels }) => (

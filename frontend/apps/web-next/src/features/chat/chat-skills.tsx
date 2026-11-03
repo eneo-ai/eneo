@@ -490,6 +490,7 @@ export function ChatSkills() {
         label={t("personal_chat_skills_button")}
         // A search field brings up the keyboard: only a tall sheet makes room for it.
         height={skills.searchable ? "tall" : "80dvh"}
+        padding={0}
       >
         <SkillsPanel
           skills={skills}

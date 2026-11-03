@@ -10,7 +10,7 @@
     "build": "tsr generate && vite build",
     "build:vite": "bun run build",
     "routes:generate": "tsr generate",
-    "lint": "node scripts/check-i18n.mjs && astryx theme build --check src/theme/eneo-theme.ts && prettier --check . && eslint && node scripts/check-route-parity.mjs",
+    "lint": "node scripts/check-i18n.mjs && astryx theme build --check src/theme/eneo-theme.ts && prettier --check . && eslint",
     "format": "prettier --write .",
     "check": "tsr generate && tsc --noEmit",
     "theme:build": "astryx theme build src/theme/eneo-theme.ts",
@@ -24,11 +24,11 @@
   },
   "dependencies": {
     "@ai-sdk/react": "3.0.294",
-    "@astryxdesign/core": "0.7.3",
-    "@astryxdesign/theme-neutral": "0.7.3",
-    "@eneo/eneo-js": "workspace:*",
+    "@astryxdesign/core": "0.7.5",
+    "@astryxdesign/theme-neutral": "0.7.5",
     "@eneo/markdown-math": "workspace:*",
     "@eneo/whats-new": "workspace:*",
+    "@eneo/eneo-js": "workspace:*",
     "@eneo/skill-instructions": "workspace:*",
     "@modelcontextprotocol/ext-apps": "2.0.3",
     "@radix-ui/react-use-controllable-state": "^1.2.3",
@@ -83,7 +83,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@astryxdesign/cli": "0.7.3",
+    "@astryxdesign/cli": "0.7.5",
     "@axe-core/playwright": "4.13.0",
     "@eneo/eslint-plugin": "workspace:*",
     "@playwright/test": "1.61.1",

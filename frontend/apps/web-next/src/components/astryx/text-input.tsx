@@ -5,11 +5,14 @@ import {
 } from "@astryxdesign/core/TextInput";
 import { type InputHTMLAttributes, useRef } from "react";
 
-// Astryx 0.7.3 forwards native input attributes but omits maxLength from its type.
+// Astryx forwards native input props but omits maxLength from its public type.
 export type TextInputProps = AstryxTextInputProps &
   Pick<InputHTMLAttributes<HTMLInputElement>, "maxLength">;
 
-/** Astryx TextInput with the phone keyboard's search key. Lint sends every TextInput import here. */
+/**
+ * Astryx TextInput whose search key puts the phone's keyboard away. Lint
+ * sends every TextInput import here.
+ */
 export function TextInput({ ref, onEnter, ...props }: TextInputProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const mergedRef = useMergedRefs(ref, inputRef);

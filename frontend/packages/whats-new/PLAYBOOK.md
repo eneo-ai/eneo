@@ -16,7 +16,14 @@ anything a user can see or do differently after the change:
 - Write one or two sentences **from the user's point of view**. "You can now
   change your password under My account", not "Add PATCH /users/me/password".
 - Write `No` when nothing changes for users (refactors, CI, dependencies,
-  internal admin tooling that has no screen).
+  internal admin tooling that has no screen). The test is: does a person see
+  or do something differently **inside Eneo** after this change? Configuration
+  done outside the app (identity-provider claims, environment variables,
+  deployment files, migrations) and operator-only fixes are `No`, whatever
+  their importance: they belong in the GitHub release notes and the guides,
+  not in the app. An administrator audience does not change this: an
+  `audience: admin` entry is for changes met in Eneo's own administration
+  pages.
 - If the feature has a natural place to point at, give the element a
   `data-tour="<kebab-case-anchor>"` attribute in the same PR. That is what the
   **Show me** button spotlights. Put the attribute on the row or section, not

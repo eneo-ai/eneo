@@ -8,12 +8,12 @@ import { useLayoutEffect, useRef } from "react";
 export type { ChatComposerInputProps };
 
 /**
- * Astryx ChatComposerInput whose `aria-describedby` reaches the element you
- * type in. Astryx 0.7.3 spreads a caller's attributes on the input's wrapper,
- * so the hint and validation state would otherwise never be read
- * out with the field. The ids are written on the editable element after each
- * render; Astryx sets no `aria-describedby` of its own there, so nothing is
- * overwritten.
+ * Astryx ChatComposerInput whose `aria-invalid` reaches the element you type
+ * in. Astryx 0.7.5 puts a caller's `aria-describedby` on the editable element
+ * and its wrapper, but `aria-invalid` on the wrapper only, so the validation
+ * state would otherwise never be read out with the field. Both are written on
+ * the editable element alone after each render; Astryx sets neither of its
+ * own there, so nothing is overwritten.
  */
 export function ChatComposerInput({
   "aria-describedby": describedBy,

@@ -188,7 +188,7 @@ export function AdminUsersPage() {
   if (isPending) {
     results = <LoadingState rows={5} />;
   } else if (users.length === 0) {
-    results = <EmptyState title={t("no_users_found")} />;
+    results = <EmptyState isAnnounced={false} title={t("no_users_found")} />;
   } else {
     results = (
       <TableFrame>

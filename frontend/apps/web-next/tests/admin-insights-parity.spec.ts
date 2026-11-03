@@ -52,6 +52,7 @@ test("uses native period statistics, question logs and the analysis stream under
     "href",
     /\/admin\/usage\?tab=tokens&from=.*&to=/
   );
+  await expect(page.getByRole("button", { name: /^Period:/ })).toBeVisible();
   await page.getByRole("switch", { name: "Jämför", exact: true }).click();
   await expect(
     page.getByText(/jämfört med föregående period|Ny aktivitet utan tidigare data/).first()

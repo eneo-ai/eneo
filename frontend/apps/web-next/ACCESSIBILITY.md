@@ -247,6 +247,9 @@ says "Radix" it means the legacy shadcn primitives in `src/components/ui`.
   element) or a toast from `@/lib/toast`. While a modal is open, the Toaster
   moves the live regions into it, because everything outside a modal is hidden
   from screen readers.
+- An `EmptyState` that appears after load reads itself out. Where a search
+  result count already says "Inga träffar", the empty state under it takes
+  `isAnnounced={false}`, so the result is read once.
 - Urgent errors that block the task use `role="alert"`, sparingly. Loading
   uses `LoadingState` (a `role="status"` region); don't announce every spinner.
 - Toasts come only from `@/lib/toast` (`no-restricted-imports` blocks `sonner`

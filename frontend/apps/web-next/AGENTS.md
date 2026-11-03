@@ -129,17 +129,21 @@ ships must be release-ready: correct, accessible, tested and without dead ends.
 - **Fix an Astryx gap in one place**, never at each call site: a wrapper in
   `src/components/astryx/` (lint sends imports there), or the bun patch for
   what a wrapper can't reach (How it is wired → Packages). Known gaps in
-  Astryx 0.7.3 (0.7.0 closed the Switch "Loading" announcement, now in the
-  active locale, and TextInput's dropped `aria-describedby`; those wrappers
-  are gone):
+  Astryx 0.7.5:
   - A `Banner` has no live region unless it is given one. A banner for
     something that just happened (a refusal, a list that failed to load) gets
     `role="alert"`; a page-level notice that may change gets `role="status"`;
     a notice about a state that lasts, shown on every visit to its page or
     tab, gets no role, and what is new is announced politely with
     `useAnnounce`.
-  - `ChatComposerInput` puts a caller's `aria-describedby` on its wrapper,
-    not on the element you type in: use `ChatComposerInput` from
+  - `Typeahead` and `Tokenizer` set no `aria-invalid` for an error status and
+    leave the `KEYBOARD` attributes out of their types: use the wrappers in
+    `@/components/astryx/`.
+  - The Swedish catalog lacks some strings: `astryx-sv-supplement.ts` (next to
+    the provider) adds them, and its test fails when a component we use has an
+    untranslated string.
+  - `ChatComposerInput` puts a caller's `aria-invalid` on its wrapper, not
+    on the element you type in: use `ChatComposerInput` from
     `@/components/astryx/chat-composer-input`, which moves it there.
   - CommandPalette marks only a picked value as selected: patched (the
     highlighted option is exposed as selected, as the APG combobox pattern
@@ -210,7 +214,7 @@ open), so the index has no bar of its own and names itself with a heading.
 - **Packages** (beta, pinned exactly; upgrade together, then run
   `bunx astryx upgrade` and `bun run theme:build`): `@astryxdesign/core`,
   `@astryxdesign/theme-neutral`, `@stylexjs/stylex` (runtime only), dev
-  `@astryxdesign/cli`. `frontend/patches/@astryxdesign%2Fcore@0.7.3.patch`
+  `@astryxdesign/cli`. `frontend/patches/@astryxdesign%2Fcore@0.7.5.patch`
   makes CommandPalette mark the highlighted option as selected, and gives
   the layers' slide-rule `<style>` the page's CSP nonce. After an upgrade bun silently skips
   the stale patch and the guard tests in `src/components/astryx/` fail:
@@ -467,7 +471,9 @@ focus-visible:outline-offset-2 focus-visible:outline-ring`);
 - `EmptyState` — `title`, `description?`, `icon?`, `hue?` (the area's hue for
   the icon tile, `AREA_HUES` from `icon-tile.tsx`; neutral for zero results),
   `actions?` (or `children`), `headingLevel?` (1–4, default 2), `isCompact?`,
-  `framed?` (dashed frame, default on).
+  `framed?` (dashed frame, default on), `isAnnounced?` (default on: Astryx
+  reads an empty state that appears after load; off where a result count
+  already says it, such as under `ResourceFilterInput`).
 - `IconTile` — the coloured icon tile of the start page's starter cards and
   the empty states: `icon`, `hue?` (`neutral` | categorical, `AREA_HUES` maps
   each area to one), `size?: sm|md|lg`. Decorative; the text beside it
@@ -700,7 +706,7 @@ and with the text size at 130 %.
 
 <!-- ASTRYX:START -->
 
-Astryx 0.7.3 quick reference for this app (edited for web-next; see above).
+Astryx 0.7.5 quick reference for this app (edited for web-next; see above).
 
 - Discover: `bunx astryx search "<q>"`, `bunx astryx component <Name> --dense`,
   `bunx astryx build "<idea>"`, `bunx astryx docs layout`.

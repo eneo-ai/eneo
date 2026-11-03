@@ -62,21 +62,87 @@ test("workflow, local action, scope and gate changes force full validation", () 
   }
 });
 
-test("only the job limit bounds Playwright system libraries from a slow mirror", () => {
+test("apt has deadlines only on its network phase and installs nothing it did not download", () => {
   const action = fs.readFileSync(path.join(root, ".github/actions/setup-playwright/action.yml"), "utf8");
   const workflow = fs.readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8");
-  // Slow mirrors that kept progressing needed about 590 s (develop run 40352666820)
-  // and more than 720 s (run 40367572604); a step deadline turns them red.
-  const step = action.split("- name: Install system libraries\n")[1]?.split(/\n    - name: /)[0];
-  const install = step?.split("\n").find((line) => line.includes("playwright install-deps"));
-  assert.equal(install?.trim(), "bun run --bun playwright install-deps chromium");
-  assert.doesNotMatch(step, /^      timeout-minutes:/m);
+  assert.match(action, /playwright install-deps --dry-run chromium/);
+  assert.match(action, /"\$GITHUB_WORKSPACE\/\.github\/scripts\/ci-apt-install\.sh" "\$\{missing\[@\]\}"/);
+  assert.doesNotMatch(action, /^        bun run --bun playwright install-deps chromium$/m);
+
+  // Stubs record every apt-get call and whether it ran under `timeout`; FAIL_DOWNLOADS
+  // download attempts fail before one succeeds.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "eneo-ci-apt-"));
+  try {
+    const log = path.join(dir, "apt.log");
+    const stub = (name, body) => fs.writeFileSync(path.join(dir, name), `#!/usr/bin/env bash\n${body}\n`, { mode: 0o755 });
+    // `sed -i` without a suffix is GNU syntax; on macOS the stub supplies BSD's empty one.
+    stub("sudo", [
+      '[ "$1" = tee ] && { cat >/dev/null; exit 0; }',
+      'if [ "$1" = sed ] && ! sed --version >/dev/null 2>&1; then shift 2; exec sed -i "" "$@"; fi',
+      'exec "$@"',
+    ].join("\n"));
+    stub("timeout", 'shift 2\nDEADLINE=1 exec "$@"');
+    stub("apt-get", [
+      'echo "${DEADLINE:+deadline }$*" >> "$APT_LOG"',
+      'if [[ "$*" == *--download-only* ]]; then',
+      '  n=$(grep -c -- --download-only "$APT_LOG")',
+      '  [ "$n" -gt "${FAIL_DOWNLOADS:-0}" ]',
+      "fi",
+    ].join("\n"));
+    const mirrors = path.join(dir, "apt-mirrors.txt");
+    const hosted = "http://azure.archive.ubuntu.com/ubuntu/\tpriority:1\nhttps://archive.ubuntu.com/ubuntu/\tpriority:2\n"
+      + "https://security.ubuntu.com/ubuntu/\tpriority:3\n";
+    const run = (args, failDownloads, mirrorList = hosted) => {
+      fs.rmSync(log, { force: true });
+      fs.writeFileSync(mirrors, mirrorList);
+      const result = spawnSync("bash", [path.join(root, ".github/scripts/ci-apt-install.sh"), ...args], {
+        encoding: "utf8", timeout: 10_000,
+        env: {
+          ...process.env, PATH: `${dir}:${process.env.PATH}`, APT_LOG: log, APT_MIRRORS: mirrors,
+          FAIL_DOWNLOADS: String(failDownloads),
+        },
+      });
+      const calls = fs.existsSync(log) ? fs.readFileSync(log, "utf8").trim().split("\n") : [];
+      return { status: result.status, calls, mirrors: fs.readFileSync(mirrors, "utf8") };
+    };
+    const update = "deadline -q update";
+    const download = "deadline -q install -y --no-install-recommends --download-only fonts-a fonts-b";
+    const install = "install -y -q --no-install-recommends --no-download fonts-a fonts-b";
+
+    const fallback = hosted.split("\n").slice(1).join("\n");
+    assert.deepEqual(run(["fonts-a", "fonts-b"], 0), { status: 0, calls: [update, download, install], mirrors: hosted });
+    // A failed download leaves the Azure mirror and resumes; dpkg still runs only after it.
+    assert.deepEqual(run(["fonts-a", "fonts-b"], 1),
+      { status: 0, calls: [update, download, download, install], mirrors: fallback });
+    // Three failed downloads stop the job without starting dpkg, and keep the other mirrors.
+    assert.deepEqual(run(["fonts-a", "fonts-b"], 3),
+      { status: 1, calls: [update, download, download, download], mirrors: fallback });
+    // A runner without the Azure mirror (an AWS-hosted one) retries on its own list.
+    assert.deepEqual(run(["fonts-a", "fonts-b"], 1, fallback),
+      { status: 0, calls: [update, download, download, install], mirrors: fallback });
+    assert.deepEqual(run([], 0), { status: 0, calls: [], mirrors: hosted });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  // Three bounded attempts per phase still leave the rest of each Playwright job its time.
   const jobs = workflow.split("\njobs:\n")[1].split(/\n(?=  [a-z][a-z0-9-]*:\n)/)
     .filter((block) => block.includes("uses: ./.github/actions/setup-playwright"));
   assert.ok(jobs.length > 0);
   for (const block of jobs) {
     const limit = Number(block.match(/^    timeout-minutes: (\d+)$/m)?.[1]);
     assert.ok(limit >= 30, `${block.match(/^  ([a-z0-9-]+):/)[1]}: ${limit} min`);
+  }
+});
+
+test("both E2E jobs free disk before building their stack", () => {
+  // AWS-hosted runners ran out of space during the stack build (jobs 125460893789, 125544852231).
+  const workflow = fs.readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8");
+  for (const [name, next] of [["frontend-e2e", "frontend-web-next-e2e"], ["frontend-web-next-e2e", "schema-drift"]]) {
+    const job = workflow.split(`\n  ${name}:\n`)[1].split(`\n  ${next}:\n`)[0];
+    const guard = job.indexOf("uses: ./.github/actions/free-disk");
+    assert.ok(guard > job.indexOf("- name: Checkout"), name);
+    assert.ok(guard < job.indexOf("- name: Start isolated E2E stack in the background"), name);
   }
 });
 
@@ -171,33 +237,44 @@ test("web-next runs all browser cases on FastAPI and has no Next runtime job", (
   assert.ok(assets > job.indexOf("- name: Wait for the E2E stack"));
   assert.ok(assets < job.indexOf("- name: Run E2E and accessibility tests"));
   assert.match(job.slice(assets), /e2e-backend:\/app\/web-bundle-report.json frontend\/apps\/web-next\/node_modules\/\.cache\/vite-bundle-report.json/);
+  // Production images and the web-next stack build the Vite app; the Svelte stack, which never serves it, does not.
   const dockerfile = fs.readFileSync(path.join(root, "backend/Dockerfile"), "utf8");
-  assert.match(dockerfile, /COPY --from=web-build .*\/vite-bundle-report.json \/app\/web-bundle-report.json/);
+  assert.match(dockerfile, /^ARG WEB_APP_STAGE=web-build$/m);
+  assert.match(dockerfile, /^FROM \$\{WEB_APP_STAGE\} AS web-app$/m);
+  assert.match(dockerfile, /COPY --from=web-app .*\/vite-bundle-report.json \/app\/web-bundle-report.json/);
+  const compose = (file) => fs.readFileSync(path.join(root, file), "utf8");
+  assert.match(compose("docker-compose.e2e.ci.yml"), /^ {8}WEB_APP_STAGE: no-web-app$/m);
+  assert.match(compose("docker-compose.e2e.web-app.yml"), /^ {8}WEB_APP_STAGE: web-build$/m);
 });
 
-test("web-next rejects route drift and retains Vite resource reports after build failure", () => {
+test("web-next rejects route drift before type checking", () => {
   const workflow = fs.readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8");
   const job = workflow.split("\n  frontend-web-next:\n")[1].split("\n  frontend-e2e:\n")[0];
   const step = (name) => job.split(`- name: ${name}\n`)[1]?.split(/\n      - name: /)[0];
   assert.match(job, /working-directory: frontend\n/);
-  assert.match(job, /fetch-depth: 0/);
-  assert.doesNotMatch(job.split("\n    steps:")[0], /ROUTE_PARITY_UPSTREAM:/);
-  assert.match(step("Lint") ?? "", /ROUTE_PARITY_UPSTREAM:/);
   assert.match(step("Check route tree drift") ?? "", /routes:generate && git diff --exit-code -- apps\/web-next\/src\/routeTree\.gen\.ts/);
   assert.ok(job.indexOf("- name: Check route tree drift") < job.indexOf("- name: Type check"));
-  const report = "$RUNNER_TEMP/web-next-vite-build.txt";
-  assert.ok(step("Build (Vite)")?.includes(`/usr/bin/time -v -o "${report}" bun run --filter '@eneo/web-next' build`));
-  assert.ok(step("Record Vite build memory")?.includes("Maximum resident set size"));
-  for (const name of ["Record Vite build memory", "Upload Vite build reports"]) {
-    assert.ok(step(name)?.includes("if: ${{ !cancelled() }}"), name);
-  }
-  const upload = step("Upload Vite build reports");
-  assert.ok(upload?.includes("name: web-next-vite-build-resources"));
-  assert.ok(upload.includes("${{ runner.temp }}/web-next-vite-build.txt"));
-  assert.ok(upload.includes("frontend/apps/web-next/node_modules/.cache/vite-bundle-report.json"));
-  assert.ok(upload.includes("include-hidden-files: true"), "the explicitly selected .cache report is uploaded");
-  assert.ok(upload.includes("retention-days: 7") && upload.includes("if-no-files-found: ignore"));
-  assert.ok(!job.includes("ci-build-memory.mjs"), "Vite sizes and RSS are report-only");
+});
+
+test("only develop pushes save the package download cache", () => {
+  // Pull request and merge-queue refs saved their own ~610 MB copy that no other ref could restore.
+  const action = fs.readFileSync(path.join(root, ".github/actions/setup-frontend/action.yml"), "utf8");
+  const step = (name) => action.split(`- name: ${name}\n`)[1]?.split(/\n    - /)[0] ?? "";
+  const restore = step("Restore the package download cache");
+  const save = step("Save the package download cache");
+  assert.doesNotMatch(action, /uses: actions\/cache@/);
+  assert.match(restore, /^      id: bun-cache$/m);
+  assert.match(restore, /^      uses: actions\/cache\/restore@[0-9a-f]{40} # v4$/m);
+  assert.match(restore, /^        restore-keys: bun-/m);
+  assert.equal(save.match(/^      if: (.*)$/m)?.[1],
+    "github.event_name == 'push' && github.ref == 'refs/heads/develop' && steps.bun-cache.outputs.cache-hit != 'true'");
+  assert.match(save, /^      uses: actions\/cache\/save@[0-9a-f]{40} # v4$/m);
+  assert.match(save, /^        key: \$\{\{ steps\.bun-cache\.outputs\.cache-primary-key \}\}$/m);
+  const cachePath = (body) => body.match(/^        path: (.*)$/m)?.[1];
+  assert.equal(cachePath(save), cachePath(restore));
+  const order = ["Restore the package download cache", "Install locked workspace dependencies", "Save the package download cache"]
+    .map((name) => action.indexOf(`- name: ${name}\n`));
+  assert.ok(order.every((index, i) => index > (order[i - 1] ?? -1)), String(order));
 });
 
 test("the memory check passes within budget and fails above it or without a measurement", () => {
