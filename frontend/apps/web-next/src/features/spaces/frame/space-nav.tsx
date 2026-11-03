@@ -23,7 +23,8 @@ import {
   type LucideIcon
 } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { Fragment } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { blockingError } from "@/components/composites/query-state";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { iconUrl } from "@/components/composites/icon-field";
@@ -108,6 +109,31 @@ function SpaceChip({ space }: { space: Space }) {
 }
 
 /**
+ * Whether the switcher has opened. Astryx mounts a heading's menu with the
+ * page, so a row per space would render, hidden, on every page of a space;
+ * an account with many spaces paid for it on each one. The menu is a native
+ * popover, and its `beforetoggle` renders the rows before it shows; they then
+ * stay. A browser without the Popover API (Astryx shows the menu by `display`
+ * there) gets the rows at once.
+ */
+function useOpenedOnce() {
+  const marker = useRef<HTMLSpanElement>(null);
+  const [opened, setOpened] = useState(
+    () => typeof HTMLElement === "undefined" || !("showPopover" in HTMLElement.prototype)
+  );
+  useEffect(() => {
+    const popover = marker.current?.closest<HTMLElement>("[popover]");
+    if (opened || !popover) return;
+    const open = (event: Event) => {
+      if ((event as ToggleEvent).newState === "open") flushSync(() => setOpened(true));
+    };
+    popover.addEventListener("beforetoggle", open);
+    return () => popover.removeEventListener("beforetoggle", open);
+  }, [opened]);
+  return { marker, opened };
+}
+
+/**
  * Svelte's space selector (`SpaceSelector.svelte`): "Dina ytor", every
  * shared space (the current one checked) and "Skapa en ny yta" for those who
  * may. Picking a space opens its overview.
@@ -117,11 +143,13 @@ function SwitcherMenu({ currentId }: { currentId: string | null }) {
   const { can } = useAppContext();
   const { openCreateSpace } = useShell();
   const spaces = useQuery(spacesListQueryOptions(browserApi)).data ?? [];
+  const { marker, opened } = useOpenedOnce();
 
   return (
     <NavHeadingMenu>
+      <span ref={marker} hidden />
       <NavHeadingMenuItem label={t("your_spaces")} href="/spaces/list" />
-      {spaces
+      {(opened ? spaces : [])
         .filter((space) => !space.personal && !space.organization)
         .map((space) => (
           <NavHeadingMenuItem

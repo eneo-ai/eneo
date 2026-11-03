@@ -138,6 +138,29 @@ describe("SpaceNav", () => {
     expect(shell.openCreateSpace).toHaveBeenCalled();
   });
 
+  it("mounts a row per space only once the switcher opens, where popovers are native", () => {
+    // A browser with the Popover API: opening fires beforetoggle on the menu's popover.
+    const proto = HTMLElement.prototype as Partial<HTMLElement>;
+    proto.showPopover = function (this: HTMLElement) {
+      this.dispatchEvent(Object.assign(new Event("beforetoggle"), { newState: "open" }));
+    };
+    proto.hidePopover = () => {};
+    try {
+      renderNav("/spaces/s1/overview");
+      expect(screen.queryByText("Socialtjänst")).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Öppna meny" }));
+      expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+        "Dina ytor",
+        "Upphandling",
+        "Socialtjänst",
+        "Skapa en ny yta"
+      ]);
+    } finally {
+      delete proto.showPopover;
+      delete proto.hidePopover;
+    }
+  });
+
   it("offers Skapa en ny yta only with the shared_spaces permission", () => {
     renderNav("/spaces/s1/overview", { permissions: [] });
     fireEvent.click(screen.getByRole("button", { name: "Öppna meny" }));
