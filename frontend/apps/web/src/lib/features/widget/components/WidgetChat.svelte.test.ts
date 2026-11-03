@@ -1396,30 +1396,34 @@ describe("WidgetChat inside the loader's panel", () => {
 
   test("offers to enlarge only once a loader has reported the panel's layout", async () => {
     const posted = vi.spyOn(window.parent, "postMessage");
-    renderFramed();
-    // Framed: the header closes the panel, but a loader from before the
-    // layout message cannot enlarge it, so nothing is offered yet.
-    await expect.element(page.getByRole("button", { name: "widget_close" })).toBeVisible();
-    expect(expandButton().query()).toBeNull();
+    try {
+      renderFramed();
+      // Framed: the header closes the panel, but a loader from before the
+      // layout message cannot enlarge it, so nothing is offered yet.
+      await expect.element(page.getByRole("button", { name: "widget_close" })).toBeVisible();
+      expect(expandButton().query()).toBeNull();
 
-    fromLoader(layoutMessage(false, false));
-    await expect.element(expandButton()).toBeVisible();
-    await userEvent.click(expandButton());
-    expect(posted).toHaveBeenCalledWith({ ns: "eneo-widget", v: 1, type: "expand" }, HOST);
+      fromLoader(layoutMessage(false, false));
+      await expect.element(expandButton()).toBeVisible();
+      await userEvent.click(expandButton());
+      expect(posted).toHaveBeenCalledWith({ ns: "eneo-widget", v: 1, type: "expand" }, HOST);
 
-    // The loader confirms; the same control now shrinks, and keeps focus.
-    fromLoader(layoutMessage(true, true));
-    await expect.element(shrinkButton()).toBeVisible();
-    expect(expandButton().query()).toBeNull();
-    expect(document.activeElement).toBe(shrinkButton().element());
-    // The icon alone is silent; a screen reader hears that it took effect.
-    await vi.waitFor(() => expect(announced()).toBe("widget_expanded_announced"));
-    await userEvent.click(shrinkButton());
-    expect(posted).toHaveBeenCalledWith({ ns: "eneo-widget", v: 1, type: "collapse" }, HOST);
+      // The loader confirms; the same control now shrinks, and keeps focus.
+      fromLoader(layoutMessage(true, true));
+      await expect.element(shrinkButton()).toBeVisible();
+      expect(expandButton().query()).toBeNull();
+      expect(document.activeElement).toBe(shrinkButton().element());
+      // The icon alone is silent; a screen reader hears that it took effect.
+      await vi.waitFor(() => expect(announced()).toBe("widget_expanded_announced"));
+      await userEvent.click(shrinkButton());
+      expect(posted).toHaveBeenCalledWith({ ns: "eneo-widget", v: 1, type: "collapse" }, HOST);
 
-    fromLoader(layoutMessage(false, false));
-    await expect.element(expandButton()).toBeVisible();
-    await vi.waitFor(() => expect(announced()).toBe("widget_collapsed_announced"));
+      fromLoader(layoutMessage(false, false));
+      await expect.element(expandButton()).toBeVisible();
+      await vi.waitFor(() => expect(announced()).toBe("widget_collapsed_announced"));
+    } finally {
+      posted.mockRestore();
+    }
   });
 
   test("Escape in the enlarged chat shrinks it before a second Escape closes it", async () => {
@@ -1428,12 +1432,16 @@ describe("WidgetChat inside the loader's panel", () => {
     fromLoader(layoutMessage(true, true));
     await expect.element(shrinkButton()).toBeVisible();
     const posted = vi.spyOn(window.parent, "postMessage");
-    await userEvent.keyboard("{Escape}");
-    expect(posted).toHaveBeenLastCalledWith({ ns: "eneo-widget", v: 1, type: "collapse" }, HOST);
-    fromLoader(layoutMessage(false, false));
-    await expect.element(expandButton()).toBeVisible();
-    await userEvent.keyboard("{Escape}");
-    expect(posted).toHaveBeenLastCalledWith({ ns: "eneo-widget", v: 1, type: "close" }, HOST);
+    try {
+      await userEvent.keyboard("{Escape}");
+      expect(posted).toHaveBeenLastCalledWith({ ns: "eneo-widget", v: 1, type: "collapse" }, HOST);
+      fromLoader(layoutMessage(false, false));
+      await expect.element(expandButton()).toBeVisible();
+      await userEvent.keyboard("{Escape}");
+      expect(posted).toHaveBeenLastCalledWith({ ns: "eneo-widget", v: 1, type: "close" }, HOST);
+    } finally {
+      posted.mockRestore();
+    }
   });
 
   test("the first layout is not announced", async () => {

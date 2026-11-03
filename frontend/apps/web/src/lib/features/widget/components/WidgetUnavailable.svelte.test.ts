@@ -1,24 +1,19 @@
 import { page, userEvent } from "@vitest/browser/context";
 import { render } from "vitest-browser-svelte";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import axe from "axe-core";
 import { virtual } from "@guidepup/virtual-screen-reader";
 import "../../../../app.css";
-import { BRIDGE_NAMESPACE } from "../embedBridge";
+import { BRIDGE_NAMESPACE, BRIDGE_VERSION } from "../embedBridge";
 import WidgetUnavailable from "./WidgetUnavailable.svelte";
 
 vi.mock("$lib/paraglide/messages", () => ({
   m: new Proxy<Record<string, () => string>>({}, { get: (_target, key) => () => String(key) })
 }));
 
-// Vitest runs each test file in a frame of its own page, so the notice is
-// "embedded" with the runner as its host. The runner talks over postMessage
-// too: with a foreign host origin the browser drops what the bridge posts to
-// it, while the spy still records the calls.
-const HOST_ORIGIN = "https://www.kommun.se";
-
-const posted = () =>
-  vi.mocked(window.parent.postMessage).mock.calls.map((call) => (call[0] as { type: string }).type);
+// Test files have separate frames but share the runner's parent Window. Observe
+// this frame's real messages instead of spying on that shared Window's method.
+const HOST_ORIGIN = window.location.origin;
 
 /** What the loader sends when the visitor opens the panel. */
 function openPanel() {
@@ -31,24 +26,44 @@ function openPanel() {
   );
 }
 
-afterEach(() => vi.restoreAllMocks());
-
 describe("WidgetUnavailable", () => {
   test("reports ready, takes focus on open and closes from its button or Escape", async () => {
-    vi.spyOn(window.parent, "postMessage");
-    render(WidgetUnavailable, { hostOrigin: HOST_ORIGIN });
-    await vi.waitFor(() => expect(posted()).toContain("ready"));
+    const posted: string[] = [];
+    function capture(event: MessageEvent<unknown>) {
+      const data = event.data;
+      if (
+        event.source !== window ||
+        event.origin !== HOST_ORIGIN ||
+        !data ||
+        typeof data !== "object" ||
+        !("ns" in data) ||
+        data.ns !== BRIDGE_NAMESPACE ||
+        !("v" in data) ||
+        data.v !== BRIDGE_VERSION ||
+        !("type" in data) ||
+        typeof data.type !== "string"
+      )
+        return;
+      posted.push(data.type);
+    }
+    window.parent.addEventListener("message", capture);
+    try {
+      render(WidgetUnavailable, { hostOrigin: HOST_ORIGIN });
+      await vi.waitFor(() => expect(posted).toEqual(["ready"]));
 
-    openPanel();
-    await expect
-      .element(page.getByRole("heading", { name: "widget_not_available_title" }))
-      .toHaveFocus();
+      openPanel();
+      await expect
+        .element(page.getByRole("heading", { name: "widget_not_available_title" }))
+        .toHaveFocus();
 
-    await userEvent.click(page.getByRole("button", { name: "widget_close" }));
-    expect(posted()).toEqual(["ready", "close"]);
+      await userEvent.click(page.getByRole("button", { name: "widget_close" }));
+      await vi.waitFor(() => expect(posted).toEqual(["ready", "close"]));
 
-    await userEvent.keyboard("{Escape}");
-    expect(posted()).toEqual(["ready", "close", "close"]);
+      await userEvent.keyboard("{Escape}");
+      await vi.waitFor(() => expect(posted).toEqual(["ready", "close", "close"]));
+    } finally {
+      window.parent.removeEventListener("message", capture);
+    }
   });
 
   test("offers no close button on the stand-alone page", async () => {
