@@ -1240,11 +1240,16 @@ class SpaceRepository:
             security_classification=entry_in_db.security_classification,
         )
         from eneo.mcp_servers.application.capability_resolver import (
-            capability_availability,
+            active_capability_providers,
+            availability_from_providers,
         )
 
-        space.available_capabilities = await capability_availability(
-            self.session, self.user.tenant_id, space.security_classification
+        # One provider load serves the tenant-wide and the user-scoped view.
+        capability_providers = await active_capability_providers(
+            self.session, self.user.tenant_id
+        )
+        space.available_capabilities = availability_from_providers(
+            capability_providers, space.security_classification
         )
         if space.is_personal():
             space.enabled_capabilities = [
@@ -1259,9 +1264,8 @@ class SpaceRepository:
                 allowed_capability_purposes,
             )
 
-            personal_availability = await capability_availability(
-                self.session,
-                self.user.tenant_id,
+            personal_availability = availability_from_providers(
+                capability_providers,
                 space.security_classification,
                 user_group_ids=self.user.user_groups_ids,
                 allowed_purposes=allowed_capability_purposes(self.user.permissions),
