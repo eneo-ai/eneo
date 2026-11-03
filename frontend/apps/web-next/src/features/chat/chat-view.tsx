@@ -299,17 +299,22 @@ function ConversationView({
   // composer, put back if it fails before the answer starts.
   const pendingSendRef = useRef<{ text: string; attachments: Attachment[] } | null>(null);
   const [pendingQuestion, setPendingQuestion] = useState<PendingQuestionState | null>(null);
+  // A question whose files are on the server, waiting in the conversation for a
+  // model or reasoning switch to be saved before its request is issued.
+  const [queuedQuestion, setQueuedQuestion] = useState<{ text: string; files: SentFiles } | null>(
+    null
+  );
   // A reload or a closed tab ends what is typed or attached and not yet sent: the
   // draft survives a reload but not a closed tab, and files survive neither.
   // A question taken out of the composer is still unsent while it waits for a model or
-  // reasoning switch to be saved (`queuedSend`) or for its uploads (`pendingQuestion`).
-  const [queuedSend, setQueuedSend] = useState(false);
-  useBeforeUnloadWarning(
+  // reasoning switch to be saved (`queuedQuestion`) or for its uploads (`pendingQuestion`).
+  // Leaving the chat inside the app asks about the same.
+  const unsent =
     input.trim() !== "" ||
-      attachments.attachments.length > 0 ||
-      queuedSend ||
-      pendingQuestion !== null
-  );
+    attachments.attachments.length > 0 ||
+    queuedQuestion !== null ||
+    pendingQuestion !== null;
+  useBeforeUnloadWarning(unsent);
   // Ends the wait of a question not yet sent, for its uploads or a partner
   // save (a stop while it waits).
   const pendingAbort = useRef<AbortController | null>(null);
@@ -491,7 +496,7 @@ function ConversationView({
   const busy = status === "submitted" || status === "streaming";
   // The composer is taken from the moment a question leaves it, uploads and
   // partner saves included.
-  const sending = busy || pendingQuestion !== null || queuedSend;
+  const sending = busy || pendingQuestion !== null || queuedQuestion !== null;
 
   // Record client-side step timings for the answer being streamed.
   useEffect(() => {
@@ -659,7 +664,9 @@ function ConversationView({
     fileInput.current?.click();
   }, []);
 
-  const started = messages.length > 0 || pendingQuestion !== null;
+  // A question that has left the composer keeps the view in the conversation while
+  // it waits, for its uploads and then a partner save, until `sendMessage` adds it.
+  const started = messages.length > 0 || pendingQuestion !== null || queuedQuestion !== null;
 
   // A tool waiting for a decision in the latest answer: on a phone the
   // decision takes the composer's place (decision 26); wider, the card in
@@ -759,7 +766,8 @@ function ConversationView({
     const quote = resendFiles ? null : panel.quote;
     const text = resendFiles ? question : composeQuotedQuestion(quote, question);
     if (!resendFiles) panel.clearQuote();
-    if (!started) {
+    const first = !started;
+    if (first) {
       // A tapped Send button holds no focus in Safari: a question from the
       // composer keeps it in the composer whatever has focus now.
       refocusComposer.current =
@@ -779,7 +787,6 @@ function ConversationView({
         keys: batch.map((attachment) => attachment.key),
         request
       };
-      const first = !started;
       const controller = new AbortController();
       pendingAbort.current = controller;
       setPendingQuestion(pending);
@@ -791,7 +798,7 @@ function ConversationView({
           if (!mounted.current) return;
           pendingAbort.current = null;
           setPendingQuestion(null);
-          issue(pending.text, sentFiles(ready), pending.request, pending);
+          issue(pending.text, sentFiles(ready), pending.request, pending, first);
         },
         () => {
           if (!mounted.current) return;
@@ -801,14 +808,21 @@ function ConversationView({
       );
       return;
     }
-    issue(text, resendFiles ?? sentFiles(batch), request, { question, quote });
+    issue(text, resendFiles ?? sentFiles(batch), request, { question, quote }, first);
   }
 
   /**
    * Issues the request for a question whose files are all on the server;
-   * `draft` is what a stop before it goes returns to the composer.
+   * `draft` is what a stop before it goes returns to the composer, and `first`
+   * whether that takes the view back to the start state.
    */
-  function issue(text: string, files: SentFiles, request: SendRequest, draft: QuestionDraft) {
+  function issue(
+    text: string,
+    files: SentFiles,
+    request: SendRequest,
+    draft: QuestionDraft,
+    first: boolean
+  ) {
     clearError();
     setStreamError(null);
     streamErrorRef.current = null;
@@ -844,24 +858,30 @@ function ConversationView({
     };
     // A model or reasoning switch made in the composer is saved on the
     // assistant; the backend answers with what is stored, so that save lands first.
-    // The question is on its way meanwhile: a stop takes it back, files included.
+    // The question waits in the conversation meanwhile: a stop takes it back, files included.
     if (hasPendingPartnerUpdates()) {
       const controller = new AbortController();
       pendingAbort.current = controller;
       controller.signal.addEventListener("abort", () => {
         pendingAbort.current = null;
-        setQueuedSend(false);
+        setQueuedQuestion(null);
         const taken = pendingSendRef.current;
         pendingSendRef.current = null;
+        // Once the view has gone, this deletes the files instead.
         if (taken) attachments.restore(taken.attachments);
-        withdrawQuestion(draft, false);
+        withdrawQuestion(draft, first);
       });
-      setQueuedSend(true);
+      setQueuedQuestion({ text, files });
       void awaitPartnerUpdates().then(() => {
         if (controller.signal.aborted) return;
+        // A view that has gone sends nothing, as for a question waiting for its uploads.
+        if (!mounted.current) {
+          controller.abort();
+          return;
+        }
         pendingAbort.current = null;
         // Sent from here on: the request itself outlasts the answer, not the wait.
-        setQueuedSend(false);
+        setQueuedQuestion(null);
         void send();
       });
     } else void send();
@@ -895,6 +915,10 @@ function ConversationView({
         }))
     : [];
   const pendingDone = pendingUploads.filter((upload) => !upload.uploading).length;
+  // A question waiting for a partner save shows its files as it did once they were uploaded.
+  const queuedUploads: PendingUpload[] = (queuedQuestion?.files ?? []).map(
+    ({ id, name, size, mimetype }) => ({ key: id, name, size, mimetype, uploading: false })
+  );
   const composerAttachments = pendingQuestion
     ? {
         ...attachments,
@@ -1122,7 +1146,7 @@ function ConversationView({
   const leaveConfirmation = (
     <LeaveConfirmation
       ref={leaveConfirmationRef}
-      active={panel.dirty || input.trim() !== "" || attachments.attachments.length > 0}
+      active={panel.dirty || unsent}
       title={unsentQuestionOnly ? t("chat_unsent_navigation_title") : undefined}
       description={unsentQuestionOnly ? t("chat_unsent_navigation_description") : undefined}
       confirmLabel={unsentQuestionOnly ? t("chat_unsent_navigation_leave") : undefined}
@@ -1245,7 +1269,7 @@ function ConversationView({
         {({ sheetOver }) => (
           <ConversationLayout
             className="min-w-0 flex-1"
-            followKey={`${messages.filter((message) => message.role === "user").length}:${pendingQuestion ? "pending" : ""}`}
+            followKey={`${messages.filter((message) => message.role === "user").length}:${pendingQuestion || queuedQuestion ? "pending" : ""}`}
             sheetOver={sheetOver}
             sheetOpener={activityTrigger}
             composer={
@@ -1298,7 +1322,14 @@ function ConversationView({
                   conversationFiles={allFiles}
                 />
               )}
-              {(status === "submitted" || pendingQuestion) && (
+              {queuedQuestion && (
+                <PendingQuestion
+                  text={queuedQuestion.text}
+                  uploads={queuedUploads}
+                  conversationFiles={allFiles}
+                />
+              )}
+              {(status === "submitted" || pendingQuestion || queuedQuestion) && (
                 <PendingAnswer
                   assistant={assistantIdentity}
                   status={

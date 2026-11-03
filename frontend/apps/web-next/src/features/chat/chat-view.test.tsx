@@ -424,14 +424,18 @@ describe("ChatView composer drafts", () => {
     renderInApp(<Harness partner={assistant} />);
     let saved!: () => void;
     void queuePartnerUpdate(() => new Promise<void>((resolve) => (saved = resolve)));
-    const field = screen.getByRole("textbox", { name: "Fråga Upphandlingsassistenten" });
-    fireEvent.change(field, { target: { value: "Första frågan" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Fråga Upphandlingsassistenten" }), {
+      target: { value: "Första frågan" }
+    });
     fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
 
     // The first question waits for the save: a second stays in the composer.
+    const field = screen.getByRole<HTMLTextAreaElement>("textbox", {
+      name: "Fråga Upphandlingsassistenten"
+    });
     fireEvent.change(field, { target: { value: "Andra frågan" } });
     fireEvent.keyDown(field, { key: "Enter", ctrlKey: true });
-    expect((field as HTMLTextAreaElement).value).toBe("Andra frågan");
+    expect(field.value).toBe("Andra frågan");
 
     await act(async () => {
       await Promise.resolve();
@@ -441,23 +445,40 @@ describe("ChatView composer drafts", () => {
     expect(requestsSent()).toBe(1);
   });
 
-  it("takes a question waiting for a model switch back to the composer when stopped", async () => {
+  it("shows a question waiting for a model switch in the conversation, and a stop takes it back to the start", async () => {
     sessionStorage.clear();
     renderInApp(<Harness partner={assistant} />);
     let saved!: () => void;
-    void queuePartnerUpdate(() => new Promise<void>((resolve) => (saved = resolve)));
+    const saving = new Promise<void>((resolve) => (saved = resolve));
+    void queuePartnerUpdate(() => saving);
     const field = screen.getByRole("textbox", { name: "Fråga Upphandlingsassistenten" });
+    field.focus();
     fireEvent.change(field, { target: { value: "Skicka när modellen är sparad" } });
-    fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
-    expect((field as HTMLTextAreaElement).value).toBe("");
+    fireEvent.keyDown(field, { key: "Enter", ctrlKey: true });
 
+    // It stands in the conversation while it waits, and the focus went to the docked composer.
+    const log = screen.getByRole("log", { name: "Konversation" });
+    expect(within(log).getByText("Skicka när modellen är sparad")).toBeTruthy();
+    expect(screen.queryByRole("heading", { level: 1, name: "Upphandlingsassistenten" })).toBeNull();
+    const docked = screen.getByRole<HTMLTextAreaElement>("textbox", {
+      name: "Fråga Upphandlingsassistenten"
+    });
+    expect(docked.value).toBe("");
+    expect(document.activeElement).toBe(docked);
+
+    // A first question goes back to the start state, its draft and the focus in that composer.
     fireEvent.click(screen.getByRole("button", { name: "Stoppa generering" }));
-    expect((field as HTMLTextAreaElement).value).toBe("Skicka när modellen är sparad");
+    expect(screen.queryByRole("log")).toBeNull();
+    expect(screen.getByRole("heading", { level: 1, name: "Upphandlingsassistenten" })).toBeTruthy();
+    const start = screen.getByRole<HTMLTextAreaElement>("textbox", {
+      name: "Fråga Upphandlingsassistenten"
+    });
+    expect(start.value).toBe("Skicka när modellen är sparad");
+    expect(document.activeElement).toBe(start);
     expect(screen.getByRole("button", { name: "Skicka meddelande" })).toBeTruthy();
 
     // Saved after the stop: nothing goes out.
     await act(async () => {
-      await Promise.resolve();
       saved();
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
