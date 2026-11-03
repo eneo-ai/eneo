@@ -25,6 +25,10 @@ from eneo.assistants.assistant_repo import (
     PersonalDefaultValidationInput,
 )
 from eneo.assistants.assistant_update import AssistantUpdate
+from eneo.assistants.reference_tags import (
+    INLINE_REFERENCE_PATTERN,
+    InlineReferenceScanner,
+)
 from eneo.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
 from eneo.authentication.auth_models import ApiKeyScopeType, ApiKeyStateReasonCode
 from eneo.authentication.auth_service import AuthService
@@ -318,7 +322,6 @@ class AssistantPreflightBaseline:
 
 
 AT_TAG_PATTERN = r"<eneo-at-tag: @[^>]+>"
-REFERENCE_PATTERN = r'<inref id="([0-9a-f]{8})"/>'  # noqa
 
 
 def clean_eneo_tag(input_string: str) -> str:
@@ -338,7 +341,9 @@ def get_references(
         return list(info_blobs)
 
     # Preserve order, remove duplicates
-    info_blob_ids = list(dict.fromkeys(re.findall(REFERENCE_PATTERN, response_string)))
+    info_blob_ids = list(
+        dict.fromkeys(INLINE_REFERENCE_PATTERN.findall(response_string))
+    )
 
     if get_id_func is None:
 
@@ -2701,6 +2706,13 @@ class AssistantService:
                 stream_output_token_estimate: int | None = None
                 stream_context_output_token_estimate: int | None = None
                 completed = False
+                # Version 1 lists every retrieved blob; later versions cite
+                # blobs inline, and each text chunk carries those cited so far.
+                reference_scanner = (
+                    None
+                    if version == 1
+                    else InlineReferenceScanner(datastore_result.info_blobs)
+                )
 
                 try:
                     completion = response.completion
@@ -2726,10 +2738,10 @@ class AssistantService:
 
                         if chunk.response_type == ResponseType.TEXT:
                             response_string = f"{response_string}{chunk.text}"
-                            chunk.reference_chunks = get_references(
-                                response_string=response_string,
-                                info_blobs=datastore_result.info_blobs,
-                                version=version,
+                            chunk.reference_chunks = (
+                                list(datastore_result.info_blobs)
+                                if reference_scanner is None
+                                else reference_scanner.references(response_string)
                             )
                             yield chunk
 
