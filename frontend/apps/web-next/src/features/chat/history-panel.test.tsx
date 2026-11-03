@@ -30,6 +30,8 @@ const api = vi.hoisted(() => ({
   /** The latest conversations with every assistant (`/conversations/recent/`). */
   recent: [] as Recent[],
   cursors: [] as (string | undefined)[],
+  /** While set, every read waits for it. */
+  hold: null as Promise<void> | null,
   GET: vi.fn(),
   PATCH: vi.fn(async () => ({ data: {}, response: new Response() })),
   POST: vi.fn(async () => ({ data: {}, response: new Response() })),
@@ -44,6 +46,7 @@ vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 beforeAll(() => {
   api.GET.mockImplementation(
     async (path: string, init: { params: { query: { cursor?: string } } }) => {
+      if (api.hold) await api.hold;
       if (path === "/api/v1/conversations/recent/") {
         return { data: { items: api.recent }, response: new Response() };
       }
@@ -65,6 +68,7 @@ beforeEach(() => {
     { id: "s2", name: "Protokoll KS", updated_at: new Date(now - 40 * day).toISOString() }
   ];
   api.cursors.length = 0;
+  api.hold = null;
   const space = { id: "space-1", name: "Upphandling", personal: false, organization: false };
   api.recent = [
     {
@@ -201,6 +205,9 @@ describe("HistoryAside", () => {
     fireEvent.change(input, { target: { value: "Direktupphandling" } });
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() => expect(queryClient.getQueryState(recent)?.isInvalidated).toBe(true));
+    // The history is read again once, not once per list invalidated.
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+    expect(api.cursors).toEqual([undefined, undefined]);
 
     queryClient.setQueryData(recent, []);
     fireEvent.click(await rowMenuItem("Protokoll KS", "Ta bort"));
@@ -208,6 +215,47 @@ describe("HistoryAside", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Bekräfta borttagning" }));
     await waitFor(() => expect(onDeleted).toHaveBeenCalledWith("s2"));
     expect(queryClient.getQueryState(recent)?.isInvalidated).toBe(true);
+  });
+
+  it("shows a rename at once in the history and in Senaste, before either is read again", async () => {
+    const queryClient = testQueryClient();
+    const nav = recentConversationsQueryOptions(browserApi).queryKey;
+    queryClient.setQueryData(nav, api.recent);
+    renderHistory({ queryClient });
+    fireEvent.click(await rowMenuItem("Upphandlingsanalys", "Byt namn"));
+    const input = await screen.findByLabelText(/^Namn/);
+    api.hold = new Promise(() => {});
+    fireEvent.change(input, { target: { value: "Direktupphandling" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(await screen.findByRole("button", { name: "Direktupphandling" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Upphandlingsanalys" })).toBeNull();
+    expect(queryClient.getQueryData<Recent[]>(nav)?.map((row) => [row.id, row.name])).toEqual([
+      ["s9", "Avtalsgranskning"],
+      ["s1", "Direktupphandling"]
+    ]);
+    // The refetch still follows.
+    expect(queryClient.getQueryState(nav)?.isInvalidated).toBe(true);
+  });
+
+  it("changes no list when a rename fails", async () => {
+    const queryClient = testQueryClient();
+    const nav = recentConversationsQueryOptions(browserApi).queryKey;
+    queryClient.setQueryData(nav, api.recent);
+    renderHistory({ queryClient });
+    fireEvent.click(await rowMenuItem("Upphandlingsanalys", "Byt namn"));
+    const input = await screen.findByLabelText(/^Namn/);
+    api.PATCH.mockResolvedValueOnce({
+      error: { message: "Unavailable" },
+      response: new Response(null, { status: 503 })
+    } as never);
+    fireEvent.change(input, { target: { value: "Direktupphandling" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(api.PATCH).toHaveBeenCalledOnce());
+    await waitFor(() => expect(screen.getByLabelText(/^Namn/)).toBeTruthy());
+    expect(screen.getByRole("button", { name: "Upphandlingsanalys" })).toBeTruthy();
+    expect(queryClient.getQueryData<Recent[]>(nav)).toEqual(api.recent);
   });
 
   it("renames and deletes from a row's menu; answers are rated in the conversation", async () => {
@@ -352,6 +400,41 @@ describe("HistoryAside scope (decision 29)", () => {
     expect(
       queryClient.getQueryData<{ pages: { items: unknown[] }[] }>(theirs)?.pages[0]?.items
     ).toEqual([]);
+    expect(queryClient.getQueryState(theirs)?.isInvalidated).toBe(true);
+  });
+
+  it("renames under Alla at once in every list, a later history page included", async () => {
+    const queryClient = testQueryClient();
+    const nav = recentConversationsQueryOptions(browserApi).queryKey;
+    queryClient.setQueryData(nav, api.recent);
+    // The other assistant's history has it on its second loaded page.
+    const theirs = ["conversations", "assistant", "assistant-2"];
+    queryClient.setQueryData(theirs, {
+      pages: [
+        { items: [{ id: "s8", name: "Remiss" }], next_cursor: "1" },
+        { items: [{ id: "s9", name: "Avtalsgranskning" }], next_cursor: null }
+      ],
+      pageParams: [null, "1"]
+    });
+    renderHistory({ queryClient });
+    fireEvent.click(within(scope()).getByRole("radio", { name: "Alla" }));
+    fireEvent.click(await rowMenuItem("Avtalsgranskning", "Byt namn"));
+    const input = await screen.findByLabelText(/^Namn/);
+    api.hold = new Promise(() => {});
+    fireEvent.change(input, { target: { value: "Ramavtal" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(await screen.findByRole("button", { name: /^Ramavtal/ })).toBeTruthy();
+    expect(queryClient.getQueryData<Recent[]>(nav)?.map((row) => row.name)).toEqual([
+      "Ramavtal",
+      "Upphandlingsanalys"
+    ]);
+    expect(
+      queryClient
+        .getQueryData<{ pages: { items: { name: string }[] }[] }>(theirs)
+        ?.pages.map((page) => page.items.map((item) => item.name))
+    ).toEqual([["Remiss"], ["Ramavtal"]]);
+    expect(queryClient.getQueryState(nav)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(theirs)?.isInvalidated).toBe(true);
   });
 

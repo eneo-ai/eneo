@@ -231,7 +231,7 @@ function ResourceAttachmentIcon({ file }: { file: Attachment }) {
 }
 
 function AttachmentPreview({ file, onClose }: { file: Attachment; onClose: () => void }) {
-  const { url, error } = useSignedUrl(file.id);
+  const { url, error, resign } = useSignedUrl(file.id);
   return (
     <AttachmentPreviewDialog
       open
@@ -240,6 +240,7 @@ function AttachmentPreview({ file, onClose }: { file: Attachment; onClose: () =>
       mimetype={file.mimetype}
       url={url}
       error={error}
+      onImageError={resign}
     />
   );
 }

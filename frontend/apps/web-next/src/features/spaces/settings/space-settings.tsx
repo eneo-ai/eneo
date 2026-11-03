@@ -59,7 +59,7 @@ import {
   type SecurityClassification
 } from "@/features/admin/security-classifications/security-classifications";
 import { parseRetentionDays } from "@/features/spaces/retention-days";
-import { invalidateSpaces, invalidateSpacesList, type Space } from "@/features/spaces/space";
+import { invalidateDeletedSpace, invalidateSpacesList, type Space } from "@/features/spaces/space";
 import { editorSummaries } from "@/features/spaces/editor-summaries";
 import { useSpace } from "@/features/spaces/use-space";
 import { PageHeader } from "@/components/composites/page-header";
@@ -933,7 +933,7 @@ function SpaceMcpServerRow({
 
 function DangerSection() {
   const t = useTranslations();
-  const { space } = useSpace();
+  const { space, routeId } = useSpace();
   const router = useRouter();
   const queryClient = useQueryClient();
 
@@ -941,7 +941,7 @@ function DangerSection() {
     mutationFn: () =>
       unwrap(browserApi.DELETE("/api/v1/spaces/{id}/", { params: { path: { id: space.id } } })),
     onSuccess: () => {
-      invalidateSpaces(queryClient);
+      void invalidateDeletedSpace(queryClient, routeId);
       router.push("/spaces/list");
     },
     onError: (error) => toastApiError(error, t)

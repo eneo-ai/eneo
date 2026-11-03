@@ -12,7 +12,7 @@ import { confirmationMatches } from "@/components/composites/confirmation-match"
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { useRemovalMutation } from "@/features/spaces/removal";
-import { invalidateSpaces, type SpaceSparse } from "@/features/spaces/space";
+import { invalidateDeletedSpace, type SpaceSparse } from "@/features/spaces/space";
 
 /** Mounted only during deletion, so settlement and every retry reset the timer. */
 export function SpaceDeletionHint() {
@@ -53,7 +53,7 @@ export function DeleteSpaceDialog({
   const deleteSpace = useRemovalMutation({
     mutationFn: (id: string) =>
       unwrap(browserApi.DELETE("/api/v1/spaces/{id}/", { params: { path: { id } } })),
-    refresh: () => invalidateSpaces(queryClient),
+    refresh: (id) => invalidateDeletedSpace(queryClient, id),
     onRemoved: () => close()
   });
 

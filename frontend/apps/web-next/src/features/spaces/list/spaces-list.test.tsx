@@ -254,6 +254,36 @@ describe("SpacesList", () => {
     );
   });
 
+  it("refreshes the list after a delete and leaves the other spaces' loaded data alone", async () => {
+    api.spaces = [space({}), space({ id: "s2", name: "Ekonomi" })];
+    const { queryClient } = await show();
+    const keys = [
+      ["spaces", "s1"],
+      ["spaces", "s2"],
+      ["spaces", "s2", "applications"]
+    ];
+    for (const key of keys) queryClient.setQueryData(key, {});
+
+    const more = screen.getByRole("button", { name: "Fler åtgärder för Upphandling" });
+    fireEvent.click(more);
+    const menu = document.getElementById(more.getAttribute("aria-controls") ?? "")!;
+    fireEvent.click(await within(menu).findByRole("menuitem", { name: "Radera yta" }));
+    const dialog = await screen.findByRole("dialog", { name: "Radera yta" });
+    const field = within(dialog).getByRole("textbox", { name: "Ange ytnamnet för att bekräfta" });
+    fireEvent.change(field, { target: { value: "Upphandling" } });
+    api.spaces = [space({ id: "s2", name: "Ekonomi" })];
+    fireEvent.click(within(dialog).getByRole("button", { name: "Bekräfta borttagning" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Radera yta" })).toBeNull());
+    expect(screen.queryByRole("button", { name: "Fler åtgärder för Upphandling" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Fler åtgärder för Ekonomi" })).toBeTruthy();
+    expect(keys.map((key) => queryClient.getQueryState(key)?.isInvalidated)).toEqual([
+      true,
+      false,
+      false
+    ]);
+  });
+
   it("closes the delete dialog with Escape without deleting", async () => {
     api.spaces = [space({})];
     await show();
