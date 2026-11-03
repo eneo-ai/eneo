@@ -5,7 +5,7 @@ import { useAnnounce } from "@astryxdesign/core/hooks";
 import type { WidgetClient, WidgetPublicConfig } from "@eneo/eneo-js";
 import { Maximize2, MessageSquarePlus, Minimize2, X } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import { loadAltcha, solveWithAltcha } from "../altcha";
 import { answerText } from "../answer-text";
 import { launcherColors } from "../contrast";
@@ -63,6 +63,7 @@ export function WidgetChat({
   persona?: PersonaView | null;
 }) {
   const t = useTranslations();
+  const titleId = useId();
   const announce = useAnnounce();
   const {
     conversation,
@@ -479,6 +480,7 @@ export function WidgetChat({
       ref={chatRoot}
     >
       <header
+        aria-labelledby={titleId}
         className={cn(
           "border-ax-border flex items-center justify-between gap-2 border-b px-4 py-3",
           config.theme.header_color && "widget-header-tinted"
@@ -489,7 +491,12 @@ export function WidgetChat({
               Eneo's own mark. Who answers is the persona's business, inside the
               conversation. */}
           <div className="min-w-0">
-            <h1 ref={title} tabIndex={-1} className="text-base font-semibold break-words">
+            <h1
+              id={titleId}
+              ref={title}
+              tabIndex={-1}
+              className="text-base font-semibold break-words"
+            >
               {config.texts.title || config.name}
             </h1>
             <p
@@ -559,7 +566,11 @@ export function WidgetChat({
       </header>
 
       {/* The conversation is the page's main landmark; header and footer frame it. */}
-      <main className="widget-log min-h-0 flex-1 overflow-y-auto px-4 py-4" ref={log}>
+      <main
+        className="widget-log min-h-0 flex-1 overflow-y-auto px-4 py-4"
+        ref={log}
+        aria-labelledby={titleId}
+      >
         <div className="widget-column">
           {unavailable ? (
             <p className="text-ax-text-secondary text-center text-sm">

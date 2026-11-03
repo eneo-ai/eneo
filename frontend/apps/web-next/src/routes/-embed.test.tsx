@@ -38,10 +38,10 @@ afterEach(() => {
   window.history.replaceState({}, "", "/");
 });
 
-async function open(path: string, response: Response) {
+async function open(path: string, response: Response | Promise<Response>) {
   window.history.replaceState({}, "", path);
   document.documentElement.dataset.eneoEmbedScheme = "light";
-  const fetcher = vi.fn<typeof fetch>(async () => response.clone());
+  const fetcher = vi.fn<typeof fetch>(async () => (await response).clone());
   vi.stubGlobal("fetch", fetcher);
   const queryClient = makeQueryClient();
   const router = createAppRouter(
@@ -91,6 +91,21 @@ it("uses a preview token only from the fragment and never makes an anonymous con
   expect(request.url).not.toContain("draft-secret");
 });
 
+it("names the preview's loading landmark until its configuration arrives", async () => {
+  document.documentElement.dataset.eneoEmbedState = "preview";
+  let respond!: (response: Response) => void;
+  const response = new Promise<Response>((resolve) => {
+    respond = resolve;
+  });
+  await open(`/embed/${publicId}?preview=1#preview=draft-secret`, response);
+  expect(screen.getByRole("main", { name: messages.widget_preview_loading })).toBeTruthy();
+  await act(async () => {
+    respond(Response.json({ name: "Utkast", texts: { title: "Utkast" } }));
+  });
+  expect(await screen.findByRole("heading", { name: "Utkast" })).toBeTruthy();
+  expect(screen.queryByRole("main", { name: messages.widget_preview_loading })).toBeNull();
+});
+
 it.each(["/embed", "/en/embed"])(
   "keeps %s unavailable for the document lifetime even after the widget is activated",
   async (prefix) => {
@@ -104,6 +119,7 @@ it.each(["/embed", "/en/embed"])(
     expect(
       await screen.findByRole("heading", { name: messages.widget_not_available_title })
     ).toBeTruthy();
+    expect(screen.getByRole("main", { name: messages.widget_not_available_title })).toBeTruthy();
     expect(fetcher).not.toHaveBeenCalled();
     await act(() => router.invalidate());
     expect(fetcher).not.toHaveBeenCalled();

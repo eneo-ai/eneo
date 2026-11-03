@@ -105,7 +105,12 @@ describe("WidgetChat", () => {
     renderChat(config(), client);
 
     expect(screen.getByRole("heading", { level: 1, name: "Kaffehjälpen" })).toBeTruthy();
-    expect(screen.getByText("Hej! Fråga mig om kaffe.")).toBeTruthy();
+    expect(screen.getByRole("banner", { name: "Kaffehjälpen" })).toBeTruthy();
+    expect(
+      within(screen.getByRole("main", { name: "Kaffehjälpen" })).getByText(
+        "Hej! Fråga mig om kaffe."
+      )
+    ).toBeTruthy();
     // Without a persona the welcome text is a plain paragraph, outside the log.
     expect(screen.queryByRole("log")).toBeNull();
 

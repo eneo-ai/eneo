@@ -2,7 +2,7 @@
 
 import { X } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { useEffect, useId, useRef, useSyncExternalStore } from "react";
 import { createEmbedBridge, type EmbedBridge } from "../embed-bridge";
 
 const subscribeNever = () => () => {};
@@ -15,6 +15,7 @@ const subscribeNever = () => () => {};
  */
 export function WidgetNotice({ hostOrigin }: { hostOrigin: string | null }) {
   const t = useTranslations();
+  const headingId = useId();
   const heading = useRef<HTMLHeadingElement>(null);
   const bridge = useRef<EmbedBridge | null>(null);
   const embedded = useSyncExternalStore(
@@ -45,7 +46,10 @@ export function WidgetNotice({ hostOrigin }: { hostOrigin: string | null }) {
 
   return (
     // Every state of the page is its main landmark, like the chat itself.
-    <main className="bg-ax-surface text-ax-text fixed inset-0 flex flex-col items-center justify-center gap-2 p-6">
+    <main
+      aria-labelledby={headingId}
+      className="bg-ax-surface text-ax-text fixed inset-0 flex flex-col items-center justify-center gap-2 p-6"
+    >
       {embedded && (
         <button
           type="button"
@@ -57,7 +61,7 @@ export function WidgetNotice({ hostOrigin }: { hostOrigin: string | null }) {
           <X className="size-5" aria-hidden="true" />
         </button>
       )}
-      <h1 ref={heading} className="text-base font-semibold" tabIndex={-1}>
+      <h1 id={headingId} ref={heading} className="text-base font-semibold" tabIndex={-1}>
         {t("widget_not_available_title")}
       </h1>
       <p className="text-ax-text-secondary text-center text-sm">{t("widget_not_available_body")}</p>

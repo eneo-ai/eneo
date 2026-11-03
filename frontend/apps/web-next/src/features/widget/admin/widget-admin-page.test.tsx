@@ -150,6 +150,25 @@ describe("WidgetAdminPage", () => {
     });
   });
 
+  it("marks the selected preview scheme and sends that scheme to the real embed page", async () => {
+    showPage([widget()]);
+    const frame = (await screen.findByTitle(
+      "Förhandsgranskning av chattwidgeten"
+    )) as HTMLIFrameElement;
+    const schemes = within(
+      screen.getByRole("group", { name: "Färgschema i förhandsgranskningen" })
+    );
+    const automatic = schemes.getByRole("button", { name: "Automatiskt", pressed: true });
+    const dark = schemes.getByRole("button", { name: "Mörkt", pressed: false });
+    expect(automatic.querySelector("svg.lucide-check")).toBeTruthy();
+    expect(dark.querySelector("svg.lucide-check")).toBeNull();
+    fireEvent.click(dark);
+    expect(dark.getAttribute("aria-pressed")).toBe("true");
+    expect(dark.querySelector("svg.lucide-check")).toBeTruthy();
+    expect(automatic.querySelector("svg.lucide-check")).toBeNull();
+    expect(new URL(frame.src).searchParams.get("scheme")).toBe("dark");
+  });
+
   it("saves an edited name with the widget's revision after a pause", async () => {
     api.PATCH.mockImplementation((_path: string, init: { body: Record<string, unknown> }) =>
       ok(widget({ ...init.body, revision: 4 }))

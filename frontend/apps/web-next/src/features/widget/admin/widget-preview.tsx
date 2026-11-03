@@ -2,6 +2,7 @@
 
 import { Button } from "@astryxdesign/core/Button";
 import { ToggleButton, ToggleButtonGroup } from "@astryxdesign/core/ToggleButton";
+import { Check } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useEffect, useId, useRef, useState } from "react";
 import { toastApiError } from "@/lib/api/toast";
@@ -137,25 +138,37 @@ export function WidgetPreview({ widget }: { widget: Widget }) {
             <ToggleButton
               value="auto"
               label={t("widget_admin_scheme_auto")}
+              pressedIcon={<Check className="size-4" aria-hidden="true" />}
               isDisabled={pinnedScheme !== null}
-            />
+            >
+              {t("widget_admin_scheme_auto")}
+            </ToggleButton>
             <ToggleButton
               value="light"
               label={t("widget_admin_scheme_light")}
+              pressedIcon={<Check className="size-4" aria-hidden="true" />}
               isDisabled={pinnedScheme !== null}
-            />
+            >
+              {t("widget_admin_scheme_light")}
+            </ToggleButton>
             <ToggleButton
               value="dark"
               label={t("widget_admin_scheme_dark")}
+              pressedIcon={<Check className="size-4" aria-hidden="true" />}
               isDisabled={pinnedScheme !== null}
-            />
+            >
+              {t("widget_admin_scheme_dark")}
+            </ToggleButton>
           </ToggleButtonGroup>
           <ToggleButton
             size="sm"
             label={t("widget_admin_preview_mobile")}
+            pressedIcon={<Check className="size-4" aria-hidden="true" />}
             isPressed={mobile}
             onPressedChange={setMobile}
-          />
+          >
+            {t("widget_admin_preview_mobile")}
+          </ToggleButton>
           <Button
             size="sm"
             label={t("widget_admin_preview_reload")}

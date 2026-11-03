@@ -62,6 +62,7 @@ describe("WidgetsAdminPage", () => {
       name: "Widgetar med placering, status och användning"
     });
     expect(within(list).getAllByRole("listitem")).toHaveLength(2);
+    expect(within(list).getAllByRole("heading", { level: 2 })).toHaveLength(2);
     expect(within(list).getByRole("link", { name: "Kontaktchatt" }).getAttribute("href")).toBe(
       "/spaces/s1/assistants/a1/widget"
     );

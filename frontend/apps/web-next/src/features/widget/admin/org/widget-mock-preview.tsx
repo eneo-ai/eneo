@@ -1,7 +1,7 @@
 "use client";
 
 import { ToggleButton, ToggleButtonGroup } from "@astryxdesign/core/ToggleButton";
-import { SendHorizontal } from "lucide-react";
+import { Check, SendHorizontal } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useId, useState } from "react";
 import type { Schema } from "@/lib/api/models";
@@ -92,13 +92,19 @@ export function WidgetMockPreview({
           <ToggleButton
             value="light"
             label={t("widget_admin_scheme_light")}
+            pressedIcon={<Check className="size-4" aria-hidden="true" />}
             isDisabled={pinned !== null}
-          />
+          >
+            {t("widget_admin_scheme_light")}
+          </ToggleButton>
           <ToggleButton
             value="dark"
             label={t("widget_admin_scheme_dark")}
+            pressedIcon={<Check className="size-4" aria-hidden="true" />}
             isDisabled={pinned !== null}
-          />
+          >
+            {t("widget_admin_scheme_dark")}
+          </ToggleButton>
         </ToggleButtonGroup>
       </div>
       <p className="text-ax-text-secondary text-sm">
@@ -130,7 +136,7 @@ export function WidgetMockPreview({
             }}
           >
             <div className="min-w-0">
-              <p className="truncate text-base font-semibold">{texts.title || name}</p>
+              <h3 className="truncate text-base font-semibold">{texts.title || name}</h3>
               <p className={`text-xs ${header ? "" : "text-ax-text-secondary"}`}>
                 {texts.subtitle}
               </p>

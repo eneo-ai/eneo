@@ -210,7 +210,7 @@ test("the Vite widget loads cross-origin, streams and stores conversation feedba
   }
 });
 
-test("the real widget passes the full WCAG AA audit in its accessibility instrumentation context", async ({
+test("the widget's answer and feedback dialog pass automated WCAG AA checks", async ({
   page,
   browser
 }) => {

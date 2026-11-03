@@ -1,6 +1,6 @@
 import { createWidgetClient, type WidgetPublicConfig } from "@eneo/eneo-js";
 import { useTranslations } from "use-intl";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { isEmbedDocumentUnavailable } from "../embed-config";
 import { readPreviewToken } from "../preview";
 import { EmbedApp } from "./embed-app";
@@ -25,6 +25,7 @@ export function EmbedPage({
   preview: boolean;
 }) {
   const t = useTranslations();
+  const loadingId = useId();
   const documentUnavailable = isEmbedDocumentUnavailable();
   const previewToken = preview ? readPreviewToken(location.hash) : null;
   const [previewConfig, setPreviewConfig] = useState<WidgetPublicConfig | null>(null);
@@ -71,8 +72,13 @@ export function EmbedPage({
   if (unavailable || fetchFailed || (preview && !previewToken))
     return <WidgetNotice hostOrigin={hostOrigin} />;
   return (
-    <main className="bg-ax-surface text-ax-text-secondary fixed inset-0 flex items-center justify-center p-6">
-      <p className="text-sm">{t("widget_preview_loading")}</p>
+    <main
+      aria-labelledby={loadingId}
+      className="bg-ax-surface text-ax-text-secondary fixed inset-0 flex items-center justify-center p-6"
+    >
+      <p id={loadingId} className="text-sm">
+        {t("widget_preview_loading")}
+      </p>
     </main>
   );
 }

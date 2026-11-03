@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { screen } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
@@ -28,6 +28,7 @@ describe("WidgetMockPreview", () => {
     expect(image.textContent).toContain("Sigge");
     expect(image.textContent).toContain("www.kommun.se");
     expect(screen.getByRole("heading", { level: 2, name: "Förhandsgranskning" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 3, name: "Fråga oss" })).toBeTruthy();
     await expectNoAxeViolations(container);
   });
 
@@ -43,5 +44,26 @@ describe("WidgetMockPreview", () => {
     expect(dark.hasAttribute("disabled") || dark.getAttribute("aria-disabled") === "true").toBe(
       true
     );
+  });
+
+  it("marks the chosen scheme with a check and moves it when the preview changes", () => {
+    renderInApp(<WidgetMockPreview name="Kommunmallen" texts={texts} theme={{}} />);
+    const schemes = within(
+      screen.getByRole("group", { name: "Färgschema i förhandsgranskningen" })
+    );
+    const selected = schemes.getByRole("button", { pressed: true });
+    const other = schemes.getByRole("button", { pressed: false });
+    const nextScheme = other === schemes.getByRole("button", { name: "Mörkt" }) ? "dark" : "light";
+    expect(selected.querySelector("svg.lucide-check")).toBeTruthy();
+    expect(other.querySelector("svg.lucide-check")).toBeNull();
+    fireEvent.click(other);
+    expect(other.getAttribute("aria-pressed")).toBe("true");
+    expect(other.querySelector("svg.lucide-check")).toBeTruthy();
+    expect(selected.querySelector("svg.lucide-check")).toBeNull();
+    expect(
+      screen
+        .getByRole("img", { name: /Statisk förhandsgranskning av mallen Kommunmallen/ })
+        .getAttribute("data-theme")
+    ).toBe(nextScheme);
   });
 });

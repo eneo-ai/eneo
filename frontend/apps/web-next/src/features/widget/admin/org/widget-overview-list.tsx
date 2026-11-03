@@ -97,7 +97,7 @@ export function WidgetOverviewList({ overview }: { overview: WidgetOverview }) {
               <article className="bg-ax-card border-ax-border flex h-full flex-col gap-4 rounded-xl border p-4">
                 <div className="border-ax-border flex flex-wrap items-start justify-between gap-2 border-b pb-3">
                   <div className="min-w-0">
-                    <h3 className="flex flex-wrap items-center gap-2 text-base font-semibold">
+                    <h2 className="flex flex-wrap items-center gap-2 text-base font-semibold">
                       <Link
                         className="inline-flex min-h-6 min-w-6 items-center underline-offset-2 hover:underline pointer-coarse:min-h-11 pointer-coarse:min-w-11"
                         href={widgetHref(item)}
@@ -114,7 +114,7 @@ export function WidgetOverviewList({ overview }: { overview: WidgetOverview }) {
                         }
                         label={statusLabel(item)}
                       />
-                    </h3>
+                    </h2>
                     <p className="text-ax-text-secondary text-sm">
                       {item.space_name ?? "–"} · {item.assistant_name ?? "–"} ·{" "}
                       {item.allowed_origins.length === 1
