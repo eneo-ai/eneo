@@ -597,9 +597,9 @@ for (const colorScheme of ["light", "dark"] as const) {
             page.getByRole("tab", { name: /^(Webbplatser|Websites)$/, selected: true })
           ).toBeVisible();
           const panel = page.getByRole("tabpanel");
-          // A new space has no websites: the empty state (a list shows a table).
+          // A new space has no websites: the empty state, under the page's h1 (a list shows a table).
           await expect(
-            panel.getByRole("heading", { level: 3 }).or(panel.getByRole("table")).first()
+            panel.getByRole("heading", { level: 2 }).or(panel.getByRole("table")).first()
           ).toBeVisible();
         });
 
