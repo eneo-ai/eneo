@@ -30,7 +30,7 @@ import { cn } from "@/lib/utils";
 import { useFileDrop } from "@/features/files/use-file-drop";
 import { FileFormatDetails } from "@/features/files/file-format-details";
 import { useJobs } from "@/features/jobs/use-jobs";
-import { useMediaMatch } from "@/lib/hooks/use-media-match";
+import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { collectionBlobsQueryOptions } from "./knowledge";
 import { useFocusRescue } from "@/lib/focus-rescue";
 
@@ -155,7 +155,7 @@ function UploadBlobsForm({
 }) {
   const t = useTranslations();
   // Dragging a file onto the page needs a mouse: a touch screen is told to choose files.
-  const coarse = useMediaMatch("(pointer: coarse)");
+  const coarse = useMediaQuery("(pointer: coarse)");
   const locale = useLocale();
   const { limits, user, can } = useAppContext();
   const queryClient = useQueryClient();

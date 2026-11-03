@@ -1,8 +1,8 @@
 import { useChat } from "@ai-sdk/react";
 import { Button } from "@astryxdesign/core/Button";
 import { ChatMessageList, ChatSystemMessage } from "@astryxdesign/core/Chat";
-import { Collapsible } from "@astryxdesign/core/Collapsible";
-import { useAnnounce } from "@astryxdesign/core/hooks";
+import { Collapsible } from "@/components/astryx/collapsible";
+import { useAnnounce, useMediaQuery } from "@astryxdesign/core/hooks";
 import { Selector } from "@astryxdesign/core/Selector";
 import { useQueryClient } from "@tanstack/react-query";
 import { CircleAlert } from "lucide-react";
@@ -23,7 +23,6 @@ import {
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
 import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
-import { useMediaMatch } from "@/lib/hooks/use-media-match";
 import { MEDIA } from "@/lib/breakpoints";
 import { useOnline } from "@/lib/hooks/use-online";
 import { invalidateConversationLists } from "@/lib/api/conversations";
@@ -321,8 +320,8 @@ function ConversationView({
   const dockTextareaRef = useRef<HTMLTextAreaElement>(null);
   const startTextareaRef = useRef<HTMLTextAreaElement>(null);
   const startDockTextareaRef = useRef<HTMLTextAreaElement>(null);
-  const phone = useMediaMatch(PHONE);
-  const startDocked = useMediaMatch(DOCK_START);
+  const phone = useMediaQuery(PHONE);
+  const startDocked = useMediaQuery(DOCK_START);
   /** The start composer's field the user has: docked or centred (DOCK_START). */
   const startTextarea = () => (startDocked ? startDockTextareaRef : startTextareaRef).current;
   const startField = useEffectEvent(startTextarea);

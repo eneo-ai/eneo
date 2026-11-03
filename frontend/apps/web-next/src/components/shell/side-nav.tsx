@@ -5,7 +5,7 @@ import { useTranslations } from "use-intl";
 import { useEffect, useState } from "react";
 import { MEDIA } from "@/lib/breakpoints";
 import { useFocusRescue } from "@/lib/focus-rescue";
-import { useMediaMatch } from "@/lib/hooks/use-media-match";
+import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { cn } from "@/lib/utils";
 import { AdminSections, AdminTopContent } from "./admin-nav";
 import { EneoWordMark } from "./eneo-logo";
@@ -41,7 +41,7 @@ export function DesktopSideNav({
 }) {
   const t = useTranslations();
   const [chosen, setChosen] = useState(defaultCollapsed);
-  const isNarrow = useMediaMatch(`not all and ${MEDIA.xl}`);
+  const isNarrow = useMediaQuery(`not all and ${MEDIA.xl}`);
   const collapsed = chosen ?? isNarrow;
 
   // The width collapsing or expanding the nav removes whole sections (Senaste

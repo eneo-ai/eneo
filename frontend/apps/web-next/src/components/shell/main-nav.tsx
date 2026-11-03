@@ -1,5 +1,5 @@
 import { AppShellMobileContext, useAppShellMobile } from "@astryxdesign/core/AppShell";
-import { useMediaMatch } from "@/lib/hooks/use-media-match";
+import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { Button } from "@astryxdesign/core/Button";
 import { Icon } from "@astryxdesign/core/Icon";
 import { IconButton } from "@astryxdesign/core/IconButton";
@@ -225,7 +225,7 @@ function RecentConversationItem({
   const context = conversationContext(conversation, t);
   // A touch screen has no tooltip: the context joins the title, so two chats with the
   // same title can be told apart in the phone's menu.
-  const coarse = useMediaMatch("(pointer: coarse)");
+  const coarse = useMediaQuery("(pointer: coarse)");
   const title = conversation.name.trim() || t("shell_untitled_conversation");
 
   return (

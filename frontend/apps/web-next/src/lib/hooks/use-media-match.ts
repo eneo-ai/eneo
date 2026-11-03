@@ -1,5 +1,5 @@
+import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { MEDIA } from "@/lib/breakpoints";
-import { useCallback, useSyncExternalStore } from "react";
 
 /**
  * Narrower than 768 px (Tailwind `md`), whatever the pointer. A phone's layout
@@ -18,7 +18,9 @@ export const MOBILE_QUERY = `not all and ${MEDIA.lg}`;
  * A phone in a hand, held either way: touched, and either narrower than a phone (below 768 px) or
  * as short as one held sideways (a phone turned is 844 px wide and under 430 px tall; an iPad is
  * 1024 px or more wide when it is short with its keyboard up). Turning it does not change which
- * it is, so a screen built for a phone stays one and keeps what is open on it.
+ * it is, so a screen built for a phone stays one and keeps what is open on it. Not Astryx's
+ * compactDefinition, which counts any window under 500 px tall: a short desktop window or an iPad
+ * with its keyboard up is not a phone here, and rem follows the font size as Tailwind does.
  */
 export const HANDHELD_QUERY =
   "(pointer: coarse) and (width < 48rem), (pointer: coarse) and (height < 31.25rem) and (width < 64rem)";
@@ -35,21 +37,5 @@ export const PHONE_SCREEN_QUERY = `${PHONE_QUERY}, ${HANDHELD_QUERY}`;
  * stays built for one when the phone is turned, and keeps what is open on it.
  */
 export function usePhoneScreen(): boolean {
-  return useMediaMatch(PHONE_SCREEN_QUERY);
-}
-
-/** Match the current viewport immediately and follow changes.
- * Astryx's useMediaQuery returns false until its effect measures the viewport.
- */
-export function useMediaMatch(query: string): boolean {
-  // Stable per query, so a re-render does not subscribe again.
-  const subscribe = useCallback(
-    (onChange: () => void) => {
-      const list = window.matchMedia(query);
-      list.addEventListener("change", onChange);
-      return () => list.removeEventListener("change", onChange);
-    },
-    [query]
-  );
-  return useSyncExternalStore(subscribe, () => window.matchMedia(query).matches);
+  return useMediaQuery(PHONE_SCREEN_QUERY);
 }

@@ -1,7 +1,6 @@
 import { Button } from "@astryxdesign/core/Button";
-import { useMediaMatch } from "@/lib/hooks/use-media-match";
 import { ChatComposer, ChatComposerDrawer, useChatComposerContext } from "@astryxdesign/core/Chat";
-import { useAnnounce, useMergedRefs } from "@astryxdesign/core/hooks";
+import { useAnnounce, useMediaQuery, useMergedRefs } from "@astryxdesign/core/hooks";
 import { Kbd } from "@astryxdesign/core/Kbd";
 import { Popover } from "@astryxdesign/core/Popover";
 import { isImeKeyEvent } from "@astryxdesign/core/utils";
@@ -335,7 +334,7 @@ export function Composer({
   const t = useTranslations();
   // A touch screen has no Shift, Ctrl or Enter key to point at, and its
   // Return adds a line.
-  const coarse = useMediaMatch("(pointer: coarse)");
+  const coarse = useMediaQuery("(pointer: coarse)");
   const announce = useAnnounce();
   const hintId = useId();
   const problemId = useId();

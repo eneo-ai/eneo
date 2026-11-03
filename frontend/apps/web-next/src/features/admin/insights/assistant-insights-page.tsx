@@ -1,6 +1,6 @@
 import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
-import { useAnnounce } from "@astryxdesign/core/hooks";
+import { useAnnounce, useMediaQuery } from "@astryxdesign/core/hooks";
 import { revealProblems } from "@/components/composites/field-problem";
 import { Switch } from "@astryxdesign/core/Switch";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
@@ -50,7 +50,6 @@ import { useSearchParams, replaceUrl } from "@/lib/navigation";
 import { insightPeriod } from "./insights";
 import { insightRangeOfDays } from "@/features/insights/insights-range";
 import { InsightsRangePicker } from "@/features/insights/insights-range-picker";
-import { useMediaMatch } from "@/lib/hooks/use-media-match";
 import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
 type InsightsTab = AssistantInsightView["tab"];
@@ -109,7 +108,7 @@ function AnalysisTab({
 }) {
   const t = useTranslations();
   const announce = useAnnounce();
-  const coarse = useMediaMatch("(pointer: coarse)");
+  const coarse = useMediaQuery("(pointer: coarse)");
   const [question, setQuestion] = useState("");
   const [asked, setAsked] = useState(false);
   const questionRef = useRef<HTMLTextAreaElement>(null);

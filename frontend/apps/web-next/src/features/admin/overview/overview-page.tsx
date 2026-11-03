@@ -19,7 +19,8 @@ import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError } from "@/lib/api/errors";
 import { useFocusAcrossLayouts } from "@/lib/hooks/use-focus-across-layouts";
-import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
+import { useMediaQuery } from "@astryxdesign/core/hooks";
+import { PHONE_QUERY } from "@/lib/hooks/use-media-match";
 import { cn } from "@/lib/utils";
 import { actionLabel } from "@/features/admin/audit/audit";
 import type { CrawlerSchedulerHealth } from "@/features/admin/crawler/crawler";
@@ -525,7 +526,7 @@ function AreaRows({ className }: { className?: string }) {
 export function AdminOverviewPage() {
   const t = useTranslations();
   const { settings } = useAppContext();
-  const phone = useMediaMatch(PHONE_QUERY);
+  const phone = useMediaQuery(PHONE_QUERY);
   const layouts = useRef<HTMLDivElement>(null);
   useFocusAcrossLayouts(layouts, phone);
 
