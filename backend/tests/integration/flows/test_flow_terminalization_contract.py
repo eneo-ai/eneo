@@ -1736,6 +1736,13 @@ async def test_one_renewal_tells_a_held_run_from_a_lost_one(
         await asyncio.gather(*jobs.values(), return_exceptions=True)
 
 
+async def _alembic_versions(session) -> set[str]:
+    """The stamped revisions: one per branch of the history that is not merged yet."""
+    return set(
+        await session.scalars(sa.text("SELECT version_num FROM alembic_version"))
+    )
+
+
 @pytest.mark.asyncio
 @pytest.mark.integration
 @pytest.mark.migration_isolation
@@ -1773,53 +1780,85 @@ async def test_heartbeat_migration_cutover_preserves_existing_running_history(
     config = Config(str(backend / "alembic.ini"))
     config.set_main_option("script_location", str(backend / "alembic"))
     config.set_main_option("sqlalchemy.url", test_settings.sync_database_url)
-    await asyncio.to_thread(command.downgrade, config, "202609201000")
-    failed = False
-
-    def fail_committed_phase(conn, cursor, statement, parameters, context, executemany):
-        nonlocal failed
-        matches = {
-            "backfill": "UPDATE flow_runs SET execution_heartbeat_at" in statement,
-            "index": "CREATE INDEX CONCURRENTLY" in statement,
-            "stamp": "UPDATE alembic_version" in statement,
-        }
-        if failed or not matches[failure_phase]:
-            return
-        failed = True
-        if failure_phase == "index":
-            # A failed concurrent build leaves an INVALID index with the target name.
-            cursor.execute(
-                "CREATE INDEX CONCURRENTLY ix_flow_runs_running_execution_heartbeat "
-                "ON flow_runs ((1 / (revision - revision)))"
-            )
-        else:
-            cursor.execute(
-                "DO $$ BEGIN RAISE EXCEPTION 'injected lock timeout' "
-                "USING ERRCODE = '55P03'; END $$"
-            )
-
-    sa.event.listen(Engine, "before_cursor_execute", fail_committed_phase)
+    await asyncio.to_thread(command.downgrade, config, "202609201100")
     try:
-        with pytest.raises((DBAPIError, psycopg2.Error)):
-            await asyncio.to_thread(command.upgrade, config, "202609201200")
-        assert failed
-    finally:
-        sa.event.remove(Engine, "before_cursor_execute", fail_committed_phase)
-    async with sessionmanager.session() as session, session.begin():
-        assert (
-            await session.scalar(sa.text("SELECT version_num FROM alembic_version"))
-            == "202609201000"
-        )
-        assert (
-            await session.scalar(
-                sa.text(
-                    "SELECT count(*) FROM pg_attribute WHERE attrelid = 'flow_runs'::regclass "
-                    "AND attname = 'execution_heartbeat_at' AND NOT attisdropped"
+        failed = False
+
+        def fail_committed_phase(
+            conn, cursor, statement, parameters, context, executemany
+        ):
+            nonlocal failed
+            matches = {
+                "backfill": "UPDATE flow_runs SET execution_heartbeat_at" in statement,
+                "index": "CREATE INDEX CONCURRENTLY" in statement,
+                "stamp": "UPDATE alembic_version" in statement,
+            }
+            if failed or not matches[failure_phase]:
+                return
+            failed = True
+            if failure_phase == "index":
+                # A failed concurrent build leaves an INVALID index with the target name.
+                cursor.execute(
+                    "CREATE INDEX CONCURRENTLY ix_flow_runs_running_execution_heartbeat "
+                    "ON flow_runs ((1 / (revision - revision)))"
                 )
+            else:
+                cursor.execute(
+                    "DO $$ BEGIN RAISE EXCEPTION 'injected lock timeout' "
+                    "USING ERRCODE = '55P03'; END $$"
+                )
+
+        sa.event.listen(Engine, "before_cursor_execute", fail_committed_phase)
+        try:
+            with pytest.raises((DBAPIError, psycopg2.Error)):
+                await asyncio.to_thread(command.upgrade, config, "202609201200")
+            assert failed
+        finally:
+            sa.event.remove(Engine, "before_cursor_execute", fail_committed_phase)
+        async with sessionmanager.session() as session, session.begin():
+            assert "202609201100" in await _alembic_versions(session)
+            assert (
+                await session.scalar(
+                    sa.text(
+                        "SELECT count(*) FROM pg_attribute WHERE attrelid = 'flow_runs'::regclass "
+                        "AND attname = 'execution_heartbeat_at' AND NOT attisdropped"
+                    )
+                )
+                == 1
             )
-            == 1
-        )
-        if failure_phase == "index":
+            if failure_phase == "index":
+                assert (
+                    await session.scalar(
+                        sa.text(
+                            "SELECT indisvalid FROM pg_index WHERE indexrelid = "
+                            "'ix_flow_runs_running_execution_heartbeat'::regclass"
+                        )
+                    )
+                    is False
+                )
+            heartbeat = existing.updated_at
+            if failure_phase != "backfill":
+                heartbeat = await session.scalar(
+                    sa.update(FlowRuns)
+                    .where(FlowRuns.id == run.id)
+                    .values(
+                        execution_heartbeat_at=sa.func.clock_timestamp(),
+                        updated_at=FlowRuns.updated_at,
+                    )
+                    .returning(FlowRuns.execution_heartbeat_at)
+                )
+        await asyncio.to_thread(command.upgrade, config, "202609201200")
+        async with sessionmanager.session() as session, session.begin():
+            assert "202609201200" in await _alembic_versions(session)
+            assert (
+                await session.scalar(
+                    sa.text(
+                        "SELECT convalidated FROM pg_constraint WHERE conrelid = 'flow_runs'::regclass "
+                        "AND conname = 'ck_flow_runs_running_execution_heartbeat'"
+                    )
+                )
+                is True
+            )
             assert (
                 await session.scalar(
                     sa.text(
@@ -1827,56 +1866,27 @@ async def test_heartbeat_migration_cutover_preserves_existing_running_history(
                         "'ix_flow_runs_running_execution_heartbeat'::regclass"
                     )
                 )
-                is False
+                is True
             )
-        heartbeat = existing.updated_at
-        if failure_phase != "backfill":
-            heartbeat = await session.scalar(
-                sa.update(FlowRuns)
-                .where(FlowRuns.id == run.id)
-                .values(
-                    execution_heartbeat_at=sa.func.clock_timestamp(),
-                    updated_at=FlowRuns.updated_at,
+            assert (
+                await session.scalar(
+                    sa.text("SELECT to_regclass('ix_flow_runs_running_updated_at')")
                 )
-                .returning(FlowRuns.execution_heartbeat_at)
+                is None
             )
-    await asyncio.to_thread(command.upgrade, config, "202609201200")
-    async with sessionmanager.session() as session, session.begin():
-        assert (
-            await session.scalar(sa.text("SELECT version_num FROM alembic_version"))
-            == "202609201200"
-        )
-        assert (
-            await session.scalar(
-                sa.text(
-                    "SELECT convalidated FROM pg_constraint WHERE conrelid = 'flow_runs'::regclass "
-                    "AND conname = 'ck_flow_runs_running_execution_heartbeat'"
-                )
+        # The repository reads today's columns, which later revisions add.
+        await asyncio.to_thread(command.upgrade, config, "heads")
+        async with sessionmanager.session() as session, session.begin():
+            restored = await FlowRunRepository(session=session).get(
+                run_id=run.id, tenant_id=run.tenant_id
             )
-            is True
-        )
-        assert (
-            await session.scalar(
-                sa.text(
-                    "SELECT indisvalid FROM pg_index WHERE indexrelid = "
-                    "'ix_flow_runs_running_execution_heartbeat'::regclass"
-                )
-            )
-            is True
-        )
-        assert (
-            await session.scalar(
-                sa.text("SELECT to_regclass('ix_flow_runs_running_updated_at')")
-            )
-            is None
-        )
-        restored = await FlowRunRepository(session=session).get(
-            run_id=run.id, tenant_id=run.tenant_id
-        )
-        assert restored.execution_heartbeat_at == heartbeat
-        assert restored.updated_at == existing.updated_at
-        assert restored.revision == existing.revision
-        assert restored.status == existing.status == FlowRunStatus.RUNNING
+            assert restored.execution_heartbeat_at == heartbeat
+            assert restored.updated_at == existing.updated_at
+            assert restored.revision == existing.revision
+            assert restored.status == existing.status == FlowRunStatus.RUNNING
+    finally:
+        # Back to head for the next case: the session's schema is migrated once.
+        await asyncio.to_thread(command.upgrade, config, "heads")
 
 
 @pytest.mark.asyncio
