@@ -332,19 +332,6 @@ SESSIONS_REPO_CASES: list[tuple[str, Callable[..., Awaitable[set[UUID]]], str]] 
         "single",
     ),
     (
-        "get_by_assistant_helper_returns_empty",
-        # Listing by the helper assistant must return no sessions.
-        lambda repo, s: repo.get_by_assistant(assistant_id=s["helper_assistant"]),
-        "list_then_total",
-    ),
-    (
-        "get_by_assistant_with_tenant_excludes_helper",
-        lambda repo, s: repo.get_by_assistant(
-            assistant_id=s["helper_assistant"], tenant_id=s["tenant_id"]
-        ),
-        "list_then_total",
-    ),
-    (
         "get_metadata_by_assistant_helper_returns_empty",
         lambda repo, s: repo.get_metadata_by_assistant(
             assistant_id=s["helper_assistant"]
@@ -355,18 +342,6 @@ SESSIONS_REPO_CASES: list[tuple[str, Callable[..., Awaitable[set[UUID]]], str]] 
         "get_metadata_by_assistant_with_tenant_excludes_helper",
         lambda repo, s: repo.get_metadata_by_assistant(
             assistant_id=s["helper_assistant"], tenant_id=s["tenant_id"]
-        ),
-        "list_then_total",
-    ),
-    (
-        "get_by_group_chat_excludes_helper",
-        lambda repo, s: repo.get_by_group_chat(group_chat_id=s["group_chat"]),
-        "list_then_total",
-    ),
-    (
-        "get_by_group_chat_with_tenant_excludes_helper",
-        lambda repo, s: repo.get_by_group_chat(
-            group_chat_id=s["group_chat"], tenant_id=s["tenant_id"]
         ),
         "list_then_total",
     ),
@@ -471,13 +446,13 @@ async def test_sessions_repo_returns_regular_sessions(db_container, admin_user):
 
         assert (await repo.get(setup["regular_session"])) is not None
 
-        sessions, total = await repo.get_by_assistant(
+        sessions, total = await repo.get_metadata_by_assistant(
             assistant_id=setup["regular_assistant"]
         )
         assert setup["regular_session"] in _ids(sessions)
         assert total >= 1
 
-        sessions, total = await repo.get_by_group_chat(
+        sessions, total = await repo.get_metadata_by_group_chat(
             group_chat_id=setup["group_chat"]
         )
         assert setup["regular_gc_session"] in _ids(sessions)
