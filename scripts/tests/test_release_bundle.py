@@ -254,6 +254,7 @@ vm.runInNewContext(process.argv[1], {
 
     def test_existing_image_source_must_match(self):
         manifest = {
+            "digest": "sha256:" + "d" * 64,
             "manifests": [
                 {
                     "digest": "sha256:" + "b" * 64,
@@ -269,7 +270,6 @@ vm.runInNewContext(process.argv[1], {
                 release,
                 "run",
                 side_effect=[
-                    json.dumps({"digest": "sha256:" + "b" * 64}),
                     json.dumps(
                         {
                             "config": {
@@ -295,15 +295,65 @@ vm.runInNewContext(process.argv[1], {
                     {"GITHUB_REF": "refs/tags/v2.3.0", "GITHUB_SHA": "a" * 40},
                 ),
                 patch(
-                    "sys.argv", ["release_bundle.py", "bundle", "--output", str(output)]
+                    "sys.argv",
+                    ["release_bundle.py", "bundle", "--output", str(output),
+                     "--digest", "backend=sha256:" + "b" * 64, "--digest", "frontend="],
                 ),
-                patch.object(
-                    release, "verify_image", side_effect=["sha256:" + "b" * 64, None]
-                ),
+                patch.object(release, "verify_digest", side_effect=lambda c, d, v, r: d),
             ):
-                with self.assertRaisesRegex(ValueError, "Missing image"):
+                with self.assertRaisesRegex(ValueError, "Missing image: frontend"):
                     release.main()
             self.assertFalse(output.exists())
+
+    def test_bundle_names_the_digests_the_component_jobs_checked(self):
+        digests = {c: "sha256:" + str(i) * 64 for i, c in enumerate(release.COMPONENTS, 1)}
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "bundle"
+            with (
+                patch.dict(os.environ, {"GITHUB_REF": "refs/tags/v2.3.0", "GITHUB_SHA": "a" * 40}),
+                patch(
+                    "sys.argv",
+                    ["release_bundle.py", "bundle", "--output", str(output)]
+                    + [arg for c, d in digests.items() for arg in ("--digest", f"{c}={d}")],
+                ),
+                patch.object(release, "verify_digest", side_effect=lambda c, d, v, r: d) as verify,
+                patch.object(release, "verify_image") as by_tag,
+            ):
+                release.main()
+            by_tag.assert_not_called()
+            self.assertEqual(
+                sorted(call.args for call in verify.call_args_list),
+                sorted((c, d, "2.3.0", "a" * 40) for c, d in digests.items()),
+            )
+            recorded = json.loads((output / "release.json").read_text())
+            self.assertEqual(
+                recorded["images"], {c: f"{release.REGISTRY}{c}@{d}" for c, d in digests.items()}
+            )
+
+    def test_a_tag_that_moves_between_reads_cannot_swap_the_checked_image(self):
+        # The tag is read once; its platforms and labels are read by digest.
+        child = "sha256:" + "c" * 64
+        manifest = {
+            "digest": "sha256:" + "d" * 64,
+            "manifests": [{"digest": child, "platform": {"os": "linux", "architecture": "amd64"}}],
+        }
+        labels = {"config": {"Labels": {
+            "org.opencontainers.image.version": "2.3.0",
+            "org.opencontainers.image.revision": "a" * 40,
+        }}}
+        with (
+            patch.object(release, "inspect", return_value=manifest) as inspect,
+            patch.object(release, "run", return_value=json.dumps(labels)) as run,
+        ):
+            self.assertEqual(release.verify_image("backend", "2.3.0", "a" * 40), manifest["digest"])
+        inspect.assert_called_once_with(release.REGISTRY + "backend:2.3.0")
+        self.assertEqual(run.call_args.args[4], release.REGISTRY + "backend@" + child)
+        # A digest the registry answers for with another manifest is refused.
+        with patch.object(release, "inspect", return_value={**manifest, "digest": "sha256:" + "e" * 64}):
+            with self.assertRaisesRegex(ValueError, "Cannot read"):
+                release.verify_digest("backend", "sha256:" + "d" * 64, "2.3.0", "a" * 40)
+        with self.assertRaisesRegex(ValueError, "Invalid digest"):
+            release.verify_digest("backend", "backend:latest", "2.3.0", "a" * 40)
 
     def test_retry_reuses_attested_matching_image(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -439,11 +489,8 @@ vm.runInNewContext(process.argv[1], {
 
     def test_runtime_requires_both_supported_architectures(self):
         with (
-            patch.object(release, "inspect", return_value={"manifests": []}),
             patch.object(
-                release,
-                "run",
-                return_value=json.dumps({"digest": "sha256:" + "b" * 64}),
+                release, "inspect", return_value={"digest": "sha256:" + "b" * 64, "manifests": []}
             ),
         ):
             with self.assertRaisesRegex(ValueError, "Unexpected platforms"):

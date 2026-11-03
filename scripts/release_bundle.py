@@ -44,8 +44,9 @@ def run(*args: str) -> str:
 
 
 def inspect(ref: str) -> dict | None:
+    """One registry read: the manifest's digest and the platform manifests it lists."""
     result = subprocess.run(
-        ["docker", "buildx", "imagetools", "inspect", ref, "--raw"],
+        ["docker", "buildx", "imagetools", "inspect", ref, "--format", "{{json .Manifest}}"],
         capture_output=True,
         text=True,
     )
@@ -57,22 +58,32 @@ def inspect(ref: str) -> dict | None:
 
 
 def verify_image(component: str, version: str, revision: str) -> str | None:
-    image = REGISTRY + component
-    ref = f"{image}:{version}"
-    manifest = inspect(ref)
+    """The digest a version tag names, checked as verify_digest checks it."""
+    manifest = inspect(f"{REGISTRY}{component}:{version}")
     if manifest is None:
         return None
-    digest = json.loads(
-        run(
-            "docker",
-            "buildx",
-            "imagetools",
-            "inspect",
-            ref,
-            "--format",
-            "{{json .Manifest}}",
-        )
-    )["digest"]
+    return verify_digest(component, manifest["digest"], version, revision, manifest)
+
+
+def verify_digest(
+    component: str,
+    digest: str,
+    version: str,
+    revision: str,
+    manifest: dict | None = None,
+) -> str:
+    """Platforms and labels of the image at an immutable digest.
+
+    Every read after the first names a digest, so a tag that moves meanwhile cannot
+    swap in an image that was never checked.
+    """
+    image = REGISTRY + component
+    ref = f"{image}@{digest}"
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
+        raise ValueError(f"Invalid digest for {component}")
+    manifest = manifest or inspect(ref)
+    if manifest is None or manifest.get("digest") != digest:
+        raise ValueError(f"Cannot read {ref}")
     children = [
         m
         for m in manifest.get("manifests", [])
@@ -165,6 +176,10 @@ def main() -> None:
         "--revision", help="Explicit source commit for default-branch release reconciliation"
     )
     parser.add_argument(
+        "--digest", action="append", default=[], metavar="COMPONENT=DIGEST",
+        help="A component's digest from the job that built or reused it (bundle)",
+    )
+    parser.add_argument(
         "--published-releases", action="store_true",
         help="Promote among successfully published releases, excluding unfinished final tags",
     )
@@ -204,11 +219,20 @@ def main() -> None:
             out.write(f"exists={str(bool(digest)).lower()}\ndigest={digest or ''}\n")
         return
     images = {}
-    for component in COMPONENTS:
-        digest = verify_image(component, version, revision)
-        if not digest:
-            raise ValueError(f"Missing image: {component}")
-        images[component] = f"{REGISTRY}{component}@{digest}"
+    if args.command == "bundle":
+        # The digests the component jobs built or reused, never their tags again.
+        digests = dict(item.split("=", 1) for item in args.digest)
+        for component in COMPONENTS:
+            if not digests.get(component):
+                raise ValueError(f"Missing image: {component}")
+            digest = verify_digest(component, digests[component], version, revision)
+            images[component] = f"{REGISTRY}{component}@{digest}"
+    else:
+        for component in COMPONENTS:
+            digest = verify_image(component, version, revision)
+            if not digest:
+                raise ValueError(f"Missing image: {component}")
+            images[component] = f"{REGISTRY}{component}@{digest}"
     if args.command == "bundle":
         output = Path(args.output)
         output.mkdir(parents=True, exist_ok=True)

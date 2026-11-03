@@ -99,8 +99,14 @@ jobs:
           password: ${{ github.token }}
       - name: Verify every published component
         id: bundle
+        # The digests the component jobs built or reused and checked, not their tags again.
+        env:
+          BACKEND_DIGEST: ${{ needs.backend.outputs.digest }}
+          FRONTEND_DIGEST: ${{ needs.frontend.outputs.digest }}
+          RUNTIME_DIGEST: ${{ needs.tool-runtime.outputs.digest }}
         run: |
-          python3 scripts/release_bundle.py bundle
+          python3 scripts/release_bundle.py bundle --digest "backend=$BACKEND_DIGEST" \
+            --digest "frontend=$FRONTEND_DIGEST" --digest "tool-runtime=$RUNTIME_DIGEST"
           echo "runtime-image=$(jq -r '.images["tool-runtime"]' release-bundle/release.json)" >>"$GITHUB_OUTPUT"
       - name: Scan the exact runtime digest, including on retries
         uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2

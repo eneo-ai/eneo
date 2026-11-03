@@ -15,6 +15,10 @@ on:
       publish:
         default: false
         type: boolean
+    outputs:
+      digest:
+        description: The published image's digest, built or reused
+        value: ${{ jobs.image.outputs.digest }}
 
 env:
   REGISTRY: ghcr.io
@@ -91,6 +95,8 @@ jobs:
       group: tool-runtime-image-${{ needs.test.outputs.publish == 'true' && needs.test.outputs.version || github.run_id }}
       queue: max
       cancel-in-progress: false
+    outputs:
+      digest: ${{ steps.reuse.outputs.digest || steps.push.outputs.digest }}
     permissions:
       contents: read
       packages: write
