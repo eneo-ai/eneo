@@ -122,15 +122,17 @@ class WidgetTemplateService:
                 f"Invalid template: {validation_messages(exc)}"
             ) from exc
         self._assert_locks_enforceable(template)
-        # The template row is locked above, so the icon locks come second.
+        # Template rows first (this one, then the former default), icons last:
+        # an avatar edit on the former default holds its row and then wants
+        # the icon, so wanting its row while holding the icon would deadlock.
+        if making_default:
+            await self.repo.clear_default(self.user.tenant_id)
         await self.icon_repo.ensure_attachable(
             previous_avatar,
             template.persona.avatar_icon_id,
             tenant_id=self.user.tenant_id,
             user_id=self.user.id,
         )
-        if making_default:
-            await self.repo.clear_default(self.user.tenant_id)
         template = await self.repo.update(template)
         await self.icon_repo.release_replaced(
             previous_avatar, template.persona.avatar_icon_id

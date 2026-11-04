@@ -31,7 +31,8 @@ export function WidgetPersonaFields({
   locked = false,
   lockHint = "",
   errors = {},
-  onChange
+  onChange,
+  onHeld
 }: {
   persona: WidgetPersona;
   /** The chat's title, to warn when the persona repeats it. */
@@ -42,6 +43,8 @@ export function WidgetPersonaFields({
   lockHint?: string;
   errors?: Record<string, string>;
   onChange: (persona: WidgetPersona) => void;
+  /** Told whether the name holds a value that cannot be sent yet. */
+  onHeld?: (held: boolean) => void;
 }) {
   const t = useTranslations();
   // The name is typed; the API echoes it cleaned, so the draft keeps the
@@ -51,6 +54,16 @@ export function WidgetPersonaFields({
   // refuses anything else, and the field says so before a save is tried.
   const nameInvalid = !!collapseWhitespace(name.text) && !/^\p{L}/u.test(name.text.trim());
   const nameProblem = nameInvalid ? t("widget_admin_persona_name_invalid") : errors["name"];
+  const reportHeld = useRef(onHeld);
+  useEffect(() => {
+    reportHeld.current = onHeld;
+  });
+  useEffect(() => {
+    reportHeld.current?.(nameInvalid);
+    return () => {
+      if (nameInvalid) reportHeld.current?.(false);
+    };
+  }, [nameInvalid]);
   const repeatsTitle =
     !!collapseWhitespace(name.text) &&
     collapseWhitespace(name.text).toLocaleLowerCase() ===

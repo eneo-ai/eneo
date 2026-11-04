@@ -75,6 +75,10 @@
   const template = $derived(autosave.widget);
 
   const name = new TextDraft(() => autosave.widget.name);
+  // A blank name stays in the field; the editor still counts it as unsaved.
+  $effect(() => {
+    autosave.markDraft("name", !collapseWhitespace(name.text));
+  });
   const description = new TextDraft(() => autosave.widget.description ?? "");
   const nameProblem = $derived(
     !collapseWhitespace(name.text) ? m.widget_admin_name_required() : autosave.refusals["name"]
@@ -418,6 +422,7 @@
                       ? m.widget_admin_blocker_legal_texts_lock_subtitle()
                       : undefined}
                     onLinkHeld={(held) => autosave.markDraft("texts.footer_link_url", held)}
+                    onSubtitleHeld={(held) => autosave.markDraft("texts.subtitle", held)}
                     onChange={(change) =>
                       autosave.patch({ texts: { ...template.texts, ...change } })}
                   />
@@ -436,6 +441,7 @@
                     title={template.texts.title}
                     idPrefix="template"
                     errors={personaErrors}
+                    onHeld={(held) => autosave.markDraft("persona.name", held)}
                     onChange={(persona) => autosave.patch({ persona })}
                   />
                 </Card.Content>

@@ -166,7 +166,8 @@ export function WidgetTextsFields({
   errors = {},
   subtitleRequired,
   onQuestionsHeld,
-  onLinkHeld
+  onLinkHeld,
+  onSubtitleHeld
 }: {
   texts: WidgetTexts;
   onChange: (change: Partial<WidgetTexts>) => void;
@@ -187,6 +188,8 @@ export function WidgetTextsFields({
   onQuestionsHeld?: (held: boolean) => void;
   /** Told whether the footer link holds an address that cannot be sent yet. */
   onLinkHeld?: (held: boolean) => void;
+  /** Told whether a blank subtitle is held back because it may not be emptied here. */
+  onSubtitleHeld?: (held: boolean) => void;
 }) {
   const t = useTranslations();
   const locked = (field: LockedTextField) => lockedFields.has(field);
@@ -205,6 +208,18 @@ export function WidgetTextsFields({
 
   const subtitleProblem =
     errors.subtitle ?? (heldSubtitle !== null && subtitleRequired ? subtitleRequired : undefined);
+
+  const subtitleHeld = heldSubtitle !== null;
+  const reportSubtitle = useRef(onSubtitleHeld);
+  useEffect(() => {
+    reportSubtitle.current = onSubtitleHeld;
+  });
+  useEffect(() => {
+    reportSubtitle.current?.(subtitleHeld);
+    return () => {
+      if (subtitleHeld) reportSubtitle.current?.(false);
+    };
+  }, [subtitleHeld]);
 
   const typed = (field: Drafted) => (value: string) => {
     if (field === "subtitle") {

@@ -113,7 +113,8 @@
         return "";
     }
   });
-  const invalid = $derived(current !== "" && !isHexColor(current));
+  // A required colour cleared is a held edit too, not a value to save.
+  const invalid = $derived(current === "" ? !clearable : !isHexColor(current));
   // Tracks only the verdict: the parent's callback may be recreated on its
   // own state changes, and following it would loop.
   $effect(() => {

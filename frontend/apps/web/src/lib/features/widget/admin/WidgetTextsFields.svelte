@@ -32,6 +32,8 @@
     onQuestionsHeld?: (held: boolean) => void;
     /** Told whether the footer link holds an address that cannot be sent yet. */
     onLinkHeld?: (held: boolean) => void;
+    /** Told whether a blank subtitle is held back because it may not be emptied here. */
+    onSubtitleHeld?: (held: boolean) => void;
     /** Id of an error about the whole texts group, which every field points to. */
     groupErrorId?: string;
   };
@@ -47,6 +49,7 @@
     subtitleRequired,
     onQuestionsHeld,
     onLinkHeld,
+    onSubtitleHeld,
     groupErrorId
   }: Props = $props();
 
@@ -88,6 +91,13 @@
   // A held blank subtitle is sent as soon as it may be (the widget is paused,
   // the template unlocks it), not left in the field until it is edited again.
   const subtitleHeld = $derived(subtitleBlankHeld && !drafts.subtitle.text.trim());
+  $effect(() => {
+    const held = subtitleHeld;
+    untrack(() => onSubtitleHeld?.(held));
+    return () => {
+      if (held) onSubtitleHeld?.(false);
+    };
+  });
   $effect(() => {
     if (!subtitleHeld || subtitleRequired) return;
     untrack(() => {

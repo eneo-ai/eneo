@@ -461,6 +461,31 @@ describe("WidgetAdminPage", () => {
     );
   });
 
+  it("a blank name, a held disclosure and a bad persona name all count as unsaved", async () => {
+    api.PATCH.mockImplementation((_path: string, init: { body: Record<string, unknown> }) =>
+      ok(widget({ ...init.body, revision: 4 }))
+    );
+    showPage([widget({ status: "active", activated_at: "2026-09-01T00:00:00Z" })]);
+    const [name, personaName] = await screen.findAllByRole("textbox", { name: /^Namn/ });
+
+    fireEvent.change(name!, { target: { value: "" } });
+    expect(await screen.findByText("1 osparad ändring")).toBeTruthy();
+    fireEvent.change(name!, { target: { value: "Kontaktchatt" } });
+    await screen.findByText("Alla ändringar sparade", { selector: "section *" });
+
+    // A live widget keeps its disclosure, so a blank one is held, not sent.
+    const subtitle = screen.getByRole("textbox", { name: /^Beskrivning/ });
+    fireEvent.change(subtitle, { target: { value: "" } });
+    expect(await screen.findByText("1 osparad ändring")).toBeTruthy();
+    fireEvent.change(subtitle, { target: { value: "AI" } });
+    await screen.findByText("Alla ändringar sparade", { selector: "section *" });
+
+    fireEvent.change(personaName!, { target: { value: "1Robo" } });
+    expect(await screen.findByText("1 osparad ändring")).toBeTruthy();
+    fireEvent.change(personaName!, { target: { value: "Robo" } });
+    await screen.findByText("Alla ändringar sparade", { selector: "section *" });
+  });
+
   it("an incomplete colour counts as unsaved until it is corrected", async () => {
     api.PATCH.mockImplementation((_path: string, init: { body: Record<string, unknown> }) =>
       ok(widget({ ...init.body, revision: 4 }))
@@ -470,6 +495,11 @@ describe("WidgetAdminPage", () => {
     const colour = await screen.findByRole("textbox", { name: /^Primärfärg/ });
     fireEvent.change(colour, { target: { value: "#12" } });
     expect(await screen.findByText("1 osparad ändring")).toBeTruthy();
+    expect(api.PATCH).not.toHaveBeenCalled();
+    // Cleared is held too: the primary colour has no empty value to save.
+    fireEvent.change(colour, { target: { value: "" } });
+    expect(await screen.findByText("1 osparad ändring")).toBeTruthy();
+    expect(colour.getAttribute("aria-invalid")).toBe("true");
     expect(api.PATCH).not.toHaveBeenCalled();
 
     fireEvent.change(colour, { target: { value: "#123456" } });

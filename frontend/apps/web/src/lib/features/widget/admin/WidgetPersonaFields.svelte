@@ -9,7 +9,7 @@
   the server deletes the image once nothing shows it.
 -->
 <script lang="ts">
-  import { onDestroy } from "svelte";
+  import { onDestroy, untrack } from "svelte";
   import type { WidgetPersona } from "@eneo/eneo-js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
@@ -33,6 +33,8 @@
     idPrefix?: string;
     errors?: Record<string, string>;
     onChange: (persona: WidgetPersona) => void;
+    /** Told whether the name holds a value that cannot be sent yet. */
+    onHeld?: (held: boolean) => void;
   };
 
   let {
@@ -43,7 +45,8 @@
     lockHint = "",
     idPrefix = "widget",
     errors = {},
-    onChange
+    onChange,
+    onHeld
   }: Props = $props();
 
   const eneo = getEneo();
@@ -67,6 +70,13 @@
         collapseWhitespace(title).toLocaleLowerCase()
   );
   const savedName = $derived(persona.name ?? "");
+  $effect(() => {
+    const held = nameInvalid;
+    untrack(() => onHeld?.(held));
+    return () => {
+      if (held) onHeld?.(false);
+    };
+  });
   const hasName = $derived(savedName.length > 0);
   const avatarUrl = $derived(
     persona.avatar_icon_id ? eneo.icons.url({ id: persona.avatar_icon_id }) : null

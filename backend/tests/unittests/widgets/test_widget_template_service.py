@@ -568,3 +568,42 @@ async def test_publication_releases_replaced_avatars_once_each_in_id_order():
 
     assert len(result.synced_widgets) == 3
     assert icons.deleted == [low, high]
+
+
+async def test_making_a_template_default_clears_the_old_one_before_touching_icons():
+    """Both rows, then the icon: an avatar edit on the former default holds
+    its row and then wants the icon, so the new default must not hold the
+    icon while waiting for that row."""
+    order: list[str] = []
+
+    class _OrderedRepo(_InMemoryRepo):
+        async def clear_default(self, tenant_id):
+            order.append("clear_default")
+            await super().clear_default(tenant_id)
+
+    class _OrderedIcons(_FakeIconRepo):
+        async def ensure_attachable(self, previous, requested, *, tenant_id, user_id):
+            order.append("ensure_attachable")
+            await super().ensure_attachable(
+                previous, requested, tenant_id=tenant_id, user_id=user_id
+            )
+
+    repo, widgets, icons = _OrderedRepo(), _InMemoryWidgetRepo(), _OrderedIcons()
+    admin = _user(Permission.ADMIN)
+    service = _template_service(admin, repo, widgets, icons)
+    shared = uuid4()
+    former = await service.create_template(name="Standard", is_default=True)
+    template = await service.create_template(name="Ny")
+    await service.update_template(
+        template.id, {"persona": {"name": "Sigge", "avatar_icon_id": shared}}
+    )
+    order.clear()
+
+    updated = await service.update_template(
+        template.id,
+        {"is_default": True, "persona": {"name": "Sigge", "avatar_icon_id": None}},
+    )
+
+    assert updated.is_default is True
+    assert (await repo.get(former.id)).is_default is False
+    assert order == ["clear_default", "ensure_attachable"]

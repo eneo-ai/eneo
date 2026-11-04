@@ -74,7 +74,8 @@ export function ColorField({
     checkContrast && draft
       ? contrastVerdict(draft, surface === "dark" ? DARK_SURFACE : LIGHT_SURFACE)
       : null;
-  const invalid = draft !== "" && !isHexColor(draft);
+  // A required colour cleared is a held edit too, not a value to save.
+  const invalid = draft === "" ? !clearable : !isHexColor(draft);
   const report = useRef(onHeld);
   useEffect(() => {
     report.current = onHeld;

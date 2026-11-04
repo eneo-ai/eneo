@@ -113,6 +113,12 @@ export function WidgetEditor({
 
   // Pending edits are saved first and later ones wait, so pause and archive
   // never race the autosave; a save that fails does not stop the kill switch.
+  // A blank name stays in the field; the editor still counts it as unsaved.
+  const nameHeld = !collapseWhitespace(name.text);
+  useEffect(() => {
+    autosave.markDraft("name", nameHeld);
+  }, [autosave, nameHeld]);
+
   const lifecycle = (action: (id: string) => Promise<Widget>) => async () => {
     const result: { widget: Widget | null } = { widget: null };
     await autosave.exclusive(async () => (result.widget = await action(widget.id)));
@@ -411,6 +417,7 @@ export function WidgetEditor({
                   }
                   onQuestionsHeld={(held) => autosave.markDraft("texts.suggested_questions", held)}
                   onLinkHeld={(held) => autosave.markDraft("texts.footer_link_url", held)}
+                  onSubtitleHeld={(held) => autosave.markDraft("texts.subtitle", held)}
                   onChange={(change) =>
                     autosave.patch({ texts: { ...autosave.widget.texts, ...change } })
                   }
@@ -431,6 +438,7 @@ export function WidgetEditor({
                   locked={personaLocked}
                   lockHint={lockHint}
                   errors={personaErrors}
+                  onHeld={(held) => autosave.markDraft("persona.name", held)}
                   onChange={(persona) => autosave.patch({ persona })}
                 />
               </SettingsGroup>

@@ -90,6 +90,10 @@
   // A blank name is never sent: the API would refuse it and hold every
   // later edit back with it.
   const name = new TextDraft(() => autosave.widget.name);
+  // A blank name stays in the field; the editor still counts it as unsaved.
+  $effect(() => {
+    autosave.markDraft("name", !collapseWhitespace(name.text));
+  });
   const nameProblem = $derived(
     !collapseWhitespace(name.text) ? m.widget_admin_name_required() : autosave.refusals["name"]
   );
@@ -412,6 +416,7 @@
                   : undefined}
                 onQuestionsHeld={(held) => autosave.markDraft("texts.suggested_questions", held)}
                 onLinkHeld={(held) => autosave.markDraft("texts.footer_link_url", held)}
+                onSubtitleHeld={(held) => autosave.markDraft("texts.subtitle", held)}
                 groupErrorId={autosave.refusals["texts"] ? "widget-texts-error" : undefined}
                 onChange={(change) => autosave.patch({ texts: { ...current.texts, ...change } })}
               />
@@ -434,6 +439,7 @@
                 locked={personaLocked}
                 {lockHint}
                 errors={personaErrors}
+                onHeld={(held) => autosave.markDraft("persona.name", held)}
                 onChange={(persona) => autosave.patch({ persona })}
               />
             </Card.Content>

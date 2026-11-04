@@ -238,25 +238,40 @@ describe("WidgetEditor", () => {
     await userEvent.fill(colour, "#12");
     await expect.element(colour).toHaveAttribute("aria-invalid", "true");
     expect(leavingAsks()).toBe(true);
+    // Cleared is held too: the primary colour has no empty value to save.
+    await userEvent.clear(colour);
+    await expect.element(colour).toHaveAttribute("aria-invalid", "true");
+    expect(leavingAsks()).toBe(true);
 
     await userEvent.fill(colour, "#123456");
     await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(1), { timeout: 3000 });
     await vi.waitFor(() => expect(leavingAsks()).toBe(false));
   });
 
-  test("leaving with the name or the disclosure emptied is handled alike", async () => {
+  test("a blank name, a held disclosure and a bad persona name all count as unsaved", async () => {
     renderEditor(widget());
     const name = page.getByLabelText("name", { exact: true });
     await userEvent.clear(name);
     await expect.element(name).toHaveAttribute("aria-invalid", "true");
-    const askedWithoutName = leavingAsks();
-
+    expect(leavingAsks()).toBe(true);
     await userEvent.fill(name, "Kontaktchatt");
     await expect.element(name).toHaveAttribute("aria-invalid", "false");
+    await vi.waitFor(() => expect(leavingAsks()).toBe(false));
+
+    // A live widget keeps its disclosure, so a blank one is held, not sent.
     const subtitle = page.getByLabelText("widget_admin_text_subtitle", { exact: true });
     await userEvent.clear(subtitle);
     await expect.element(subtitle).toHaveAttribute("aria-invalid", "true");
-    expect(leavingAsks()).toBe(askedWithoutName);
+    expect(leavingAsks()).toBe(true);
+    await userEvent.fill(subtitle, "AI");
+    await vi.waitFor(() => expect(leavingAsks()).toBe(false));
+
+    const persona = page.getByLabelText("widget_admin_persona_name", { exact: true });
+    await userEvent.fill(persona, "1Robo");
+    await expect.element(persona).toHaveAttribute("aria-invalid", "true");
+    expect(leavingAsks()).toBe(true);
+    await userEvent.fill(persona, "Robo");
+    await vi.waitFor(() => expect(leavingAsks()).toBe(false), { timeout: 3000 });
   });
 
   test("a refusal of the whole texts group is tied to every text field", async () => {

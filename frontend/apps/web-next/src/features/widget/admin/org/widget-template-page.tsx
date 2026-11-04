@@ -10,7 +10,7 @@ import { TextArea } from "@astryxdesign/core/TextArea";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { FileText, Palette } from "lucide-react";
 import { useLocale, useTranslations } from "use-intl";
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { Switch } from "@astryxdesign/core/Switch";
 import { TextInput } from "@/components/astryx/text-input";
 import { PageHeader } from "@/components/composites/page-header";
@@ -160,6 +160,11 @@ function TemplateEditor({ template: initial }: { template: WidgetTemplate }) {
   // The dialog names what the followers lose or regain, so an admin is not
   // confirming a count but a change.
   const [confirmOpen, setConfirmOpen] = useState(false);
+  // A blank name stays in the field; the editor still counts it as unsaved.
+  const nameHeld = !collapseWhitespace(name.text);
+  useEffect(() => {
+    autosave.markDraft("name", nameHeld);
+  }, [autosave, nameHeld]);
   const [publishing, setPublishing] = useState(false);
   const summary = publicationSummary(template);
   const groupNames = (groups: WidgetTemplateLockGroup[]) =>
@@ -390,6 +395,7 @@ function TemplateEditor({ template: initial }: { template: WidgetTemplate }) {
                     showSuggestions={false}
                     errors={textErrors}
                     onLinkHeld={(held) => autosave.markDraft("texts.footer_link_url", held)}
+                    onSubtitleHeld={(held) => autosave.markDraft("texts.subtitle", held)}
                     subtitleRequired={
                       legalLocked ? t("widget_admin_blocker_legal_texts_lock_subtitle") : undefined
                     }
@@ -409,6 +415,7 @@ function TemplateEditor({ template: initial }: { template: WidgetTemplate }) {
                     persona={template.persona ?? {}}
                     chatTitle={template.texts.title ?? ""}
                     errors={personaErrors}
+                    onHeld={(held) => autosave.markDraft("persona.name", held)}
                     onChange={(persona) => autosave.patch({ persona })}
                   />
                 </SettingsGroup>
