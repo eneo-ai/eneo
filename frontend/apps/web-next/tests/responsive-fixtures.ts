@@ -1,5 +1,6 @@
 import type { Browser, BrowserContextOptions, Page } from "@playwright/test";
 import { STORAGE_STATE } from "../playwright.config";
+import { watchCsp } from "./csp";
 import { apiPost, spaceWithWork, uniqueName } from "./helpers";
 import { ROUTES, type Fixtures } from "./responsive-routes";
 
@@ -97,7 +98,9 @@ export type Walk = {
 
 /**
  * Opens every screen of tests/responsive-routes.ts, signed in or out as its entry says, and
- * runs `visit` on each. Returns what `visit` objected to and each screen that did not open.
+ * runs `visit` on each. Returns what `visit` objected to, each screen that did not open and
+ * what the Content-Security-Policy blocked: its contexts are not the test's, so the CSP
+ * fixture of tests/csp.ts cannot see them.
  */
 export async function walkRoutes(
   browser: Browser,
@@ -112,6 +115,8 @@ export async function walkRoutes(
       storageState: { cookies: [], origins: [] }
     })
   };
+  const violations: string[] = [];
+  for (const context of Object.values(contexts)) await watchCsp(context, violations);
   const pages = { in: await contexts.in.newPage(), out: await contexts.out.newPage() };
   const problems: string[] = [];
   for (const [pattern, entry] of Object.entries(ROUTES)) {
@@ -126,6 +131,7 @@ export async function walkRoutes(
       continue;
     }
     problems.push(...(await visit(page, pattern, signedIn)));
+    problems.push(...violations.splice(0).map((violation) => `${pattern}: CSP ${violation}`));
   }
   for (const context of Object.values(contexts)) await context.close();
   return problems;
