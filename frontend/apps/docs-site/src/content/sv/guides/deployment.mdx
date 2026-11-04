@@ -1,6 +1,6 @@
 ---
 title: Driftsätt Eneo
-translationSource: guides/deployment.mdx@46d4a3e749af
+translationSource: guides/deployment.mdx@260561bf99f4
 ---
 
 import { Callout } from "nextra/components";
@@ -51,7 +51,7 @@ mkdir eneo-deployment && cd eneo-deployment
 # Ladda ner release.json och release.env från den valda releasen till den här katalogen.
 ENEO_SOURCE_REVISION=$(python3 -c 'import json; print(json.load(open("release.json"))["revision"])')
 for f in docker-compose.yml docker-compose.object-content.yml docker-compose.without-tools.yml \
-  env_backend.template env_frontend.template env_db.template .env.template setup.py; do
+  docker-compose.web-next.yml env_backend.template env_frontend.template env_db.template .env.template setup.py; do
   curl -fLO "https://raw.githubusercontent.com/eneo-ai/eneo/$ENEO_SOURCE_REVISION/docs/deployment/$f"
 done
 cp env_backend.template env_backend.env

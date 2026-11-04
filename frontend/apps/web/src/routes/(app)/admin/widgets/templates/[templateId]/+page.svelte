@@ -417,6 +417,7 @@
                     subtitleRequired={template.locked_groups.includes("legal_texts")
                       ? m.widget_admin_blocker_legal_texts_lock_subtitle()
                       : undefined}
+                    onLinkHeld={(held) => autosave.markDraft("texts.footer_link_url", held)}
                     onChange={(change) =>
                       autosave.patch({ texts: { ...template.texts, ...change } })}
                   />
@@ -450,6 +451,7 @@
                   <WidgetThemeFields
                     theme={template.theme}
                     idPrefix="template"
+                    onHeld={(held) => autosave.markDraft("theme", held)}
                     onChange={(change) =>
                       autosave.patch({ theme: { ...template.theme, ...change } })}
                   />

@@ -18,6 +18,8 @@
     lockHint?: string;
     /** Id of an error about the whole appearance, which every control points to. */
     errorId?: string;
+    /** Told whether a colour or the radius holds a value that cannot be sent yet. */
+    onHeld?: (held: boolean) => void;
   };
 
   let {
@@ -26,7 +28,8 @@
     idPrefix = "widget",
     locked = false,
     lockHint = "",
-    errorId
+    errorId,
+    onHeld
   }: Props = $props();
 
   const id = (name: string) => `${idPrefix}-${name}`;
@@ -56,6 +59,18 @@
   // The API stores the radius as a whole number of pixels; a fraction stays
   // in the field with an error instead of failing the save.
   let radiusInvalid = $state(false);
+  let colorHeld = $state<Record<string, boolean>>({});
+  const held = $derived(radiusInvalid || Object.values(colorHeld).some(Boolean));
+  $effect(() => {
+    const current = held;
+    untrack(() => onHeld?.(current));
+    return () => {
+      if (current) onHeld?.(false);
+    };
+  });
+  const heldBy = (key: string) => (value: boolean) => {
+    if (colorHeld[key] !== value) colorHeld = { ...colorHeld, [key]: value };
+  };
   function radius(event: Event) {
     const raw = (event.currentTarget as HTMLInputElement).value;
     const value = Number(raw);
@@ -78,6 +93,7 @@
   <Field.Group class="grid gap-6">
     <ColorField
       id={id("primary-color")}
+      onHeld={heldBy("primary-color")}
       label={m.widget_admin_primary_color()}
       description={m.widget_admin_primary_color_description()}
       value={theme.primary_color ?? null}
@@ -89,6 +105,7 @@
 
     <ColorField
       id={id("header-color")}
+      onHeld={heldBy("header-color")}
       label={m.widget_admin_header_color()}
       description={m.widget_admin_header_color_description()}
       value={theme.header_color ?? null}
@@ -122,6 +139,7 @@
         <Field.Group class="grid gap-6 pt-2">
           <ColorField
             id={id("primary-color-dark")}
+            onHeld={heldBy("primary-color-dark")}
             label={m.widget_admin_primary_color_dark()}
             description={m.widget_admin_primary_color_dark_description()}
             value={theme.primary_color_dark ?? null}
@@ -134,6 +152,7 @@
           />
           <ColorField
             id={id("header-color-dark")}
+            onHeld={heldBy("header-color-dark")}
             label={m.widget_admin_header_color_dark()}
             description={m.widget_admin_header_color_dark_description()}
             value={theme.header_color_dark ?? null}

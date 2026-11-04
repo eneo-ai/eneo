@@ -128,7 +128,11 @@ export function WidgetEditor({
   // Pending edits are saved first and later ones wait, so pause and archive
   // never race the autosave; a save that fails does not stop the kill switch.
   const lifecycle = (action: (id: string) => Promise<Widget>) => async () => {
-    await autosave.exclusive(() => action(widget.id));
+    const result: { widget: Widget | null } = { widget: null };
+    await autosave.exclusive(async () => (result.widget = await action(widget.id)));
+    // The saved-state effect below runs only while mounted; a page left during
+    // the request still needs its list to follow the answer.
+    if (result.widget) onSaved?.(result.widget);
   };
 
   // Linking a template overwrites texts and appearance, so it asks first;
@@ -162,17 +166,18 @@ export function WidgetEditor({
   async function withTemplate(action: () => Promise<Widget>, replaced: string[]) {
     setApplying(true);
     try {
-      let applied = false;
+      const result: { widget: Widget | null } = { widget: null };
       await autosave.exclusive(async () => {
         if (autosave.hasPending) return null;
         const updated = await action();
         // Refused edits of the groups the release replaced are moot; any other
         // refused edit stays on screen, held with its reason.
         autosave.discardRefused(replaced);
-        applied = true;
+        result.widget = updated;
         return updated;
       });
-      return applied;
+      if (result.widget) onSaved?.(result.widget);
+      return result.widget !== null;
     } catch (error) {
       toastWidgetError(error, t);
       return false;
@@ -419,6 +424,7 @@ export function WidgetEditor({
                       : undefined
                   }
                   onQuestionsHeld={(held) => autosave.markDraft("texts.suggested_questions", held)}
+                  onLinkHeld={(held) => autosave.markDraft("texts.footer_link_url", held)}
                   onChange={(change) =>
                     autosave.patch({ texts: { ...autosave.widget.texts, ...change } })
                   }
@@ -520,6 +526,7 @@ export function WidgetEditor({
                   theme={current.theme}
                   locked={appearanceLocked}
                   lockHint={lockHint}
+                  onHeld={(held) => autosave.markDraft("theme", held)}
                   onChange={(change) =>
                     autosave.patch({ theme: { ...autosave.widget.theme, ...change } })
                   }

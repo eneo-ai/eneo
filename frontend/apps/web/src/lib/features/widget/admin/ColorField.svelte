@@ -40,6 +40,8 @@
     disabled?: boolean;
     /** Extra ids for aria-describedby, e.g. the template lock hint. */
     describedBy?: string;
+    /** Told whether the field holds an incomplete colour that cannot be sent yet. */
+    onHeld?: (held: boolean) => void;
   };
 
   let {
@@ -53,7 +55,8 @@
     checkTextOn = checkContrast,
     surface = "light",
     disabled = false,
-    describedBy = ""
+    describedBy = "",
+    onHeld
   }: Props = $props();
 
   // What is typed stays local until it is a complete hex colour; the server
@@ -111,6 +114,15 @@
     }
   });
   const invalid = $derived(current !== "" && !isHexColor(current));
+  // Tracks only the verdict: the parent's callback may be recreated on its
+  // own state changes, and following it would loop.
+  $effect(() => {
+    const held = invalid;
+    untrack(() => onHeld?.(held));
+    return () => {
+      if (held) onHeld?.(false);
+    };
+  });
   // The panel paints text in whatever reads best on the colour; for mid-tone
   // colours that is still below the 4.5:1 the visitor's messages need.
   const textOnRatio = $derived(

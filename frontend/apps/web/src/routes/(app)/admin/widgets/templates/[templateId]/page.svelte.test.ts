@@ -349,6 +349,31 @@ describe("widget template details", () => {
     expect(leavingAsks()).toBe(askedWithoutName);
   });
 
+  test("an invalid footer link counts as unsaved until it is corrected", async () => {
+    const { update } = renderPage(template());
+    const leavingAsks = () => {
+      const leave = vi.mocked(beforeNavigate).mock.lastCall![0];
+      const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+      try {
+        leave({ cancel: vi.fn() } as unknown as Parameters<typeof leave>[0]);
+        return confirm.mock.calls.length > 0;
+      } finally {
+        confirm.mockRestore();
+      }
+    };
+    const link = page.getByLabelText("widget_admin_text_footer_link_url", { exact: true });
+    await userEvent.fill(link, "https://");
+    await userEvent.tab();
+    await expect.element(link).toHaveAttribute("aria-invalid", "true");
+    expect(update).not.toHaveBeenCalled();
+    expect(leavingAsks()).toBe(true);
+
+    await userEvent.fill(link, "https://www.kommun.se/chatt");
+    await userEvent.tab();
+    await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    await vi.waitFor(() => expect(leavingAsks()).toBe(false));
+  });
+
   test("each card title is a section heading", async () => {
     renderNormalising(template());
     for (const name of ["widget_admin_template_details", "widget_admin_template_locks"]) {

@@ -380,6 +380,7 @@ function TemplateEditor({ template: initial }: { template: WidgetTemplate }) {
                     texts={template.texts}
                     showSuggestions={false}
                     errors={textErrors}
+                    onLinkHeld={(held) => autosave.markDraft("texts.footer_link_url", held)}
                     subtitleRequired={
                       legalLocked ? t("widget_admin_blocker_legal_texts_lock_subtitle") : undefined
                     }
@@ -415,6 +416,7 @@ function TemplateEditor({ template: initial }: { template: WidgetTemplate }) {
                 )}
                 <WidgetThemeFields
                   theme={template.theme}
+                  onHeld={(held) => autosave.markDraft("theme", held)}
                   onChange={(change) =>
                     autosave.patch({ theme: { ...autosave.widget.theme, ...change } })
                   }

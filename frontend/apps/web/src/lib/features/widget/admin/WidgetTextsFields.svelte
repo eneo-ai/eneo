@@ -30,6 +30,8 @@
     subtitleRequired?: string;
     /** Told whether the suggested questions hold edits that cannot be sent yet. */
     onQuestionsHeld?: (held: boolean) => void;
+    /** Told whether the footer link holds an address that cannot be sent yet. */
+    onLinkHeld?: (held: boolean) => void;
     /** Id of an error about the whole texts group, which every field points to. */
     groupErrorId?: string;
   };
@@ -44,6 +46,7 @@
     errors = {},
     subtitleRequired,
     onQuestionsHeld,
+    onLinkHeld,
     groupErrorId
   }: Props = $props();
 
@@ -103,6 +106,13 @@
   // The footer link is committed when the field is left, never per keystroke.
   let linkDraft = $state(untrack(() => texts.footer_link_url ?? ""));
   let linkInvalid = $state(false);
+  $effect(() => {
+    const held = linkInvalid;
+    untrack(() => onLinkHeld?.(held));
+    return () => {
+      if (held) onLinkHeld?.(false);
+    };
+  });
   let lastSavedLink = untrack(() => texts.footer_link_url ?? "");
   $effect(() => {
     const saved = texts.footer_link_url ?? "";

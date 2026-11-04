@@ -3,7 +3,7 @@
 import { NumberInput } from "@astryxdesign/core/NumberInput";
 import { Selector } from "@astryxdesign/core/Selector";
 import { useTranslations } from "use-intl";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Switch } from "@astryxdesign/core/Switch";
 import type { Schema } from "@/lib/api/models";
 import { ColorField } from "./color-field";
@@ -15,10 +15,13 @@ export function WidgetThemeFields({
   theme,
   onChange,
   locked = false,
-  lockHint = ""
+  lockHint = "",
+  onHeld
 }: {
   theme: WidgetTheme;
   onChange: (change: Partial<WidgetTheme>) => void;
+  /** Told whether a colour holds a value that cannot be sent yet. */
+  onHeld?: (held: boolean) => void;
   /** The whole appearance is governed by a template; `lockHint` says so. */
   locked?: boolean;
   lockHint?: string;
@@ -30,6 +33,20 @@ export function WidgetThemeFields({
   // clears them so dark mode falls back to the light-mode colours.
   const hasDarkColors = !!(theme.primary_color_dark || theme.header_color_dark);
   const [customDark, setCustomDark] = useState(hasDarkColors);
+  const [colorHeld, setColorHeld] = useState<Record<string, boolean>>({});
+  const held = Object.values(colorHeld).some(Boolean);
+  const report = useRef(onHeld);
+  useEffect(() => {
+    report.current = onHeld;
+  });
+  useEffect(() => {
+    report.current?.(held);
+    return () => {
+      if (held) report.current?.(false);
+    };
+  }, [held]);
+  const heldBy = (key: string) => (value: boolean) =>
+    setColorHeld((current) => (current[key] === value ? current : { ...current, [key]: value }));
   const showDark = customDark || hasDarkColors;
   function toggleDark(checked: boolean) {
     setCustomDark(checked);
@@ -41,6 +58,7 @@ export function WidgetThemeFields({
       {locked && <p className="text-ax-text-secondary text-sm">{lockHint}</p>}
       <ColorField
         label={t("widget_admin_primary_color")}
+        onHeld={heldBy("widget_admin_primary_color")}
         description={t("widget_admin_primary_color_description")}
         value={theme.primary_color ?? null}
         checkContrast
@@ -50,6 +68,7 @@ export function WidgetThemeFields({
       />
       <ColorField
         label={t("widget_admin_header_color")}
+        onHeld={heldBy("widget_admin_header_color")}
         description={t("widget_admin_header_color_description")}
         value={theme.header_color ?? null}
         clearable
@@ -75,6 +94,7 @@ export function WidgetThemeFields({
           <div className="flex flex-col gap-6 pt-2">
             <ColorField
               label={t("widget_admin_primary_color_dark")}
+              onHeld={heldBy("widget_admin_primary_color_dark")}
               description={t("widget_admin_primary_color_dark_description")}
               value={theme.primary_color_dark ?? null}
               clearable
@@ -86,6 +106,7 @@ export function WidgetThemeFields({
             />
             <ColorField
               label={t("widget_admin_header_color_dark")}
+              onHeld={heldBy("widget_admin_header_color_dark")}
               description={t("widget_admin_header_color_dark_description")}
               value={theme.header_color_dark ?? null}
               clearable

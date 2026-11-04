@@ -411,6 +411,7 @@
                   ? m.widget_admin_blocker_subtitle_empty()
                   : undefined}
                 onQuestionsHeld={(held) => autosave.markDraft("texts.suggested_questions", held)}
+                onLinkHeld={(held) => autosave.markDraft("texts.footer_link_url", held)}
                 groupErrorId={autosave.refusals["texts"] ? "widget-texts-error" : undefined}
                 onChange={(change) => autosave.patch({ texts: { ...current.texts, ...change } })}
               />
@@ -522,6 +523,7 @@
                 locked={appearanceLocked}
                 {lockHint}
                 errorId={appearanceErrors.length > 0 ? "widget-appearance-error" : undefined}
+                onHeld={(held) => autosave.markDraft("theme", held)}
                 onChange={(change) => autosave.patch({ theme: { ...current.theme, ...change } })}
               />
             </Card.Content>

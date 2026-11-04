@@ -3,7 +3,7 @@
 import { Button } from "@astryxdesign/core/Button";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useTranslations } from "use-intl";
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { TextInput } from "@/components/astryx/text-input";
 import {
   contrastRatio,
@@ -30,12 +30,15 @@ export function ColorField({
   checkTextOn = checkContrast,
   surface = "light",
   disabled = false,
-  disabledMessage
+  disabledMessage,
+  onHeld
 }: {
   label: string;
   description: string;
   value: string | null;
   onChange: (value: string | null) => void;
+  /** Told whether the field holds an incomplete colour that cannot be sent yet. */
+  onHeld?: (held: boolean) => void;
   /** Optional colours can be cleared back to the neutral surface. */
   clearable?: boolean;
   /** Show how the colour fares against the surface it will sit on. */
@@ -72,6 +75,16 @@ export function ColorField({
       ? contrastVerdict(draft, surface === "dark" ? DARK_SURFACE : LIGHT_SURFACE)
       : null;
   const invalid = draft !== "" && !isHexColor(draft);
+  const report = useRef(onHeld);
+  useEffect(() => {
+    report.current = onHeld;
+  });
+  useEffect(() => {
+    report.current?.(invalid);
+    return () => {
+      if (invalid) report.current?.(false);
+    };
+  }, [invalid]);
 
   function typed(raw: string) {
     const next = raw.trim();

@@ -2,7 +2,7 @@
 
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { useTranslations } from "use-intl";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { TextInput } from "@/components/astryx/text-input";
 import type { Schema } from "@/lib/api/models";
 import { isHttpUrl } from "../urls";
@@ -94,7 +94,8 @@ function LinkField({
   locked,
   lockHint,
   error,
-  onCommit
+  onCommit,
+  onHeld
 }: {
   value: string;
   label: string;
@@ -103,10 +104,21 @@ function LinkField({
   lockHint: string;
   error?: string;
   onCommit: (value: string | null) => void;
+  onHeld?: (held: boolean) => void;
 }) {
   const t = useTranslations();
   const [draft, setDraft] = useState(value);
   const [invalid, setInvalid] = useState(false);
+  const report = useRef(onHeld);
+  useEffect(() => {
+    report.current = onHeld;
+  });
+  useEffect(() => {
+    report.current?.(invalid);
+    return () => {
+      if (invalid) report.current?.(false);
+    };
+  }, [invalid]);
   // Follow a new saved value (template applied, other tab) without ever
   // touching what is being typed. Adjusted during render.
   const [seen, setSeen] = useState(value);
@@ -153,7 +165,8 @@ export function WidgetTextsFields({
   lockHint = "",
   errors = {},
   subtitleRequired,
-  onQuestionsHeld
+  onQuestionsHeld,
+  onLinkHeld
 }: {
   texts: WidgetTexts;
   onChange: (change: Partial<WidgetTexts>) => void;
@@ -172,6 +185,8 @@ export function WidgetTextsFields({
   subtitleRequired?: string;
   /** Told whether the suggested questions hold edits that cannot be sent yet. */
   onQuestionsHeld?: (held: boolean) => void;
+  /** Told whether the footer link holds an address that cannot be sent yet. */
+  onLinkHeld?: (held: boolean) => void;
 }) {
   const t = useTranslations();
   const locked = (field: LockedTextField) => lockedFields.has(field);
@@ -290,6 +305,7 @@ export function WidgetTextsFields({
           locked={locked("footer_link_url")}
           lockHint={lockHint}
           error={errors.footer_link_url}
+          onHeld={onLinkHeld}
           onCommit={(footer_link_url) => onChange({ footer_link_url })}
         />
         <DraftedText

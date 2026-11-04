@@ -401,6 +401,63 @@ describe("WidgetAdminPage", () => {
     );
   });
 
+  it("a pause finished after leaving the page still reaches the list", async () => {
+    const queryClient = testQueryClient();
+    let finishPause!: (paused: Widget) => void;
+    const view = showPage(
+      [widget({ status: "active", activated_at: "2026-09-01T00:00:00Z" })],
+      ["widgets"],
+      { queryClient }
+    );
+    api.POST.mockImplementation((path: string) =>
+      path === "/api/v1/widgets/{id}/pause/"
+        ? new Promise<{ data: Widget; response: Response }>((resolve) => {
+            finishPause = (data) => resolve({ data, response: new Response("{}") });
+          })
+        : ok({ token: "preview-token", expires_in: 900 })
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Pausa" }));
+    await waitFor(() =>
+      expect(api.POST).toHaveBeenCalledWith("/api/v1/widgets/{id}/pause/", expect.anything())
+    );
+    view.unmount();
+    await act(async () => finishPause(widget({ status: "paused", revision: 7 })));
+    await waitFor(() =>
+      expect(
+        (queryClient.getQueryData(["spaces", "s1", "widgets"]) as Widget[]).find(
+          (item) => item.id === "w1"
+        )
+      ).toMatchObject({ status: "paused", revision: 7 })
+    );
+  });
+
+  it("an incomplete colour counts as unsaved until it is corrected", async () => {
+    api.PATCH.mockImplementation((_path: string, init: { body: Record<string, unknown> }) =>
+      ok(widget({ ...init.body, revision: 4 }))
+    );
+    showPage([widget()]);
+    fireEvent.click(await screen.findByRole("tab", { name: /Utseende/ }));
+    const colour = await screen.findByRole("textbox", { name: /^Primärfärg/ });
+    fireEvent.change(colour, { target: { value: "#12" } });
+    expect(await screen.findByText("1 osparad ändring")).toBeTruthy();
+    expect(api.PATCH).not.toHaveBeenCalled();
+
+    fireEvent.change(colour, { target: { value: "#123456" } });
+    await waitFor(
+      () =>
+        expect(api.PATCH).toHaveBeenCalledWith(
+          WIDGET_PATH,
+          expect.objectContaining({
+            body: expect.objectContaining({
+              theme: expect.objectContaining({ primary_color: "#123456" })
+            })
+          })
+        ),
+      { timeout: 2000 }
+    );
+    await screen.findByText("Alla ändringar sparade", { selector: "section *" });
+  });
+
   it("linking a template lets its cached follower count go", async () => {
     const queryClient = testQueryClient();
     queryClient.setQueryData(["widget-templates", "t1"], template());

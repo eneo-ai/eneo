@@ -231,6 +231,19 @@ describe("WidgetEditor", () => {
   });
 
   // Required texts retain their invalid draft; leaving treats them alike.
+  test("an incomplete colour counts as unsaved until it is corrected", async () => {
+    const { update } = renderEditor(widget());
+    click(page.getByRole("tab", { name: "widget_admin_tab_appearance" }));
+    const colour = page.getByRole("textbox", { name: "widget_admin_primary_color", exact: true });
+    await userEvent.fill(colour, "#12");
+    await expect.element(colour).toHaveAttribute("aria-invalid", "true");
+    expect(leavingAsks()).toBe(true);
+
+    await userEvent.fill(colour, "#123456");
+    await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    await vi.waitFor(() => expect(leavingAsks()).toBe(false));
+  });
+
   test("leaving with the name or the disclosure emptied is handled alike", async () => {
     renderEditor(widget());
     const name = page.getByLabelText("name", { exact: true });
