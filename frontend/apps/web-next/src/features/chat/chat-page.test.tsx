@@ -457,6 +457,30 @@ describe("ChatPage Historik tab, as in Svelte", () => {
     await waitFor(() => expect(document.activeElement?.id).toBe(CHAT_PANEL_IDS.chat));
   });
 
+  it("moves focus to the conversation when a narrowed window takes the Historik row away", async () => {
+    window.history.replaceState(null, "", "/chat?tab=history");
+    setRoute("/chat?tab=history");
+    renderPage(null);
+    const row = await within(historyPanel()).findByRole("button", { name: /^Samtal s-1/ });
+    row.focus();
+    act(() => setViewport("phone"));
+    await waitFor(() => expect(document.activeElement?.id).toBe(CHAT_PANEL_IDS.chat));
+  });
+
+  it("leaves focus elsewhere alone when a narrowed window takes Historik away", async () => {
+    window.history.replaceState(null, "", "/chat?tab=history");
+    setRoute("/chat?tab=history");
+    renderPage(null);
+    await within(historyPanel()).findByRole("button", { name: /^Samtal s-1/ });
+    const outside = document.body.appendChild(document.createElement("button"));
+    outside.focus();
+    act(() => setViewport("phone"));
+    await waitFor(() => expect(screen.queryAllByRole("tabpanel")).toEqual([]));
+    await act(() => new Promise(requestAnimationFrame));
+    expect(document.activeElement).toBe(outside);
+    outside.remove();
+  });
+
   it("starts a new conversation in Chatt from Historik", async () => {
     window.history.replaceState(null, "", "/chat?tab=history");
     setRoute("/chat?tab=history");
