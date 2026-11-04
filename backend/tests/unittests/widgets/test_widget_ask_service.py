@@ -156,6 +156,8 @@ def _service(*, ask_result=None, session_questions=0, tokens=(120, 80)):
     session_service.leave_feedback = AsyncMock(return_value=session_obj)
     limiter = MagicMock()
     limiter.check_message = AsyncMock()
+    limiter.hold_turn = AsyncMock()
+    limiter.release_turn = AsyncMock()
     budget = MagicMock()
     budget.reserve = AsyncMock(
         return_value=BudgetReservation(
@@ -659,6 +661,9 @@ async def test_follow_up_requires_owned_session_and_respects_turn_limit(fake_db)
             _principal(widget), question="q", session_id=uuid4(), client_ip=None
         )
     assert exc.value.code == "session_turns_exceeded"
+    # The conversation's turn hold never outlives a refused follow-up.
+    deps.limiter.hold_turn.assert_awaited_once()
+    deps.limiter.release_turn.assert_awaited_once()
 
     for error in (NotFoundException(), UnauthorizedException("other principal")):
         deps.session_service.get_session_by_uuid = AsyncMock(side_effect=error)
@@ -668,6 +673,7 @@ async def test_follow_up_requires_owned_session_and_respects_turn_limit(fake_db)
             )
         with pytest.raises(SessionNotOwnedError):
             await service.get_session(_principal(widget), uuid4())
+    assert deps.limiter.release_turn.await_count == 3
 
 
 async def test_feedback_text_is_dropped_unless_stored():
