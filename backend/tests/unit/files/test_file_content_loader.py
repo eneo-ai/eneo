@@ -241,6 +241,7 @@ def test_reading_the_content_of_a_file_without_content_raises():
         file_type=FileType.TEXT,
         user_id=uuid4(),
         tenant_id=uuid4(),
+        owner_type=PrincipalType.USER,
     )
 
     with pytest.raises(FileContentNotLoadedError):

@@ -10,6 +10,7 @@ import pytest
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.assistants.assistant import AssistantOrigin
 from eneo.assistants.assistant_factory import AssistantFactory
+from eneo.authentication.principal_types import PrincipalType
 from eneo.files.file_models import FileType, FileWithoutContent
 from eneo.flows.assistant_execution_snapshot import (
     assistant_execution_surface_hash,
@@ -419,6 +420,7 @@ def test_a_snapshot_needs_no_attachment_content():
         file_type=FileType.TEXT,
         user_id=uuid4(),
         tenant_id=uuid4(),
+        owner_type=PrincipalType.USER,
     )
     assistant = _assistant()
     assistant.attachments = [file]
