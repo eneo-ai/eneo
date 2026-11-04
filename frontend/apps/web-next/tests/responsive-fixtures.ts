@@ -15,10 +15,12 @@ export async function createFixtures(
 ): Promise<Fixtures> {
   const context = await browser.newContext({ storageState: STORAGE_STATE, baseURL });
   const page = await context.newPage();
-  const work = await spaceWithWork(page, uniqueName(prefix));
+  const spaceName = uniqueName(prefix);
+  const work = await spaceWithWork(page, spaceName);
   const spaceId = work.space.split("/").pop()!;
+  const groupChatName = uniqueName("Grupp");
   const groupChat = await apiPost(page, `${work.space}/applications/group-chats/`, {
-    name: uniqueName("Grupp")
+    name: groupChatName
   });
   const website = await apiPost(page, `/spaces/${spaceId}/knowledge/websites/`, {
     url: "https://example.org/contract",
@@ -58,10 +60,12 @@ export async function createFixtures(
   await context.close();
   return {
     space: work.space,
+    spaceName,
     assistant: work.editor.split("/assistants/")[1]!.split("/")[0]!,
     app: work.app.split("/apps/")[1]!,
     run: work.result.split("/results/")[1]!,
     groupChat,
+    groupChatName,
     website,
     collection,
     userId

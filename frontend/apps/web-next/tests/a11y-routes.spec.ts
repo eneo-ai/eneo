@@ -1,9 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import AxeBuilder from "@axe-core/playwright";
+import type { Page } from "@playwright/test";
 import { expect, test } from "./csp";
 import { contrastIncomplete } from "./contrast-incomplete";
 import { contrastProbe } from "./contrast-probe";
+import { expectNoCollapsedTableColumns, expectShellHoldsStill } from "./helpers";
 import { leftEdgeProbe } from "./left-edge-probe";
 import { createFixtures, walkRoutes, walkTags } from "./responsive-fixtures";
 import type { Fixtures } from "./responsive-routes";
@@ -22,7 +24,8 @@ test.skip(!process.env.E2E_BASE_URL, "Requires the FastAPI-served Vite build");
  * the list skips is skipped here too (its reason is in that file).
  *
  * tests/a11y.spec.ts scans the same pages with a menu, dialog or panel open;
- * this spec is about breadth. A rule that cannot hold on one screen goes in
+ * this spec is about breadth. CHECKS holds what must be on a screen before it is
+ * scanned, so a scan cannot pass on a screen that never arrived. A rule that cannot hold on one screen goes in
  * EXCEPTIONS with the reason; nothing is excluded globally.
  * A11Y_ROUTES narrows a run to routes matching a regular expression,
  * A11Y_VARIANTS=phone-light,ipad-light to those variants, and
@@ -41,6 +44,60 @@ const PROBES = { selected: selectedProbe, "left-edge": leftEdgeProbe, contrast: 
 
 /** route pattern → rule → reason. Fix instead of adding to this. */
 const EXCEPTIONS: Record<string, Record<string, string>> = {};
+
+/** The screen `page` shows, at a layout's width. */
+type Screen = { page: Page; fixtures: Fixtures; width: number };
+
+const heading = ({ page }: Screen, level: number, name: RegExp | string) =>
+  expect(page.getByRole("heading", { level, name })).toBeVisible();
+/** Below 1024 px a Konto page has its own heading; sideways, "Konto" over its tabs. */
+const kontoPage = ({ page, width }: Screen, title: RegExp) =>
+  expect(
+    page.getByRole("heading", { level: 1, name: width < 1024 ? title : /^(Konto|Account)$/ })
+  ).toBeAttached();
+
+/**
+ * Route pattern → what must be on the screen before it is scanned. These routes also hold the
+ * checks axe has no rule for: a column that collapsed, a document that scrolls under the shell.
+ */
+const CHECKS: Record<string, (screen: Screen) => Promise<void>> = {
+  "/account": (screen) => heading(screen, 1, /^(Konto|Account)$/),
+  "/account/api-keys": (screen) => kontoPage(screen, /^(Mina API-nycklar|My API keys)$/),
+  "/account/appearance": ({ page }) =>
+    expect(page.getByRole("radiogroup", { name: /^(Tema|Theme)$/ })).toBeVisible(),
+  "/account/copy-format": (screen) => kontoPage(screen, /^(Kopieringsformat|Copy format)$/),
+  "/account/integrations": (screen) => kontoPage(screen, /^(Integrationer|Integrations)$/),
+  "/account/password": (screen) => kontoPage(screen, /^(Byt lösenord|Change password)$/),
+  "/admin": (screen) => heading(screen, 1, /^(Översikt|Overview)$/),
+  "/admin/models": (screen) => heading(screen, 2, "E2E Mock Provider"),
+  "/admin/users": async (screen) => {
+    await heading(screen, 1, /^(Användare|Users)$/);
+    await expect(screen.page.getByRole("main").getByText(/^\d+ (användare|users?)$/)).toBeVisible();
+  },
+  "/spaces/$/apps": (screen) => heading(screen, 2, /^(Appar|Apps)$/),
+  "/spaces/$/apps/$": async ({ page, fixtures }) => {
+    await expect(page.getByRole("tab", { name: /^(Resultat|Results)$/ })).toBeVisible();
+    await expect(page.getByRole("link", { name: /^(Redigera|Edit)$/ })).toHaveAttribute(
+      "href",
+      `${fixtures.space}/apps/${fixtures.app}/edit`
+    );
+  },
+  "/spaces/$/apps/$/edit": (screen) => heading(screen, 1, /^Protokoll /),
+  "/spaces/$/assistants": (screen) => heading(screen, 2, /^(Assistenter|Assistants)$/),
+  "/spaces/$/assistants/$/edit": (screen) => heading(screen, 1, /^Bygglov /),
+  "/spaces/$/group-chats/$/edit": (screen) => heading(screen, 1, screen.fixtures.groupChatName),
+  "/spaces/$/members": (screen) => heading(screen, 2, /^(Medlemmar|Members)$/),
+  "/spaces/$/overview": async (screen) => {
+    // A phone's and a tablet's space header names the space (#1328).
+    await heading(screen, 1, screen.fixtures.spaceName);
+    // A phone lists what manages the space; tablets keep a tab for each.
+    await expect(
+      screen.page.getByRole("region", { name: /^(Hantera ytan|Manage space)$/ })
+    ).toHaveCount(screen.width < 768 ? 1 : 0);
+  },
+  "/spaces/list": ({ page }) => expect(page.getByRole("heading", { level: 1 })).toBeVisible(),
+  "/whats-new": (screen) => heading(screen, 1, /^(Nyheter|What's new)$/)
+};
 
 type AxePage = ConstructorParameters<typeof AxeBuilder>[0]["page"];
 
@@ -94,6 +151,14 @@ for (const variant of VARIANTS) {
       } as const;
       const found = await walkRoutes(browser, walk, async (page, pattern) => {
         const problems: string[] = [];
+        const check = CHECKS[pattern];
+        if (check) {
+          try {
+            await check({ page, fixtures, width: variant.width });
+          } catch (error) {
+            problems.push(`${pattern}: not ready (${String(error).split("\n")[0]})`);
+          }
+        }
         if (shots) {
           const file = `${variant.name}-${variant.scheme}-${pattern.replace(/[^a-z0-9]+/gi, "_")}.png`;
           await page.screenshot({ path: path.join(shots, file) });
@@ -128,6 +193,14 @@ for (const variant of VARIANTS) {
               reviews.push(`${scan}: ${name} ${key}: ${detail}`);
           } catch (error) {
             problems.push(`${scan}: the ${name} probe failed (${String(error).split("\n")[0]})`);
+          }
+        }
+        if (check) {
+          try {
+            await expectNoCollapsedTableColumns(page);
+            await expectShellHoldsStill(page);
+          } catch (error) {
+            problems.push(`${pattern}: ${String(error).split("\n")[0]}`);
           }
         }
         return problems;

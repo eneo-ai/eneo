@@ -13,10 +13,12 @@
 export type Fixtures = {
   /** `/spaces/<id>`: a shared space. */
   space: string;
+  spaceName: string;
   assistant: string;
   app: string;
   run: string;
   groupChat: string;
+  groupChatName: string;
   website: string;
   collection: string;
   /** The signed-in user, who has token usage to show. */
