@@ -197,6 +197,14 @@ export function WidgetTextsFields({
   // A blank subtitle held back while it may not be emptied; sent as soon as
   // it may be (the widget is paused, the template unlocks it).
   const [heldSubtitle, setHeldSubtitle] = useState<string | null>(null);
+  // A subtitle supplied from outside (a template applied, a reload) makes
+  // the held blank moot; it must not be sent once the field is free again.
+  const savedSubtitle = texts.subtitle ?? "";
+  const [seenSubtitle, setSeenSubtitle] = useState(savedSubtitle);
+  if (savedSubtitle !== seenSubtitle) {
+    setSeenSubtitle(savedSubtitle);
+    if (heldSubtitle !== null && savedSubtitle.trim()) setHeldSubtitle(null);
+  }
   const [wasRequired, setWasRequired] = useState(!!subtitleRequired);
   if (!!subtitleRequired !== wasRequired) {
     setWasRequired(!!subtitleRequired);

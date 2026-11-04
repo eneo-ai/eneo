@@ -174,6 +174,29 @@ describe("widget template page", () => {
     expect(document.querySelector('[role="alertdialog"]')).toBeNull();
   });
 
+  test("a name cleared on one template does not follow into the next with the same name", async () => {
+    const first = template();
+    const second = template({ id: "t2" });
+    expect(second.name).toBe(first.name);
+    const update = vi.fn(async ({ update: patch }: { update: Partial<WidgetTemplate> }) => ({
+      ...second,
+      ...patch,
+      has_unpublished_changes: true
+    }));
+    const eneo = { widgets: { templates: { update, publish: vi.fn() } } };
+    const screen = render(TemplatePage, { data: { template: first, eneo } as never });
+    const name = page.getByLabelText("name", { exact: true });
+    await userEvent.clear(name);
+    await expect.element(name).toHaveAttribute("aria-invalid", "true");
+
+    // Leaving discards the blank; the next template starts from its saved name.
+    await screen.rerender({ data: { template: second, eneo } as never });
+    await expect.element(name).toHaveValue(second.name);
+    await expect.element(name).toHaveAttribute("aria-invalid", "false");
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    expect(update).not.toHaveBeenCalled();
+  });
+
   test("an edit made while a template publishes is saved afterwards, not lost", async () => {
     const first = template({ linked_widgets: 0, has_unpublished_changes: true });
     let release!: (published: WidgetTemplate) => void;

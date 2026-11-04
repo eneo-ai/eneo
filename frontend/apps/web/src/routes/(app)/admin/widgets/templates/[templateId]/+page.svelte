@@ -62,6 +62,7 @@
     untrack(() => {
       owner = { templateId };
       autosave.reload(data.template);
+      resetHeaderDrafts();
       confirmPublish = false;
     });
   });
@@ -75,6 +76,13 @@
   const template = $derived(autosave.widget);
 
   const name = new TextDraft(() => autosave.widget.name);
+  /** The header fields live outside the keyed subtree; a draft left in them
+   * (a cleared name) would otherwise survive into the next template when
+   * both save the same text, since a draft follows only a changed value. */
+  function resetHeaderDrafts() {
+    name.text = autosave.widget.name;
+    description.text = autosave.widget.description ?? "";
+  }
   // A blank name stays in the field; the editor still counts it as unsaved.
   $effect(() => {
     autosave.markDraft("name", !collapseWhitespace(name.text));

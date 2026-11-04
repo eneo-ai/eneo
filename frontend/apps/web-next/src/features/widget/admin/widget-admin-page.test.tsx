@@ -518,6 +518,48 @@ describe("WidgetAdminPage", () => {
     await screen.findByText("Alla ändringar sparade", { selector: "section *" });
   });
 
+  it("a template that supplies the subtitle releases a blank one held before it", async () => {
+    api.PATCH.mockImplementation((_path: string, init: { body: Record<string, unknown> }) =>
+      ok(widget({ ...init.body, status: "active", revision: 4 }))
+    );
+    const live = { status: "active" as const, activated_at: "2026-09-01T00:00:00Z" };
+    showPage([widget(live)], ["widgets"], { templates: [template()] });
+    api.POST.mockImplementation((path: string) =>
+      path === LINK_PATH
+        ? ok(
+            linked({
+              ...live,
+              texts: { ...widget().texts, subtitle: "Från mallen" },
+              template: {
+                id: "t1",
+                name: "Kommunmallen",
+                locked_groups: ["persona", "legal_texts"]
+              }
+            })
+          )
+        : path === "/api/v1/widgets/{id}/pause/"
+          ? ok(widget({ status: "paused", revision: 6 }))
+          : ok({ token: "preview-token", expires_in: 900 })
+    );
+    // A live widget keeps its subtitle, so the blank is held, not sent.
+    const subtitle = await screen.findByRole("textbox", { name: /^Beskrivning/ });
+    fireEvent.change(subtitle, { target: { value: "" } });
+    expect(await screen.findByText("1 osparad ändring")).toBeTruthy();
+
+    await applyTemplate();
+    await waitFor(() => expect((subtitle as HTMLInputElement).value).toBe("Från mallen"));
+    expect(subtitle.getAttribute("aria-invalid")).toBeNull();
+    await waitFor(() => expect(screen.queryByText("1 osparad ändring")).toBeNull());
+
+    // Pausing frees the subtitle; the discarded blank must not be sent then.
+    fireEvent.click(screen.getByRole("button", { name: "Pausa" }));
+    await waitFor(() =>
+      expect(api.POST).toHaveBeenCalledWith("/api/v1/widgets/{id}/pause/", expect.anything())
+    );
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    expect(api.PATCH).not.toHaveBeenCalled();
+  });
+
   it("linking a template lets its cached follower count go", async () => {
     const queryClient = testQueryClient();
     queryClient.setQueryData(["widget-templates", "t1"], template());
