@@ -62,10 +62,15 @@ test(
       viewport: { width: 1280, height: 800 }
     });
     const page = await context.newPage();
+    // Send moves twice after the field shows, and a pointer it leaves closes the tooltip: the
+    // lists below the composer recentre it once both have answered, and the context meter adds
+    // a line under it.
+    const lists = ["/api/v1/conversations/recent/", "/api/v1/dashboard/"].map((path) =>
+      page.waitForResponse((response) => new URL(response.url()).pathname === path)
+    );
     await page.goto("/spaces/personal/chat");
+    await Promise.all(lists);
     const composer = page.locator("[data-start-composer]");
-    // The context meter arrives last and moves Send: the pointer has to wait for it, or Send
-    // leaves from under it and the tooltip closes.
     await expect(composer.getByRole("button", { name: /^Kontextanvändning/ })).toBeVisible();
     await composer.getByRole("button", { name: "Skicka meddelande" }).hover();
     await expect(page.getByText("Skicka (Retur). Skift+Retur ger en ny rad.")).toBeVisible();

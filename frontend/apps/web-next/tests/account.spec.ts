@@ -165,7 +165,7 @@ test.describe("Konto on a phone (decision 22)", { tag: "@vite" }, () => {
 test.describe("Konto on an iPad held upright", { tag: "@vite" }, () => {
   test.use({ viewport: { width: 820, height: 1180 }, hasTouch: true });
 
-  test("is a centred column of 42 rem with inset groups; a phone keeps its edge-to-edge rows", async ({
+  test("is a 42 rem column on the page's left edge with inset groups; a phone keeps its edge-to-edge rows", async ({
     page
   }) => {
     await page.goto("/account");
@@ -175,10 +175,8 @@ test.describe("Konto on an iPad held upright", { tag: "@vite" }, () => {
     const box = (await group.boundingBox())!;
     expect(box.width).toBeLessThanOrEqual(672 + 1);
     const panel = (await main.boundingBox())!;
-    // Centred in the page: as much room on either side.
-    expect(
-      Math.abs(box.x - panel.x - (panel.x + panel.width - box.x - box.width))
-    ).toBeLessThanOrEqual(2);
+    // On the left edge every page starts on: the page frame's 24 px inset.
+    expect(Math.abs(box.x - panel.x - 24)).toBeLessThanOrEqual(1);
     expect(await group.evaluate((list) => getComputedStyle(list).borderTopLeftRadius)).not.toBe(
       "0px"
     );
