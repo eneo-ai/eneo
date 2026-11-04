@@ -624,13 +624,14 @@ test(
     await last.scrollIntoViewIfNeeded();
     await expect(last).toBeInViewport();
     await expect(page.getByRole("menuitem", { name: "Skapa en ny yta" })).toBeInViewport();
-    // Only a list that overflows can fail this: the rule is about reaching the scroll area.
-    const { violations } = await new AxeBuilder({ page })
-      .include("[popover]:popover-open")
-      .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
-      .withRules(["scrollable-region-focusable", "aria-required-children"])
-      .analyze();
-    expect(violations.map(({ id }) => id)).toEqual([]);
+    // Only a list that overflows can fail the first: it is about reaching the scroll area.
+    // Two builders, as withRules replaces withTags.
+    const menu = () => new AxeBuilder({ page }).include("[popover]:popover-open");
+    const rules = ["scrollable-region-focusable", "aria-required-children"];
+    const tags = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
+    for (const scan of [menu().withRules(rules), menu().withTags(tags)]) {
+      expect((await scan.analyze()).violations.map(({ id }) => id)).toEqual([]);
+    }
   }
 );
 
