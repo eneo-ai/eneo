@@ -43,6 +43,7 @@ from eneo.widgets.domain.widget_template_repo import WidgetTemplateRepo
 if TYPE_CHECKING:
     from eneo.actors.actor_manager import ActorManager
     from eneo.spaces.space import Space
+    from eneo.spaces.space_repo import SpaceRepository
     from eneo.spaces.space_service import SpaceService
     from eneo.tenants.tenant_service import TenantService
 
@@ -66,6 +67,7 @@ class WidgetService:
         actor_manager: "ActorManager",
         tenant_service: "TenantService",
         icon_repo: IconRepository,
+        space_repo: "SpaceRepository",
         token_service: Optional[VisitorTokenService] = None,
     ) -> None:
         self.user = user
@@ -75,6 +77,7 @@ class WidgetService:
         self.actor_manager = actor_manager
         self.tenant_service = tenant_service
         self.icon_repo = icon_repo
+        self.space_repo = space_repo
         self.token_service = token_service or VisitorTokenService()
 
     # --- policy -----------------------------------------------------------
@@ -256,10 +259,14 @@ class WidgetService:
             raise BadRequestException(
                 "Widgets cannot be created in a personal space. Choose a shared space."
             )
+        # The space row first, then the assistant: the order a transfer or a
+        # space deletion takes, so neither side holds the assistant while it
+        # waits for the space. Both are held until commit, so a move or a
+        # deletion that follows sees the new widget and refuses or archives.
+        await self.space_repo.lock(space_id)
+        space = await self._space_for_edit(space_id)
         # Raises NotFound when the assistant is not part of this space.
         space.get_assistant(target_id)
-        # Held until commit: moving or deleting the assistant waits for the
-        # new widget, so it sees it and refuses the move or archives it.
         if await self.repo.lock_target_space(target_id) != space_id:
             raise NotFoundException("Assistant not found in this space.")
         template = (

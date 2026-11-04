@@ -1734,11 +1734,14 @@ class AssistantService:
         prompt_text: str,
     ) -> None:
         """A visitor never gets the files tool, so an "open with tool"
-        attachment would reach the model as a link nothing can open. Inline
-        them when the whole baseline then fits the window; otherwise leave the
-        links as they are, so one oversized file does not close the widget.
-        The choice is made on the turn's assistant copy and read by every
-        later step (fit guard, derived pages, completion input)."""
+        attachment would reach the model as a link nothing can open: every
+        attachment inlines for the visitor instead. The baseline is then
+        checked against the window here, before any conversation row exists;
+        a link is no fallback (without tools the completion layer inlines it
+        anyway, and with only knowledge tools it stays unreadable), so a turn
+        that cannot fit is refused and logged for the administrator. The
+        choice is made on the turn's assistant copy and read by every later
+        step (fit guard, derived pages, completion input)."""
         if not assistant.url_only_attachment_ids(model):
             return
         assistant.withhold_file_reader()
@@ -1753,13 +1756,12 @@ class AssistantService:
                 files=files,
             )
         except BadRequestException:
-            assistant.restore_file_reader()
             logger.warning(
-                "Widget visitor keeps %d attachment(s) as links the model cannot "
-                "open: inlined, they would not fit the model's window",
-                len(assistant.url_only_attachment_ids(model)),
+                "Widget visitor turn refused: the assistant's attachments marked "
+                "'open with tool' do not fit the model's window once inlined",
                 extra={"assistant_id": str(assistant.id)},
             )
+            raise
 
     async def get_completion_model(self, space: "Space") -> Optional["CompletionModel"]:
         """Get a completion model for the space. Returns None if no model is available."""

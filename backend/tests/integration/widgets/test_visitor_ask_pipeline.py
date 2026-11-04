@@ -44,6 +44,7 @@ from eneo.database.tables.capabilities_table import (
 )
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.mcp_server_table import MCPServers, MCPServerTools
+from eneo.database.tables.questions_table import Questions
 from eneo.info_blobs.info_blob import (
     InfoBlobAdd,
     InfoBlobChunkInDBWithScore,
@@ -705,3 +706,48 @@ async def test_an_open_with_tool_attachment_reaches_the_visitor_turn_as_text(
     [attachment] = completion["prompt_files"]
     assert str(attachment.id) == file_id
     assert FEE_TEXT in (attachment.text or "")
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_an_oversized_open_with_tool_attachment_refuses_the_visitor_turn(
+    client, admin_token, active_widget, visitor_pipeline
+):
+    """Inlined for the visitor, the attachment does not fit the model's
+    window; the turn is refused before a conversation or question exists
+    rather than failing at the provider or leaving an unreadable link."""
+    seen: _Pipeline = visitor_pipeline["seen"]
+    public_id = active_widget["public_id"]
+    assistant_id = UUID(active_widget["target_id"])
+    oversized = ("Taxa 2026: 4 500 kronor per \u00e4rende. " * 20_000).encode()
+    upload = await client.post(
+        "/api/v1/files/",
+        files={"upload_file": ("taxa-stor.txt", oversized, "text/plain")},
+        headers=_auth(admin_token),
+    )
+    assert upload.status_code == 200, upload.text
+    updated = await client.post(
+        f"/api/v1/assistants/{assistant_id}/",
+        json={"attachments": [{"id": upload.json()["id"], "inline_text": False}]},
+        headers=_auth(admin_token),
+    )
+    assert updated.status_code == 200, updated.text
+
+    async def question_rows() -> int:
+        async with sessionmanager.session() as db, db.begin():
+            return await db.scalar(
+                sa.select(sa.func.count())
+                .select_from(Questions)
+                .where(Questions.assistant_id == assistant_id)
+            )
+
+    before = await question_rows()
+    token = await _mint(client, public_id)
+    resp = await client.post(
+        f"/api/v1/widgets/{public_id}/ask/",
+        json={"question": "Vad kostar ett bygglov?"},
+        headers=_auth(token),
+    )
+    assert resp.status_code == 400, resp.text
+    assert seen.completion_kwargs == []
+    assert await question_rows() == before

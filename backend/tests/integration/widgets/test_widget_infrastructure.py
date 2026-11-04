@@ -8,6 +8,7 @@ import pytest
 import sqlalchemy as sa
 
 from eneo.database.database import sessionmanager
+from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.base_class import Base
 from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
@@ -626,6 +627,35 @@ async def test_overview_includes_durable_inflight_budget_without_per_widget_read
     assert row.budget_used_today == 8_000
     assert row.questions_30d == 0
     assert row.last_activity is None
+
+
+async def test_creating_a_widget_during_an_assistant_transfer_does_not_deadlock(
+    db_container, active_widget
+):
+    """Moving an assistant locks its spaces and then the assistant. A widget
+    being created must queue on the space first; holding the assistant while
+    waiting for the space would deadlock the two."""
+    space_id = UUID(active_widget["space_id"])
+    target_id = UUID(active_widget["target_id"])
+
+    async def create() -> Widget:
+        async with db_container() as container:
+            view = await container.widget_service().create_widget(
+                space_id=space_id, target_id=target_id, name="Under flytt"
+            )
+            return view.widget
+
+    async with db_container() as mover:
+        await mover.space_repo().lock(space_id)
+        racer = asyncio.create_task(create())
+        await _wait_until_blocked(mover.session(), racer)
+        # The transfer takes the assistant next; the creation must not hold it yet.
+        await mover.session().execute(
+            sa.select(Assistants.id).where(Assistants.id == target_id).with_for_update()
+        )
+        assert not racer.done()
+    widget = await racer
+    assert (widget.space_id, widget.status) == (space_id, WidgetStatus.DRAFT)
 
 
 async def test_reapplying_a_release_during_its_publication_does_not_deadlock(

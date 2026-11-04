@@ -188,6 +188,7 @@ def _service(user, space, can_edit=True, repo=None, template_repo=None, icon_rep
         actor_manager=actor_manager,
         tenant_service=tenant_service,
         icon_repo=icon_repo or _FakeIconRepo(),
+        space_repo=SimpleNamespace(lock=AsyncMock()),
     )
 
 

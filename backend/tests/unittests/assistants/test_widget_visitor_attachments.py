@@ -89,7 +89,7 @@ async def test_an_open_with_tool_attachment_inlines_for_a_visitor_when_it_fits(
     assert fit.call_args.kwargs["max_input_tokens"] == 8_000
 
 
-async def test_an_oversized_attachment_stays_a_link_rather_than_closing_the_widget(
+async def test_an_oversized_attachment_refuses_the_visitor_turn_before_any_row(
     monkeypatch,
 ):
     attachment = _attachment()
@@ -102,11 +102,15 @@ async def test_an_oversized_attachment_stays_a_link_rather_than_closing_the_widg
     logger = MagicMock()
     monkeypatch.setattr(assistant_service_mod, "logger", logger)
 
-    await _service()._inline_attachments_for_visitor(assistant, MODEL, "Svara kort.")
+    with pytest.raises(BadRequestException):
+        await _service()._inline_attachments_for_visitor(
+            assistant, MODEL, "Svara kort."
+        )
 
-    assert assistant.url_only_attachment_ids(MODEL) == {attachment.id}
+    # No link fallback: the attachment is inlined or the turn is refused.
+    assert assistant.url_only_attachment_ids(MODEL) == set()
     logger.warning.assert_called_once()
-    assert "would not fit" in logger.warning.call_args.args[0]
+    assert "do not fit" in logger.warning.call_args.args[0]
 
 
 async def test_inlined_attachments_need_no_decision(monkeypatch):
