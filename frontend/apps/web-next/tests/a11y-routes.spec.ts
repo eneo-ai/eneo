@@ -68,9 +68,17 @@ const CHECKS: Record<string, (screen: Screen) => Promise<void>> = {
   "/account/integrations": (screen) => kontoPage(screen, /^(Integrationer|Integrations)$/),
   "/account/password": (screen) => kontoPage(screen, /^(Byt lösenord|Change password)$/),
   "/admin": (screen) => heading(screen, 1, /^(Översikt|Overview)$/),
-  "/admin/flow-data-retention": (screen) =>
-    heading(screen, 1, /^(Gallring av flöden|Flow retention)$/),
-  "/admin/flow-settings": (screen) => heading(screen, 1, /^(Flöden|Flows)$/),
+  // A control from inside the page's read, which a failed read does not show.
+  "/admin/flow-data-retention": ({ page }) =>
+    expect(
+      page.getByRole("spinbutton", { name: /^(Felsökningsunderlag|Debug evidence), / })
+    ).toBeVisible(),
+  "/admin/flow-settings": ({ page }) =>
+    expect(
+      page.getByRole("switch", {
+        name: /^(Tillåt nya steg som körs per fil|Allow new steps that run once per file)/
+      })
+    ).toBeVisible(),
   "/admin/models": (screen) => heading(screen, 2, "E2E Mock Provider"),
   "/admin/users": async (screen) => {
     await heading(screen, 1, /^(Användare|Users)$/);

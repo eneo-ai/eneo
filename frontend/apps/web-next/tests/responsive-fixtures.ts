@@ -184,6 +184,7 @@ export async function walkRoutes(
   const violations: string[] = [];
   for (const context of Object.values(contexts)) await watchCsp(context, violations);
   const pages = { in: await contexts.in.newPage(), out: await contexts.out.newPage() };
+  const watch = { in: watchDocument(pages.in), out: watchDocument(pages.out) };
   const problems: string[] = [];
   for (const [pattern, entry] of Object.entries(ROUTES)) {
     if ("skip" in entry) continue;
@@ -196,7 +197,13 @@ export async function walkRoutes(
       problems.push(`${pattern}: did not open (${String(error).split("\n")[0]})`);
       continue;
     }
-    problems.push(...(await visit(page, pattern, signedIn)));
+    const watcher = watch[signedIn ? "in" : "out"];
+    watcher.begin(pattern);
+    try {
+      problems.push(...(await visit(page, pattern, signedIn)));
+    } catch (error) {
+      throw watcher.explain(error);
+    }
     problems.push(...violations.splice(0).map((violation) => `${pattern}: CSP ${violation}`));
   }
   for (const context of Object.values(contexts)) await context.close();
