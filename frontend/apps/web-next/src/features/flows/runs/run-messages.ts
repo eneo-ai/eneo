@@ -14,6 +14,12 @@ export function flowErrorText(code: string | null | undefined, t: Translator): s
   return t.has(key) ? t(key) : null;
 }
 
+/** A step warning's text: its own where it has one, and a warning can share an error's code. */
+export function stepWarningText(code: string, t: Translator): string | null {
+  const key = `flow_step_warning_${code}`;
+  return t.has(key) ? t(key) : flowErrorText(code, t);
+}
+
 /** A sentence the special codes need from their `context` or `details`. */
 function contextualText(
   code: string | null | undefined,

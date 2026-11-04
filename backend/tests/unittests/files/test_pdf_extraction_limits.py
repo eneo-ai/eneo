@@ -98,7 +98,9 @@ class _ControlledExtractor(TextExtractor):
     @classmethod
     def _extract_pdf_page(cls, page):
         path = Path(page.pdf.stream.name)
-        path.with_suffix(".pid").write_text(str(os.getpid()))
+        # Whole or not there: the parent reads it as soon as it exists.
+        path.with_suffix(".tmp").write_text(str(os.getpid()))
+        path.with_suffix(".tmp").replace(path.with_suffix(".pid"))
         while not path.with_suffix(".release").exists():
             time.sleep(0.01)
         return super()._extract_pdf_page(page)

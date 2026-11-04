@@ -13,7 +13,7 @@ import { CitationSummary } from "./run-citations";
 import { CopyButton } from "./run-copy";
 import { formatCount, formatSeconds, stepInputFiles } from "./run-format";
 import { JsonBlock, JsonValue } from "./run-json";
-import { flowErrorText, runErrorText } from "./run-messages";
+import { runErrorText, stepWarningText } from "./run-messages";
 import {
   nextStepOrder,
   outputStructured,
@@ -389,7 +389,7 @@ function StepCard({
       {warnings.length > 0 ? (
         <ul className="text-ax-text flex list-disc flex-col gap-0.5 pl-5 text-sm">
           {/* A code's text says nothing of the case, so two of one code read as one line. */}
-          {[...new Set(warnings.map((item) => flowErrorText(item.code, t) ?? item.message))].map(
+          {[...new Set(warnings.map((item) => stepWarningText(item.code, t) ?? item.message))].map(
             (text) => (
               <li key={text}>{text}</li>
             )
