@@ -726,6 +726,9 @@
   "bgOverlap": 3,
   "shortTextContent": 1
  },
+ "WCAG 2.2 AA, dark mode|a dialog open: the session is about to end #1": {
+  "elmPartiallyObscuring": 1
+ },
  "WCAG 2.2 AA, dark mode|a menu open: the profile menu #1": {
   "bgOverlap": 10
  },
@@ -853,6 +856,9 @@
  "WCAG 2.2 AA, light mode › phone (390 × 844)|chat: an answer, and its activity sheet #2": {
   "bgOverlap": 3,
   "shortTextContent": 1
+ },
+ "WCAG 2.2 AA, light mode|a dialog open: the session is about to end #1": {
+  "elmPartiallyObscuring": 1
  },
  "WCAG 2.2 AA, light mode|a menu open: the profile menu #1": {
   "bgOverlap": 10
