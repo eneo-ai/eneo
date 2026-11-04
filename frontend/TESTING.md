@@ -89,6 +89,13 @@ E2E_MANAGE_STACK=0 bun run test:e2e
 docker compose -f docker-compose.e2e.yml down
 ```
 
+The reused Linux `backend_venv` must match this checkout's `backend/uv.lock`.
+Synchronize it through the usual devcontainer setup after a branch adds a Python
+dependency. A host Python environment does not update that mounted environment.
+The backend healthcheck requires an HTTP response from `/api/livez`, since a
+listening Gunicorn socket can precede a worker import failure. For startup
+failures, inspect the `e2e-backend` logs before running browser tests.
+
 The suite authenticates once (`auth.setup.ts` logs in the seeded user and saves a
 session to `playwright/.auth/`), then every spec reuses that session — login is
 exercised for real, but each test starts authenticated.
@@ -356,6 +363,33 @@ When writing these tests:
 Not automated yet: real screen readers (NVDA, JAWS, VoiceOver, TalkBack).
 Guidepup can drive NVDA and VoiceOver in CI; until that is set up, test the
 widget with them by hand before a release.
+
+## Widget test ownership
+
+Framework-neutral widget contracts live in `packages/eneo-js/src/widgets/`:
+visitor identity/rotation/storage, install snippets, origin validation,
+colour calculations, template locks/publication summaries and the iframe bridge.
+Their Node tests run once for both apps through the existing SDK test command.
+The Python policy test owns the cross-language budget-ceiling contract; there is no mirrored frontend source-reading test.
+
+Keep component tests for each UI's rendering, focus, announcements, feedback
+and editor state. Markdown announcements use different parsers in the apps,
+and autosave uses different reactive integrations: their app-specific tests
+remain useful. Keep backend unit, HTTP, real-PostgreSQL/Redis concurrency,
+retention and migration tests; these protect different boundaries.
+
+The worker lifecycle has fast SDK tests (deadline, cancellation, failure,
+retry and cookie omission). `proofOfWork.svelte.test.ts` exercises the actual
+vendor worker and verifies its signed solution in Chromium. The cross-origin
+`widget-embed.spec.ts` flows in both apps run with ALTCHA enabled against the
+real backend and the deterministic model. They must not replace the worker
+or its solution with a test bypass. The loader's immutable-byte and frozen
+bridge contracts remain independent of the current apps.
+
+For a test removal, identify the surviving test and the same failure it
+catches. Similar names across layers are not evidence of duplication. Change
+shared owners before removing app copies. Use one worker locally, the global
+resource supervisor and the repository's local execution rules.
 
 ## AI-assisted workflow
 

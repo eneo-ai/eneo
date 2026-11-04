@@ -9,8 +9,8 @@ import { Switch } from "@astryxdesign/core/Switch";
 import { SettingsGroup } from "@/components/composites/settings-rows";
 import type { AutosaveSnapshot, Widget, WidgetAutosave } from "./autosave";
 import { blockerLabel } from "./blockers";
-import { MAX_DAILY_TOKEN_BUDGET } from "./limits";
-import { MAX_ALLOWED_ORIGINS, parseOrigins } from "./origins";
+import { MAX_DAILY_TOKEN_BUDGET } from "@eneo/eneo-js/widgets/limits";
+import { MAX_ALLOWED_ORIGINS, parseOrigins } from "@eneo/eneo-js/widgets/origins";
 import type { WidgetPolicy } from "./queries";
 import { useTextDraft } from "./use-text-draft";
 

@@ -9,7 +9,7 @@ import { Switch } from "@astryxdesign/core/Switch";
 import { SettingsGroup } from "@/components/composites/settings-rows";
 import { Autosave } from "../autosave";
 import { toastWidgetError } from "../errors";
-import { MAX_DAILY_TOKEN_BUDGET } from "../limits";
+import { MAX_DAILY_TOKEN_BUDGET } from "@eneo/eneo-js/widgets/limits";
 import { widgetPolicyQueryOptions, type WidgetPolicy } from "../queries";
 import { useAutosave } from "../use-widget-autosave";
 import { widgetPolicyApi, type WidgetPolicyUpdate } from "./queries";

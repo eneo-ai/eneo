@@ -1,3 +1,28 @@
+// @ts-check
+/** @typedef {import('./contrast.js').LauncherColors} LauncherColors */
+/** @typedef {{ full: boolean; expanded: boolean }} PanelLayout */
+/** @typedef {{ name: string; avatar_url: string | null }} LauncherPersona */
+/** @typedef {| {
+ * type: "ready";
+ * payload?: { colors?: LauncherColors; title?: string; persona?: LauncherPersona };
+ * }
+ * | { type: "close" }
+ * | { type: "conversation_started" }
+ * | { type: "unread"; payload: { count: number } }
+ * | { type: "expand" }
+ * | { type: "collapse" }} OutboundMessage */
+/** @typedef {| { type: "open" }
+ * | { type: "theme"; payload: { scheme: "light" | "dark" | "auto" } }
+ * | { type: "context"; payload: { page_url?: string; page_title?: string } }
+ * | { type: "layout"; payload: PanelLayout }} InboundMessage */
+/** @template T
+ * @typedef {{ ns: typeof BRIDGE_NAMESPACE; v: number } & T} Envelope */
+/** @typedef {{
+ * onOpen?: () => void;
+ * onTheme?: (scheme: "light" | "dark" | "auto") => void;
+ * onContext?: (context: { page_url?: string; page_title?: string }) => void;
+ * onLayout?: (layout: PanelLayout) => void;
+ * }} EmbedBridgeHandlers */
 /**
  * postMessage protocol between the embed page (inside the iframe) and the
  * loader on the host page. Every message is origin-checked and carries no
@@ -9,70 +34,30 @@
  * and new optional payload fields keep the version, since unknown types are
  * ignored and unknown fields are dropped by the parsers on both sides.
  */
-
 export const BRIDGE_NAMESPACE = "eneo-widget";
 export const BRIDGE_VERSION = 1;
-
-import type { LauncherColors } from "./contrast";
-
-/**
- * How the loader shows the panel right now. `full` is true whenever it covers
- * the host viewport: forced by a small screen, or because the chat asked to
- * expand. Loaders from before this message never send it, so the chat offers
- * its expand control only once a layout has arrived.
- */
-export type PanelLayout = { full: boolean; expanded: boolean };
-
-/**
- * The persona as the launcher needs it: the name for the button's accessible
- * name, the avatar only when the widget shows it as the launcher.
- */
-export type LauncherPersona = { name: string; avatar_url: string | null };
-
-export type OutboundMessage =
-  | {
-      type: "ready";
-      payload?: { colors?: LauncherColors; title?: string; persona?: LauncherPersona };
-    }
-  | { type: "close" }
-  | { type: "conversation_started" }
-  | { type: "unread"; payload: { count: number } }
-  | { type: "expand" }
-  | { type: "collapse" };
-
-export type InboundMessage =
-  | { type: "open" }
-  | { type: "theme"; payload: { scheme: "light" | "dark" | "auto" } }
-  | { type: "context"; payload: { page_url?: string; page_title?: string } }
-  | { type: "layout"; payload: PanelLayout };
-
-type Envelope<T> = { ns: typeof BRIDGE_NAMESPACE; v: number } & T;
-
-export type EmbedBridgeHandlers = {
-  onOpen?: () => void;
-  onTheme?: (scheme: "light" | "dark" | "auto") => void;
-  onContext?: (context: { page_url?: string; page_title?: string }) => void;
-  onLayout?: (layout: PanelLayout) => void;
-};
-
 /** Parse a raw message event payload into an inbound message, or null. */
-export function parseInbound(data: unknown): InboundMessage | null {
+/** @param {unknown} data
+ * @returns {InboundMessage | null} */
+export function parseInbound(data) {
   if (!data || typeof data !== "object") return null;
-  const envelope = data as Partial<Envelope<{ type?: unknown; payload?: unknown }>>;
+  const envelope = /** @type {Partial<Envelope<{ type?: unknown; payload?: unknown }>>} */ (data);
   if (envelope.ns !== BRIDGE_NAMESPACE) return null;
   if (typeof envelope.v !== "number" || envelope.v > BRIDGE_VERSION) return null;
   switch (envelope.type) {
     case "open":
       return { type: "open" };
     case "theme": {
-      const scheme = (envelope.payload as { scheme?: unknown } | undefined)?.scheme;
+      const scheme = /** @type {{ scheme?: unknown } | undefined} */ (envelope.payload)?.scheme;
       if (scheme === "light" || scheme === "dark" || scheme === "auto") {
         return { type: "theme", payload: { scheme } };
       }
       return null;
     }
     case "context": {
-      const payload = (envelope.payload ?? {}) as { page_url?: unknown; page_title?: unknown };
+      const payload = /** @type {{ page_url?: unknown; page_title?: unknown }} */ (
+        envelope.payload ?? {}
+      );
       return {
         type: "context",
         payload: {
@@ -82,7 +67,9 @@ export function parseInbound(data: unknown): InboundMessage | null {
       };
     }
     case "layout": {
-      const payload = (envelope.payload ?? {}) as { full?: unknown; expanded?: unknown };
+      const payload = /** @type {{ full?: unknown; expanded?: unknown }} */ (
+        envelope.payload ?? {}
+      );
       if (typeof payload.full !== "boolean" || typeof payload.expanded !== "boolean") return null;
       return { type: "layout", payload: { full: payload.full, expanded: payload.expanded } };
     }
@@ -90,29 +77,30 @@ export function parseInbound(data: unknown): InboundMessage | null {
       return null;
   }
 }
-
-export function createEmbedBridge(options: {
-  /** Origin of the host page; messages are only exchanged with it. */
-  hostOrigin: string | null;
-  handlers?: EmbedBridgeHandlers;
-  target?: Pick<Window, "postMessage"> | null;
-  addListener?: (listener: (event: MessageEvent) => void) => () => void;
-}) {
+/**
+ * Origin and window checks are enforced before dispatching to the iframe UI.
+ * @param {{hostOrigin: string | null, handlers?: EmbedBridgeHandlers,
+ *   target?: Pick<Window, "postMessage"> | null,
+ *   addListener?: (listener: (event: MessageEvent) => void) => () => void}} options
+ */
+export function createEmbedBridge(options) {
   const { hostOrigin, handlers = {} } = options;
   const embedded = typeof window !== "undefined" && window.parent !== window && hostOrigin !== null;
   const target = options.target ?? (embedded ? window.parent : null);
-
-  function post(message: OutboundMessage): void {
+  /** @param {OutboundMessage} message
+   * @returns {void} */
+  function post(message) {
     if (!target || !hostOrigin) return;
-    const envelope: Envelope<OutboundMessage> = {
+    const envelope = {
       ns: BRIDGE_NAMESPACE,
       v: BRIDGE_VERSION,
       ...message
     };
     target.postMessage(envelope, hostOrigin);
   }
-
-  function listener(event: MessageEvent): void {
+  /** @param {MessageEvent} event
+   * @returns {void} */
+  function listener(event) {
     if (!hostOrigin || event.origin !== hostOrigin) return;
     if (target && event.source !== target) return;
     const message = parseInbound(event.data);
@@ -132,7 +120,6 @@ export function createEmbedBridge(options: {
         break;
     }
   }
-
   const unsubscribe =
     options.addListener?.(listener) ??
     (typeof window !== "undefined"
@@ -141,7 +128,6 @@ export function createEmbedBridge(options: {
           return () => window.removeEventListener("message", listener);
         })()
       : () => {});
-
   return {
     embedded,
     post,
@@ -150,19 +136,22 @@ export function createEmbedBridge(options: {
      * frame after the widget's title for screen readers once the page is up,
      * and names its button after the persona (showing its avatar when asked).
      */
-    ready: (colors?: LauncherColors, title?: string, persona?: LauncherPersona) =>
-      post(
-        colors || title || persona
-          ? {
-              type: "ready",
-              payload: {
-                ...(colors ? { colors } : {}),
-                ...(title ? { title } : {}),
-                ...(persona ? { persona } : {})
+    ready:
+      /** @param {LauncherColors} [colors]
+       * @param {string} [title]
+       * @param {LauncherPersona} [persona] */ (colors, title, persona) =>
+        post(
+          colors || title || persona
+            ? {
+                type: "ready",
+                payload: {
+                  ...(colors ? { colors } : {}),
+                  ...(title ? { title } : {}),
+                  ...(persona ? { persona } : {})
+                }
               }
-            }
-          : { type: "ready" }
-      ),
+            : { type: "ready" }
+        ),
     close: () => post({ type: "close" }),
     /** Ask the loader to grow the panel over the host viewport, or to put it back. */
     expand: () => post({ type: "expand" }),
@@ -172,3 +161,5 @@ export function createEmbedBridge(options: {
     destroy: unsubscribe
   };
 }
+
+/** @typedef {ReturnType<typeof createEmbedBridge>} EmbedBridge */

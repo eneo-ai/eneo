@@ -1,8 +1,8 @@
-import { page } from "@vitest/browser/context";
+import { page } from "vitest/browser";
 import { render } from "vitest-browser-svelte";
 import type { Eneo, Widget } from "@eneo/eneo-js";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import type { LoaderRelease } from "./snippet";
+import type { LoaderRelease } from "@eneo/eneo-js/widgets/snippet";
 
 const state = vi.hoisted(() => ({
   page: {

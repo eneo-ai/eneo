@@ -11,8 +11,8 @@
   import * as Field from "$lib/components/ui/field/index.js";
   import * as RadioGroup from "$lib/components/ui/radio-group/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { DEFAULT_PRIMARY_COLOR, isHexColor } from "../contrast";
-  import { templateRelease } from "./templateLocks";
+  import { DEFAULT_PRIMARY_COLOR, isHexColor } from "@eneo/eneo-js/widgets/contrast";
+  import { templateRelease } from "@eneo/eneo-js/widgets/template-locks";
 
   type Props = {
     templates: WidgetTemplate[];

@@ -153,6 +153,7 @@ submitted) and popups for source links.
 bun run --filter @eneo/widget-loader build   # dist/eneo.js + eneo.css + manifest.json, size budget, release check
 bun run --filter @eneo/widget-loader build:dev   # the same without the release check, for work in progress
 bun run --filter @eneo/widget-loader test    # builds, then Vitest in headless Chromium and the release check's tests
+bun run --filter @eneo/widget-loader test:built # CI only: tests the assets already built in this job
 bun run --filter @eneo/widget-loader lock    # records a new version's bytes in release.json
 ```
 

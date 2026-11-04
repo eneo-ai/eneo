@@ -14,7 +14,7 @@ import {
   LIGHT_SURFACE,
   normalizeHexColor,
   readableOn
-} from "../contrast";
+} from "@eneo/eneo-js/widgets/contrast";
 
 /**
  * A colour: native picker plus the hex value, with an optional WCAG contrast

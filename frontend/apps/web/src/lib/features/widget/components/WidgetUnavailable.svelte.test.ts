@@ -1,10 +1,10 @@
-import { page, userEvent } from "@vitest/browser/context";
+import { page, userEvent } from "vitest/browser";
 import { render } from "vitest-browser-svelte";
 import { describe, expect, test, vi } from "vitest";
 import axe from "axe-core";
 import { virtual } from "@guidepup/virtual-screen-reader";
 import "../../../../app.css";
-import { BRIDGE_NAMESPACE, BRIDGE_VERSION } from "../embedBridge";
+import { BRIDGE_NAMESPACE, BRIDGE_VERSION } from "@eneo/eneo-js/widgets/embed-bridge";
 import WidgetUnavailable from "./WidgetUnavailable.svelte";
 
 vi.mock("$lib/paraglide/messages", () => ({

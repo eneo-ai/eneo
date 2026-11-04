@@ -4,25 +4,27 @@
   widget-specific so the WCAG contract in the ADR is enforced here.
 -->
 <script lang="ts">
-  import "altcha";
-  import type { AltchaWidgetElement } from "altcha";
   import type { WidgetClient, WidgetPublicConfig } from "@eneo/eneo-js";
   import { onMount, tick, untrack } from "svelte";
   import { m } from "$lib/paraglide/messages";
   import { getChatService } from "$lib/features/chat/ChatService.svelte";
-  import { launcherColors } from "../contrast";
+  import { launcherColors } from "@eneo/eneo-js/widgets/contrast";
   import { isHttpUrl, linkHost } from "../urls";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import Maximize2 from "@lucide/svelte/icons/maximize-2";
   import MessageSquarePlus from "@lucide/svelte/icons/message-square-plus";
   import Minimize2 from "@lucide/svelte/icons/minimize-2";
   import X from "@lucide/svelte/icons/x";
-  import { solveWithAltcha } from "../altcha";
+  import { solveWithAltcha } from "@eneo/eneo-js/widgets/proof-of-work";
   import { Announcer } from "../announcer.svelte";
   import { answerText } from "../answerText";
-  import { createEmbedBridge, type PanelLayout } from "../embedBridge";
+  import { createEmbedBridge, type PanelLayout } from "@eneo/eneo-js/widgets/embed-bridge";
   import type { PersonaView } from "../persona";
-  import { VisitorSession, isTokenRejected, isWidgetUnavailable } from "../visitorSession";
+  import {
+    VisitorSession,
+    isTokenRejected,
+    isWidgetUnavailable
+  } from "@eneo/eneo-js/widgets/visitor-session";
   import {
     MAX_COOLDOWN_SECONDS,
     describeWidgetError,
@@ -64,8 +66,7 @@
 
   const chat = getChatService();
 
-  let altchaElement = $state<AltchaWidgetElement | null>(null);
-  let challengeReady = $state(untrack(() => config.bot_protection === "altcha"));
+  const verification = new AbortController();
   let composer = $state<WidgetComposer | null>(null);
   let draft = $state("");
   // How the loader shows the panel; null until a loader that reports it says.
@@ -111,10 +112,8 @@
     fixedToken: initial.previewToken,
     solve: async () => {
       verifying = true;
-      challengeReady = true;
       try {
-        await tick();
-        return await solveWithAltcha(altchaElement);
+        return await solveWithAltcha(initial.client, { signal: verification.signal });
       } finally {
         verifying = false;
       }
@@ -204,6 +203,7 @@
     }
     return () => {
       activeSend = null;
+      verification.abort();
       if (cooldownTimer) clearTimeout(cooldownTimer);
       announcer.clear();
       bridge.destroy();
@@ -656,25 +656,6 @@
       </AlertDialog.Footer>
     </AlertDialog.Content>
   </AlertDialog.Root>
-
-  {#if challengeReady}
-    <!-- The server may require a challenge after this iframe was opened. -->
-    <div hidden aria-hidden="true">
-      <altcha-widget
-        bind:this={altchaElement}
-        challenge={client.challengeUrl}
-        auto="off"
-        display="invisible"
-        workers="2"
-        configuration={JSON.stringify({
-          hideFooter: true,
-          hideLogo: true,
-          workers: 2,
-          credentials: "omit"
-        })}
-      ></altcha-widget>
-    </div>
-  {/if}
 </div>
 
 <style>

@@ -14,7 +14,7 @@
   import Sun from "@lucide/svelte/icons/sun";
   import { untrack } from "svelte";
   import { getEneo } from "$lib/core/Eneo";
-  import { contrastRatio, readableOn, themeColors } from "../contrast";
+  import { contrastRatio, readableOn, themeColors } from "@eneo/eneo-js/widgets/contrast";
   import { monogram } from "../persona";
   import { currentAppScheme } from "./appScheme";
   import { linkHost } from "../urls";

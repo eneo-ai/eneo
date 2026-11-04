@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { createBrowserHistory, createRoute, type AnyRootRoute } from "@tanstack/react-router";
 import { act, waitFor } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { renderWithRouter } from "@/test/router";
 import { useAutosaveNavigationGuard, type GuardedAutosave } from "./use-autosave-navigation-guard";
 
@@ -30,7 +30,11 @@ function Guard({ autosave }: { autosave: GuardedAutosave }) {
 }
 const routes = (root: AnyRootRoute) =>
   ["/editor", "/elsewhere"].map((path) => createRoute({ getParentRoute: () => root, path }));
-afterEach(() => vi.restoreAllMocks());
+beforeEach(() => vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true));
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 it("holds a route transition until the pending save lands, preserving its fragment", async () => {
   const autosave = store();

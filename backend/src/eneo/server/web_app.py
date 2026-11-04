@@ -310,7 +310,7 @@ def install_web_app(app: FastAPI) -> None:
         overrides = {
             "frame-ancestors": policy.frame_ancestors,
             "frame-src": "'none'",
-            "worker-src": "'self' blob:",
+            "worker-src": "'self'",
             "base-uri": "'none'",
         }
         directives = build_content_security_policy(nonce, ()).split("; ")

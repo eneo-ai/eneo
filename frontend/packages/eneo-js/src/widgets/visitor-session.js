@@ -1,63 +1,59 @@
-import type { WidgetClient, WidgetPublicConfig } from "@eneo/eneo-js";
-import { EneoError } from "@eneo/eneo-js";
-import { widgetErrorCode } from "./widgetErrors";
-
+// @ts-check
 /**
- * What the embed page remembers about a visitor, in the iframe's own
- * storage. Browsers partition that storage per top-level site, so this
- * gives continuity across pages of one host site and nothing across sites.
- * Nothing is written until the visitor actually sends a message.
+ * @typedef {import('../../index.js').WidgetClient} WidgetClient
+ * @typedef {import('../../index.js').WidgetPublicConfig} WidgetPublicConfig
+ * @typedef {{visitor_id: string, visitor_key: string | null, token: string,
+ *   expires_at: number, session_id: string | null}} StoredVisitor
+ * @typedef {Pick<Storage, "getItem" | "setItem" | "removeItem">} StorageLike
+ * @typedef {{client: WidgetClient,
+ *   config: Pick<WidgetPublicConfig, "public_id" | "bot_protection" | "token_generation">,
+ *   solve: () => Promise<string>, storage?: StorageLike | null, now?: () => number,
+ *   graceSeconds?: number, fixedToken?: string | null}} VisitorSessionOptions
+ *
+ * Identity and conversation continuity inside the iframe. visitor_key proves
+ * the server-issued pseudonym. Nothing is stored before the first message.
+ * A fixed admin-preview token is never persisted or rotated. graceSeconds is
+ * the server's expired-token renewal window (15 minutes by default).
  */
-type StoredVisitor = {
-  visitor_id: string;
-  /** Server-issued proof for visitor_id; without it the id is not sent. */
-  visitor_key: string | null;
-  token: string;
-  expires_at: number;
-  session_id: string | null;
-};
-
-type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
-
-export type VisitorSessionOptions = {
-  client: WidgetClient;
-  config: Pick<WidgetPublicConfig, "public_id" | "bot_protection" | "token_generation">;
-  /** Solve the proof of work and return the ALTCHA payload. */
-  solve: () => Promise<string>;
-  storage?: StorageLike | null;
-  now?: () => number;
-  /** Seconds an expired token may still rotate silently (the server's default grace is 15 min). */
-  graceSeconds?: number;
-  /** A preview token from the admin page: used as is, never stored or rotated. */
-  fixedToken?: string | null;
-};
-
+import { EneoError } from "../client/client.js";
+import { widgetErrorCode } from "./errors.js";
 const EXPIRY_MARGIN_MS = 30_000;
-
-export function storageKey(publicId: string): string {
+/** @param {string} publicId
+ * @returns {string} */
+export function storageKey(publicId) {
   return `eneo-widget:${publicId}`;
 }
-
-export function isTokenRejected(error: unknown): boolean {
+/** @param {unknown} error
+ * @returns {boolean} */
+export function isTokenRejected(error) {
   return error instanceof EneoError && error.status === 401;
 }
-
-export function isWidgetUnavailable(error: unknown): boolean {
+/** @param {unknown} error
+ * @returns {boolean} */
+export function isWidgetUnavailable(error) {
   return error instanceof EneoError && error.status === 404;
 }
-
 export class VisitorSession {
-  #client: WidgetClient;
-  #config: VisitorSessionOptions["config"];
-  #solve: () => Promise<string>;
-  #storage: StorageLike | null;
-  #now: () => number;
-  #grace: number;
-  #state: StoredVisitor | null;
-  #minting: Promise<string> | null = null;
-  #fixedToken: string | null;
-
-  constructor(options: VisitorSessionOptions) {
+  /** @type {WidgetClient} */
+  #client;
+  /** @type {VisitorSessionOptions["config"]} */
+  #config;
+  /** @type {() => Promise<string>} */
+  #solve;
+  /** @type {StorageLike | null} */
+  #storage;
+  /** @type {() => number} */
+  #now;
+  /** @type {number} */
+  #grace;
+  /** @type {StoredVisitor | null} */
+  #state;
+  /** @type {Promise<string> | null} */
+  #minting = null;
+  /** @type {string | null} */
+  #fixedToken;
+  /** @param {VisitorSessionOptions} options */
+  constructor(options) {
     this.#client = options.client;
     this.#config = options.config;
     this.#solve = options.solve;
@@ -72,57 +68,60 @@ export class VisitorSession {
     this.#grace = (options.graceSeconds ?? 900) * 1000;
     this.#state = this.#load();
   }
-
-  /** True for the admin page's live preview; nothing is remembered. */
-  get isPreview(): boolean {
+  /** True for the admin page's live preview; nothing is remembered.
+   * @returns {boolean} */
+  get isPreview() {
     return this.#fixedToken !== null;
   }
-
-  /** The token to send right now, or null when nothing has been minted yet. */
-  get token(): string | null {
+  /** The token to send right now, or null when nothing has been minted yet.
+   * @returns {string | null} */
+  get token() {
     return this.#fixedToken ?? this.#state?.token ?? null;
   }
-
-  get visitorId(): string | null {
+  /** @returns {string | null} */
+  get visitorId() {
     return this.#state?.visitor_id ?? null;
   }
-
-  /** Session the visitor was in when the page was last open, for restore. */
-  get sessionId(): string | null {
+  /** Session the visitor was in when the page was last open, for restore.
+   * @returns {string | null} */
+  get sessionId() {
     return this.#state?.session_id ?? null;
   }
-
-  /** True when a still-valid or silently-rotatable token is at hand. */
-  get hasIdentity(): boolean {
+  /** True when a still-valid or silently-rotatable token is at hand.
+   * @returns {boolean} */
+  get hasIdentity() {
     const state = this.#state;
     if (!state?.token) return false;
     return state.expires_at + this.#grace > this.#now();
   }
-
-  rememberSession(sessionId: string | null): void {
+  /** @param {string | null} sessionId */
+  rememberSession(sessionId) {
     if (!this.#state) return;
     this.#state = { ...this.#state, session_id: sessionId };
     this.#save();
   }
-
-  /** Forget the token (the server said it is stale or invalid). */
-  invalidate(): void {
+  /** Forget the token (the server said it is stale or invalid).  */
+  invalidate() {
     if (!this.#state) return;
     this.#state = { ...this.#state, token: "", expires_at: 0 };
     this.#save();
   }
-
-  /** Forget everything, including the visitor id and remembered session. */
-  clear(): void {
+  /** Forget everything, including the visitor id and remembered session.  */
+  clear() {
     this.#state = null;
-    this.#storage?.removeItem(storageKey(this.#config.public_id));
+    try {
+      this.#storage?.removeItem(storageKey(this.#config.public_id));
+    } catch {
+      // Storage access can be revoked while the iframe is open. Its in-memory
+      // identity is still cleared, just as failed writes leave it usable.
+    }
   }
-
   /**
    * Return a token that is valid for at least a few more seconds, minting or
    * rotating as needed. Concurrent callers share one mint.
-   */
-  async ensureToken(): Promise<string> {
+   *
+   * @returns {Promise<string>} */
+  async ensureToken() {
     if (this.#fixedToken !== null) return this.#fixedToken;
     const state = this.#state;
     if (state?.token && state.expires_at - EXPIRY_MARGIN_MS > this.#now()) {
@@ -135,12 +134,11 @@ export class VisitorSession {
     }
     return this.#minting;
   }
-
-  async #mint(): Promise<string> {
+  /** @returns {Promise<string>} */
+  async #mint() {
     const previous = this.#state;
     const previousToken =
       previous?.token && previous.expires_at + this.#grace > this.#now() ? previous.token : null;
-
     if (previousToken) {
       try {
         return this.#store(await this.#client.createVisitorSession({ previousToken }));
@@ -149,7 +147,6 @@ export class VisitorSession {
         if (!isTokenRejected(error)) throw error;
       }
     }
-
     // The pseudonym is only worth sending with the key the server issued for it.
     const identity =
       previous?.visitor_id && previous.visitor_key
@@ -168,13 +165,14 @@ export class VisitorSession {
     const altcha = await this.#solve();
     return this.#store(await this.#client.createVisitorSession({ altcha, ...identity }));
   }
-
-  #store(session: {
-    token: string;
-    expires_in: number;
-    visitor_id: string;
-    visitor_key: string;
-  }): string {
+  /** @param {{
+      token: string;
+      expires_in: number;
+      visitor_id: string;
+      visitor_key: string;
+    }} session
+   * @returns {string} */
+  #store(session) {
     this.#state = {
       visitor_id: session.visitor_id,
       visitor_key: session.visitor_key,
@@ -185,12 +183,12 @@ export class VisitorSession {
     this.#save();
     return session.token;
   }
-
-  #load(): StoredVisitor | null {
+  /** @returns {StoredVisitor | null} */
+  #load() {
     try {
       const raw = this.#storage?.getItem(storageKey(this.#config.public_id));
       if (!raw) return null;
-      const parsed = JSON.parse(raw) as Partial<StoredVisitor>;
+      const parsed = /** @type {Partial<StoredVisitor>} */ (JSON.parse(raw));
       if (typeof parsed.visitor_id !== "string" || typeof parsed.token !== "string") return null;
       return {
         visitor_id: parsed.visitor_id,
@@ -203,8 +201,8 @@ export class VisitorSession {
       return null;
     }
   }
-
-  #save(): void {
+  /** @returns {void} */
+  #save() {
     try {
       if (this.#state) {
         this.#storage?.setItem(storageKey(this.#config.public_id), JSON.stringify(this.#state));
@@ -214,8 +212,8 @@ export class VisitorSession {
     }
   }
 }
-
-function safeLocalStorage(): StorageLike | null {
+/** @returns {StorageLike | null} */
+function safeLocalStorage() {
   try {
     return typeof localStorage === "undefined" ? null : localStorage;
   } catch {

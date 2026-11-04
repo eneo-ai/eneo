@@ -15,7 +15,7 @@ from eneo.widgets.domain.exceptions import (
     WidgetPolicyViolationError,
     WidgetServingBlockedError,
 )
-from eneo.widgets.domain.widget import BotProtection, Widget, WidgetStatus
+from eneo.widgets.domain.widget import BotProtection, Widget, WidgetStatus, WidgetUpdate
 
 
 class _InMemoryRepo:
@@ -323,10 +323,12 @@ async def test_activation_requires_admin_and_reports_blockers(assistant):
 
     await admin.update_widget(
         view.widget.id,
-        {
-            "revision": view.widget.revision,
-            "allowed_origins": ["https://www.kommun.se"],
-        },
+        WidgetUpdate.model_validate(
+            {
+                "revision": view.widget.revision,
+                "allowed_origins": ["https://www.kommun.se"],
+            }
+        ),
     )
     activated = await admin.activate_widget(view.widget.id)
     assert activated.widget.status == WidgetStatus.ACTIVE
@@ -342,7 +344,9 @@ async def test_reactivating_an_active_widget_is_rejected(assistant):
     )
     await service.update_widget(
         view.widget.id,
-        {"revision": view.widget.revision, "allowed_origins": ["https://a.se"]},
+        WidgetUpdate.model_validate(
+            {"revision": view.widget.revision, "allowed_origins": ["https://a.se"]}
+        ),
     )
     await service.activate_widget(view.widget.id)
     with pytest.raises(BadRequestException):
@@ -359,10 +363,12 @@ async def test_update_enforces_tenant_policy(assistant):
     with pytest.raises(WidgetPolicyViolationError) as exc:
         await service.update_widget(
             view.widget.id,
-            {
-                "revision": view.widget.revision,
-                "limits": {"daily_token_budget": 100_000},
-            },
+            WidgetUpdate.model_validate(
+                {
+                    "revision": view.widget.revision,
+                    "limits": {"daily_token_budget": 100_000},
+                }
+            ),
         )
     assert exc.value.code == "widget_policy_violation"
     assert exc.value.details() == {"violations": ["daily_token_budget_exceeds_policy"]}
@@ -378,7 +384,9 @@ async def test_admin_runs_the_lifecycle_outside_their_own_spaces(assistant):
     )
     await editor.update_widget(
         view.widget.id,
-        {"revision": view.widget.revision, "allowed_origins": ["https://a.se"]},
+        WidgetUpdate.model_validate(
+            {"revision": view.widget.revision, "allowed_origins": ["https://a.se"]}
+        ),
     )
 
     outsider = _service(admin_user, space, repo=repo)
@@ -408,7 +416,9 @@ async def test_pause_is_allowed_for_editors_and_admins(assistant):
     )
     await admin.update_widget(
         view.widget.id,
-        {"revision": view.widget.revision, "allowed_origins": ["https://a.se"]},
+        WidgetUpdate.model_validate(
+            {"revision": view.widget.revision, "allowed_origins": ["https://a.se"]}
+        ),
     )
     await admin.activate_widget(view.widget.id)
 
@@ -468,10 +478,11 @@ async def test_reading_widget_configuration_needs_the_widgets_permission(assista
         )
     ).widget.id == view.widget.id
 
-    with pytest.raises(BadRequestException):
-        await _service(owner, space, repo=repo).update_widget(
-            view.widget.id, {"name": "no revision"}
-        )
+    updated = await _service(owner, space, repo=repo).update_widget(
+        view.widget.id,
+        WidgetUpdate(revision=view.widget.revision, name="Allowed"),
+    )
+    assert updated.widget.name == "Allowed"
 
 
 async def test_policy_update_merges_and_validates(assistant):
@@ -576,10 +587,12 @@ async def test_update_rejects_locked_parts_and_accepts_the_rest(assistant):
     with pytest.raises(WidgetFieldLockedError) as locked:
         await service.update_widget(
             widget.id,
-            {
-                "revision": widget.revision,
-                "theme": {**widget.theme.model_dump(), "primary_color": "#000000"},
-            },
+            WidgetUpdate.model_validate(
+                {
+                    "revision": widget.revision,
+                    "theme": {**widget.theme.model_dump(), "primary_color": "#000000"},
+                }
+            ),
         )
     assert locked.value.fields == ["theme"]
     assert locked.value.code == "field_locked_by_template"
@@ -587,7 +600,9 @@ async def test_update_rejects_locked_parts_and_accepts_the_rest(assistant):
     with pytest.raises(WidgetFieldLockedError) as locked:
         await service.update_widget(
             widget.id,
-            {"revision": widget.revision, "texts": {**texts, "footer_text": "Egen"}},
+            WidgetUpdate.model_validate(
+                {"revision": widget.revision, "texts": {**texts, "footer_text": "Egen"}}
+            ),
         )
     assert locked.value.fields == ["texts.footer_text"]
 
@@ -595,12 +610,14 @@ async def test_update_rejects_locked_parts_and_accepts_the_rest(assistant):
     # unlocked title (wording) is editable.
     updated = await service.update_widget(
         widget.id,
-        {
-            "revision": widget.revision,
-            "texts": {**texts, "title": "Egen titel"},
-            "theme": widget.theme.model_dump(),
-            "language": widget.language.value,
-        },
+        WidgetUpdate.model_validate(
+            {
+                "revision": widget.revision,
+                "texts": {**texts, "title": "Egen titel"},
+                "theme": widget.theme.model_dump(),
+                "language": widget.language.value,
+            }
+        ),
     )
     assert updated.widget.texts.title == "Egen titel"
     assert updated.widget.texts.footer_text == "Personuppgifter hanteras…"
@@ -617,10 +634,12 @@ async def test_detaching_keeps_values_and_frees_every_part(assistant):
 
     updated = await service.update_widget(
         detached.widget.id,
-        {
-            "revision": detached.widget.revision,
-            "theme": {**widget.theme.model_dump(), "primary_color": "#000000"},
-        },
+        WidgetUpdate.model_validate(
+            {
+                "revision": detached.widget.revision,
+                "theme": {**widget.theme.model_dump(), "primary_color": "#000000"},
+            }
+        ),
     )
     assert updated.widget.theme.primary_color == "#000000"
 
@@ -678,7 +697,9 @@ async def _serving_widget(assistant, *, widget_policy=None):
     )
     await service.update_widget(
         view.widget.id,
-        {"revision": view.widget.revision, "allowed_origins": ["https://a.se"]},
+        WidgetUpdate.model_validate(
+            {"revision": view.widget.revision, "allowed_origins": ["https://a.se"]}
+        ),
     )
     return service, (await service.activate_widget(view.widget.id)).widget
 
@@ -699,7 +720,10 @@ async def test_an_active_widget_cannot_be_edited_out_of_serving(
     service, widget = await _serving_widget(assistant)
     with pytest.raises(WidgetServingBlockedError) as exc:
         await service.update_widget(
-            widget.id, {"revision": widget.revision, **change(widget)}
+            widget.id,
+            WidgetUpdate.model_validate(
+                {"revision": widget.revision, **change(widget)}
+            ),
         )
     assert exc.value.code == "widget_serving_blocked"
     assert exc.value.blockers == [blocker]
@@ -713,7 +737,8 @@ async def test_an_active_widget_cannot_be_edited_out_of_serving(
         )
     ).widget
     view = await draft_service.update_widget(
-        draft.id, {"revision": draft.revision, **change(draft)}
+        draft.id,
+        WidgetUpdate.model_validate({"revision": draft.revision, **change(draft)}),
     )
     assert blocker in view.activation_blockers
 
@@ -741,7 +766,8 @@ async def test_a_tightened_policy_holds_edits_to_the_settings_they_change(assist
     service.user.tenant.widget_policy = {"max_daily_token_budget": 100_000}
 
     renamed = await service.update_widget(
-        widget.id, {"revision": widget.revision, "name": "Nytt namn"}
+        widget.id,
+        WidgetUpdate.model_validate({"revision": widget.revision, "name": "Nytt namn"}),
     )
     assert renamed.widget.name == "Nytt namn"
     assert renamed.activation_blockers == ["daily_token_budget_exceeds_policy"]
@@ -750,19 +776,23 @@ async def test_a_tightened_policy_holds_edits_to_the_settings_they_change(assist
     with pytest.raises(WidgetPolicyViolationError) as exc:
         await service.update_widget(
             widget.id,
-            {
-                "revision": widget.revision,
-                "limits": {**limits, "daily_token_budget": 400_000},
-            },
+            WidgetUpdate.model_validate(
+                {
+                    "revision": widget.revision,
+                    "limits": {**limits, "daily_token_budget": 400_000},
+                }
+            ),
         )
     assert exc.value.violations == ["daily_token_budget_exceeds_policy"]
 
     compliant = await service.update_widget(
         widget.id,
-        {
-            "revision": widget.revision,
-            "limits": {**limits, "daily_token_budget": 100_000},
-        },
+        WidgetUpdate.model_validate(
+            {
+                "revision": widget.revision,
+                "limits": {**limits, "daily_token_budget": 100_000},
+            }
+        ),
     )
     assert compliant.activation_blockers == []
 
@@ -780,11 +810,13 @@ async def test_activation_reports_policy_violations_as_structured_codes(assistan
     )
     await service.update_widget(
         view.widget.id,
-        {
-            "revision": view.widget.revision,
-            "allowed_origins": ["https://a.se"],
-            "bot_protection": "none",
-        },
+        WidgetUpdate.model_validate(
+            {
+                "revision": view.widget.revision,
+                "allowed_origins": ["https://a.se"],
+                "bot_protection": "none",
+            }
+        ),
     )
     user.tenant.widget_policy = {"allow_bot_protection_none": False}
     with pytest.raises(WidgetPolicyViolationError) as exc:
@@ -832,10 +864,12 @@ async def test_persona_avatar_is_checked_before_the_write_and_released_after(
 
     updated = await service.update_widget(
         view.widget.id,
-        {
-            "revision": view.widget.revision,
-            "persona": {"name": "Sigge", "avatar_icon_id": first},
-        },
+        WidgetUpdate.model_validate(
+            {
+                "revision": view.widget.revision,
+                "persona": {"name": "Sigge", "avatar_icon_id": first},
+            }
+        ),
     )
     assert updated.widget.persona.avatar_icon_id == first
     # The row was locked before the icons (see IconRepository.lock_for_change).
@@ -845,10 +879,12 @@ async def test_persona_avatar_is_checked_before_the_write_and_released_after(
 
     await service.update_widget(
         updated.widget.id,
-        {
-            "revision": updated.widget.revision,
-            "persona": {"name": "Sigge", "avatar_icon_id": second},
-        },
+        WidgetUpdate.model_validate(
+            {
+                "revision": updated.widget.revision,
+                "persona": {"name": "Sigge", "avatar_icon_id": second},
+            }
+        ),
     )
     assert icons.attachable[-1] == (first, second, user.tenant_id, user.id)
     assert icons.released[-1] == (first, second)
@@ -858,7 +894,10 @@ async def test_persona_avatar_is_checked_before_the_write_and_released_after(
     icons.released.clear()
     current = await service.get_widget(view.widget.id)
     await service.update_widget(
-        current.widget.id, {"revision": current.widget.revision, "name": "Ny"}
+        current.widget.id,
+        WidgetUpdate.model_validate(
+            {"revision": current.widget.revision, "name": "Ny"}
+        ),
     )
     assert icons.attachable == [(second, second, user.tenant_id, user.id)]
     assert icons.released == [(second, second)]
@@ -889,10 +928,12 @@ async def test_linking_a_template_releases_the_widgets_own_avatar(assistant):
     )
     view = await service.update_widget(
         view.widget.id,
-        {
-            "revision": view.widget.revision,
-            "persona": {"name": "Egen", "avatar_icon_id": own_avatar},
-        },
+        WidgetUpdate.model_validate(
+            {
+                "revision": view.widget.revision,
+                "persona": {"name": "Egen", "avatar_icon_id": own_avatar},
+            }
+        ),
     )
     icons.released.clear()
     linked = await service.link_template(

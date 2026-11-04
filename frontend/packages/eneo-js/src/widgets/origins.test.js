@@ -1,10 +1,10 @@
-import { describe, expect, it } from "vitest";
-import { MAX_ALLOWED_ORIGINS, normalizeOrigin, parseOrigins } from "./origins";
-
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import { MAX_ALLOWED_ORIGINS, normalizeOrigin, parseOrigins } from "./origins.js";
 // Expected values are what the backend's normalize_origin_pattern returns
 // (null where it raises), so the field refuses exactly what a save would.
 // backend/tests/unit/test_origin_matching.py holds the same table.
-const BACKEND: [string, string | null][] = [
+const BACKEND = [
   ["https://www.kommun.se", "https://www.kommun.se"],
   ["https://www.kommun.se/", "https://www.kommun.se"],
   ["https://www.kommun.se/kontakt", null],
@@ -46,24 +46,22 @@ const BACKEND: [string, string | null][] = [
   ["https://[:::]:80", null],
   ["https://[::ffff:1.2.3.4]:80", "https://[::ffff:1.2.3.4]:80"]
 ];
-
 describe("allowed origins", () => {
-  it.each(BACKEND)("%s matches the API's rule", (input, expected) => {
-    expect(normalizeOrigin(input)).toBe(expected);
-  });
-
+  for (const [input, expected] of BACKEND)
+    it(`${input} matches the API's rule`, () => {
+      assert.deepStrictEqual(normalizeOrigin(input), expected);
+    });
   it("splits lines, keeps the canonical form once and names the refused lines", () => {
     const parsed = parseOrigins(
       "https://www.kommun.se/\n\n  https://WWW.kommun.se \nhttps://www.kommun.se/kontakt\n"
     );
-    expect(parsed.origins).toEqual(["https://www.kommun.se"]);
-    expect(parsed.invalid).toEqual(["https://www.kommun.se/kontakt"]);
-    expect(parsed.tooMany).toBe(false);
+    assert.deepStrictEqual(parsed.origins, ["https://www.kommun.se"]);
+    assert.deepStrictEqual(parsed.invalid, ["https://www.kommun.se/kontakt"]);
+    assert.deepStrictEqual(parsed.tooMany, false);
   });
-
   it("flags more origins than the API stores", () => {
     const lines = Array.from({ length: MAX_ALLOWED_ORIGINS + 1 }, (_, i) => `https://s${i}.se`);
-    expect(parseOrigins(lines.join("\n")).tooMany).toBe(true);
-    expect(parseOrigins(lines.slice(1).join("\n")).tooMany).toBe(false);
+    assert.deepStrictEqual(parseOrigins(lines.join("\n")).tooMany, true);
+    assert.deepStrictEqual(parseOrigins(lines.slice(1).join("\n")).tooMany, false);
   });
 });

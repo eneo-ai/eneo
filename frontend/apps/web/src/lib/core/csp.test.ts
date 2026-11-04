@@ -34,10 +34,10 @@ describe("withFramePolicy", () => {
     expect(withFramePolicy(null, { frameAncestors: "'none'" })).not.toContain("default-src");
   });
 
-  it("allows blob workers only when asked", () => {
+  it("allows same-origin workers only when asked", () => {
     expect(
-      withFramePolicy("script-src 'self'", { frameAncestors: "'self'", allowBlobWorkers: true })
-    ).toBe("script-src 'self'; frame-ancestors 'self'; worker-src 'self' blob:");
+      withFramePolicy("script-src 'self'", { frameAncestors: "'self'", allowWorkers: true })
+    ).toBe("script-src 'self'; frame-ancestors 'self'; worker-src 'self'");
   });
 });
 

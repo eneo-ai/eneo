@@ -17,9 +17,9 @@ from eneo.widgets.domain.widget_policy import WidgetPolicy
 from eneo.widgets.infrastructure.widget_repo_impl import WidgetRepoImpl
 from eneo.widgets.presentation.widget_models import WidgetPolicyUpdate
 
-WEB_LIMITS = (
+WIDGET_CLIENT_LIMITS = (
     Path(__file__).resolve().parents[4]
-    / "frontend/apps/web/src/lib/features/widget/admin/limits.ts"
+    / "frontend/packages/eneo-js/src/widgets/limits.js"
 )
 
 
@@ -151,10 +151,10 @@ def test_token_budgets_stay_within_the_usage_counters():
 def test_the_editors_budget_ceiling_is_the_apis():
     """The editors check budgets against their own copy of the ceiling: the
     generated TypeScript types carry no maximum, so nothing else keeps the two
-    equal. The frontend has the mirror of this test."""
+    equal. This test owns the cross-language contract."""
     copy = re.search(
         r"^export const MAX_DAILY_TOKEN_BUDGET = ([\d_]+);$",
-        WEB_LIMITS.read_text(),
+        WIDGET_CLIENT_LIMITS.read_text(),
         re.MULTILINE,
     )
     assert copy is not None

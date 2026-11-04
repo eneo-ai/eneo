@@ -6,7 +6,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { toastApiError } from "@/lib/api/toast";
 import type { Widget } from "./autosave";
 import { widgetApi } from "./queries";
-import { loaderUrl, type LoaderRelease } from "./snippet";
+import { loaderUrl, type LoaderRelease } from "@eneo/eneo-js/widgets/snippet";
 import { useAppScheme } from "./use-app-scheme";
 
 function loadLoader(src: string): Promise<void> {

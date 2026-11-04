@@ -1,8 +1,13 @@
 /* eslint-disable eneo/no-raw-color -- fixtures use literal widget colours */
 import { describe, expect, it, vi } from "vitest";
 import * as loader from "../../../../../../packages/widget-loader/src/protocol";
-import { launcherColors } from "./contrast";
-import { BRIDGE_NAMESPACE, BRIDGE_VERSION, createEmbedBridge, parseInbound } from "./embedBridge";
+import { launcherColors } from "@eneo/eneo-js/widgets/contrast";
+import {
+  BRIDGE_NAMESPACE,
+  BRIDGE_VERSION,
+  createEmbedBridge,
+  parseInbound
+} from "@eneo/eneo-js/widgets/embed-bridge";
 
 const colors = {
   light: { accent: "#1F4E79", on_accent: "#FFFFFF" },

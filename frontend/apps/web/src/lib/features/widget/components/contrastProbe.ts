@@ -3,7 +3,7 @@
  * Test helpers for the widget's component tests: what a rendered element
  * actually looks like, measured the way WCAG does. Browser only.
  */
-import { contrastRatio } from "../contrast";
+import { contrastRatio } from "@eneo/eneo-js/widgets/contrast";
 
 type Rgba = [number, number, number, number];
 

@@ -21,11 +21,17 @@ from eneo.widgets.application.visitor_user import build_visitor_user
 from eneo.widgets.application.widget_limits import BudgetReservation, WidgetBudget
 from eneo.widgets.application.widget_retention import purge_expired_widget_sessions
 from eneo.widgets.domain.exceptions import (
+    VisitorTokenInvalidError,
     VisitorTokenStaleError,
     WidgetBudgetExhaustedError,
     WidgetRevisionConflictError,
 )
-from eneo.widgets.domain.widget import Widget, WidgetStatus, generate_public_id
+from eneo.widgets.domain.widget import (
+    Widget,
+    WidgetStatus,
+    WidgetUpdate,
+    generate_public_id,
+)
 from eneo.widgets.domain.widget_template import WidgetTemplate
 from eneo.widgets.infrastructure.widget_overview_repo_impl import WidgetOverviewRepoImpl
 from eneo.widgets.infrastructure.widget_repo_impl import WidgetRepoImpl
@@ -160,6 +166,29 @@ async def test_concurrent_budget_admission_and_exactly_once_completion(active_wi
     assert (days[0].input_tokens, days[0].output_tokens) == (2_000, 500)
 
 
+async def test_concurrent_token_replacements_have_one_winner(
+    db_container, active_widget
+):
+    """Real Redis arbitrates rotation after both callers passed their read."""
+    widget = await _load_widget(active_widget["id"])
+    tokens = VisitorTokenService()
+    token, _ = tokens.mint(widget, uuid4())
+    claims = tokens.verify(token, widget)
+    async with db_container() as container:
+        revocations = container.widget_token_revocations()
+        await asyncio.gather(
+            revocations.ensure_current(widget, claims),
+            revocations.ensure_current(widget, claims),
+        )
+        results = await asyncio.gather(
+            revocations.consume_for_rotation(widget, claims, grace_seconds=900),
+            revocations.consume_for_rotation(widget, claims, grace_seconds=900),
+            return_exceptions=True,
+        )
+    assert sum(result is None for result in results) == 1
+    assert sum(isinstance(result, VisitorTokenInvalidError) for result in results) == 1
+
+
 async def test_budget_admission_is_capped_by_the_tenant_policy_as_it_stands(
     active_widget,
 ):
@@ -287,10 +316,10 @@ async def test_pause_revokes_tokens_minted_after_a_concurrent_rules_change(
         edited = (
             await editor.widget_service().update_widget(
                 widget_id,
-                {
-                    "revision": active_widget["revision"],
-                    "allowed_origins": ["https://www.kommun.se", "https://e.kommun.se"],
-                },
+                WidgetUpdate(
+                    revision=active_widget["revision"],
+                    allowed_origins=["https://www.kommun.se", "https://e.kommun.se"],
+                ),
             )
         ).widget
         assert edited.token_generation == active_widget["token_generation"] + 1

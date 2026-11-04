@@ -1,5 +1,5 @@
 /* eslint-disable eneo/no-raw-color -- fixtures use literal widget colours */
-import { page, userEvent } from "@vitest/browser/context";
+import { page, userEvent } from "vitest/browser";
 import { render } from "vitest-browser-svelte";
 import { EneoError, type Assistant, type Eneo, type Widget } from "@eneo/eneo-js";
 import { describe, expect, test, vi } from "vitest";
@@ -201,8 +201,7 @@ describe("WidgetEditor", () => {
     expect(update).not.toHaveBeenCalled();
   });
 
-  // Whether an emptied required text asks before leaving is an open product
-  // decision; whichever way it goes, the name and the disclosure agree.
+  // Required texts retain their invalid draft; leaving treats them alike.
   test("leaving with the name or the disclosure emptied is handled alike", async () => {
     renderEditor(widget());
     const name = page.getByLabelText("name", { exact: true });

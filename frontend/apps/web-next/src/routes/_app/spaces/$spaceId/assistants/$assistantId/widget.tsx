@@ -11,7 +11,7 @@ import { browserApi } from "@/lib/api/browser";
 import { readFresh } from "@/lib/api/query";
 import { routeTitle } from "@/lib/route-head";
 import { notFoundOn404, requirePermission } from "@/lib/route-helpers";
-import type { LoaderRelease } from "@/features/widget/admin/snippet";
+import type { LoaderRelease } from "@eneo/eneo-js/widgets/snippet";
 
 async function loaderRelease(): Promise<LoaderRelease | null> {
   const response = await fetch("/widget/manifest.json", { cache: "no-store" });

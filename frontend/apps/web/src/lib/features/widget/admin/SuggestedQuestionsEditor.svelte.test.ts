@@ -1,4 +1,4 @@
-import { page, userEvent } from "@vitest/browser/context";
+import { page, userEvent } from "vitest/browser";
 import { render } from "vitest-browser-svelte";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import "../../../../app.css";

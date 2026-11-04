@@ -24,7 +24,7 @@ import {
   type Widget,
   type WidgetTemplate
 } from "./queries";
-import type { LoaderRelease } from "./snippet";
+import type { LoaderRelease } from "@eneo/eneo-js/widgets/snippet";
 import { TemplatePicker } from "./template-picker";
 import { WidgetEditor } from "./widget-editor";
 

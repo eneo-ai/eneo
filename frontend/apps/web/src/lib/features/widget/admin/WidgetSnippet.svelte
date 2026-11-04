@@ -18,7 +18,7 @@
     standaloneUrl,
     type LoaderRelease,
     type SnippetOptions
-  } from "./snippet";
+  } from "@eneo/eneo-js/widgets/snippet";
 
   type Props = {
     widget: Widget;

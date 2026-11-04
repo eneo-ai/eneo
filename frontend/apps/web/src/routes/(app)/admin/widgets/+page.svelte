@@ -27,11 +27,11 @@
   import { toastWidgetError } from "$lib/features/widget/admin/errors";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import WidgetOverviewList from "$lib/features/widget/admin/WidgetOverviewList.svelte";
-  import { MAX_DAILY_TOKEN_BUDGET } from "$lib/features/widget/admin/limits";
+  import { MAX_DAILY_TOKEN_BUDGET } from "@eneo/eneo-js/widgets/limits";
   import { urlTab } from "$lib/features/widget/admin/tabState.svelte";
   import { Autosave } from "$lib/features/widget/admin/widgetAutosave.svelte";
   import { guardAutosaveNavigation } from "$lib/features/widget/admin/guardAutosaveNavigation";
-  import { DEFAULT_PRIMARY_COLOR, isHexColor } from "$lib/features/widget/contrast";
+  import { DEFAULT_PRIMARY_COLOR, isHexColor } from "@eneo/eneo-js/widgets/contrast";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
   import { intlLocale } from "$lib/core/formatting/dateTime";

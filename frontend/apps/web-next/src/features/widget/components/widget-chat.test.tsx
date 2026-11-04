@@ -68,7 +68,7 @@ function clientWith({
 }) {
   const client = {
     publicId: PUBLIC_ID,
-    challengeUrl: `http://localhost:3100/api/v1/widgets/${PUBLIC_ID}/challenge/`,
+    challenge: vi.fn(),
     config: vi.fn(),
     createVisitorSession: vi.fn(async () => ({
       token: "visitor-token",

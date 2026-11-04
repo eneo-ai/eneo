@@ -52,7 +52,7 @@ type EneoFetchFunction = <
   Method extends keyof EneoEndpoints[Endpoint]
 >(
   endpoint: Endpoint,
-  args: EneoParams<Endpoint, Method> extends never
+  args: { signal?: AbortSignal } & (EneoParams<Endpoint, Method> extends never
     ? EneoRequestBody<Endpoint, Method> extends never
       ? { method: Method; params?: never; requestBody?: never }
       : {
@@ -70,7 +70,7 @@ type EneoFetchFunction = <
           method: Method;
           params: EneoParams<Endpoint, Method>;
           requestBody: EneoRequestBody<Endpoint, Method>;
-        }
+        })
 ) => Promise<SuccessResponse<Responses<Endpoint, Method>>>;
 
 type EneoStreamingEndpoints =

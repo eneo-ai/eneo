@@ -2,27 +2,20 @@
 
 import { createWidgetClient, type WidgetPublicConfig } from "@eneo/eneo-js";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { DARK_SURFACE, LIGHT_SURFACE, contrastRatio, readableOn, themeColors } from "../contrast";
+import {
+  DARK_SURFACE,
+  LIGHT_SURFACE,
+  contrastRatio,
+  readableOn,
+  themeColors
+} from "@eneo/eneo-js/widgets/contrast";
 import { personaView } from "../persona";
-import type { VisitorSession } from "../visitor-session";
+import type { VisitorSession } from "@eneo/eneo-js/widgets/visitor-session";
 import { useEmbedScheme } from "./embed-providers";
 import { WidgetChat } from "./widget-chat";
 import "../widget.css";
 
 type Scheme = "light" | "dark" | "auto";
-
-/**
- * FastAPI serves the visitor API under this page's own origin. The client wants an absolute base, which the
- * server does not know for sure (a reverse proxy may front the app) and the
- * page must not guess: requests are made relative, against the origin the
- * page actually runs on, by taking this placeholder off again.
- */
-const PLACEHOLDER_ORIGIN = "http://eneo-embed.invalid";
-
-function sameOriginFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-  return fetch(url.replace(PLACEHOLDER_ORIGIN, ""), init);
-}
 
 function sessionHolder() {
   let session: VisitorSession | null = null;
@@ -62,10 +55,9 @@ export function EmbedApp({
   const client = useMemo(
     () =>
       createWidgetClient({
-        baseUrl: PLACEHOLDER_ORIGIN,
+        baseUrl: location.origin,
         publicId,
-        getToken: () => holder.get()?.token ?? null,
-        fetch: sameOriginFetch
+        getToken: () => holder.get()?.token ?? null
       }),
     [publicId, holder]
   );

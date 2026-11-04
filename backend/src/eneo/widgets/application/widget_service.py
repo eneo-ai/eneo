@@ -32,6 +32,7 @@ from eneo.widgets.domain.widget import (
     WidgetLanguage,
     WidgetStatus,
     WidgetTargetType,
+    WidgetUpdate,
     validation_messages,
 )
 from eneo.widgets.domain.widget_policy import WidgetPolicy
@@ -347,15 +348,10 @@ class WidgetService:
         widget = await self.repo.update(widget)
         return await self._view_with_template(space, widget)
 
-    async def update_widget(
-        self, widget_id: UUID, changes: dict[str, Any]
-    ) -> WidgetView:
+    async def update_widget(self, widget_id: UUID, update: WidgetUpdate) -> WidgetView:
         validate_permission(self.user, Permission.WIDGETS)
-        changes = dict(changes)
-        revision = changes.pop("revision", None)
-        if revision is None:
-            raise BadRequestException("revision is required.")
-        widget, space = await self._widget_for_change(widget_id, revision)
+        changes = update.changes()
+        widget, space = await self._widget_for_change(widget_id, update.revision)
         template = await self._template_of(widget)
         if template is not None and template.published is not None:
             locked = template.published.locked_changes(widget, changes)

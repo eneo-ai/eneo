@@ -5,10 +5,10 @@
 
 import re
 import secrets
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Optional
+from typing import Annotated, Any, Optional, cast
 from urllib.parse import urlparse
 from uuid import UUID
 
@@ -22,6 +22,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from pydantic.json_schema import SkipJsonSchema
 
 from eneo.allowed_origins.origin_matching import normalize_origin_pattern
 from eneo.main.exceptions import BadRequestException
@@ -320,6 +321,80 @@ def frame_ancestor_sources(origins: list[str]) -> list[str]:
     return list(origins)
 
 
+_WHOLE_GROUP = (
+    "Replaces the whole group: a field left out of it takes its default, so"
+    " send the current values along with the changed ones."
+)
+
+
+class WidgetUpdate(BaseModel):
+    """Only the fields sent are changed; a field left out keeps its value.
+    Null is refused: there is nothing to reset a field to."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    revision: int = Field(ge=0)
+
+    # None only marks a field left out; _no_nulls refuses a sent null, so the
+    # schema does not offer one.
+    name: Annotated[str, Field(min_length=1, max_length=100)] | SkipJsonSchema[None] = (
+        None
+    )
+    texts: WidgetTexts | SkipJsonSchema[None] = Field(
+        default=None, description=_WHOLE_GROUP
+    )
+    theme: WidgetTheme | SkipJsonSchema[None] = Field(
+        default=None, description=_WHOLE_GROUP
+    )
+    persona: WidgetPersona | SkipJsonSchema[None] = Field(
+        default=None,
+        description=(
+            _WHOLE_GROUP + " Only an icon the caller uploaded can be the avatar"
+            " (`icon_not_attachable` otherwise)."
+        ),
+    )
+    limits: WidgetLimits | SkipJsonSchema[None] = Field(
+        default=None, description=_WHOLE_GROUP
+    )
+    privacy: WidgetPrivacy | SkipJsonSchema[None] = Field(
+        default=None, description=_WHOLE_GROUP
+    )
+    language: WidgetLanguage | SkipJsonSchema[None] = None
+    allowed_origins: (
+        Annotated[list[str], Field(max_length=20)] | SkipJsonSchema[None]
+    ) = None
+    bot_protection: BotProtection | SkipJsonSchema[None] = None
+    show_sources: bool | SkipJsonSchema[None] = None
+    show_tool_activity: bool | SkipJsonSchema[None] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _no_nulls(cls, data: object) -> object:
+        if not isinstance(data, dict):
+            return data
+        fields = cast(Mapping[object, object], data)
+        nulls = sorted(str(key) for key, value in fields.items() if value is None)
+        if nulls:
+            raise ValueError(
+                f"{', '.join(nulls)} cannot be null; leave a field out to"
+                " keep its value."
+            )
+        return fields
+
+    @field_validator("allowed_origins")
+    @classmethod
+    def _origins(cls, value: Optional[list[str]]) -> Optional[list[str]]:
+        return None if value is None else normalize_allowed_origins(value)
+
+    def changes(self) -> dict[str, object]:
+        """Validated values being changed; revision is the precondition, not a field."""
+        return {
+            field: getattr(self, field)
+            for field in self.model_fields_set
+            if field != "revision"
+        }
+
+
 class Widget(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
 
@@ -477,7 +552,7 @@ class Widget(BaseModel):
         self.status = WidgetStatus.ARCHIVED
         self.token_generation += 1
 
-    def apply_update(self, changes: dict[str, Any]) -> bool:
+    def apply_update(self, changes: Mapping[str, object]) -> bool:
         """Apply admin-editable fields. Returns True when the token generation
         was bumped because a visitor-facing policy field changed."""
         if self.status == WidgetStatus.ARCHIVED:

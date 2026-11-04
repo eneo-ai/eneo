@@ -406,10 +406,10 @@ jobs:
         timeout-minutes: 10
         run: FORCE_COLOR=1 bun run --filter '@eneo/web' test
 
-      # Builds the loader first (its size budget is enforced by the build) and
-      # runs its element tests in the same Chromium.
+      # Reuse the loader built above; that build enforces size and pinned bytes.
+      # Its browser and release contracts still run here.
       - name: Run widget loader tests
-        run: FORCE_COLOR=1 bun run --filter '@eneo/widget-loader' test
+        run: FORCE_COLOR=1 bun run --filter '@eneo/widget-loader' test:built
 
   frontend-web-next:
     name: Frontend (web-next)

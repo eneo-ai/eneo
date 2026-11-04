@@ -1,3 +1,9 @@
+// @ts-check
+/**
+ * @typedef {{version: string, channel: string, integrity: string}} LoaderRelease
+ * @typedef {{origin: string, publicId: string, language?: "sv" | "en" | "auto",
+ *   release: LoaderRelease | null}} SnippetOptions
+ */
 /**
  * The install snippets the admin page shows. The floating channel (`v1`)
  * follows Eneo releases and is the default; the pinned variant carries the
@@ -9,44 +15,34 @@
  * the saved language, position and colours from Eneo on every page, so an
  * edit or a template publication reaches sites without a new snippet.
  */
-
-export type LoaderRelease = {
-  version: string;
-  channel: string;
-  integrity: string;
-};
-
-export type SnippetOptions = {
-  /** Public origin of this Eneo installation, e.g. `https://eneo.kommun.se`. */
-  origin: string;
-  publicId: string;
-  /** Widget language when it is fixed; `auto` follows the host page. Only the stand-alone link uses it. */
-  language?: "sv" | "en" | "auto";
-  release: LoaderRelease | null;
-};
-
-const escapeAttribute = (value: string) => value.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
-
-function scriptTag(attributes: Array<[string, string]>): string {
+const escapeAttribute = /** @param {string} value */ (value) =>
+  value.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+/** @param {Array<[string, string]>} attributes
+ * @returns {string} */
+function scriptTag(attributes) {
   const rendered = attributes.map(([name, value]) => `${name}="${escapeAttribute(value)}"`);
   return `<script async ${rendered.join(" ")}></script>`;
 }
-
-export function loaderUrl(origin: string, version: string): string {
+/** @param {string} origin
+ * @param {string} version
+ * @returns {string} */
+export function loaderUrl(origin, version) {
   return `${origin.replace(/\/+$/, "")}/widget/${version}/eneo.js`;
 }
-
-/** Floating snippet; updates with every Eneo release. */
-export function floatingSnippet(options: SnippetOptions): string | null {
+/** Floating snippet; updates with every Eneo release.
+ * @param {SnippetOptions} options
+ * @returns {string | null} */
+export function floatingSnippet(options) {
   if (!options.release) return null;
   return scriptTag([
     ["src", loaderUrl(options.origin, options.release.channel)],
     ["data-widget-id", options.publicId]
   ]);
 }
-
-/** Pinned snippet with Subresource Integrity; the host replaces it when the loader version changes. */
-export function pinnedSnippet(options: SnippetOptions): string | null {
+/** Pinned snippet with Subresource Integrity; the host replaces it when the loader version changes.
+ * @param {SnippetOptions} options
+ * @returns {string | null} */
+export function pinnedSnippet(options) {
   if (!options.release) return null;
   return scriptTag([
     ["src", loaderUrl(options.origin, options.release.version)],
@@ -55,14 +51,13 @@ export function pinnedSnippet(options: SnippetOptions): string | null {
     ["data-widget-id", options.publicId]
   ]);
 }
-
 /**
  * The full-page chat, for linking from a site that cannot run scripts. The
  * page moves to the widget's language itself if it changes after copying.
- */
-export function standaloneUrl(
-  options: Pick<SnippetOptions, "origin" | "publicId" | "language">
-): string {
+ *
+ * @param {Pick<SnippetOptions, "origin" | "publicId" | "language">} options
+ * @returns {string} */
+export function standaloneUrl(options) {
   const prefix = options.language === "en" ? "/en" : "";
   return `${options.origin.replace(/\/+$/, "")}${prefix}/embed/${encodeURIComponent(options.publicId)}?mode=full`;
 }

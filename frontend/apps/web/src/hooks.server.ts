@@ -129,7 +129,7 @@ export const framePolicyHandle: Handle = async ({ event, resolve }) => {
     "content-security-policy",
     withFramePolicy(response.headers.get("content-security-policy"), {
       frameAncestors: frameAncestors ?? "'none'",
-      allowBlobWorkers: isEmbed,
+      allowWorkers: isEmbed,
       harden: isEmbed,
       embedSources: isEmbed ? (event.locals.embedSources ?? { img: [], connect: [] }) : undefined
     })

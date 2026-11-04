@@ -23,8 +23,8 @@ export function createWidgetClient({ baseUrl, publicId, getToken, fetch }) {
   const path = { public_id: publicId };
 
   /** A fresh client per call so a rotated visitor token is always the one sent. */
-  const client = () => {
-    const token = getToken?.() ?? undefined;
+  const client = (withVisitorToken = true) => {
+    const token = withVisitorToken ? (getToken?.() ?? undefined) : undefined;
     return createClient({
       baseUrl,
       token,
@@ -45,8 +45,18 @@ export function createWidgetClient({ baseUrl, publicId, getToken, fetch }) {
   return {
     publicId,
 
-    /** Challenge URL for the ALTCHA widget (it fetches the challenge itself). */
-    challengeUrl: `${baseUrl}/api/v1/widgets/${publicId}/challenge/`,
+    /**
+     * Fetch a challenge through the same cookieless transport and error
+     * normalisation as every visitor request.
+     * @param {{signal?: AbortSignal}} [options]
+     * @returns {Promise<import("./types/resources").WidgetChallenge>}
+     */
+    challenge: async ({ signal } = {}) =>
+      client(false).fetch("/api/v1/widgets/{public_id}/challenge/", {
+        method: "get",
+        params: { path },
+        signal
+      }),
 
     /**
      * Display configuration of an active widget.

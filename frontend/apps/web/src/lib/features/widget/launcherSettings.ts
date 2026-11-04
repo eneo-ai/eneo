@@ -1,6 +1,6 @@
 import type { WidgetPublicConfig } from "@eneo/eneo-js";
-import { launcherColors, type LauncherColors } from "./contrast";
-import type { LauncherPersona } from "./embedBridge";
+import { launcherColors, type LauncherColors } from "@eneo/eneo-js/widgets/contrast";
+import type { LauncherPersona } from "@eneo/eneo-js/widgets/embed-bridge";
 import { personaView } from "./persona";
 
 /**

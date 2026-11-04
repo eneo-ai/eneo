@@ -2,12 +2,8 @@ import { EneoError } from "@eneo/eneo-js";
 
 type Translate = (key: string, values?: Record<string, string | number>) => string;
 
-/** The backend's error code for a failed widget request, or null. */
-export function widgetErrorCode(error: unknown): string | null {
-  if (!(error instanceof EneoError)) return null;
-  const detail = (error.response as { detail?: { code?: string } } | undefined)?.detail;
-  return typeof detail?.code === "string" ? detail.code : null;
-}
+export { widgetErrorCode } from "@eneo/eneo-js/widgets/errors";
+import { widgetErrorCode } from "@eneo/eneo-js/widgets/errors";
 
 /** Seconds from a 429's Retry-After header, or null when it carries none. */
 export function retryAfterSeconds(error: unknown): number | null {

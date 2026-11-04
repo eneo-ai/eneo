@@ -1,5 +1,5 @@
 /* eslint-disable eneo/no-raw-color -- fixtures use literal widget colours */
-import { page, userEvent } from "@vitest/browser/context";
+import { page, userEvent } from "vitest/browser";
 import { render } from "vitest-browser-svelte";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { EneoError, type WidgetPublicConfig } from "@eneo/eneo-js";
@@ -94,7 +94,7 @@ vi.mock("@eneo/eneo-js", async (importOriginal) => {
     ...actual,
     createWidgetClient: () => ({
       publicId: "wgt_test",
-      challengeUrl: "http://localhost/api/v1/widgets/wgt_test/challenge/",
+      challenge: unsupported,
       config: unsupported,
       createVisitorSession: async () => {
         fake.mints += 1;

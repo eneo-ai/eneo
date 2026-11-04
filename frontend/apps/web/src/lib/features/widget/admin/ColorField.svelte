@@ -17,7 +17,7 @@
     LIGHT_SURFACE,
     normalizeHexColor,
     readableOn
-  } from "../contrast";
+  } from "@eneo/eneo-js/widgets/contrast";
 
   type Props = {
     id: string;

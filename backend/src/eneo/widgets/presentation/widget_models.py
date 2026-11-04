@@ -4,11 +4,10 @@
 
 
 from datetime import date, datetime
-from typing import Annotated, Any, Literal, Optional, cast
+from typing import Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from pydantic.json_schema import SkipJsonSchema
+from pydantic import BaseModel, ConfigDict, Field
 
 from eneo.widgets.domain.widget import (
     MAX_DAILY_TOKEN_BUDGET,
@@ -21,8 +20,8 @@ from eneo.widgets.domain.widget import (
     WidgetTargetType,
     WidgetTexts,
     WidgetTheme,
-    normalize_allowed_origins,
 )
+from eneo.widgets.domain.widget import WidgetUpdate as WidgetUpdate
 from eneo.widgets.domain.widget_template import TemplateLockGroup
 
 
@@ -85,72 +84,6 @@ class WidgetTemplateInUseDetail(BaseModel):
 
 class WidgetTemplateInUseResponse(BaseModel):
     detail: WidgetTemplateInUseDetail
-
-
-_WHOLE_GROUP = (
-    "Replaces the whole group: a field left out of it takes its default, so"
-    " send the current values along with the changed ones."
-)
-
-
-class WidgetUpdate(BaseModel):
-    """Only the fields sent are changed; a field left out keeps its value.
-    Null is refused: there is nothing to reset a field to."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    revision: int = Field(ge=0)
-
-    # None only marks a field left out; _no_nulls refuses a sent null, so the
-    # schema does not offer one.
-    name: Annotated[str, Field(min_length=1, max_length=100)] | SkipJsonSchema[None] = (
-        None
-    )
-    texts: WidgetTexts | SkipJsonSchema[None] = Field(
-        default=None, description=_WHOLE_GROUP
-    )
-    theme: WidgetTheme | SkipJsonSchema[None] = Field(
-        default=None, description=_WHOLE_GROUP
-    )
-    persona: WidgetPersona | SkipJsonSchema[None] = Field(
-        default=None,
-        description=(
-            _WHOLE_GROUP + " Only an icon the caller uploaded can be the avatar"
-            " (`icon_not_attachable` otherwise)."
-        ),
-    )
-    limits: WidgetLimits | SkipJsonSchema[None] = Field(
-        default=None, description=_WHOLE_GROUP
-    )
-    privacy: WidgetPrivacy | SkipJsonSchema[None] = Field(
-        default=None, description=_WHOLE_GROUP
-    )
-    language: WidgetLanguage | SkipJsonSchema[None] = None
-    allowed_origins: (
-        Annotated[list[str], Field(max_length=20)] | SkipJsonSchema[None]
-    ) = None
-    bot_protection: BotProtection | SkipJsonSchema[None] = None
-    show_sources: bool | SkipJsonSchema[None] = None
-    show_tool_activity: bool | SkipJsonSchema[None] = None
-
-    @model_validator(mode="before")
-    @classmethod
-    def _no_nulls(cls, data: Any) -> Any:
-        if not isinstance(data, dict):
-            return data
-        fields = cast(dict[object, object], data)
-        nulls = sorted(str(key) for key, value in fields.items() if value is None)
-        if nulls:
-            raise ValueError(
-                f"{', '.join(nulls)} cannot be null; leave a field out to"
-                " keep its value."
-            )
-        return fields
-
-    @field_validator("allowed_origins")
-    @classmethod
-    def _origins(cls, value: Optional[list[str]]) -> Optional[list[str]]:
-        return None if value is None else normalize_allowed_origins(value)
 
 
 class WidgetPublic(BaseModel):

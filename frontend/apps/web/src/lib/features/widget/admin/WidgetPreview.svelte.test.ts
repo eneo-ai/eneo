@@ -1,5 +1,5 @@
 /* eslint-disable eneo/no-raw-color -- fixtures use literal widget colours */
-import { page } from "@vitest/browser/context";
+import { page } from "vitest/browser";
 import { render } from "vitest-browser-svelte";
 import type { Eneo, Widget } from "@eneo/eneo-js";
 import { beforeEach, describe, expect, test, vi } from "vitest";

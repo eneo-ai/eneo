@@ -3,7 +3,7 @@
 import { X } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useEffect, useId, useRef, useSyncExternalStore } from "react";
-import { createEmbedBridge, type EmbedBridge } from "../embed-bridge";
+import { createEmbedBridge, type EmbedBridge } from "@eneo/eneo-js/widgets/embed-bridge";
 
 const subscribeNever = () => () => {};
 

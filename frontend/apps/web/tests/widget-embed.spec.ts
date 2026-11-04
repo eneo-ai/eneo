@@ -63,20 +63,6 @@ async function createActiveWidget(
     "publish assistant"
   );
 
-  // The proof of work is verified server-side by the widget unit and
-  // integration tests. In Playwright's headless Chromium on a loaded runner
-  // the ALTCHA workers intermittently never report back (the challenge is
-  // fetched, no solution ever follows), so the E2E widget runs without bot
-  // protection and only checks that the challenge endpoint answers the
-  // embed origin cross-origin.
-  await expectOk(
-    await backendFetch(page, request, "/api/v1/admin/widget-policy/", {
-      method: "PATCH",
-      data: { allow_bot_protection_none: true }
-    }),
-    "allow widgets without bot protection"
-  );
-
   const created = await backendFetch(page, request, `/api/v1/spaces/${spaceId}/widgets/`, {
     method: "POST",
     data: { target_id: assistantId, name: uniqueName("widget e2e"), language: "sv" }
@@ -90,7 +76,7 @@ async function createActiveWidget(
       data: {
         revision: widget.revision,
         allowed_origins: [HOST_ORIGIN],
-        bot_protection: "none",
+        bot_protection: "altcha",
         texts: {
           title: "Fråga kommunen",
           welcome: "Hej! Vad kan jag hjälpa dig med?",
@@ -163,7 +149,7 @@ test.afterAll(async () => {
 });
 
 test.describe("embeddable widget", () => {
-  test("loads cross-origin, answers, respects keyboard flow and passes axe", async ({
+  test("solves ALTCHA cross-origin, answers, respects keyboard flow and passes axe", async ({
     page,
     request,
     baseURL
@@ -208,11 +194,11 @@ test.describe("embeddable widget", () => {
     expect(csp).toContain(`frame-ancestors 'self' ${HOST_ORIGIN}`);
     expect(csp).not.toContain(DENIED_ORIGIN);
     // Scripts run only with the response nonce; inline styles are the one
-    // allowance (server-rendered style attributes and ALTCHA's shadow styles).
+    // allowance (server-rendered style attributes).
     expect(csp).not.toMatch(/script-src[^;]*unsafe-inline/);
     expect(csp).toContain("default-src 'self'");
     expect(csp).toContain("style-src 'self' 'unsafe-inline'");
-    expect(csp).toContain("worker-src 'self' blob:");
+    expect(csp).toContain("worker-src 'self'");
     expect(csp).toContain("frame-src 'none'");
 
     hostHtml = hostPage(loaderOrigin, widget.public_id);

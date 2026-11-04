@@ -6,13 +6,21 @@ import type { WidgetClient, WidgetPublicConfig } from "@eneo/eneo-js";
 import { Maximize2, MessageSquarePlus, Minimize2, X } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
-import { loadAltcha, solveWithAltcha } from "../altcha";
+import { solveWithAltcha } from "@eneo/eneo-js/widgets/proof-of-work";
 import { answerText } from "../answer-text";
-import { launcherColors } from "../contrast";
-import { createEmbedBridge, type EmbedBridge, type PanelLayout } from "../embed-bridge";
+import { launcherColors } from "@eneo/eneo-js/widgets/contrast";
+import {
+  createEmbedBridge,
+  type EmbedBridge,
+  type PanelLayout
+} from "@eneo/eneo-js/widgets/embed-bridge";
 import type { PersonaView } from "../persona";
 import { isHttpUrl, linkHost } from "../urls";
-import { VisitorSession, isTokenRejected, isWidgetUnavailable } from "../visitor-session";
+import {
+  VisitorSession,
+  isTokenRejected,
+  isWidgetUnavailable
+} from "@eneo/eneo-js/widgets/visitor-session";
 import {
   MAX_COOLDOWN_SECONDS,
   describeWidgetError,
@@ -32,9 +40,6 @@ import { WidgetQuestionBubble } from "./widget-question-bubble";
 type Scheme = "light" | "dark" | "auto";
 
 const subscribeNever = () => () => {};
-
-/** The hidden proof-of-work element, created once it is first needed. */
-type AltchaElement = import("altcha/external").AltchaWidgetElement;
 
 /**
  * The chat a visitor sees inside the widget iframe (or on the stand-alone
@@ -87,8 +92,7 @@ export function WidgetChat({
   const log = useRef<HTMLElement>(null);
   const newQuestionButton = useRef<HTMLButtonElement>(null);
   const startOverButton = useRef<HTMLButtonElement>(null);
-  const altchaHost = useRef<HTMLDivElement>(null);
-  const altcha = useRef<Promise<AltchaElement> | null>(null);
+  const verification = useRef<AbortController | null>(null);
   const cooldownTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [draft, setDraft] = useState("");
@@ -111,38 +115,6 @@ export function WidgetChat({
   // Starting over throws the visible conversation away, so it asks first.
   const [confirmStartOver, setConfirmStartOver] = useState(false);
 
-  /**
-   * The ALTCHA element, mounted hidden on first use: it fetches the
-   * challenge from the widget's challenge URL itself (through this origin's
-   * proxy) and solves it in workers. Loaded on the client only, as a custom
-   * element has no server side.
-   */
-  const ensureAltcha = useCallback((): Promise<AltchaElement> => {
-    altcha.current ??= loadAltcha().then(async () => {
-      const element = document.createElement("altcha-widget") as AltchaElement;
-      // Its settings are attributes named after its properties. The element
-      // fetches the challenge itself, so it needs the real address under
-      // this page's origin, not the client's relative one.
-      element.setAttribute(
-        "challenge",
-        `${window.location.origin}/api/v1/widgets/${encodeURIComponent(config.public_id)}/challenge/`
-      );
-      element.setAttribute("auto", "off");
-      element.setAttribute("display", "invisible");
-      element.setAttribute("workers", "2");
-      element.setAttribute(
-        "configuration",
-        JSON.stringify({ hideFooter: true, hideLogo: true, workers: 2, credentials: "omit" })
-      );
-      altchaHost.current?.appendChild(element);
-      // A Svelte custom element mounts a tick after it is connected; its
-      // methods (verify, reset) exist from then on.
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      return element;
-    });
-    return altcha.current;
-  }, [config.public_id]);
-
   const [session] = useState(
     () =>
       new VisitorSession({
@@ -152,7 +124,8 @@ export function WidgetChat({
         solve: async () => {
           setVerifying(true);
           try {
-            return await solveWithAltcha(await ensureAltcha());
+            verification.current ??= new AbortController();
+            return await solveWithAltcha(client, { signal: verification.current.signal });
           } finally {
             setVerifying(false);
           }
@@ -293,7 +266,6 @@ export function WidgetChat({
           }
         : undefined
     );
-    if (config.bot_protection === "altcha") void ensureAltcha();
     if (config.single_turn) {
       session.rememberSession(null);
     } else if (session.sessionId && session.hasIdentity) {
@@ -302,6 +274,8 @@ export function WidgetChat({
     }
     return () => {
       activeSend.current = null;
+      verification.current?.abort();
+      verification.current = null;
       if (cooldownTimer.current) clearTimeout(cooldownTimer.current);
       created.destroy();
       bridge.current = null;
@@ -737,7 +711,6 @@ export function WidgetChat({
 
       {/* The proof-of-work element lives here, hidden; the server may require
           a challenge after this iframe was opened. */}
-      <div ref={altchaHost} hidden aria-hidden="true" />
     </div>
   );
 }

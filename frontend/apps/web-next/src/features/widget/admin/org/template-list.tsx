@@ -12,7 +12,7 @@ import { useState } from "react";
 import { SettingsGroup } from "@/components/composites/settings-rows";
 import { browserApi } from "@/lib/api/browser";
 import { toastApiError } from "@/lib/api/toast";
-import { DEFAULT_PRIMARY_COLOR, isHexColor } from "../../contrast";
+import { DEFAULT_PRIMARY_COLOR, isHexColor } from "@eneo/eneo-js/widgets/contrast";
 import type { WidgetTemplate } from "../autosave";
 import { toastWidgetError } from "../errors";
 import { widgetTemplatesQueryOptions } from "../queries";

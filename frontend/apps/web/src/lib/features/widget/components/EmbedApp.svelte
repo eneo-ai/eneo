@@ -8,8 +8,14 @@
   import { createWidgetClient, type Eneo, type WidgetPublicConfig } from "@eneo/eneo-js";
   import { onMount, untrack } from "svelte";
   import { initChatService } from "$lib/features/chat/ChatService.svelte";
-  import type { VisitorSession } from "../visitorSession";
-  import { DARK_SURFACE, LIGHT_SURFACE, contrastRatio, readableOn, themeColors } from "../contrast";
+  import type { VisitorSession } from "@eneo/eneo-js/widgets/visitor-session";
+  import {
+    DARK_SURFACE,
+    LIGHT_SURFACE,
+    contrastRatio,
+    readableOn,
+    themeColors
+  } from "@eneo/eneo-js/widgets/contrast";
   import { personaView } from "../persona";
   import { widgetChatPartner } from "../widgetPartner";
   import WidgetChat from "./WidgetChat.svelte";

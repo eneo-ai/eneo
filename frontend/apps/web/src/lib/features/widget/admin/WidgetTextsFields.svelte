@@ -8,7 +8,7 @@
   import { untrack } from "svelte";
   import { isHttpUrl } from "../urls";
   import SuggestedQuestionsEditor from "./SuggestedQuestionsEditor.svelte";
-  import type { LockedTextField } from "./templateLocks";
+  import type { LockedTextField } from "@eneo/eneo-js/widgets/template-locks";
   import { TextDraft } from "./textDraft.svelte";
 
   type Props = {

@@ -1,4 +1,4 @@
-import { page, userEvent } from "@vitest/browser/context";
+import { page, userEvent } from "vitest/browser";
 import { render } from "vitest-browser-svelte";
 import type { WidgetTexts } from "@eneo/eneo-js";
 import { describe, expect, test, vi } from "vitest";
@@ -9,7 +9,7 @@ vi.mock("$lib/paraglide/messages", () => ({
 }));
 
 import WidgetTextsFields from "./WidgetTextsFields.svelte";
-import { lockedTextFields } from "./templateLocks";
+import { lockedTextFields } from "@eneo/eneo-js/widgets/template-locks";
 
 const texts: WidgetTexts = {
   title: "Fråga kommunen",

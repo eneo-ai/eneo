@@ -10,8 +10,8 @@
   import { m } from "$lib/paraglide/messages";
   import { untrack } from "svelte";
   import { blockerLabel } from "./blockers";
-  import { MAX_DAILY_TOKEN_BUDGET } from "./limits";
-  import { MAX_ALLOWED_ORIGINS, parseOrigins } from "./origins";
+  import { MAX_DAILY_TOKEN_BUDGET } from "@eneo/eneo-js/widgets/limits";
+  import { MAX_ALLOWED_ORIGINS, parseOrigins } from "@eneo/eneo-js/widgets/origins";
   import { TextDraft } from "./textDraft.svelte";
   import type { WidgetAutosave } from "./widgetAutosave.svelte";
   import { intlLocale } from "$lib/core/formatting/dateTime";

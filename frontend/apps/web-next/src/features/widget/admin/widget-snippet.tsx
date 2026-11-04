@@ -15,7 +15,7 @@ import {
   standaloneUrl,
   type LoaderRelease,
   type SnippetOptions
-} from "./snippet";
+} from "@eneo/eneo-js/widgets/snippet";
 
 function CopyButton({ text, label }: { text: string | null; label: string }) {
   const t = useTranslations();

@@ -8,7 +8,7 @@
   import { onMount, untrack } from "svelte";
   import X from "@lucide/svelte/icons/x";
   import { m } from "$lib/paraglide/messages";
-  import { createEmbedBridge } from "../embedBridge";
+  import { createEmbedBridge } from "@eneo/eneo-js/widgets/embed-bridge";
 
   let { hostOrigin }: { hostOrigin: string | null } = $props();
 

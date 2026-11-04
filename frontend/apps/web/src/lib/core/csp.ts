@@ -45,10 +45,9 @@ function hostSources(sources: readonly string[] | undefined): string[] {
 
 /**
  * Directives the embed page adds on top of SvelteKit's nonce-based script-src.
- * `style-src` keeps `'unsafe-inline'` for the page's own origin: server-rendered
- * `style:` attributes and the ALTCHA widget's shadow-root styles are inline,
- * and a nonce cannot reach either without patching both. Everything the page
- * does not load (fonts from elsewhere, media, plugins) is closed off.
+ * `style-src` keeps `'unsafe-inline'` for server-rendered `style:` attributes;
+ * they cannot carry a style-element nonce. Everything the page does not load
+ * (fonts from elsewhere, media, plugins) is closed off.
  */
 export const EMBED_HARDENING: ReadonlyArray<readonly [string, string]> = [
   ["default-src", "'self'"],
@@ -86,7 +85,7 @@ export function withFramePolicy(
   csp: string | null | undefined,
   options: {
     frameAncestors: string;
-    allowBlobWorkers?: boolean;
+    allowWorkers?: boolean;
     harden?: boolean;
     /**
      * Where the embed page may load images from and connect to, on top of
@@ -98,9 +97,9 @@ export function withFramePolicy(
 ): string {
   const directives = parse(csp);
   directives.set(FRAME_DIRECTIVE, options.frameAncestors);
-  if (options.allowBlobWorkers) {
-    // The ALTCHA proof-of-work widget spawns its workers from blob: URLs.
-    directives.set(WORKER_DIRECTIVE, "'self' blob:");
+  if (options.allowWorkers) {
+    // The proof-of-work solver loads its worker as a same-origin asset.
+    directives.set(WORKER_DIRECTIVE, "'self'");
   }
   if (options.embedSources) {
     directives.set(

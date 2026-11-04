@@ -3,8 +3,8 @@
 import { Badge } from "@astryxdesign/core/Badge";
 import { RadioList, RadioListItem } from "@astryxdesign/core/RadioList";
 import { useTranslations } from "use-intl";
-import { DEFAULT_PRIMARY_COLOR, isHexColor } from "../contrast";
-import { templateRelease, type WidgetTemplate } from "./template-locks";
+import { DEFAULT_PRIMARY_COLOR, isHexColor } from "@eneo/eneo-js/widgets/contrast";
+import { templateRelease, type WidgetTemplate } from "@eneo/eneo-js/widgets/template-locks";
 
 /**
  * Choose a template: a radio list where each entry shows the template's

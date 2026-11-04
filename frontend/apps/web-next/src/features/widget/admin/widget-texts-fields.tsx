@@ -7,7 +7,7 @@ import { TextInput } from "@/components/astryx/text-input";
 import type { Schema } from "@/lib/api/models";
 import { isHttpUrl } from "../urls";
 import { SuggestedQuestionsEditor } from "./suggested-questions-editor";
-import type { LockedTextField } from "./template-locks";
+import type { LockedTextField } from "@eneo/eneo-js/widgets/template-locks";
 import { DraftWrapper, useTextDraft } from "./use-text-draft";
 
 type WidgetTexts = Schema<"WidgetTexts">;

@@ -1,6 +1,6 @@
 /**
  * postMessage protocol between the loader (host page) and the embed page
- * (iframe). Mirrors `lib/features/widget/embedBridge.ts` in the web app; both
+ * (iframe). Mirrors `eneo-js/src/widgets/embed-bridge.js` in the SDK; both
  * sides ignore anything outside the namespace or above their version.
  *
  * Pinned (SRI) copies of this loader live on customer sites for a long time,

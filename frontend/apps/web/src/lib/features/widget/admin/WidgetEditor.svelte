@@ -28,8 +28,8 @@
   import { blockerLabel } from "./blockers";
   import { getCapability } from "$lib/features/mcp/capabilities";
   import { urlTab } from "./tabState.svelte";
-  import type { LoaderRelease } from "./snippet";
-  import { isGroupLocked, lockedTextFields } from "./templateLocks";
+  import type { LoaderRelease } from "@eneo/eneo-js/widgets/snippet";
+  import { isGroupLocked, lockedTextFields } from "@eneo/eneo-js/widgets/template-locks";
   import { collapseWhitespace, TextDraft } from "./textDraft.svelte";
   import TemplatePicker from "./TemplatePicker.svelte";
   import { WidgetAutosave } from "./widgetAutosave.svelte";

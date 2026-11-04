@@ -1,6 +1,6 @@
 ---
 title: Bädda in en chattwidget på webbplatsen
-translationSource: guides/embed-widget.mdx@210390287de6
+translationSource: guides/embed-widget.mdx@391623492ba7
 ---
 
 # Bädda in en chattwidget på webbplatsen
@@ -21,7 +21,7 @@ ska lägga in det på webbplatsen, börja med
 
 ## Så fungerar det [#how-it-works]
 
-- Webbplatsen hämtar ett litet skript (_laddaren_, omkring 5 kB komprimerat) från
+- Webbplatsen hämtar ett litet skript (_laddaren_, omkring 6 kB komprimerat) från
   er Eneo-installation. Innan chattknappen visas läser skriptet widgetens
   sparade språk, placering och färger från Eneo, så senare ändringar når
   webbplatsen utan ny installationskod. När besökaren öppnar chatten laddas den
@@ -221,8 +221,9 @@ konversationen började, även när en röst ändras senare. Med **Spara
 fritextåterkoppling** påslaget (av som standard) följs rösten av en länk ("Vill
 du berätta mer?", efter tumme ner "Berätta gärna vad som saknades") som öppnar
 en dialog med en kommentarsruta (högst 2 000 tecken). Besökaren kan låta bli
-att svara. Kommentaren sparas med konversationen bara så länge inställningen
-är påslagen och tas bort tillsammans med konversationen. Om besökaren ändrar
+att svara. Nya kommentarer sparas bara när inställningen är påslagen. Om den stängs av
+slutar widgeten samla in nya kommentarer; redan sparade kommentarer följer
+konversationens lagringstid och tas bort tillsammans med den. Om besökaren ändrar
 sin röst efteråt ligger kommentaren kvar. **Redigera kommentar** öppnar den
 sparade texten igen och ersätter den när besökaren skickar.
 
@@ -231,16 +232,16 @@ sparade texten igen och ersätter den när besökaren skickar.
 Den kopierade installationskoden innehåller bara `data-widget-id`. De här
 valfria attributen är till för webbansvariga:
 
-| Attribut                                   | Funktion                                                                                                                                                   |
-| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `data-lang="sv"` eller `"en"`              | Värdsidans språk, som används när widgetens språk är **Automatiskt** (standard: sidans `lang`). En widget inställd på svenska eller engelska behåller det. |
-| `data-position="bottom-left"`              | Bara en reserv när de sparade inställningarna inte går att läsa. Annars gäller widgetens sparade placering.                                                |
-| `data-color-scheme="light"` eller `"dark"` | Värdsidans färgschema, som används när widgetens färgschema är automatiskt (standard: besökarens systeminställning)                                        |
-| `data-launcher="none"`                     | Dölj knappen och öppna chatten med webbplatsens egen kontroll                                                                                              |
-| `data-launcher="static"`                   | Låt knappen ligga kvar på telefoner; som standard glider den in i kanten när sidan rullas nedåt (se nedan)                                                 |
-| `data-auto-open="true"`                    | Öppna chatten när sidan laddas                                                                                                                             |
+| Attribut                                   | Funktion                                                                                                                                                                  |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `data-lang="sv"` eller `"en"`              | Värdsidans språk, som används när widgetens språk är **Automatiskt** (standard: sidans `lang`). En widget inställd på svenska eller engelska behåller det.                |
+| `data-position="bottom-left"`              | Bara en reserv när de sparade inställningarna inte går att läsa. Annars gäller widgetens sparade placering.                                                               |
+| `data-color-scheme="light"` eller `"dark"` | Värdsidans färgschema, som används när widgetens färgschema är automatiskt (standard: besökarens systeminställning)                                                       |
+| `data-launcher="none"`                     | Dölj knappen och öppna chatten med webbplatsens egen kontroll                                                                                                             |
+| `data-launcher="static"`                   | Låt knappen ligga kvar på telefoner; som standard glider den in i kanten när sidan rullas nedåt (se nedan)                                                                |
+| `data-auto-open="true"`                    | Öppna chatten när sidan laddas                                                                                                                                            |
 | `data-label="…"`                           | Knappens tillgängliga namn (standard "Öppna chatt" eller "Open chat", med persona "Öppna chatt med `<namn>`, AI-assistent" eller "Open chat with `<name>`, AI assistant") |
-| `data-frame-title="…"`                     | Chattramens tillgängliga namn (standard "Chatt" eller "Chat")                                                                                              |
+| `data-frame-title="…"`                     | Chattramens tillgängliga namn (standard "Chatt" eller "Chat")                                                                                                             |
 
 **På telefoner** (upp till 40em bred skärm) är knappen 48 px i stället för 56 px,
 håller 16 px till kanterna plus enhetens säkra område, och glider halvvägs in i
@@ -457,6 +458,14 @@ att ladda om när mallen har ändrat deras widget.
   CAPTCHA-leverantör, kakor eller fingeravtryck. En widget utan botskydd kräver
   att organisationens policy tillåter det. En utmaning signeras för den widget
   som utfärdade den, och bara den widgeten godtar lösningen.
+  Beräkningsuppgiften gör det dyrare att skapa besökaridentiteter; den bevisar
+  inte att besökaren är en människa och ger ingen rätt att läsa privat
+  information. Serverns anropsgränser och dagliga budget gäller fortfarande.
+  Verifieringen använder ALTCHA:s solver i en worker från samma origin, utan
+  dolt formulär eller tredjepartstjänst. Hela försöket har en tidsgräns på
+  30 sekunder; vid fel kan besökaren försöka igen, och workern avslutas när
+  chattsidan lämnas.
+
 - **Begränsningarna stänger vid fel som standard.** Redis skyddar
   anropsfrekvens och återanvändning av utmaningar. Den dagliga budgeten och
   pågående reservationer lagras i PostgreSQL, så förlorad Redis-data nollställer

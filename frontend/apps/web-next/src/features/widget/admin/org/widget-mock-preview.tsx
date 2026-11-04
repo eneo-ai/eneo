@@ -6,7 +6,7 @@ import { useTranslations } from "use-intl";
 import { useId, useState } from "react";
 import type { Schema } from "@/lib/api/models";
 import { WidgetPersonaByline } from "../../components/widget-persona-byline";
-import { contrastRatio, readableOn, themeColors } from "../../contrast";
+import { contrastRatio, readableOn, themeColors } from "@eneo/eneo-js/widgets/contrast";
 import { avatarIconUrl, monogram } from "../../persona";
 import { linkHost } from "../../urls";
 import { useAppScheme } from "../use-app-scheme";

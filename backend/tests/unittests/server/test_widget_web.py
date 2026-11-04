@@ -90,7 +90,7 @@ def test_embed_document_has_widget_policy_without_preference_cookies(
     csp = response.headers["content-security-policy"]
     assert "frame-ancestors 'self' https://site.example" in csp
     assert "frame-src 'none'" in csp
-    assert "worker-src 'self' blob:" in csp
+    assert "worker-src 'self'" in csp
     assert "base-uri 'none'" in csp
     assert "connect-src 'self'" in csp
     assert "img-src 'self' blob: data:" in csp

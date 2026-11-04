@@ -19,7 +19,11 @@ import { SettingsGroup } from "@/components/composites/settings-rows";
 import { browserApi } from "@/lib/api/browser";
 import { WidgetTemplateAutosave, type WidgetTemplate } from "../autosave";
 import { toastWidgetError, widgetFieldErrors } from "../errors";
-import { LOCK_GROUPS, publicationSummary, type WidgetTemplateLockGroup } from "../template-locks";
+import {
+  LOCK_GROUPS,
+  publicationSummary,
+  type WidgetTemplateLockGroup
+} from "@eneo/eneo-js/widgets/template-locks";
 import { collapseWhitespace } from "../text";
 import { DraftWrapper, useTextDraft } from "../use-text-draft";
 import { useAutosave } from "../use-widget-autosave";

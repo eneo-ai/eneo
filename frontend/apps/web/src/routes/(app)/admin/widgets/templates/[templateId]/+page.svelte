@@ -23,7 +23,7 @@
   import WidgetTextsFields from "$lib/features/widget/admin/WidgetTextsFields.svelte";
   import WidgetThemeFields from "$lib/features/widget/admin/WidgetThemeFields.svelte";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
-  import { LOCK_GROUPS, publicationSummary } from "$lib/features/widget/admin/templateLocks";
+  import { LOCK_GROUPS, publicationSummary } from "@eneo/eneo-js/widgets/template-locks";
   import { collapseWhitespace, TextDraft } from "$lib/features/widget/admin/textDraft.svelte";
   import { m } from "$lib/paraglide/messages";
   import { intlLocale } from "$lib/core/formatting/dateTime";

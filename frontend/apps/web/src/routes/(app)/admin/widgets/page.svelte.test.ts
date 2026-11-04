@@ -1,4 +1,4 @@
-import { page, userEvent } from "@vitest/browser/context";
+import { page, userEvent } from "vitest/browser";
 import { render } from "vitest-browser-svelte";
 import type { WidgetPolicy } from "@eneo/eneo-js";
 import { describe, expect, test, vi } from "vitest";

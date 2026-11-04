@@ -8,8 +8,8 @@ import { WidgetChat } from "./widget-chat";
 // The bridge is replaced so the test can read what the page tells the loader
 // at ready, which the real bridge only posts from inside an iframe.
 const ready = vi.fn();
-vi.mock("../embed-bridge", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../embed-bridge")>()),
+vi.mock("@eneo/eneo-js/widgets/embed-bridge", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@eneo/eneo-js/widgets/embed-bridge")>()),
   createEmbedBridge: () => ({
     embedded: true,
     post: vi.fn(),

@@ -11,7 +11,7 @@
   import { toastError } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
   import { currentAppScheme } from "./appScheme";
-  import { loaderUrl, type LoaderRelease } from "./snippet";
+  import { loaderUrl, type LoaderRelease } from "@eneo/eneo-js/widgets/snippet";
 
   type Props = {
     widget: Widget;

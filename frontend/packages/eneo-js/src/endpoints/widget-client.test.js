@@ -2,6 +2,27 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createWidgetClient } from "../widget.js";
 
+test("challenge bootstrap omits stale tokens and cookies and forwards cancellation", async () => {
+  let request;
+  const controller = new AbortController();
+  const widget = createWidgetClient({
+    baseUrl: "https://eneo.example",
+    publicId: "wgt_x",
+    getToken: () => "expired-visitor-token",
+    fetch: async (input, init) => {
+      request = new Request(input, init);
+      return Response.json({ parameters: { algorithm: "SHA-256" }, signature: "signed" });
+    }
+  });
+  const challenge = await widget.challenge({ signal: controller.signal });
+  assert.equal(challenge.signature, "signed");
+  assert.equal(request.url, "https://eneo.example/api/v1/widgets/wgt_x/challenge/");
+  assert.equal(request.credentials, "omit");
+  assert.equal(request.headers.get("Authorization"), null);
+  controller.abort();
+  assert.equal(request.signal.aborted, true);
+});
+
 for (const injectedFetch of [true, false]) {
   test(`widget requests omit cookies with ${injectedFetch ? "injected" : "native"} fetch`, async (t) => {
     const requests = [];

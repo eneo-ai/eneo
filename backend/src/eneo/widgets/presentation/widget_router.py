@@ -270,7 +270,7 @@ async def update_widget(id: UUID, body: WidgetUpdate, container: _ContainerWithU
     assembler = container.widget_assembler()
     before = await service.get_widget(id)
     changes = body.model_dump(exclude_unset=True)
-    view = await service.update_widget(id, changes)
+    view = await service.update_widget(id, body)
     await _audit(
         container,
         action=ActionType.WIDGET_UPDATED,

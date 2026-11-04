@@ -1,4 +1,4 @@
-import { page } from "@vitest/browser/context";
+import { page } from "vitest/browser";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { EneoWidgetElement } from "./element";
 import { BRIDGE_NAMESPACE } from "./protocol";

@@ -6,7 +6,6 @@ import { expect, test } from "./csp";
 import { apiPost, apiPostJson, apiWriteJson, MOCK_REPLY, uniqueName } from "./helpers";
 
 type Widget = Schema<"WidgetPublic">;
-type Policy = Schema<"WidgetPolicyPublic">;
 type LoaderRelease = { version: string; channel: string; integrity: string };
 
 // These are real loopback sites: Chromium, rather than a request mock, decides
@@ -16,7 +15,6 @@ let allowedOrigin = "";
 let deniedOrigin = "";
 let eneoOrigin = "";
 let hostHtml = "";
-let savedBotPolicy: boolean | undefined;
 const createdWidgets: string[] = [];
 
 async function serveHost(): Promise<string> {
@@ -71,10 +69,7 @@ async function createWidget(page: Page, activate: boolean): Promise<Widget> {
   const configured = await apiWriteJson<Widget>(page, "PATCH", `/widgets/${draft.id}/`, {
     revision: draft.revision,
     allowed_origins: [allowedOrigin],
-    // The real visitor API, budget and model stream remain in this flow. Proof
-    // of work has backend integration coverage; its headless worker timing is
-    // deliberately outside this cross-origin/browser-session regression.
-    bot_protection: "none",
+    bot_protection: "altcha",
     privacy: { retention_days: 30, store_feedback_text: true },
     texts: {
       title: "Fråga kommunen",
@@ -109,31 +104,15 @@ test.afterAll(async () => {
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/spaces/list");
-  const response = await page.request.get("/api/v1/admin/widget-policy/");
-  expect(response.status()).toBe(200);
-  const policy: Policy = await response.json();
-  savedBotPolicy = policy.allow_bot_protection_none;
-  if (!savedBotPolicy) {
-    await apiWriteJson(page, "PATCH", "/admin/widget-policy/", { allow_bot_protection_none: true });
-  }
 });
 
 test.afterEach(async ({ page }) => {
-  try {
-    for (const id of createdWidgets.splice(0)) {
-      await apiPostJson(page, `/widgets/${id}/archive/`, {});
-    }
-  } finally {
-    if (savedBotPolicy !== undefined) {
-      await apiWriteJson(page, "PATCH", "/admin/widget-policy/", {
-        allow_bot_protection_none: savedBotPolicy
-      });
-      savedBotPolicy = undefined;
-    }
+  for (const id of createdWidgets.splice(0)) {
+    await apiPostJson(page, `/widgets/${id}/archive/`, {});
   }
 });
 
-test("the Vite widget loads cross-origin, streams and stores conversation feedback without app cookies", async ({
+test("the Vite widget solves ALTCHA cross-origin, streams and restores feedback without app cookies", async ({
   page,
   context
 }) => {
