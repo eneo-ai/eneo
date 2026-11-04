@@ -94,7 +94,13 @@ for (const vp of VIEWPORTS) {
           either = new Set([...either, ...again]);
         }
         seen[key] = { stable, either };
-        if (vp.keyboard) problems.push(...(await hiddenFocusProbe(page, pattern)));
+        if (vp.keyboard) {
+          try {
+            problems.push(...(await hiddenFocusProbe(page, pattern)));
+          } catch (error) {
+            problems.push(`${pattern}: Tabbing failed (${String(error).split("\n")[0]})`);
+          }
+        }
         return problems;
       });
       problems.push(...found);

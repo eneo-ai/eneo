@@ -5,7 +5,7 @@ import type { Page } from "@playwright/test";
 import { expect, test } from "./csp";
 import { contrastIncomplete } from "./contrast-incomplete";
 import { contrastProbe } from "./contrast-probe";
-import { expectNoCollapsedTableColumns, expectShellHoldsStill } from "./helpers";
+import { expectNoCollapsedTableColumns, expectNothingBusy, expectShellHoldsStill } from "./helpers";
 import { leftEdgeProbe } from "./left-edge-probe";
 import { createFixtures, walkRoutes, walkTags } from "./responsive-fixtures";
 import type { Fixtures } from "./responsive-routes";
@@ -55,8 +55,9 @@ const kontoPage = ({ page, width }: Screen, title: RegExp) =>
   ).toBeAttached();
 
 /**
- * Route pattern → what must be on the screen before it is scanned. These routes also hold the
- * checks axe has no rule for: a column that collapsed, a document that scrolls under the shell.
+ * Route pattern → what must be on the screen before it is scanned, with nothing left
+ * loading. These routes also hold the checks axe has no rule for: a column that collapsed, a
+ * document that scrolls under the shell.
  */
 const CHECKS: Record<string, (screen: Screen) => Promise<void>> = {
   "/account": (screen) => heading(screen, 1, /^(Konto|Account)$/),
@@ -153,6 +154,7 @@ for (const variant of VARIANTS) {
         if (check) {
           try {
             await check({ page, fixtures, width: variant.width });
+            await expectNothingBusy(page);
           } catch (error) {
             problems.push(`${pattern}: not ready (${String(error).split("\n")[0]})`);
           }

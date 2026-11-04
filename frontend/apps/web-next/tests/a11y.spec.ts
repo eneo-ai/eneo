@@ -17,6 +17,7 @@ import {
   conversationLog,
   createSpace,
   expectNoCollapsedTableColumns,
+  expectNothingBusy,
   expectShellHoldsStill,
   MOCK_REPLY,
   openCreateCollectionDialog,
@@ -77,7 +78,7 @@ async function expectNoAxeViolations(
   assertDocumented(disableRules, (rule) => `Skipping the axe rule "${rule}"`);
   // Wait for exposed loading regions. A queued run keeps a decorative skeleton
   // under aria-hidden after the result page has loaded; that state is scanned too.
-  await expect(page.locator('[aria-busy="true"]:not([aria-hidden="true"] *)')).toHaveCount(0);
+  await expectNothingBusy(page);
 
   const rules = Object.fromEntries([
     ...PAGE_STRUCTURE_RULES.map((rule) => [rule, { enabled: true }]),
@@ -910,7 +911,13 @@ for (const colorScheme of ["light", "dark"] as const) {
           });
         }
 
-        test("the organisation space", async ({ page }) => {
+        test("a space, and the organisation space", async ({ page }) => {
+          // A new space, so the overview's empty states and their create actions are scanned.
+          const name = uniqueName(`E2E A11y Touch Space ${colorScheme}`);
+          const space = await createSpace(page, name);
+          await scan(page, `${space}/overview`, async () => {
+            await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
+          });
           await scan(page, "/spaces/organization/knowledge", async () => {
             await expect(
               page.getByRole("heading", { level: 1, name: /^(Organisation|Organization)$/ })

@@ -434,3 +434,11 @@ export async function expectShellHoldsStill(page: Page) {
     `The document scrolls under the shell on ${page.url()}: ${overflow.escaped.join(", ")}`
   ).toBe(false);
 }
+
+/**
+ * Fails on a region that says it is still loading. A queued run keeps a decorative
+ * skeleton under aria-hidden after its page has loaded; that state passes.
+ */
+export async function expectNothingBusy(page: Page) {
+  await expect(page.locator('[aria-busy="true"]:not([aria-hidden="true"] *)')).toHaveCount(0);
+}

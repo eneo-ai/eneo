@@ -481,7 +481,9 @@ test("the migrations leg runs every migration_isolation test file exactly once",
   assert.match(roundTrips, /xargs -P 4 -I '\{\}' bash -c '$/m);
   assert.match(roundTrips, /^\s+timeout .* uv run pytest -q -m migration_isolation "\$1" >"\$log" 2>&1$/m);
   assert.match(roundTrips, /^\s+echo "=== \$1: exit \$status/m);
-  assert.match(roundTrips, /^\s+exit "\$status"$/m);
+  // The step's own exit, outside xargs: it alone fails the step once the sampler is stopped.
+  assert.match(roundTrips, /' _ '\{\}' \|\| status=\$\?$/m);
+  assert.match(roundTrips, /^ {10}exit "\$status"$/m);
   assert.match(roundTrips, /^\s+flock 9$/m);
   const ignored = [...roundTrips.matchAll(/--ignore=(\S+)/g)].map(([, file]) => file);
   const dedicated = [...fileIcon.matchAll(/(tests\/integration\/\S+\.py)/g)].map(([, file]) => file);
