@@ -3445,7 +3445,9 @@ class AssistantService:
                 history_repo=self.help_assistant_assignment_history_repo,
             )
 
-        space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
+        space = await self.space_repo.get_space_by_assistant(
+            assistant_id=assistant_id, tool_assistant_id=tool_assistant_id
+        )
         active_assistant = space.get_assistant(assistant_id=assistant_id)
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
