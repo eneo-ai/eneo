@@ -125,7 +125,7 @@ for (const variant of VARIANTS) {
           ...Object.keys(except).map((rule) => [rule, { enabled: false }])
         ]);
         let builder = new AxeBuilder({ page: page as unknown as AxePage })
-          .options({ rules })
+          .options({ rules, ancestry: true })
           .withTags(WCAG_22_AA);
         for (const selector of DEV_ONLY) builder = builder.exclude(selector);
         const { violations, incomplete } = await builder.analyze();
