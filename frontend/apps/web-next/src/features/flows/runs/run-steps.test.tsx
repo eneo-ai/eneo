@@ -224,6 +224,27 @@ describe("RunSteps copying", () => {
   });
 });
 
+describe("RunSteps warnings", () => {
+  it("says a step's warning in the user's language, by its code", () => {
+    const steps = runStepViews(
+      makeRunGraph([{ order: 1, label: "Sammanfatta", status: "completed" }]),
+      [
+        makeRunStep(1, {
+          diagnostics: [
+            {
+              code: "rag_retrieval_query_truncated",
+              message: "Step 1: knowledge retrieval query was truncated to 2048 characters.",
+              severity: "warning"
+            }
+          ]
+        })
+      ]
+    );
+    renderInApp(<RunSteps flowId="flow-1" runId="run-1" steps={steps} />);
+    expect(screen.getByText("Sökfrågan mot kunskapen blev för lång och kortades.")).toBeTruthy();
+  });
+});
+
 describe("RunSteps input and output", () => {
   const transcript = "[00:00:00 - 00:00:07] SPEAKER_00: Välkomna till mötet.";
 

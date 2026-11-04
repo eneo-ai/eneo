@@ -9830,5 +9830,16 @@
   "flows_retention_saved": "The retention is saved.",
   "flows_classification_heading": "Security classification",
   "flows_classification_raised": "{name}, {count, plural, one {# step raises} other {# steps raise}} the level",
-  "flows_classification_hint": "Inherited from the space, and a step can raise it."
+  "flows_classification_hint": "Inherited from the space, and a step can raise it.",
+  "flow_error_rag_retrieval_query_truncated": "The knowledge search query was too long and was shortened.",
+  "flow_error_rag_retrieval_timeout": "The knowledge search took too long.",
+  "flow_error_typed_output_keys_renamed": "Fields in the result were renamed to match the step's format.",
+  "flow_error_typed_output_extra_properties_dropped": "Fields the step's format does not have were removed from the result.",
+  "flow_error_empty_prior_step_input": "The step got no material from the previous step.",
+  "flow_error_speaker_mapping_unmapped_labels": "A speaker could not be matched to a participant.",
+  "flow_error_speaker_mapping_skipped": "No speaker could be determined. The transcript's text is kept.",
+  "flow_error_audio_diarization_skipped": "The speakers could not be told apart in the audio.",
+  "flow_error_audio_diarization_reduced_precision": "The speakers were told apart with lower precision.",
+  "flow_error_audio_transcription_empty_interval": "Part of the audio returned no text.",
+  "flow_error_typed_io_transcript_near_limit": "The transcript is close to what the step can read."
 }

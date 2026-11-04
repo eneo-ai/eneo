@@ -9830,5 +9830,16 @@
   "flows_retention_saved": "Gallringen är sparad.",
   "flows_classification_heading": "Säkerhetsklass",
   "flows_classification_raised": "{name}, {count, plural, one {# steg höjer} other {# steg höjer}} nivån",
-  "flows_classification_hint": "Ärvs från ytan och kan höjas per steg."
+  "flows_classification_hint": "Ärvs från ytan och kan höjas per steg.",
+  "flow_error_rag_retrieval_query_truncated": "Sökfrågan mot kunskapen blev för lång och kortades.",
+  "flow_error_rag_retrieval_timeout": "Sökningen i kunskapen tog för lång tid.",
+  "flow_error_typed_output_keys_renamed": "Fält i resultatet döptes om för att stämma med stegets format.",
+  "flow_error_typed_output_extra_properties_dropped": "Fält som stegets format inte har togs bort ur resultatet.",
+  "flow_error_empty_prior_step_input": "Steget fick inget underlag från det tidigare steget.",
+  "flow_error_speaker_mapping_unmapped_labels": "Någon talare kunde inte kopplas till en deltagare.",
+  "flow_error_speaker_mapping_skipped": "Ingen talare kunde avgöras. Transkriptets text är kvar.",
+  "flow_error_audio_diarization_skipped": "Talarna kunde inte särskiljas i ljudet.",
+  "flow_error_audio_diarization_reduced_precision": "Talarna särskiljdes med lägre precision.",
+  "flow_error_audio_transcription_empty_interval": "En del av ljudet gav ingen text.",
+  "flow_error_typed_io_transcript_near_limit": "Transkriptet ligger nära gränsen för hur mycket steget kan läsa."
 }
