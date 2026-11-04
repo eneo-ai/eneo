@@ -84,7 +84,7 @@ export function FlowRetentionDialog({
       width={480}
       variant={phone ? "fullscreen" : "standard"}
     >
-      {open && policy.data ? (
+      {!open ? null : policy.data ? (
         <RetentionForm
           key={policy.dataUpdatedAt}
           flow={flow}

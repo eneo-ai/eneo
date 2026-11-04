@@ -346,7 +346,7 @@ test(
       await page.keyboard.press("Enter");
       await expect(disclosure).toHaveAttribute("aria-expanded", "false");
       await expect(disclosure).toBeFocused();
-      await expect(secondary).toHaveCount(0);
+      await expect(secondary).toBeHidden();
       await expect(primary).toHaveCount(1);
       await expect(primary).toBeVisible();
       await expect(copy).toBeVisible();
