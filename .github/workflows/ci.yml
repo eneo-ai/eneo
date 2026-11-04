@@ -215,9 +215,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-24.04
-    # A ceiling for the migrations leg, which grows with the history: its round
-    # trips run one module at a time, each from an empty database.
-    timeout-minutes: 40
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: backend
