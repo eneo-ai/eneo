@@ -895,6 +895,7 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
                     openRequest={settingsRequest}
                     stepCount={steps.length}
                     problemCount={draftProblems}
+                    classification={space.security_classification?.name}
                     onDirtyChange={setSettingsDirty}
                   />
                   {canEdit ? (

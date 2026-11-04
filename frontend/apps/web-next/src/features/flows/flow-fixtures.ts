@@ -45,7 +45,11 @@ export function makeFlow(overrides: Partial<FlowPublic> = {}): FlowPublic {
     tenant_id: "tenant-1",
     step_count: steps.length,
     metadata_json: null,
-    run_history_retention: { source: "none" },
+    run_history_retention: {
+      state: "off",
+      source: "none",
+      contributors: { organization: null, space: null, flow: null }
+    },
     permissions: flowPermissions(),
     ...overrides,
     steps

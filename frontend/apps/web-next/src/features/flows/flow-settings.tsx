@@ -15,6 +15,8 @@ import { flushSync } from "react-dom";
 import { TextInput } from "@/components/astryx/text-input";
 import { EmptyState } from "@/components/composites/empty-state";
 import { LeaveConfirmation } from "@/components/composites/leave-confirmation";
+import { useAppContext } from "@/components/providers/app-context";
+import { FlowRetentionDialog, FlowRetentionSummary } from "./flow-retention";
 import type { FlowDefinitionUpdate, FlowPublic } from "./flows-api";
 import {
   evidenceExportAllowed,
@@ -113,16 +115,25 @@ export function SettingsSummary({
   flow,
   transcription,
   stepCount,
-  problemCount
+  problemCount,
+  classification,
+  onChangeRetention
 }: {
   flow: FlowPublic;
   transcription?: TranscriptionResources;
   stepCount?: number;
   /** The draft check's problem count; null while unchecked. */
   problemCount?: number | null;
+  /** The name of the space's security classification, when it has one. */
+  classification?: string | null;
+  /** Offers to change the retention, for someone who may. */
+  onChangeRetention?: () => void;
 }) {
   const t = useTranslations();
   const fields = formFieldsOf(flow.metadata_json);
+  const raisingSteps = flow.steps.filter(
+    (step) => step.output_classification_override != null
+  ).length;
   const settings = transcriptionSettingsOf(flow.metadata_json);
   const transcribes = flowTakesAudio(flow.steps) || settings.enabled;
   return (
@@ -172,6 +183,24 @@ export function SettingsSummary({
             : "flow_editor_tools_off"
         )}
       </MetadataListItem>
+      <MetadataListItem label={t("flows_retention_heading")}>
+        <FlowRetentionSummary flow={flow} />
+        {onChangeRetention ? (
+          <span className="mt-1 block">
+            <Button label={t("flows_retention_change")} size="sm" onClick={onChangeRetention} />
+          </span>
+        ) : null}
+      </MetadataListItem>
+      {classification ? (
+        <MetadataListItem label={t("flows_classification_heading")}>
+          {raisingSteps > 0
+            ? t("flows_classification_raised", { name: classification, count: raisingSteps })
+            : classification}
+          <span className="text-ax-text-secondary mt-0.5 block text-sm">
+            {t("flows_classification_hint")}
+          </span>
+        </MetadataListItem>
+      ) : null}
       {problemCount == null ? null : (
         <MetadataListItem label={t("flows_settings_check")}>
           {problemCount === 0 ? (
@@ -345,6 +374,7 @@ export function FlowSettings({
   openRequest,
   stepCount,
   problemCount,
+  classification,
   onDirtyChange
 }: {
   flow: FlowPublic;
@@ -364,10 +394,14 @@ export function FlowSettings({
   stepCount?: number;
   /** The draft check's problem count (null while unchecked), shown in the read view. */
   problemCount?: number | null;
+  /** The name of the space's security classification, when it has one. */
+  classification?: string | null;
   /** Told true while the open form differs from the flow it was loaded from. */
   onDirtyChange?: (dirty: boolean) => void;
 }) {
   const t = useTranslations();
+  const { can } = useAppContext();
+  const [retentionOpen, setRetentionOpen] = useState(false);
   const announce = useAnnounce();
   const headingId = useId();
   const formId = useId();
@@ -597,6 +631,8 @@ export function FlowSettings({
           transcription={transcription}
           stepCount={stepCount}
           problemCount={problemCount}
+          classification={classification}
+          onChangeRetention={can("retention_manage") ? () => setRetentionOpen(true) : undefined}
         />
       ) : (
         <form
@@ -727,6 +763,7 @@ export function FlowSettings({
         </form>
       )}
       {editing ? <LeaveConfirmation active={dirty} /> : null}
+      <FlowRetentionDialog flow={flow} open={retentionOpen} onOpenChange={setRetentionOpen} />
     </section>
   );
 }

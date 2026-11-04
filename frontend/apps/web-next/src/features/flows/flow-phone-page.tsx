@@ -54,6 +54,7 @@ export function FlowPhonePage({ flowId, onStart }: { flowId: string; onStart: ()
               models: space.transcription_models,
               services: space.transcription_services ?? []
             }}
+            classification={space.security_classification?.name}
           />
         </section>
         {flow.permissions.can_view_runs ? (
