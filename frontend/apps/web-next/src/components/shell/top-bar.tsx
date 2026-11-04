@@ -5,8 +5,9 @@ import { ArrowUpToLine, Search } from "lucide-react";
 import Link from "@/lib/link";
 import { usePathname } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAppContext } from "@/components/providers/app-context";
+import { useFocusRescue } from "@/lib/focus-rescue";
 import { cn } from "@/lib/utils";
 import { EneoIcon, EneoWordMark } from "./eneo-logo";
 import { NotificationBells } from "./notification-bells";
@@ -49,8 +50,23 @@ export function TopBar({
   const showRef = useRef<HTMLButtonElement>(null);
   const hideRef = useRef<HTMLButtonElement>(null);
   const homeRef = useRef<HTMLAnchorElement>(null);
-  // Set by the buttons, not by the pointer: only a keyboard or click toggle moves focus.
+  // Set by the buttons, and by the pointer only when it takes the focused show button away.
   const handOff = useRef(false);
+
+  const rescueFocus = useFocusRescue();
+  // The window narrowed to the icon rail, which has no hide button: a press hands off above.
+  const hideButton = useCallback(
+    (button: HTMLButtonElement) => {
+      hideRef.current = button;
+      return () => {
+        hideRef.current = null;
+        if (!handOff.current && document.activeElement === button) {
+          rescueFocus(() => homeRef.current);
+        }
+      };
+    },
+    [rescueFocus]
+  );
 
   useEffect(() => {
     if (!handOff.current) return;
@@ -72,7 +88,10 @@ export function TopBar({
           data-top-bar-reveal=""
           aria-hidden="true"
           className="fixed inset-x-0 top-0 z-50 h-3"
-          onPointerEnter={() => setShown(true)}
+          onPointerEnter={() => {
+            handOff.current = document.activeElement === showRef.current;
+            setShown(true);
+          }}
         />
         <button
           ref={showRef}
@@ -115,7 +134,7 @@ export function TopBar({
         {/* The icon rail has room for the mark only. */}
         {railCollapsed ? null : (
           <IconButton
-            ref={hideRef}
+            ref={hideButton}
             variant="ghost"
             icon={<Icon icon={ArrowUpToLine} />}
             label={t("hide_header")}

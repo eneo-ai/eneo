@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { useState } from "react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Permission } from "@/lib/auth/permissions";
 import { expectNoAxeViolations } from "@/test/axe";
@@ -55,6 +56,55 @@ describe("TopBar", () => {
       expect(screen.queryAllByRole("menuitem", { name: /Har du en fråga/ })).toHaveLength(rows);
       unmount();
     }
+  });
+
+  describe("when a control goes without being pressed", () => {
+    function renderHidable() {
+      let setRail!: (rail: boolean) => void;
+      function Bar() {
+        const [rail, set] = useState(false);
+        setRail = set;
+        return <TopBar railCollapsed={rail} />;
+      }
+      renderInApp(<Bar />);
+      return { rail: () => act(() => setRail(true)) };
+    }
+    const hide = () => screen.getByRole("button", { name: "Dölj sidhuvudet" });
+    const home = () => screen.getByRole("link", { name: "Eneo, till startsidan" });
+    const reveal = () => document.querySelector("[data-top-bar-reveal]")!;
+
+    it("gives the focused hide button's focus to the home link in the icon rail", async () => {
+      const { rail } = renderHidable();
+      hide().focus();
+      rail();
+      await waitFor(() => expect(document.activeElement).toBe(home()));
+    });
+
+    it("leaves focus elsewhere alone when the rail takes the hide button away", async () => {
+      const { rail } = renderHidable();
+      const link = screen.getByRole("link", { name: "Personligt" });
+      link.focus();
+      rail();
+      await act(() => new Promise(requestAnimationFrame));
+      expect(document.activeElement).toBe(link);
+    });
+
+    it("gives the focused show button's focus to the hide button when the pointer reveals the bar", () => {
+      renderHidable();
+      fireEvent.click(hide());
+      fireEvent.pointerEnter(reveal());
+      expect(document.activeElement).toBe(hide());
+    });
+
+    it("takes no focus when the pointer reveals the bar", () => {
+      renderHidable();
+      const outside = document.body.appendChild(document.createElement("button"));
+      fireEvent.click(hide());
+      outside.focus();
+      fireEvent.pointerEnter(reveal());
+      expect(document.activeElement).toBe(outside);
+      outside.remove();
+    });
   });
 
   it("links the areas where Svelte's top bar does", () => {

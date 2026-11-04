@@ -224,6 +224,19 @@ export function ChatPage({
     if (viewTab === "history") rescueFocus(() => document.getElementById(CHAT_PANEL_IDS.chat));
   }
 
+  /**
+   * Historik can also go without a pick: a window narrowed to the phone layout, which has no
+   * tabs. A ref's cleanup runs before the panel leaves the page, so it can still see the focus.
+   */
+  const historyContents = useCallback(
+    (contents: HTMLDivElement) => () => {
+      if (contents.contains(document.activeElement)) {
+        rescueFocus(() => document.getElementById(CHAT_PANEL_IDS.chat));
+      }
+    },
+    [rescueFocus]
+  );
+
   function selectSession(sessionId: string) {
     const showing = pendingSessionId ?? active?.sessionId ?? null;
     if (sessionId !== showing) {
@@ -388,19 +401,21 @@ export function ChatPage({
             className="flex min-h-0 min-w-0 flex-1 flex-col p-6"
           >
             {viewTab === "history" && (
-              <HistoryTab
-                partner={partner}
-                activeSessionId={sessionId ?? pendingSessionId}
-                onSelect={selectSession}
-                onDeleted={(id) => {
-                  if (active?.sessionId === id) startConversation(false);
-                }}
-                onRenamed={(id, name) =>
-                  setActive((current) =>
-                    current?.sessionId === id ? { ...current, title: name } : current
-                  )
-                }
-              />
+              <div ref={historyContents} className="contents">
+                <HistoryTab
+                  partner={partner}
+                  activeSessionId={sessionId ?? pendingSessionId}
+                  onSelect={selectSession}
+                  onDeleted={(id) => {
+                    if (active?.sessionId === id) startConversation(false);
+                  }}
+                  onRenamed={(id, name) =>
+                    setActive((current) =>
+                      current?.sessionId === id ? { ...current, title: name } : current
+                    )
+                  }
+                />
+              </div>
             )}
           </div>
           {/* The conversation stays mounted behind Insikter, so switching back
