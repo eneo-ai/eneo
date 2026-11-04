@@ -550,3 +550,78 @@ test(
     await expect(toggle).toBeFocused();
   }
 );
+
+test(
+  "the space switcher moves one row per key, closes on a pick and returns focus",
+  { tag: ["@vite"] },
+  async ({ page }) => {
+    await page.goto("/spaces/personal/chat");
+    const first = await createSpace(page, uniqueName("Switcher one"));
+    const second = uniqueName("Switcher two");
+    await createSpace(page, second);
+    await page.goto(`${first}/overview`);
+    const nav = page.getByRole("navigation", { name: "Ytans meny", exact: true });
+    const trigger = nav.getByRole("button", { name: "Öppna meny" });
+    await trigger.focus();
+    await page.keyboard.press("Enter");
+    const items = page.getByRole("menu").getByRole("menuitem");
+    await expect(items.first()).toBeFocused();
+    // The spaces arrive after the menu opens.
+    await expect(page.getByRole("menuitem", { name: second })).toBeVisible();
+    // Each row in turn: Astryx's two list handlers would land on every second one.
+    for (const row of [1, 2]) {
+      await page.keyboard.press("ArrowDown");
+      await expect(items.nth(row)).toBeFocused();
+    }
+    // Tab stays in the open menu, and the palette's key still reaches the page.
+    await page.keyboard.press("Tab");
+    await expect(page.locator("[popover]:popover-open :focus")).toHaveCount(1);
+    await page.keyboard.press("ControlOrMeta+k");
+    await expect(page.getByRole("combobox").first()).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("combobox")).toHaveCount(0);
+    await trigger.focus();
+    if (!(await items.first().isVisible())) await page.keyboard.press("Enter");
+    await expect(page.getByRole("menuitem", { name: second })).toBeVisible();
+    await page.getByRole("menuitem", { name: second }).focus();
+    await page.keyboard.press("Enter");
+    await page.waitForURL(/\/spaces\/[^/]+\/overview$/);
+    await expect(page).not.toHaveURL(`${first}/overview`);
+    await expect(items.first()).toBeHidden();
+    await expect(trigger).toBeFocused();
+  }
+);
+
+test(
+  "the space switcher keeps Skapa en ny yta on the screen with many spaces",
+  { tag: ["@vite"] },
+  async ({ page }) => {
+    await page.goto("/spaces/personal/chat");
+    const space = await createSpace(page, uniqueName("Many spaces"));
+    await page.route(
+      (url) => url.pathname.endsWith("/api/v1/spaces/"),
+      async (route) => {
+        const response = await route.fetch();
+        const { items, ...page_ } = await response.json();
+        const copies = Array.from({ length: 80 }, (_, index) => ({
+          ...items.at(-1),
+          id: crypto.randomUUID(),
+          name: `Kopia ${index}`
+        }));
+        await route.fulfill({ response, json: { ...page_, items: [...items, ...copies] } });
+      }
+    );
+    await page.goto(`${space}/overview`);
+    await page
+      .getByRole("navigation", { name: "Ytans meny", exact: true })
+      .getByRole("button", { name: "Öppna meny" })
+      .press("Enter");
+    await page.getByRole("menuitem", { name: "Kopia 0" }).waitFor();
+    await expect(page.getByRole("menuitem", { name: "Skapa en ny yta" })).toBeInViewport();
+    const last = page.getByRole("menuitem", { name: "Kopia 79" });
+    await expect(last).not.toBeInViewport();
+    await last.scrollIntoViewIfNeeded();
+    await expect(last).toBeInViewport();
+    await expect(page.getByRole("menuitem", { name: "Skapa en ny yta" })).toBeInViewport();
+  }
+);
