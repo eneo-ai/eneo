@@ -30,7 +30,6 @@ import { WidgetPersonaByline } from "./widget-persona-byline";
 import { WidgetQuestionBubble } from "./widget-question-bubble";
 
 type Scheme = "light" | "dark" | "auto";
-type Status = "idle" | "verifying" | "sending";
 
 const subscribeNever = () => () => {};
 
@@ -49,6 +48,7 @@ export function WidgetChat({
   onSession,
   onTheme,
   previewToken = null,
+  tintedHeader = false,
   persona = null
 }: {
   config: WidgetPublicConfig;
@@ -59,6 +59,7 @@ export function WidgetChat({
   onTheme?: (scheme: Scheme) => void;
   /** Admin preview of a draft widget: used as the visitor token, nothing is remembered. */
   previewToken?: string | null;
+  tintedHeader?: boolean;
   /** The voice answers are presented under; null for a neutral widget. */
   persona?: PersonaView | null;
 }) {
@@ -93,11 +94,8 @@ export function WidgetChat({
   const [draft, setDraft] = useState("");
   // How the loader shows the panel; null until a loader that reports it says.
   const [layout, setLayout] = useState<PanelLayout | null>(null);
-  const [status, setStatus] = useState<Status>("idle");
-  const statusRef = useRef<Status>("idle");
-  useEffect(() => {
-    statusRef.current = status;
-  }, [status]);
+  const activeSend = useRef<symbol | null>(null);
+  const [verifying, setVerifying] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [unavailable, setUnavailable] = useState(false);
   // A 429 with Retry-After: the composer stays closed until the window passes.
@@ -152,13 +150,12 @@ export function WidgetChat({
         config,
         fixedToken: previewToken,
         solve: async () => {
-          // Restore what was in progress (a send stays "sending" until it ends).
-          const before = statusRef.current;
-          setStatus("verifying");
-          const element = await ensureAltcha();
-          return solveWithAltcha(element).finally(() => {
-            if (statusRef.current === "verifying") setStatus(before);
-          });
+          setVerifying(true);
+          try {
+            return await solveWithAltcha(await ensureAltcha());
+          } finally {
+            setVerifying(false);
+          }
         }
       })
   );
@@ -215,7 +212,7 @@ export function WidgetChat({
   // The question is appended once the backend confirms it; until then show
   // it and a typing indicator so the visitor sees progress.
   const showPending = pendingQuestion !== null && messages.length <= pendingFrom;
-  const busy = restoring || status !== "idle" || asking;
+  const busy = restoring || pendingQuestion !== null || verifying || asking;
   // With a persona the welcome text is its first message (see the log below).
   const opening = persona && config.texts.welcome ? config.texts.welcome : null;
   // Retention 0: the backend deletes the session when the answer ends, so
@@ -304,6 +301,7 @@ export function WidgetChat({
       void restore(session.sessionId);
     }
     return () => {
+      activeSend.current = null;
       if (cooldownTimer.current) clearTimeout(cooldownTimer.current);
       created.destroy();
       bridge.current = null;
@@ -351,17 +349,18 @@ export function WidgetChat({
     setRateableSession(sessionId);
   }
 
-  async function askQuestion(question: string, retried: boolean): Promise<void> {
+  async function askQuestion(question: string, attempt: symbol, retried: boolean): Promise<void> {
     const wasNew = !conversationRef.current.id;
     let result: Awaited<ReturnType<typeof ask>>;
     try {
       await session.ensureToken();
+      if (activeSend.current !== attempt) return;
       result = await ask(question);
     } catch (error) {
       result = { status: "failed", error, started: false };
     }
     // Started over while the answer streamed: the chat is already empty.
-    if (result.status === "cancelled") return;
+    if (activeSend.current !== attempt || result.status === "cancelled") return;
     if (result.status === "done") {
       keepConversation(wasNew, result.sessionId);
       // The finished answer is read once, as in any chat; the stream never
@@ -382,7 +381,7 @@ export function WidgetChat({
     if (isTokenRejected(error) && !retried) {
       // Stale after a pause/config change or simply expired: re-mint once.
       session.invalidate();
-      return askQuestion(question, true);
+      return askQuestion(question, attempt, true);
     }
     // Nothing reached the server, so the question goes back into the field.
     composer.current?.restore(question);
@@ -411,7 +410,7 @@ export function WidgetChat({
   async function send(question: string): Promise<void> {
     // One request at a time. The guard is synchronous, so a second click while
     // the token is minted or before the first chunk never starts another ask.
-    if (restoring || statusRef.current !== "idle" || asking) return;
+    if (restoring || activeSend.current !== null || verifying || asking) return;
     // A suggested question leaves the page with the question; focus must not
     // go with it. The composer takes it, or on a touch screen the heading,
     // so the keyboard does not open over the answer.
@@ -419,8 +418,8 @@ export function WidgetChat({
       if (matchMedia("(pointer: coarse)").matches) title.current?.focus({ preventScroll: true });
       else composer.current?.focus();
     }
-    statusRef.current = "sending";
-    setStatus("sending");
+    const attempt = Symbol();
+    activeSend.current = attempt;
     setErrorMessage(null);
     setPendingQuestion(question);
     setPendingFrom(conversationRef.current.messages.length);
@@ -429,16 +428,19 @@ export function WidgetChat({
       persona ? t("widget_persona_answering", { name: persona.name }) : t("assistant_is_typing")
     );
     try {
-      await askQuestion(question, false);
+      await askQuestion(question, attempt, false);
     } finally {
-      statusRef.current = "idle";
-      setStatus("idle");
-      setPendingQuestion(null);
-      requestAnimationFrame(scrollToEnd);
+      if (activeSend.current === attempt) {
+        activeSend.current = null;
+        setPendingQuestion(null);
+        requestAnimationFrame(scrollToEnd);
+      }
     }
   }
 
   function startOver() {
+    activeSend.current = null;
+    setPendingQuestion(null);
     setConfirmStartOver(false);
     reset();
     session.rememberSession(null);
@@ -491,7 +493,7 @@ export function WidgetChat({
         aria-labelledby={titleId}
         className={cn(
           "border-ax-border flex items-center justify-between gap-2 border-b px-4 py-3",
-          config.theme.header_color && "widget-header-tinted"
+          tintedHeader && "widget-header-tinted"
         )}
       >
         <div className="flex min-w-0 items-center gap-3">
@@ -663,7 +665,7 @@ export function WidgetChat({
                   sessionId={conversation.id}
                   collectsText={config.collects_feedback_text}
                   restored={conversation.feedback}
-                  disabled={status === "sending" || asking}
+                  disabled={pendingQuestion !== null || asking}
                   submit={submitFeedback}
                 />
               )}
@@ -679,9 +681,7 @@ export function WidgetChat({
               {errorMessage}
             </p>
           )}
-          {status === "verifying" && (
-            <p className="text-ax-text-secondary text-xs">{t("widget_verifying")}</p>
-          )}
+          {verifying && <p className="text-ax-text-secondary text-xs">{t("widget_verifying")}</p>}
           {answered && (
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-ax-text-secondary text-xs">{t("widget_single_turn_hint")}</p>

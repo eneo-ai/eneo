@@ -68,6 +68,7 @@
 
 /* A tinted header uses the widget's own colours; text is derived for contrast. */
 .widget-header-tinted {
+  --widget-focus: var(--widget-on-header);
   background: var(--widget-header);
   color: var(--widget-on-header);
   border-color: transparent;

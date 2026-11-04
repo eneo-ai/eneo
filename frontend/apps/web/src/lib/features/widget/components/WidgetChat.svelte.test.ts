@@ -78,6 +78,8 @@ const fake = vi.hoisted(() => ({
   getErrors: [] as unknown[],
   // Visitor tokens minted so far.
   mints: 0,
+  tokenLifetime: 3600,
+  holdRenewal: null as Promise<void> | null,
   // Merged into every first chunk, and the references every answer cites.
   chunkExtras: {} as Record<string, unknown>,
   references: [] as unknown[]
@@ -96,9 +98,10 @@ vi.mock("@eneo/eneo-js", async (importOriginal) => {
       config: unsupported,
       createVisitorSession: async () => {
         fake.mints += 1;
+        if (fake.holdRenewal) await fake.holdRenewal;
         return {
           token: "visitor-token",
-          expires_in: 3600,
+          expires_in: fake.tokenLifetime,
           visitor_id: "11111111-1111-4111-8111-111111111111",
           visitor_key: "key"
         };
@@ -332,6 +335,8 @@ beforeEach(() => {
   fake.askErrors.length = 0;
   fake.getErrors.length = 0;
   fake.mints = 0;
+  fake.tokenLifetime = 3600;
+  fake.holdRenewal = null;
   fake.chunkExtras = {};
   fake.references = [];
   localStorage.clear();
@@ -339,6 +344,33 @@ beforeEach(() => {
 });
 
 describe("WidgetChat", () => {
+  test("a follow-up waiting for token renewal is discarded on start over", async () => {
+    fake.tokenLifetime = 1;
+    renderApp();
+    await userEvent.click(suggestion());
+    await releaseAnswer();
+    await expect.element(composer()).toBeEnabled();
+    let finishRenewal!: () => void;
+    fake.holdRenewal = new Promise<void>((resolve) => {
+      finishRenewal = resolve;
+    });
+    await userEvent.fill(composer(), "Kasta den här frågan");
+    await userEvent.keyboard("{Enter}");
+    await vi.waitFor(() => expect(fake.mints).toBe(2));
+    await userEvent.click(page.getByRole("button", { name: "widget_new_conversation" }));
+    await userEvent.click(
+      page
+        .getByRole("alertdialog")
+        .getByRole("button", { name: "widget_new_conversation_confirm_action" })
+    );
+    finishRenewal();
+    await askFollowUp("Ny fråga", "Nytt svar");
+    expect(fake.asks.map(({ question }) => question)).toEqual([
+      "Vad har biblioteket för öppettider?",
+      "Ny fråga"
+    ]);
+  });
+
   test("a suggested question hands focus to the composer before it disappears", async () => {
     renderApp();
     await expect.element(suggestion()).toBeVisible();
@@ -889,12 +921,23 @@ describe("WidgetChat", () => {
       return controls.length;
     }
 
+    test("a dark-only header color follows the active scheme", async () => {
+      renderApp({ theme: { header_color_dark: "#123456" } }, scheme);
+      const header = document.querySelector("[data-widget-chat] header")!;
+      await vi.waitFor(() =>
+        expect(header.classList.contains("widget-header-tinted")).toBe(scheme === "dark")
+      );
+      if (scheme === "dark")
+        expect(getComputedStyle(header).backgroundColor).toBe("rgb(18, 52, 86)");
+    });
+
     test("every control shows an indicator of at least 3:1", async () => {
       renderApp(
         {
+          theme: { primary_color: "#000000", header_color: "#000000" },
           texts: {
             title: "Fråga kommunen",
-            subtitle: "Du chattar med en AI-assistent.",
+            subtitle: "Du chattar med en AI-assistent. ".repeat(8),
             welcome: "Hej!",
             suggested_questions: ["Vad har biblioteket för öppettider?"],
             footer_text: "Läs mer",

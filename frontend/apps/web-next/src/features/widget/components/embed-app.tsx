@@ -140,6 +140,7 @@ export function EmbedApp({
         hostOrigin={hostOrigin}
         previewToken={previewToken}
         persona={persona}
+        tintedHeader={!!header}
         onSession={holder.set}
         onTheme={applyScheme}
       />

@@ -46,6 +46,7 @@
     onTheme?: (scheme: "light" | "dark" | "auto") => void;
     /** Admin preview of a draft widget: used as the visitor token, nothing is remembered. */
     previewToken?: string | null;
+    tintedHeader?: boolean;
     /** The voice answers are presented under; null for a neutral widget. */
     persona?: PersonaView | null;
   };
@@ -57,6 +58,7 @@
     onSession,
     onTheme,
     previewToken = null,
+    tintedHeader = false,
     persona = null
   }: Props = $props();
 
@@ -74,7 +76,8 @@
   let newQuestionButton = $state<HTMLButtonElement | null>(null);
   let startOverButton = $state<HTMLButtonElement | null>(null);
 
-  let status = $state<"idle" | "verifying" | "sending">("idle");
+  let activeSend: symbol | null = null;
+  let verifying = $state(false);
   let restoring = $state(false);
   const announcer = new Announcer();
   let errorMessage = $state<string | null>(null);
@@ -107,14 +110,14 @@
     config: initial.config,
     fixedToken: initial.previewToken,
     solve: async () => {
-      // Restore what was in progress (a send stays "sending" until it ends).
-      const before = status;
-      status = "verifying";
+      verifying = true;
       challengeReady = true;
-      await tick();
-      return solveWithAltcha(altchaElement).finally(() => {
-        if (status === "verifying") status = before;
-      });
+      try {
+        await tick();
+        return await solveWithAltcha(altchaElement);
+      } finally {
+        verifying = false;
+      }
     }
   });
   initial.onSession(session);
@@ -154,7 +157,9 @@
   // The service appends the message once the backend confirms it; until then
   // show the question and a typing indicator so the visitor sees progress.
   const showPending = $derived(pendingQuestion !== null && messages.length <= pendingFrom);
-  const busy = $derived(restoring || status !== "idle" || chat.askQuestion.isLoading);
+  const busy = $derived(
+    restoring || pendingQuestion !== null || verifying || chat.askQuestion.isLoading
+  );
   const subtitle = $derived(config.texts.subtitle);
   // With a persona the welcome text is its first message (see the log below).
   const opening = $derived(persona && config.texts.welcome ? config.texts.welcome : null);
@@ -198,6 +203,7 @@
       void restore(session.sessionId).finally(() => (restoring = false));
     }
     return () => {
+      activeSend = null;
       if (cooldownTimer) clearTimeout(cooldownTimer);
       announcer.clear();
       bridge.destroy();
@@ -254,7 +260,7 @@
   async function send(question: string): Promise<void> {
     // One request at a time. The guard is synchronous, so a second click while
     // the token is minted or before the first chunk never starts another ask.
-    if (restoring || status !== "idle" || chat.askQuestion.isLoading) return;
+    if (restoring || pendingQuestion !== null || verifying || chat.askQuestion.isLoading) return;
     // A suggested question leaves the page with the question; focus must not
     // go with it. The composer takes it, or on a touch screen the heading,
     // so the keyboard does not open over the answer.
@@ -262,7 +268,8 @@
       if (matchMedia("(pointer: coarse)").matches) title?.focus({ preventScroll: true });
       else composer?.focus();
     }
-    status = "sending";
+    const attempt = Symbol();
+    activeSend = attempt;
     errorMessage = null;
     pendingQuestion = question;
     pendingFrom = messages.length;
@@ -273,12 +280,13 @@
         : m.assistant_is_typing()
     );
     try {
-      await ask(question, false);
+      await ask(question, attempt, false);
     } finally {
-      status = "idle";
-      pendingQuestion = null;
-      await tick();
-      scrollToEnd();
+      if (activeSend === attempt) {
+        pendingQuestion = null;
+        await tick();
+        if (activeSend === attempt) scrollToEnd();
+      }
     }
   }
 
@@ -300,12 +308,14 @@
     rateableSession = sessionId;
   }
 
-  async function ask(question: string, retried: boolean): Promise<void> {
+  async function ask(question: string, attempt: symbol, retried: boolean): Promise<void> {
     const wasNew = !chat.currentConversation.id;
     const turns = chat.currentConversation.messages?.length ?? 0;
     try {
       await session.ensureToken();
+      if (activeSend !== attempt) return;
       await chat.askQuestion(question);
+      if (activeSend !== attempt) return;
       keepConversation(wasNew);
       // The finished answer is read once, as in any chat; the stream never
       // is (the log's own live region is off).
@@ -313,6 +323,7 @@
       const sender = initial.persona?.name ?? m.widget_assistant();
       announcer.announce(answer ? `${sender}: ${answer}` : m.widget_answer_complete());
     } catch (error) {
+      if (activeSend !== attempt) return;
       if ((chat.currentConversation.messages?.length ?? 0) > turns) {
         // The answer broke off after it began: what arrived stays, the alert
         // says it is incomplete and nothing announces it as done.
@@ -324,7 +335,7 @@
       if (isTokenRejected(error) && !retried) {
         // Stale after a pause/config change or simply expired: re-mint once.
         session.invalidate();
-        return ask(question, true);
+        return ask(question, attempt, true);
       }
       // The alert below speaks for itself; a pending "typing" must not follow it.
       announcer.clear();
@@ -354,6 +365,10 @@
 
   async function startOver() {
     confirmStartOver = false;
+    activeSend = null;
+    pendingQuestion = null;
+    rateableSession = null;
+    announcer.clear();
     chat.newConversation();
     session.rememberSession(null);
     errorMessage = null;
@@ -406,7 +421,7 @@
   <header
     class={[
       "border-default flex items-center justify-between gap-2 border-b px-4 py-3",
-      config.theme.header_color && "widget-header-tinted"
+      tintedHeader && "widget-header-tinted"
     ]}
   >
     <div class="flex min-w-0 items-center gap-3">
@@ -562,7 +577,7 @@
             sessionId={chat.currentConversation.id}
             collectsText={config.collects_feedback_text}
             restored={chat.currentConversation.feedback ?? null}
-            disabled={status === "sending" || chat.askQuestion.isLoading}
+            disabled={pendingQuestion !== null || chat.askQuestion.isLoading}
             submit={submitFeedback}
           />
         {/if}
@@ -582,7 +597,7 @@
           {errorMessage}
         </p>
       {/if}
-      {#if status === "verifying"}
+      {#if verifying}
         <p class="text-secondary text-xs">{m.widget_verifying()}</p>
       {/if}
       {#if answered}
@@ -697,6 +712,7 @@
   }
   /* A tinted header uses the widget's own colours; text is derived for contrast. */
   .widget-header-tinted {
+    --widget-focus: var(--widget-on-header);
     background: var(--widget-header);
     color: var(--widget-on-header);
     border-color: transparent;

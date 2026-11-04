@@ -242,6 +242,34 @@ describe("WidgetChat", () => {
     expect(screen.queryByRole("button", { name: "Hjälpsam konversation" })).toBeNull();
   });
 
+  it("discards a follow-up while its token is being renewed", async () => {
+    const { client, ask } = fakeClient();
+    const token = { token: "first", expires_in: 1, visitor_id: SESSION, visitor_key: "key" };
+    let finishRenewal!: (value: typeof token) => void;
+    vi.mocked(client.createVisitorSession)
+      .mockResolvedValueOnce(token)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishRenewal = resolve;
+          })
+      );
+    renderChat(config(), client);
+    typeQuestion("Första frågan");
+    await screen.findByText("Pour over: 15 g kaffe på 250 g vatten.");
+    typeQuestion("Kasta den här");
+    await waitFor(() => expect(client.createVisitorSession).toHaveBeenCalledTimes(2));
+    await startOver();
+    await act(async () => finishRenewal({ ...token, token: "renewed", expires_in: 3600 }));
+    expect(ask).toHaveBeenCalledTimes(1);
+    expect(rememberedSession()).toBeNull();
+    typeQuestion("Ny fråga");
+    await waitFor(() => expect(ask).toHaveBeenCalledTimes(2));
+    expect(ask).toHaveBeenLastCalledWith(
+      expect.objectContaining({ question: "Ny fråga", conversation: { id: null } })
+    );
+  });
+
   it.each([
     ["finishes", (stream: { finish: () => void }) => stream.finish()],
     ["fails", (stream: { fail: (error: unknown) => void }) => stream.fail(new Error("aborted"))]
@@ -257,7 +285,7 @@ describe("WidgetChat", () => {
       expect(rememberedSession()).toBeNull();
 
       await startOver();
-      expect(within(log).queryByText("Pour over:")).toBeNull();
+      expect(screen.queryByRole("log")).toBeNull();
       await act(async () => settle(stream));
       await flushAnnouncements();
 

@@ -116,6 +116,7 @@
     {hostOrigin}
     {previewToken}
     {persona}
+    tintedHeader={!!header}
     onSession={(created) => (session = created)}
     onTheme={applyScheme}
   />
