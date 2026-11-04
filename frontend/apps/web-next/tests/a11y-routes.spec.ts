@@ -1,19 +1,17 @@
 import fs from "node:fs";
 import path from "node:path";
 import AxeBuilder from "@axe-core/playwright";
-import type { Browser, BrowserContext } from "@playwright/test";
+import type { Page } from "@playwright/test";
 import { expect, test } from "./csp";
-import { STORAGE_STATE } from "../playwright.config";
 import { contrastIncomplete } from "./contrast-incomplete";
 import { contrastProbe } from "./contrast-probe";
+import { expectNoCollapsedTableColumns, expectNothingBusy, expectShellHoldsStill } from "./helpers";
 import { leftEdgeProbe } from "./left-edge-probe";
-import { createFixtures, openRoute, walkTags } from "./responsive-fixtures";
-import { ROUTES, type Fixtures } from "./responsive-routes";
+import { createFixtures, walkRoutes, walkTags } from "./responsive-fixtures";
+import type { Fixtures } from "./responsive-routes";
 import { selectedProbe } from "./selected-probe";
 import { DEV_ONLY, probeBaseline, type Cell } from "./ui-probes";
 import { AXE_PAGE_RULES, WCAG_22_AA_TAGS } from "../src/test/wcag";
-
-test.skip(!process.env.E2E_BASE_URL, "Requires the FastAPI-served Vite build");
 
 /*
  * axe (WCAG 2.2 A/AA: contrast, target size, names, structure) on every screen
@@ -24,7 +22,8 @@ test.skip(!process.env.E2E_BASE_URL, "Requires the FastAPI-served Vite build");
  * the list skips is skipped here too (its reason is in that file).
  *
  * tests/a11y.spec.ts scans the same pages with a menu, dialog or panel open;
- * this spec is about breadth. A rule that cannot hold on one screen goes in
+ * this spec is about breadth. CHECKS holds what must be on a screen before it is
+ * scanned, so a scan cannot pass on a screen that never arrived. A rule that cannot hold on one screen goes in
  * EXCEPTIONS with the reason; nothing is excluded globally.
  * A11Y_ROUTES narrows a run to routes matching a regular expression,
  * A11Y_VARIANTS=phone-light,ipad-light to those variants, and
@@ -43,6 +42,61 @@ const PROBES = { selected: selectedProbe, "left-edge": leftEdgeProbe, contrast: 
 
 /** route pattern → rule → reason. Fix instead of adding to this. */
 const EXCEPTIONS: Record<string, Record<string, string>> = {};
+
+/** The screen `page` shows, at a layout's width. */
+type Screen = { page: Page; fixtures: Fixtures; width: number };
+
+const heading = ({ page }: Screen, level: number, name: RegExp | string) =>
+  expect(page.getByRole("heading", { level, name })).toBeVisible();
+/** Below 1024 px a Konto page has its own heading; sideways, "Konto" over its tabs. */
+const kontoPage = ({ page, width }: Screen, title: RegExp) =>
+  expect(
+    page.getByRole("heading", { level: 1, name: width < 1024 ? title : /^(Konto|Account)$/ })
+  ).toBeAttached();
+
+/**
+ * Route pattern → what must be on the screen before it is scanned, with nothing left
+ * loading. These routes also hold the checks axe has no rule for: a column that collapsed, a
+ * document that scrolls under the shell.
+ */
+const CHECKS: Record<string, (screen: Screen) => Promise<void>> = {
+  "/account": (screen) => heading(screen, 1, /^(Konto|Account)$/),
+  "/account/api-keys": (screen) => kontoPage(screen, /^(Mina API-nycklar|My API keys)$/),
+  "/account/appearance": ({ page }) =>
+    expect(page.getByRole("radiogroup", { name: /^(Tema|Theme)$/ })).toBeVisible(),
+  "/account/copy-format": (screen) => kontoPage(screen, /^(Kopieringsformat|Copy format)$/),
+  "/account/integrations": (screen) => kontoPage(screen, /^(Integrationer|Integrations)$/),
+  "/account/password": (screen) => kontoPage(screen, /^(Byt lösenord|Change password)$/),
+  "/admin": (screen) => heading(screen, 1, /^(Översikt|Overview)$/),
+  "/admin/models": (screen) => heading(screen, 2, "E2E Mock Provider"),
+  "/admin/users": async (screen) => {
+    await heading(screen, 1, /^(Användare|Users)$/);
+    await expect(screen.page.getByRole("main").getByText(/^\d+ (användare|users?)$/)).toBeVisible();
+  },
+  "/spaces/$/apps": (screen) => heading(screen, 2, /^(Appar|Apps)$/),
+  "/spaces/$/apps/$": async ({ page, fixtures }) => {
+    await expect(page.getByRole("tab", { name: /^(Resultat|Results)$/ })).toBeVisible();
+    await expect(page.getByRole("link", { name: /^(Redigera|Edit)$/ })).toHaveAttribute(
+      "href",
+      `${fixtures.space}/apps/${fixtures.app}/edit`
+    );
+  },
+  "/spaces/$/apps/$/edit": (screen) => heading(screen, 1, /^Protokoll /),
+  "/spaces/$/assistants": (screen) => heading(screen, 2, /^(Assistenter|Assistants)$/),
+  "/spaces/$/assistants/$/edit": (screen) => heading(screen, 1, /^Bygglov /),
+  "/spaces/$/group-chats/$/edit": (screen) => heading(screen, 1, screen.fixtures.groupChatName),
+  "/spaces/$/members": (screen) => heading(screen, 2, /^(Medlemmar|Members)$/),
+  "/spaces/$/overview": async (screen) => {
+    // A phone's and a tablet's space header names the space (#1328).
+    await heading(screen, 1, screen.fixtures.spaceName);
+    // A phone lists what manages the space; tablets keep a tab for each.
+    await expect(
+      screen.page.getByRole("region", { name: /^(Hantera ytan|Manage space)$/ })
+    ).toHaveCount(screen.width < 768 ? 1 : 0);
+  },
+  "/spaces/list": ({ page }) => expect(page.getByRole("heading", { level: 1 })).toBeVisible(),
+  "/whats-new": (screen) => heading(screen, 1, /^(Nyheter|What's new)$/)
+};
 
 type AxePage = ConstructorParameters<typeof AxeBuilder>[0]["page"];
 
@@ -64,23 +118,6 @@ test.beforeAll(async ({ browser, baseURL }) => {
   fixtures = await createFixtures(browser, baseURL, "Axe");
 });
 
-async function contextFor(
-  browser: Browser,
-  baseURL: string | undefined,
-  variant: (typeof VARIANTS)[number],
-  signedIn: boolean
-) {
-  return browser.newContext({
-    baseURL,
-    storageState: signedIn ? STORAGE_STATE : { cookies: [], origins: [] },
-    viewport: { width: variant.width, height: variant.height },
-    colorScheme: variant.scheme,
-    reducedMotion: "reduce",
-    hasTouch: true,
-    isMobile: true
-  });
-}
-
 for (const variant of VARIANTS) {
   const only = process.env.A11Y_VARIANTS?.split(",");
   if (only && !only.includes(`${variant.name}-${variant.scheme}`)) continue;
@@ -96,24 +133,31 @@ for (const variant of VARIANTS) {
         theme: variant.scheme,
         touch: true
       };
-      const contexts: Record<string, BrowserContext> = {
-        in: await contextFor(browser, baseURL, variant, true),
-        out: await contextFor(browser, baseURL, variant, false)
-      };
-      const pages = { in: await contexts.in!.newPage(), out: await contexts.out!.newPage() };
       const shots = process.env.A11Y_SHOTS;
       if (shots) fs.mkdirSync(shots, { recursive: true });
 
-      for (const [pattern, entry] of Object.entries(ROUTES)) {
-        if ("skip" in entry) continue;
-        if (process.env.A11Y_ROUTES && !new RegExp(process.env.A11Y_ROUTES).test(pattern)) continue;
-        const signedIn = entry.auth !== "out";
-        const page = pages[signedIn ? "in" : "out"];
-        try {
-          await openRoute(page, entry.url(fixtures), signedIn);
-        } catch (error) {
-          problems.push(`${pattern}: did not open (${String(error).split("\n")[0]})`);
-          continue;
+      const walk = {
+        baseURL,
+        fixtures,
+        context: {
+          viewport: cell.viewport,
+          colorScheme: variant.scheme,
+          reducedMotion: "reduce",
+          hasTouch: true,
+          isMobile: true
+        },
+        only: process.env.A11Y_ROUTES
+      } as const;
+      const found = await walkRoutes(browser, walk, async (page, pattern) => {
+        const problems: string[] = [];
+        const check = CHECKS[pattern];
+        if (check) {
+          try {
+            await check({ page, fixtures, width: variant.width });
+            await expectNothingBusy(page);
+          } catch (error) {
+            problems.push(`${pattern}: not ready (${String(error).split("\n")[0]})`);
+          }
         }
         if (shots) {
           const file = `${variant.name}-${variant.scheme}-${pattern.replace(/[^a-z0-9]+/gi, "_")}.png`;
@@ -151,10 +195,19 @@ for (const variant of VARIANTS) {
             problems.push(`${scan}: the ${name} probe failed (${String(error).split("\n")[0]})`);
           }
         }
-      }
+        if (check) {
+          try {
+            await expectNoCollapsedTableColumns(page);
+            await expectShellHoldsStill(page);
+          } catch (error) {
+            problems.push(`${pattern}: ${String(error).split("\n")[0]}`);
+          }
+        }
+        return problems;
+      });
+      problems.push(...found);
       if (reviews.length)
         await test.info().attach("ui-probes-review.txt", { body: reviews.join("\n") });
-      for (const context of Object.values(contexts)) await context.close();
       if (process.env.A11Y_OUT) {
         fs.appendFileSync(
           process.env.A11Y_OUT,

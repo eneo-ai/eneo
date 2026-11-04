@@ -1,8 +1,6 @@
 import { expect, test } from "./csp";
 import { STORAGE_STATE } from "../playwright.config";
 
-test.skip(!process.env.E2E_BASE_URL, "Requires the FastAPI-served Vite build");
-
 /*
  * Key hints (⌘K in the menu and the palette's footer) point at keys. A touch screen has
  * none, and a phone-width window with a mouse (a desktop browser narrowed to the phone
@@ -25,7 +23,7 @@ const visibleKeyHints = (page: import("@playwright/test").Page, within?: string)
 for (const touch of [true, false]) {
   test(
     `no key hints in a phone-width window ${touch ? "on a touch screen" : "with a mouse"}`,
-    { tag: ["@vite", "@key-hints"] },
+    { tag: "@key-hints" },
     async ({ browser, baseURL }) => {
       const context = await browser.newContext({
         baseURL,
@@ -54,7 +52,7 @@ for (const touch of [true, false]) {
 
 test(
   "Send names its keys on its tooltip in the laptop layout with a mouse",
-  { tag: ["@vite", "@key-hints"] },
+  { tag: "@key-hints" },
   async ({ browser, baseURL }) => {
     const context = await browser.newContext({
       baseURL,
@@ -80,7 +78,7 @@ test(
 
 test(
   "Shift+Return adds a line with a mouse, and Return adds one on a touch screen",
-  { tag: ["@vite", "@key-hints"] },
+  { tag: "@key-hints" },
   async ({ browser, baseURL }) => {
     for (const touch of [false, true]) {
       const context = await browser.newContext({

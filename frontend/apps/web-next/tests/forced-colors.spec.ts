@@ -1,10 +1,6 @@
-import type { BrowserContext } from "@playwright/test";
 import { expect, test } from "./csp";
-import { STORAGE_STATE } from "../playwright.config";
-import { createFixtures, openRoute } from "./responsive-fixtures";
-import { ROUTES, type Fixtures } from "./responsive-routes";
-
-test.skip(!process.env.E2E_BASE_URL, "Requires the FastAPI-served Vite build");
+import { createFixtures, walkRoutes } from "./responsive-fixtures";
+import type { Fixtures } from "./responsive-routes";
 
 /*
  * Windows high contrast (WCAG 1.4.11, 1.4.1, 4.1.2). In forced colours the browser
@@ -36,36 +32,22 @@ test.beforeAll(async ({ browser, baseURL }) => {
 for (const variant of VARIANTS) {
   test(
     `every control keeps a boundary in forced colours on a ${variant.name}`,
-    { tag: ["@vite", "@forced-colors"] },
+    { tag: "@forced-colors" },
     async ({ browser, baseURL }) => {
       test.setTimeout(15 * 60_000);
-      const problems: string[] = [];
-      const contexts: Record<string, BrowserContext> = {};
-      for (const key of ["in", "out"] as const) {
-        contexts[key] = await browser.newContext({
-          baseURL,
-          storageState: key === "in" ? STORAGE_STATE : { cookies: [], origins: [] },
+      const walk = {
+        baseURL,
+        fixtures,
+        context: {
           viewport: { width: variant.width, height: variant.height },
           forcedColors: "active",
           reducedMotion: "reduce",
           hasTouch: true,
           isMobile: true
-        });
-      }
-      const pages = { in: await contexts.in!.newPage(), out: await contexts.out!.newPage() };
-
-      for (const [pattern, entry] of Object.entries(ROUTES)) {
-        if ("skip" in entry) continue;
-        if (process.env.FORCED_ROUTES && !new RegExp(process.env.FORCED_ROUTES).test(pattern))
-          continue;
-        const signedIn = entry.auth !== "out";
-        const page = pages[signedIn ? "in" : "out"];
-        try {
-          await openRoute(page, entry.url(fixtures), signedIn);
-        } catch (error) {
-          problems.push(`${pattern}: did not open (${String(error).split("\n")[0]})`);
-          continue;
-        }
+        },
+        only: process.env.FORCED_ROUTES
+      } as const;
+      const problems = await walkRoutes(browser, walk, async (page, pattern) => {
         const found = await page.evaluate((selector) => {
           const canvas = getComputedStyle(document.body).backgroundColor;
           const filled = (color: string) => color !== "rgba(0, 0, 0, 0)" && !color.endsWith(", 0)");
@@ -109,9 +91,8 @@ for (const variant of VARIANTS) {
           }
           return [...out];
         }, CONTROLS);
-        for (const item of found) problems.push(`${pattern}: ${item}`);
-      }
-      for (const context of Object.values(contexts)) await context.close();
+        return found.map((item) => `${pattern}: ${item}`);
+      });
       expect(problems, problems.join("\n")).toEqual([]);
     }
   );

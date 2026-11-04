@@ -4,8 +4,6 @@ import { STORAGE_STATE } from "../playwright.config";
 import { apiPost, createSpace, uniqueName } from "./helpers";
 import { openRoute } from "./responsive-fixtures";
 
-test.skip(!process.env.E2E_BASE_URL, "Requires the FastAPI-served Vite build");
-
 /*
  * What opens and closes takes the time of the Eneo motion scale (globals.css; the owner's
  * "Rörelse, touch och prestanda" board): a menu opens in 165 ms and closes at once, a drawer, a
@@ -54,7 +52,7 @@ const durations = (runs: Run[], on: RegExp) =>
 for (const reduced of [false, true]) {
   test(
     reduced ? "nothing moves with reduced motion" : "overlays open and close on the motion scale",
-    { tag: ["@vite", "@motion"] },
+    { tag: "@motion" },
     async ({ browser, baseURL }) => {
       test.setTimeout(3 * 60_000);
       const context = await browser.newContext({
@@ -148,7 +146,7 @@ for (const { title, reduced, touch } of [
   { title: "the rail at most fades with reduced motion on touch", reduced: true, touch: true },
   { title: "the rail changes at once with reduced motion and a mouse", reduced: true, touch: false }
 ]) {
-  test(title, { tag: ["@vite", "@motion"] }, async ({ browser, baseURL }) => {
+  test(title, { tag: "@motion" }, async ({ browser, baseURL }) => {
     const context = await browser.newContext({
       baseURL,
       storageState: STORAGE_STATE,
@@ -249,7 +247,7 @@ for (const { title, reduced, touch } of [
   { title: "a disclosure at most fades with reduced motion on touch", reduced: true, touch: true },
   { title: "a disclosure is instant with reduced motion and a mouse", reduced: true, touch: false }
 ]) {
-  test(title, { tag: ["@vite", "@motion"] }, async ({ browser, baseURL }) => {
+  test(title, { tag: "@motion" }, async ({ browser, baseURL }) => {
     test.setTimeout(2 * 60_000);
     const context = await browser.newContext({
       baseURL,
