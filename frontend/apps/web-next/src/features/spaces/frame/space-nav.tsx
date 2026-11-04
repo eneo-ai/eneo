@@ -1,6 +1,10 @@
 import { Button } from "@astryxdesign/core/Button";
 import { Icon } from "@astryxdesign/core/Icon";
-import { NavHeadingMenu, NavHeadingMenuItem } from "@astryxdesign/core/NavMenu";
+import {
+  NavHeadingMenu,
+  NavHeadingMenuItem,
+  useNavHeadingCloseContext
+} from "@astryxdesign/core/NavMenu";
 import { Divider } from "@astryxdesign/core/Divider";
 import { SideNavHeading, SideNavItem } from "@astryxdesign/core/SideNav";
 import { Skeleton } from "@astryxdesign/core/Skeleton";
@@ -119,7 +123,7 @@ function SpaceChip({ space }: { space: Space }) {
  *
  * Astryx closes a heading's menu on a pick only in the icon rail, and exports
  * nothing that closes it in the full sidebar, where the heading stays mounted
- * across spaces. `hidePopover` returns focus to the heading in both.
+ * across spaces. `hidePopover` closes it there and returns focus to the heading.
  */
 function useSwitcherPopover() {
   const marker = useRef<HTMLSpanElement>(null);
@@ -135,16 +139,22 @@ function useSwitcherPopover() {
     popover.addEventListener("beforetoggle", open);
     return () => popover.removeEventListener("beforetoggle", open);
   }, [opened]);
-  const close = () => marker.current?.closest<HTMLElement>("[popover]")?.hidePopover?.();
+  const closedByAstryx = useNavHeadingCloseContext() !== null;
+  const close = () => {
+    if (!closedByAstryx) marker.current?.closest<HTMLElement>("[popover]")?.hidePopover?.();
+  };
   return { marker, opened, close };
 }
 
 /**
- * Astryx handles a list key on the heading's popover as well as on its menu, so
- * left to both an arrow moves two rows. Escape is the popover's alone.
+ * Astryx handles these on the heading's popover as well as on its menu, so left
+ * to both an arrow moves two rows. Every other key goes on: Tab to the focus
+ * trap, ⌘K to the palette, Escape to the popover.
  */
-function keepKeyInMenu(event: KeyboardEvent) {
-  if (event.key !== "Escape") event.stopPropagation();
+const LIST_KEYS = new Set(["ArrowUp", "ArrowDown", "Home", "End"]);
+
+function keepListKeyInMenu(event: KeyboardEvent) {
+  if (LIST_KEYS.has(event.key)) event.stopPropagation();
 }
 
 /**
@@ -161,7 +171,7 @@ function SwitcherMenu({ currentId }: { currentId: string | null }) {
   const { marker, opened, close } = useSwitcherPopover();
 
   return (
-    <NavHeadingMenu onKeyDown={keepKeyInMenu}>
+    <NavHeadingMenu onKeyDown={keepListKeyInMenu}>
       <span ref={marker} hidden />
       <NavHeadingMenuItem label={t("your_spaces")} href="/spaces/list" onClick={close} />
       {blockingError(query) && (
