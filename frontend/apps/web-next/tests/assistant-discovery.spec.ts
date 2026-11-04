@@ -3,6 +3,22 @@ import type { Schema } from "../src/lib/api/models";
 import { expect, test } from "./csp";
 import { apiPost, createSpace, sessionResponseHeaders, uniqueName } from "./helpers";
 
+// The create button and its menu button are one control: both halves share one box.
+test("draws the split create button as one control", { tag: "@vite" }, async ({ page }) => {
+  const space = await createSpace(page, uniqueName("Split create"));
+  await page.goto(`${space}/assistants`);
+  const more = page.getByRole("main").getByRole("button", { name: "Fler sätt att skapa" }).first();
+  await expect(more).toBeVisible();
+  const halves = await more.evaluate((menu) => {
+    const create = menu.parentElement!.firstElementChild!;
+    return [create, menu].map((element) => {
+      const { top, height } = element.getBoundingClientRect();
+      return { top, height };
+    });
+  });
+  expect(halves[1]).toEqual(halves[0]);
+});
+
 test(
   "creates a named group chat and honors both editor choices",
   { tag: "@vite" },
@@ -65,7 +81,7 @@ test(
     const space = await createSpace(page, uniqueName("Assistant routes"));
     await page.goto(`${space}/assistants`);
     await expect(
-      page.getByRole("heading", { name: "Assistenter", level: 2, exact: true })
+      page.getByRole("heading", { name: "Assistenter", level: 1, exact: true })
     ).toBeVisible();
     const response = await page.request.get("/api/v1/spaces/type/organization/");
     expect(response.status()).toBe(200);

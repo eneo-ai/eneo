@@ -85,6 +85,38 @@ describe("ProfileMenu", () => {
     expect(screen.queryByRole("menuitem", { name: "Tillgänglighetsredogörelse" })).toBeNull();
   });
 
+  it("links the help centre on a page without a SideNav, in a new tab, when one is configured", async () => {
+    const helpCenter = "https://example.se/hjalp";
+    const { unmount } = renderInApp(<ProfileMenu inTopBar withHelpCenter />, {
+      appContext: testAppContext({ links: { helpCenter } })
+    });
+    fireEvent.click(screen.getByRole("button", { name: TRIGGER }));
+    const link = await screen.findByRole("menuitem", {
+      name: "Har du en fråga? (öppnas i en ny flik)"
+    });
+    expect(link.getAttribute("href")).toBe(helpCenter);
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("rel")).toBe("noopener noreferrer");
+    expect(link.querySelector("svg.lucide-external-link")).toBeTruthy();
+    unmount();
+
+    renderInApp(<ProfileMenu inTopBar withHelpCenter />, {
+      appContext: testAppContext({ links: { helpCenter: null } })
+    });
+    fireEvent.click(screen.getByRole("button", { name: TRIGGER }));
+    await screen.findByRole("menuitem", { name: "Mitt konto" });
+    expect(screen.queryByRole("menuitem", { name: /Har du en fråga/ })).toBeNull();
+  });
+
+  it("leaves the help centre to the SideNav's foot beside it", async () => {
+    renderInApp(<ProfileMenu inTopBar />, {
+      appContext: testAppContext({ links: { helpCenter: "https://example.se/hjalp" } })
+    });
+    fireEvent.click(screen.getByRole("button", { name: TRIGGER }));
+    await screen.findByRole("menuitem", { name: "Mitt konto" });
+    expect(screen.queryByRole("menuitem", { name: /Har du en fråga/ })).toBeNull();
+  });
+
   it("offers a return to the existing app only when configured", async () => {
     renderInApp(<ProfileMenu />, {
       appContext: testAppContext({ links: { legacyApp: "https://app.example" } })

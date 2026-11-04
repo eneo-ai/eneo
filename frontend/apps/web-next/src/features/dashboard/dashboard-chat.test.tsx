@@ -74,7 +74,7 @@ describe("DashboardChat", () => {
       api.permissions = allowed ? ["read", "insight_view"] : ["read"];
       renderRoute();
       await screen.findByRole("heading", { name: "Upphandlingsassistenten", level: 1 });
-      expect(Boolean(screen.queryByRole("radio", { name: "Insikter" }))).toBe(allowed);
+      expect(Boolean(screen.queryByRole("tab", { name: "Insikter" }))).toBe(allowed);
     }
   );
 

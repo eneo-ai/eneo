@@ -182,6 +182,14 @@ export function buildPaletteEntries(
     command: { type: "navigate", href: NEW_CONVERSATION_HREF },
     visual: { type: "icon", icon: "compose" }
   });
+  // Every assistant and app in one list (/dashboard): as in Svelte, no sidebar links it.
+  entries.push({
+    id: "action:catalog",
+    label: t("shell_palette_catalog"),
+    group: "actions",
+    command: { type: "navigate", href: "/dashboard" },
+    visual: { type: "icon", icon: "conversation" }
+  });
   if (permissions.canCreateSpace) {
     entries.push({
       id: "action:create-space",

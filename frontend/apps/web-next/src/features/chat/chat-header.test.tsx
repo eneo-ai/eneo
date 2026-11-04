@@ -5,8 +5,10 @@ import type { ChatPartner } from "@/lib/chat/types";
 import { expectNameToHoldVisibleText, expectNoAxeViolations } from "@/test/axe";
 import { router } from "@/test/navigation";
 import { renderInApp } from "@/test/render";
+import { setViewport } from "@/test/setup-dom";
 import { OPEN_NAV_EVENT } from "@/components/shell/routes";
 import { ChatHeader, PartnerSwitcher } from "./chat-header";
+import { CHAT_PANEL_IDS } from "./chat-url";
 import type { ChatPartnerSwitcherItem } from "./partner-switcher";
 
 vi.mock("@/lib/navigation", () => import("@/test/navigation"));
@@ -52,13 +54,22 @@ function renderHeader(overrides: Partial<Parameters<typeof ChatHeader>[0]> = {})
     switcherItems: items,
     title: "Upphandlingsanalys mot LOU",
     modelName: "Claude Haiku 4.5",
+    view: { value: "chat", onChange: vi.fn(), hasInsights: false },
     historyOpen: false,
     onToggleHistory: vi.fn(),
     onNewConversation: vi.fn(),
     menuItems: [{ label: "Byt namn på konversationen", onClick: vi.fn() }],
     ...overrides
   };
-  return renderInApp(<ChatHeader {...props} />);
+  // The tabs control the page's panels (chat-page.tsx): stand-ins here.
+  return renderInApp(
+    <>
+      <ChatHeader {...props} />
+      {Object.values(CHAT_PANEL_IDS).map((id) => (
+        <div key={id} id={id} />
+      ))}
+    </>
+  );
 }
 
 describe("ChatHeader", () => {
@@ -112,7 +123,8 @@ describe("ChatHeader", () => {
     // The full header's h1 is shown; the phone's is for assistive technology only.
     const full = screen
       .getAllByRole("heading", { level: 1 })
-      .find((heading) => !heading.classList.contains("sr-only"))!.parentElement!;
+      .find((heading) => !heading.classList.contains("sr-only"))!
+      .closest<HTMLElement>("[class*='wide:flex']")!;
     expect(full.className).toContain("wide:flex");
     expect(full.className).not.toContain("lg:flex");
   });
@@ -126,24 +138,122 @@ describe("ChatHeader", () => {
     window.removeEventListener(OPEN_NAV_EVENT, listener);
   });
 
-  it("exposes history as a disclosure and starts new conversations", () => {
-    const onToggleHistory = vi.fn();
+  it("switches Chatt, Historik and Insikter as tabs, as Svelte's chat page does", () => {
+    const onChange = vi.fn();
+    renderHeader({ view: { value: "chat", onChange, hasInsights: true } });
+    const tabs = screen.getByRole("tablist", { name: /^Huvudvyer/ });
+    const tab = (name: string) => within(tabs).getByRole("tab", { name });
+    expect(tab("Chatt").getAttribute("aria-selected")).toBe("true");
+    expect(tab("Historik").getAttribute("aria-controls")).toBe(CHAT_PANEL_IDS.history);
+    fireEvent.click(tab("Historik"));
+    expect(onChange).toHaveBeenCalledWith("history");
+    fireEvent.click(tab("Insikter"));
+    expect(onChange).toHaveBeenCalledWith("insights");
+  });
+
+  it("offers Insikter only where the partner has them", () => {
+    renderHeader();
+    expect(within(screen.getByRole("tablist")).queryByRole("tab", { name: "Insikter" })).toBeNull();
+  });
+
+  it("starts a new conversation from its primary button and links the editor", () => {
     const onNewConversation = vi.fn();
-    renderHeader({ historyOpen: true, onToggleHistory, onNewConversation });
-    // Named after what it opens; aria-expanded carries the state.
-    const history = screen.getByRole("button", {
-      name: "Konversationer med Upphandlingsassistenten"
-    });
-    expect(history.getAttribute("aria-expanded")).toBe("true");
-    fireEvent.click(history);
-    expect(onToggleHistory).toHaveBeenCalled();
-    fireEvent.click(screen.getAllByRole("button", { name: "Ny konversation" })[0]!);
+    renderHeader({ onNewConversation, editHref: "/spaces/s/assistants/assistant-1/edit" });
+    const create = screen.getAllByRole("button", { name: "Ny konversation" })[0]!;
+    expect(create.dataset.variant).toBe("primary");
+    fireEvent.click(create);
     expect(onNewConversation).toHaveBeenCalled();
+    expect(screen.getByRole("link", { name: "Redigera" }).getAttribute("href")).toBe(
+      "/spaces/s/assistants/assistant-1/edit"
+    );
+  });
+
+  it("names the personal assistant where Svelte's chat page does", () => {
+    renderHeader({
+      partner: { type: "default-assistant", id: "p", name: "Eneo", personalSpace: true }
+    });
+    const wide = screen.getByRole("tablist").closest<HTMLElement>("[class*='wide:flex']")!;
+    expect(within(wide).getByText("Personlig assistent")).toBeTruthy();
+  });
+
+  it("opens Felsökning once a saved answer exists, and says why it waits before", () => {
+    const onOpen = vi.fn();
+    renderHeader({ debug: { isEnabled: false, onOpen } });
+    const debug = screen.getByRole("button", { name: "Felsökning" });
+    fireEvent.click(debug);
+    expect(onOpen).not.toHaveBeenCalled();
+    cleanup();
+    renderHeader({ debug: { isEnabled: true, onOpen } });
+    fireEvent.click(screen.getByRole("button", { name: "Felsökning" }));
+    expect(onOpen).toHaveBeenCalledWith(screen.getByRole("button", { name: "Felsökning" }));
   });
 
   it("has no axe violations", async () => {
     const { container } = renderHeader();
     await expectNoAxeViolations(container);
+  });
+});
+
+describe("ChatHeader beside an icon rail (below 1280 px: an iPad, a small laptop)", () => {
+  afterEach(() => setViewport("desktop"));
+
+  it("keeps its buttons whole: Felsökning and Redigera as named icons, Ny konversation in words", () => {
+    setViewport("tablet-portrait");
+    renderHeader({
+      debug: { isEnabled: true, onOpen: vi.fn() },
+      editHref: "/spaces/s/assistants/assistant-1/edit"
+    });
+    const wide = screen.getByRole("tablist").closest<HTMLElement>("[class*='wide:flex']")!;
+    const debug = within(wide).getByRole("button", { name: "Felsökning" });
+    const edit = within(wide).getByRole("link", { name: "Redigera" });
+    // Their names stay (tooltip and accessible name); the words leave the row.
+    expect(debug.textContent).not.toContain("Felsökning");
+    expect(edit.textContent).not.toContain("Redigera");
+    expect(within(wide).getByRole("button", { name: "Ny konversation" }).textContent).toContain(
+      "Ny konversation"
+    );
+    // The title gives way first: the buttons do not shrink, at any width.
+    expect(debug.closest("div")!.className).toMatch(/(^| )min-w-max( |$)/);
+  });
+
+  it("names a space's default assistant after the space, and only the personal one Personlig assistent", () => {
+    const shared = {
+      ...partner,
+      type: "default-assistant",
+      name: "Default",
+      personalSpace: false
+    } as const;
+    renderHeader({ partner: shared, minimal: true });
+    const wide = screen.getByRole("tablist").closest<HTMLElement>("[class*='wide:flex']")!;
+    expect(within(wide).getByText("Assistent för Upphandling")).toBeTruthy();
+    expect(within(wide).queryByText("Personlig assistent")).toBeNull();
+    cleanup();
+    renderHeader({ partner: { ...shared, personalSpace: true } });
+    const personal = screen.getByRole("tablist").closest<HTMLElement>("[class*='wide:flex']")!;
+    expect(within(personal).getByText("Personlig assistent")).toBeTruthy();
+  });
+
+  it("gives a shared space's default assistant its switcher once the conversation has started", () => {
+    renderHeader({
+      partner: { ...partner, type: "default-assistant", name: "Default", personalSpace: false }
+    });
+    const wide = screen.getByRole("tablist").closest<HTMLElement>("[class*='wide:flex']")!;
+    expect(within(wide).getByRole("button", { name: /Byt assistent$/ })).toBeTruthy();
+  });
+
+  it("hides Felsökning on touch until a saved answer exists: its reason is a tooltip touch cannot reach", () => {
+    setViewport("tablet-portrait");
+    renderHeader({ debug: { isEnabled: false, onOpen: vi.fn() } });
+    expect(screen.queryByRole("button", { name: "Felsökning" })).toBeNull();
+    cleanup();
+    renderHeader({ debug: { isEnabled: true, onOpen: vi.fn() } });
+    expect(screen.getByRole("button", { name: "Felsökning" })).toBeTruthy();
+  });
+
+  it("shows the words from 1280 px", () => {
+    setViewport({ width: 1280, height: 800, pointer: "fine" });
+    renderHeader({ debug: { isEnabled: true, onOpen: vi.fn() } });
+    expect(screen.getByRole("button", { name: "Felsökning" }).textContent).toContain("Felsökning");
   });
 });
 

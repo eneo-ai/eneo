@@ -513,7 +513,6 @@
   "chat_unsent_navigation_description": "You have a question that has not been sent. Do you want to leave this chat?",
   "chat_unsent_navigation_leave": "Leave chat",
   "chat_unsent_navigation_title": "Leave this chat?",
-  "chat_view_label": "Chat or insights",
   "chat_your_assistants": "Your assistants",
   "chat_your_message": "Your message",
   "choose_timeframe_to_generate_insights": "Choose a timeframe to generate insights for",
@@ -1488,7 +1487,6 @@
   "sharepoint_wrapper_sites": "{count} sites",
   "shell_account_nav_label": "Account settings",
   "shell_administration": "Administration",
-  "shell_all_spaces": "All spaces",
   "shell_back_to": "Back to {name}",
   "shell_back_to_eneo": "Back to Eneo",
   "shell_catalog_app_in_space": "App in {space}",
@@ -1858,7 +1856,7 @@
   "module_admin_remove_description": "{moduleKey} will no longer be available in this Eneo installation. Its callback and service-key binding will be removed.",
   "space_apps_actions": "Apps, actions",
   "chat_composer_hint_touch": "Return adds a line. Send with the Send button.",
-  "chat_composer_key_newline": "New line",
+  "chat_send_tooltip": "Send (Return). Shift+Return adds a line.",
   "app_run_start": "Run the app",
   "admin_mcp_servers_empty_title": "No MCP servers yet",
   "space_assistants_actions": "Assistants, actions",
@@ -1915,5 +1913,10 @@
   "session_extended": "You are still signed in.",
   "session_extend_failed": "The session could not be extended. Try again.",
   "skills_library_view_revision_aria": "Preview of version {revision}",
-  "tools_bundled_unavailable": "Eneo's built-in tools could not be read"
+  "tools_bundled_unavailable": "Eneo's built-in tools could not be read",
+  "shell_area_shared": "Spaces",
+  "shell_top_nav_label": "Main areas",
+  "show_header": "Show header",
+  "shell_space_nav_label": "Space menu",
+  "shell_palette_catalog": "All assistants and apps"
 }

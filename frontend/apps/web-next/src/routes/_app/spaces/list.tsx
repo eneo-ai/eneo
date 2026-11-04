@@ -9,7 +9,7 @@ import { routeTitle } from "@/lib/route-head";
 
 export const Route = createFileRoute("/_app/spaces/list")({
   loader: ({ context }) => readCached(context.queryClient, spacesListQueryOptions(browserApi)),
-  head: routeTitle("spaces"),
+  head: routeTitle("your_spaces"),
   component: SpacesListPage
 });
 
@@ -17,7 +17,8 @@ function SpacesListPage() {
   const t = useTranslations();
   return (
     <PageFrame className="gap-6">
-      <SpacesList title={t("spaces")} />
+      {/* Svelte's title for the list; the top bar's area is Delat. */}
+      <SpacesList title={t("your_spaces")} />
     </PageFrame>
   );
 }

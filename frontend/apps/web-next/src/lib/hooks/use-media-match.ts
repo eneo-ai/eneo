@@ -39,3 +39,15 @@ export const PHONE_SCREEN_QUERY = `${PHONE_QUERY}, ${HANDHELD_QUERY}`;
 export function usePhoneScreen(): boolean {
   return useMediaQuery(PHONE_SCREEN_QUERY);
 }
+
+/**
+ * A tablet in a hand (an iPad either way): touch, and not a phone's layout. It
+ * keeps the shell built for touch (#1328): the full SideNav or its icon rail
+ * with every space, a space's header with its tabs, and Konto's tabs. The top
+ * bar and the sidebar that holds one place are for a computer with a mouse.
+ */
+export function useTouchTablet(): boolean {
+  const coarse = useMediaQuery("(pointer: coarse)");
+  const phone = usePhoneScreen();
+  return coarse && !phone;
+}

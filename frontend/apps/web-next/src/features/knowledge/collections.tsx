@@ -58,6 +58,7 @@ import { KnowledgeActionContext } from "./knowledge-action-context";
 import { RowsOrTable } from "./knowledge-list";
 import { collectionRow } from "./knowledge-rows";
 import { KnowledgeNameCell, KnowledgeTableControls } from "./table-controls-ui";
+import { useSectionHeadingLevels } from "@/features/spaces/frame/space-frame";
 
 function useInvalidateSpace() {
   const { routeId } = useSpace();
@@ -385,6 +386,8 @@ function CollectionsTable({
 /** The collections tab; `name` (its tab, or its name on a phone) names an ungrouped table. */
 export function CollectionsTab({ canCreate, name }: { canCreate: boolean; name: TableName }) {
   const t = useTranslations();
+  // Under the page's title: an h2 beside the sidebar, an h3 under a phone's space header.
+  const headingLevel = useSectionHeadingLevels().sub;
   const { space, routeId } = useSpace();
   const groupId = useId();
   const [filter, setFilter] = useState("");
@@ -424,7 +427,7 @@ export function CollectionsTab({ canCreate, name }: { canCreate: boolean; name: 
           hue={AREA_HUES.knowledge}
           title={t("space_collections_empty_title")}
           description={t("space_collections_empty_description")}
-          headingLevel={3}
+          headingLevel={headingLevel}
           actions={action}
         />
       </>
@@ -451,7 +454,7 @@ export function CollectionsTab({ canCreate, name }: { canCreate: boolean; name: 
           isAnnounced={false}
           icon={<SearchX />}
           title={t("ui_no_items_matching", { resourceNamePlural: t("resource_collections") })}
-          headingLevel={3}
+          headingLevel={headingLevel}
           isCompact
         />
       </div>

@@ -177,7 +177,7 @@ export function ContextUsageBar({
       <div className="space-y-3 py-3">
         {baselineTotal > 0 && (
           <div className="space-y-1.5">
-            <p className="text-ax-text-secondary text-[10px] font-medium tracking-wide uppercase">
+            <p className="text-ax-text-secondary text-xs font-medium tracking-wide uppercase">
               {t("context_usage_section_baseline")}
             </p>
             <div className="flex items-baseline justify-between gap-3">
@@ -192,7 +192,7 @@ export function ContextUsageBar({
                 {fmt(assistantAttachmentTokens)}
               </span>
             </div>
-            <p className="text-ax-text-secondary text-[10px] leading-snug">
+            <p className="text-ax-text-secondary text-xs leading-snug">
               {t("context_usage_assistant_baseline_hint")}
             </p>
             {skillContextTokens > 0 && (
@@ -203,7 +203,7 @@ export function ContextUsageBar({
                     {fmt(skillContextTokens)}
                   </span>
                 </div>
-                <p className="text-ax-text-secondary ps-3 text-[10px] leading-snug">
+                <p className="text-ax-text-secondary ps-3 text-xs leading-snug">
                   {t("context_usage_skills_subset_hint")}
                 </p>
               </>
@@ -212,7 +212,7 @@ export function ContextUsageBar({
         )}
         {(lockedInputTokens > 0 || lockedOutputTokens > 0) && (
           <div className="space-y-1.5">
-            <p className="text-ax-text-secondary text-[10px] font-medium tracking-wide uppercase">
+            <p className="text-ax-text-secondary text-xs font-medium tracking-wide uppercase">
               {t("context_usage_section_locked")}
             </p>
             <div className="flex items-baseline justify-between gap-3">
@@ -222,7 +222,7 @@ export function ContextUsageBar({
               </span>
               <span className="text-ax-text-secondary tabular-nums">{fmt(lockedInputTokens)}</span>
             </div>
-            <p className="text-ax-text-secondary ps-[18px] text-[10px] leading-snug">
+            <p className="text-ax-text-secondary ps-[18px] text-xs leading-snug">
               {t("context_usage_label_input_hint")}
             </p>
             <div className="flex items-baseline justify-between gap-3">
@@ -237,7 +237,7 @@ export function ContextUsageBar({
 
         {pendingTotal > 0 && (
           <div className="border-ax-border space-y-1.5 border-t pt-3">
-            <p className="text-ax-text-secondary text-[10px] font-medium tracking-wide uppercase">
+            <p className="text-ax-text-secondary text-xs font-medium tracking-wide uppercase">
               {t("context_usage_section_pending")}
             </p>
             {pendingTextTokens > 0 && (
@@ -267,7 +267,7 @@ export function ContextUsageBar({
 
         {pendingTotal > 0 && (
           <div className="border-ax-border space-y-1.5 border-t pt-3">
-            <p className="text-ax-text-secondary text-[10px] font-medium tracking-wide uppercase">
+            <p className="text-ax-text-secondary text-xs font-medium tracking-wide uppercase">
               {t("context_usage_section_excluded")}
             </p>
             <p className="text-ax-text-secondary leading-snug">
@@ -278,7 +278,7 @@ export function ContextUsageBar({
 
         {hasCumulative && (
           <div className="border-ax-border space-y-1.5 border-t pt-3">
-            <p className="text-ax-text-secondary text-[10px] font-medium tracking-wide uppercase">
+            <p className="text-ax-text-secondary text-xs font-medium tracking-wide uppercase">
               {t("context_usage_section_cumulative")}
             </p>
             <div className="flex items-baseline justify-between gap-3">
@@ -286,7 +286,7 @@ export function ContextUsageBar({
               <span className="text-ax-text-secondary tabular-nums">{cumulativeSummary}</span>
             </div>
             {turnCount > 1 && (
-              <p className="text-ax-text-secondary text-[10px] leading-snug tabular-nums">
+              <p className="text-ax-text-secondary text-xs leading-snug tabular-nums">
                 {t("context_usage_cumulative_average", { average: fmt(averagePerTurn) })}
               </p>
             )}
@@ -300,7 +300,7 @@ export function ContextUsageBar({
           <div className="bg-ax-error-muted text-ax-error rounded-ax-inner flex flex-col gap-2 px-2 py-1.5">
             <div className="flex items-start gap-2">
               <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden />
-              <span className="text-[11px] leading-snug">
+              <span className="text-xs leading-snug">
                 {t("context_usage_will_exceed_estimate")}
               </span>
             </div>
@@ -322,7 +322,7 @@ export function ContextUsageBar({
 
       <div className="border-ax-border flex items-center justify-between gap-2 border-t pt-2">
         {modelName ? (
-          <p className="text-ax-text-secondary text-[10px]">
+          <p className="text-ax-text-secondary text-xs">
             {t("context_usage_model_label")}: <span className="text-ax-text">{modelName}</span>
           </p>
         ) : (
@@ -363,7 +363,7 @@ export function ContextUsageBar({
         type="button"
         aria-haspopup="dialog"
         aria-expanded={open}
-        className="text-ax-text-secondary hover:text-ax-text focus-visible:outline-ring rounded-ax-inner flex min-h-6 w-full items-center gap-3 px-1 text-[11px] leading-none transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11"
+        className="text-ax-text-secondary hover:text-ax-text focus-visible:outline-ring rounded-ax-inner flex min-h-6 w-full items-center gap-3 px-1 text-xs leading-none transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11"
       >
         <span className="sr-only">{t("context_usage")}: </span>
         <div

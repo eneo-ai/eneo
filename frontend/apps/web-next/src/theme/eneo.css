@@ -485,6 +485,10 @@
     background-color: var(--eneo-color-segment-selected);
   }
 
+  .astryx-segmented-control-item {
+    min-height: 24px;
+  }
+
   .astryx-switch {
     --color-background-gray: var(--eneo-color-border-control);
   }
@@ -759,6 +763,7 @@
 
     .astryx-segmented-control-item {
     min-height: 44px;
+    min-width: 44px;
   }
 
     .astryx-checkbox-input {

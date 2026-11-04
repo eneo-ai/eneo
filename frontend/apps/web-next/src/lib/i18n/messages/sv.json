@@ -5807,7 +5807,6 @@
   "chat_unsent_navigation_description": "Du har en fråga som inte har skickats. Vill du lämna chatten?",
   "chat_unsent_navigation_leave": "Lämna chatten",
   "chat_unsent_navigation_title": "Lämna chatten?",
-  "chat_view_label": "Chatt eller insikter",
   "chat_your_assistants": "Dina assistenter",
   "chat_your_message": "Ditt meddelande",
   "choose_timeframe_to_generate_insights": "Välj en tidsram för att generera insikter för",
@@ -6746,7 +6745,6 @@
   "sharepoint_wrapper_sites": "{count} webbplatser",
   "shell_account_nav_label": "Kontoinställningar",
   "shell_administration": "Administration",
-  "shell_all_spaces": "Alla ytor",
   "shell_back_to": "Tillbaka till {name}",
   "shell_back_to_eneo": "Tillbaka till Eneo",
   "shell_catalog_app_in_space": "App i {space}",
@@ -7092,7 +7090,7 @@
   "website_detail_actions": "Webbplats, åtgärder",
   "space_apps_actions": "Appar, åtgärder",
   "chat_composer_hint_touch": "Retur ger en ny rad. Skicka med Skicka-knappen.",
-  "chat_composer_key_newline": "Ny rad",
+  "chat_send_tooltip": "Skicka (Retur). Skift+Retur ger en ny rad.",
   "app_run_start": "Kör appen",
   "admin_mcp_servers_empty_title": "Inga MCP-servrar ännu",
   "space_assistants_actions": "Assistenter, åtgärder",
@@ -7130,5 +7128,10 @@
   "session_expiring_announcement": "Din session går ut om {seconds, plural, one {# sekund} other {# sekunder}}.",
   "session_extended": "Du är fortsatt inloggad.",
   "session_extend_failed": "Det gick inte att förlänga sessionen. Försök igen.",
-  "tools_bundled_unavailable": "Det gick inte att läsa Eneos inbyggda verktyg"
+  "tools_bundled_unavailable": "Det gick inte att läsa Eneos inbyggda verktyg",
+  "shell_area_shared": "Delat",
+  "shell_top_nav_label": "Huvudområden",
+  "show_header": "Visa sidhuvudet",
+  "shell_space_nav_label": "Ytans meny",
+  "shell_palette_catalog": "Alla assistenter och appar"
 }

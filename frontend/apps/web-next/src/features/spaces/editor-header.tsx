@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 import { PageHeader } from "@/components/composites/page-header";
 import { SaveStatusIndicator } from "@/components/composites/save-status";
 import type { SettingsPhoneIndex } from "@/components/composites/sectioned-settings";
-import { useSpaceDisplayName } from "./frame/space-header";
+import { useSpaceDisplayName } from "./space-display-name";
 import { spaceLandingHref, spaceSections, type SpaceSectionId } from "./frame/space-sections";
 import { useSpace } from "./use-space";
 

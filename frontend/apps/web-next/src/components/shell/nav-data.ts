@@ -3,7 +3,7 @@ import { blockingError } from "@/components/composites/query-state";
 import { usePathname, useSearchParams } from "@/lib/navigation";
 import { browserApi } from "@/lib/api/browser";
 import { recentConversationsQueryOptions, type RecentConversation } from "@/lib/api/conversations";
-import { spacesListQueryOptions } from "@/features/spaces/space";
+import { spacesListQueryOptions, type SpaceSparse } from "@/features/spaces/space";
 import { currentNavTarget, navTarget, type NavTarget } from "./routes";
 
 /** How many conversations the SideNav lists under "Senaste". */
@@ -14,11 +14,36 @@ const firstInNav = (conversations: RecentConversation[]) =>
 
 const NO_CONVERSATIONS: RecentConversation[] = [];
 
+/**
+ * The shared spaces in the order the menu lists them, which shows only the
+ * first few: those of the latest conversations first, most recent first,
+ * then the rest newest first, so a space someone was just invited to or
+ * created is there at once instead of after the oldest ones.
+ */
+export function spacesForNav(
+  spaces: readonly SpaceSparse[],
+  recent: readonly Pick<RecentConversation, "space">[]
+): SpaceSparse[] {
+  const rank = new Map<string, number>();
+  for (const conversation of recent) {
+    if (!rank.has(conversation.space.id)) rank.set(conversation.space.id, rank.size);
+  }
+  const created = (space: SpaceSparse) => (space.created_at ? Date.parse(space.created_at) : 0);
+  return spaces
+    .filter((space) => !space.personal && !space.organization)
+    .sort(
+      (a, b) =>
+        (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity) || created(b) - created(a)
+    );
+}
+
 /** Shared (non-personal, non-organisation) spaces, from the existing spaces list query. */
 export function useNavSpaces() {
   const query = useQuery(spacesListQueryOptions(browserApi));
+  // The same cache entry as Senaste and the ⌘K palette: no request of its own.
+  const recent = useQuery(recentConversationsQueryOptions(browserApi)).data ?? NO_CONVERSATIONS;
   return {
-    spaces: (query.data ?? []).filter((space) => !space.personal && !space.organization),
+    spaces: spacesForNav(query.data ?? [], recent),
     isPending: query.isPending,
     // Keep the error beside cached links, and through a retry without data,
     // so keyboard focus does not fall off the recovery button.
