@@ -476,8 +476,11 @@ test("the migrations leg runs every migration_isolation test file exactly once",
   const fileIcon = step("Verify File/Icon upgrade and optional cleanup on PostgreSQL 13");
   assert.match(roundTrips, /^        if: matrix\.suite == 'migrations'$/m);
   assert.match(roundTrips, /--collect-only -m migration_isolation tests \\$/m);
-  // One process per module: modules that share the session database start from a fresh schema.
-  assert.match(roundTrips, /for module in "\$\{modules\[@\]\}"; do\n\s+uv run pytest -q -m migration_isolation "\$module" \|\| status=1/);
+  // One process per module, four at a time: modules that share the session database start from
+  // a fresh schema, and a failure in one fails the step without stopping the others.
+  assert.match(roundTrips, /xargs -P 4 -I '\{\}' bash -c '$/m);
+  assert.match(roundTrips, /^\s+uv run pytest -q -m migration_isolation "\$1" >"\$log" 2>&1$/m);
+  assert.match(roundTrips, /^\s+exit "\$status"$/m);
   const ignored = [...roundTrips.matchAll(/--ignore=(\S+)/g)].map(([, file]) => file);
   const dedicated = [...fileIcon.matchAll(/(tests\/integration\/\S+\.py)/g)].map(([, file]) => file);
   assert.ok(ignored.length > 0);

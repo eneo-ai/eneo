@@ -109,14 +109,6 @@
   "bgOverlap": 8,
   "shortTextContent": 5
  },
- "ipad-dark|/spaces/$/services": {
-  "bgOverlap": 8,
-  "shortTextContent": 4
- },
- "ipad-dark|/spaces/$/services/$": {
-  "bgOverlap": 8,
-  "shortTextContent": 4
- },
  "ipad-dark|/spaces/$/settings": {
   "bgOverlap": 20,
   "shortTextContent": 5
@@ -245,14 +237,6 @@
  "ipad-landscape-dark|/spaces/$/overview": {
   "bgOverlap": 8,
   "shortTextContent": 5
- },
- "ipad-landscape-dark|/spaces/$/services": {
-  "bgOverlap": 8,
-  "shortTextContent": 4
- },
- "ipad-landscape-dark|/spaces/$/services/$": {
-  "bgOverlap": 8,
-  "shortTextContent": 4
  },
  "ipad-landscape-dark|/spaces/$/settings": {
   "bgOverlap": 13,
@@ -383,14 +367,6 @@
   "bgOverlap": 8,
   "shortTextContent": 5
  },
- "ipad-landscape-light|/spaces/$/services": {
-  "bgOverlap": 8,
-  "shortTextContent": 4
- },
- "ipad-landscape-light|/spaces/$/services/$": {
-  "bgOverlap": 8,
-  "shortTextContent": 4
- },
  "ipad-landscape-light|/spaces/$/settings": {
   "bgOverlap": 13,
   "shortTextContent": 5
@@ -512,14 +488,6 @@
  "ipad-light|/spaces/$/overview": {
   "bgOverlap": 8,
   "shortTextContent": 5
- },
- "ipad-light|/spaces/$/services": {
-  "bgOverlap": 8,
-  "shortTextContent": 4
- },
- "ipad-light|/spaces/$/services/$": {
-  "bgOverlap": 8,
-  "shortTextContent": 4
  },
  "ipad-light|/spaces/$/settings": {
   "bgOverlap": 20,
@@ -779,25 +747,6 @@
  "WCAG 2.2 AA, dark mode › iPad landscape (1180 × 820)|space app pages, app editor and group-chat editor #2": {
   "bgOverlap": 5
  },
- "WCAG 2.2 AA, dark mode › iPad landscape (1180 × 820)|space app pages, group-chat editor and service pages #1": {
-  "bgOverlap": 8,
-  "shortTextContent": 4
- },
- "WCAG 2.2 AA, dark mode › iPad landscape (1180 × 820)|space app pages, group-chat editor and service pages #2": {
-  "bgOverlap": 5
- },
- "WCAG 2.2 AA, dark mode › iPad landscape (1180 × 820)|space app pages, group-chat editor and service pages #4": {
-  "bgOverlap": 8,
-  "shortTextContent": 4
- },
- "WCAG 2.2 AA, dark mode › iPad landscape (1180 × 820)|space app pages, group-chat editor and service pages #5": {
-  "bgOverlap": 8,
-  "shortTextContent": 4
- },
- "WCAG 2.2 AA, dark mode › iPad landscape (1180 × 820)|space app pages, group-chat editor and service pages #6": {
-  "bgOverlap": 8,
-  "shortTextContent": 4
- },
  "WCAG 2.2 AA, dark mode › iPad portrait (820 × 1180)|a space, and the organisation space #1": {
   "bgOverlap": 8,
   "shortTextContent": 5
@@ -848,28 +797,6 @@
  },
  "WCAG 2.2 AA, dark mode › iPad portrait (820 × 1180)|space app pages, app editor and group-chat editor #3": {
   "bgOverlap": 4
- },
- "WCAG 2.2 AA, dark mode › iPad portrait (820 × 1180)|space app pages, group-chat editor and service pages #1": {
-  "bgOverlap": 8,
-  "shortTextContent": 4
- },
- "WCAG 2.2 AA, dark mode › iPad portrait (820 × 1180)|space app pages, group-chat editor and service pages #2": {
-  "bgOverlap": 14
- },
- "WCAG 2.2 AA, dark mode › iPad portrait (820 × 1180)|space app pages, group-chat editor and service pages #3": {
-  "bgOverlap": 4
- },
- "WCAG 2.2 AA, dark mode › iPad portrait (820 × 1180)|space app pages, group-chat editor and service pages #4": {
-  "bgOverlap": 8,
-  "shortTextContent": 4
- },
- "WCAG 2.2 AA, dark mode › iPad portrait (820 × 1180)|space app pages, group-chat editor and service pages #5": {
-  "bgOverlap": 8,
-  "shortTextContent": 4
- },
- "WCAG 2.2 AA, dark mode › iPad portrait (820 × 1180)|space app pages, group-chat editor and service pages #6": {
-  "bgOverlap": 8,
-  "shortTextContent": 4
  },
  "WCAG 2.2 AA, dark mode › phone (390 × 844)|a space, and the organisation space #1": {
   "bgOverlap": 5
@@ -1056,25 +983,6 @@
  "WCAG 2.2 AA, light mode › iPad landscape (1180 × 820)|space app pages, app editor and group-chat editor #2": {
   "bgOverlap": 5
  },
- "WCAG 2.2 AA, light mode › iPad landscape (1180 × 820)|space app pages, group-chat editor and service pages #1": {
-  "bgOverlap": 8,
-  "shortTextContent": 4
- },
- "WCAG 2.2 AA, light mode › iPad landscape (1180 × 820)|space app pages, group-chat editor and service pages #2": {
-  "bgOverlap": 5
- },
- "WCAG 2.2 AA, light mode › iPad landscape (1180 × 820)|space app pages, group-chat editor and service pages #4": {
-  "bgOverlap": 8,
-  "shortTextContent": 4
- },
- "WCAG 2.2 AA, light mode › iPad landscape (1180 × 820)|space app pages, group-chat editor and service pages #5": {
-  "bgOverlap": 8,
-  "shortTextContent": 4
- },
- "WCAG 2.2 AA, light mode › iPad landscape (1180 × 820)|space app pages, group-chat editor and service pages #6": {
-  "bgOverlap": 8,
-  "shortTextContent": 4
- },
  "WCAG 2.2 AA, light mode › iPad portrait (820 × 1180)|a space, and the organisation space #1": {
   "bgOverlap": 8,
   "shortTextContent": 5
@@ -1125,28 +1033,6 @@
  },
  "WCAG 2.2 AA, light mode › iPad portrait (820 × 1180)|space app pages, app editor and group-chat editor #3": {
   "bgOverlap": 4
- },
- "WCAG 2.2 AA, light mode › iPad portrait (820 × 1180)|space app pages, group-chat editor and service pages #1": {
-  "bgOverlap": 8,
-  "shortTextContent": 4
- },
- "WCAG 2.2 AA, light mode › iPad portrait (820 × 1180)|space app pages, group-chat editor and service pages #2": {
-  "bgOverlap": 14
- },
- "WCAG 2.2 AA, light mode › iPad portrait (820 × 1180)|space app pages, group-chat editor and service pages #3": {
-  "bgOverlap": 4
- },
- "WCAG 2.2 AA, light mode › iPad portrait (820 × 1180)|space app pages, group-chat editor and service pages #4": {
-  "bgOverlap": 8,
-  "shortTextContent": 4
- },
- "WCAG 2.2 AA, light mode › iPad portrait (820 × 1180)|space app pages, group-chat editor and service pages #5": {
-  "bgOverlap": 8,
-  "shortTextContent": 4
- },
- "WCAG 2.2 AA, light mode › iPad portrait (820 × 1180)|space app pages, group-chat editor and service pages #6": {
-  "bgOverlap": 8,
-  "shortTextContent": 4
  },
  "WCAG 2.2 AA, light mode › phone (390 × 844)|a space, and the organisation space #1": {
   "bgOverlap": 5
