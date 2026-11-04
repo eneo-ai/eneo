@@ -185,7 +185,15 @@ function SwitcherMenu({ currentId }: { currentId: string | null }) {
           }}
         />
       )}
-      <div className="flex max-h-[50dvh] flex-col gap-0.5 overflow-y-auto">
+      {/* A scroller a keyboard reaches by name: the rows are arrow-key stops (tabindex -1), which
+          neither a browser nor axe counts as a way in. */}
+      <div
+        role="group"
+        aria-label={t("your_spaces")}
+        // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a menu's child, so it cannot be a region
+        tabIndex={0}
+        className="focus-visible:outline-ring flex max-h-[50dvh] flex-col gap-0.5 overflow-y-auto focus-visible:outline-2 focus-visible:-outline-offset-2"
+      >
         {(opened ? (query.data ?? []) : [])
           .filter((space) => !space.personal && !space.organization)
           .map((space) => (

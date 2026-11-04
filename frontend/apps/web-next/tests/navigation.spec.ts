@@ -1,3 +1,4 @@
+import AxeBuilder from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
 import { expect, test } from "./csp";
 import {
@@ -623,5 +624,70 @@ test(
     await last.scrollIntoViewIfNeeded();
     await expect(last).toBeInViewport();
     await expect(page.getByRole("menuitem", { name: "Skapa en ny yta" })).toBeInViewport();
+    // Only a list that overflows can fail this: the rule is about reaching the scroll area.
+    const { violations } = await new AxeBuilder({ page })
+      .include("[popover]:popover-open")
+      .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
+      .withRules(["scrollable-region-focusable", "aria-required-children"])
+      .analyze();
+    expect(violations.map(({ id }) => id)).toEqual([]);
   }
 );
+
+for (const form of ["full sidebar", "icon rail"]) {
+  test(
+    `the keys work from the switcher's scroll area in the ${form}`,
+    { tag: ["@vite"] },
+    async ({ page }) => {
+      await page.goto("/spaces/personal/chat");
+      const first = await createSpace(page, uniqueName("Scroll area"));
+      const second = uniqueName("Typeahead");
+      await createSpace(page, second);
+      await page.goto(`${first}/overview`);
+      const nav = page.getByRole("navigation", { name: "Ytans meny", exact: true });
+      const toggle = nav.getByRole("button", { name: /sidomenyn$/ });
+      await expect(toggle).toHaveAttribute("aria-expanded", "true");
+      if (form === "icon rail") {
+        await toggle.click();
+        await expect(toggle).toHaveAttribute("aria-expanded", "false");
+      }
+      const trigger = nav.locator("button[aria-haspopup]").first();
+      await trigger.focus();
+      await page.keyboard.press("Enter");
+      await expect(page.getByRole("menuitem", { name: second })).toBeVisible();
+      const items = page.getByRole("menu").getByRole("menuitem");
+      const area = page.getByRole("group", { name: "Dina ytor" });
+      const enterArea = async () => {
+        await area.focus();
+        await expect(area).toBeFocused();
+      };
+
+      await enterArea();
+      await page.keyboard.press("ArrowDown");
+      await expect(items.first()).toBeFocused();
+      await enterArea();
+      await page.keyboard.press("End");
+      await expect(items.last()).toBeFocused();
+      await enterArea();
+      await page.keyboard.press("Home");
+      await expect(items.first()).toBeFocused();
+      await enterArea();
+      await page.keyboard.type("Typeahead");
+      await expect(page.locator("[popover]:popover-open :focus")).toHaveText(/^Typeahead/);
+      await enterArea();
+      await page.keyboard.press("Tab");
+      await expect(page.locator("[popover]:popover-open :focus")).toHaveCount(1);
+
+      // Picking closes the menu, in the rail by Astryx alone, and the page takes no error.
+      const errors: string[] = [];
+      page.on("pageerror", (error) => errors.push(error.message));
+      await page.getByRole("menuitem", { name: second }).focus();
+      await page.keyboard.press("Enter");
+      await page.waitForURL(/\/spaces\/[^/]+\/overview$/);
+      await expect(page).not.toHaveURL(`${first}/overview`);
+      await expect(items.first()).toBeHidden();
+      await expect(trigger).toBeFocused();
+      expect(errors).toEqual([]);
+    }
+  );
+}
