@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from uuid import uuid4
 
 import altcha
@@ -211,12 +212,20 @@ async def test_visitor_session_lifecycle(client, admin_token, active_widget):
     assert resp.status_code == 400, resp.text
     assert resp.json()["detail"]["code"] == "challenge_replayed"
 
-    # Silent rotation keeps the visitor id without a new challenge.
-    resp = await client.post(
-        f"/api/v1/widgets/{public_id}/visitor-sessions/",
-        json={"previous_token": token},
+    # Overlapping silent rotations may return only one successor.
+    attempts = await asyncio.gather(
+        *(
+            client.post(
+                f"/api/v1/widgets/{public_id}/visitor-sessions/",
+                json={"previous_token": token},
+            )
+            for _ in range(2)
+        )
     )
+    resp, replay = sorted(attempts, key=lambda response: response.status_code)
     assert resp.status_code == 200, resp.text
+    assert replay.status_code == 401, replay.text
+    assert replay.json()["detail"]["code"] == "visitor_token_invalid"
     assert resp.json()["visitor_id"] == visitor_id
     rotated = resp.json()["token"]
 

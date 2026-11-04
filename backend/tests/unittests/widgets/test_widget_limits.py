@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from uuid import uuid4
@@ -156,11 +157,14 @@ class _FakeRedis:
         self.keys: dict[str, int] = {}
         self.fail = fail
 
-    async def set(self, key, value, ex=None, nx=False):
+    async def eval(self, script, numkeys, key, deadline):
         if self.fail:
             raise ConnectionError("down")
-        self.keys[key] = ex
-        return True
+        ttl = deadline - int(datetime.now(timezone.utc).timestamp())
+        if key in self.keys or ttl <= 0:
+            return 0
+        self.keys[key] = ttl
+        return 1
 
     async def exists(self, key):
         if self.fail:
@@ -191,7 +195,7 @@ async def test_a_rotated_token_is_refused_until_it_could_not_be_used_anyway():
     claims = _claims(widget, expires_in=600)
 
     await revocations.ensure_current(widget, claims)
-    await revocations.revoke(widget, claims, grace_seconds=900)
+    await revocations.consume_for_rotation(widget, claims, grace_seconds=900)
     with pytest.raises(VisitorTokenInvalidError):
         await revocations.ensure_current(widget, claims)
 
@@ -200,10 +204,10 @@ async def test_a_rotated_token_is_refused_until_it_could_not_be_used_anyway():
     assert 1_495 <= ttl <= 1_501
     # Another widget's token with the same id is unaffected.
     await revocations.ensure_current(_widget(), claims)
-    # A token already past its grace has nothing left to revoke.
-    await revocations.revoke(
-        widget, _claims(widget, jti="old", expires_in=-1_000), grace_seconds=900
-    )
+    with pytest.raises(VisitorTokenInvalidError):
+        await revocations.consume_for_rotation(
+            widget, _claims(widget, jti="old", expires_in=-1_000), grace_seconds=900
+        )
     assert len(redis.keys) == 1
 
 
@@ -216,6 +220,40 @@ async def test_a_token_without_an_id_never_came_from_the_minting_service():
         await revocations.ensure_current(widget, _claims(widget, jti=""))
 
 
+async def test_only_one_concurrent_rotation_can_replace_a_token():
+    revocations = VisitorTokenRevocations(
+        redis_client=_FakeRedis(), settings=_settings()
+    )
+    widget = _widget()
+    claims = _claims(widget)
+    results = await asyncio.gather(
+        revocations.consume_for_rotation(widget, claims, grace_seconds=900),
+        revocations.consume_for_rotation(widget, claims, grace_seconds=900),
+        return_exceptions=True,
+    )
+    assert sum(result is None for result in results) == 1
+    assert sum(isinstance(result, VisitorTokenInvalidError) for result in results) == 1
+
+
+async def test_fail_open_still_rejects_a_known_replay_when_redis_is_read_only(
+    monkeypatch,
+):
+    redis = _FakeRedis()
+    revocations = VisitorTokenRevocations(
+        redis, _settings(widget_rate_limit_fail_open=True)
+    )
+    widget = _widget()
+    claims = _claims(widget)
+    await revocations.consume_for_rotation(widget, claims, grace_seconds=900)
+
+    async def read_only(*args):
+        raise ConnectionError("writes unavailable")
+
+    monkeypatch.setattr(redis, "eval", read_only)
+    with pytest.raises(VisitorTokenInvalidError):
+        await revocations.consume_for_rotation(widget, claims, grace_seconds=900)
+
+
 async def test_revocation_follows_the_limiter_fail_policy():
     widget = _widget()
     claims = _claims(widget)
@@ -225,11 +263,11 @@ async def test_revocation_follows_the_limiter_fail_policy():
     with pytest.raises(WidgetProtectionUnavailableError):
         await closed.ensure_current(widget, claims)
     with pytest.raises(WidgetProtectionUnavailableError):
-        await closed.revoke(widget, claims, grace_seconds=900)
+        await closed.consume_for_rotation(widget, claims, grace_seconds=900)
 
     opened = VisitorTokenRevocations(
         redis_client=_FakeRedis(fail=True),
         settings=_settings(widget_rate_limit_fail_open=True),
     )
     await opened.ensure_current(widget, claims)
-    await opened.revoke(widget, claims, grace_seconds=900)
+    await opened.consume_for_rotation(widget, claims, grace_seconds=900)

@@ -163,7 +163,6 @@ async def create_visitor_session(
     revocations = container.widget_token_revocations()
     await limiter.check_mint(widget, client_ip(request))
 
-    replaced = None
     if body.previous_token is not None:
         claims = tokens.verify(
             body.previous_token,
@@ -176,9 +175,10 @@ async def create_visitor_session(
             raise VisitorTokenInvalidError("Preview tokens cannot be rotated.")
         # Each token rotates once: a copy of an already replaced token
         # cannot rotate itself into a fresh one.
-        await revocations.ensure_current(widget, claims)
+        await revocations.consume_for_rotation(
+            widget, claims, grace_seconds=settings.widget_visitor_token_grace_seconds
+        )
         visitor_id = claims.visitor_id
-        replaced = claims
     elif body.altcha is not None:
         await container.widget_altcha_service().verify(body.altcha, widget)
         visitor_id = identity.resolve(widget, body.visitor_id, body.visitor_key)
@@ -190,10 +190,6 @@ async def create_visitor_session(
         )
 
     token, expires_in = tokens.mint(widget, visitor_id)
-    if replaced is not None:
-        await revocations.revoke(
-            widget, replaced, grace_seconds=settings.widget_visitor_token_grace_seconds
-        )
     return VisitorSession(
         token=token,
         expires_in=expires_in,

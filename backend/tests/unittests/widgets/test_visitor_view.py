@@ -503,6 +503,11 @@ def _stored_session() -> SessionInDB:
                 arguments={"query": "bibliotek", "email": "anna@kommun.se"},
                 tool_call_id="call_1",
                 result=SECRET_CONTENT,
+                app_view={
+                    "view_id": "private-view",
+                    "mcp_server_id": "private-server",
+                    "ui": {},
+                },
                 meta={"gen_ai.request.model": "internal-model"},
                 generated_file_ids=[uuid4()],
             )
@@ -557,6 +562,7 @@ def test_restored_session_with_everything_shown():
     [call] = message["tool_calls"]
     assert call["arguments"] == {"query": "bibliotek"}
     assert call["result"] is None and call["meta"] is None
+    assert call["app_view"] is None
     assert call["generated_file_ids"] is None
 
 

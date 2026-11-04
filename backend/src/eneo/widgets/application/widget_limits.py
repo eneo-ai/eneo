@@ -5,7 +5,7 @@
 
 import ipaddress
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta
 from typing import Any, Optional
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
@@ -150,6 +150,14 @@ class VisitorTokenRevocations:
     follows the limiter's fail policy: closed unless the operator opted out.
     """
 
+    # Judge the deadline and expire the marker on the same Redis clock. A
+    # slower API worker cannot reuse a predecessor after its marker expires.
+    _CONSUME = """
+    if tonumber(redis.call('TIME')[1]) >= tonumber(ARGV[1]) then return 0 end
+    if redis.call('SET', KEYS[1], '1', 'NX', 'EXAT', ARGV[1]) then return 1 end
+    return 0
+    """
+
     def __init__(self, redis_client: Any, settings: Optional[Settings] = None) -> None:
         self.redis = redis_client
         self.settings = settings or get_settings()
@@ -158,30 +166,31 @@ class VisitorTokenRevocations:
     def _key(widget: Widget, jti: str) -> str:
         return _widget_key(widget, "revoked", jti)
 
-    async def revoke(
+    async def consume_for_rotation(
         self, widget: Widget, claims: VisitorClaims, *, grace_seconds: int
     ) -> None:
         """Retire ``claims`` for as long as a rotation could still accept it."""
         if not claims.jti:
-            return
-        remaining = (
-            claims.expires_at
-            + timedelta(seconds=grace_seconds)
-            - datetime.now(timezone.utc)
-        )
-        ttl = int(remaining.total_seconds()) + 1
-        if ttl <= 0:
-            return
+            raise VisitorTokenInvalidError()
+        deadline = claims.expires_at + timedelta(seconds=grace_seconds)
         try:
-            await self.redis.set(self._key(widget, claims.jti), b"1", ex=ttl)
+            fresh = await self.redis.eval(
+                self._CONSUME,
+                1,
+                self._key(widget, claims.jti),
+                int(deadline.timestamp()),
+            )
         except Exception as exc:
             if self.settings.widget_rate_limit_fail_open:
+                await self.ensure_current(widget, claims)
                 logger.warning(
                     "Visitor token revocation skipped: Redis unavailable",
                     extra={"widget_id": str(widget.id), "error": str(exc)},
                 )
                 return
             raise WidgetProtectionUnavailableError() from exc
+        if not fresh:
+            raise VisitorTokenInvalidError()
 
     async def ensure_current(self, widget: Widget, claims: VisitorClaims) -> None:
         """Refuse a token that a rotation has already replaced."""

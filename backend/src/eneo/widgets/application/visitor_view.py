@@ -226,6 +226,7 @@ class VisitorView:
             update={
                 "result": None,
                 "meta": None,
+                "app_view": None,
                 "generated_file_ids": None,
                 "arguments": self._shown_argument(call.arguments),
             }
