@@ -150,6 +150,34 @@ describe("SpaceNav", () => {
     expect(document.activeElement).toBe(other);
   });
 
+  it("leaves every other key to the page: Tab to the focus trap, ⌘K to the palette", () => {
+    renderNav("/spaces/s1/overview");
+    fireEvent.click(screen.getByRole("button", { name: "Öppna meny" }));
+    const seen: string[] = [];
+    const listen = (event: Event) => void seen.push((event as globalThis.KeyboardEvent).key);
+    document.addEventListener("keydown", listen);
+    const row = screen.getByRole("menuitem", { name: "Socialtjänst" });
+    for (const key of ["Tab", "k", "ArrowDown", "ArrowUp", "Home", "End"]) {
+      fireEvent.keyDown(row, { key, metaKey: key === "k" });
+    }
+    document.removeEventListener("keydown", listen);
+    expect(seen).toEqual(["Tab", "k"]);
+  });
+
+  it("says the list failed and offers a retry instead of showing no spaces", async () => {
+    const queryClient = client({ s1: SHARED });
+    const { queryKey } = spacesListQueryOptions(browserApi);
+    queryClient.removeQueries({ queryKey, exact: true });
+    const list = vi.spyOn(browserApi, "GET").mockRejectedValue(new Error("down"));
+    renderNav("/spaces/s1/overview", { queryClient });
+    fireEvent.click(screen.getByRole("button", { name: "Öppna meny" }));
+    const retry = await screen.findByRole("menuitem", { name: /^Försök ladda ytorna igen/ });
+    expect(retry.textContent).toContain("Ytorna kunde inte laddas.");
+    const calls = list.mock.calls.length;
+    fireEvent.click(retry);
+    expect(list.mock.calls.length).toBeGreaterThan(calls);
+  });
+
   it("keeps Dina ytor and Skapa en ny yta outside the spaces' scroll area", () => {
     renderNav("/spaces/s1/overview");
     fireEvent.click(screen.getByRole("button", { name: "Öppna meny" }));

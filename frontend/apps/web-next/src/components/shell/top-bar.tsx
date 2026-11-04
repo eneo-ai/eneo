@@ -27,10 +27,13 @@ import { useShell } from "./shell-context";
  */
 export function TopBar({
   railCollapsed = false,
+  hasSideNav = true,
   className
 }: {
   /** The SideNav below is its icon rail: the wordmark cell narrows to it. */
   railCollapsed?: boolean;
+  /** A page without one has the help centre in the profile's menu. */
+  hasSideNav?: boolean;
   className?: string;
 }) {
   const t = useTranslations();
@@ -156,7 +159,7 @@ export function TopBar({
             {isAdmin && <TopNavItem label={t("admin")} href="/admin" {...current("admin")} />}
             <div className="ms-2 flex items-center gap-1">
               <NotificationBells />
-              <ProfileMenu inTopBar />
+              <ProfileMenu inTopBar withHelpCenter={!hasSideNav} />
             </div>
           </>
         }

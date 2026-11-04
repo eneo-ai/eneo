@@ -411,7 +411,7 @@ export function ChatPage({
             aria-label={t("chat")}
             hidden={viewTab !== "chat"}
             tabIndex={-1}
-            className="flex min-h-0 min-w-0 flex-1 flex-col outline-none"
+            className="focus-visible:outline-ring flex min-h-0 min-w-0 flex-1 flex-col focus-visible:outline-2 focus-visible:-outline-offset-2"
           >
             {active ? (
               <ChatView

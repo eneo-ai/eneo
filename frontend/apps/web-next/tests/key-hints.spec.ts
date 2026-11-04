@@ -63,11 +63,11 @@ test(
     });
     const page = await context.newPage();
     await page.goto("/spaces/personal/chat");
-    await expect(page.getByRole("textbox", { name: /^Fråga / })).toBeVisible();
-    await page
-      .locator("[data-start-composer]")
-      .getByRole("button", { name: "Skicka meddelande" })
-      .hover();
+    const composer = page.locator("[data-start-composer]");
+    // The context meter arrives last and moves Send: the pointer has to wait for it, or Send
+    // leaves from under it and the tooltip closes.
+    await expect(composer.getByRole("button", { name: /^Kontextanvändning/ })).toBeVisible();
+    await composer.getByRole("button", { name: "Skicka meddelande" }).hover();
     await expect(page.getByText("Skicka (Retur). Skift+Retur ger en ny rad.")).toBeVisible();
     await context.close();
   }

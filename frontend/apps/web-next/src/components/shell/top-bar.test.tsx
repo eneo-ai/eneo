@@ -43,6 +43,20 @@ afterEach(() => {
 });
 
 describe("TopBar", () => {
+  it("offers the help centre in the profile's menu only without a SideNav", async () => {
+    const appContext = testAppContext({ links: { helpCenter: "https://example.se/hjalp" } });
+    for (const [hasSideNav, rows] of [
+      [false, 1],
+      [true, 0]
+    ] as const) {
+      const { unmount } = renderInApp(<TopBar hasSideNav={hasSideNav} />, { appContext });
+      fireEvent.click(screen.getByRole("button", { name: /konto och inställningar$/ }));
+      await screen.findByRole("menuitem", { name: "Mitt konto" });
+      expect(screen.queryAllByRole("menuitem", { name: /Har du en fråga/ })).toHaveLength(rows);
+      unmount();
+    }
+  });
+
   it("links the areas where Svelte's top bar does", () => {
     renderBar({ permissions: ["admin"] });
     const nav = areas();
