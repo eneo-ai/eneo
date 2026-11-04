@@ -85,9 +85,9 @@ describe("ProfileMenu", () => {
     expect(screen.queryByRole("menuitem", { name: "Tillgänglighetsredogörelse" })).toBeNull();
   });
 
-  it("links the help centre from the top bar, in a new tab, when one is configured", async () => {
+  it("links the help centre on a page without a SideNav, in a new tab, when one is configured", async () => {
     const helpCenter = "https://example.se/hjalp";
-    const { unmount } = renderInApp(<ProfileMenu inTopBar />, {
+    const { unmount } = renderInApp(<ProfileMenu inTopBar withHelpCenter />, {
       appContext: testAppContext({ links: { helpCenter } })
     });
     fireEvent.click(screen.getByRole("button", { name: TRIGGER }));
@@ -97,9 +97,10 @@ describe("ProfileMenu", () => {
     expect(link.getAttribute("href")).toBe(helpCenter);
     expect(link.getAttribute("target")).toBe("_blank");
     expect(link.getAttribute("rel")).toBe("noopener noreferrer");
+    expect(link.querySelector("svg.lucide-external-link")).toBeTruthy();
     unmount();
 
-    renderInApp(<ProfileMenu inTopBar />, {
+    renderInApp(<ProfileMenu inTopBar withHelpCenter />, {
       appContext: testAppContext({ links: { helpCenter: null } })
     });
     fireEvent.click(screen.getByRole("button", { name: TRIGGER }));
@@ -108,7 +109,7 @@ describe("ProfileMenu", () => {
   });
 
   it("leaves the help centre to the SideNav's foot beside it", async () => {
-    renderInApp(<ProfileMenu />, {
+    renderInApp(<ProfileMenu inTopBar />, {
       appContext: testAppContext({ links: { helpCenter: "https://example.se/hjalp" } })
     });
     fireEvent.click(screen.getByRole("button", { name: TRIGGER }));
