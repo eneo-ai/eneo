@@ -1,7 +1,5 @@
 import { expect, test } from "./csp";
-import { STORAGE_STATE } from "../playwright.config";
-import { createFixtures, openRoute, walkTags } from "./responsive-fixtures";
-import { ROUTES } from "./responsive-routes";
+import { createFixtures, walkRoutes, walkTags } from "./responsive-fixtures";
 
 test.skip(!process.env.E2E_BASE_URL, "Requires the FastAPI-served Vite build");
 
@@ -30,27 +28,9 @@ test(
   async ({ browser, baseURL }) => {
     test.setTimeout(15 * 60_000);
     const fixtures = await createFixtures(browser, baseURL, "Focus");
-    const contexts = {
-      in: await browser.newContext({ baseURL, storageState: STORAGE_STATE, viewport: VIEWPORT }),
-      out: await browser.newContext({
-        baseURL,
-        storageState: { cookies: [], origins: [] },
-        viewport: VIEWPORT
-      })
-    };
-    const pages = { in: await contexts.in.newPage(), out: await contexts.out.newPage() };
-    const problems: string[] = [];
-
-    for (const [pattern, entry] of Object.entries(ROUTES)) {
-      if ("skip" in entry) continue;
-      const signedIn = entry.auth !== "out";
-      const page = pages[signedIn ? "in" : "out"];
-      try {
-        await openRoute(page, entry.url(fixtures), signedIn);
-      } catch (error) {
-        problems.push(`${pattern}: did not open (${String(error).split("\n")[0]})`);
-        continue;
-      }
+    const walk = { baseURL, fixtures, context: { viewport: VIEWPORT } };
+    const problems = await walkRoutes(browser, walk, async (page, pattern, signedIn) => {
+      const found: string[] = [];
       await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur?.());
 
       for (let stop = 0; stop < STOPS; stop++) {
@@ -71,7 +51,7 @@ test(
         });
         if (!focused) continue;
         if (stop === 0 && signedIn && !/Hoppa till innehåll|Skip to/i.test(focused.name)) {
-          problems.push(`${pattern}: the first Tab stop is ${focused.name}, not the skip link`);
+          found.push(`${pattern}: the first Tab stop is ${focused.name}, not the skip link`);
         }
         const { x, y, width, height } = focused.box;
         const left = Math.max(0, x - PAD);
@@ -89,13 +69,13 @@ test(
         await page.evaluate(() => (document.activeElement as HTMLElement).blur());
         const without = await page.screenshot({ clip });
         if (withFocus.equals(without))
-          problems.push(`${pattern}: no visible focus on ${focused.name}`);
+          found.push(`${pattern}: no visible focus on ${focused.name}`);
         // Back where the keyboard was, so the next Tab continues from it.
         await page.keyboard.press("Shift+Tab");
         await page.keyboard.press("Tab");
       }
-    }
-    for (const context of Object.values(contexts)) await context.close();
+      return found;
+    });
     expect(problems, problems.join("\n")).toEqual([]);
   }
 );
@@ -115,35 +95,17 @@ for (const size of TOUCH_SIZES) {
     async ({ browser, baseURL }) => {
       test.setTimeout(15 * 60_000);
       const fixtures = await createFixtures(browser, baseURL, "Obscured");
-      const contexts = {
-        in: await browser.newContext({
-          baseURL,
-          storageState: STORAGE_STATE,
+      const walk = {
+        baseURL,
+        fixtures,
+        context: {
           viewport: { width: size.width, height: size.height },
           hasTouch: true,
           isMobile: true
-        }),
-        out: await browser.newContext({
-          baseURL,
-          storageState: { cookies: [], origins: [] },
-          viewport: { width: size.width, height: size.height },
-          hasTouch: true,
-          isMobile: true
-        })
-      };
-      const pages = { in: await contexts.in.newPage(), out: await contexts.out.newPage() };
-      const problems: string[] = [];
-
-      for (const [pattern, entry] of Object.entries(ROUTES)) {
-        if ("skip" in entry) continue;
-        const signedIn = entry.auth !== "out";
-        const page = pages[signedIn ? "in" : "out"];
-        try {
-          await openRoute(page, entry.url(fixtures), signedIn);
-        } catch (error) {
-          problems.push(`${pattern}: did not open (${String(error).split("\n")[0]})`);
-          continue;
         }
+      };
+      const problems = await walkRoutes(browser, walk, async (page, pattern) => {
+        const found: string[] = [];
         await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur?.());
         const seen = new Set<string>();
         for (let stop = 0; stop < STOPS; stop++) {
@@ -185,11 +147,11 @@ for (const size of TOUCH_SIZES) {
           });
           if (hidden && !seen.has(hidden.name)) {
             seen.add(hidden.name);
-            problems.push(`${pattern}: ${hidden.name} is entirely hidden by ${hidden.by}`);
+            found.push(`${pattern}: ${hidden.name} is entirely hidden by ${hidden.by}`);
           }
         }
-      }
-      for (const context of Object.values(contexts)) await context.close();
+        return found;
+      });
       expect(problems, problems.join("\n")).toEqual([]);
     }
   );

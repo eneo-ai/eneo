@@ -1,14 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import AxeBuilder from "@axe-core/playwright";
-import type { Browser, BrowserContext } from "@playwright/test";
 import { expect, test } from "./csp";
-import { STORAGE_STATE } from "../playwright.config";
 import { contrastIncomplete } from "./contrast-incomplete";
 import { contrastProbe } from "./contrast-probe";
 import { leftEdgeProbe } from "./left-edge-probe";
-import { createFixtures, openRoute, walkTags } from "./responsive-fixtures";
-import { ROUTES, type Fixtures } from "./responsive-routes";
+import { createFixtures, walkRoutes, walkTags } from "./responsive-fixtures";
+import type { Fixtures } from "./responsive-routes";
 import { selectedProbe } from "./selected-probe";
 import { DEV_ONLY, probeBaseline, type Cell } from "./ui-probes";
 import { AXE_PAGE_RULES, WCAG_22_AA_TAGS } from "../src/test/wcag";
@@ -64,23 +62,6 @@ test.beforeAll(async ({ browser, baseURL }) => {
   fixtures = await createFixtures(browser, baseURL, "Axe");
 });
 
-async function contextFor(
-  browser: Browser,
-  baseURL: string | undefined,
-  variant: (typeof VARIANTS)[number],
-  signedIn: boolean
-) {
-  return browser.newContext({
-    baseURL,
-    storageState: signedIn ? STORAGE_STATE : { cookies: [], origins: [] },
-    viewport: { width: variant.width, height: variant.height },
-    colorScheme: variant.scheme,
-    reducedMotion: "reduce",
-    hasTouch: true,
-    isMobile: true
-  });
-}
-
 for (const variant of VARIANTS) {
   const only = process.env.A11Y_VARIANTS?.split(",");
   if (only && !only.includes(`${variant.name}-${variant.scheme}`)) continue;
@@ -96,25 +77,23 @@ for (const variant of VARIANTS) {
         theme: variant.scheme,
         touch: true
       };
-      const contexts: Record<string, BrowserContext> = {
-        in: await contextFor(browser, baseURL, variant, true),
-        out: await contextFor(browser, baseURL, variant, false)
-      };
-      const pages = { in: await contexts.in!.newPage(), out: await contexts.out!.newPage() };
       const shots = process.env.A11Y_SHOTS;
       if (shots) fs.mkdirSync(shots, { recursive: true });
 
-      for (const [pattern, entry] of Object.entries(ROUTES)) {
-        if ("skip" in entry) continue;
-        if (process.env.A11Y_ROUTES && !new RegExp(process.env.A11Y_ROUTES).test(pattern)) continue;
-        const signedIn = entry.auth !== "out";
-        const page = pages[signedIn ? "in" : "out"];
-        try {
-          await openRoute(page, entry.url(fixtures), signedIn);
-        } catch (error) {
-          problems.push(`${pattern}: did not open (${String(error).split("\n")[0]})`);
-          continue;
-        }
+      const walk = {
+        baseURL,
+        fixtures,
+        context: {
+          viewport: cell.viewport,
+          colorScheme: variant.scheme,
+          reducedMotion: "reduce",
+          hasTouch: true,
+          isMobile: true
+        },
+        only: process.env.A11Y_ROUTES
+      } as const;
+      const found = await walkRoutes(browser, walk, async (page, pattern) => {
+        const problems: string[] = [];
         if (shots) {
           const file = `${variant.name}-${variant.scheme}-${pattern.replace(/[^a-z0-9]+/gi, "_")}.png`;
           await page.screenshot({ path: path.join(shots, file) });
@@ -151,10 +130,11 @@ for (const variant of VARIANTS) {
             problems.push(`${scan}: the ${name} probe failed (${String(error).split("\n")[0]})`);
           }
         }
-      }
+        return problems;
+      });
+      problems.push(...found);
       if (reviews.length)
         await test.info().attach("ui-probes-review.txt", { body: reviews.join("\n") });
-      for (const context of Object.values(contexts)) await context.close();
       if (process.env.A11Y_OUT) {
         fs.appendFileSync(
           process.env.A11Y_OUT,

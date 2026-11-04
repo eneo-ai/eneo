@@ -1,7 +1,7 @@
-import type { Browser, Page } from "@playwright/test";
+import type { Browser, BrowserContextOptions, Page } from "@playwright/test";
 import { STORAGE_STATE } from "../playwright.config";
 import { apiPost, spaceWithWork, uniqueName } from "./helpers";
-import type { Fixtures } from "./responsive-routes";
+import { ROUTES, type Fixtures } from "./responsive-routes";
 
 /**
  * What the screens that need a record are opened with: a shared space with an
@@ -80,6 +80,51 @@ export function walkTags(walk: `@${string}`, viewport: string): string[] {
   const device = DEVICE_GROUPS.find((group) => viewport.startsWith(group));
   if (!device) throw new Error(`${viewport}: no device group in DEVICE_GROUPS`);
   return ["@vite", walk, `@${device}`];
+}
+
+export type Walk = {
+  baseURL: string | undefined;
+  fixtures: Fixtures;
+  /** What the walk's signed-in and signed-out contexts both open with. */
+  context: BrowserContextOptions;
+  /** A regular expression that narrows the walk to some route patterns. */
+  only?: string;
+};
+
+/**
+ * Opens every screen of tests/responsive-routes.ts, signed in or out as its entry says, and
+ * runs `visit` on each. Returns what `visit` objected to and each screen that did not open.
+ */
+export async function walkRoutes(
+  browser: Browser,
+  { baseURL, fixtures, context, only }: Walk,
+  visit: (page: Page, pattern: string, signedIn: boolean) => Promise<string[]>
+) {
+  const contexts = {
+    in: await browser.newContext({ ...context, baseURL, storageState: STORAGE_STATE }),
+    out: await browser.newContext({
+      ...context,
+      baseURL,
+      storageState: { cookies: [], origins: [] }
+    })
+  };
+  const pages = { in: await contexts.in.newPage(), out: await contexts.out.newPage() };
+  const problems: string[] = [];
+  for (const [pattern, entry] of Object.entries(ROUTES)) {
+    if ("skip" in entry) continue;
+    if (only && !new RegExp(only).test(pattern)) continue;
+    const signedIn = entry.auth !== "out";
+    const page = pages[signedIn ? "in" : "out"];
+    try {
+      await openRoute(page, entry.url(fixtures), signedIn);
+    } catch (error) {
+      problems.push(`${pattern}: did not open (${String(error).split("\n")[0]})`);
+      continue;
+    }
+    problems.push(...(await visit(page, pattern, signedIn)));
+  }
+  for (const context of Object.values(contexts)) await context.close();
+  return problems;
 }
 
 /** Opens a route and waits until it shows its content and has stopped loading. */

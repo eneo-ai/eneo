@@ -1,11 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { Browser, BrowserContext } from "@playwright/test";
 import { expect, test } from "./csp";
-import { STORAGE_STATE } from "../playwright.config";
-import { createFixtures, openRoute, walkTags } from "./responsive-fixtures";
+import { createFixtures, walkRoutes, walkTags } from "./responsive-fixtures";
 import { measure, type PageMeasure, type Violation } from "./responsive-measure";
-import { ROUTES, type Fixtures } from "./responsive-routes";
+import type { Fixtures } from "./responsive-routes";
 
 test.skip(!process.env.E2E_BASE_URL, "Requires the FastAPI-served Vite build");
 
@@ -53,21 +51,6 @@ test.beforeAll(async ({ browser, baseURL }) => {
   fixtures = await createFixtures(browser, baseURL, "Contract");
 });
 
-async function contextFor(
-  browser: Browser,
-  baseURL: string | undefined,
-  vp: (typeof VIEWPORTS)[number],
-  signedIn: boolean
-) {
-  return browser.newContext({
-    baseURL,
-    storageState: signedIn ? STORAGE_STATE : { cookies: [], origins: [] },
-    viewport: { width: vp.width, height: vp.height },
-    hasTouch: true,
-    isMobile: true
-  });
-}
-
 for (const vp of VIEWPORTS) {
   test(
     `every screen holds up at ${vp.name} (${vp.width} × ${vp.height})`,
@@ -76,24 +59,18 @@ for (const vp of VIEWPORTS) {
       test.setTimeout(15 * 60_000);
       const problems: string[] = [];
       const seen: Record<string, { stable: Set<string>; either: Set<string> }> = {};
-      const contexts: Record<string, BrowserContext> = {
-        in: await contextFor(browser, baseURL, vp, true),
-        out: await contextFor(browser, baseURL, vp, false)
+      const walk = {
+        baseURL,
+        fixtures,
+        context: {
+          viewport: { width: vp.width, height: vp.height },
+          hasTouch: true,
+          isMobile: true
+        },
+        only: process.env.CONTRACT_ROUTES
       };
-      const pages = { in: await contexts.in!.newPage(), out: await contexts.out!.newPage() };
-
-      for (const [pattern, entry] of Object.entries(ROUTES)) {
-        if ("skip" in entry) continue;
-        if (process.env.CONTRACT_ROUTES && !new RegExp(process.env.CONTRACT_ROUTES).test(pattern))
-          continue;
-        const signedIn = entry.auth !== "out";
-        const page = pages[signedIn ? "in" : "out"];
-        try {
-          await openRoute(page, entry.url(fixtures), signedIn);
-        } catch (error) {
-          problems.push(`${pattern}: did not open (${String(error).split("\n")[0]})`);
-          continue;
-        }
+      const found = await walkRoutes(browser, walk, async (page, pattern) => {
+        const problems: string[] = [];
         const result = await measure(page);
         if (result.overflowDoc > 0 || result.overflowPanel > 1) {
           problems.push(
@@ -115,8 +92,9 @@ for (const vp of VIEWPORTS) {
           either = new Set([...either, ...again]);
         }
         seen[key] = { stable, either };
-      }
-      for (const context of Object.values(contexts)) await context.close();
+        return problems;
+      });
+      problems.push(...found);
 
       for (const [key, { stable, either }] of Object.entries(seen)) {
         recorded[key] = [...stable].sort();
