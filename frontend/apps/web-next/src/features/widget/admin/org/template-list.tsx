@@ -45,6 +45,8 @@ export function TemplateList({ templates }: { templates: WidgetTemplate[] }) {
       router.push(templateHref(created.id));
     } catch (error) {
       toastApiError(error, t);
+    } finally {
+      // The push may be declined by a leave guard; the button must work again.
       setCreating(false);
     }
   }

@@ -117,7 +117,8 @@
   let linkDraft = $state(untrack(() => texts.footer_link_url ?? ""));
   let linkInvalid = $state(false);
   $effect(() => {
-    const held = linkInvalid;
+    // Held: an invalid address, or one typed but not yet committed (blur).
+    const held = linkInvalid || linkDraft.trim() !== (texts.footer_link_url ?? "");
     untrack(() => onLinkHeld?.(held));
     return () => {
       if (held) onLinkHeld?.(false);

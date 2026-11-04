@@ -59,6 +59,17 @@
   // The API stores the radius as a whole number of pixels; a fraction stays
   // in the field with an error instead of failing the save.
   let radiusInvalid = $state(false);
+  // A radius supplied from outside (a template applied) replaces what was
+  // typed; the error about the typed fraction goes with it.
+  let seenRadius = untrack(() => theme.radius);
+  $effect(() => {
+    const incoming = theme.radius;
+    if (incoming === seenRadius) return;
+    seenRadius = incoming;
+    untrack(() => {
+      radiusInvalid = false;
+    });
+  });
   let colorHeld = $state<Record<string, boolean>>({});
   const held = $derived(radiusInvalid || Object.values(colorHeld).some(Boolean));
   $effect(() => {

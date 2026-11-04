@@ -68,7 +68,8 @@ export function SuggestedQuestionsEditor({
   const duplicates = rows
     .filter((_, index) => texts[index] && texts.indexOf(texts[index]!) < index)
     .map((row) => row.key);
-  const held = duplicates.length > 0;
+  // Held: a repeat, or a row typed but not yet committed (blur, Enter).
+  const held = duplicates.length > 0 || clean(rows.map((row) => row.text)).join("\n") !== sent;
   // The parent's callback is read through a ref: reporting a held state
   // re-renders the parent, which hands down a new callback, and an effect
   // keyed on it would report again without end.

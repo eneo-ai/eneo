@@ -1,8 +1,9 @@
 /* eslint-disable eneo/no-raw-color -- fixtures use literal widget colours */
-import { page } from "vitest/browser";
+import { page, userEvent } from "vitest/browser";
 import { render } from "vitest-browser-svelte";
 import type { Eneo, Widget } from "@eneo/eneo-js";
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import "../../../../app.css";
 
 vi.mock("$lib/paraglide/messages", () => ({
   m: new Proxy<Record<string, () => string>>({}, { get: (_target, key) => () => String(key) })
@@ -129,5 +130,27 @@ describe("WidgetPreview tokens", () => {
     expect(toastError).not.toHaveBeenCalled();
     expect(frameSrc()).toContain("preview=current");
     expect(document.querySelector("[role=alert]")).toBeNull();
+  });
+});
+
+describe("WidgetPreview layout", () => {
+  test("the phone-sized frame never grows wider than its panel", async () => {
+    // Narrower than a frame's intrinsic 300px: a flex item shrinks no further
+    // than that on its own, so only an explicit cap keeps it inside the panel.
+    document.body.style.width = "280px";
+    try {
+      const { mints, previewToken } = renderPreview();
+      await expect.poll(() => previewToken.mock.calls.length).toBe(1);
+      mints[0].resolve({ token: "t", expires_in: 3600 });
+      await expect.poll(frameSrc).toContain("preview=t");
+
+      await userEvent.click(page.getByRole("button", { name: "widget_admin_preview_mobile" }));
+      const frame = document.querySelector("iframe")!;
+      await expect.poll(() => frame.style.width).toBe("375px");
+      // A narrow admin panel shows the phone width clamped, never a horizontal scroll.
+      expect(frame.getBoundingClientRect().width).toBeLessThanOrEqual(280);
+    } finally {
+      document.body.style.width = "";
+    }
   });
 });

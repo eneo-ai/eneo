@@ -46,7 +46,7 @@
   let rows = $state<{ key: number; text: string }[]>([]);
   let nextKey = 0;
   let announcement = $state("");
-  let seen: string | null = null;
+  let seen = $state<string | null>(null);
 
   const focusRow = (key: number) => document.getElementById(`${id}-${key}`)?.focus();
 
@@ -73,7 +73,9 @@
   });
 
   $effect(() => {
-    const held = duplicates.length > 0;
+    // Held: a repeat, or a row typed but not yet committed (blur, Enter).
+    const held =
+      duplicates.length > 0 || clean(rows.map((row) => row.text)).join("\n") !== (seen ?? "");
     untrack(() => onHeld?.(held));
     return () => untrack(() => onHeld?.(false));
   });

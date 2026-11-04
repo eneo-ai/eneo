@@ -486,6 +486,54 @@ describe("WidgetAdminPage", () => {
     await screen.findByText("Alla ändringar sparade", { selector: "section *" });
   });
 
+  it("a link or a question typed but not yet committed counts as unsaved", async () => {
+    api.PATCH.mockImplementation((_path: string, init: { body: Record<string, unknown> }) =>
+      ok(widget({ ...init.body, revision: 4 }))
+    );
+    showPage([widget()]);
+    const link = await screen.findByRole("textbox", { name: /^Länk i sidfoten/ });
+    fireEvent.change(link, { target: { value: "https://www.kommun.se/personuppgifter" } });
+    expect(await screen.findByText("1 osparad ändring")).toBeTruthy();
+    expect(api.PATCH).not.toHaveBeenCalled();
+    fireEvent.blur(link);
+    await waitFor(
+      () =>
+        expect(api.PATCH).toHaveBeenCalledWith(
+          WIDGET_PATH,
+          expect.objectContaining({
+            body: expect.objectContaining({
+              texts: expect.objectContaining({
+                footer_link_url: "https://www.kommun.se/personuppgifter"
+              })
+            })
+          })
+        ),
+      { timeout: 2000 }
+    );
+    await screen.findByText("Alla ändringar sparade", { selector: "section *" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Lägg till fråga" }));
+    const question = await screen.findByRole("textbox", { name: /^Föreslagen fråga/ });
+    // An empty new row is not an edit yet.
+    expect(screen.queryByText("1 osparad ändring")).toBeNull();
+    fireEvent.change(question, { target: { value: "Kontakt?" } });
+    expect(await screen.findByText("1 osparad ändring")).toBeTruthy();
+    fireEvent.blur(question);
+    await waitFor(
+      () =>
+        expect(api.PATCH).toHaveBeenCalledWith(
+          WIDGET_PATH,
+          expect.objectContaining({
+            body: expect.objectContaining({
+              texts: expect.objectContaining({ suggested_questions: ["Kontakt?"] })
+            })
+          })
+        ),
+      { timeout: 2000 }
+    );
+    await screen.findByText("Alla ändringar sparade", { selector: "section *" });
+  });
+
   it("an incomplete colour counts as unsaved until it is corrected", async () => {
     api.PATCH.mockImplementation((_path: string, init: { body: Record<string, unknown> }) =>
       ok(widget({ ...init.body, revision: 4 }))

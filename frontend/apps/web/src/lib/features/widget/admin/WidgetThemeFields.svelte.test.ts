@@ -131,6 +131,27 @@ describe("WidgetThemeFields radius", () => {
     expect(onChange).toHaveBeenLastCalledWith({ radius: 8 });
     await expect.element(radius).toHaveAttribute("aria-invalid", "false");
   });
+
+  test("a radius supplied from outside replaces the typed fraction and its error", async () => {
+    const onHeld = vi.fn<(held: boolean) => void>();
+    const theme = { primary_color: "#1F4E79", radius: 12 } as WidgetTheme;
+    const screen = render(WidgetThemeFields, { theme, onChange: vi.fn(), onHeld });
+    const radius = page.getByLabelText("widget_admin_radius", { exact: true });
+    await userEvent.fill(radius, "1.5");
+    await expect.element(radius).toHaveAttribute("aria-invalid", "true");
+    expect(onHeld).toHaveBeenLastCalledWith(true);
+
+    // Another part of the theme changing says nothing about the radius.
+    await screen.rerender({ theme: { ...theme, primary_color: "#123456" } });
+    await expect.element(radius).toHaveAttribute("aria-invalid", "true");
+    expect(onHeld).toHaveBeenLastCalledWith(true);
+
+    // A template applied brings its own radius: the fraction and its error go.
+    await screen.rerender({ theme: { ...theme, primary_color: "#123456", radius: 8 } });
+    await expect.element(radius).toHaveAttribute("aria-invalid", "false");
+    await expect.element(radius).toHaveValue(8);
+    expect(onHeld).toHaveBeenLastCalledWith(false);
+  });
 });
 
 describe("WidgetThemeFields errors", () => {

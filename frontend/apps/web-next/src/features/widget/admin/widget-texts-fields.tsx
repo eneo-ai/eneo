@@ -113,12 +113,14 @@ function LinkField({
   useEffect(() => {
     report.current = onHeld;
   });
+  // Held: an invalid address, or one typed but not yet committed (blur).
+  const held = invalid || draft.trim() !== value;
   useEffect(() => {
-    report.current?.(invalid);
+    report.current?.(held);
     return () => {
-      if (invalid) report.current?.(false);
+      if (held) report.current?.(false);
     };
-  }, [invalid]);
+  }, [held]);
   // Follow a new saved value (template applied, other tab) without ever
   // touching what is being typed. Adjusted during render.
   const [seen, setSeen] = useState(value);

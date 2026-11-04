@@ -156,6 +156,7 @@
           title={m.widget_admin_preview_frame_title()}
           class="border-default bg-primary rounded-lg border shadow"
           style:width={mobile ? "375px" : "100%"}
+          style:max-width="100%"
           style:height="600px"
         ></iframe>
       {/key}

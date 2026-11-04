@@ -227,6 +227,9 @@ describe("WidgetsAdminPage templates", () => {
       })
     );
     await waitFor(() => expect(router.push).toHaveBeenCalledWith("/admin/widgets/templates/t9"));
+    // Leaving can be declined (an unsaved edit elsewhere); the button must work again.
+    fireEvent.click(screen.getByRole("button", { name: "Ny mall" }));
+    await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(2));
   });
 
   it("sets the default and asks before deleting", async () => {

@@ -274,6 +274,33 @@ describe("WidgetEditor", () => {
     await vi.waitFor(() => expect(leavingAsks()).toBe(false), { timeout: 3000 });
   });
 
+  test("a link or a question typed but not yet committed counts as unsaved", async () => {
+    const { update } = renderEditor(widget());
+    const link = page.getByLabelText("widget_admin_text_footer_link_url", { exact: true });
+    await userEvent.fill(link, "https://www.kommun.se/personuppgifter");
+    expect(leavingAsks()).toBe(true);
+    expect(update).not.toHaveBeenCalled();
+    await userEvent.tab();
+    await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    expect(update.mock.lastCall![0].update).toMatchObject({
+      texts: expect.objectContaining({ footer_link_url: "https://www.kommun.se/personuppgifter" })
+    });
+    await vi.waitFor(() => expect(leavingAsks()).toBe(false));
+
+    await userEvent.click(page.getByRole("button", { name: "widget_admin_questions_add" }));
+    const question = page.getByRole("textbox", { name: "widget_admin_questions_label" });
+    // An empty new row is not an edit yet.
+    expect(leavingAsks()).toBe(false);
+    await userEvent.type(question, "Kontakt?");
+    expect(leavingAsks()).toBe(true);
+    await userEvent.tab();
+    await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(2), { timeout: 3000 });
+    expect(update.mock.lastCall![0].update).toMatchObject({
+      texts: expect.objectContaining({ suggested_questions: ["Kontakt?"] })
+    });
+    await vi.waitFor(() => expect(leavingAsks()).toBe(false));
+  });
+
   test("a refusal of the whole texts group is tied to every text field", async () => {
     const { update } = renderEditor(widget());
     update.mockRejectedValueOnce(
