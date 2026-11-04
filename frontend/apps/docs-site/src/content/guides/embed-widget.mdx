@@ -21,7 +21,7 @@ A widget publishes the assistant as it is configured. There is no separate tool 
 - **The assistant's own MCP servers**: those enabled on the assistant that the space's security classification allows, with their tools as configured. Visitors are anonymous: a server set to forward user identity receives no identity headers, and no tool call waits for anyone's approval.
 - **Web search**, when both the space and the assistant have it switched on and the model can call tools. Web search runs on the organisation's external search server (see [Web search and image generation](/guides/capabilities)).
 
-Never available to visitors, whatever the assistant's configuration: image generation, file analysis, file creation and charts, file uploads, attachment reading, built-in function providers, and images or files that a tool returns, which are dropped. Only publish knowledge and tools that are appropriate for anonymous visitors.
+Never available to visitors, whatever the assistant's configuration: image generation, file analysis, file creation and charts, file uploads, built-in function providers, and images or files that a tool returns, which are dropped. Visitors also get no tool for reading attachments, so an attachment set to _Open with tool_ is given to the model as text instead, like any other attachment, when the assistant's attachments then fit the model's context window; otherwise it stays a link the model cannot open, and the server logs a warning. Only publish knowledge and tools that are appropriate for anonymous visitors.
 
 <Callout type="warning">
   Changing the assistant's MCP servers or functions changes what an active

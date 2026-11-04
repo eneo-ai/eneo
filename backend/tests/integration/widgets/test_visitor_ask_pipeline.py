@@ -27,6 +27,7 @@ from eneo.ai_models.completion_models.completion_model import (
     ToolCallMetadata,
 )
 from eneo.assistants.references import ReferencesService
+from eneo.completion_models.infrastructure.adapters.base_adapter import ProviderInput
 from eneo.completion_models.infrastructure.completion_service import (
     CompletionService,
 )
@@ -254,6 +255,19 @@ async def visitor_pipeline(
 
         def get_model_route(self) -> str:
             return "gpt-4"
+
+        def prepare_provider_input(self, context, **kwargs) -> ProviderInput:
+            # Save-time preflight of an assistant with attachments measures
+            # the exact provider payload; a plain rendering of the context
+            # is enough for it.
+            return ProviderInput(
+                messages=[
+                    {"role": "system", "content": getattr(context, "prompt", "") or ""},
+                    {"role": "user", "content": getattr(context, "input", "") or ""},
+                ],
+                tools=[],
+                built_in_tools=[],
+            )
 
         async def prepare_streaming(self, **kwargs):
             return object()
@@ -653,3 +667,41 @@ async def test_hidden_tool_activity_still_delivers_tool_sources(
     assert ref["uri"] == "https://arenden.kommun.se/2026-123"
     assert (ref["tool_call_id"], ref["mcp_tool_name"]) == (None, None)
     assert "arendesystem__run" not in json.dumps(events)
+
+
+FEE_TEXT = "Avgiften f\u00f6r bygglov \u00e4r 4 500 kronor."
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_an_open_with_tool_attachment_reaches_the_visitor_turn_as_text(
+    client, admin_token, active_widget, visitor_pipeline
+):
+    """Visitors never get the files tool, so the attachment the admin marked
+    "open with tool" is inlined for them instead of sent as a link nothing
+    can open."""
+    seen: _Pipeline = visitor_pipeline["seen"]
+    public_id = active_widget["public_id"]
+    upload = await client.post(
+        "/api/v1/files/",
+        files={"upload_file": ("taxa.txt", FEE_TEXT.encode(), "text/plain")},
+        headers=_auth(admin_token),
+    )
+    assert upload.status_code == 200, upload.text
+    file_id = upload.json()["id"]
+    updated = await client.post(
+        f"/api/v1/assistants/{active_widget['target_id']}/",
+        json={"attachments": [{"id": file_id, "inline_text": False}]},
+        headers=_auth(admin_token),
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["attachments"][0]["inline_text"] is False
+
+    token = await _mint(client, public_id)
+    await _ask(client, public_id, token)
+
+    [completion] = seen.completion_kwargs
+    assert completion["url_only_prompt_file_ids"] == set()
+    [attachment] = completion["prompt_files"]
+    assert str(attachment.id) == file_id
+    assert FEE_TEXT in (attachment.text or "")

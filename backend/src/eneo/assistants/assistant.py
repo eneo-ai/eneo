@@ -119,6 +119,8 @@ class Assistant(Entity):
         self._attachment_inline_text: dict[UUID, bool] = dict(
             attachment_inline_text or {}
         )
+        # Per turn, never persisted: see withhold_file_reader.
+        self._file_reader_available = True
         self.source_template = source_template
         self.published = published
         self.is_default = is_default
@@ -251,8 +253,19 @@ class Assistant(Entity):
             file_id: bool(inline) for file_id, inline in inline_text_by_id.items()
         }
 
+    def withhold_file_reader(self) -> None:
+        """This turn's principal gets no files tool (a widget visitor), so an
+        attachment marked "open with tool" would reach the model as a link
+        nothing can open: every attachment inlines like any other instead."""
+        self._file_reader_available = False
+
+    def restore_file_reader(self) -> None:
+        self._file_reader_available = True
+
     def url_only_attachment_ids(self, completion_model: CompletionModel) -> set[UUID]:
         """Attachments this model receives as signed URLs only (shared predicate)."""
+        if not self._file_reader_available:
+            return set()
         return url_only_attachment_ids(
             self._attachments, self._attachment_inline_text, completion_model
         )

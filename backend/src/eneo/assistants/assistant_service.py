@@ -1727,6 +1727,40 @@ class AssistantService:
             files=persistent_files + message_files,
         )
 
+    async def _inline_attachments_for_visitor(
+        self,
+        assistant: "Assistant",
+        model: "CompletionModel",
+        prompt_text: str,
+    ) -> None:
+        """A visitor never gets the files tool, so an "open with tool"
+        attachment would reach the model as a link nothing can open. Inline
+        them when the whole baseline then fits the window; otherwise leave the
+        links as they are, so one oversized file does not close the widget.
+        The choice is made on the turn's assistant copy and read by every
+        later step (fit guard, derived pages, completion input)."""
+        if not assistant.url_only_attachment_ids(model):
+            return
+        assistant.withhold_file_reader()
+        files = await self._completion_prompt_files_for_model(
+            persistent_attachments=assistant.attachments, completion_model=model
+        )
+        try:
+            assert_prompt_and_files_fit_context(
+                max_input_tokens=model.max_input_tokens,
+                model_name=model.name,
+                prompt_text=prompt_text,
+                files=files,
+            )
+        except BadRequestException:
+            assistant.restore_file_reader()
+            logger.warning(
+                "Widget visitor keeps %d attachment(s) as links the model cannot "
+                "open: inlined, they would not fit the model's window",
+                len(assistant.url_only_attachment_ids(model)),
+                extra={"assistant_id": str(assistant.id)},
+            )
+
     async def get_completion_model(self, space: "Space") -> Optional["CompletionModel"]:
         """Get a completion model for the space. Returns None if no model is available."""
         model = space.get_default_completion_model()
@@ -3701,6 +3735,11 @@ class AssistantService:
                 if self.user.active_widget is None
                 or not is_builtin_provider(server.http_auth_type)
             ]
+
+        if self.user.active_widget is not None:
+            await self._inline_attachments_for_visitor(
+                assistant_to_ask, effective_completion_model, skill_composition.prompt
+            )
 
         # This message's own uploads have no save-time fit gate and are inlined
         # whole, so reject an upload that can't fit before any session/question
