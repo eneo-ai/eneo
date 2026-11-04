@@ -11,9 +11,6 @@ on:
       revision:
         required: true
         type: string
-      backend_digest:
-        default: ''
-        type: string
       # Components that build from another directory (the Next beta builds
       # from the frontend workspace with its own Dockerfile).
       context:
@@ -28,6 +25,11 @@ on:
 jobs:
   image:
     runs-on: ubuntu-latest
+    # One writer of a version's image tag at a time, whichever ref resolved to it.
+    concurrency:
+      group: eneo-image-${{ inputs.component }}-${{ inputs.version }}
+      queue: max
+      cancel-in-progress: false
     outputs:
       digest: ${{ steps.reuse.outputs.digest || steps.build.outputs.digest }}
     permissions:
@@ -60,22 +62,21 @@ jobs:
       - name: Inject backend version
         if: inputs.component == 'backend' && steps.reuse.outputs.exists != 'true'
         run: ./scripts/inject-backend-version.sh "$VERSION"
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+      # Built beside the backend, not after it: the version is the release's own (the one
+      # inject-backend-version.sh gives the backend), and the API types are the committed
+      # ones, which CI's schema drift check holds equal to the backend of this commit.
+      - name: Prepare frontend for this release
         if: inputs.component == 'frontend' && steps.reuse.outputs.exists != 'true'
-        with:
-          bun-version: 1.4.4
-      - name: Prepare frontend from this release's backend
-        if: inputs.component == 'frontend' && steps.reuse.outputs.exists != 'true'
-        timeout-minutes: 15
-        env:
-          BACKEND_DIGEST: ${{ inputs.backend_digest }}
         run: |
           sudo fallocate -l 6G /mnt/eneo-frontend.swap
           sudo chmod 600 /mnt/eneo-frontend.swap
           sudo mkswap /mnt/eneo-frontend.swap
           sudo swapon /mnt/eneo-frontend.swap
-          ./scripts/sync-frontend-with-backend.sh "ghcr.io/eneo-ai/eneo-backend@$BACKEND_DIGEST"
+          jq --arg version "$VERSION" '.version = $version' frontend/apps/web/package.json >package.json.tmp
+          mv package.json.tmp frontend/apps/web/package.json
+          sed -i -E 's/^(  const version = ")[^"]*(";)/\1'"$VERSION"'\2/' frontend/packages/eneo-js/src/client/client.js
           test "$(jq -r .version frontend/apps/web/package.json)" = "$VERSION"
+          grep -qF "  const version = \"$VERSION\";" frontend/packages/eneo-js/src/client/client.js
       - name: Build immutable component image
         if: steps.reuse.outputs.exists != 'true'
         id: build
@@ -99,7 +100,8 @@ jobs:
             APP_VERSION=${{ inputs.version }}
             APP_REVISION=${{ inputs.revision }}
           cache-from: type=gha,scope=${{ inputs.component }}
-          cache-to: type=gha,mode=max,scope=${{ inputs.component }}
+          # The Svelte frontend's layers are rarely reused, and exporting them took 2.5-3.5 min.
+          cache-to: ${{ inputs.component != 'frontend' && format('type=gha,mode=max,scope={0}', inputs.component) || '' }}
       # Provenance records the build, not its CVE status. Attest before checks
       # that can fail so retries can verify and rescan the same image digest.
       - name: Attest component provenance
@@ -118,8 +120,8 @@ jobs:
             sudo swapoff /mnt/eneo-frontend.swap
             sudo rm /mnt/eneo-frontend.swap
           fi
-          # The build cache has already been exported to GHA. Grype needs
-          # room for both its downloaded database and the hydrated SQLite DB.
+          # Grype needs room for both its downloaded database and the hydrated
+          # SQLite DB; the build's local cache is no longer needed.
           docker buildx prune --all --force
           df -h / /mnt
       # Cover reused images too; source/provenance checks do not establish CVE status.

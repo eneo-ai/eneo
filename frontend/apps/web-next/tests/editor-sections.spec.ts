@@ -323,14 +323,15 @@ test.describe("an editor on an iPad held sideways", () => {
     await expect(last).toBeInViewport();
   });
 
-  test("lines space settings up with the space's header", async ({ page }) => {
+  test("lines space settings up with the space's other pages", async ({ page }) => {
     const space = await createSpace(page, uniqueName("Settings"));
+    // The frame's line: where Översikt's title starts, as every section page's does.
+    const overview = page.getByRole("main").getByRole("heading", { level: 1 });
+    await expect(overview).toBeVisible();
+    const line = (await overview.boundingBox())!.x;
     await page.goto(`${space}/settings`);
     const list = page.locator("[data-editor-rail]");
     await expect(list).toBeVisible();
-    // The space's header: its breadcrumbs start on the frame's line.
-    const crumbs = page.locator("main header nav").first();
-    const line = (await crumbs.boundingBox())!.x;
     const first = list.getByRole("link").first();
     expect(Math.abs((await first.boundingBox())!.x - line)).toBeLessThanOrEqual(1);
     const title = page.locator("[data-space-full-bleed] > header").getByRole("heading").first();
@@ -346,7 +347,11 @@ test.describe("an editor on a tablet, at the card's height", () => {
     await page.goto(editor);
     const strip = page.locator("header").getByRole("navigation", { name: "Avsnitt" });
     await growHeader(page, "ai");
-    await strip.getByRole("link", { name: "AI-inställningar" }).click();
+    // From the keyboard: Astryx scrolls a partly hidden tab into view as it takes focus, which
+    // can move it from under a pointer mid-click, depending on where the strip was scrolled to.
+    const link = strip.getByRole("link", { name: "AI-inställningar" });
+    await link.focus();
+    await link.press("Enter");
     await expectBelowHeader(page, "ai");
   });
 });

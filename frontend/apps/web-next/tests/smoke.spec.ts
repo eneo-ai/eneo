@@ -91,10 +91,15 @@ test("profile language selection reloads the document in either language", async
   await expect(page.getByRole("button", { name: /: konto och inställningar$/ })).toBeVisible();
 });
 
-test("the side navigation reaches the assistant catalog", { tag: "@vite" }, async ({ page }) => {
+// As in the Svelte app no sidebar links the catalogue; the palette does.
+test("the command palette reaches the assistant catalog", { tag: "@vite" }, async ({ page }) => {
   await page.goto("/spaces/list");
-  const navigation = page.getByRole("navigation", { name: /huvudmeny|main menu/i });
-  await navigation.getByRole("link", { name: /^(assistenter|assistants)$/i }).click();
+  await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+  await page.keyboard.press("ControlOrMeta+k");
+  const palette = page.getByRole("dialog", { name: /^(Sök i Eneo|Search Eneo)$/ });
+  await palette
+    .getByRole("option", { name: /^(Alla assistenter och appar|All assistants and apps)/ })
+    .click();
   await expect(page).toHaveURL(/\/dashboard$/);
   await expect(
     page.getByRole("heading", { level: 1, name: /assistenter|assistants/i })

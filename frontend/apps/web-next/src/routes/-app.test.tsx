@@ -464,7 +464,7 @@ it.each(["assistants", "apps"] as const)(
   async (kind) => {
     replies.set("/api/v1/spaces/space-1/", makeSpace({ resourcePermissions: [] }));
     await renderRoute(`/spaces/space-1/${kind}`);
-    await screen.findByRole("heading", { name: messages[kind], level: 2 });
+    await screen.findByRole("heading", { name: messages[kind], level: 1 });
     expect(document.title).toBe(`${messages[kind]} · Upphandling · Eneo`);
   }
 );
@@ -1082,8 +1082,8 @@ it("opens the organization Skill list, saved editor and creation form for an adm
 
 it("renders the spaces list with its document title and keeps list distinct from a space ID", async () => {
   await renderRoute("/spaces/list");
-  await screen.findByRole("heading", { name: messages.spaces, level: 1 });
-  await waitFor(() => expect(document.title).toBe(`${messages.spaces} · Eneo`));
+  await screen.findByRole("heading", { name: messages.your_spaces, level: 1 });
+  await waitFor(() => expect(document.title).toBe(`${messages.your_spaces} · Eneo`));
   expect(requestedPaths()).not.toContain("/api/v1/spaces/list/");
 });
 
@@ -1095,9 +1095,9 @@ it("keeps a cached spaces list visible when its background refresh fails", async
   const { queryClient } = await renderRoute("/spaces/list", undefined, ({ queryClient }) => {
     queryClient.setQueryData(["spaces"], []);
   });
-  await screen.findByRole("heading", { name: messages.spaces, level: 1 });
+  await screen.findByRole("heading", { name: messages.your_spaces, level: 1 });
   await waitFor(() => expect(queryClient.getQueryState(["spaces"])?.status).toBe("error"));
-  expect(screen.getByRole("heading", { name: messages.spaces, level: 1 })).toBeTruthy();
+  expect(screen.getByRole("heading", { name: messages.your_spaces, level: 1 })).toBeTruthy();
 });
 
 function requestedPaths() {
@@ -1209,14 +1209,15 @@ it.each(["organization", "org-space"])(
 it("opens shared assistants when the loaded space is not an organization", async () => {
   replies.set("/api/v1/spaces/space-1/", makeSpace());
   const { router } = await renderRoute("/spaces/space-1/assistants");
-  await screen.findByRole("heading", { name: messages.assistants, level: 2 });
+  await screen.findByRole("heading", { name: messages.assistants, level: 1 });
   expect(router.state.matches.some((match) => match.status === "notFound")).toBe(false);
 });
 
 it("uses the stored collapsed preference on the first shell commit", async () => {
   document.cookie = "eneo_sidenav_collapsed=1; Path=/";
   const commits: string[] = [];
-  await renderRoute(undefined, () => {
+  // A page with a sidebar (a page that does not exist has none, as in Svelte).
+  await renderRoute("/spaces/list", () => {
     const toggle = document.querySelector(
       'button[aria-label="Fäll ihop sidomenyn"], button[aria-label="Fäll ut sidomenyn"]'
     );
@@ -1235,7 +1236,7 @@ it("redirects the root to the signed-in landing path", async () => {
 
 it("redirects the spaces index to its list without treating it as a space ID", async () => {
   const { router } = await renderRoute("/spaces");
-  await screen.findByRole("heading", { name: messages.spaces, level: 1 });
+  await screen.findByRole("heading", { name: messages.your_spaces, level: 1 });
   expect(router.state.location.pathname).toBe("/spaces/list");
   expect(requestedPaths()).not.toContain("/api/v1/spaces/list/");
 });
@@ -1254,15 +1255,16 @@ it.each([
   }
 );
 
-it("keeps the space frame mounted when switching from overview to members", async () => {
+it("keeps the space's sidebar mounted when switching from overview to members", async () => {
   setViewport("desktop");
   replies.set("/api/v1/spaces/space-1/", makeSpace());
   const { router } = await renderRoute("/spaces/space-1/overview");
-  const heading = await screen.findByRole("heading", { name: "Upphandling", level: 1 });
+  await screen.findByRole("heading", { name: messages.overview, level: 1 });
+  const sidebar = screen.getByRole("navigation", { name: messages.shell_space_nav_label });
   await act(() => router.navigate({ href: "/spaces/space-1/members" }));
-  await screen.findByRole("heading", { name: messages.members });
+  await screen.findByRole("heading", { name: messages.members, level: 1 });
   await waitFor(() => expect(document.title).toBe(`${messages.members} · Upphandling · Eneo`));
-  expect(screen.getByRole("heading", { name: "Upphandling", level: 1 })).toBe(heading);
+  expect(screen.getByRole("navigation", { name: messages.shell_space_nav_label })).toBe(sidebar);
 });
 
 it("preserves chat state when its saved session updates the URL without another space read", async () => {
@@ -1556,8 +1558,9 @@ it.each([
     });
     await renderRoute(`/account/${page}`);
     await waitFor(() => expect(document.title).toBe(`${messages[titleKey]} · Eneo`));
-    const navigation = screen.getByRole("navigation", { name: messages.shell_account_nav_label });
-    const current = navigation.querySelectorAll('a[aria-current="true"]');
+    // The account sidebar, as in the Svelte app.
+    const navigation = screen.getByRole("navigation", { name: messages.account_and_settings });
+    const current = navigation.querySelectorAll('a[aria-current="page"]');
     expect(current).toHaveLength(1);
     expect(current[0]?.getAttribute("href")).toBe(currentHref);
     switch (page) {

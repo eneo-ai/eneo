@@ -1,6 +1,7 @@
 import { Button as AstryxButton } from "@astryxdesign/core/Button";
 import { useCollator } from "@astryxdesign/core/i18n";
 import { MoreMenu } from "@astryxdesign/core/MoreMenu";
+import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { LayoutGrid, Pencil, SearchX, Trash2 } from "lucide-react";
 import { useTranslations } from "use-intl";
@@ -153,7 +154,7 @@ export function SpacesList({ title }: { title: string }) {
       renderCell: (space) => (
         <Link
           href={`/spaces/${spaceRouteId(space)}/overview`}
-          className="font-medium hover:underline"
+          className="font-medium hover:underline pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:min-w-11 pointer-coarse:items-center"
         >
           {space.name}
         </Link>
@@ -161,7 +162,7 @@ export function SpacesList({ title }: { title: string }) {
     },
     {
       key: "actions",
-      header: t("actions"),
+      header: <VisuallyHidden>{t("actions")}</VisuallyHidden>,
       width: pixel(64),
       renderCell: (space) => <SpaceActions space={space} onDelete={setDeleteTarget} />
     }

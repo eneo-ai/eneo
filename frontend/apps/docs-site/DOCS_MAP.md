@@ -119,14 +119,14 @@ result guards.
 
 ## Project and contributing
 
-| Code                                                                                                                                                                                                                   | Pages                               |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
-| `.github/workflows/ci.yml`, `.github/workflows/security.yml`, `.github/workflows/dependency-review.yml`, `.github/dependabot.yml`, `docs/SECURITY.md`                                                                  | `contributing/security.mdx`         |
-| `.github/workflows/export-roadmap.yml`, `.github/workflows/add-to-project.yml`, `.github/workflows/pr-labels.yml`, `.github/scripts/**`, `scripts/export_github_roadmap.mjs`, `.github/ISSUE_TEMPLATE/**`, `AGENTS.md` | `contributing/project-roadmap.mdx`  |
-| `docs/CONTRIBUTING.md`, `docs/DEPLOYMENT_WORKFLOW.md`, `docs/CODE_QUALITY.md`, `.github/ISSUE_TEMPLATE/**` (template choice and contact links), `.github/pull_request_template.md`                                     | `contributing/index.mdx`            |
-| `.github/workflows/release.yml`, `scripts/release_workflow.py`, `scripts/release_notes.py` (reviewed preparation, publication and release history)                                                                     | `contributing/index.mdx`            |
-| `.github/CODEOWNERS`, team roles and repository rulesets (GitHub settings), the "Repository Access and Change Control" section of `docs/SECURITY.md`                                                                   | `contributing/governance.mdx`       |
-| `frontend/apps/docs-site/**` (the site itself)                                                                                                                                                                         | `frontend/apps/docs-site/README.md` |
+| Code                                                                                                                                                                                                                           | Pages                               |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------- |
+| `.github/workflows/ci.yml`, `.github/workflows/build_and_push_images.yml` (CI reuse in publication), `.github/workflows/security.yml`, `.github/workflows/dependency-review.yml`, `.github/dependabot.yml`, `docs/SECURITY.md` | `contributing/security.mdx`         |
+| `.github/workflows/export-roadmap.yml`, `.github/workflows/add-to-project.yml`, `.github/workflows/pr-labels.yml`, `.github/scripts/**`, `scripts/export_github_roadmap.mjs`, `.github/ISSUE_TEMPLATE/**`, `AGENTS.md`         | `contributing/project-roadmap.mdx`  |
+| `docs/CONTRIBUTING.md`, `docs/DEPLOYMENT_WORKFLOW.md`, `docs/CODE_QUALITY.md`, `.github/ISSUE_TEMPLATE/**` (template choice and contact links), `.github/pull_request_template.md`                                             | `contributing/index.mdx`            |
+| `.github/workflows/release.yml`, `scripts/release_workflow.py`, `scripts/release_notes.py` (reviewed preparation, publication and release history)                                                                             | `contributing/index.mdx`            |
+| `.github/CODEOWNERS`, team roles and repository rulesets (GitHub settings), the "Repository Access and Change Control" section of `docs/SECURITY.md`                                                                           | `contributing/governance.mdx`       |
+| `frontend/apps/docs-site/**` (the site itself)                                                                                                                                                                                 | `frontend/apps/docs-site/README.md` |
 
 Bundled runtime lifecycle and diagnostics (`mcp_servers/application/runtime_status.py`,
 deployment setup and Compose) are documented in `docs/builtin-tool-servers.mdx`,

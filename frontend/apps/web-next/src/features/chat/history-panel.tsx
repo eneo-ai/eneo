@@ -37,7 +37,6 @@ import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 const PAGE_SIZE = 50;
 
 /** The history's width beside the conversation (in px, as the 480 px rule is). */
-export const HISTORY_WIDTH = 320;
 
 type SessionRow = {
   id: string;
@@ -113,17 +112,15 @@ function HistoryPanel({
   onSelect,
   onDeleted,
   onRenamed,
-  onClose,
-  focusHeadingOnMount = false
+  onClose
 }: {
   partner: ChatPartner;
   activeSessionId: string | null;
   onSelect: (sessionId: string) => void;
   onDeleted: (sessionId: string) => void;
   onRenamed?: (sessionId: string, name: string) => void;
-  onClose: () => void;
-  /** Side panel: focus moves to the heading when it opens. */
-  focusHeadingOnMount?: boolean;
+  /** Without it (the Historik tab) there is no close button. */
+  onClose?: () => void;
 }) {
   const t = useTranslations();
   const router = useRouter();
@@ -149,10 +146,6 @@ function HistoryPanel({
       onDeleted(id);
     }
   });
-
-  useEffect(() => {
-    if (focusHeadingOnMount) headingRef.current?.focus();
-  }, [focusHeadingOnMount]);
 
   const isGroupChat = partner.type === "group-chat";
   const history = useInfiniteQuery({
@@ -225,13 +218,15 @@ function HistoryPanel({
         >
           {t("chat_history_title")}
         </h2>
-        <IconButton
-          label={t("chat_history_close")}
-          icon={<X className="size-4" />}
-          variant="ghost"
-          size="sm"
-          onClick={onClose}
-        />
+        {onClose ? (
+          <IconButton
+            label={t("chat_history_close")}
+            icon={<X className="size-4" />}
+            variant="ghost"
+            size="sm"
+            onClick={onClose}
+          />
+        ) : null}
       </div>
       <div className="border-ax-border flex shrink-0 flex-col gap-2 border-b px-2 py-2">
         <SegmentedControl
@@ -375,55 +370,37 @@ function HistoryPanel({
 }
 
 /**
- * History as a side panel (where the conversation keeps 480 px beside it; focus
- * moves to its heading, Escape closes) or an Astryx bottom sheet (modal: it
- * traps focus and returns it). The chat page decides which.
- * The caller returns focus to the history button when the panel closes.
+ * History as the chat page's Historik tab, as in the Svelte app: the list
+ * across the page's width. Picking a conversation opens it in Chatt.
+ */
+export function HistoryTab(props: Omit<Parameters<typeof HistoryPanel>[0], "onClose">) {
+  return (
+    <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col">
+      <HistoryPanel {...props} />
+    </div>
+  );
+}
+
+/**
+ * History on a phone, as an Astryx bottom sheet (modal: it traps focus and
+ * returns it). Beside the SideNav it is the chat page's Historik tab.
  */
 export function HistoryAside({
   onClose,
-  inline,
   ...props
-}: Omit<Parameters<typeof HistoryPanel>[0], "focusHeadingOnMount"> & { inline: boolean }) {
+}: Omit<Parameters<typeof HistoryPanel>[0], "onClose"> & {
+  onClose: () => void;
+}) {
   const t = useTranslations();
-  const asideRef = useRef<HTMLElement>(null);
-  const label = t("chat_history_title");
-
-  useEffect(() => {
-    const aside = asideRef.current;
-    if (!inline || !aside) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || event.defaultPrevented) return;
-      event.preventDefault();
-      onClose();
-    };
-    aside.addEventListener("keydown", onKeyDown);
-    return () => aside.removeEventListener("keydown", onKeyDown);
-  }, [inline, onClose]);
-
-  if (!inline) {
-    return (
-      <BottomSheet
-        isOpen
-        onOpenChange={(open) => !open && onClose()}
-        label={label}
-        height="tall"
-        padding={0}
-      >
-        <HistoryPanel {...props} onClose={onClose} />
-      </BottomSheet>
-    );
-  }
-
   return (
-    <aside
-      ref={asideRef}
-      id="chat-history"
-      aria-label={label}
-      style={{ width: HISTORY_WIDTH }}
-      className="bg-ax-sunken border-ax-border flex shrink-0 flex-col border-s"
+    <BottomSheet
+      isOpen
+      onOpenChange={(open) => !open && onClose()}
+      label={t("chat_history_title")}
+      height="tall"
+      padding={0}
     >
-      <HistoryPanel {...props} onClose={onClose} focusHeadingOnMount />
-    </aside>
+      <HistoryPanel {...props} onClose={onClose} />
+    </BottomSheet>
   );
 }

@@ -15,13 +15,6 @@ on:
 permissions:
   contents: read
 
-# Serialize state changes and final alias promotion. Keep pending transitions
-# instead of replacing them when another release or CI run completes.
-concurrency:
-  group: eneo-release-lifecycle
-  queue: max
-  cancel-in-progress: false
-
 env:
   TZ: Europe/Stockholm
 
@@ -38,6 +31,13 @@ jobs:
        github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Serialize state changes and alias promotion with every other alias writer (image
+    # publication's promote job). Keep pending transitions instead of replacing them.
+    # On the job, so completions this job skips never wait in or fill the lock.
+    concurrency:
+      group: eneo-release-lifecycle
+      queue: max
+      cancel-in-progress: false
     env:
       RELEASE_MANAGED: ${{ vars.RELEASE_MANAGED }}
     permissions:

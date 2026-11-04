@@ -48,6 +48,23 @@ Every model belongs to a provider record, and Eneo always builds the LiteLLM rou
 
 For Azure OpenAI the model name in the route is the **deployment name**, not the underlying model, so name Azure models after their deployments.
 
+### Reasoning settings for Azure deployments
+
+An explicit reasoning effort of `none` disables reasoning on models that support
+it. Leaving the setting at its default omits the parameter and lets the provider
+choose; these settings are not equivalent.
+
+For a deployment with a custom name, Eneo uses the model's saved parameter
+capabilities when sending reasoning settings. Ensure those capabilities match
+the deployed model and explicitly include `none` before selecting it. Eneo does
+not infer the underlying model from a deployment's display name. Models without
+saved capabilities still require LiteLLM to confirm support for `none`.
+
+Azure GPT-5.6 requires `reasoning_effort="none"` to combine Chat Completions with
+function tools, including Eneo's MCP tools. Tool calls with reasoning enabled
+require the Responses API; selecting `none` is not a replacement for configuring
+that API when reasoning is needed. See [Azure's reasoning model documentation](https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/reasoning).
+
 ---
 
 ## How Providers Are Supported

@@ -55,7 +55,7 @@ describe("AssistantsPage", () => {
   it("groups cards by status for publishers, each card a link to its chat", async () => {
     const { container } = show(makeSpace({ assistants }), <AssistantsPage />);
 
-    expect(screen.getByRole("heading", { level: 2, name: "Assistenter" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1, name: "Assistenter" })).toBeTruthy();
     expect(screen.getAllByRole("button", { name: "Skapa assistent" })).toHaveLength(1);
     // Docked at the bottom on a phone, like the apps tab. It is the tab's
     // primary action, so it stays filled (the overview's are secondary).
@@ -86,7 +86,7 @@ describe("AssistantsPage", () => {
       target: { value: "saknas" }
     });
     // Under the tab's h2, the empty result is an h3.
-    expect(screen.getByRole("heading", { level: 3, name: "Inga resultat hittades" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 2, name: "Inga resultat hittades" })).toBeTruthy();
     // The count owns the empty result: its empty state does not say it again.
     await waitFor(() => expect(said).toEqual(["1 träff", "Inga träffar"]));
     expect(liveRegion()?.textContent).toBe("Inga träffar");
@@ -137,7 +137,7 @@ describe("AssistantsPage", () => {
       );
       await waitFor(() =>
         expect(document.activeElement).toBe(
-          screen.getByRole("heading", { level: 2, name: "Assistenter" })
+          screen.getByRole("heading", { level: 1, name: "Assistenter" })
         )
       );
     }
@@ -159,7 +159,7 @@ describe("AssistantsPage", () => {
 
   it("puts the create menu in the empty state", async () => {
     const { container } = show(makeSpace(), <AssistantsPage />);
-    expect(screen.getByRole("heading", { level: 3, name: "Inga assistenter ännu" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 2, name: "Inga assistenter ännu" })).toBeTruthy();
     expect(screen.getAllByRole("button", { name: "Skapa assistent" })).toHaveLength(1);
     await expectNoAxeViolations(container);
   });
@@ -218,7 +218,7 @@ describe("AppsPage", () => {
 
   it("explains an empty list", () => {
     show(makeSpace(), <AppsPage />);
-    expect(screen.getByRole("heading", { level: 3, name: "Inga appar ännu" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 2, name: "Inga appar ännu" })).toBeTruthy();
   });
 });
 
@@ -281,10 +281,10 @@ for (const [Page, space] of [
         .getAllByRole("region")
         .filter((region) =>
           ["Publicerad", "Utkast"].includes(
-            region.getAttribute("aria-label") ?? region.querySelector("h3")?.textContent ?? ""
+            region.getAttribute("aria-label") ?? region.querySelector("h2, h3")?.textContent ?? ""
           )
         )
-        .map((region) => region.querySelector("h3")?.textContent)
+        .map((region) => region.querySelector("h2, h3")?.textContent)
     ).toEqual(["Utkast", "Publicerad"]);
     const name = within(table).getByRole("columnheader", { name: /Namn/ });
     fireEvent.click(within(name).getByRole("button"));

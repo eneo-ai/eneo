@@ -9,7 +9,7 @@ import sv from "../src/lib/i18n/messages/sv.json";
 const PHONE = { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true };
 test.use(PHONE);
 
-// The shell's top bar: a space's own header (tablets, desktop) is a <header> in main.
+// The shell's top bar: the phone's, or a computer's; a space's own header is a <header> in main.
 const TOP_BAR = "header:not(main *)";
 // A page's own header: a pushed screen's (Konto, the chat) or a phone's only (a space, an admin area).
 const OWN_HEADER = "[data-own-mobile-header], [data-own-phone-header]";
@@ -56,13 +56,17 @@ test("a shared space is pushed on a phone; the personal and organisation spaces 
 }) => {
   const name = uniqueName("E2E Pushed Space");
   const space = await createSpace(page, name);
-  const back = page.getByRole("link", { name: /^(Tillbaka till|Back to) (Ytor|Spaces)$/ });
+  const back = page.getByRole("link", {
+    name: /^(Tillbaka till|Back to) (Dina ytor|Your spaces)$/
+  });
   const tabs = page.getByRole("navigation", { name: /^(Ytans innehåll|Space content)$/ });
 
   await page.goto(`${space}/overview`);
   await expect(back).toBeVisible();
   await expect(page.locator(TOP_BAR)).toBeHidden();
   await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
+  // The name once: the header's h1, not again on Översikt.
+  await expect(page.getByRole("heading", { name, exact: true })).toHaveCount(1);
   // A phone's tabs are the space's content (space-sections.ts): Översikt, Assistenter, Appar and
   // Kunskap, and Flöden beside Appar where the tenant has flows for this user (flowsAvailable).
   const flows = await flowsShown(page);
@@ -71,6 +75,9 @@ test("a shared space is pushed on a phone; the personal and organisation spaces 
     await expect(tabs.getByRole("link", { name: tab, exact: true })).toHaveCount(1);
   }
   await expect(tabs.getByRole("link", { name: "Flöden", exact: true })).toHaveCount(flows ? 1 : 0);
+  // What to open, not count tiles that repeat the tabs above.
+  await expect(page.getByRole("region", { name: /^(Assistenter|Assistants)$/ })).toBeVisible();
+  await expect(page.getByRole("link", { name: /^(Assistenter|Assistants) \d+$/ })).toHaveCount(0);
   const strip = await tabs.evaluate((nav) => {
     const scroller = [...nav.querySelectorAll<HTMLElement>("*")].find(
       (element) => getComputedStyle(element).overflowX === "auto"
@@ -104,6 +111,39 @@ test("a shared space is pushed on a phone; the personal and organisation spaces 
   }
   // The organisation space: knowledge, skills and settings (legacy services are hidden).
   await expect(tabs.getByRole("link")).toHaveCount(3);
+});
+
+test("the menu lists the spaces, the current one marked, one tap from the others", async ({
+  page
+}) => {
+  const name = uniqueName("E2E Drawer Space");
+  const space = await createSpace(page, name);
+  const drawer = page.getByRole("dialog", { name: /^(Meny|Menu)$/ });
+
+  await page.goto("/spaces/personal/overview");
+  await page.getByRole("button", { name: /^(Öppna menyn|Open menu)$/ }).click();
+  await expect(drawer.getByRole("link", { name: /^(Personligt|Personal)$/ })).toHaveAttribute(
+    "aria-current",
+    "page"
+  );
+  await expect(drawer.locator('[aria-current="page"]')).toHaveCount(1);
+  await expect(drawer.getByRole("link", { name: /^(Dina ytor|Your spaces)$/ })).toHaveAttribute(
+    "href",
+    "/spaces/list"
+  );
+  expect(await drawer.evaluate((element) => element.scrollWidth - element.clientWidth)).toBe(0);
+
+  // A shared space's chat opens the menu from its own header; the space is
+  // listed and marked even past the menu's first spaces.
+  await page.goto(`${space}/chat`);
+  await page.getByRole("button", { name: /^(Öppna menyn|Open the menu)$/ }).click();
+  await expect(drawer.getByRole("link", { name, exact: true })).toHaveAttribute(
+    "aria-current",
+    "page"
+  );
+  await drawer.getByRole("link", { name: /^(Personligt|Personal)$/ }).click();
+  await expect(page).toHaveURL(/\/spaces\/personal\/overview$/);
+  await expect(drawer).toBeHidden();
 });
 
 test("a long space name in the back link never makes a 320 px page scroll sideways", async ({
@@ -144,6 +184,7 @@ test("an iPad held upright shows an admin area beside the icon rail, without the
   await page.setViewportSize({ width: 820, height: 1180 });
   await page.goto("/admin/users");
   await expect(page.locator("main h1")).toBeVisible({ timeout: 15_000 });
+  // A tablet keeps the touch shell (#1328): no top bar, the SideNav carries the areas.
   await expect(page.locator(TOP_BAR)).toBeHidden();
   await expect(page.getByRole("button", { name: /^(Öppna menyn|Open menu)$/ })).toHaveCount(0);
   await expect(

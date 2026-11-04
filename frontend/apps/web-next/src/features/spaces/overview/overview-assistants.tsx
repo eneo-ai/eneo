@@ -3,31 +3,27 @@ import { Bot } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { EmptyState } from "@/components/composites/empty-state";
 import { AREA_HUES } from "@/components/composites/icon-tile";
-import { useAppContext } from "@/components/providers/app-context";
 import { ResourceCollection } from "@/components/composites/resource-tile";
 import { CreateChatAppMenu } from "@/features/assistants/create-menu";
 import { ChatAppTile } from "@/features/assistants/tile";
-import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { useSpace } from "../use-space";
 import { recentChatItems } from "./overview-data";
-import { OverviewCreateCard, OverviewLink, OverviewSection } from "./overview-section";
+import { OverviewLink, OverviewSection } from "./overview-section";
 
 /**
- * The newest assistants and group chats as cards (one row), plus the create
- * card for users who may create; on a phone the create control sits in the
- * heading instead of a card. Both are small and secondary: the tab's docked
- * button is the primary action. "Visa alla" leads to the assistants tab.
+ * The newest assistants and group chats as cards (three, one row on a tablet),
+ * with a small secondary create control in the heading for users who may
+ * create: the tab's docked button is the primary action. One control at every
+ * width, so a dialog it opened stays open when the screen turns. "Visa alla"
+ * leads to the assistants tab.
  */
 export function OverviewAssistants() {
   const t = useTranslations();
   const { space, routeId, can } = useSpace();
   const collator = useCollator();
-  const { settings } = useAppContext();
-  const phone = usePhoneScreen();
   const items = recentChatItems(space, collator.compare);
   const canCreate = can("create", "assistant");
-  const createCard = canCreate && !phone;
-  const shown = items.slice(0, createCard ? 2 : 3);
+  const shown = items.slice(0, 3);
   const showStatus = !space.personal;
 
   return (
@@ -37,7 +33,7 @@ export function OverviewAssistants() {
       end={
         items.length > 0 ? (
           <>
-            {canCreate && phone ? <CreateChatAppMenu secondary /> : null}
+            {canCreate ? <CreateChatAppMenu secondary /> : null}
             <OverviewLink
               href={`/spaces/${routeId}/assistants`}
               label={t("space_view_all_assistants")}
@@ -60,21 +56,7 @@ export function OverviewAssistants() {
           actions={canCreate ? <CreateChatAppMenu /> : undefined}
         />
       ) : (
-        <ResourceCollection
-          gridClassName="grid gap-3 @lg:grid-cols-2 @xl:grid-cols-3"
-          trailing={
-            createCard ? (
-              <OverviewCreateCard
-                hint={
-                  settings.using_templates
-                    ? t("space_new_assistant_hint_templates")
-                    : t("space_new_assistant_hint")
-                }
-                action={<CreateChatAppMenu secondary />}
-              />
-            ) : undefined
-          }
-        >
+        <ResourceCollection gridClassName="grid gap-3 @lg:grid-cols-2 @xl:grid-cols-3">
           {shown.map((item) => (
             <ChatAppTile key={item.id} item={item} showStatus={showStatus} showActions={false} />
           ))}

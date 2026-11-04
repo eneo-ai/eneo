@@ -84,10 +84,9 @@ describe("Composer", () => {
     expect(descriptionOf(textarea)).toBe(
       "Retur skickar och Skift+Retur ger en ny rad. Kommando+Retur, Ctrl+Retur och Skicka-knappen skickar också."
     );
-    // Beside Send, the two keys and what they do (hidden from assistive tech: the description says it).
-    const hint = screen.getByText("Ny rad").closest("[aria-hidden]");
-    expect(hint?.textContent).toContain("Skicka");
-    expect(hint?.querySelectorAll("kbd").length).toBeGreaterThan(1);
+    // The keys sit on Send's tooltip, not in the footer row, where they crowded it.
+    expect(document.querySelector("kbd")).toBeNull();
+    expect(screen.getByText("Skicka (Retur). Skift+Retur ger en ny rad.")).toBeTruthy();
   });
 
   it("does not point a touch screen at keys it does not have in the field's description", () => {

@@ -68,7 +68,9 @@ test.describe("production chunk recovery", { tag: "@vite" }, () => {
     const failedImport = page.waitForEvent("requestfailed", (request) =>
       new URL(request.url()).pathname.startsWith("/assets/")
     );
-    const spaces = page.getByRole("link", { name: /^(Alla ytor|All spaces)$/ });
+    const spaces = page
+      .getByRole("navigation", { name: /^(Huvudområden|Main areas)$/ })
+      .getByRole("link", { name: /^(Delat|Spaces)$/ });
     await spaces.focus();
     await failedImport;
     await chatComposer(page).fill("Vilken gräns gäller?");
@@ -84,6 +86,8 @@ test.describe("production chunk recovery", { tag: "@vite" }, () => {
     const confirmation = page.getByRole("alertdialog", { name: "Lämna chatten?", exact: true });
     await confirmation.getByRole("button", { name: "Lämna chatten", exact: true }).click();
     await expect(page).toHaveURL(/\/spaces\/list$/);
-    await expect(page.getByRole("heading", { level: 1, name: /^(Ytor|Spaces)$/ })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { level: 1, name: /^(Dina ytor|Your spaces)$/ })
+    ).toBeVisible();
   });
 });

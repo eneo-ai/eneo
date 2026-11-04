@@ -47,14 +47,28 @@ const api = vi.hoisted(() => ({
   space: null as unknown,
   spaceError: null as Error | null,
   /** While set, the jobs list waits for it. */
-  jobsGate: null as Promise<void> | null
+  jobsGate: null as Promise<void> | null,
+  /** What a read by id answers: the job, or 404 for one that is gone. */
+  byId: {} as Record<string, Job | 404>,
+  /** A read by id of a job listed here waits for its promise. */
+  byIdGates: {} as Record<string, Promise<void>>,
+  /** While set, answers every read by id in place of `byId`; a rejection fails it. */
+  answerById: null as ((id: string) => Promise<Job | 404>) | null
 }));
 
 vi.mock("@/lib/api/browser", () => ({
   browserApi: {
-    GET: vi.fn(async (path: string) => {
+    GET: vi.fn(async (path: string, init?: { params: { path: { id: string } } }) => {
       if (path === "/api/v1/spaces/{id}/" && api.spaceError) throw api.spaceError;
       if (path === "/api/v1/jobs/" && api.jobsGate) await api.jobsGate;
+      if (path === "/api/v1/jobs/{id}/") {
+        const id = init!.params.path.id;
+        await api.byIdGates[id];
+        const found = api.answerById ? await api.answerById(id) : api.byId[id];
+        return found === 404 || found === undefined
+          ? { error: { message: "Not found" }, response: new Response("{}", { status: 404 }) }
+          : { data: found, response: new Response("{}") };
+      }
       return {
         data: path === "/api/v1/spaces/{id}/" ? api.space : { items: api.items },
         response: new Response("{}")
@@ -63,10 +77,17 @@ vi.mock("@/lib/api/browser", () => ({
   }
 }));
 
+/** The GET calls made so far to one API path. */
+const callsTo = (path: string) =>
+  (vi.mocked(browserApi.GET).mock.calls as unknown[][]).filter(([called]) => called === path);
+
 beforeEach(() => {
   api.items = [job];
   api.spaceError = null;
   api.jobsGate = null;
+  api.byId = {};
+  api.byIdGates = {};
+  api.answerById = null;
 });
 
 afterEach(() => {
@@ -126,6 +147,219 @@ it("finishes a crawl from the feed, refreshing its website without a poll", asyn
   expect(invalidate).toHaveBeenCalledWith({ queryKey: ["websites"] });
   expect(browserApi.GET).toHaveBeenCalledTimes(polls);
   fake.restore();
+});
+
+// The list keeps a completed job for five minutes: a job that finishes while
+// the feed is down for longer is never listed with its outcome.
+describe("a job that left the list while it was running", () => {
+  const crawl = { ...job, id: "job-crawl", task: "crawl", name: "Devize" } as Job;
+  const upload = { ...job, id: "job-upload", task: "upload_info_blob" } as Job;
+  const readsById = () => callsTo("/api/v1/jobs/{id}/");
+
+  /** Both jobs run, the feed drops, and when it is back the list has neither. */
+  async function returnAfterBothLeft() {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const fake = (await import("./job-events.test-support")).installFakeEventSource();
+    api.items = [crawl, upload];
+    const rendered = renderInApp(
+      <JobsProvider>
+        <JobIndicator />
+      </JobsProvider>
+    );
+    await screen.findByRole("button", { name: "Aviseringar, 2 pågår" });
+    await act(async () => fake.latest().open());
+    await act(async () => fake.latest().blip());
+    api.items = [];
+    const invalidate = vi.spyOn(rendered.queryClient, "invalidateQueries");
+    // Ten minutes later the feed is back and the reopen reads the list again.
+    await act(async () => fake.latest().open());
+    return { ...rendered, fake, invalidate };
+  }
+
+  const invalidationsOf = (invalidate: { mock: { calls: unknown[][] } }, key: string) =>
+    invalidate.mock.calls.filter(([filters]) => {
+      const queryKey = (filters as { queryKey?: unknown[] } | undefined)?.queryKey;
+      return queryKey?.length === 1 && queryKey[0] === key;
+    }).length;
+
+  it("reads each by id and reports its outcome once, as the feed would have", async () => {
+    api.byId = {
+      [crawl.id]: { ...crawl, status: "complete" },
+      [upload.id]: { ...upload, status: "failed", failure_code: "encrypted" } as Job
+    };
+    const { fake, invalidate } = await returnAfterBothLeft();
+
+    await vi.waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(toast.success).toHaveBeenCalledTimes(1));
+    expect(toast.success).toHaveBeenCalledWith("Devize är klar.");
+    expect(toast.error).toHaveBeenCalledWith(
+      "Avtal.pdf misslyckades.",
+      expect.objectContaining({ description: expect.any(String) })
+    );
+    expect(invalidationsOf(invalidate, "websites")).toBe(1);
+    expect(invalidationsOf(invalidate, "collections")).toBe(1);
+    expect(readsById()).toHaveLength(2);
+
+    // Nothing else left the list: the next poll reads nothing by id.
+    await act(() => vi.advanceTimersByTimeAsync(120_000));
+    expect(readsById()).toHaveLength(2);
+    expect(toast.success).toHaveBeenCalledTimes(1);
+    expect(toast.error).toHaveBeenCalledTimes(1);
+    fake.restore();
+  });
+
+  it("drops a job that was deleted meanwhile without a word", async () => {
+    api.byId = { [crawl.id]: 404, [upload.id]: 404 };
+    trackSyncs([{ jobId: crawl.id, knowledgeId: "ik-1" }]);
+    const { fake, invalidate } = await returnAfterBothLeft();
+
+    await vi.waitFor(() => expect(invalidationsOf(invalidate, "websites")).toBe(1));
+    expect(readsById()).toHaveLength(2);
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(toast.error).not.toHaveBeenCalled();
+    // A sync that waited on the deleted job is over without another list.
+    await vi.waitFor(() => expect(pendingSyncs()).toEqual([]));
+    await act(() => vi.advanceTimersByTimeAsync(120_000));
+    expect(readsById()).toHaveLength(2);
+    fake.restore();
+  });
+
+  it("reads them together, not one after the other", async () => {
+    api.byId = {
+      [crawl.id]: { ...crawl, status: "complete" },
+      [upload.id]: { ...upload, status: "complete" }
+    };
+    let answer = () => {};
+    const gate = new Promise<void>((resolve) => (answer = resolve));
+    api.byIdGates = { [crawl.id]: gate, [upload.id]: gate };
+    trackSyncs([{ jobId: crawl.id, knowledgeId: "ik-1" }]);
+    const { fake } = await returnAfterBothLeft();
+
+    await vi.waitFor(() => expect(readsById()).toHaveLength(2));
+    expect(toast.success).not.toHaveBeenCalled();
+    // Not over while its read is out.
+    expect(pendingSyncs()).toHaveLength(1);
+    await act(async () => answer());
+    await vi.waitFor(() => expect(toast.success).toHaveBeenCalledTimes(2));
+    fake.restore();
+  });
+
+  it("reports a job as soon as its read answers, not when the slowest one does", async () => {
+    api.byId = {
+      [crawl.id]: { ...crawl, status: "complete" },
+      [upload.id]: { ...upload, status: "complete" }
+    };
+    let answer = () => {};
+    api.byIdGates = { [upload.id]: new Promise<void>((resolve) => (answer = resolve)) };
+    const { fake } = await returnAfterBothLeft();
+
+    await vi.waitFor(() => expect(toast.success).toHaveBeenCalledWith("Devize är klar."));
+    expect(toast.success).toHaveBeenCalledTimes(1);
+    await act(async () => answer());
+    await vi.waitFor(() => expect(toast.success).toHaveBeenCalledTimes(2));
+    fake.restore();
+  });
+});
+
+// A list can show a job again while its read is out, and a later list miss
+// it again: only the newest read speaks for it.
+describe("a job that leaves the list twice", () => {
+  const crawl = { ...job, id: "job-crawl", task: "crawl", name: "Devize" } as Job;
+  type Read = { resolve: (answer: Job | 404) => void; reject: (error: Error) => void };
+
+  /** Two reads of the job are out, the first started before the second miss. */
+  async function twoReadsOut() {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const reads: Read[] = [];
+    api.answerById = () =>
+      new Promise<Job | 404>((resolve, reject) => reads.push({ resolve, reject }));
+    api.items = [crawl];
+    renderInApp(
+      <JobsProvider>
+        <JobIndicator />
+      </JobsProvider>
+    );
+    await screen.findByRole("button", { name: "Aviseringar, 1 pågår" });
+    // Each list is waited for on screen, so the provider has judged it
+    // before the next one comes.
+    api.items = [];
+    await act(() => vi.advanceTimersByTimeAsync(2_000));
+    await screen.findByRole("button", { name: "Aviseringar" });
+    await vi.waitFor(() => expect(reads).toHaveLength(1));
+    api.items = [crawl];
+    await act(() => vi.advanceTimersByTimeAsync(30_000));
+    await screen.findByRole("button", { name: "Aviseringar, 1 pågår" });
+    api.items = [];
+    await act(() => vi.advanceTimersByTimeAsync(2_000));
+    await screen.findByRole("button", { name: "Aviseringar" });
+    await vi.waitFor(() => expect(reads).toHaveLength(2));
+    return reads;
+  }
+
+  it("reports the newest read's answer when the older read fails after it started", async () => {
+    const [first, second] = await twoReadsOut();
+    await act(async () => first!.reject(new Error("Network error")));
+    await act(async () => second!.resolve({ ...crawl, status: "complete" }));
+
+    await vi.waitFor(() => expect(toast.success).toHaveBeenCalledWith("Devize är klar."));
+    await act(() => vi.advanceTimersByTimeAsync(30_000));
+    expect(toast.success).toHaveBeenCalledTimes(1);
+    expect(callsTo("/api/v1/jobs/{id}/")).toHaveLength(2);
+  });
+
+  it("lets an older read neither settle nor overwrite the newest one", async () => {
+    const [first, second] = await twoReadsOut();
+    // Answered late, the first read would drop the job as gone.
+    await act(async () => first!.resolve(404));
+    await act(async () => {});
+    expect(screen.getByRole("button", { name: "Aviseringar" })).toBeTruthy();
+    await act(async () => second!.resolve({ ...crawl, status: "complete" }));
+
+    await vi.waitFor(() => expect(toast.success).toHaveBeenCalledWith("Devize är klar."));
+    expect(toast.success).toHaveBeenCalledTimes(1);
+    expect(callsTo("/api/v1/jobs/{id}/")).toHaveLength(2);
+  });
+});
+
+it("reads a started job by id once lists begun after it never show it", async () => {
+  // It ran and finished while nothing watched, and has left the list. A list
+  // already under way when the job was started cannot show it: that one waits.
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  api.items = [];
+  const started = { ...job, id: "job-new", task: "crawl", name: "Devize", status: "queued" } as Job;
+  let listArrives = () => {};
+  api.jobsGate = new Promise<void>((resolve) => (listArrives = resolve));
+  api.byId = { [started.id]: started };
+  function Track() {
+    const { trackJob } = useJobs();
+    return (
+      <button type="button" onClick={() => trackJob(started)}>
+        Track
+      </button>
+    );
+  }
+  const { queryClient } = renderInApp(
+    <JobsProvider>
+      <Track />
+    </JobsProvider>
+  );
+  await vi.waitFor(() => expect(browserApi.GET).toHaveBeenCalledTimes(1));
+  fireEvent.click(screen.getByRole("button", { name: "Track" }));
+  api.jobsGate = null;
+  await act(async () => listArrives());
+  await vi.waitFor(() => expect(queryClient.getQueryData(["jobs"])).toEqual([]));
+  const readsById = () => callsTo("/api/v1/jobs/{id}/");
+  expect(readsById()).toHaveLength(0);
+
+  // A list begun after it: read by id, still running, so still tracked.
+  await act(() => vi.advanceTimersByTimeAsync(2_000));
+  await vi.waitFor(() => expect(readsById()).toHaveLength(1));
+  expect(toast.success).not.toHaveBeenCalled();
+
+  api.byId = { [started.id]: { ...started, status: "complete" } };
+  await act(() => vi.advanceTimersByTimeAsync(2_000));
+  await vi.waitFor(() => expect(toast.success).toHaveBeenCalledWith("Devize är klar."));
+  expect(readsById()).toHaveLength(2);
 });
 
 it("keeps its context still when the jobs arrive", async () => {
@@ -485,11 +719,44 @@ describe("an import's first sync", () => {
     await act(async () => {});
     expect(toast.success).not.toHaveBeenCalled();
     expect(toast.error).not.toHaveBeenCalled();
-    expect(pendingImports()).toEqual([pending]);
+    expect(pendingImports()).toEqual([{ ...pending, jobStatus: "complete" }]);
     api.space = spaceWith(synced);
     await act(() => vi.advanceTimersByTimeAsync(30_000));
     await vi.waitFor(() => expect(toast.success).toHaveBeenCalledTimes(1));
     expect(pendingImports()).toEqual([]);
+  });
+
+  it("keeps a recovered job's status for reports after a list that no longer shows it", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    sessionStorage.setItem(PENDING_IMPORTS_STORAGE_KEY, JSON.stringify([pending]));
+    resetPendingImports();
+    api.items = [{ ...imported, status: "in progress" }];
+    api.space = spaceWith({ last_sync_status: "never" });
+    const { queryClient } = renderInApp(<JobsProvider>{null}</JobsProvider>);
+    await vi.waitFor(() => expect(queryClient.getQueryData(["jobs"])).toEqual(api.items));
+
+    // It finished unseen and left the list; its read says complete, but its
+    // sync status is not written yet: the report waits.
+    api.items = [];
+    api.byId = { [imported.id]: { ...imported, status: "complete" } };
+    await act(() => vi.advanceTimersByTimeAsync(2_000));
+    await vi.waitFor(() =>
+      expect(browserApi.GET).toHaveBeenCalledWith("/api/v1/spaces/{id}/", expect.anything())
+    );
+    await act(async () => {});
+    // The next list no longer shows it at all: still a completed job.
+    const spaceReads = () => callsTo("/api/v1/spaces/{id}/").length;
+    const before = spaceReads();
+    await act(() => vi.advanceTimersByTimeAsync(30_000));
+    await vi.waitFor(() => expect(spaceReads()).toBeGreaterThan(before));
+    await act(async () => {});
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(pendingImports()).toHaveLength(1);
+
+    api.space = spaceWith(synced);
+    await act(() => vi.advanceTimersByTimeAsync(30_000));
+    await vi.waitFor(() => expect(toast.success).toHaveBeenCalledTimes(1));
+    expect(toast.error).not.toHaveBeenCalled();
   });
 
   it("retries a temporary space-read failure without another job transition", async () => {
@@ -559,6 +826,8 @@ it("stops a sync queued from a menu reading as queued once its job is over, not 
   vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
   api.items = [];
   const sync = { ...job, id: "job-sync", name: "Avtal", task: "pull_sharepoint_content" };
+  // Asked by id, the server knows it: still queued.
+  api.byId = { "job-sync": { ...sync, status: "queued" } as Job };
   function StartSync() {
     const { trackJob } = useJobs();
     return (
@@ -582,7 +851,8 @@ it("stops a sync queued from a menu reading as queued once its job is over, not 
 
   fireEvent.click(screen.getByRole("button", { name: "Synka" }));
   // The list read right after does not show the job yet.
-  await vi.waitFor(() => expect(browserApi.GET).toHaveBeenCalledTimes(2));
+  await vi.waitFor(() => expect(callsTo("/api/v1/jobs/")).toHaveLength(2));
+  await vi.waitFor(() => expect(callsTo("/api/v1/jobs/{id}/")).toHaveLength(1));
   await act(async () => {});
   expect(pendingSyncs()).toHaveLength(1);
 

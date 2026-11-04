@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testAppContext } from "@/test/render";
 import { setViewport } from "@/test/setup-dom";
@@ -69,6 +69,17 @@ const sharedSpace = () =>
     }
   });
 
+// A tablet's header is a chunk of its own: one render loads it, so every test then renders it at once.
+beforeAll(async () => {
+  // Fetched first: on a loaded test machine the chunk outlasts findBy's wait.
+  await import("./space-header");
+  setViewport("tablet-portrait");
+  show(sharedSpace(), ["overview"]);
+  await screen.findByRole("button", { name: "Lägg till medlem" });
+  cleanup();
+  setViewport("desktop");
+});
+
 describe("SpaceFrame", () => {
   it("renders the chat full-bleed, without the space header", () => {
     show(sharedSpace(), ["chat"]);
@@ -87,6 +98,62 @@ describe("SpaceFrame", () => {
     expect(screen.queryByRole("link", { name: "Ny chatt" })).toBeNull();
   });
 
+  it("gives a page beside the sidebar no header of its own: the page's title is its h1", () => {
+    const { container } = show(sharedSpace(), ["overview"]);
+    // As in Svelte, the sidebar carries the space and its sections (SpaceNav).
+    expect(screen.queryByRole("banner")).toBeNull();
+    expect(screen.queryByRole("navigation")).toBeNull();
+    expect(screen.queryByRole("heading")).toBeNull();
+    expect(container.querySelector("[data-own-phone-header]")).toBeNull();
+  });
+
+  it("names the space above a section page for when the sidebar is its icon rail", () => {
+    // A small laptop: a mouse, under 1280 px.
+    setViewport({ width: 1024, height: 768, pointer: "fine" });
+    show(sharedSpace(), ["assistants"]);
+    // Shown by CSS only while the shell marks the rail (app-shell.tsx data-side-nav-rail).
+    const eyebrow = document.querySelector<HTMLElement>("[data-space-eyebrow]")!;
+    expect(eyebrow.textContent).toContain("Upphandling");
+    expect(eyebrow.textContent).toContain("Klass 2 · Intern");
+    expect(eyebrow.className).toMatch(/group-has-\[\[data-side-nav-rail\]\]\/shell:flex/);
+    expect(eyebrow.className).toMatch(/(^| )hidden( |$)/);
+    setViewport("desktop");
+  });
+
+  it("names it nowhere else: Översikt shows the name, a phone and a tablet have their header", () => {
+    show(sharedSpace(), ["overview"]);
+    expect(document.querySelector("[data-space-eyebrow]")).toBeNull();
+    cleanup();
+    for (const viewport of ["phone", "tablet-portrait"] as const) {
+      cleanup();
+      setViewport(viewport);
+      show(sharedSpace(), ["assistants"]);
+      expect(document.querySelector("[data-space-eyebrow]")).toBeNull();
+    }
+    setViewport("desktop");
+  });
+
+  it("scrolls with the page panel instead of a scroll container of its own", () => {
+    const { container } = show(sharedSpace(), ["overview"]);
+    // main#main-content (the app shell) is the one scroll container, so Page
+    // Down works after the skip link and nothing inside can trap the scroll.
+    expect(container.querySelector(".overflow-y-auto, .overflow-auto")).toBeNull();
+    const column = screen.getByText("Sidans innehåll").parentElement!;
+    const inset = column.parentElement!;
+    // The page inset, which a full-bleed page (the space settings) drops.
+    expect(inset.className).toContain("p-6");
+    expect(inset.className).toContain("has-[[data-space-full-bleed]]:p-0");
+    // The pages' shared column, which a full-bleed page spans edge to edge.
+    expect(column.className).toContain("max-w-6xl");
+    expect(column.className).toContain("has-[[data-space-full-bleed]]:max-w-none");
+  });
+});
+
+describe("SpaceFrame on a tablet: the space's header and tabs (#1328)", () => {
+  // Touch: the SideNav lists every space, so the page names its own.
+  beforeEach(() => setViewport("tablet-portrait"));
+  afterEach(() => setViewport("desktop"));
+
   it("gives a tab page the space name as its h1, breadcrumbs, members and tabs", async () => {
     const { container } = show(sharedSpace(), ["overview"]);
 
@@ -98,7 +165,7 @@ describe("SpaceFrame", () => {
     );
 
     const crumbs = screen.getAllByRole("navigation")[0]!;
-    expect(within(crumbs).getByRole("link", { name: "Ytor" }).getAttribute("href")).toBe(
+    expect(within(crumbs).getByRole("link", { name: "Dina ytor" }).getAttribute("href")).toBe(
       "/spaces/list"
     );
     expect(within(crumbs).getByText("Upphandling").closest("[aria-current='page']")).toBeTruthy();
@@ -142,21 +209,6 @@ describe("SpaceFrame", () => {
     cleanup();
     show(makeSpace({ overrides: { description: null } }), ["overview"]);
     expect(column().className).toContain("self-center");
-  });
-
-  it("scrolls with the page panel instead of a scroll container of its own", () => {
-    const { container } = show(sharedSpace(), ["overview"]);
-    // main#main-content (the app shell) is the one scroll container, so Page
-    // Down works after the skip link and nothing inside can trap the scroll.
-    expect(container.querySelector(".overflow-y-auto, .overflow-auto")).toBeNull();
-    const column = screen.getByText("Sidans innehåll").parentElement!;
-    const inset = column.parentElement!;
-    // The page inset, which a full-bleed page (the space settings) drops.
-    expect(inset.className).toContain("p-6");
-    expect(inset.className).toContain("has-[[data-space-full-bleed]]:p-0");
-    // The pages' shared column, which a full-bleed page spans edge to edge.
-    expect(column.className).toContain("max-w-6xl");
-    expect(column.className).toContain("has-[[data-space-full-bleed]]:max-w-none");
   });
 
   it("lines the header up with the page below it, in the pages' shared column", () => {
@@ -313,11 +365,11 @@ describe("SpaceFrame on a phone (decision 24)", () => {
       .getAllByRole("link")
       .map((link) => link.getAttribute("href"));
 
-  it("pushes a shared space: back to Ytor, its name and class, the content tabs only", async () => {
+  it("pushes a shared space: back to Dina ytor, its name and class, the content tabs only", async () => {
     setViewport("phone");
     const { container } = show(sharedSpace(), ["overview"]);
 
-    const back = screen.getByRole("link", { name: "Tillbaka till Ytor" });
+    const back = screen.getByRole("link", { name: "Tillbaka till Dina ytor" });
     expect(back.getAttribute("href")).toBe("/spaces/list");
     expect(phoneHeader()?.contains(back)).toBe(true);
     expect(screen.getByRole("heading", { level: 1, name: "Upphandling" })).toBeTruthy();

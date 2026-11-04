@@ -28,9 +28,9 @@ graph LR
     B -->|Push| C[Build :develop image]
     C -->|Image Update| D[Deploy to Dev]
     B -->|Create branch| E[release/v1.8]
-    E -->|Tag v1.8.0-rc.1| F[Build :v1.8.0-rc.1 image]
+    E -->|Tag v1.8.0-rc.1| F[Build :1.8.0-rc.1 image]
     F -->|Deploy| G[Test Environment]
-    E -->|Tag v1.8.0| H[Build :v1.8.0 image]
+    E -->|Tag v1.8.0| H[Build :1.8.0 image]
     H -->|Deploy| I[Production]
 ```
 
@@ -47,8 +47,8 @@ Backflow (patches):
 | Environment | Purpose | Branch/Tag | Image Tag | Deployment Method |
 |------------|---------|------------|-----------|-------------------|
 | **Development** | Latest features, may be unstable | `develop` | `:develop` | Auto (on image update) |
-| **Test** | Pre-production testing via RC tags | `v*-rc.*` tags on `release/v1.X` | `:v1.8.0-rc.1` | Manual deploy |
-| **Production** | Live system | `v*` tags on `release/v1.X` | `:v1.8.0` | Manual deploy |
+| **Test** | Pre-production testing via RC tags | `v*-rc.*` tags on `release/v1.X` | `:1.8.0-rc.1` | Manual deploy |
+| **Production** | Live system | `v*` tags on `release/v1.X` | `:1.8.0` | Manual deploy |
 
 ## Branch Strategy
 
@@ -63,7 +63,7 @@ Backflow (patches):
 - Created from `develop` when ready to release or stabilize a minor version
 - Persistent home for all patches to that minor version
 - All version tags (`v1.X.Y`) live here
-- Test via RC tags (`:v1.8.0-rc.1`) before creating the final release
+- Test via RC tags (`:1.8.0-rc.1`) before creating the final release
 - **Never merged back** — fixes flow to `develop` via cherry-pick only
 - Protected: only members of `@eneo-ai/core-maintainers` can create, push to or delete release branches and create `v*` tags, so the release steps below require Core Maintainer access. See [Governance and Roles](../frontend/apps/docs-site/src/content/contributing/governance.mdx)
 
@@ -199,12 +199,22 @@ from a PR, release checkout, artifact or event-supplied ref.
 | Checker or schema differs from `develop` | Backport `scripts/check_whats_new.py` and `releases.schema.json` to the release branch, then prepare again. Preparation and the tag build must validate the notes with identical rules. |
 | Draft created, tag creation failed | Fix App/tag permissions and rerun the failed controller job or preparation. The same draft and commit are reused. |
 | Images, smoke tests or SBOM generation failed | Rerun failed jobs in **Build and Push Docker Images**. The release stays a draft and its `latest` aliases are not promoted. |
+| A develop publication failed or never moved `:develop` | Rerun **all jobs** of that commit's **Build and Push Docker Images** run. It keeps the run's commit and ref, checks again, and moves the alias only if no newer commit is already published. |
 | Publication, alias promotion or history PR failed | Rerun the failed **Prepare and Publish Release** reconciliation. It revalidates the tag and bundle, preserves publication metadata, reuses an open history PR and recreates an interrupted history branch from the current `develop`. |
 | Existing tag names another commit | Stop. The controller refuses to replace it; use a new version. |
 
 Publication transitions and image builds use queued concurrency so a newer
-event does not replace a pending release. GitHub permits up to 100 pending
-runs per concurrency group; if that limit is reached, rerun a canceled event.
+event does not replace a pending release. Different commits publish side by
+side; writes of one version's image tags and release assets wait for each
+other, and every alias move (`develop`, a branch's alias, `latest`) and the
+release controller hold one lock. GitHub permits up to 100 pending runs per
+concurrency group; if that limit is reached, rerun a canceled event.
+
+A develop publication reuses the merge queue's CI when the queue's run on that
+exact commit passed the full suite and left its validation receipt; a fresh
+security check still runs, and the published images are still scanned and
+smoke tested. Otherwise, and for tags and manual runs, the full CI runs in the
+publication.
 
 This flow applies to release branches carrying the managed-publication changes
 in `build_and_push_images.yml` and the release scripts, including the existing
@@ -215,9 +225,11 @@ without a request keep their existing publication behavior; their tag-local
 workflows are never rewritten. RC publication is unchanged. Do not manually
 publish a managed draft or create its final tag in the Releases UI.
 
-GitHub Actions will automatically build production images:
-- `ghcr.io/eneo-ai/eneo-backend:v1.8.0`
-- `ghcr.io/eneo-ai/eneo-frontend:v1.8.0`
+GitHub Actions will automatically build production images (the tag's version
+without its `v`):
+- `ghcr.io/eneo-ai/eneo-backend:1.8.0`
+- `ghcr.io/eneo-ai/eneo-frontend:1.8.0`
+- `ghcr.io/eneo-ai/eneo-tool-runtime:1.8.0`
 
 Deploy to production by updating your deployment config to point at the new version tag.
 
@@ -447,13 +459,30 @@ This applies to all fixes on release branches — hotfixes, RC stabilization fix
 
 ### Image Tagging Strategy
 
+Every published version is one commit's backend, frontend and tool-runtime
+images, recorded with their digests in the release bundle (`release.json`,
+`release.env`). A version tag is the release version without its `v`, or a
+branch's name followed by the commit's first 12 hex characters. Only
+`v`-prefixed tags are releases.
+
 | Source | Docker Tags | Purpose |
 |--------|------------|---------|
-| `develop` branch | `:develop`, `:develop-{sha}` | Development testing |
-| `v*-rc/beta` tags | `:v1.8.0-rc.1` (no `:latest`) | Test environment / pre-release testing |
-| `v*` tags (stable) | `:v1.8.0`, `:latest` (if highest version) | Production releases |
+| `develop` branch | `:develop`, `:develop-<12-hex sha>` (for example `:develop-0575bbaa925b`) | Development testing |
+| Branch dispatch (`workflow_dispatch`) | `:<branch>`, `:<branch>-<12-hex sha>` (`/` becomes `-`; a branch cannot publish `:latest` or `:develop`) | Feature testing |
+| `v*-rc/beta` tags | `:1.8.0-rc.1` (no `:latest`) | Test environment / pre-release testing |
+| `v*` tags (stable) | `:1.8.0`, `:latest` (if highest version) | Production releases |
 
-**How `:latest` is decided:** Evaluated at tag-push time by comparing the new tag against all existing stable tags (`v*` excluding pre-releases like `-rc`, `-beta`) via semver sort. Only the highest stable version wins `:latest`.
+**How `:develop` (and a branch's alias) moves:** only forward. After a commit's
+images pass CI, the scans and the bundle smoke test, its bundled digests
+become the alias if the commit is on the branch and every component's alias
+names that commit, an older one, or nothing yet. A commit that finishes after
+a newer one leaves the alias alone, a failed newest commit leaves it on the
+last good one, and a rerun completes a move that stopped part-way. The three
+component aliases are written one after another, so a reader that follows
+aliases can briefly see a mix; deploy a complete bundle (`release.env`) to get
+one tested combination.
+
+**How `:latest` is decided:** Evaluated once the tag's publication, including its SBOM, has succeeded, by comparing the new tag against all existing stable tags (`v*` excluding pre-releases like `-rc`, `-beta`) via semver sort. Only the highest stable version wins `:latest`.
 
 Consequences to be aware of:
 - Patching an older release (e.g. tagging `v1.7.4` while `v1.8.0` exists) will NOT overwrite `:latest` — the older patch correctly stays out of `:latest`.
@@ -465,15 +494,15 @@ Consequences to be aware of:
 
 ```bash
 # Backend Images
-ghcr.io/eneo-ai/eneo-backend:develop      # Latest from develop
-ghcr.io/eneo-ai/eneo-backend:v1.8.0-rc.1  # RC for testing
-ghcr.io/eneo-ai/eneo-backend:v1.8.0       # Specific release
+ghcr.io/eneo-ai/eneo-backend:develop      # Newest published develop commit
+ghcr.io/eneo-ai/eneo-backend:1.8.0-rc.1  # RC for testing
+ghcr.io/eneo-ai/eneo-backend:1.8.0       # Specific release
 ghcr.io/eneo-ai/eneo-backend:latest       # Highest stable release
 
 # Frontend Images
-ghcr.io/eneo-ai/eneo-frontend:develop      # Latest from develop
-ghcr.io/eneo-ai/eneo-frontend:v1.8.0-rc.1  # RC for testing
-ghcr.io/eneo-ai/eneo-frontend:v1.8.0       # Specific release
+ghcr.io/eneo-ai/eneo-frontend:develop      # Newest published develop commit
+ghcr.io/eneo-ai/eneo-frontend:1.8.0-rc.1  # RC for testing
+ghcr.io/eneo-ai/eneo-frontend:1.8.0       # Specific release
 ghcr.io/eneo-ai/eneo-frontend:latest       # Highest stable release
 ```
 

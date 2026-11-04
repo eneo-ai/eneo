@@ -211,25 +211,129 @@ vm.runInNewContext(process.argv[1], {
                 release.bundle("2.3.0", "a" * 40, bad)
 
     def test_promotion_never_rewinds(self):
-        self.assertFalse(
-            release.may_promote(
-                "refs/tags/v2.2.0", "a" * 40, ["v2.3.0", "v2.2.0"], None
+        self.assertFalse(release.may_promote("refs/tags/v2.2.0", "a" * 40, ["v2.3.0", "v2.2.0"]))
+        self.assertFalse(release.may_promote("refs/tags/v2.4.0-rc.1", "a" * 40, ["v2.3.0"]))
+        self.assertTrue(release.may_promote("refs/tags/v2.3.0", "a" * 40, ["v2.3.0", "v2.2.0"]))
+        # An unprefixed tag is not a release and never outranks one.
+        self.assertTrue(release.may_promote("refs/tags/v2.3.0", "a" * 40, ["v2.3.0", "99.0.0"]))
+        with self.assertRaises(ValueError):
+            release.may_promote("refs/heads/develop", "a" * 40, [])
+
+    def test_a_branch_alias_moves_forward_and_repairs_but_never_back(self):
+        # develop: one -> two -> three -> four (head); "old" is no longer on it.
+        line = ["one", "two", "three", "four"]
+
+        def contains(ancestor, descendant):
+            return ancestor in line and descendant in line and line.index(ancestor) <= line.index(descendant)
+
+        def moves(revision, destinations, head="four"):
+            return release.may_move_branch_alias(revision, head, destinations, contains)
+
+        self.assertTrue(moves("two", [None, None, None]))  # bootstrap
+        self.assertTrue(moves("three", ["two", "two", "two"]))  # forward
+        self.assertTrue(moves("three", ["three", "two", "two"]))  # (B, A, A) is repaired to B
+        self.assertTrue(moves("three", ["three"] * 3))  # a retry rewrites the same revision
+        self.assertFalse(moves("two", ["three", "two", "two"]))  # B is refused once one is at C
+        self.assertFalse(moves("three", ["two", "four", "two"]))
+        self.assertTrue(moves("four", ["old", "two", None]))  # an alias left by a rebase follows
+        self.assertTrue(moves("three", ["two"] * 3, head="four"))  # the branch moved on meanwhile
+        self.assertFalse(moves("old", ["two"] * 3))  # a commit off the branch never moves it
+        self.assertFalse(moves("three", ["two"] * 3, head=None))  # the branch is gone
+        # A revert is a new commit after the one it reverts: forward like any other.
+        line.append("revert-of-four")
+        self.assertTrue(moves("revert-of-four", ["four"] * 3, head="revert-of-four"))
+
+    def test_an_unreadable_alias_is_not_an_absent_one(self):
+        manifest = {"digest": "sha256:" + "d" * 64, "manifests": [
+            {"digest": "sha256:" + "1" * 64, "platform": {"os": "linux", "architecture": "amd64"}},
+            {"digest": "sha256:" + "2" * 64, "platform": {"os": "linux", "architecture": "arm64"}},
+        ]}
+        label = lambda revision: json.dumps({"config": {"Labels": {"org.opencontainers.image.revision": revision}}})
+        with patch.object(release, "inspect", return_value=None):
+            self.assertEqual(release.alias_state("backend", "develop"), (None, None))
+        with patch.object(release, "inspect", return_value=manifest), patch.object(release, "run", side_effect=[label("a" * 40)] * 2):
+            self.assertEqual(release.alias_state("tool-runtime", "develop"), (manifest["digest"], "a" * 40))
+        for labels in ([label("a" * 40), label("b" * 40)], [json.dumps({}), json.dumps({})]):
+            with patch.object(release, "inspect", return_value=manifest), patch.object(release, "run", side_effect=labels):
+                with self.assertRaisesRegex(ValueError, "Cannot read the source revision"):
+                    release.alias_state("tool-runtime", "develop")
+        with patch.object(release, "inspect", side_effect=RuntimeError("Cannot verify registry image")):
+            with self.assertRaises(RuntimeError):
+                release.alias_state("backend", "develop")
+
+    def test_promotion_writes_and_checks_the_bundled_digests(self):
+        images = {c: f"{release.REGISTRY}{c}@sha256:" + str(i) * 64 for i, c in enumerate(release.COMPONENTS, 1)}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "release.json"
+            path.write_text(json.dumps(release.bundle("develop-" + "a" * 12, "a" * 40, images)))
+            history = ["b" * 40, "a" * 40]
+            written = {}
+
+            def run(*args):
+                if args[:2] == ("git", "ls-remote"):
+                    return "a" * 40 + "\trefs/heads/develop"
+                if args[:2] == ("git", "rev-parse"):
+                    return "a" * 40
+                if args[:4] == ("docker", "buildx", "imagetools", "create"):
+                    written[args[5].rsplit(":", 1)[0]] = args[6]
+                return ""
+
+            def state(component, alias):
+                image = written.get(release.REGISTRY + component)
+                return (image.rsplit("@", 1)[1], "a" * 40) if image else (None, "b" * 40 if component == "backend" else None)
+
+            env = {"GITHUB_REF": "refs/heads/develop", "GITHUB_SHA": "a" * 40}
+            with (
+                patch.dict(os.environ, env),
+                patch("sys.argv", ["release_bundle.py", "promote", "--bundle", str(path)]),
+                patch.object(release, "run", side_effect=run),
+                patch.object(release, "alias_state", side_effect=state),
+                patch.object(release, "contains", side_effect=lambda a, b: history.index(a) <= history.index(b)),
+                patch.object(release, "verify_image") as by_tag,
+                patch.object(release, "verify_digest", side_effect=lambda c, d, v, r: d) as by_digest,
+            ):
+                release.main()
+            by_tag.assert_not_called()
+            # Every bundled image is checked again, by digest, against this version and revision.
+            self.assertEqual(
+                sorted(call.args for call in by_digest.call_args_list),
+                sorted((c, i.rsplit("@", 1)[1], "develop-" + "a" * 12, "a" * 40) for c, i in images.items()),
             )
-        )
-        self.assertFalse(
-            release.may_promote("refs/tags/v2.4.0-rc.1", "a" * 40, ["v2.3.0"], None)
-        )
-        self.assertFalse(
-            release.may_promote("refs/heads/develop", "a" * 40, [], "b" * 40)
-        )
-        self.assertTrue(
-            release.may_promote("refs/heads/develop", "a" * 40, [], "a" * 40)
-        )
-        self.assertTrue(
-            release.may_promote(
-                "refs/tags/v2.3.0", "a" * 40, ["v2.3.0", "v2.2.0"], None
-            )
-        )
+            self.assertEqual(written, {release.REGISTRY + c: images[c] for c in release.COMPONENTS})
+            # An alias that does not name the bundled digest after the write fails the job.
+            with (
+                patch.dict(os.environ, env),
+                patch("sys.argv", ["release_bundle.py", "promote", "--bundle", str(path)]),
+                patch.object(release, "run", side_effect=run),
+                patch.object(release, "alias_state", return_value=("sha256:" + "f" * 64, "a" * 40)),
+                patch.object(release, "contains", return_value=True),
+                patch.object(release, "verify_digest", side_effect=lambda c, d, v, r: d),
+            ):
+                with self.assertRaisesRegex(ValueError, "does not name"):
+                    release.main()
+            # A bundle for another revision is refused before anything is read or written.
+            path.write_text(json.dumps(release.bundle("develop-" + "b" * 12, "b" * 40, images)))
+            with (
+                patch.dict(os.environ, env),
+                patch("sys.argv", ["release_bundle.py", "promote", "--bundle", str(path)]),
+                patch.object(release, "run") as run_mock,
+            ):
+                with self.assertRaisesRegex(ValueError, "different version or source"):
+                    release.main()
+                run_mock.assert_not_called()
+
+    def test_reserved_aliases_and_unprefixed_tags_publish_nothing(self):
+        sha = "a" * 40
+        for ref in (
+            "refs/heads/latest", "refs/heads/DEVELOP", "refs/heads/develop-", "refs/tags/1.2.3",
+            # Aliases shaped like a release's or a branch's version tag.
+            "refs/heads/2.3.0", "refs/heads/2.3.0-rc.1", "refs/heads/develop-aaaaaaaaaaaa",
+            "refs/heads/feat/x-0123456789ab",
+        ):
+            with self.assertRaises(ValueError, msg=ref):
+                release.resolve(ref, sha)
+        self.assertEqual(release.resolve("refs/heads/develop", sha)["alias"], "develop")
+        self.assertEqual(release.resolve("refs/heads/feat/v2-layout", sha)["alias"], "feat-v2-layout")
 
     def test_deployment_environment_is_derived_from_the_complete_bundle(self):
         images = {c: release.REGISTRY + c + "@sha256:" + "b" * 64 for c in reversed(release.COMPONENTS)}
@@ -254,6 +358,7 @@ vm.runInNewContext(process.argv[1], {
 
     def test_existing_image_source_must_match(self):
         manifest = {
+            "digest": "sha256:" + "d" * 64,
             "manifests": [
                 {
                     "digest": "sha256:" + "b" * 64,
@@ -269,7 +374,6 @@ vm.runInNewContext(process.argv[1], {
                 release,
                 "run",
                 side_effect=[
-                    json.dumps({"digest": "sha256:" + "b" * 64}),
                     json.dumps(
                         {
                             "config": {
@@ -295,15 +399,65 @@ vm.runInNewContext(process.argv[1], {
                     {"GITHUB_REF": "refs/tags/v2.3.0", "GITHUB_SHA": "a" * 40},
                 ),
                 patch(
-                    "sys.argv", ["release_bundle.py", "bundle", "--output", str(output)]
+                    "sys.argv",
+                    ["release_bundle.py", "bundle", "--output", str(output),
+                     "--digest", "backend=sha256:" + "b" * 64, "--digest", "frontend="],
                 ),
-                patch.object(
-                    release, "verify_image", side_effect=["sha256:" + "b" * 64, None]
-                ),
+                patch.object(release, "verify_digest", side_effect=lambda c, d, v, r: d),
             ):
-                with self.assertRaisesRegex(ValueError, "Missing image"):
+                with self.assertRaisesRegex(ValueError, "Missing image: frontend"):
                     release.main()
             self.assertFalse(output.exists())
+
+    def test_bundle_names_the_digests_the_component_jobs_checked(self):
+        digests = {c: "sha256:" + str(i) * 64 for i, c in enumerate(release.COMPONENTS, 1)}
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "bundle"
+            with (
+                patch.dict(os.environ, {"GITHUB_REF": "refs/tags/v2.3.0", "GITHUB_SHA": "a" * 40}),
+                patch(
+                    "sys.argv",
+                    ["release_bundle.py", "bundle", "--output", str(output)]
+                    + [arg for c, d in digests.items() for arg in ("--digest", f"{c}={d}")],
+                ),
+                patch.object(release, "verify_digest", side_effect=lambda c, d, v, r: d) as verify,
+                patch.object(release, "verify_image") as by_tag,
+            ):
+                release.main()
+            by_tag.assert_not_called()
+            self.assertEqual(
+                sorted(call.args for call in verify.call_args_list),
+                sorted((c, d, "2.3.0", "a" * 40) for c, d in digests.items()),
+            )
+            recorded = json.loads((output / "release.json").read_text())
+            self.assertEqual(
+                recorded["images"], {c: f"{release.REGISTRY}{c}@{d}" for c, d in digests.items()}
+            )
+
+    def test_a_tag_that_moves_between_reads_cannot_swap_the_checked_image(self):
+        # The tag is read once; its platforms and labels are read by digest.
+        child = "sha256:" + "c" * 64
+        manifest = {
+            "digest": "sha256:" + "d" * 64,
+            "manifests": [{"digest": child, "platform": {"os": "linux", "architecture": "amd64"}}],
+        }
+        labels = {"config": {"Labels": {
+            "org.opencontainers.image.version": "2.3.0",
+            "org.opencontainers.image.revision": "a" * 40,
+        }}}
+        with (
+            patch.object(release, "inspect", return_value=manifest) as inspect,
+            patch.object(release, "run", return_value=json.dumps(labels)) as run,
+        ):
+            self.assertEqual(release.verify_image("backend", "2.3.0", "a" * 40), manifest["digest"])
+        inspect.assert_called_once_with(release.REGISTRY + "backend:2.3.0")
+        self.assertEqual(run.call_args.args[4], release.REGISTRY + "backend@" + child)
+        # A digest the registry answers for with another manifest is refused.
+        with patch.object(release, "inspect", return_value={**manifest, "digest": "sha256:" + "e" * 64}):
+            with self.assertRaisesRegex(ValueError, "Cannot read"):
+                release.verify_digest("backend", "sha256:" + "d" * 64, "2.3.0", "a" * 40)
+        with self.assertRaisesRegex(ValueError, "Invalid digest"):
+            release.verify_digest("backend", "backend:latest", "2.3.0", "a" * 40)
 
     def test_retry_reuses_attested_matching_image(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -439,11 +593,8 @@ vm.runInNewContext(process.argv[1], {
 
     def test_runtime_requires_both_supported_architectures(self):
         with (
-            patch.object(release, "inspect", return_value={"manifests": []}),
             patch.object(
-                release,
-                "run",
-                return_value=json.dumps({"digest": "sha256:" + "b" * 64}),
+                release, "inspect", return_value={"digest": "sha256:" + "b" * 64, "manifests": []}
             ),
         ):
             with self.assertRaisesRegex(ValueError, "Unexpected platforms"):

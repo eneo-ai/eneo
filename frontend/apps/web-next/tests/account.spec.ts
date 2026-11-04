@@ -201,6 +201,7 @@ test.describe("the account pages on an iPad held sideways", { tag: "@vite" }, ()
   test("keep the title Konto, as upright, its tabs and the profile menu", async ({ page }) => {
     await page.goto("/account");
     await expect(page.getByRole("heading", { level: 1, name: "Konto", exact: true })).toBeVisible();
+    // A tablet keeps Konto's tabs (#1328); with a mouse its sidebar lists the pages.
     await expect(page.getByRole("navigation", { name: "Kontoinställningar" })).toBeVisible();
     await expect(page.getByRole("button", { name: /: konto och inställningar$/ })).toHaveAttribute(
       "aria-haspopup",

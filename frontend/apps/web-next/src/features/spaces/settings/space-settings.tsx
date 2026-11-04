@@ -90,6 +90,7 @@ import {
 import { SpaceModelSelect, type ModelKind, type ModelSelectionChange } from "./space-model-select";
 import { SpaceSpeakerServices } from "./space-speaker-services";
 import { SpaceDeletionHint } from "@/features/spaces/list/delete-space-dialog";
+import { useSectionHeadingLevels } from "@/features/spaces/frame/space-frame";
 
 type SpaceUpdate = Schema<"PartialUpdateSpaceRequest">;
 type SpaceUpdateRequest = SpaceUpdate | ((currentSpace: Space) => SpaceUpdate);
@@ -1110,6 +1111,7 @@ function SpaceCapabilitiesSection() {
 
 export function SpaceSettings() {
   const t = useTranslations();
+  const levels = useSectionHeadingLevels();
   const { space, can } = useSpace();
   const summary = editorSummaries(t);
   const isOrgSpace = space.organization;
@@ -1196,7 +1198,7 @@ export function SpaceSettings() {
         isFramed
         header={
           <PageHeader
-            headingLevel={2}
+            headingLevel={levels.title}
             title={t("settings")}
             actions={<SaveStatusIndicator />}
             className="py-3"

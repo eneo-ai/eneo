@@ -31,10 +31,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   try {
     if (process.argv.includes("--github-event")) {
       const event = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, "utf8"));
-      const base = eventName === "pull_request"
-        ? event.pull_request?.base?.sha : event.merge_group?.base_sha;
-      if (["pull_request", "merge_group"].includes(eventName)) {
-        files = changedFiles(base, process.env.GITHUB_SHA);
+      if (eventName === "pull_request") {
+        files = changedFiles(event.pull_request?.base?.sha, process.env.GITHUB_SHA);
       }
     } else {
       const filesPath = getArgValue("--files");
@@ -43,7 +41,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   } catch (error) {
     console.error(`::warning::Cannot determine changed files; running full CI. ${error.message}`);
   }
-  const plan = planCi(files, eventName);
+  const plan = planCi(files, eventName, { publication: process.env.CI_PUBLICATION === "true" });
   writeOutputs(plan);
   if (process.env.GITHUB_STEP_SUMMARY) {
     const jobs = Object.entries(plan.expected_jobs).filter(([, required]) => required).map(([job]) => job);
@@ -55,7 +53,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 }
 
 export function changedFiles(base, head, cwd = process.cwd()) {
-  // Never substitute HEAD^: a queue candidate can include several PRs.
+  // Never substitute HEAD^: a pull request can hold several commits.
   if (![base, head].every((sha) => typeof sha === "string" && /^[0-9a-f]{40}$/.test(sha))) {
     throw new Error("A valid base and head SHA are required for scoped CI");
   }
@@ -64,11 +62,15 @@ export function changedFiles(base, head, cwd = process.cwd()) {
   }).split("\0").filter(Boolean);
 }
 
-export function planCi(files, eventName) {
-  // Reusable workflows inherit the caller's event. Pushes, tags and manual
-  // publication always validate everything, even when their diff is narrow.
-  const scope = ["pull_request", "merge_group"].includes(eventName) ? classify(files) : allTrue();
-  const images = dockerImages.filter(({ image }) => scope[`docker_${image.replaceAll("-", "_")}`]);
+export function planCi(files, eventName, { publication = false } = {}) {
+  // Only a pull request is scoped to its diff. The merge queue validates everything:
+  // its candidate is what lands on develop, image publication reuses that result, and
+  // a queued entry's diff leaves out the entries ahead of it. Reusable workflows
+  // inherit the caller's event, so pushes, tags and manual publication do the same.
+  const scope = eventName === "pull_request" ? classify(files) : allTrue();
+  // Publication builds and checks the backend and frontend images it publishes.
+  const images = dockerImages.filter(({ image }) => scope[`docker_${image.replaceAll("-", "_")}`]
+    && !(publication && ["backend", "frontend"].includes(image)));
   return {
     ...scope,
     docker: images.length > 0,

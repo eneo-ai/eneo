@@ -12,14 +12,14 @@ import {
   useCallback,
   useEffect,
   useEffectEvent,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   useSyncExternalStore,
   type ComponentProps,
   type Ref,
-  type ReactNode
+  type ReactNode,
+  useImperativeHandle
 } from "react";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
@@ -203,8 +203,15 @@ function previewFilesKey(files: readonly PreviewFile[]): string {
   );
 }
 
+/** Opens the latest answer's Felsökning tab; false when there is none to show yet. */
+export type ChatDebugHandle = { openDebug: (trigger: HTMLElement | null) => boolean };
+
 type ChatViewProps = {
   leaveConfirmationRef?: Ref<LeaveConfirmationHandle>;
+  /** The page header's Felsökning button opens the latest answer's debug view through it. */
+  debugRef?: Ref<ChatDebugHandle>;
+  /** Whether `debugRef` has a saved answer to open: the header enables Felsökning by it. */
+  onDebugReadyChange?: (ready: boolean) => void;
   partner: ChatPartner;
   initialSessionId?: string | null;
   initialMessages?: EneoUIMessage[];
@@ -231,9 +238,7 @@ type ChatViewProps = {
   partnerToken?: ReactNode;
   activity: ActivityState | null;
   onActivityChange: (next: ActivityState | null) => void;
-  /** Whether the side panel holds a file, view or the overview (the activity is the page's). */
-  onPanelOpenChange?: (open: boolean) => void;
-  /** The row the side panel shares with the page's history. */
+  /** The row the side panel measures, and whether the conversation is on screen. */
   layout?: SidePanelLayout;
   /**
    * A tool call of this visit reached its result or failed, once per call
@@ -275,6 +280,8 @@ export function ChatView(props: ChatViewProps) {
 
 function ConversationView({
   leaveConfirmationRef,
+  debugRef,
+  onDebugReadyChange,
   partner,
   initialSessionId = null,
   initialMessages = [],
@@ -288,7 +295,6 @@ function ConversationView({
   partnerToken,
   activity,
   onActivityChange,
-  onPanelOpenChange,
   layout,
   onToolCallFinished,
   onAnswerFinished,
@@ -632,12 +638,6 @@ function ConversationView({
   useEffect(() => {
     if (panelOpen) onActivityChange(null);
   }, [panelOpen, onActivityChange]);
-  // Before paint: a history that gives way to the panel is gone in the same frame.
-  useLayoutEffect(() => {
-    if (!panelOpen) return;
-    onPanelOpenChange?.(true);
-    return () => onPanelOpenChange?.(false);
-  }, [panelOpen, onPanelOpenChange]);
 
   // The panel follows the answer being written: a document draft shows there
   // while the assistant writes it, and a file created in the live turn takes
@@ -1053,6 +1053,35 @@ function ConversationView({
       onActivityChange({ messageId, tab, source: request?.source ?? null });
     },
     [openActivityId, closeActivity, onActivityChange]
+  );
+  // The header's Felsökning: the latest saved answer's debug view, its focus
+  // returning to the button as from a pill. An answer still being written has
+  // nothing saved to inspect yet, so it is never the target, and before the
+  // first answer is saved the button waits.
+  const debugAnswerId =
+    debugAvailable && sessionId !== null
+      ? (messages.findLast(
+          (message, index) =>
+            message.role === "assistant" && !(busy && index === messages.length - 1)
+        )?.id ?? null)
+      : null;
+  const debugReady = debugAnswerId !== null;
+  useEffect(() => {
+    onDebugReadyChange?.(debugReady);
+    // Gone with this conversation: the next one reports its own.
+    return () => onDebugReadyChange?.(false);
+  }, [debugReady, onDebugReadyChange]);
+  useImperativeHandle(
+    debugRef,
+    () => ({
+      openDebug: (trigger) => {
+        if (debugAnswerId === null) return false;
+        activityTrigger.current = trigger;
+        onActivityChange({ messageId: debugAnswerId, tab: "debug", source: null });
+        return true;
+      }
+    }),
+    [debugAnswerId, onActivityChange]
   );
   // A call waiting for a decision takes the dock on a phone (decision 26): a
   // sheet over the dock gives way to it, and the focus goes back to what

@@ -4,11 +4,10 @@ import { STORAGE_STATE } from "../playwright.config";
 test.skip(!process.env.E2E_BASE_URL, "Requires the FastAPI-served Vite build");
 
 /*
- * Key hints (↵ and ⇧ ↵ beside Send, ⌘K in the menu and the palette's footer) point at keys.
- * A touch screen has none, and a phone-width window with a mouse (a desktop browser
- * narrowed to the phone layout, the way a developer or a split view looks at it) has no
- * room for them: they crowd the send button. From the laptop layout up, with a mouse, the
- * composer still shows its hint, so hiding must not go too far.
+ * Key hints (⌘K in the menu and the palette's footer) point at keys. A touch screen has
+ * none, and a phone-width window with a mouse (a desktop browser narrowed to the phone
+ * layout, the way a developer or a split view looks at it) has no room for them. Send's
+ * keys are on its tooltip, where a mouse finds them without crowding the composer's row.
  */
 
 /** The visible key hints in the document, or only in what `within` selects. */
@@ -54,7 +53,7 @@ for (const touch of [true, false]) {
 }
 
 test(
-  "the composer keeps its key hint in the laptop layout with a mouse",
+  "Send names its keys on its tooltip in the laptop layout with a mouse",
   { tag: ["@vite", "@key-hints"] },
   async ({ browser, baseURL }) => {
     const context = await browser.newContext({
@@ -65,9 +64,11 @@ test(
     const page = await context.newPage();
     await page.goto("/spaces/personal/chat");
     await expect(page.getByRole("textbox", { name: /^Fråga / })).toBeVisible();
-    // In the composer itself: the menu's own ⌘K hint is also on screen at this width and
-    // would keep this green if the composer's went missing.
-    expect((await visibleKeyHints(page, "[data-start-composer]")).length).toBeGreaterThan(0);
+    await page
+      .locator("[data-start-composer]")
+      .getByRole("button", { name: "Skicka meddelande" })
+      .hover();
+    await expect(page.getByText("Skicka (Retur). Skift+Retur ger en ny rad.")).toBeVisible();
     await context.close();
   }
 );

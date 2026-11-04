@@ -156,7 +156,7 @@ test(
     await page.reload();
     const filter = page.getByRole("textbox", { name: "Filtrera ytor", exact: true });
     await filter.fill(prefix);
-    const table = page.getByRole("table", { name: "Ytor", exact: true });
+    const table = page.getByRole("table", { name: "Dina ytor", exact: true });
     await expect(page.getByRole("button", { name: "Lista", exact: true })).toHaveAttribute(
       "aria-pressed",
       "true"
@@ -190,7 +190,9 @@ test(
     await dialog.getByRole("button", { name: "Bekräfta borttagning", exact: true }).click();
     expect((await deletion).ok()).toBe(true);
     await expect(dialog).toBeHidden();
-    await expect(page.getByRole("heading", { level: 1, name: "Ytor", exact: true })).toBeFocused();
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Dina ytor", exact: true })
+    ).toBeFocused();
     await table.getByRole("link", { name: second.name, exact: true }).click();
     await expect(page).toHaveURL(`/spaces/${second.id}/overview`);
   }

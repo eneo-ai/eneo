@@ -128,6 +128,30 @@ export function spaceRoute(segments: readonly string[]): SpaceRoute {
   return { kind: "page", section: first, isSectionRoot: rest.length === 0 };
 }
 
+/** A row of the space's sidebar: a section, or the personal space's chat. */
+export type SpaceNavItem = { id: SpaceSectionId | "chat"; href: string };
+
+/**
+ * The space's sidebar in groups, each set apart by a divider, as Svelte's
+ * `SpaceMenu.svelte` draws it: the personal space's Chatt on its own, the
+ * sections, then Medlemmar with what follows it. Gating stays with
+ * `spaceSections`; empty groups are dropped.
+ */
+export function spaceNavGroups(space: Space, can: Can, routeId: SpaceRouteId): SpaceNavItem[][] {
+  const sections = spaceSections(space, can, routeId);
+  const members = sections.findIndex((section) => section.id === "members");
+  const groups: SpaceNavItem[][] = [
+    space.personal && !space.organization
+      ? [{ id: "chat", href: `/spaces/${routeId}/chat?tab=chat` }]
+      : [],
+    members === -1 ? sections : sections.slice(0, members),
+    members === -1 ? [] : sections.slice(members)
+  ];
+  return groups
+    .map((group) => group.map(({ id, href }) => ({ id, href })))
+    .filter((group) => group.length > 0);
+}
+
 /** Where the space crumb in the breadcrumbs points: the overview, or the first tab. */
 export function spaceLandingHref(sections: SpaceSection[], routeId: SpaceRouteId): string {
   return sections[0]?.href ?? `/spaces/${routeId}/overview`;

@@ -45,6 +45,9 @@ from eneo.completion_models.domain.model_capacity import (
     ModelCapacityNoFit,
     UnknownModelCapacityError,
 )
+from eneo.completion_models.domain.model_kwargs_capabilities import (
+    resolve_supported_model_kwargs,
+)
 from eneo.completion_models.domain.request_preflight import (
     DEFAULT_USEFUL_OUTPUT_RESERVE_TOKENS,
     CompletionOutputCapacityError,
@@ -1567,6 +1570,23 @@ class TenantModelAdapter(CompletionModelAdapter):
             built_in_tools=eneo_tools,
         )
 
+    def _prepare_reasoning_effort(self, effort: object) -> dict[str, Any]:
+        """The reasoning controls a model's stored capabilities allow, which
+        are authoritative even when LiteLLM cannot recognize an opaque
+        deployment name. Resolution also applies the model's flags."""
+        capability = resolve_supported_model_kwargs(
+            model_kwargs_capabilities=self.model.model_kwargs_capabilities,
+            reasoning=self.model.reasoning,
+        ).reasoning_effort
+        if not capability.accepts(effort):
+            return {}
+        kwargs: dict[str, Any] = {"reasoning_effort": effort}
+        if self.provider_type == "azure":
+            # LiteLLM's Azure mapping otherwise drops reasoning for opaque
+            # routes, including when drop_params=True is used.
+            kwargs["allowed_openai_params"] = ["reasoning_effort"]
+        return kwargs
+
     def _prepare_kwargs(
         self,
         model_kwargs: ModelKwargs | dict[str, Any] | None = None,
@@ -1609,7 +1629,14 @@ class TenantModelAdapter(CompletionModelAdapter):
 
         # Merge with additional kwargs
         kwargs.update(additional_kwargs)
-        if model_kwargs or kwargs.get("reasoning_effort") not in (None, ""):
+        effort = kwargs.get("reasoning_effort")
+        if (
+            effort not in (None, "")
+            and getattr(self.model, "model_kwargs_capabilities", None) is not None
+        ):
+            del kwargs["reasoning_effort"]
+            kwargs.update(self._prepare_reasoning_effort(effort))
+        elif model_kwargs or effort not in (None, ""):
             kwargs = normalize_reasoning_effort(
                 litellm_model=self.litellm_model,
                 provider_type=self.provider_type,

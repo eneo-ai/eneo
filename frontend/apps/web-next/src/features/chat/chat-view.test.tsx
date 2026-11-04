@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatPartner, EneoUIMessage } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
@@ -928,68 +928,5 @@ describe("ChatView activity on a phone (decision 28)", () => {
     layOutConversation(844);
     expect(await screen.findByRole("complementary", { name: PANEL })).toBeTruthy();
     expect(document.activeElement).toBe(inAnswer);
-  });
-});
-
-describe("ChatView activity where the history gives way to it", () => {
-  /** The chat page's row: the conversation, and a 320 px history that yields to a panel. */
-  function Row({ messages }: { messages: EneoUIMessage[] }) {
-    const row = useRef<HTMLDivElement>(null);
-    const [historyOpen, setHistoryOpen] = useState(true);
-    const [activity, setActivity] = useState<ActivityState | null>(null);
-    return (
-      <div ref={row} data-testid="row" className="flex h-[600px]">
-        <ChatView
-          partner={assistant}
-          initialMessages={messages}
-          initialSessionId="session-1"
-          activity={activity}
-          onActivityChange={(next) => {
-            if (next) setHistoryOpen(false);
-            setActivity(next);
-          }}
-          layout={{ row, aside: historyOpen ? { width: 320, yields: true } : null }}
-        />
-        {historyOpen && <aside aria-label="Konversationer" style={{ width: 320 }} />}
-      </div>
-    );
-  }
-
-  it("opens beside the conversation without passing through the sheet", () => {
-    const sourced: EneoUIMessage[] = [
-      { id: "q1", role: "user", parts: [{ type: "text", text: "Vilken gräns gäller?" }] },
-      {
-        id: "a1",
-        role: "assistant",
-        parts: [
-          {
-            type: "source-document",
-            sourceId: "abcd1234-0000",
-            mediaType: "text/plain",
-            title: "LOU 19 kap."
-          },
-          { type: "text", text: 'Gränsen är 700 000 kr<inref id="abcd1234"/>.', state: "done" }
-        ] as EneoUIMessage["parts"]
-      }
-    ];
-    renderInApp(<Row messages={sourced} />);
-    act(() => reportResize(screen.getByTestId("row"), { width: 1000, height: 600 }));
-    const dock = screen.getByRole("textbox", { name: /^Fråga / });
-    const hidden: boolean[] = [];
-    const watch = new MutationObserver(() => hidden.push(Boolean(dock.closest("[hidden]"))));
-    watch.observe(document.body, { attributes: true, attributeFilter: ["hidden"], subtree: true });
-    const scrolled = vi.spyOn(HTMLElement.prototype, "scrollIntoView");
-    const opener = within(screen.getByRole("list", { name: "Källor" })).getByRole("button", {
-      name: "Källa 1: LOU 19 kap."
-    });
-
-    fireEvent.click(opener);
-
-    expect(screen.getByRole("complementary", { name: "Aktivitet för svaret" })).toBeTruthy();
-    watch.disconnect();
-    // The dock never gave way and the answer did not scroll for a sheet that never came.
-    expect(hidden.filter(Boolean)).toEqual([]);
-    expect(scrolled.mock.contexts).not.toContain(opener);
-    scrolled.mockRestore();
   });
 });

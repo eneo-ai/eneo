@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -8,6 +9,7 @@ import test from "node:test";
 import { checkBuildMemory, readPeakRssMb } from "./ci-build-memory.mjs";
 import { changedFiles, planCi } from "./ci-change-scope.mjs";
 import { evaluateCi } from "./ci-gate.mjs";
+import { CI_WORKFLOW, proves } from "./ci-publication-acceptance.mjs";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const appFile = "frontend/apps/web/src/routes/+page.svelte";
@@ -16,7 +18,7 @@ const docsFile = "frontend/apps/docs-site/src/content/contributing/index.mdx";
 const resultsFor = (plan) => Object.fromEntries(Object.entries(plan.expected_jobs)
   .map(([job, required]) => [job, { result: required ? "success" : "skipped" }]));
 
-for (const event of ["pull_request", "merge_group"]) {
+for (const event of ["pull_request"]) {
   test(`${event}: Svelte-only changes retain E2E and a production image build`, () => {
     const plan = planCi([appFile], event);
     assert.equal(plan.frontend, true);
@@ -48,7 +50,7 @@ for (const event of ["pull_request", "merge_group"]) {
 
 test("shared frontend inputs validate both apps and all application images", () => {
   for (const file of ["frontend/bun.lock", "frontend/package.json", "frontend/patches/x.patch", "frontend/packages/ui/src/styles/main.css"]) {
-    const plan = planCi([file], "merge_group");
+    const plan = planCi([file], "pull_request");
     for (const name of ["frontend", "frontend_e2e", "web_next", "web_next_e2e"]) assert.equal(plan[name], true, `${file}: ${name}`);
     assert.deepEqual(plan.docker_matrix.include.map(({ image }) => image), ["backend", "frontend"]);
   }
@@ -56,7 +58,7 @@ test("shared frontend inputs validate both apps and all application images", () 
 
 test("workflow, local action, scope and gate changes force full validation", () => {
   for (const file of [".github/workflows/ci.yml", ".github/actions/setup-playwright/action.yml", ".github/scripts/ci-gate.mjs", ".github/scripts/ci-web-next-e2e-legs.mjs"]) {
-    const plan = planCi([file], "merge_group");
+    const plan = planCi([file], "pull_request");
     assert.equal(plan.full, true);
     assert.equal(plan.docker_matrix.include.length, 3);
   }
@@ -283,6 +285,167 @@ test("web-next rejects route drift before type checking", () => {
   assert.ok(job.indexOf("- name: Check route tree drift") < job.indexOf("- name: Type check"));
 });
 
+test("publications running side by side never cancel or replace each other's work", () => {
+  const read = (file) => fs.readFileSync(path.join(root, ".github/workflows", file), "utf8");
+  // Called by image publication, CI carries the caller's workflow name and belongs to that run.
+  const ci = read("ci.yml").split("\nconcurrency:\n")[1].split("\n\n")[0];
+  assert.equal(ci, [
+    "  group: ${{ github.workflow == 'CI' && format('CI-{0}', github.event.pull_request.number || github.ref) || format('{0}-checks-{1}', github.workflow, github.run_id) }}",
+    "  cancel-in-progress: ${{ github.workflow == 'CI' }}",
+  ].join("\n"));
+  // The user-facing check ci.yml calls cancels only an older run of the same pull request.
+  const userFacing = read("user-facing.yml").split("\nconcurrency:\n")[1].split("\n\n")[0];
+  assert.equal(userFacing, [
+    "  group: ${{ github.event_name == 'pull_request' && format('user-facing-{0}-{1}', github.workflow, github.event.pull_request.number) || format('user-facing-{0}-{1}', github.workflow, github.run_id) }}",
+    "  cancel-in-progress: ${{ github.event_name == 'pull_request' }}",
+  ].join("\n"));
+  // One tool-runtime publisher per version, and a waiting one is never replaced.
+  const runtime = read("tool_runtime_image.yml").split("\n  image:\n")[1].split("\n    permissions:")[0];
+  assert.match(runtime, /^      group: eneo-image-tool-runtime-\$\{\{ needs\.test\.outputs\.publish == 'true' && needs\.test\.outputs\.version \|\| github\.run_id \}\}\n      queue: max\n      cancel-in-progress: false$/m);
+});
+
+test("publication reuses CI only through a full-suite receipt from the merge queue on that commit", () => {
+  const repository = "eneo-ai/eneo";
+  const sha = "a".repeat(40);
+  const run = {
+    id: 7, run_attempt: 2, event: "merge_group", path: CI_WORKFLOW, head_sha: sha,
+    repository: { full_name: repository }, head_repository: { full_name: repository },
+    status: "completed", conclusion: "success",
+  };
+  const receipt = {
+    schema: 1, sha, repository, workflow: `${repository}/${CI_WORKFLOW}@refs/heads/gh-readonly-queue/develop/pr-1-x`,
+    event: "merge_group", run_id: 7, run_attempt: 2, scope: "full",
+  };
+  assert.equal(proves(run, receipt, { sha, repository }), true);
+  for (const [field, value] of [
+    ["event", "pull_request"], ["path", ".github/workflows/other.yml"], ["head_sha", "b".repeat(40)],
+    ["repository", { full_name: "fork/eneo" }], ["head_repository", { full_name: "fork/eneo" }],
+    ["status", "in_progress"], ["conclusion", "failure"],
+  ]) assert.equal(proves({ ...run, [field]: value }, receipt, { sha, repository }), false, `run ${field}`);
+  for (const [field, value] of [
+    ["schema", 2], ["sha", "b".repeat(40)], ["repository", "fork/eneo"], ["event", "push"],
+    ["workflow", `${repository}/.github/workflows/build_and_push_images.yml@refs/heads/develop`],
+    ["run_id", 8], ["run_attempt", 1], ["scope", "scoped"],
+  ]) assert.equal(proves(run, { ...receipt, [field]: value }, { sha, repository }), false, `receipt ${field}`);
+  assert.equal(proves(run, undefined, { sha, repository }), false);
+
+  // CI writes the receipt only after its gate passed, from the scope the run planned.
+  const ci = fs.readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8");
+  const gate = ci.slice(ci.indexOf("\n  ci:\n"));
+  assert.ok(gate.indexOf("run: node .github/scripts/ci-gate.mjs") < gate.indexOf("- name: Write the validation receipt"));
+  assert.match(gate, /FULL: \$\{\{ needs\.changes\.outputs\.full \}\}/);
+  // Only merge-queue runs write one: elsewhere an artifact-service failure must not fail CI.
+  for (const name of ["Write the validation receipt", "Keep the validation receipt"]) {
+    assert.match(gate.split(`- name: ${name}\n`)[1], /^        if: github\.event_name == 'merge_group'\n/, name);
+  }
+  assert.match(gate, /name: ci-receipt\n {10}path: ci-receipt\.json\n {10}retention-days: 14\n {10}overwrite: true/);
+
+  const workflow = fs.readFileSync(path.join(root, ".github/workflows/build_and_push_images.yml"), "utf8");
+  const job = (name) => workflow.split(`\n  ${name}:\n`)[1].split(/\n  [a-z-]+:\n/)[0];
+  assert.match(job("acceptance"), /^    permissions:\n      actions: read\n      contents: read\n/m);
+  assert.match(job("checks"), /^    needs: \[release, acceptance\]\n    if: needs\.acceptance\.outputs\.reuse != 'true'\n    uses: \.\/\.github\/workflows\/ci\.yml$/m);
+  assert.match(job("security"), /^    if: needs\.acceptance\.outputs\.reuse == 'true'\n    uses: \.\/\.github\/workflows\/security\.yml$/m);
+  assert.ok(job("accepted").includes(`[[ "$CHECKS" == success || ( "$REUSE" == true && "$CHECKS" == skipped && "$SECURITY" == success ) ]]`));
+  assert.match(job("bundle"), /^    needs: \[release, accepted, /m);
+  // One of checks and security is always skipped: without their own status checks the
+  // jobs after accepted would be skipped with it.
+  assert.ok(job("bundle").includes("&& needs.accepted.result == 'success'"));
+  assert.match(job("bundle"), /\$\{\{ !cancelled\(\)/);
+  assert.match(job("release-sbom"), /^    if: \$\{\{ !cancelled\(\) && needs\.bundle\.result == 'success' && startsWith\(github\.ref, 'refs\/tags\/v'\) \}\}$/m);
+});
+
+test("publication moves aliases only from its bundle, under the release controller's lock", () => {
+  const workflow = fs.readFileSync(path.join(root, ".github/workflows/build_and_push_images.yml"), "utf8");
+  const job = (name) => workflow.split(`\n  ${name}:\n`)[1].split(/\n  [a-z-]+:\n/)[0];
+  assert.doesNotMatch(job("bundle"), /release_bundle\.py promote|packages: write/);
+  const promote = job("promote");
+  assert.match(promote, /^    needs: \[release, verify, bundle, release-sbom\]$/m);
+  const lock = "    concurrency:\n      group: eneo-release-lifecycle\n      queue: max\n      cancel-in-progress: false\n";
+  assert.ok(promote.includes(lock));
+  // The controller takes the same lock on its job, so skipped completions never queue in it.
+  const release = fs.readFileSync(path.join(root, ".github/workflows/release.yml"), "utf8");
+  assert.doesNotMatch(release, /^concurrency:/m);
+  assert.ok(release.split("\n  reconcile:\n")[1].includes(lock));
+  assert.match(promote, /^    permissions:\n      contents: read\n      packages: write\n    steps:$/m);
+  // A final release moves latest after its SBOM; develop and branches, whose SBOM job is skipped, still move.
+  assert.ok(promote.includes("needs.release-sbom.result == 'success'"));
+  assert.ok(promote.includes("(needs.release-sbom.result == 'skipped' && !startsWith(github.ref, 'refs/tags/'))"));
+  assert.match(promote, /^        if: needs\.release\.outputs\.managed != 'true'\n        run: python3 scripts\/release_bundle\.py promote --bundle release-bundle\/release\.json$/m);
+  assert.equal(workflow.match(/release_bundle\.py promote/g).length, 1);
+});
+
+test("publication serializes a version's writes by that version, and nothing else", () => {
+  const read = (file) => fs.readFileSync(path.join(root, ".github/workflows", file), "utf8");
+  const workflow = read("build_and_push_images.yml");
+  assert.doesNotMatch(workflow, /^concurrency:/m);
+  const lock = (group) => `    concurrency:\n      group: ${group}\n      queue: max\n      cancel-in-progress: false\n`;
+  assert.ok(read("application_image.yml").includes(lock("eneo-image-${{ inputs.component }}-${{ inputs.version }}")));
+  assert.ok(workflow.split("\n  bundle:\n")[1].includes(lock("eneo-bundle-${{ needs.release.outputs.version }}")));
+  // The tag's SBOM publisher queues too: a waiting retry is never replaced.
+  assert.match(read("release_sbom.yml"), /^concurrency:\n  group: eneo-release-sbom-\$\{\{ inputs\.tag \}\}\n  queue: max\n  cancel-in-progress: false$/m);
+});
+
+test("publication's CI skips only the backend and frontend dry-run builds it publishes itself", () => {
+  const plan = planCi([], "push", { publication: true });
+  assert.equal(plan.full, true);
+  assert.deepEqual(plan.docker_matrix.include.map(({ image }) => image), ["devcontainer"]);
+  assert.equal(plan.expected_jobs["docker-builds"], true);
+  assert.equal(planCi([], "push").docker_matrix.include.length, 3);
+  const workflow = fs.readFileSync(path.join(root, ".github/workflows/build_and_push_images.yml"), "utf8");
+  assert.match(workflow.split("\n  checks:\n")[1].split(/\n  [a-z-]+:\n/)[0], /^    with:\n(?:      #.*\n)*      publication: true$/m);
+  assert.match(fs.readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8"), /CI_PUBLICATION: \$\{\{ inputs\.publication \}\}/);
+});
+
+test("the frontend image builds beside the backend, with its release version and no cache export", () => {
+  const publication = fs.readFileSync(path.join(root, ".github/workflows/build_and_push_images.yml"), "utf8");
+  assert.match(publication.split("\n  frontend:\n")[1], /^    needs: release\n/);
+  const image = fs.readFileSync(path.join(root, ".github/workflows/application_image.yml"), "utf8");
+  assert.doesNotMatch(image, /backend_digest|sync-frontend-with-backend/);
+  assert.match(image, /sudo fallocate -l 6G \/mnt\/eneo-frontend\.swap/);
+  assert.match(image, /test "\$\(jq -r \.version frontend\/apps\/web\/package\.json\)" = "\$VERSION"/);
+  assert.match(image, /cache-to: \$\{\{ inputs\.component != 'frontend' && /);
+  // The bundle is published only after acceptance; verifying it does not wait for that.
+  assert.match(publication.split("\n  verify:\n")[1], /^    needs: \[release, backend, frontend, tool-runtime\]\n/);
+  assert.match(publication.split("\n  bundle:\n")[1], /^    needs: \[release, accepted, verify\]\n/);
+  // The bundle files cross jobs as an artifact: bundle and promote use them only if they
+  // are the files verify checked.
+  assert.match(publication.split("\n  verify:\n")[1], /^    outputs:\n      sums: \$\{\{ steps\.bundle\.outputs\.sums \}\}$/m);
+  const check = "          test \"$(ls -A | sort | tr '\\n' ' ')\" = \"release.env release.json \"\n          base64 -d <<<\"$SUMS\" | sha256sum -c -\n";
+  // Only those two files are uploaded, attested and published.
+  assert.doesNotMatch(publication, /release-bundle\/\*|path: release-bundle\/\n/);
+  assert.match(publication, /subject-path: release-bundle\/release\.json,release-bundle\/release\.env$/m);
+  for (const name of ["bundle", "promote"]) {
+    const block = publication.split(`\n  ${name}:\n`)[1].split(/\n  [a-z-]+:\n/)[0];
+    assert.ok(block.indexOf(check) > 0, name);
+    assert.ok(block.indexOf(check) < block.indexOf(name === "bundle" ? "Attest the complete bundle" : "release_bundle.py promote"), name);
+  }
+  assert.ok(publication.split("\n  bundle:\n")[1].includes("&& needs.verify.result == 'success'"));
+});
+
+test("the bundle check passes only the two files verify checked, unchanged", () => {
+  const publication = fs.readFileSync(path.join(root, ".github/workflows/build_and_push_images.yml"), "utf8");
+  const script = publication.split("\n  bundle:\n")[1].split("- name: Check the bundle is the one verify checked\n")[1]
+    .split("\n        run: |\n")[1].split(/\n      - /)[0].replace(/^ {10}/gm, "");
+  const files = { "release.json": "{\"version\": \"1\"}\n", "release.env": "ENEO_VERSION=1\n" };
+  const sums = Buffer.from(Object.entries(files)
+    .map(([name, content]) => `${crypto.createHash("sha256").update(content).digest("hex")}  ${name}\n`).join("")).toString("base64");
+  const check = (change) => {
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "eneo-bundle-check-"));
+    try {
+      fs.mkdirSync(path.join(cwd, "release-bundle"));
+      for (const [name, content] of Object.entries(files)) fs.writeFileSync(path.join(cwd, "release-bundle", name), content);
+      change(path.join(cwd, "release-bundle"));
+      return spawnSync("bash", ["-e", "-c", script], { cwd, env: { ...process.env, SUMS: sums }, encoding: "utf8" }).status;
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
+  };
+  assert.equal(check(() => {}), 0);
+  assert.notEqual(check((dir) => fs.appendFileSync(path.join(dir, "release.json"), " ")), 0);
+  assert.notEqual(check((dir) => fs.writeFileSync(path.join(dir, "payload.sh"), "exit 0\n")), 0);
+  assert.notEqual(check((dir) => fs.rmSync(path.join(dir, "release.env"))), 0);
+});
+
 test("only develop pushes save the package download cache", () => {
   // Pull request and merge-queue refs saved their own ~610 MB copy that no other ref could restore.
   const action = fs.readFileSync(path.join(root, ".github/actions/setup-frontend/action.yml"), "utf8");
@@ -367,7 +530,7 @@ test("push, tag and manual callers keep full validation even with only docs chan
 });
 
 test("a combined candidate includes requirements from every changed area", () => {
-  const plan = planCi([backendFile, appFile], "merge_group");
+  const plan = planCi([backendFile, appFile], "pull_request");
   assert.equal(plan.backend, true);
   assert.equal(plan.frontend, true);
   assert.equal(plan.web_next_e2e, true);
@@ -375,12 +538,12 @@ test("a combined candidate includes requirements from every changed area", () =>
 });
 
 test("empty diffs run the full suite", () => {
-  assert.equal(planCi([], "merge_group").full, true);
+  assert.equal(planCi([], "pull_request").full, true);
 });
 
 test("unmapped runtime and root configuration paths run the full suite", () => {
   for (const file of ["new-service/main.py", ".env.example", "docker-compose.yml"]) {
-    assert.equal(planCi([file], "merge_group").full, true, file);
+    assert.equal(planCi([file], "pull_request").full, true, file);
   }
 });
 
@@ -410,14 +573,14 @@ test("contract inputs select their consumers and developer tooling", () => {
     [".devcontainer/Dockerfile", ["docker_devcontainer"]],
   ];
   for (const [file, required] of cases) {
-    const plan = planCi([file], "merge_group");
+    const plan = planCi([file], "pull_request");
     for (const name of required) assert.equal(plan[name], true, `${file}: ${name}`);
   }
   assert.equal(planCi([backendFile], "pull_request").scripts, false);
 });
 
 test("web-next-only changes do not build the Svelte app", () => {
-  const plan = planCi(["frontend/apps/web-next/src/routes/index.tsx"], "merge_group");
+  const plan = planCi(["frontend/apps/web-next/src/routes/index.tsx"], "pull_request");
   assert.equal(plan.web_next, true);
   assert.equal(plan.web_next_e2e, true);
   assert.equal(plan.frontend, false);
@@ -427,7 +590,7 @@ test("web-next-only changes do not build the Svelte app", () => {
 
 test("web-next inputs rebuild the backend image that bundles the web app", () => {
   for (const file of ["frontend/bunfig.toml", "frontend/apps/web-next/src/main.tsx"]) {
-    const plan = planCi([file], "merge_group");
+    const plan = planCi([file], "pull_request");
     const backend = plan.docker_matrix.include.find(({ image }) => image === "backend");
     assert.equal(backend?.build_contexts, "web=./frontend", file);
   }
@@ -436,7 +599,7 @@ test("web-next inputs rebuild the backend image that bundles the web app", () =>
 });
 
 test("missing, failed, cancelled and unexpectedly skipped required jobs fail the gate", () => {
-  const plan = planCi([appFile], "merge_group");
+  const plan = planCi([appFile], "pull_request");
   for (const job of Object.keys(plan.expected_jobs).filter((job) => plan.expected_jobs[job])) {
     for (const result of ["failure", "cancelled", "skipped", "timed_out", undefined]) {
       const needs = resultsFor(plan);
@@ -447,7 +610,7 @@ test("missing, failed, cancelled and unexpectedly skipped required jobs fail the
 });
 
 test("optional jobs cannot hide a failure and unknown jobs cannot bypass the gate", () => {
-  const plan = planCi([docsFile], "merge_group");
+  const plan = planCi([docsFile], "pull_request");
   const needs = resultsFor(plan);
   needs.frontend.result = "failure";
   assert.ok(evaluateCi(plan.expected_jobs, needs).length);
@@ -459,7 +622,7 @@ test("optional jobs cannot hide a failure and unknown jobs cannot bypass the gat
 });
 
 test("a broken scope job cannot turn the aggregate green", () => {
-  const plan = planCi([docsFile], "merge_group");
+  const plan = planCi([docsFile], "pull_request");
   const needs = resultsFor(plan);
   needs.changes.result = "failure";
   assert.ok(evaluateCi(plan.expected_jobs, needs).length);
@@ -495,7 +658,7 @@ test("workflow selection matches the required-job plan for each kind of change",
   }
 });
 
-test("each candidate is classified by its own diff onto the preceding candidate, and a bad base runs everything", () => {
+test("a pull request is classified by its own diff, the merge queue runs everything, and a bad base runs everything", () => {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "eneo-ci-diff-"));
   const git = (...args) => execFileSync("git", args, {
     cwd, encoding: "utf8", timeout: 5_000,
@@ -509,12 +672,13 @@ test("each candidate is classified by its own diff onto the preceding candidate,
     git("init", "--quiet");
     git("config", "user.name", "CI contract test");
     git("config", "user.email", "ci@example.invalid");
-    const scope = (baseSha, head) => {
+    const scope = (baseSha, head, event = "pull_request") => {
       const eventPath = path.join(cwd, "event.json");
-      fs.writeFileSync(eventPath, JSON.stringify({ merge_group: { base_sha: baseSha } }));
+      fs.writeFileSync(eventPath, JSON.stringify(event === "pull_request"
+        ? { pull_request: { base: { sha: baseSha } } } : { merge_group: { base_sha: baseSha } }));
       return spawnSync(process.execPath, [path.join(root, ".github/scripts/ci-change-scope.mjs"), "--github-event"], {
         cwd, encoding: "utf8", timeout: 5_000,
-        env: { ...process.env, GITHUB_EVENT_NAME: "merge_group", GITHUB_EVENT_PATH: eventPath, GITHUB_SHA: head, GITHUB_STEP_SUMMARY: "" },
+        env: { ...process.env, GITHUB_EVENT_NAME: event, GITHUB_EVENT_PATH: eventPath, GITHUB_SHA: head, GITHUB_STEP_SUMMARY: "" },
       });
     };
     write(backendFile, "original\n");
@@ -525,13 +689,18 @@ test("each candidate is classified by its own diff onto the preceding candidate,
     write(appFile, "later queued PR\n");
     git("add", "."); git("commit", "--quiet", "-m", "candidate");
     let head = git("rev-parse", "HEAD");
-    // merge_group.base_sha is the preceding candidate's head, not the develop tip.
     assert.deepEqual(changedFiles(preceding, head, cwd), [appFile]);
     let run = scope(preceding, head);
     assert.equal(run.status, 0, run.stderr);
     assert.match(run.stdout, /^full=false$/m);
     assert.match(run.stdout, /^frontend=true$/m);
     assert.match(run.stdout, /^backend=false$/m);
+    // A queue entry's diff leaves out the entries ahead of it, and publication reuses
+    // the queue's result for the commit that lands: the queue validates everything.
+    run = scope(preceding, head, "merge_group");
+    assert.equal(run.status, 0, run.stderr);
+    assert.match(run.stdout, /^full=true$/m);
+    assert.match(run.stdout, /^backend=true$/m);
     fs.mkdirSync(path.join(cwd, "docs"));
     git("mv", backendFile, "docs/moved.md");
     git("commit", "--quiet", "-m", "move out of backend");

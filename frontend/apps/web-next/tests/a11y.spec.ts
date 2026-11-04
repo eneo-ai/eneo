@@ -273,6 +273,7 @@ async function answeredQuestion(page: Page) {
   await expect(page.getByRole("button", { name: /skicka meddelande|send message/i })).toBeVisible();
 }
 
+const OVERVIEW = /^(Översikt|Overview)$/;
 const ACTIVITY_PANEL = /^(Aktivitet för svaret|Activity for the answer)$/;
 
 // What a model's answer can hold that the mock model's "pong" never does: a table, code, a link,
@@ -526,14 +527,14 @@ for (const colorScheme of ["light", "dark"] as const) {
     });
 
     test(
-      "assistant catalogue with the SideNav collapsed to its icon rail",
+      "personal chat with the SideNav collapsed to its icon rail",
       { tag: "@vite" },
       async ({ page, baseURL }) => {
         await page
           .context()
           .addCookies([{ name: SIDE_NAV_COLLAPSED_COOKIE, value: "1", url: baseURL! }]);
-        await scan(page, "/dashboard", async () => {
-          await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+        await scan(page, "/spaces/personal/chat", async () => {
+          await chatStartReady(page);
           await expect(
             page.getByRole("button", { name: /fäll ut sidomenyn|expand the side menu/i })
           ).toBeVisible();
@@ -561,7 +562,8 @@ for (const colorScheme of ["light", "dark"] as const) {
       const name = uniqueName(`E2E Space Shell ${colorScheme}`);
       const space = await createSpace(page, name);
       await scan(page, `${space}/overview`, async () => {
-        await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
+        await expect(page.getByRole("heading", { level: 1, name: OVERVIEW })).toBeVisible();
+        await expect(page.getByRole("heading", { level: 2, name })).toBeVisible();
         await expect(page).toHaveTitle(`${name} · Eneo`);
       });
       for (const [tab, title] of [
@@ -570,7 +572,7 @@ for (const colorScheme of ["light", "dark"] as const) {
       ]) {
         await scan(page, `${space}/${tab}`, async () => {
           await expect(
-            page.getByRole("heading", { level: 2, name: title, exact: true })
+            page.getByRole("heading", { level: 1, name: title, exact: true })
           ).toBeVisible();
           await expect(page).toHaveTitle(`${title} · ${name} · Eneo`);
         });
@@ -585,11 +587,11 @@ for (const colorScheme of ["light", "dark"] as const) {
         const space = await createSpace(page, name);
 
         await scan(page, `${space}/overview`, async () => {
-          await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
+          await expect(page.getByRole("heading", { level: 2, name })).toBeVisible();
         });
         await scan(page, `${space}/knowledge`, async () => {
           await expect(
-            page.getByRole("heading", { level: 2, name: /^(Kunskap|Knowledge)$/ })
+            page.getByRole("heading", { level: 1, name: /^(Kunskap|Knowledge)$/ })
           ).toBeVisible();
         });
         await scan(page, `${space}/knowledge?tab=websites`, async () => {
@@ -597,9 +599,9 @@ for (const colorScheme of ["light", "dark"] as const) {
             page.getByRole("tab", { name: /^(Webbplatser|Websites)$/, selected: true })
           ).toBeVisible();
           const panel = page.getByRole("tabpanel");
-          // A new space has no websites: the empty state (a list shows a table).
+          // A new space has no websites: the empty state, under the page's h1 (a list shows a table).
           await expect(
-            panel.getByRole("heading", { level: 3 }).or(panel.getByRole("table")).first()
+            panel.getByRole("heading", { level: 2 }).or(panel.getByRole("table")).first()
           ).toBeVisible();
         });
 
@@ -638,7 +640,7 @@ for (const colorScheme of ["light", "dark"] as const) {
         await page.reload();
         await expect(page.getByRole("textbox", { name: /^(Namn|Name)$/ })).toHaveValue(name);
         await page
-          .getByLabel(/^(Ytans innehåll|Space sections)$/)
+          .getByRole("navigation", { name: /^(Ytans meny|Space menu)$/ })
           .getByRole("link", { name: "Skills", exact: true })
           .click();
         await expect(page).toHaveURL(/\/spaces\/organization\/skills$/);
@@ -671,7 +673,7 @@ for (const colorScheme of ["light", "dark"] as const) {
         await page.getByRole("textbox", { name: /^(Namn|Name)$/ }).fill(name);
         {
           await page
-            .getByLabel(/^(Ytans innehåll|Space sections)$/)
+            .getByRole("navigation", { name: /^(Ytans meny|Space menu)$/ })
             .getByRole("link", { name: "Skills", exact: true })
             .click();
           const leave = page.getByRole("alertdialog", { name: "Lämna sidan?" });
@@ -1071,6 +1073,7 @@ for (const colorScheme of ["light", "dark"] as const) {
           const name = uniqueName(`E2E A11y Touch Space ${colorScheme}`);
           const space = await createSpace(page, name);
           await scan(page, `${space}/overview`, async () => {
+            // A phone's and a tablet's space header names the space (#1328).
             await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
             // A phone lists what manages the space; tablets keep a tab for each.
             await expect(
@@ -1181,6 +1184,7 @@ for (const colorScheme of ["light", "dark"] as const) {
               ["members", /^(Medlemmar|Members)$/]
             ] as const) {
               await scan(page, `${work.space}/${tab}`, async () => {
+                // Under a phone's or a tablet's space header the section's title is an h2.
                 await expect(page.getByRole("heading", { level: 2, name })).toBeVisible();
               });
             }

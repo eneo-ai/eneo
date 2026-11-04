@@ -89,7 +89,7 @@ test(
     });
     await page.goto(`/dashboard/${assistant.id}?tab=insights`);
     await expect(page.getByRole("textbox", { name: /^Fråga / })).toBeVisible();
-    await expect(page.getByRole("radio", { name: "Insikter", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("tab", { name: "Insikter", exact: true })).toHaveCount(0);
     expect(insightReads).toBe(0);
     allowed = true;
     await page.reload();
@@ -227,11 +227,12 @@ test(
     );
     await page.goto(`/spaces/personal/chat?session_id=${SESSION}`);
     await expect(page.getByRole("log").getByText("Tredje svaret", { exact: true })).toBeVisible();
-    await page.getByRole("button", { name: /^Konversationer med / }).click();
+    await page.getByRole("tab", { name: "Historik", exact: true }).click();
     await expect(page.getByText("Laddade 2/3 konversationer", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Visa fler konversationer", exact: true }).click();
     await expect(page.getByText("Laddade 3/3 konversationer", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Äldre samtal", exact: true })).toBeFocused();
+    await page.getByRole("tab", { name: "Chatt", exact: true }).click();
     await page
       .getByRole("button", { name: "Visa sidopanelen med filer och vyer", exact: true })
       .click();

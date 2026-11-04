@@ -63,7 +63,11 @@ import {
 import { CrawlRunDetailsDialog } from "./crawl-run-details";
 import { canRequestCrawlStop, type CrawlFailureKind } from "./crawl-run-state";
 import { CrawlFailureActions, CrawlRunStatusLabel } from "./crawl-run-ui";
-import { nextCrawlAt, STALE_SYNC_DAYS, websiteSyncedAt } from "./website-status";
+import { isActiveCrawl, nextCrawlAt, STALE_SYNC_DAYS, websiteSyncedAt } from "./website-status";
+import { useSectionHeadingLevels } from "@/features/spaces/frame/space-frame";
+
+const ACTIVE_CRAWL_REFRESH_MS = 2_000;
+const IDLE_WEBSITE_REFRESH_MS = 30_000;
 
 /** Which run's failures to show, and of which kind. */
 type FailureSelection = { run: CrawlRun; kind: CrawlFailureKind | null };
@@ -381,6 +385,8 @@ function WebsitesTable({
 export function WebsitesTab({ canCreate, name }: { canCreate: boolean; name: TableName }) {
   const phone = usePhoneScreen();
   const t = useTranslations();
+  // Under the page's title: an h2 beside the sidebar, an h3 under a phone's space header.
+  const headingLevel = useSectionHeadingLevels().sub;
   const { space, routeId } = useSpace();
   const queryClient = useQueryClient();
   const { trackJob } = useJobs();
@@ -557,7 +563,7 @@ export function WebsitesTab({ canCreate, name }: { canCreate: boolean; name: Tab
           hue={AREA_HUES.knowledge}
           title={t("space_websites_empty_title")}
           description={t("space_websites_empty_description")}
-          headingLevel={3}
+          headingLevel={headingLevel}
           actions={
             canCreate ? docked : <NoCreatePermissionInfo resourceType={t("resource_websites")} />
           }
@@ -685,7 +691,7 @@ export function WebsitesTab({ canCreate, name }: { canCreate: boolean; name: Tab
           isAnnounced={false}
           icon={<SearchX />}
           title={t("ui_no_items_matching", { resourceNamePlural: t("resource_websites") })}
-          headingLevel={3}
+          headingLevel={headingLevel}
           isCompact
         />
       </div>

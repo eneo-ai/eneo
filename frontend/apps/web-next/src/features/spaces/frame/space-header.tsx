@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils";
 import { flowsListQueryOptions } from "@/features/flows/flows-api";
 import { AddMemberDialog } from "../members/space-members";
 import { MemberStack } from "../members/member-stack";
+import { useSpaceDisplayName } from "../space-display-name";
 import { useSpace } from "../use-space";
 import {
   spaceLandingHref,
@@ -23,15 +24,6 @@ import {
   type SpaceSection
 } from "./space-sections";
 import { SpaceTabs } from "./space-tabs";
-
-/** The space's display name: personal and organization spaces use their alias. */
-export function useSpaceDisplayName(): string {
-  const t = useTranslations();
-  const { space } = useSpace();
-  if (space.personal) return t("personal");
-  if (space.organization) return t("organization");
-  return space.name;
-}
 
 /**
  * The space's tabs for this user, flows included when the tenant has them. The
@@ -53,7 +45,8 @@ export function useSpaceSections(): SpaceSection[] {
 }
 
 /**
- * The header above every space page except the chat: breadcrumbs, the space
+ * A tablet's header above every space page except the chat (#1328; with a
+ * mouse the sidebar holds the space instead): breadcrumbs, the space
  * tile and name, its security classification and description, members and
  * the space's actions, then the section tabs. Those actions are secondary, so
  * a tab's own create button stays its one primary action. On a tab's own page
@@ -94,7 +87,7 @@ export function SpaceHeader({
             need names of their own. */}
         <Breadcrumbs variant="supporting" label={t("space_breadcrumbs_label")}>
           <BreadcrumbItem href="/spaces/list" isCurrent={false} className={CRUMB_TOUCH}>
-            {t("spaces")}
+            {t("your_spaces")}
           </BreadcrumbItem>
           {isOverview ? (
             <BreadcrumbItem isCurrent>{name}</BreadcrumbItem>
