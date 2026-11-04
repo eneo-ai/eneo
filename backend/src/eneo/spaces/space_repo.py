@@ -1667,7 +1667,7 @@ class SpaceRepository:
             await self.session.scalars(
                 sa.select(Assistants)
                 .execution_options(populate_existing=True)
-                .where(Assistants.space_id == id)
+                .where(Assistants.space_id == id, Assistants.hidden.is_(False))
                 .order_by(Assistants.created_at)
             )
         ).all()

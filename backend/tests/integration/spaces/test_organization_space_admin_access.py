@@ -96,6 +96,30 @@ async def test_application_projection_does_not_load_another_tenants_resources(
         assert "Private own assistant" in {item.name for item in own.assistants}
 
 
+async def test_application_projection_leaves_out_hidden_assistants(
+    db_container, organization_spaces
+):
+    own_id, _ = organization_spaces
+    async with db_container() as container:
+        session = container.session()
+        session.add(
+            Assistants(
+                name="Hidden step assistant",
+                space_id=own_id,
+                user_id=container.user().id,
+                logging_enabled=False,
+                is_default=False,
+                published=False,
+                hidden=True,
+            )
+        )
+        await session.flush()
+        own = await container.space_repo().get_applications_projection(own_id)
+    names = {item.name for item in own.assistants}
+    assert "Private own assistant" in names
+    assert "Hidden step assistant" not in names
+
+
 async def test_org_key_owner_check_rejects_a_foreign_tenant_before_route_authorization(
     client, db_container, admin_user, organization_spaces
 ):
