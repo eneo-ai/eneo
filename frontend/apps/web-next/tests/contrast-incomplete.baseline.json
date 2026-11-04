@@ -933,7 +933,7 @@
  },
  "WCAG 2.2 AA, dark mode|space flows, the new-flow dialog and a flow's page #3": {
   "bgOverlap": 2,
-  "elmPartiallyObscured": 2,
+  "elmPartiallyObscured": 3,
   "nonBmp": 3
  },
  "WCAG 2.2 AA, dark mode|space overview, knowledge and websites, and the create-collection dialog #1": {
@@ -1241,7 +1241,7 @@
  },
  "WCAG 2.2 AA, light mode|space flows, the new-flow dialog and a flow's page #3": {
   "bgOverlap": 2,
-  "elmPartiallyObscured": 2,
+  "elmPartiallyObscured": 3,
   "nonBmp": 3
  },
  "WCAG 2.2 AA, light mode|space overview, knowledge and websites, and the create-collection dialog #1": {

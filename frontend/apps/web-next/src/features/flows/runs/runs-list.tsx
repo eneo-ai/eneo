@@ -46,7 +46,7 @@ import { CancelRunButton, RetryRunButton, runActions, type RunActionNotice } fro
 import { refusalText } from "./run-messages";
 import { runHref } from "./run-routes";
 import { starterName } from "./run-starter";
-import { RunUsage } from "./run-usage";
+import { RunUsage, RunUsageBrief } from "./run-usage";
 import { useStartedRuns, withStartedRuns } from "./runs-optimistic";
 import {
   canRedispatch,
@@ -522,6 +522,12 @@ export function FlowRunsList({
                       .filter(Boolean)
                       .join(" · ")}
                   </span>
+                  {/* Beside the chat there is room for it; a phone reads it on the run's page. */}
+                  {phone ? null : (
+                    <span className="flex flex-wrap gap-x-3 text-sm">
+                      <RunUsageBrief run={run} />
+                    </span>
+                  )}
                 </li>
               ))}
             </ul>

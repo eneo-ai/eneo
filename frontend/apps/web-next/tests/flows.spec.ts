@@ -124,6 +124,8 @@ test(
     await expect(page.getByText(/Det manuella flödet fungerar\./).first()).toBeVisible({
       timeout: 60_000
     });
+    // Beside the chat the six columns need a full-width window; the phone's list is checked below.
+    await page.setViewportSize({ width: 1920, height: 1080 });
     await page.goto(`${flowUrl}?tab=runs`);
     await expect(page.getByRole("link", { name: runName, exact: true })).toBeVisible();
     await expect(page.getByRole("columnheader", { name: "Användning", exact: true })).toBeVisible();

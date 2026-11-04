@@ -190,7 +190,9 @@ test(
       "flow_run_evidence_export_disabled"
     );
     await page.goto(`${url}/runs/${older.detail.id}`);
-    await expect(page.getByText(/^Export av bevisunderlag är avstängd för flödet\./)).toBeVisible();
+    await expect(
+      page.getByText(/^Nedladdning av bevisunderlag är avstängd för flödet\./)
+    ).toBeVisible();
     await expect(
       page.getByRole("button", { name: "Ladda ner bevisunderlag", exact: true })
     ).toHaveCount(0);
@@ -235,6 +237,8 @@ test(
     expect(newer.step.runtime_input_file_ids ?? []).toHaveLength(0);
     expect(newer.evidence.knowledge_traces?.[0]?.rag.references ?? []).toHaveLength(0);
 
+    // The table's usage column needs a full-width window beside the chat.
+    await page.setViewportSize({ width: 1920, height: 1080 });
     await page.goto(`${url}?tab=runs`);
     await expect(page.getByRole("link", { name: newerLabel, exact: true })).toBeVisible();
     const oldLink = page.getByRole("link", { name: olderLabel, exact: true });
@@ -354,7 +358,7 @@ test(
     await expect(
       article
         .locator("dt")
-        .filter({ hasText: /^temperature$/ })
+        .filter({ hasText: /^Temperatur$/ })
         .first()
         .locator("+ dd")
     ).toHaveText("0.2");

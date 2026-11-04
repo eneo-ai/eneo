@@ -837,6 +837,7 @@ describe("FlowRunsList in a narrow panel", () => {
     const list = screen.getByRole("list", { name: messages.flow_runs_heading });
     const [row] = within(list).getAllByRole("listitem");
     expect(within(row!).getByText("Anna Lind · 1 min 5 s · Version 3")).toBeTruthy();
+    expect(within(row!).getByText(/^1\s200 token$/)).toBeTruthy();
     expect(screen.queryByText(messages.flow_runs_usage_tokens_explainer)).toBeNull();
   });
 
