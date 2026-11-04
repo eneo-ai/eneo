@@ -121,6 +121,8 @@
   }
 
   function openDialog() {
+    // A comment on its way would otherwise clear the draft typed after it.
+    if (sending) return;
     text = savedComment;
     error = null;
     dialogOpen = true;
@@ -196,7 +198,7 @@
       <button
         type="button"
         class="text-accent-default min-h-11 w-fit rounded-md text-xs underline-offset-2 hover:underline disabled:opacity-50"
-        {disabled}
+        disabled={disabled || sending}
         onclick={openDialog}
       >
         {sent
@@ -242,7 +244,8 @@
         placeholder={given === -1
           ? m.widget_feedback_more_placeholder_negative()
           : m.widget_feedback_more_placeholder()}
-        bind:value={text}></textarea>
+        bind:value={text}
+        readonly={sending}></textarea>
       {#if error && dialogOpen}
         <p
           role="alert"

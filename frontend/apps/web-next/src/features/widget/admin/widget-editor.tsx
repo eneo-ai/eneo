@@ -87,23 +87,9 @@ export function WidgetEditor({
   }, []);
   // Widgets follow a template's published release, so drafts are not offered.
   const templates = allTemplates.filter((template) => template.published_at != null);
-  const { autosave, state } = useWidgetAutosave(widget);
+  const { autosave, state } = useWidgetAutosave(widget, onSaved);
   const current = state.widget;
   const [tab, setTab] = useUrlTab(TABS, "content");
-
-  // The list the page was built from must follow every answer (a save, a
-  // lifecycle action, a template, a reload), or reopening the page within
-  // its stale time would rebuild the editor from the old entry.
-  const reportSaved = useRef(onSaved);
-  useEffect(() => {
-    reportSaved.current = onSaved;
-  });
-  const reported = useRef(widget);
-  useEffect(() => {
-    if (state.saved === reported.current) return;
-    reported.current = state.saved;
-    reportSaved.current?.(state.saved);
-  }, [state.saved]);
 
   // A blank name is never sent: the API would refuse it and hold every
   // later edit back with it.

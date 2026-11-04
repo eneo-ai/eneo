@@ -70,8 +70,17 @@ export function useAutosave<Store extends AutosaveStore>(
   return { autosave, state: state as ReturnType<Store["getSnapshot"]> };
 }
 
-/** The autosave of the widget being edited (the widget page). */
-export function useWidgetAutosave(widget: Widget): {
+/**
+ * The autosave of the widget being edited (the widget page). Every saved
+ * widget is reported to `onSaved` as the save completes, also after the
+ * editor has unmounted: the page's list must follow a save that finishes
+ * after a confirmed navigation, or reopening within its stale time would
+ * rebuild the editor from the old revision.
+ */
+export function useWidgetAutosave(
+  widget: Widget,
+  onSaved?: (widget: Widget) => void
+): {
   autosave: WidgetAutosave;
   state: AutosaveSnapshot<Widget>;
 } {
@@ -82,7 +91,9 @@ export function useWidgetAutosave(widget: Widget): {
         widget,
         async (update) => {
           try {
-            return await widgetApi.update(widget.id, update);
+            const saved = await widgetApi.update(widget.id, update);
+            onSaved?.(saved);
+            return saved;
           } catch (error) {
             toastWidgetError(error, t);
             throw error;

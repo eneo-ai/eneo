@@ -457,6 +457,34 @@ describe("WidgetChat", () => {
     expect(page.getByRole("button", { name: "widget_feedback_more" }).elements()).toHaveLength(0);
   });
 
+  test("a comment on its way cannot be edited or replaced until it has landed", async () => {
+    renderApp();
+    await userEvent.click(suggestion());
+    await vi.waitFor(() => expect(fake.release).not.toBeNull());
+    await releaseAnswer();
+    await userEvent.click(page.getByRole("button", { name: "widget_feedback_helpful" }));
+    await userEvent.click(page.getByRole("button", { name: "widget_feedback_more" }));
+    const dialog = page.getByRole("dialog");
+    await userEvent.fill(dialog.getByRole("textbox"), "Första kommentaren.");
+    fake.holdNextFeedback = true;
+    await userEvent.click(dialog.getByRole("button", { name: "widget_feedback_send" }));
+    await vi.waitFor(() => expect(fake.releaseFeedback).not.toBeNull());
+
+    // Still on its way: the text cannot change, and no new draft can start.
+    await expect.element(dialog.getByRole("textbox")).toHaveAttribute("readonly");
+    await userEvent.click(dialog.getByRole("button", { name: "cancel" }));
+    await vi.waitFor(() => expect(page.getByRole("dialog").elements()).toHaveLength(0));
+    await expect.element(page.getByRole("button", { name: "widget_feedback_more" })).toBeDisabled();
+
+    fake.releaseFeedback!();
+    const edit = page.getByRole("button", { name: "widget_feedback_edit_comment" });
+    await expect.element(edit).toBeEnabled();
+    await userEvent.click(edit);
+    const reopened = page.getByRole("dialog").getByRole("textbox");
+    await expect.element(reopened).toHaveValue("Första kommentaren.");
+    await expect.element(reopened).not.toHaveAttribute("readonly");
+  });
+
   test("a new question clears an old feedback error so a failed ask has one alert", async () => {
     renderApp();
     await userEvent.click(suggestion());

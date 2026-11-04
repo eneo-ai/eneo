@@ -131,6 +131,8 @@ export function WidgetFeedback({
   }
 
   function openDialog() {
+    // A comment on its way would otherwise clear the draft typed after it.
+    if (sending) return;
     setText(savedComment);
     setError(null);
     setDialogOpen(true);
@@ -193,7 +195,7 @@ export function WidgetFeedback({
               <button
                 type="button"
                 className="text-ax-text-accent min-h-11 w-fit rounded-md text-xs underline-offset-2 hover:underline disabled:opacity-50"
-                disabled={disabled}
+                disabled={disabled || sending}
                 onClick={openDialog}
               >
                 {sent
@@ -243,6 +245,7 @@ export function WidgetFeedback({
                       : t("widget_feedback_more_placeholder")
                   }
                   value={text}
+                  readOnly={sending}
                   onChange={(event) => setText(event.target.value)}
                 />
                 {error && dialogOpen && (

@@ -242,6 +242,47 @@ describe("WidgetChat", () => {
     expect(screen.queryByRole("button", { name: "Hjälpsam konversation" })).toBeNull();
   });
 
+  it("a comment on its way cannot be edited or replaced until it has landed", async () => {
+    let finishComment!: () => void;
+    const leaveFeedback = vi
+      .fn()
+      .mockResolvedValueOnce({})
+      .mockImplementationOnce(
+        () => new Promise<object>((resolve) => (finishComment = () => resolve({})))
+      );
+    const { client } = clientWith({ ask: fakeClient().ask, leaveFeedback });
+    renderChat(config(), client);
+    fireEvent.click(screen.getByRole("button", { name: "Hur brygger jag pour over?" }));
+    await screen.findByText("Pour over: 15 g kaffe på 250 g vatten.");
+    const helpful = await screen.findByRole("button", { name: "Hjälpsam konversation" });
+    await waitFor(() => expect((helpful as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(helpful);
+    fireEvent.click(await screen.findByRole("button", { name: "Vill du berätta mer?" }));
+    const dialog = await screen.findByRole("dialog");
+    const box = within(dialog).getByRole("textbox") as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: "Första kommentaren." } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Skicka" }));
+    await waitFor(() => expect(leaveFeedback).toHaveBeenCalledTimes(2));
+
+    // Still on its way: the text cannot change, and no new draft can start.
+    await waitFor(() => expect(box.readOnly).toBe(true));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Avbryt" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(
+      (screen.getByRole("button", { name: "Vill du berätta mer?" }) as HTMLButtonElement).disabled
+    ).toBe(true);
+
+    await act(async () => finishComment());
+    const edit = await screen.findByRole("button", { name: "Redigera kommentar" });
+    expect((edit as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(edit);
+    const reopened = within(await screen.findByRole("dialog")).getByRole(
+      "textbox"
+    ) as HTMLTextAreaElement;
+    expect(reopened.value).toBe("Första kommentaren.");
+    expect(reopened.readOnly).toBe(false);
+  });
+
   it("keeps sending unavailable while a remembered conversation renews its token", async () => {
     const { client, ask } = fakeClient();
     const visitor = "22222222-2222-4333-8444-555555555555";

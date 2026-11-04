@@ -406,6 +406,31 @@ describe("WidgetAdminPage", () => {
     );
   });
 
+  it("a save finished after leaving the page still reaches the list", async () => {
+    const queryClient = testQueryClient();
+    let finishSave!: (saved: Widget) => void;
+    api.PATCH.mockImplementation(
+      () =>
+        new Promise<{ data: Widget; response: Response }>((resolve) => {
+          finishSave = (data) => resolve({ data, response: new Response("{}") });
+        })
+    );
+    const view = showPage([widget()], ["widgets"], { queryClient });
+    const [name] = await screen.findAllByRole("textbox", { name: /^Namn/ });
+    fireEvent.change(name!, { target: { value: "Kaffe och te" } });
+    await waitFor(() => expect(api.PATCH).toHaveBeenCalledTimes(1), { timeout: 2000 });
+    // Left during the save (a confirmed navigation); the answer lands afterwards.
+    view.unmount();
+    await act(async () => finishSave(widget({ name: "Kaffe och te", revision: 4 })));
+    await waitFor(() =>
+      expect(
+        (queryClient.getQueryData(["spaces", "s1", "widgets"]) as Widget[]).find(
+          (item) => item.id === "w1"
+        )
+      ).toMatchObject({ name: "Kaffe och te", revision: 4 })
+    );
+  });
+
   it("a pause finished after leaving the page still reaches the list", async () => {
     const queryClient = testQueryClient();
     let finishPause!: (paused: Widget) => void;
