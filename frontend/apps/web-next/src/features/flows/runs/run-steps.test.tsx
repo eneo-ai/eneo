@@ -385,6 +385,33 @@ describe("RunSteps input and output", () => {
     expect(within(two).getByText("Transkriptet från steg 2")).toBe(transcripts.get("step-2"));
   });
 
+  it("stops a transcript's sound when its panel closes", () => {
+    const [first, second] = runStepViews(
+      makeRunGraph([
+        { order: 1, label: "Transkribera", status: "completed" },
+        { order: 2, label: "Sammanfatta mötet", status: "completed" }
+      ]),
+      [
+        makeRunStep(1, { output_payload_json: { text: transcript } }),
+        makeRunStep(2, { output_payload_json: { text: "Mötet beslutade." } })
+      ]
+    );
+    const host = document.createElement("div");
+    const audio = host.appendChild(document.createElement("audio"));
+    const pause = vi.spyOn(audio, "pause").mockImplementation(() => undefined);
+    renderInApp(
+      <RunSteps
+        flowId="flow-1"
+        runId="run-1"
+        steps={[first!, second!]}
+        transcripts={new Map([["step-2", host]])}
+      />
+    );
+    expect(pause).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_runs_transcript_heading }));
+    expect(pause).toHaveBeenCalledTimes(1);
+  });
+
   /** A finished transcribing step, and the element its transcript renders into. */
   function transcribed() {
     const [step] = runStepViews(

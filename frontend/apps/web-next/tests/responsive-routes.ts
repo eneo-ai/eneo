@@ -60,7 +60,7 @@ export const ROUTES: Record<string, Entry> = {
   "/admin/crawler": open("/admin/crawler"),
   "/admin/federation": open("/admin/federation"),
   // The Svelte page's old addresses, now sections of the one settings page.
-  "/admin/flow-data-retention": redirect("/admin/flow-settings"),
+  "/admin/flow-data-retention": open("/admin/flow-data-retention"),
   "/admin/flow-input-limits": redirect("/admin/flow-settings"),
   "/admin/flow-knowledge-evidence": redirect("/admin/flow-settings"),
   "/admin/flow-settings": open("/admin/flow-settings"),

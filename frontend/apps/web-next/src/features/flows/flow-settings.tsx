@@ -105,6 +105,8 @@ function savedValues(draft: SettingsDraft): string {
   });
 }
 
+type SpaceClassification = { name: string; security_level: number };
+
 /**
  * The read view: the flow at a glance, what a run asks for, how its audio is
  * transcribed and whether its evidence may be downloaded. Without
@@ -124,15 +126,15 @@ export function SettingsSummary({
   stepCount?: number;
   /** The draft check's problem count; null while unchecked. */
   problemCount?: number | null;
-  /** The name of the space's security classification, when it has one. */
-  classification?: string | null;
+  /** The space's security classification, when it has one. */
+  classification?: SpaceClassification | null;
   /** Offers to change the retention, for someone who may. */
   onChangeRetention?: () => void;
 }) {
   const t = useTranslations();
   const fields = formFieldsOf(flow.metadata_json);
   const raisingSteps = flow.steps.filter(
-    (step) => step.output_classification_override != null
+    (step) => (step.output_classification_override ?? 0) > (classification?.security_level ?? 0)
   ).length;
   const settings = transcriptionSettingsOf(flow.metadata_json);
   const transcribes = flowTakesAudio(flow.steps) || settings.enabled;
@@ -194,8 +196,8 @@ export function SettingsSummary({
       {classification ? (
         <MetadataListItem label={t("flows_classification_heading")}>
           {raisingSteps > 0
-            ? t("flows_classification_raised", { name: classification, count: raisingSteps })
-            : classification}
+            ? t("flows_classification_raised", { name: classification.name, count: raisingSteps })
+            : classification.name}
           <span className="text-ax-text-secondary mt-0.5 block text-sm">
             {t("flows_classification_hint")}
           </span>
@@ -394,8 +396,8 @@ export function FlowSettings({
   stepCount?: number;
   /** The draft check's problem count (null while unchecked), shown in the read view. */
   problemCount?: number | null;
-  /** The name of the space's security classification, when it has one. */
-  classification?: string | null;
+  /** The space's security classification, when it has one. */
+  classification?: SpaceClassification | null;
   /** Told true while the open form differs from the flow it was loaded from. */
   onDirtyChange?: (dirty: boolean) => void;
 }) {

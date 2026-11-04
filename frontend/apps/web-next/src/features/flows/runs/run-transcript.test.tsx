@@ -166,11 +166,11 @@ describe("TranscriptSlot", () => {
     const page = (wide: boolean) =>
       wide ? (
         <section>
-          <TranscriptSlot host={host} />
+          <TranscriptSlot host={host} isOpen />
         </section>
       ) : (
         <article>
-          <TranscriptSlot host={host} />
+          <TranscriptSlot host={host} isOpen />
         </article>
       );
     const { rerender } = renderInApp(page(true));
@@ -184,7 +184,7 @@ describe("TranscriptSlot", () => {
 
   it("leaves focus where it is when a folded transcript comes back later", async () => {
     const { host, control } = hostWithControl();
-    const page = (open: boolean) => (open ? <TranscriptSlot host={host} /> : null);
+    const page = (open: boolean) => (open ? <TranscriptSlot host={host} isOpen /> : null);
     const { rerender } = renderInApp(page(true));
     control.focus();
 

@@ -100,9 +100,10 @@ function EditRow({
   );
 }
 
-function HistoryList({ checkpoint }: { checkpoint: ReviewCheckpoint }) {
+function HistoryList({ checkpoint, isOpen }: { checkpoint: ReviewCheckpoint; isOpen: boolean }) {
   const t = useTranslations();
-  const history = useInfiniteQuery(reviewEditsQueryOptions(checkpoint));
+  // Every read is audited: a closed panel reads nothing.
+  const history = useInfiniteQuery({ ...reviewEditsQueryOptions(checkpoint), enabled: isOpen });
   if (history.isPending)
     return <LoadingState rows={2} label={t("flow_run_extras_history_loading")} />;
   if (history.isError) {
@@ -169,7 +170,7 @@ export function ReviewHistory({ checkpoint }: { checkpoint: ReviewCheckpoint }) 
       trigger={<span className="text-sm font-medium">{t("flow_run_extras_history_heading")}</span>}
     >
       <div className="pt-2">
-        <HistoryList checkpoint={checkpoint} />
+        <HistoryList checkpoint={checkpoint} isOpen={open} />
       </div>
     </LazyCollapsible>
   );

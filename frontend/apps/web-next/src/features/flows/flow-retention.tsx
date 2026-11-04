@@ -33,6 +33,90 @@ const MODES: Record<
 
 const policyKey = (flowId: string) => ["flows", "retention", flowId] as const;
 
+export type RetentionDraft = { own: boolean; days: number | null; mode: Mode };
+
+/** A form's starting point: the scope's own policy, or what it inherits to start from. */
+export function retentionDraft(settings: Schema<"FlowRunRetentionPolicySettings">): RetentionDraft {
+  const start = settings.local_policy ?? settings.inherited_policy;
+  return {
+    own: settings.local_policy !== null,
+    days: start?.days ?? null,
+    mode: start?.mode ?? "review_required"
+  };
+}
+
+export function retentionDaysValid(days: number | null): days is number {
+  return days !== null && Number.isInteger(days) && days >= MIN_DAYS && days <= MAX_DAYS;
+}
+
+/**
+ * The choice every level of retention has: nothing of its own, or a period. `refused`
+ * says the form was sent without valid days, which is when the field says so.
+ */
+export function RetentionFields({
+  draft,
+  onChange,
+  refused,
+  noneLabel,
+  noneDescription,
+  ownLabel,
+  isDisabled = false
+}: {
+  draft: RetentionDraft;
+  onChange: (next: RetentionDraft) => void;
+  refused: boolean;
+  noneLabel: string;
+  noneDescription: string;
+  ownLabel: string;
+  isDisabled?: boolean;
+}) {
+  const t = useTranslations();
+  return (
+    <>
+      <RadioList
+        isDisabled={isDisabled}
+        label={t("flows_retention_choice_label")}
+        value={draft.own ? "own" : "none"}
+        onChange={(value) => onChange({ ...draft, own: value === "own" })}
+      >
+        <RadioListItem value="none" label={noneLabel} description={noneDescription} />
+        <RadioListItem value="own" label={ownLabel} />
+      </RadioList>
+      {draft.own ? (
+        <>
+          <NumberInput
+            isDisabled={isDisabled}
+            label={t("flows_retention_days_label")}
+            value={draft.days}
+            onChange={(days) => onChange({ ...draft, days })}
+            min={MIN_DAYS}
+            max={MAX_DAYS}
+            isRequired
+            status={
+              retentionDaysValid(draft.days) || !refused
+                ? undefined
+                : {
+                    type: "error",
+                    message: t("flows_retention_days_range", { min: MIN_DAYS, max: MAX_DAYS })
+                  }
+            }
+          />
+          <Selector
+            isDisabled={isDisabled}
+            label={t("flows_retention_mode_label")}
+            value={draft.mode}
+            onChange={(mode) => onChange({ ...draft, mode: mode as Mode })}
+            options={(Object.keys(MODES) as Mode[]).map((value) => ({
+              value,
+              label: t(MODES[value])
+            }))}
+          />
+        </>
+      ) : null}
+    </>
+  );
+}
+
 /** What applies to the flow's run history, in a line: the days, what follows and where from. */
 export function FlowRetentionSummary({ flow }: { flow: FlowPublic }) {
   const t = useTranslations();
@@ -83,14 +167,11 @@ export function FlowRetentionDialog({
       purpose="form"
       width={480}
       variant={phone ? "fullscreen" : "standard"}
+      // Astryx finds the title when the dialog mounts, and a closed one renders nothing.
+      aria-label={t("flows_retention_heading")}
     >
       {!open ? null : policy.data ? (
-        <RetentionForm
-          key={policy.dataUpdatedAt}
-          flow={flow}
-          settings={policy.data}
-          onClose={() => onOpenChange(false)}
-        />
+        <RetentionForm flow={flow} settings={policy.data} onClose={() => onOpenChange(false)} />
       ) : (
         <Layout
           header={
@@ -133,22 +214,15 @@ function RetentionForm({
   const formId = useId();
   const queryClient = useQueryClient();
   const inherited = settings.inherited_policy;
-  const [own, setOwn] = useState(settings.local_policy !== null);
-  const [days, setDays] = useState<number | null>(
-    settings.local_policy?.days ?? inherited?.days ?? null
-  );
-  const [mode, setMode] = useState<Mode>(
-    settings.local_policy?.mode ?? inherited?.mode ?? "review_required"
-  );
+  const [draft, setDraft] = useState(() => retentionDraft(settings));
   const [refused, setRefused] = useState(false);
-  const daysValid = days !== null && Number.isInteger(days) && days >= MIN_DAYS && days <= MAX_DAYS;
 
   const save = useMutation({
     mutationFn: () =>
       unwrap(
         browserApi.PUT("/api/v1/settings/flow-run-retention-policy/flows/{flow_id}", {
           params: { path: { flow_id: flow.id } },
-          body: { policy: own ? { days: days!, mode } : null }
+          body: { policy: draft.own ? { days: draft.days!, mode: draft.mode } : null }
         })
       ),
     onSuccess: (saved) => {
@@ -181,58 +255,23 @@ function RetentionForm({
             className="flex flex-col gap-4"
             onSubmit={(event) => {
               event.preventDefault();
-              if (!own || daysValid) save.mutate();
+              if (save.isPending) return;
+              if (!draft.own || retentionDaysValid(draft.days)) save.mutate();
               else setRefused(true);
             }}
           >
-            <RadioList
-              label={t("flows_retention_choice_label")}
-              value={own ? "own" : "inherit"}
-              onChange={(value) => setOwn(value === "own")}
-            >
-              <RadioListItem
-                value="inherit"
-                label={t("flows_retention_inherit")}
-                description={
-                  inherited
-                    ? t("flows_retention_inherit_policy", { days: inherited.days })
-                    : t("flows_retention_inherit_none")
-                }
-              />
-              <RadioListItem value="own" label={t("flows_retention_own")} />
-            </RadioList>
-            {own ? (
-              <>
-                <NumberInput
-                  label={t("flows_retention_days_label")}
-                  value={days}
-                  onChange={setDays}
-                  min={MIN_DAYS}
-                  max={MAX_DAYS}
-                  isRequired
-                  status={
-                    daysValid || !refused
-                      ? undefined
-                      : {
-                          type: "error",
-                          message: t("flows_retention_days_range", {
-                            min: MIN_DAYS,
-                            max: MAX_DAYS
-                          })
-                        }
-                  }
-                />
-                <Selector
-                  label={t("flows_retention_mode_label")}
-                  value={mode}
-                  onChange={(value) => setMode(value as Mode)}
-                  options={(Object.keys(MODES) as Mode[]).map((value) => ({
-                    value,
-                    label: t(MODES[value])
-                  }))}
-                />
-              </>
-            ) : null}
+            <RetentionFields
+              draft={draft}
+              onChange={setDraft}
+              refused={refused}
+              noneLabel={t("flows_retention_inherit")}
+              noneDescription={
+                inherited
+                  ? t("flows_retention_inherit_policy", { days: inherited.days })
+                  : t("flows_retention_inherit_none")
+              }
+              ownLabel={t("flows_retention_own")}
+            />
           </form>
         </LayoutContent>
       }

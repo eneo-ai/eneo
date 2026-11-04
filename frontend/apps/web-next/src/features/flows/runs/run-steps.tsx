@@ -120,7 +120,7 @@ function StepOutput({
               <JsonValue value={structured} />
             </VStack>
           ) : transcript ? (
-            <TranscriptSlot host={transcript} />
+            <TranscriptSlot host={transcript} isOpen={open} />
           ) : (
             <StepOutputText payload={payload} />
           )}
@@ -280,7 +280,7 @@ function StepTranscriptSection({ host }: { host: HTMLElement }) {
       }
     >
       <div className="pt-2">
-        <TranscriptSlot host={host} />
+        <TranscriptSlot host={host} isOpen={open} />
       </div>
     </LazyCollapsible>
   );
@@ -388,9 +388,12 @@ function StepCard({
       ) : null}
       {warnings.length > 0 ? (
         <ul className="text-ax-text flex list-disc flex-col gap-0.5 pl-5 text-sm">
-          {warnings.map((item, index) => (
-            <li key={`${item.code}-${index}`}>{flowErrorText(item.code, t) ?? item.message}</li>
-          ))}
+          {/* A code's text says nothing of the case, so two of one code read as one line. */}
+          {[...new Set(warnings.map((item) => flowErrorText(item.code, t) ?? item.message))].map(
+            (text) => (
+              <li key={text}>{text}</li>
+            )
+          )}
         </ul>
       ) : null}
       {result?.long_material ? <LongMaterialCoverage coverage={result.long_material} /> : null}

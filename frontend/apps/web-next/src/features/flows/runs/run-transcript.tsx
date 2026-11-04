@@ -3,7 +3,16 @@ import { Button } from "@astryxdesign/core/Button";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
-import { useCallback, useId, useMemo, useRef, useState, type ReactNode, type Ref } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type Ref
+} from "react";
 import { flushSync } from "react-dom";
 import { TextInput } from "@/components/astryx/text-input";
 import { LeaveConfirmation } from "@/components/composites/leave-confirmation";
@@ -417,7 +426,11 @@ const focusBeingMoved = new WeakMap<HTMLElement, HTMLElement>();
  * phone's width puts it back in the new place; a transcript folded away takes
  * none with it to when it is opened again.
  */
-export function TranscriptSlot({ host }: { host: HTMLElement }) {
+export function TranscriptSlot({ host, isOpen }: { host: HTMLElement; isOpen: boolean }) {
+  // A closed panel keeps its content for the exit, so nothing else stops the sound.
+  useEffect(() => {
+    if (!isOpen) host.querySelector("audio")?.pause();
+  }, [host, isOpen]);
   const place = useCallback(
     (slot: HTMLDivElement | null) => {
       if (!slot) return;

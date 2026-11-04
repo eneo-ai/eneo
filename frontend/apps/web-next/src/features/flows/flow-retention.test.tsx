@@ -112,14 +112,18 @@ describe("flow retention", () => {
 });
 
 describe("the flow's security classification", () => {
-  const steps = [makeStep(1, { output_classification_override: 3 }), makeStep(2)];
+  const steps = [
+    makeStep(1, { output_classification_override: 3 }),
+    // The same level as the space's raises nothing.
+    makeStep(2, { output_classification_override: 2 })
+  ];
 
   it("names the space's, and says how many steps raise it", () => {
     renderInApp(
       <SettingsSummary
         flow={makeFlow({ steps })}
         transcription={resources}
-        classification="Intern"
+        classification={{ name: "Intern", security_level: 2 }}
       />
     );
     expect(screen.getByText(/Intern, 1 steg höjer nivån/)).toBeTruthy();

@@ -1787,7 +1787,6 @@ it("keeps a failed Flow settings read in the page and retries it", async () => {
 });
 
 it.each([
-  ["flow-data-retention", ""],
   ["flow-input-limits", "flow-files"],
   ["flow-knowledge-evidence", "flow-evidence-text"]
 ])("redirects legacy admin/%s to its Flow settings section", async (path, hash) => {
@@ -1815,12 +1814,11 @@ it.each([
   }
 );
 
-it("lands an old Flow settings link with ?tab=retention where the old retention page does", async () => {
+it("lands an old Flow settings link with ?tab=retention on the retention page", async () => {
   serveFlowSettings();
-  // Where retention is shown is admin/flow-data-retention's to say.
   const { router } = await renderRoute("/admin/flow-settings?tab=retention");
-  await screen.findByLabelText("Antal filer per körning");
-  expect(router.state.location.pathname).toBe("/admin/flow-settings");
+  await screen.findByRole("heading", { level: 1, name: "Gallring av flöden" });
+  expect(router.state.location.pathname).toBe("/admin/flow-data-retention");
   expect(router.state.location.search).toEqual({});
   expect(router.history.length).toBe(1);
 });

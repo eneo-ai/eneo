@@ -619,6 +619,7 @@ describe("DesktopSideNav (admin)", () => {
       "/admin/prompt-library",
       "/admin/skills",
       "/admin/flow-settings",
+      "/admin/flow-data-retention",
       "/admin/security-classifications",
       "/admin/audit-logs"
     ]);

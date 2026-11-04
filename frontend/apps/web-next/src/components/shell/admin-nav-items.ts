@@ -1,5 +1,6 @@
 import {
   Activity,
+  Archive,
   Blocks,
   ChartColumn,
   Cpu,
@@ -85,7 +86,14 @@ export function adminNavGroups({
         { href: "/admin/prompt-library", icon: Library, labelKey: "governance_tab_prompts" },
         { href: "/admin/skills", icon: SlidersHorizontal, labelKey: "admin_skills_nav_label" },
         ...(flowsEnabled
-          ? [{ href: "/admin/flow-settings", icon: Workflow, labelKey: "flow_admin_nav_label" }]
+          ? [
+              { href: "/admin/flow-settings", icon: Workflow, labelKey: "flow_admin_nav_label" },
+              {
+                href: "/admin/flow-data-retention",
+                icon: Archive,
+                labelKey: "flow_retention_admin_nav_label"
+              }
+            ]
           : []),
         {
           href: "/admin/security-classifications",

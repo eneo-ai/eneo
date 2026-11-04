@@ -13,7 +13,6 @@ const TITLE_EXCEPTIONS: Record<string, string> = {
   "/spaces/$spaceId/": "Redirects to the space's chat or overview.",
   "/spaces/$spaceId/knowledge/integrations/": "Redirects to the space's knowledge page.",
   "/admin/mcp-servers/": "Redirects to the MCP servers tab on the tools page.",
-  "/admin/flow-data-retention": "Redirects to the Flow settings page.",
   "/admin/flow-input-limits": "Redirects to the file limits section of Flow settings.",
   "/admin/flow-knowledge-evidence": "Redirects to the knowledge evidence section of Flow settings.",
   "/admin/": "Inherits Administration from the admin layout.",
