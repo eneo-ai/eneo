@@ -176,6 +176,34 @@ describe("widget template page", () => {
 
   // History navigation between two templates reuses the page; a publication
   // that finishes after the move belongs to the template it was asked for.
+  test("a disclosure emptied under one template's lock is not sent to the next template", async () => {
+    const first = template({ locked_groups: ["legal_texts"] });
+    const second = template({ id: "t2", name: "Skogsgrön", locked_groups: [] });
+    const update = vi.fn(
+      async ({
+        template: { id },
+        update: patch
+      }: {
+        template: { id: string };
+        update: Partial<WidgetTemplate>;
+      }) => ({ ...(id === "t2" ? second : first), ...patch, has_unpublished_changes: true })
+    );
+    const eneo = { widgets: { templates: { update, publish: vi.fn() } } };
+    const screen = render(TemplatePage, { data: { template: first, eneo } as never });
+    const subtitle = page.getByLabelText("widget_admin_text_subtitle", { exact: true });
+    await userEvent.clear(subtitle);
+    await expect.element(subtitle).toHaveAttribute("aria-invalid", "true");
+
+    // Both templates save the same subtitle, so only the held blank differs.
+    await screen.rerender({ data: { template: second, eneo } as never });
+    await expect.element(page.getByLabelText("name", { exact: true })).toHaveValue("Skogsgrön");
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    expect(update).not.toHaveBeenCalled();
+    await expect
+      .element(page.getByLabelText("widget_admin_text_subtitle", { exact: true }))
+      .toHaveValue("AI");
+  });
+
   test("a publication that lands after moving to another template leaves that one alone", async () => {
     const first = template({ linked_widgets: 0, has_unpublished_changes: true });
     const second = template({

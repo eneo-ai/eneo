@@ -2,7 +2,7 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderInApp } from "@/test/render";
+import { renderInApp, testQueryClient } from "@/test/render";
 import { overview, overviewItem, policy, template } from "./fixtures";
 
 const api = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn(), PATCH: vi.fn(), DELETE: vi.fn() }));
@@ -19,11 +19,13 @@ function ok(data: unknown) {
 function showPage({
   items = [overviewItem()],
   templates = [template()],
-  route = "/admin/widgets"
+  route = "/admin/widgets",
+  queryClient = testQueryClient()
 }: {
   items?: ReturnType<typeof overviewItem>[];
   templates?: ReturnType<typeof template>[];
   route?: string;
+  queryClient?: ReturnType<typeof testQueryClient>;
 } = {}) {
   api.GET.mockImplementation((path: string) => {
     switch (path) {
@@ -40,7 +42,7 @@ function showPage({
         });
     }
   });
-  return renderInApp(<WidgetsAdminPage />, { route });
+  return renderInApp(<WidgetsAdminPage />, { route, queryClient });
 }
 
 afterEach(() => {
@@ -83,7 +85,11 @@ describe("WidgetsAdminPage", () => {
   });
 
   it("asks before pausing a live widget, then pauses it and reloads the list", async () => {
-    showPage();
+    // The editor's cache of the space's widgets, fresh from a recent visit.
+    const queryClient = testQueryClient();
+    const editorKey = ["spaces", "s1", "widgets"];
+    queryClient.setQueryData(editorKey, [{ id: "w1", status: "active", revision: 3 }]);
+    showPage({ queryClient });
     api.POST.mockImplementation(() => ok(overviewItem({ status: "paused" })));
     fireEvent.click(await screen.findByRole("button", { name: "Pausa" }));
     const dialog = await screen.findByRole("alertdialog", { name: "Pausa Kontaktchatt?" });
@@ -99,6 +105,8 @@ describe("WidgetsAdminPage", () => {
         api.GET.mock.calls.filter(([p]) => p === "/api/v1/admin/widgets/").length
       ).toBeGreaterThan(1)
     );
+    // Reopening the editor within its stale time must not reuse the old revision.
+    expect(queryClient.getQueryState(editorKey)?.isInvalidated).toBe(true);
   });
 
   it("only offers activation when nothing blocks it", async () => {

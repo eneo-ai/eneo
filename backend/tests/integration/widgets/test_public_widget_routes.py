@@ -295,6 +295,13 @@ async def test_bot_protection_none_requires_policy(client, admin_token, active_w
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["visitor_id"] != known_visitor
+    # A key outside ASCII is not ours either, never a server error.
+    resp = await client.post(
+        f"/api/v1/widgets/{public_id}/visitor-sessions/",
+        json={"visitor_id": known_visitor, "visitor_key": "nyckel-å" * 4},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["visitor_id"] != known_visitor
     resp = await client.post(
         f"/api/v1/widgets/{public_id}/visitor-sessions/",
         json={"visitor_id": str(uuid4())},

@@ -691,3 +691,75 @@ async def test_changing_the_vote_keeps_the_visitors_comment(
     )
     assert resp.status_code == 200, resp.text
     assert await stored() == (1, "Nu stämmer det")
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_zero_retention_closes_conversations_stored_before_it(
+    client, admin_token, active_widget, fake_assistant_ask
+):
+    """A policy that stops retention afterwards does not bump the token
+    generation; the stored conversations must still be closed to visitors."""
+    public_id = active_widget["public_id"]
+    resp = await client.patch(
+        f"/api/v1/widgets/{active_widget['id']}/",
+        json={
+            "revision": active_widget["revision"],
+            "privacy": {"retention_days": 30, "store_feedback_text": True},
+        },
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 200, resp.text
+    token = await _mint(client, public_id)
+    resp = await client.post(
+        f"/api/v1/widgets/{public_id}/ask/",
+        json={"question": "Vad har biblioteket för öppettider?"},
+        headers=_auth(token),
+    )
+    assert resp.status_code == 200, resp.text
+    session_id = _sse_events(resp.text)[0][1]["session_id"]
+    resp = await client.post(
+        f"/api/v1/widgets/{public_id}/sessions/{session_id}/feedback/",
+        json={"value": 1, "text": "Första kommentaren"},
+        headers=_auth(token),
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["feedback"]["text"] == "Första kommentaren"
+
+    resp = await client.patch(
+        "/api/v1/admin/widget-policy/",
+        json={"max_retention_days": 0},
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 200, resp.text
+
+    # The same visitor, the same token: restore, follow-up and comment all close.
+    resp = await client.get(
+        f"/api/v1/widgets/{public_id}/sessions/{session_id}/", headers=_auth(token)
+    )
+    assert resp.status_code == 404, resp.text
+    assert resp.json()["detail"]["code"] == "session_not_owned"
+    resp = await client.post(
+        f"/api/v1/widgets/{public_id}/ask/",
+        json={"question": "Och på helger?", "session_id": session_id},
+        headers=_auth(token),
+    )
+    assert resp.status_code == 404, resp.text
+    assert resp.json()["detail"]["code"] == "session_not_owned"
+    resp = await client.post(
+        f"/api/v1/widgets/{public_id}/sessions/{session_id}/feedback/",
+        json={"value": -1, "text": "Senare kommentar"},
+        headers=_auth(token),
+    )
+    assert resp.status_code == 404, resp.text
+    assert resp.json()["detail"]["code"] == "session_not_owned"
+
+    async with sessionmanager.session() as session, session.begin():
+        row = (
+            await session.execute(
+                sa.select(Sessions.feedback_value, Sessions.feedback_text).where(
+                    Sessions.id == UUID(session_id)
+                )
+            )
+        ).one()
+    assert (row.feedback_value, row.feedback_text) == (1, "Första kommentaren")

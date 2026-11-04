@@ -383,71 +383,79 @@
           </Card.Content>
         </Card.Root>
 
-        <Tabs.Root value="content" class="gap-6">
-          <Tabs.List
-            class="h-auto w-full flex-wrap gap-1 p-1 sm:w-auto"
-            aria-label={m.widget_admin_template_details()}
-          >
-            <Tabs.Trigger value="content" class="h-9 px-3">
-              <FileText aria-hidden="true" />
-              {m.widget_admin_tab_content()}
-            </Tabs.Trigger>
-            <Tabs.Trigger value="appearance" class="h-9 px-3">
-              <Palette aria-hidden="true" />
-              {m.widget_admin_tab_appearance()}
-            </Tabs.Trigger>
-          </Tabs.List>
-          <Tabs.Content value="content">
-            <Card.Root>
-              <Card.Header>
-                <Card.Title><h2>{m.widget_admin_texts()}</h2></Card.Title>
-                <Card.Description>{m.widget_admin_template_texts_description()}</Card.Description>
-              </Card.Header>
-              <Card.Content>
-                <WidgetTextsFields
-                  texts={template.texts}
-                  showSuggestions={false}
-                  idPrefix="template"
-                  errors={textErrors}
-                  subtitleRequired={template.locked_groups.includes("legal_texts")
-                    ? m.widget_admin_blocker_legal_texts_lock_subtitle()
-                    : undefined}
-                  onChange={(change) => autosave.patch({ texts: { ...template.texts, ...change } })}
-                />
-              </Card.Content>
-            </Card.Root>
-            <Card.Root class="mt-6">
-              <Card.Header>
-                <Card.Title><h2>{m.widget_admin_persona()}</h2></Card.Title>
-                <Card.Description>{m.widget_admin_template_persona_description()}</Card.Description>
-              </Card.Header>
-              <Card.Content>
-                <WidgetPersonaFields
-                  persona={template.persona ?? {}}
-                  title={template.texts.title}
-                  idPrefix="template"
-                  errors={personaErrors}
-                  onChange={(persona) => autosave.patch({ persona })}
-                />
-              </Card.Content>
-            </Card.Root>
-          </Tabs.Content>
-          <Tabs.Content value="appearance">
-            <Card.Root>
-              <Card.Header>
-                <Card.Title><h2>{m.widget_admin_appearance()}</h2></Card.Title>
-                <Card.Description>{m.widget_admin_appearance_description()}</Card.Description>
-              </Card.Header>
-              <Card.Content>
-                <WidgetThemeFields
-                  theme={template.theme}
-                  idPrefix="template"
-                  onChange={(change) => autosave.patch({ theme: { ...template.theme, ...change } })}
-                />
-              </Card.Content>
-            </Card.Root>
-          </Tabs.Content>
-        </Tabs.Root>
+        <!-- Field state (a held blank disclosure, a late avatar upload) belongs
+             to one visit: the next template starts its fields afresh. -->
+        {#key owner}
+          <Tabs.Root value="content" class="gap-6">
+            <Tabs.List
+              class="h-auto w-full flex-wrap gap-1 p-1 sm:w-auto"
+              aria-label={m.widget_admin_template_details()}
+            >
+              <Tabs.Trigger value="content" class="h-9 px-3">
+                <FileText aria-hidden="true" />
+                {m.widget_admin_tab_content()}
+              </Tabs.Trigger>
+              <Tabs.Trigger value="appearance" class="h-9 px-3">
+                <Palette aria-hidden="true" />
+                {m.widget_admin_tab_appearance()}
+              </Tabs.Trigger>
+            </Tabs.List>
+            <Tabs.Content value="content">
+              <Card.Root>
+                <Card.Header>
+                  <Card.Title><h2>{m.widget_admin_texts()}</h2></Card.Title>
+                  <Card.Description>{m.widget_admin_template_texts_description()}</Card.Description>
+                </Card.Header>
+                <Card.Content>
+                  <WidgetTextsFields
+                    texts={template.texts}
+                    showSuggestions={false}
+                    idPrefix="template"
+                    errors={textErrors}
+                    subtitleRequired={template.locked_groups.includes("legal_texts")
+                      ? m.widget_admin_blocker_legal_texts_lock_subtitle()
+                      : undefined}
+                    onChange={(change) =>
+                      autosave.patch({ texts: { ...template.texts, ...change } })}
+                  />
+                </Card.Content>
+              </Card.Root>
+              <Card.Root class="mt-6">
+                <Card.Header>
+                  <Card.Title><h2>{m.widget_admin_persona()}</h2></Card.Title>
+                  <Card.Description
+                    >{m.widget_admin_template_persona_description()}</Card.Description
+                  >
+                </Card.Header>
+                <Card.Content>
+                  <WidgetPersonaFields
+                    persona={template.persona ?? {}}
+                    title={template.texts.title}
+                    idPrefix="template"
+                    errors={personaErrors}
+                    onChange={(persona) => autosave.patch({ persona })}
+                  />
+                </Card.Content>
+              </Card.Root>
+            </Tabs.Content>
+            <Tabs.Content value="appearance">
+              <Card.Root>
+                <Card.Header>
+                  <Card.Title><h2>{m.widget_admin_appearance()}</h2></Card.Title>
+                  <Card.Description>{m.widget_admin_appearance_description()}</Card.Description>
+                </Card.Header>
+                <Card.Content>
+                  <WidgetThemeFields
+                    theme={template.theme}
+                    idPrefix="template"
+                    onChange={(change) =>
+                      autosave.patch({ theme: { ...template.theme, ...change } })}
+                  />
+                </Card.Content>
+              </Card.Root>
+            </Tabs.Content>
+          </Tabs.Root>
+        {/key}
       </div>
       <aside class="min-w-0 self-start xl:sticky xl:top-4">
         <WidgetMockPreview

@@ -74,7 +74,7 @@ export function WidgetChat({
   const {
     conversation,
     asking,
-    loading: restoring,
+    loading: loadingConversation,
     ask,
     load,
     reset
@@ -132,6 +132,12 @@ export function WidgetChat({
         }
       })
   );
+  // The whole restoration of a remembered conversation, token renewal
+  // included: a question sent meanwhile would start a conversation of its own.
+  const [restoringSession, setRestoringSession] = useState(
+    () => !config.single_turn && !!session.sessionId && session.hasIdentity
+  );
+  const restoring = loadingConversation || restoringSession;
 
   // The loader's messages arrive on a bridge created once; the handlers read
   // the latest state through this ref, refreshed after every commit.
@@ -270,7 +276,7 @@ export function WidgetChat({
       session.rememberSession(null);
     } else if (session.sessionId && session.hasIdentity) {
       // Restore the visitor's last conversation on this site, if any.
-      void restore(session.sessionId);
+      void restore(session.sessionId).finally(() => setRestoringSession(false));
     }
     return () => {
       activeSend.current = null;

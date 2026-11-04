@@ -37,7 +37,8 @@ class VisitorIdentity:
         return hmac.new(self._secret, message, hashlib.sha256).hexdigest()
 
     def verify(self, widget: Widget, visitor_id: UUID, key: Optional[str]) -> bool:
-        if not key:
+        # compare_digest raises on non-ASCII text; such a key is simply not ours.
+        if not key or not key.isascii():
             return False
         return hmac.compare_digest(self.key_for(widget, visitor_id), key)
 

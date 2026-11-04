@@ -46,7 +46,6 @@ export function mountFromScript(script: HTMLScriptElement, doc: Document = docum
       if (value !== null) element.setAttribute(name, value);
     }
     doc.body.appendChild(element);
-    if (element.getAttribute("prefetch") === "true") element.prefetch();
   };
   if (doc.readyState === "loading") doc.addEventListener("DOMContentLoaded", mount, { once: true });
   else mount();

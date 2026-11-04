@@ -7,12 +7,13 @@ import { ProgressBar } from "@astryxdesign/core/ProgressBar";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, Pause, Play } from "lucide-react";
 import Link from "@/lib/link";
+import { browserApi } from "@/lib/api/browser";
 import { useLocale, useTranslations } from "use-intl";
 import { useId, useState } from "react";
 import { Switch } from "@astryxdesign/core/Switch";
 import { blockerLabel } from "../blockers";
 import { toastWidgetError } from "../errors";
-import { widgetApi } from "../queries";
+import { spaceWidgetsQueryOptions, widgetApi } from "../queries";
 import { WIDGET_OVERVIEW_KEY, type WidgetOverview, type WidgetOverviewItem } from "./queries";
 
 /**
@@ -43,7 +44,14 @@ export function WidgetOverviewList({ overview }: { overview: WidgetOverview }) {
       if (action === "pause") await widgetApi.pause(item.id);
       else await widgetApi.activate(item.id);
       setToPause(null);
-      await queryClient.invalidateQueries({ queryKey: WIDGET_OVERVIEW_KEY });
+      // The editor reads the space's widgets from a cache of its own; the
+      // lifecycle change bumped the revision a stale copy would send back.
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: WIDGET_OVERVIEW_KEY }),
+        queryClient.invalidateQueries({
+          queryKey: spaceWidgetsQueryOptions(browserApi, item.space_id).queryKey
+        })
+      ]);
     } catch (error) {
       toastWidgetError(error, t);
     } finally {

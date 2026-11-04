@@ -261,6 +261,10 @@ export class EneoWidgetElement extends HTMLElement {
       this.layout();
     } else if (this.getAttribute("auto-open") === "true") {
       this.openPanel();
+    } else if (this.getAttribute("prefetch") === "true") {
+      // Hosts that render the element themselves get the attribute's
+      // contract too, not only a script-mounted one.
+      this.prefetch();
     }
   }
 

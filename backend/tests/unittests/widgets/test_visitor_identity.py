@@ -48,3 +48,11 @@ def test_bad_or_missing_key_issues_a_fresh_id():
     assert identity.resolve(widget, claimed, None) != claimed
     assert identity.resolve(widget, claimed, "00" * 32) != claimed
     assert identity.resolve(widget, None, None) is not None
+
+
+def test_a_non_ascii_key_is_invalid_not_an_error():
+    widget = _widget()
+    claimed = uuid4()
+    identity = _identity()
+    assert identity.verify(widget, claimed, "nyckel-å" * 4) is False
+    assert identity.resolve(widget, claimed, "nyckel-å" * 4) != claimed

@@ -242,6 +242,51 @@ describe("WidgetChat", () => {
     expect(screen.queryByRole("button", { name: "Hjälpsam konversation" })).toBeNull();
   });
 
+  it("keeps sending unavailable while a remembered conversation renews its token", async () => {
+    const { client, ask } = fakeClient();
+    const visitor = "22222222-2222-4333-8444-555555555555";
+    localStorage.setItem(
+      `eneo-widget:${PUBLIC_ID}`,
+      JSON.stringify({
+        visitor_id: visitor,
+        visitor_key: "key",
+        token: "expired",
+        expires_at: Date.now() - 1000,
+        session_id: SESSION
+      })
+    );
+    let finishRenewal!: (value: unknown) => void;
+    vi.mocked(client.createVisitorSession).mockImplementationOnce(
+      () => new Promise((resolve) => (finishRenewal = resolve)) as never
+    );
+    vi.mocked(client.conversations.get).mockResolvedValue({
+      id: SESSION,
+      messages: [{ ...firstChunk("Tidigare fråga"), answer: "Tidigare svar" }],
+      feedback: null
+    } as never);
+    renderChat(config(), client);
+    await waitFor(() => expect(client.createVisitorSession).toHaveBeenCalledTimes(1));
+
+    // Renewal still pending: a question must not start a conversation of its own.
+    typeQuestion("Under förnyelsen");
+    await act(async () => {});
+    expect(ask).not.toHaveBeenCalled();
+    // The draft stays in the box; nothing of it is shown as sent.
+    expect(screen.queryByRole("log")).toBeNull();
+
+    await act(async () =>
+      finishRenewal({ token: "renewed", expires_in: 3600, visitor_id: visitor, visitor_key: "key" })
+    );
+    await screen.findByText("Tidigare svar");
+    typeQuestion("Efter förnyelsen");
+    await waitFor(() => expect(ask).toHaveBeenCalledTimes(1));
+    expect(ask).toHaveBeenLastCalledWith(
+      expect.objectContaining({ question: "Efter förnyelsen", conversation: { id: SESSION } })
+    );
+    await screen.findByText("Pour over: 15 g kaffe på 250 g vatten.");
+    expect(rememberedSession()).toBe(SESSION);
+  });
+
   it("discards a follow-up while its token is being renewed", async () => {
     const { client, ask } = fakeClient();
     const token = { token: "first", expires_in: 1, visitor_id: SESSION, visitor_key: "key" };

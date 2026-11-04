@@ -335,14 +335,17 @@ describe("saved settings", () => {
     expect(frameOf(element)!.src).toContain("/en/embed/");
   });
 
+  // Both cancellations are answered with an active widget: an inactive one
+  // drops a pending open by itself, which would hide a missing guard.
   it("drops an early open when the host closes again before the settings are in", async () => {
     const held = heldSettings();
     const element = attach();
     element.openPanel();
     element.closePanel();
-    held.answer(null);
+    held.answer({ language: "en", position: "bottom-left", colors });
     await flushSettings();
     expect(element.open).toBe(false);
+    expect(frameOf(element)).toBeNull();
   });
 
   it("cancels a pending open when the host toggles twice", async () => {
@@ -350,10 +353,20 @@ describe("saved settings", () => {
     const element = attach();
     element.toggle();
     element.toggle();
-    held.answer(null);
+    held.answer({ language: "en", position: "bottom-left", colors });
     await flushSettings();
     expect(element.open).toBe(false);
     expect(frameOf(element)).toBeNull();
+  });
+
+  it("prefetches the iframe for an element the host mounted itself with prefetch", async () => {
+    const held = heldSettings();
+    const element = attach({ prefetch: "true" });
+    expect(frameOf(element)).toBeNull();
+    held.answer({ language: "en", position: "bottom-left", colors });
+    await flushSettings();
+    expect(element.open).toBe(false);
+    expect(frameOf(element)).not.toBeNull();
   });
 
   it("forgets an early open when the host removes it before the settings are in", async () => {

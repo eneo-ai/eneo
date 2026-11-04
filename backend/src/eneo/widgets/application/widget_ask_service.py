@@ -185,6 +185,11 @@ class WidgetAskService:
         ).date()
 
     async def _owned_session(self, widget: Widget, session_id: UUID) -> SessionInDB:
+        # Retention cut to zero after conversations were stored, by the widget
+        # or the tenant policy: they stay closed to visitors (no restore,
+        # follow-up or comment) until the retention job removes them.
+        if widget.privacy.never_persists:
+            raise SessionNotOwnedError()
         try:
             return await self.session_service.get_session_by_uuid(
                 id=session_id, assistant_id=widget.target_id
