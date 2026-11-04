@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { expect, test } from "./csp";
+import { hiddenFocusProbe } from "./hidden-focus-probe";
 import { createFixtures, walkRoutes, walkTags } from "./responsive-fixtures";
 import { measure, type PageMeasure, type Violation } from "./responsive-measure";
 import type { Fixtures } from "./responsive-routes";
@@ -17,6 +18,9 @@ test.skip(!process.env.E2E_BASE_URL, "Requires the FastAPI-served Vite build");
  * it, do not add it). A baseline entry that no longer occurs also fails the
  * run, so the file only shrinks. Sideways scroll is never baselined.
  *
+ * The sizes marked `keyboard` also Tab through each screen (tests/hidden-focus-probe.ts): it
+ * is the same visit, last, since Tabbing changes what the page shows.
+ *
  * tests/responsive-routes.ts decides which screens are opened; a unit test
  * keeps it equal to the route tree. CONTRACT_UPDATE=1 rewrites the baseline
  * from the current run; CONTRACT_VIEWPORTS=390x844,820x1180 narrows a run.
@@ -24,13 +28,13 @@ test.skip(!process.env.E2E_BASE_URL, "Requires the FastAPI-served Vite build");
 
 const VIEWPORTS = [
   { name: "phone-320", width: 320, height: 568 },
-  { name: "phone-390", width: 390, height: 844 },
+  { name: "phone-390", width: 390, height: 844, keyboard: true },
   // A phone turned: the browser's own bars leave about 300 px of height.
-  { name: "phone-landscape", width: 667, height: 300 },
+  { name: "phone-landscape", width: 667, height: 300, keyboard: true },
   // A larger phone turned: wider than 768 px but under 500 px tall, it keeps the phone's layout.
   { name: "phone-turned", width: 844, height: 390 },
-  { name: "ipad-portrait", width: 820, height: 1180 },
-  { name: "ipad-landscape", width: 1180, height: 820 }
+  { name: "ipad-portrait", width: 820, height: 1180, keyboard: true },
+  { name: "ipad-landscape", width: 1180, height: 820, keyboard: true }
 ].filter(
   ({ width, height }) =>
     !process.env.CONTRACT_VIEWPORTS ||
@@ -92,6 +96,7 @@ for (const vp of VIEWPORTS) {
           either = new Set([...either, ...again]);
         }
         seen[key] = { stable, either };
+        if (vp.keyboard) problems.push(...(await hiddenFocusProbe(page, pattern)));
         return problems;
       });
       problems.push(...found);
