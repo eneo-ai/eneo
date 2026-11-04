@@ -215,7 +215,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # A ceiling for the migrations leg, which grows with the history: its round
+    # trips run one module at a time, each from an empty database.
+    timeout-minutes: 40
     defaults:
       run:
         working-directory: backend
@@ -324,18 +326,6 @@ jobs:
             uv run pytest -q -m migration_isolation "$module" || status=1
           done
           exit "$status"
-        env:
-          TESTCONTAINERS_RYUK_DISABLED: "true"
-          DOCKER_HOST: unix:///var/run/docker.sock
-
-      - name: Verify flows migrations
-        if: matrix.suite == 'migrations'
-        # Every flows migration test owns its schema; the glob picks up future ones.
-        # The jobs index round trip owns its schema the same way.
-        run: >-
-          uv run pytest -q -m migration_isolation
-          tests/integration/migrations/test_flow_*.py
-          tests/integration/migrations/test_jobs_user_created_index_round_trip.py
         env:
           TESTCONTAINERS_RYUK_DISABLED: "true"
           DOCKER_HOST: unix:///var/run/docker.sock
