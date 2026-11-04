@@ -126,115 +126,113 @@ async function completedResult(page: Page, routeKind: "space" | "dashboard") {
 test.use({ hasTouch: true });
 
 for (const routeKind of ["space", "dashboard"] as const) {
-  test(
-    `${routeKind} result prints the selected document and downloads exact original audio`,
-    { tag: "@vite" },
-    async ({ page, context }, testInfo) => {
-      await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-      const result = await completedResult(page, routeKind);
-      await page.goto(result.path);
-      const dock = page.getByRole("group", { name: "Resultat, åtgärder", exact: true });
-      await expect(page.getByRole("heading", { name: "UTDATA_ONLY", exact: true })).toBeVisible();
-      await page.emulateMedia({ media: "print", colorScheme: "dark" });
-      await dock
+  test(`${routeKind} result prints the selected document and downloads exact original audio`, async ({
+    page,
+    context
+  }, testInfo) => {
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    const result = await completedResult(page, routeKind);
+    await page.goto(result.path);
+    const dock = page.getByRole("group", { name: "Resultat, åtgärder", exact: true });
+    await expect(page.getByRole("heading", { name: "UTDATA_ONLY", exact: true })).toBeVisible();
+    await page.emulateMedia({ media: "print", colorScheme: "dark" });
+    await dock
+      .getByRole("button", { name: "Skriv ut / Spara utdata som PDF", exact: true })
+      .click();
+    const outputPrint = await page.evaluate(() => window.__appResultPrint);
+    expect(outputPrint).toMatchObject({
+      visibleDocument: true,
+      shellHidden: true,
+      controlsHidden: true,
+      background: "rgb(255, 255, 255)"
+    });
+    expect(outputPrint?.text).toContain("UTDATA_ONLY");
+    expect(outputPrint?.text).not.toContain("Input must not print");
+    expect(outputPrint?.text).not.toContain("TRANSKRIPTION");
+    await expect(page.locator("[data-app-result-print-document]")).toHaveCount(0);
+    expect(await page.locator("body").getAttribute("data-app-result-printing")).toBeNull();
+    await expect(dock).toBeVisible();
+    await page.emulateMedia({ media: null });
+    const outputDownload = page.waitForEvent("download");
+    await dock.getByRole("button", { name: "Ladda ner", exact: true }).click();
+    const output = await outputDownload;
+    expect(await readFile((await output.path())!, "utf8")).toBe(result.output);
+
+    await page.setViewportSize({ width: 320, height: 900 });
+    await dock.screenshot({ path: testInfo.outputPath("output-actions-320-dark.png") });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      320
+    );
+    expect(
+      (await dock
         .getByRole("button", { name: "Skriv ut / Spara utdata som PDF", exact: true })
-        .click();
-      const outputPrint = await page.evaluate(() => window.__appResultPrint);
-      expect(outputPrint).toMatchObject({
-        visibleDocument: true,
-        shellHidden: true,
-        controlsHidden: true,
-        background: "rgb(255, 255, 255)"
-      });
-      expect(outputPrint?.text).toContain("UTDATA_ONLY");
-      expect(outputPrint?.text).not.toContain("Input must not print");
-      expect(outputPrint?.text).not.toContain("TRANSKRIPTION");
-      await expect(page.locator("[data-app-result-print-document]")).toHaveCount(0);
-      expect(await page.locator("body").getAttribute("data-app-result-printing")).toBeNull();
-      await expect(dock).toBeVisible();
-      await page.emulateMedia({ media: null });
-      const outputDownload = page.waitForEvent("download");
-      await dock.getByRole("button", { name: "Ladda ner", exact: true }).click();
-      const output = await outputDownload;
-      expect(await readFile((await output.path())!, "utf8")).toBe(result.output);
+        .boundingBox())!.height
+    ).toBeGreaterThanOrEqual(44);
+    await page.getByRole("tab", { name: "Transkription", exact: true }).click();
+    const first = page.getByRole("region", { name: "intervju.wav", exact: true });
+    const second = page.getByRole("region", { name: "annan.wav", exact: true });
+    await expect(first.locator("audio")).toHaveAttribute(
+      "src",
+      /\/api\/v1\/files\/.*\/download\/\?token=/
+    );
+    await second.getByRole("button", { name: "Kopiera transkription", exact: true }).click();
+    await expect
+      .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+      .toBe("TRANSKRIPTION_TWO");
+    await page.emulateMedia({ media: "print" });
+    await second
+      .getByRole("button", { name: "Skriv ut / Spara transkription som PDF", exact: true })
+      .click();
+    const transcriptionPrint = await page.evaluate(() => window.__appResultPrint);
+    expect(transcriptionPrint).toMatchObject({
+      text: "TRANSKRIPTION_TWO",
+      visibleDocument: true,
+      shellHidden: true,
+      controlsHidden: true
+    });
+    await expect(page.locator("[data-app-result-print-document]")).toHaveCount(0);
+    await page.emulateMedia({ media: null });
+    const transcriptionDownload = page.waitForEvent("download");
+    await second
+      .getByRole("button", { name: "Ladda ner transkription som råtext", exact: true })
+      .click();
+    const transcription = await transcriptionDownload;
+    expect(transcription.suggestedFilename()).toBe(output.suggestedFilename());
+    expect(await readFile((await transcription.path())!, "utf8")).toBe("TRANSKRIPTION_TWO");
 
-      await page.setViewportSize({ width: 320, height: 900 });
-      await dock.screenshot({ path: testInfo.outputPath("output-actions-320-dark.png") });
-      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
-        320
-      );
-      expect(
-        (await dock
-          .getByRole("button", { name: "Skriv ut / Spara utdata som PDF", exact: true })
-          .boundingBox())!.height
-      ).toBeGreaterThanOrEqual(44);
-      await page.getByRole("tab", { name: "Transkription", exact: true }).click();
-      const first = page.getByRole("region", { name: "intervju.wav", exact: true });
-      const second = page.getByRole("region", { name: "annan.wav", exact: true });
-      await expect(first.locator("audio")).toHaveAttribute(
-        "src",
-        /\/api\/v1\/files\/.*\/download\/\?token=/
-      );
-      await second.getByRole("button", { name: "Kopiera transkription", exact: true }).click();
-      await expect
-        .poll(() => page.evaluate(() => navigator.clipboard.readText()))
-        .toBe("TRANSKRIPTION_TWO");
-      await page.emulateMedia({ media: "print" });
-      await second
-        .getByRole("button", { name: "Skriv ut / Spara transkription som PDF", exact: true })
-        .click();
-      const transcriptionPrint = await page.evaluate(() => window.__appResultPrint);
-      expect(transcriptionPrint).toMatchObject({
-        text: "TRANSKRIPTION_TWO",
-        visibleDocument: true,
-        shellHidden: true,
-        controlsHidden: true
-      });
-      await expect(page.locator("[data-app-result-print-document]")).toHaveCount(0);
-      await page.emulateMedia({ media: null });
-      const transcriptionDownload = page.waitForEvent("download");
-      await second
-        .getByRole("button", { name: "Ladda ner transkription som råtext", exact: true })
-        .click();
-      const transcription = await transcriptionDownload;
-      expect(transcription.suggestedFilename()).toBe(output.suggestedFilename());
-      expect(await readFile((await transcription.path())!, "utf8")).toBe("TRANSKRIPTION_TWO");
+    const signedResponse = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname === `/api/v1/files/${result.file.id}/original/signed-url/`
+    );
+    const audioDownload = page.waitForEvent("download");
+    await first
+      .getByRole("button", { name: 'Ladda ner original "intervju.wav"', exact: true })
+      .click();
+    const signed = await signedResponse;
+    expect(signed.status()).toBe(200);
+    expect(signed.request().postDataJSON()).toEqual({
+      expires_in: 3600,
+      content_disposition: "attachment"
+    });
+    const audio = await audioDownload;
+    expect(audio.suggestedFilename()).toBe("intervju.wav");
+    expect(new URL(audio.url()).origin).toBe(new URL(page.url()).origin);
+    expect(new URL(audio.url()).pathname).toBe(
+      `/api/v1/files/${result.file.id}/original/download/`
+    );
+    expect(
+      createHash("sha256")
+        .update(await readFile((await audio.path())!))
+        .digest("hex")
+    ).toBe(createHash("sha256").update(result.bytes).digest("hex"));
 
-      const signedResponse = page.waitForResponse(
-        (response) =>
-          response.request().method() === "POST" &&
-          new URL(response.url()).pathname ===
-            `/api/v1/files/${result.file.id}/original/signed-url/`
-      );
-      const audioDownload = page.waitForEvent("download");
-      await first
-        .getByRole("button", { name: 'Ladda ner original "intervju.wav"', exact: true })
-        .click();
-      const signed = await signedResponse;
-      expect(signed.status()).toBe(200);
-      expect(signed.request().postDataJSON()).toEqual({
-        expires_in: 3600,
-        content_disposition: "attachment"
-      });
-      const audio = await audioDownload;
-      expect(audio.suggestedFilename()).toBe("intervju.wav");
-      expect(new URL(audio.url()).origin).toBe(new URL(page.url()).origin);
-      expect(new URL(audio.url()).pathname).toBe(
-        `/api/v1/files/${result.file.id}/original/download/`
-      );
-      expect(
-        createHash("sha256")
-          .update(await readFile((await audio.path())!))
-          .digest("hex")
-      ).toBe(createHash("sha256").update(result.bytes).digest("hex"));
-
-      await page.setViewportSize({ width: 320, height: 900 });
-      await page.emulateMedia({ colorScheme: "dark" });
-      await first.scrollIntoViewIfNeeded();
-      await first.screenshot({ path: testInfo.outputPath("transcription-320-dark.png") });
-      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
-        320
-      );
-    }
-  );
+    await page.setViewportSize({ width: 320, height: 900 });
+    await page.emulateMedia({ colorScheme: "dark" });
+    await first.scrollIntoViewIfNeeded();
+    await first.screenshot({ path: testInfo.outputPath("transcription-320-dark.png") });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      320
+    );
+  });
 }

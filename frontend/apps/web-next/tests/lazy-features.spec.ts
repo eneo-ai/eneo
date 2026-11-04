@@ -15,9 +15,7 @@ import {
 
 const fixtures = path.resolve("../../../e2e/fixtures");
 
-test.describe("production lazy features", { tag: "@vite" }, () => {
-  test.skip(!process.env.E2E_BASE_URL, "Requires the FastAPI-served production Vite build.");
-
+test.describe("production lazy features", () => {
   test("previews the original DOCX and workbook in the file panel", async ({ page }) => {
     const failures = collectAssetFailures(page);
     await page.goto("/spaces/personal/chat");

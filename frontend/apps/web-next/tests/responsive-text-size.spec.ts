@@ -3,8 +3,6 @@ import { expect, test } from "./csp";
 import { createFixtures, walkRoutes } from "./responsive-fixtures";
 import { measure } from "./responsive-measure";
 
-test.skip(!process.env.E2E_BASE_URL, "Requires the FastAPI-served Vite build");
-
 /*
  * What the reader changes about the text, on a 390 px phone, must not cost
  * content. Never baselined: a screen either survives it or does not.
@@ -39,7 +37,7 @@ async function walkScreens(
 
 test(
   "no screen scrolls sideways with the text at 200%",
-  { tag: ["@vite", "@text-size"] },
+  { tag: "@text-size" },
   async ({ browser, baseURL }) => {
     test.setTimeout(15 * 60_000);
     const problems = await walkScreens(browser, baseURL, "Text", async (page, pattern) => {
@@ -65,7 +63,7 @@ test(
 
 test(
   "no text is cut off, and nothing scrolls sideways, with the text spacing of WCAG 1.4.12",
-  { tag: ["@vite", "@text-size"] },
+  { tag: "@text-size" },
   async ({ browser, baseURL }) => {
     test.setTimeout(15 * 60_000);
     const problems = await walkScreens(browser, baseURL, "Spacing", async (page, pattern) => {

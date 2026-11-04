@@ -13,8 +13,6 @@ import { selectedProbe } from "./selected-probe";
 import { DEV_ONLY, probeBaseline, type Cell } from "./ui-probes";
 import { AXE_PAGE_RULES, WCAG_22_AA_TAGS } from "../src/test/wcag";
 
-test.skip(!process.env.E2E_BASE_URL, "Requires the FastAPI-served Vite build");
-
 /*
  * axe (WCAG 2.2 A/AA: contrast, target size, names, structure) on every screen
  * of tests/responsive-routes.ts, on a phone and an iPad (upright and sideways),

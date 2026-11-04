@@ -6,8 +6,6 @@ import { createFixtures, walkRoutes, walkTags } from "./responsive-fixtures";
 import { measure, type PageMeasure, type Violation } from "./responsive-measure";
 import type { Fixtures } from "./responsive-routes";
 
-test.skip(!process.env.E2E_BASE_URL, "Requires the FastAPI-served Vite build");
-
 /*
  * The responsive contract: every screen, opened on a handful of real device
  * sizes with touch, must not scroll sideways, and must not hold a target under

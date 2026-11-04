@@ -24,7 +24,7 @@ function list(...args) {
     cwd: app,
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
-    // The specs skip themselves without a target; listing needs none.
+    // The config refuses to start without a target; listing never reaches it.
     env: { ...process.env, E2E_BASE_URL: process.env.E2E_BASE_URL ?? "http://localhost:8124" },
   });
   if (run.status !== 0) {

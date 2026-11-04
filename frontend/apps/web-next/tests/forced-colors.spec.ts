@@ -2,8 +2,6 @@ import { expect, test } from "./csp";
 import { createFixtures, walkRoutes } from "./responsive-fixtures";
 import type { Fixtures } from "./responsive-routes";
 
-test.skip(!process.env.E2E_BASE_URL, "Requires the FastAPI-served Vite build");
-
 /*
  * Windows high contrast (WCAG 1.4.11, 1.4.1, 4.1.2). In forced colours the browser
  * swaps every author colour for the system palette: a background that is not a system
@@ -34,7 +32,7 @@ test.beforeAll(async ({ browser, baseURL }) => {
 for (const variant of VARIANTS) {
   test(
     `every control keeps a boundary in forced colours on a ${variant.name}`,
-    { tag: ["@vite", "@forced-colors"] },
+    { tag: "@forced-colors" },
     async ({ browser, baseURL }) => {
       test.setTimeout(15 * 60_000);
       const walk = {

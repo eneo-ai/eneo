@@ -83,7 +83,7 @@ export const DEVICE_GROUPS = ["phone", "ipad", "desktop"] as const;
 export function walkTags(walk: `@${string}`, viewport: string): string[] {
   const device = DEVICE_GROUPS.find((group) => viewport.startsWith(group));
   if (!device) throw new Error(`${viewport}: no device group in DEVICE_GROUPS`);
-  return ["@vite", walk, `@${device}`];
+  return [walk, `@${device}`];
 }
 
 export type Walk = {

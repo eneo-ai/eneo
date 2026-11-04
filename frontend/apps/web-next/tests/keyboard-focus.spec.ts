@@ -1,8 +1,6 @@
 import { expect, test } from "./csp";
 import { createFixtures, walkRoutes, walkTags } from "./responsive-fixtures";
 
-test.skip(!process.env.E2E_BASE_URL, "Requires the FastAPI-served Vite build");
-
 /*
  * Keyboard on every screen of tests/responsive-routes.ts, on a laptop-sized
  * window: the first Tab lands on the skip link of a signed-in screen (2.4.1),
