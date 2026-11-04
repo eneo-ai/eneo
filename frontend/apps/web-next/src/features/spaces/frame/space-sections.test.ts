@@ -223,6 +223,18 @@ describe("spaceNavGroups", () => {
     ]);
   });
 
+  it("lists the flows beside the apps where the tenant has them", () => {
+    const space = makeSpace();
+    expect(ids(spaceNavGroups(space, canFor(space), "space-1", { flows: true }))[0]).toEqual([
+      "overview",
+      "assistants",
+      "apps",
+      "flows",
+      "knowledge",
+      "skills"
+    ]);
+  });
+
   it("keeps settings with the content in the organisation space, which has no members", () => {
     const space = makeSpace({ overrides: { organization: true } });
     expect(ids(spaceNavGroups(space, canFor(space), "organization"))).toEqual([

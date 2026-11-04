@@ -137,8 +137,13 @@ export type SpaceNavItem = { id: SpaceSectionId | "chat"; href: string };
  * sections, then Medlemmar with what follows it. Gating stays with
  * `spaceSections`; empty groups are dropped.
  */
-export function spaceNavGroups(space: Space, can: Can, routeId: SpaceRouteId): SpaceNavItem[][] {
-  const sections = spaceSections(space, can, routeId);
+export function spaceNavGroups(
+  space: Space,
+  can: Can,
+  routeId: SpaceRouteId,
+  options: SpaceSectionOptions = {}
+): SpaceNavItem[][] {
+  const sections = spaceSections(space, can, routeId, options);
   const members = sections.findIndex((section) => section.id === "members");
   const groups: SpaceNavItem[][] = [
     space.personal && !space.organization

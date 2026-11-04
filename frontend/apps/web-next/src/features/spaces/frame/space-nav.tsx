@@ -270,12 +270,13 @@ export function SpaceNavSections() {
   const t = useTranslations();
   const { routeId, query } = useNavSpace();
   const current = useCurrentItem();
+  const { featureFlags } = useAppContext();
   const space = query.data;
   if (routeId === null || !space) return null;
 
   const can = (action: ResourcePermission, resource: SpaceResource) =>
     spaceHasPermission(space, action, resource);
-  const groups = spaceNavGroups(space, can, routeId);
+  const groups = spaceNavGroups(space, can, routeId, { flows: featureFlags.flows });
 
   return (
     <div className="flex flex-col gap-0.5">
