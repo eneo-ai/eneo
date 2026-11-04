@@ -1,5 +1,5 @@
 from collections import defaultdict
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Optional
@@ -244,9 +244,14 @@ class SpaceRepository:
         space_tenants: Mapping[UUID, UUID],
         assistants: Sequence[Assistants],
         apps: Sequence[Apps],
+        content_owners: Collection[tuple[str, UUID]] = (),
     ) -> tuple[dict[UUID, list[File]], dict[UUID, list[File]]]:
         """Attachments of the assistants and apps of several spaces, each
-        confined to the tenant of the space that owns it."""
+        confined to the tenant of the space that owns it.
+
+        A space read presents its applications without their files' content,
+        so only ``content_owners`` get it: the one assistant or app in use.
+        """
         groups: list[FileAttachmentGroup] = []
         for owner_kind, records in (("assistant", assistants), ("app", apps)):
             for record in records:
@@ -262,7 +267,9 @@ class SpaceRepository:
                         ),
                     )
                 )
-        loaded = await self.file_content_loader.load_attachment_groups(groups)
+        loaded = await self.file_content_loader.load_attachment_groups(
+            groups, content_owners=content_owners
+        )
         return (
             {record.id: loaded[("assistant", record.id)] for record in assistants},
             {record.id: loaded[("app", record.id)] for record in apps},
@@ -1148,7 +1155,11 @@ class SpaceRepository:
         return apps_db
 
     async def _get_from_query(
-        self, query: sa.Select[tuple[Spaces]], *, with_document_counts: bool = False
+        self,
+        query: sa.Select[tuple[Spaces]],
+        *,
+        with_document_counts: bool = False,
+        content_owners: Collection[tuple[str, UUID]] = (),
     ) -> Space | None:
         entry_in_db = await self._get_record_with_options(query)
         if not entry_in_db:
@@ -1242,6 +1253,7 @@ class SpaceRepository:
             space_tenants={entry_in_db.id: entry_in_db.tenant_id},
             assistants=assistants,
             apps=apps,
+            content_owners=content_owners,
         )
         group_chats = await self._get_group_chats([entry_in_db.id])
         services = await self._get_services(space_id=entry_in_db.id)
@@ -1574,12 +1586,23 @@ class SpaceRepository:
 
         return await self._get_from_query(query, with_document_counts=True)
 
-    async def get_space_by_assistant(self, assistant_id: UUID) -> Space:
+    async def get_space_by_assistant(
+        self, assistant_id: UUID, *, tool_assistant_id: UUID | None = None
+    ) -> Space:
+        """The assistant's space, with the content of its attachments and the
+        tool assistant's; no other assistant or app in the space has any."""
         query = self._in_caller_tenant(
             sa.select(Spaces).join(Assistants).where(Assistants.id == assistant_id)
         )
 
-        space = await self._get_from_query(query)
+        space = await self._get_from_query(
+            query,
+            content_owners=[
+                ("assistant", id)
+                for id in (assistant_id, tool_assistant_id)
+                if id is not None
+            ],
+        )
 
         if space is None:
             raise NotFoundException()
@@ -1591,7 +1614,7 @@ class SpaceRepository:
             sa.select(Spaces).join(Apps).where(Apps.id == app_id)
         )
 
-        space = await self._get_from_query(query)
+        space = await self._get_from_query(query, content_owners=[("app", app_id)])
 
         if space is None:
             raise NotFoundException()
