@@ -16,10 +16,13 @@ export function WidgetUsage({ widget, visible = true }: { widget: Widget; visibl
   const titleId = useId();
   const intlLocale = locale === "sv" ? "sv-SE" : "en-US";
   const number = new Intl.NumberFormat(intlLocale);
+  // A `YYYY-MM-DD` day parses as UTC midnight, so it is read in UTC too; a
+  // local-time formatter would name the day before, west of UTC.
   const day = new Intl.DateTimeFormat(intlLocale, {
     weekday: "short",
     day: "numeric",
-    month: "short"
+    month: "short",
+    timeZone: "UTC"
   });
 
   // The budget in force is the server's (the policy may cap it), so a saved

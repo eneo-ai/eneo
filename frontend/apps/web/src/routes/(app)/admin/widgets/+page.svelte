@@ -5,7 +5,7 @@
 -->
 <script lang="ts">
   import type { WidgetPolicy, WidgetPolicyUpdate, WidgetTemplate } from "@eneo/eneo-js";
-  import { goto } from "$app/navigation";
+  import { goto, invalidateAll } from "$app/navigation";
   import LayoutGrid from "@lucide/svelte/icons/layout-grid";
   import Pencil from "@lucide/svelte/icons/pencil";
   import Plus from "@lucide/svelte/icons/plus";
@@ -49,7 +49,10 @@
     () =>
       new Autosave<WidgetPolicy, WidgetPolicyUpdate>(data.policy, async (update) => {
         try {
-          return await data.eneo.widgets.policy.update(update);
+          const saved = await data.eneo.widgets.policy.update(update);
+          // The overview folds policy violations into each widget's blockers.
+          void invalidateAll();
+          return saved;
         } catch (error) {
           toastError(error, m.widget_admin_save_failed());
           throw error;

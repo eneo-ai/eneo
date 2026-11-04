@@ -32,6 +32,7 @@ vi.mock("$lib/paraglide/runtime", () => ({
   localizeHref: (href: string) => href
 }));
 
+import { invalidateAll } from "$app/navigation";
 import WidgetsAdminPage from "./+page.svelte";
 
 const policy: WidgetPolicy = {
@@ -96,6 +97,18 @@ describe("widget policy page", () => {
     await expect.element(retention).toHaveValue(5);
     await expect.element(budget).toHaveValue(2000);
     await expect.element(page.getByText("widget_admin_saved")).toBeVisible();
+  });
+
+  test("a saved policy reloads the overview, whose blockers fold the policy in", async () => {
+    vi.mocked(invalidateAll).mockClear();
+    const update = vi.fn(async (patch: Partial<WidgetPolicy>) => ({ ...policy, ...patch }));
+    renderPage(update);
+    (
+      page.getByRole("switch", { name: "widget_admin_policy_allow_none" }).element() as HTMLElement
+    ).click();
+    await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    expect(update).toHaveBeenCalledWith({ allow_bot_protection_none: true });
+    await vi.waitFor(() => expect(invalidateAll).toHaveBeenCalledTimes(1));
   });
 
   test("the maximum budget may reach the API's ceiling but not pass it", async () => {

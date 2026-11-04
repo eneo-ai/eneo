@@ -4,7 +4,7 @@
   import { untrack } from "svelte";
   import * as Table from "$lib/components/ui/table/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { intlLocale } from "$lib/core/formatting/dateTime";
+  import { calendarDayFormat, intlLocale } from "$lib/core/formatting/dateTime";
 
   type Props = {
     widget: Widget;
@@ -20,7 +20,7 @@
 
   const locale = intlLocale();
   const number = new Intl.NumberFormat(locale);
-  const day = new Intl.DateTimeFormat(locale, { weekday: "short", day: "numeric", month: "short" });
+  const day = calendarDayFormat(locale);
 
   const budgetPercent = $derived(
     usage && usage.daily_token_budget > 0
