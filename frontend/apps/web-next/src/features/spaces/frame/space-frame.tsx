@@ -20,14 +20,17 @@ const SpaceHeader = lazy(() =>
   import("./space-header").then((module) => ({ default: module.SpaceHeader }))
 );
 
-/** The header's h1 while it loads: on a tab's own page only, as the header has it. */
+/** The header while it loads, marked busy: its h1, on a tab's own page only, as the header has it. */
 function SpaceHeaderFallback({ route }: { route: Extract<SpaceRoute, { kind: "page" }> }) {
   const name = useSpaceDisplayName();
-  if (!route.isSectionRoot) return null;
   return (
-    <Heading level={1} className="sr-only">
-      {name}
-    </Heading>
+    <div aria-busy="true">
+      {route.isSectionRoot ? (
+        <Heading level={1} className="sr-only">
+          {name}
+        </Heading>
+      ) : null}
+    </div>
   );
 }
 

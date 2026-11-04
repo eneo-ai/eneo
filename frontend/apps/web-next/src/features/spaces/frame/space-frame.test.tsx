@@ -69,11 +69,13 @@ const sharedSpace = () =>
   });
 
 // A tablet's header is a chunk of its own: one render loads it, so every test then renders it at once.
+let h1WhileLoading: string | null | undefined;
 beforeAll(async () => {
   // Fetched first: on a loaded test machine the chunk outlasts findBy's wait.
   await import("./space-header");
   setViewport("tablet-portrait");
   show(sharedSpace(), ["overview"]);
+  h1WhileLoading = document.querySelector('[aria-busy="true"] h1')?.textContent;
   await screen.findByRole("button", { name: "Lägg till medlem" });
   cleanup();
   setViewport("desktop");
@@ -152,6 +154,10 @@ describe("SpaceFrame on a tablet: the space's header and tabs (#1328)", () => {
   // Touch: the SideNav lists every space, so the page names its own.
   beforeEach(() => setViewport("tablet-portrait"));
   afterEach(() => setViewport("desktop"));
+
+  it("is busy until the header's chunk lands, with the space name as the h1", () => {
+    expect(h1WhileLoading).toBe("Upphandling");
+  });
 
   it("gives a tab page the space name as its h1, breadcrumbs, members and tabs", async () => {
     const { container } = show(sharedSpace(), ["overview"]);
