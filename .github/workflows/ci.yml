@@ -586,8 +586,8 @@ jobs:
           - { leg: walks-2, grep: "@a11y-routes @ipad", grep_invert: "@upload-worker" }
           - { leg: walks-3, grep: "@layout-shift", grep_invert: "@upload-worker" }
           - { leg: walks-4, grep: "@contract @phone|@text-size|@a11y-dark", grep_invert: "@upload-worker" }
-          - { leg: screens, grep: " (admin|assistant|document|editor|forced|knowledge|mcp|resource|sharepoint|skills|space)-[^ ]*[.]spec[.]ts ", grep_invert: "@upload-worker|@a11y-routes @phone|@keyboard @desktop|@turn|@a11y-routes @ipad|@contract @ipad|@layout-shift|@contract @phone|@text-size|@a11y-dark" }
-          - { leg: rest, grep: ".", grep_invert: "@upload-worker|@a11y-routes @phone|@keyboard @desktop|@turn|@a11y-routes @ipad|@contract @ipad|@layout-shift|@contract @phone|@text-size|@a11y-dark| (admin|assistant|document|editor|forced|knowledge|mcp|resource|sharepoint|skills|space)-[^ ]*[.]spec[.]ts ", upload_worker: true }
+          - { leg: screens, grep: " (admin|assistant|document|editor|forced|knowledge|mcp|resource|sharepoint|skills|space)-[^ ]*[.]spec[.]ts ", grep_invert: "@upload-worker|@a11y-routes @phone|@contract @ipad|@keyboard @desktop|@turn|@a11y-routes @ipad|@layout-shift|@contract @phone|@text-size|@a11y-dark" }
+          - { leg: rest, grep: ".", grep_invert: "@upload-worker|@a11y-routes @phone|@contract @ipad|@keyboard @desktop|@turn|@a11y-routes @ipad|@layout-shift|@contract @phone|@text-size|@a11y-dark| (admin|assistant|document|editor|forced|knowledge|mcp|resource|sharepoint|skills|space)-[^ ]*[.]spec[.]ts ", upload_worker: true }
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
