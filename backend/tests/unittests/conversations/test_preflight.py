@@ -30,8 +30,10 @@ def _make_service(
         # Preflight resolves the model and file-inlining mode through the
         # governance-aware path (mirrors ask()); no policy unless a test sets
         # one via `effective_config`.
-        assistant_service.get_assistant_with_effective_config = AsyncMock(
-            return_value=(assistant, [], effective_config)
+        assistant_service.get_preflight_target = AsyncMock(
+            return_value=SimpleNamespace(
+                assistant=assistant, effective_config=effective_config
+            )
         )
         # Default: no persistent prompt/attachments. Baseline-specific tests
         # override this. Without it the AsyncMock returns a non-iterable.
@@ -663,7 +665,7 @@ async def test_preflight_resolves_session_assistant_model():
     assert result.input_tokens > 0
     assert result.model_name == "gpt-4o"
     service.session_service.get_session_ownership.assert_awaited_once_with(session_id)
-    service.assistant_service.get_assistant_with_effective_config.assert_awaited_once_with(
+    service.assistant_service.get_preflight_target.assert_awaited_once_with(
         assistant_id
     )
 

@@ -1075,7 +1075,9 @@ async def test_preflight_baseline_uses_the_exact_initial_turn_runtime_prompt(
         supports_tool_calling=assistant.completion_model.supports_tool_calling,
     )
 
-    baseline = await service.get_preflight_baseline(assistant.id)
+    baseline = await service.get_preflight_baseline(
+        await service.get_preflight_target(assistant.id)
+    )
     assert expected_runtime.tool_definition is not None
     expected_prompt_tokens = measure_provider_input_tokens(
         [{"role": "system", "content": expected_runtime.prompt}],
