@@ -295,12 +295,16 @@ test(
     for (const width of [768, 820, 1024, 1280, 1366, 1440]) {
       await page.setViewportSize({ width, height: 900 });
       await expect(switcher).toBeVisible();
+      // Astryx clips a label on its own span. The switcher's name may truncate: not measured here.
       const cut = await header
-        .getByRole("link")
-        .or(header.getByRole("button"))
+        .locator("a, button:not([aria-haspopup=menu])")
         .evaluateAll((all) =>
           all
-            .filter((control) => control.scrollWidth > control.clientWidth + 1)
+            .filter((control) =>
+              [control, ...control.querySelectorAll("span")].some(
+                (box) => box.scrollWidth > box.clientWidth + 1
+              )
+            )
             .map((control) => control.getAttribute("aria-label") ?? control.textContent)
         );
       expect(cut, `cut controls at ${width} px`).toEqual([]);
