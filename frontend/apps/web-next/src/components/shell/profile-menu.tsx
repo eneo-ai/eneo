@@ -14,6 +14,7 @@ import {
   Building2,
   ChevronRight,
   ChevronsUpDown,
+  CircleHelp,
   Globe,
   KeyRound,
   LogOut,
@@ -101,7 +102,9 @@ export function ProfileLink() {
  * The profile button at the foot of the SideNav and its menu: account pages,
  * what's new, language, colour mode, the accessibility statement (when the
  * deployment configures one, WCAG 3.2.6 keeps it here on every page),
- * organisation switch, versions and logout.
+ * organisation switch, versions and logout. In the top bar also the help
+ * centre, for the same reason: the SideNav's foot that holds it (nav-footer.tsx)
+ * is not on every page.
  */
 export function ProfileMenu({ inTopBar = false }: { inTopBar?: boolean }) {
   const t = useTranslations();
@@ -199,6 +202,16 @@ export function ProfileMenu({ inTopBar = false }: { inTopBar?: boolean }) {
           icon={Accessibility}
           label={t("a11y_statement_link")}
           href={links.accessibilityStatement}
+        />
+      )}
+      {inTopBar && links.helpCenter && (
+        <DropdownMenuItem
+          icon={CircleHelp}
+          label={t("have_a_question")}
+          aria-label={`${t("have_a_question")} ${t("chat_opens_in_new_tab")}`}
+          href={links.helpCenter}
+          target="_blank"
+          rel="noopener noreferrer"
         />
       )}
       <DropdownMenuDivider />
