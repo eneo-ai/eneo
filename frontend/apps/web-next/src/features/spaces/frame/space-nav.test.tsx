@@ -164,6 +164,14 @@ describe("SpaceNav", () => {
     expect(seen).toEqual(["Tab", "k"]);
   });
 
+  it("leaves out the spaces' scroll area when it has no rows: an empty Tab stop", () => {
+    const queryClient = client({ s1: SHARED });
+    queryClient.setQueryData(spacesListQueryOptions(browserApi).queryKey, [PERSONAL, ORG]);
+    renderNav("/spaces/s1/overview", { queryClient });
+    fireEvent.click(screen.getByRole("button", { name: "Öppna meny" }));
+    expect(screen.queryByRole("group", { name: "Dina ytor" })).toBeNull();
+  });
+
   it("says the list failed and offers a retry instead of showing no spaces", async () => {
     const queryClient = client({ s1: SHARED });
     const { queryKey } = spacesListQueryOptions(browserApi);

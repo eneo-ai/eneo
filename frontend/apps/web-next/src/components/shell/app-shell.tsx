@@ -170,7 +170,9 @@ export function AppShellFrame({
               : "wide:rounded-ax-page wide:shadow-ax-low wide:border wide:border-ax-border wide:overflow-hidden flex min-h-0 flex-1 flex-col"
           }
         >
-          {isMobile || tablet ? null : <TopBar railCollapsed={rail.collapsed} hasSideNav={sideNav !== null} />}
+          {isMobile || tablet ? null : (
+            <TopBar railCollapsed={rail.collapsed} hasSideNav={sideNav !== null} />
+          )}
           <div className={tablet ? "contents" : "flex min-h-0 flex-1"}>
             <AppShellMobileContext value={mobileNav}>
               {sideNav === null && !tablet ? null : (
