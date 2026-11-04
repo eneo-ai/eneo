@@ -183,6 +183,7 @@ export class Autosave<Resource extends object, Update extends object> {
 
   /** Explicitly discard a conflicted draft after the editor reloads it. */
   reload(widget: Resource): void {
+    this.#drafts = {};
     if (this.#timer) clearTimeout(this.#timer);
     this.#timer = null;
     this.#pending = {} as Update;

@@ -59,6 +59,7 @@ export function WidgetEditor({
   release,
   appOrigin,
   templates: allTemplates,
+  onReloaded,
   onArchived,
   onSaved
 }: {
@@ -71,11 +72,19 @@ export function WidgetEditor({
   templates: WidgetTemplate[];
   /** An archived widget cannot be edited, so the page takes the editor away. */
   onArchived: () => void;
+  onReloaded: (widget: Widget) => void;
   /** Every widget the server answers with, for the page's list cache. */
   onSaved?: (widget: Widget) => void;
 }) {
   const t = useTranslations();
   const ids = useId();
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   // Widgets follow a template's published release, so drafts are not offered.
   const templates = allTemplates.filter((template) => template.published_at != null);
   const { autosave, state } = useWidgetAutosave(widget);
@@ -263,7 +272,12 @@ export function WidgetEditor({
         autosave={autosave}
         state={state}
         isAdmin={isAdmin}
-        onReload={async () => autosave.reload(await widgetApi.get(widget.id))}
+        onReload={async () => {
+          const saved = await widgetApi.get(widget.id);
+          if (!mounted.current) return;
+          autosave.reload(saved);
+          onReloaded(saved);
+        }}
         onActivate={lifecycle(widgetApi.activate)}
         onPause={lifecycle(widgetApi.pause)}
         onArchive={async () => {

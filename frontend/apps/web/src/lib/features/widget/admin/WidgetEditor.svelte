@@ -54,6 +54,7 @@
     templates?: WidgetTemplate[];
     /** An archived widget cannot be edited, so the page takes the editor away. */
     onArchived?: () => void;
+    onReloaded: (widget: Widget) => void;
   };
 
   let {
@@ -64,7 +65,8 @@
     policy,
     release,
     templates: allTemplates = [],
-    onArchived
+    onArchived,
+    onReloaded
   }: Props = $props();
   // Widgets follow a template's published release, so drafts are not offered.
   const templates = $derived(allTemplates.filter((t) => t.published_at != null));
@@ -238,7 +240,12 @@
   <WidgetStatusBar
     {autosave}
     {isAdmin}
-    onReload={async () => autosave.reload(await eneo.widgets.get({ id: widget.id }))}
+    onReload={async () => {
+      const completed = onReloaded;
+      const saved = await eneo.widgets.get({ id: widget.id });
+      autosave.reload(saved);
+      completed(saved);
+    }}
     onActivate={lifecycle(eneo.widgets.activate)}
     onPause={lifecycle(eneo.widgets.pause)}
     onArchive={async () => {

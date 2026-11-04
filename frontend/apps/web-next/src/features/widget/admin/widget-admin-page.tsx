@@ -62,6 +62,7 @@ export function WidgetAdminPage({
 
   // The archive dialog's trigger goes with the editor, so the focus it would
   // return there moves to the note saying what happened.
+  const [reloadCount, setReloadCount] = useState(0);
   const [archived, setArchived] = useState(false);
   const archivedNote = useRef<HTMLParagraphElement>(null);
 
@@ -103,7 +104,7 @@ export function WidgetAdminPage({
         <PageFrame className="gap-6">
           {widget ? (
             <WidgetEditor
-              key={widget.id}
+              key={`${widget.id}-${reloadCount}`}
               widget={widget}
               assistant={assistant}
               isAdmin={isAdmin}
@@ -111,6 +112,10 @@ export function WidgetAdminPage({
               release={release}
               appOrigin={appOrigin}
               templates={templatesQuery.data ?? []}
+              onReloaded={(saved) => {
+                replaceInList(saved);
+                setReloadCount((count) => count + 1);
+              }}
               onSaved={(updated) => replaceInList(updated)}
               onArchived={() => {
                 replaceInList(null, widget.id);

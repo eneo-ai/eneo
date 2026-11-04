@@ -131,7 +131,7 @@ describe("WidgetsAdminPage policy", () => {
     api.PATCH.mockImplementation((_path: string, init: { body: Record<string, unknown> }) =>
       ok({ ...policy, ...init.body })
     );
-    showPage({ route: "/admin/widgets?tab=policy" });
+    const { queryClient } = showPage({ route: "/admin/widgets?tab=policy" });
     const budget = (await screen.findByRole("spinbutton", {
       name: /Högsta dagliga tokenbudget/
     })) as HTMLInputElement;
@@ -146,6 +146,9 @@ describe("WidgetsAdminPage policy", () => {
         ),
       { timeout: 2000 }
     );
+    expect(queryClient.getQueryData(["widget-policy"])).toMatchObject({
+      max_daily_token_budget: 2_000_000_000
+    });
     // Beyond the ceiling clamps to it, which is what is already saved.
     fireEvent.change(budget, { target: { value: "2000000001" } });
     fireEvent.blur(budget);
@@ -199,7 +202,9 @@ describe("WidgetsAdminPage templates", () => {
   it("sets the default and asks before deleting", async () => {
     api.PATCH.mockImplementation(() => ok(template({ is_default: true })));
     api.DELETE.mockImplementation(() => ok(null));
-    showPage({ route: "/admin/widgets?tab=templates" });
+    const { queryClient } = showPage({ route: "/admin/widgets?tab=templates" });
+    const previous = template({ id: "previous", is_default: true });
+    queryClient.setQueryData(["widget-templates", previous.id], previous);
     const list = await screen.findByRole("list", { name: "Widgetmallar" });
     expect(within(list).getByRole("link", { name: "Kommunmallen" }).getAttribute("href")).toBe(
       "/admin/widgets/templates/t1"
@@ -212,6 +217,9 @@ describe("WidgetsAdminPage templates", () => {
       })
     );
     expect(await within(list).findByText("Standard")).toBeTruthy();
+    expect(queryClient.getQueryData(["widget-templates", previous.id])).toMatchObject({
+      is_default: false
+    });
 
     fireEvent.click(within(list).getByRole("button", { name: "Ta bort" }));
     const dialog = await screen.findByRole("alertdialog", { name: "Ta bort mallen?" });
@@ -222,5 +230,6 @@ describe("WidgetsAdminPage templates", () => {
       })
     );
     await waitFor(() => expect(screen.queryByRole("link", { name: "Kommunmallen" })).toBeNull());
+    expect(queryClient.getQueryData(["widget-templates", "t1"])).toBeUndefined();
   });
 });

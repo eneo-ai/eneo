@@ -9,6 +9,7 @@
   the server deletes the image once nothing shows it.
 -->
 <script lang="ts">
+  import { onDestroy } from "svelte";
   import type { WidgetPersona } from "@eneo/eneo-js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
@@ -87,12 +88,22 @@
   let uploading = $state(false);
   let uploadError = $state<string | null>(null);
 
+  async function attachAvatar(id: string) {
+    if (hasName && mounted) onChange({ ...persona, avatar_icon_id: id });
+    else await eneo.icons.delete({ id }).catch(() => {});
+  }
+
+  let mounted = true;
+  onDestroy(() => {
+    mounted = false;
+  });
+
   async function upload(file: File) {
     uploading = true;
     uploadError = null;
     try {
       const uploaded = await eneo.icons.upload({ file });
-      onChange({ ...persona, avatar_icon_id: uploaded.id });
+      await attachAvatar(uploaded.id);
     } catch (error) {
       console.error("Failed to upload the persona avatar:", error);
       uploadError = m.avatar_upload_failed();
@@ -117,7 +128,7 @@
       const uploaded = await eneo.icons.upload({
         file: new File([blob], "avatar", { type: blob.type })
       });
-      onChange({ ...persona, avatar_icon_id: uploaded.id });
+      await attachAvatar(uploaded.id);
     } catch (error) {
       console.error("Failed to copy the assistant's icon:", error);
       uploadError = m.widget_admin_persona_use_assistant_icon_failed();

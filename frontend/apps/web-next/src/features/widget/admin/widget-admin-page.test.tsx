@@ -314,6 +314,57 @@ describe("WidgetAdminPage", () => {
     expect(consoleError.mock.calls.flat().join(" ")).not.toContain("Maximum update depth");
   });
 
+  it("saves the remaining question when removing a duplicate", async () => {
+    const saved = widget();
+    saved.texts.suggested_questions = ["A", "B"];
+    api.PATCH.mockImplementation((_path: string, { body }: { body: Partial<Widget> }) =>
+      ok({ ...saved, ...body })
+    );
+    showPage([saved]);
+    const second = await screen.findByRole("textbox", { name: "Föreslagen fråga 2" });
+    fireEvent.change(second, { target: { value: "A" } });
+    expect(await screen.findByText("Frågan finns redan i listan.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Ta bort fråga 1" }));
+    await waitFor(
+      () =>
+        expect(api.PATCH).toHaveBeenCalledWith(
+          WIDGET_PATH,
+          expect.objectContaining({
+            body: expect.objectContaining({
+              texts: expect.objectContaining({ suggested_questions: ["A"] })
+            })
+          })
+        ),
+      { timeout: 2000 }
+    );
+  });
+
+  it("discards an invalid origin on conflict reload even when the saved origins are unchanged", async () => {
+    const saved = widget();
+    api.PATCH.mockResolvedValue({
+      error: { detail: { code: "widget_revision_conflict" } },
+      response: new Response("{}", { status: 409 })
+    });
+    showPage([saved]);
+    const [name] = await screen.findAllByRole("textbox", { name: /^Namn/ });
+    fireEvent.change(name!, { target: { value: "Andra namnet" } });
+    fireEvent.click(screen.getByRole("tab", { name: /Regler/ }));
+    const origin = await screen.findByRole("textbox", { name: /Tillåtna webbplatser/ });
+    fireEvent.change(origin, { target: { value: "invalid" } });
+    const reload = await screen.findByRole(
+      "button",
+      { name: /Ladda om och kasta/ },
+      { timeout: 2000 }
+    );
+    api.GET.mockImplementationOnce(() => ok({ ...saved, revision: 4 }));
+    fireEvent.click(reload);
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("textbox", { name: /Tillåtna webbplatser/ }) as HTMLTextAreaElement).value
+      ).toBe("https://www.kommun.se")
+    );
+  });
+
   it("links a template with the revision the save it waited for returned", async () => {
     api.PATCH.mockImplementation((_path: string, init: { body: Record<string, unknown> }) =>
       ok(widget({ ...init.body, revision: 4 }))

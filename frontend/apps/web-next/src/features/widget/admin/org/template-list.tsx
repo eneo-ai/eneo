@@ -16,7 +16,7 @@ import { DEFAULT_PRIMARY_COLOR, isHexColor } from "../../contrast";
 import type { WidgetTemplate } from "../autosave";
 import { toastWidgetError } from "../errors";
 import { widgetTemplatesQueryOptions } from "../queries";
-import { widgetTemplateApi } from "./queries";
+import { cacheWidgetTemplate, widgetTemplateApi, widgetTemplateQueryOptions } from "./queries";
 
 export const templateHref = (id: string) => `/admin/widgets/templates/${id}`;
 
@@ -36,16 +36,12 @@ export function TemplateList({ templates }: { templates: WidgetTemplate[] }) {
   const [deleting, setDeleting] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  const key = widgetTemplatesQueryOptions(browserApi).queryKey;
-  const replace = (next: (current: WidgetTemplate[]) => WidgetTemplate[]) =>
-    queryClient.setQueryData(key, (current: WidgetTemplate[] | undefined) => next(current ?? []));
-
   async function create() {
     if (creating) return;
     setCreating(true);
     try {
       const created = await widgetTemplateApi.create({ name: t("widget_admin_template_new_name") });
-      replace((current) => [...current, created]);
+      cacheWidgetTemplate(queryClient, created);
       router.push(templateHref(created.id));
     } catch (error) {
       toastApiError(error, t);
@@ -58,11 +54,7 @@ export function TemplateList({ templates }: { templates: WidgetTemplate[] }) {
     setBusyId(template.id);
     try {
       const updated = await widgetTemplateApi.update(template.id, { is_default: isDefault });
-      replace((current) =>
-        current.map((item) =>
-          item.id === updated.id ? updated : isDefault ? { ...item, is_default: false } : item
-        )
-      );
+      cacheWidgetTemplate(queryClient, updated);
     } catch (error) {
       toastApiError(error, t);
     } finally {
@@ -76,7 +68,13 @@ export function TemplateList({ templates }: { templates: WidgetTemplate[] }) {
     setDeleting(true);
     try {
       await widgetTemplateApi.delete(target.id);
-      replace((current) => current.filter((item) => item.id !== target.id));
+      queryClient.removeQueries({
+        queryKey: widgetTemplateQueryOptions(browserApi, target.id).queryKey,
+        exact: true
+      });
+      queryClient.setQueryData(widgetTemplatesQueryOptions(browserApi).queryKey, (items) =>
+        items?.filter((item) => item.id !== target.id)
+      );
       setToDelete(null);
     } catch (error) {
       toastWidgetError(error, t);

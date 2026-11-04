@@ -51,6 +51,13 @@ vi.mock("$lib/paraglide/runtime", () => ({
   localizeHref: (href: string) => href
 }));
 
+const icons = vi.hoisted(() => ({
+  upload: vi.fn<() => Promise<{ id: string }>>(),
+  delete: vi.fn(async () => {}),
+  url: () => "data:image/png;base64,AA=="
+}));
+vi.mock("$lib/core/Eneo", () => ({ getEneo: () => ({ icons }) }));
+
 import WidgetEditor from "./WidgetEditor.svelte";
 
 function widget(overrides: Partial<Widget> = {}): Widget {
@@ -92,6 +99,7 @@ function renderEditor(current: Widget, assistant: Partial<Assistant> = {}) {
     }
   } as unknown as Eneo;
   render(WidgetEditor, {
+    onReloaded: vi.fn(),
     widget: current,
     assistant: {
       id: "a1",
@@ -119,6 +127,41 @@ function leavingAsks(): boolean {
 }
 
 describe("WidgetEditor", () => {
+  test.each(["upload", "copy"])("clearing a persona releases a late avatar %s", async (source) => {
+    let complete!: (icon: { id: string }) => void;
+    icons.upload.mockClear().mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          complete = resolve;
+        })
+    );
+    icons.delete.mockClear();
+    const { update } = renderEditor(
+      widget({ persona: { name: "Robo", avatar_icon_id: null, avatar_in_launcher: false } }),
+      { icon_id: "assistant-icon" }
+    );
+    if (source === "copy") {
+      await userEvent.click(
+        page.getByRole("button", { name: "widget_admin_persona_use_assistant_icon" })
+      );
+    } else {
+      const file = document.querySelector<HTMLInputElement>("#widget-persona-avatar-input")!;
+      const transfer = new DataTransfer();
+      transfer.items.add(new File(["x"], "avatar.png", { type: "image/png" }));
+      file.files = transfer.files;
+      file.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    await vi.waitFor(() => expect(icons.upload).toHaveBeenCalledTimes(1));
+    await userEvent.fill(page.getByLabelText("widget_admin_persona_name", { exact: true }), "");
+    complete({ id: "unused-icon" });
+    await vi.waitFor(() => expect(icons.delete).toHaveBeenCalledWith({ id: "unused-icon" }));
+    await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    expect(update.mock.calls[0][0].update.persona).toMatchObject({
+      name: "",
+      avatar_icon_id: null
+    });
+  });
+
   test("an active widget with something to fix says so on the Publish tab", async () => {
     renderEditor(widget({ activation_blockers: ["target_not_published"] }));
     await expect
@@ -287,6 +330,7 @@ describe("WidgetEditor", () => {
       }
     } as unknown as Eneo;
     render(WidgetEditor, {
+      onReloaded: vi.fn(),
       widget: linked,
       assistant: { id: "a1", published: true, mcp_servers: [] } as unknown as Assistant,
       eneo,
@@ -347,6 +391,7 @@ describe("WidgetEditor", () => {
       }
     } as unknown as Eneo;
     render(WidgetEditor, {
+      onReloaded: vi.fn(),
       widget: linked,
       assistant: { id: "a1", published: true, mcp_servers: [] } as unknown as Assistant,
       eneo,

@@ -1,5 +1,7 @@
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
+import { browserApi } from "@/lib/api/browser";
 import { NumberInput } from "@astryxdesign/core/NumberInput";
 import { useLocale, useTranslations } from "use-intl";
 import { useEffect, useState } from "react";
@@ -8,7 +10,7 @@ import { SettingsGroup } from "@/components/composites/settings-rows";
 import { Autosave } from "../autosave";
 import { toastWidgetError } from "../errors";
 import { MAX_DAILY_TOKEN_BUDGET } from "../limits";
-import type { WidgetPolicy } from "../queries";
+import { widgetPolicyQueryOptions, type WidgetPolicy } from "../queries";
 import { useAutosave } from "../use-widget-autosave";
 import { widgetPolicyApi, type WidgetPolicyUpdate } from "./queries";
 
@@ -26,13 +28,16 @@ type Status = { type: "error"; message: string } | undefined;
  */
 export function WidgetPolicyForm({ policy: initial }: { policy: WidgetPolicy }) {
   const t = useTranslations();
+  const queryClient = useQueryClient();
   const locale = useLocale();
   const number = new Intl.NumberFormat(locale === "sv" ? "sv-SE" : "en-US");
   const { autosave, state } = useAutosave(
     () =>
       new Autosave<WidgetPolicy, WidgetPolicyUpdate>(initial, async (update) => {
         try {
-          return await widgetPolicyApi.update(update);
+          const saved = await widgetPolicyApi.update(update);
+          queryClient.setQueryData(widgetPolicyQueryOptions(browserApi).queryKey, saved);
+          return saved;
         } catch (error) {
           toastWidgetError(error, t);
           throw error;

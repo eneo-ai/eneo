@@ -63,6 +63,13 @@
     return !destroyed && candidate === owner && candidate.assistantId === data.assistant.id;
   }
 
+  const onReloaded = $derived.by(() => {
+    const current = owner;
+    return (saved: Widget) => {
+      if (isCurrent(current) && saved.id === widget?.id) widget = saved;
+    };
+  });
+
   const onArchived = $derived.by(() => {
     const current = owner;
     return async () => {
@@ -114,7 +121,7 @@
   <Page.Main>
     <div class="mx-auto flex w-full max-w-[1400px] flex-col gap-6 p-4">
       {#if widget}
-        {#key widget.id}
+        {#key widget}
           <WidgetEditor
             {widget}
             assistant={data.assistant}
@@ -123,6 +130,7 @@
             policy={data.policy}
             release={data.release}
             {templates}
+            {onReloaded}
             {onArchived}
           />
         {/key}

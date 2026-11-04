@@ -7,7 +7,7 @@ import { Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { TextArea } from "@astryxdesign/core/TextArea";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { FileText, Palette } from "lucide-react";
 import { useLocale, useTranslations } from "use-intl";
 import { useId, useState } from "react";
@@ -26,7 +26,7 @@ import { useAutosave } from "../use-widget-autosave";
 import { WidgetPersonaFields } from "../widget-persona-fields";
 import { WidgetTextsFields } from "../widget-texts-fields";
 import { WidgetThemeFields } from "../widget-theme-fields";
-import { widgetTemplateApi, widgetTemplateQueryOptions } from "./queries";
+import { cacheWidgetTemplate, widgetTemplateApi, widgetTemplateQueryOptions } from "./queries";
 import { WidgetMockPreview } from "./widget-mock-preview";
 
 type TabId = "content" | "appearance";
@@ -59,13 +59,16 @@ function TemplateEditor({ template: initial }: { template: WidgetTemplate }) {
   const t = useTranslations();
   const locale = useLocale();
   const ids = useId();
+  const queryClient = useQueryClient();
   const { autosave, state } = useAutosave(
     () =>
       new WidgetTemplateAutosave(
         initial,
         async (update) => {
           try {
-            return await widgetTemplateApi.update(initial.id, update);
+            const saved = await widgetTemplateApi.update(initial.id, update);
+            cacheWidgetTemplate(queryClient, saved);
+            return saved;
           } catch (error) {
             toastWidgetError(error, t);
             throw error;
@@ -163,7 +166,13 @@ function TemplateEditor({ template: initial }: { template: WidgetTemplate }) {
     try {
       await autosave.flush();
       if (autosave.hasPending) return;
-      autosave.replace(await widgetTemplateApi.publish(initial.id));
+      const saved = await widgetTemplateApi.publish(initial.id);
+      cacheWidgetTemplate(queryClient, saved);
+      autosave.replace(saved);
+      await queryClient.invalidateQueries({
+        queryKey: ["spaces"],
+        predicate: ({ queryKey }) => queryKey[2] === "widgets"
+      });
       setConfirmOpen(false);
     } catch (error) {
       toastWidgetError(error, t);

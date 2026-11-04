@@ -1,9 +1,9 @@
-import { queryOptions } from "@tanstack/react-query";
+import { queryOptions, type QueryClient } from "@tanstack/react-query";
 import { browserApi, type EneoClient } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import type { WidgetTemplate, WidgetTemplateUpdate } from "../autosave";
-import type { WidgetPolicy } from "../queries";
+import { widgetTemplatesQueryOptions, type WidgetPolicy } from "../queries";
 
 export type WidgetOverview = Schema<"WidgetOverviewPublic">;
 export type WidgetOverviewItem = Schema<"WidgetOverviewItem">;
@@ -27,6 +27,33 @@ export function widgetTemplateQueryOptions(api: EneoClient, templateId: string) 
       unwrap(
         api.GET("/api/v1/admin/widget-templates/{id}/", { params: { path: { id: templateId } } })
       )
+  });
+}
+
+/** Keep the list and previously visited detail pages in sync with a server mutation. */
+export function cacheWidgetTemplate(client: QueryClient, saved: WidgetTemplate) {
+  const listKey = widgetTemplatesQueryOptions(browserApi).queryKey;
+  const detailKey = widgetTemplateQueryOptions(browserApi, saved.id).queryKey;
+  if (saved.is_default) {
+    const details = client.getQueriesData<WidgetTemplate>({
+      queryKey: listKey,
+      predicate: ({ queryKey }) => queryKey.length === detailKey.length
+    });
+    for (const [key, template] of details) {
+      if (template?.is_default && template.id !== saved.id) {
+        client.setQueryData(key, { ...template, is_default: false });
+      }
+    }
+  }
+  client.setQueryData(detailKey, saved);
+  client.setQueryData(listKey, (items) => {
+    if (!items) return items;
+    const rest = items
+      .filter((item) => item.id !== saved.id)
+      .map((item) => (saved.is_default && item.is_default ? { ...item, is_default: false } : item));
+    return [...rest, saved].sort(
+      (a, b) => Number(b.is_default) - Number(a.is_default) || a.name.localeCompare(b.name)
+    );
   });
 }
 

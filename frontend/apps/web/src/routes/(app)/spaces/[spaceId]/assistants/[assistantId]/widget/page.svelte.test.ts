@@ -2,7 +2,7 @@
 import { page, userEvent } from "@vitest/browser/context";
 import { render } from "vitest-browser-svelte";
 import { readable } from "svelte/store";
-import type { Eneo, Widget, WidgetTemplate } from "@eneo/eneo-js";
+import { EneoError, type Eneo, type Widget, type WidgetTemplate } from "@eneo/eneo-js";
 import { describe, expect, test, vi } from "vitest";
 import type { PageData } from "./$types";
 import { toastError } from "$lib/core/errors";
@@ -108,6 +108,28 @@ describe("assistant widget page", () => {
     await screen.rerender({ data: routeData("a1", null, {}) });
 
     await expect.element(name).toHaveValue("My draft name");
+  });
+
+  test("discarding a conflict clears a held numeric error", async () => {
+    const update = vi.fn().mockRejectedValue(
+      new EneoError("conflict", "RESPONSE", 409, 0, {
+        detail: { code: "widget_revision_conflict" }
+      })
+    );
+    const get = vi.fn(async () => ({ ...widget, revision: 3 }));
+    render(WidgetPage, { data: routeData("a1", widget, { update, get }) });
+    await userEvent.fill(page.getByLabelText("name", { exact: true }), "Changed");
+    const rules = page.getByRole("tab", { name: /widget_admin_tab_rules/ });
+    await userEvent.click(rules);
+    const budget = page.getByLabelText("widget_admin_daily_budget", { exact: true });
+    await userEvent.clear(budget);
+    await userEvent.tab();
+    await expect.element(budget).toHaveAttribute("aria-invalid", "true");
+    await userEvent.click(page.getByRole("button", { name: "widget_admin_reload_discard" }));
+    await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(1));
+    await userEvent.click(rules);
+    await expect.element(budget).toHaveValue(4000);
+    expect(budget.element().getAttribute("aria-invalid")).not.toBe("true");
   });
 
   test("navigation to another assistant sends edits and archive to its widget", async () => {

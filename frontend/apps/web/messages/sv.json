@@ -4931,7 +4931,7 @@
   "widget_admin_blocker_retention_min": "Lagringstiden är kortare än vad organisationen tillåter.",
   "widget_admin_blocker_retention_max": "Lagringstiden är längre än vad organisationen tillåter.",
   "widget_admin_blocker_bot_protection": "Organisationen kräver botskydd.",
-  "widget_admin_name_description": "Internt namn som bara visas i Eneo.",
+  "widget_admin_name_description": "Widgetens namn är offentligt. Det visas som chattens rubrik om du inte anger en titel.",
   "widget_admin_language": "Språk",
   "widget_admin_language_description": "Chattgränssnittets språk. Automatiskt följer webbplatsens språk.",
   "widget_admin_language_auto": "Automatiskt",

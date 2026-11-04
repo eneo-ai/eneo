@@ -85,7 +85,7 @@ describe("WidgetTemplatePage", () => {
   });
 
   it("a lock toggle only edits the draft and marks it unpublished", async () => {
-    const { container } = showPage(template());
+    const { container, queryClient } = showPage(template());
     await screen.findByRole("heading", { level: 1, name: "Kommunmallen" });
     expect(screen.getByText(/^Publicerad /)).toBeTruthy();
     const lock = screen.getByRole("switch", { name: "Upplysning och sidfot" });
@@ -101,6 +101,10 @@ describe("WidgetTemplatePage", () => {
       { timeout: 2000 }
     );
     expect(await screen.findByText("Opublicerade ändringar")).toBeTruthy();
+    expect(queryClient.getQueryData(["widget-templates", "t1"])).toMatchObject({
+      has_unpublished_changes: true,
+      locked_groups: ["appearance", "language", "legal_texts"]
+    });
     expect(api.POST).not.toHaveBeenCalled();
     await act(async () => {
       await expectNoAxeViolations(container);
@@ -108,7 +112,7 @@ describe("WidgetTemplatePage", () => {
   });
 
   it("publishing to followers asks first, says what changes, then shows the release as current", async () => {
-    showPage(
+    const { queryClient } = showPage(
       template({
         has_unpublished_changes: true,
         theme: { primary_color: "#654321", radius: 12 },
@@ -116,6 +120,8 @@ describe("WidgetTemplatePage", () => {
         locked_groups: ["appearance"]
       })
     );
+    const followers = ["spaces", "s1", "widgets"];
+    queryClient.setQueryData(followers, []);
     fireEvent.click(await screen.findByRole("button", { name: "Publicera" }));
     const dialog = await screen.findByRole("dialog", { name: "Publicera till 3 widgetar?" });
     expect(api.POST).not.toHaveBeenCalled();
@@ -131,6 +137,7 @@ describe("WidgetTemplatePage", () => {
       })
     );
     expect(await screen.findByText(/^Publicerad /)).toBeTruthy();
+    expect(queryClient.getQueryState(followers)?.isInvalidated).toBe(true);
   });
 
   it("the publish dialog says when the followers do not change at all", async () => {
