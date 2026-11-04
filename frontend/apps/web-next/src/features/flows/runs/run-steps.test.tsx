@@ -184,6 +184,20 @@ describe("RunSteps copying", () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("Ärendet gäller bygglov."));
   });
 
+  it("shows what a step was sent as it was sent, not as Markdown", () => {
+    const text = "# Ärende\n\n*inte kursivt*";
+    const steps = runStepViews(
+      makeRunGraph([{ order: 1, label: "Sammanfatta", status: "completed" }]),
+      [makeRunStep(1, { input_payload_json: { text } })]
+    );
+    renderInApp(<RunSteps flowId="flow-1" runId="run-1" steps={steps} />);
+    const card = screen.getByRole("article", { name: "Steg 1: Sammanfatta" });
+    fireEvent.click(within(card).getByRole("button", { name: messages.flow_run_step_input_show }));
+    const shown = within(card).getByLabelText(messages.flow_runs_input_heading);
+    expect(shown.textContent).toBe(text);
+    expect(within(shown).queryByRole("heading")).toBeNull();
+  });
+
   it("renders what a step was sent only while it is open", () => {
     const steps = runStepViews(
       makeRunGraph([{ order: 1, label: "Sammanfatta", status: "completed" }]),

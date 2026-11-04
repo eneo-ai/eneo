@@ -177,7 +177,7 @@ function RunInput({ flow, run }: { flow: FlowPublic; run: RunDetail }) {
   // Free text is sent as `{ text }`: no field to name, only the text.
   const { text } = payload;
   if (entries.length === 1 && !labels.has("text") && typeof text === "string" && text.trim()) {
-    return <StepText text={text} label={t("flow_runs_input_heading")} />;
+    return <StepText text={text} label={t("flow_runs_input_heading")} plain />;
   }
   return (
     <JsonValue

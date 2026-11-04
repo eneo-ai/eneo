@@ -176,9 +176,18 @@ export function StepTextInsteadOfTranscript({
 /**
  * A step's text in a soft box that wraps and, past a height, scrolls. `label`
  * names the box for a keyboard or screen reader; it is the step's output
- * unless it says otherwise.
+ * unless it says otherwise. `plain` is for what a person wrote: input is shown
+ * as it was sent, while a step's output is Markdown.
  */
-export function StepText({ text, label }: { text: string; label?: string }) {
+export function StepText({
+  text,
+  label,
+  plain = false
+}: {
+  text: string;
+  label?: string;
+  plain?: boolean;
+}) {
   const t = useTranslations();
   return (
     <ScrollableArea
@@ -186,7 +195,13 @@ export function StepText({ text, label }: { text: string; label?: string }) {
       label={label ?? t("flow_runs_step_output")}
       className="bg-ax-sunken rounded-ax-inner focus-visible:outline-ring max-h-96 min-w-0 px-3 py-2 [overflow-wrap:anywhere] focus-visible:outline-2 focus-visible:-outline-offset-2"
     >
-      <RunText text={text} />
+      {plain ? (
+        <p className="text-ax-text m-0 text-sm leading-relaxed break-words whitespace-pre-wrap">
+          {text}
+        </p>
+      ) : (
+        <RunText text={text} />
+      )}
     </ScrollableArea>
   );
 }
@@ -239,7 +254,7 @@ function StepInput({ result }: { result: RunStep }) {
           {text !== null ? (
             <HStack gap={2} vAlign="start">
               <div className="min-w-0 flex-1">
-                <StepText text={text} label={t("flow_runs_input_heading")} />
+                <StepText text={text} label={t("flow_runs_input_heading")} plain />
               </div>
               <CopyButton label={copyLabel} value={text} />
             </HStack>
