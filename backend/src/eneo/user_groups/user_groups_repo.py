@@ -1,8 +1,11 @@
+import re
+from collections import defaultdict
 from collections.abc import Iterable
 from typing import List, Optional
 from uuid import UUID
 
 import sqlalchemy as sa
+from pydantic import EmailStr, TypeAdapter, ValidationError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
@@ -22,10 +25,32 @@ from eneo.user_groups.user_group import (
     UserGroupState,
     UserGroupUpdate,
 )
+from eneo.users.user import UserSparse
 
 _NOT_DELETED = sa.or_(
     UserGroups.state.is_(None), UserGroups.state != UserGroupState.DELETED
 )
+
+
+# An address the email validator would return unchanged, or reject.
+_PLAIN_EMAIL = re.compile(
+    r"(?!.*[xX][nN]--)[A-Za-z0-9._+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+"
+)
+_EMAIL = TypeAdapter(EmailStr)
+
+
+def _listed_email(stored: str) -> str:
+    """The address as ``UserSparse`` validation gives it, or as stored if rejected.
+
+    Running the validator on every member took most of a 15k-member list's
+    second of blocked event loop, and nearly every address is already plain.
+    """
+    if _PLAIN_EMAIL.fullmatch(stored):
+        return stored
+    try:
+        return _EMAIL.validate_python(stored)
+    except ValidationError:
+        return stored
 
 
 async def count_group_users(
@@ -114,10 +139,42 @@ class UserGroupsRepository:
     async def get_all_user_groups(
         self, tenant_id: Optional[UUID] = None
     ) -> List[UserGroupPublic]:
-        """Validated straight into the response model: each member's email is
-        validated once, not as UserInDBBase and then again as UserSparse."""
-        query = sa.select(UserGroups).where(
-            UserGroups.tenant_id == tenant_id, _NOT_DELETED
+        """Built from columns, without validating each member as a model."""
+        session = self.delegate.session
+        listed = (UserGroups.tenant_id == tenant_id, _NOT_DELETED)
+        groups = list(await session.scalars(sa.select(UserGroups).where(*listed)))
+        link = usergroups_users_table.c
+        rows = await session.execute(
+            sa.select(
+                link.user_group_id,
+                Users.id,
+                Users.created_at,
+                Users.updated_at,
+                Users.email,
+                Users.username,
+            )
+            .join_from(usergroups_users_table, Users)
+            .join(UserGroups, UserGroups.id == link.user_group_id)
+            .where(*listed)
         )
-        records = await self.delegate.get_records_from_query(query)
-        return [UserGroupPublic.model_validate(record) for record in records]
+        members: defaultdict[UUID, list[UserSparse]] = defaultdict(list)
+        for group_id, id, created_at, updated_at, email, username in rows.tuples():
+            members[group_id].append(
+                UserSparse.model_construct(
+                    id=id,
+                    created_at=created_at,
+                    updated_at=updated_at,
+                    email=_listed_email(email),
+                    username=username,
+                )
+            )
+        return [
+            UserGroupPublic.model_construct(
+                id=group.id,
+                created_at=group.created_at,
+                updated_at=group.updated_at,
+                name=group.name,
+                users=members[group.id],
+            )
+            for group in groups
+        ]
