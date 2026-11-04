@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 import axe, { type Result } from "axe-core";
 import { afterEach, describe, expect, it } from "vitest";
-import { incompleteCounts } from "../../tests/contrast-incomplete";
+import { contrastIncomplete, incompleteCounts } from "../../tests/contrast-incomplete";
 
 afterEach(() => {
   document.body.innerHTML = "";
+  axe.reset();
 });
 
 /**
@@ -61,5 +62,39 @@ describe("incompleteCounts", () => {
     const second = await scan(`<main><button></button></main>`, "bgOverlap");
     const nodes = [...first[0]!.nodes, ...second[0]!.nodes];
     expect(incompleteCounts([{ ...first[0]!, nodes }])).toEqual({ pseudoContent: 1, bgOverlap: 1 });
+  });
+});
+
+describe("contrastIncomplete", () => {
+  it("fails a scan axe stopped on, whatever the baseline allows, and names the error", async () => {
+    axe.configure({
+      checks: [
+        {
+          id: "stops",
+          evaluate: () => {
+            throw new Error("Element midpoint exceeds the grid bounds");
+          }
+        }
+      ],
+      rules: [{ id: "stopped-rule", selector: "main", any: ["stops"], tags: ["stopped"] }]
+    });
+    document.body.innerHTML = "<main></main>";
+    const { incomplete } = await axe.run(document.body, { runOnly: ["stopped-rule"] });
+
+    const [problem, ...rest] = contrastIncomplete("no baseline|scan #1", incomplete);
+    expect(rest).toEqual([]);
+    expect(problem).toContain("axe stopped stopped-rule");
+    expect(problem).toContain("Element midpoint exceeds the grid bounds");
+  });
+
+  it("counts a node axe gave no reason for: it judged the rest of the page", async () => {
+    const page = await scan(`<main><button></button></main>`);
+    const nodes = page[0]!.nodes.map((node) => ({ ...node, any: [{ data: {} }] }));
+    const incomplete = [{ ...page[0]!, nodes }] as unknown as Result[];
+
+    expect(incompleteCounts(incomplete)).toEqual({ unknown: 1 });
+    expect(contrastIncomplete("no baseline|scan #1", incomplete)).toEqual([
+      expect.stringContaining("could not judge the contrast of 1 places, baseline 0")
+    ]);
   });
 });
