@@ -803,7 +803,7 @@ for (const colorScheme of ["light", "dark"] as const) {
 
         await scan(page, `${space}/flows`, async () => {
           await expect(
-            page.getByRole("heading", { level: 2, name: /^(Flöden|Flows)$/ })
+            page.getByRole("heading", { level: 1, name: /^(Flöden|Flows)$/ })
           ).toBeVisible();
         });
 

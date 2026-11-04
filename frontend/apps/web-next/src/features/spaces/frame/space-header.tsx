@@ -1,48 +1,21 @@
 import { BreadcrumbItem, Breadcrumbs } from "@astryxdesign/core/Breadcrumbs";
 import { Button } from "@astryxdesign/core/Button";
 import { Heading } from "@astryxdesign/core/Heading";
-import { useQuery } from "@tanstack/react-query";
 import { Building2, SquarePen, User } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { ClassificationToken } from "@/components/composites/classification-token";
 import { CRUMB_TOUCH } from "@/components/composites/page-header";
 import { iconUrl } from "@/components/composites/icon-field";
-import { useAppContext } from "@/components/providers/app-context";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { PAGE_COLUMN } from "@/components/composites/page-frame";
-import { browserApi } from "@/lib/api/browser";
 import { cn } from "@/lib/utils";
-import { flowsListQueryOptions } from "@/features/flows/flows-api";
 import { AddMemberDialog } from "../members/space-members";
 import { MemberStack } from "../members/member-stack";
 import { useSpaceDisplayName } from "../space-display-name";
 import { useSpace } from "../use-space";
-import {
-  spaceLandingHref,
-  spaceSections,
-  type SpaceRoute,
-  type SpaceSection
-} from "./space-sections";
+import { spaceLandingHref, type SpaceRoute } from "./space-sections";
 import { SpaceTabs } from "./space-tabs";
-
-/**
- * The space's tabs for this user, flows included when the tenant has them. The
- * other counts come with the space; the flows are listed separately (the same
- * list the flows tab shows), so their count arrives once that list is read.
- */
-export function useSpaceSections(): SpaceSection[] {
-  const { space, routeId, can } = useSpace();
-  const { featureFlags } = useAppContext();
-  const showsFlows = featureFlags.flows && !space.organization && can("read", "app");
-  const flows = useQuery({
-    ...flowsListQueryOptions(browserApi, space.id),
-    enabled: showsFlows
-  });
-  return spaceSections(space, can, routeId, {
-    flows: featureFlags.flows,
-    flowCount: flows.data?.length
-  });
-}
+import { useSpaceSections } from "./use-space-sections";
 
 /**
  * A tablet's header above every space page except the chat (#1328; with a

@@ -63,11 +63,8 @@ import {
 import { CrawlRunDetailsDialog } from "./crawl-run-details";
 import { canRequestCrawlStop, type CrawlFailureKind } from "./crawl-run-state";
 import { CrawlFailureActions, CrawlRunStatusLabel } from "./crawl-run-ui";
-import { isActiveCrawl, nextCrawlAt, STALE_SYNC_DAYS, websiteSyncedAt } from "./website-status";
+import { nextCrawlAt, STALE_SYNC_DAYS, websiteSyncedAt } from "./website-status";
 import { useSectionHeadingLevels } from "@/features/spaces/frame/space-frame";
-
-const ACTIVE_CRAWL_REFRESH_MS = 2_000;
-const IDLE_WEBSITE_REFRESH_MS = 30_000;
 
 /** Which run's failures to show, and of which kind. */
 type FailureSelection = { run: CrawlRun; kind: CrawlFailureKind | null };

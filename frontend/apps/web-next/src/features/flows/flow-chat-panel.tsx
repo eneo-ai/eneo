@@ -22,7 +22,7 @@ import { useSettingSwitch } from "@/features/admin/use-setting-switch";
 import { ChatView, type ActivityState } from "@/features/chat/chat-view";
 import { partnerCompletionModel } from "@/features/chat/partner-model";
 import { useSpace } from "@/features/spaces/use-space";
-import { useSpaceDisplayName } from "@/features/spaces/frame/space-header";
+import { useSpaceDisplayName } from "@/features/spaces/space-display-name";
 import type { ComposerInsert } from "@/features/chat/chat-references";
 import { flowChangeCardFor } from "./chat/flow-change-card";
 import { flowRunCardFor } from "./chat/flow-run-card";

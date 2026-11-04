@@ -594,7 +594,7 @@ describe("DesktopSideNav (admin)", () => {
 
   it("lists the flow settings under Styrning only when the tenant has flows", () => {
     setRoute("/admin/flow-settings");
-    renderInApp(<DesktopSideNav variant="admin" navId="side-nav" />, {
+    renderInApp(<RailedSideNav variant="admin" navId="side-nav" />, {
       queryClient: seededClient(),
       // The tenant's switch decides: this admin may not see flows themselves.
       appContext: testAppContext({

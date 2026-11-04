@@ -76,7 +76,7 @@ async def test_prompt_attachment_cost_is_linear_in_assistants_plus_prompt_rows()
     )
 
     await _repo(assistants=assistants, rows=rows)._get_assistants(
-        uuid4(), hidden_assistant_ids=HiddenAssistants.ALL
+        [uuid4()], hidden_assistant_ids=HiddenAssistants.ALL
     )
 
     bound = 3 * (len(assistants) + len(with_prompt))
@@ -100,7 +100,7 @@ async def test_each_assistant_gets_its_first_selected_prompt_row_or_none():
     assistants = [first, second, without, last]
 
     loaded = await _repo(assistants=assistants, rows=rows)._get_assistants(
-        uuid4(), hidden_assistant_ids=HiddenAssistants.ALL
+        [uuid4()], hidden_assistant_ids=HiddenAssistants.ALL
     )
 
     assert list(loaded) == assistants

@@ -23,6 +23,7 @@ import { useSearchDraft } from "@/lib/hooks/use-search-draft";
 import { browserApi } from "@/lib/api/browser";
 import { toastApiError } from "@/lib/api/toast";
 import { toast } from "@/lib/toast";
+import { useSectionHeadingLevels } from "@/features/spaces/frame/space-frame";
 import { useRemovalMutation } from "@/features/spaces/removal";
 import { ResourceFilterInput } from "@/features/spaces/resource-filter-input";
 import { useSpace } from "@/features/spaces/use-space";
@@ -51,6 +52,7 @@ import { NewFlowDialog } from "./new-flow-dialog";
  * caller may do with it.
  */
 export function FlowsPage() {
+  const levels = useSectionHeadingLevels();
   const t = useTranslations();
   const { space, routeId } = useSpace();
   const { can, user } = useAppContext();
@@ -221,7 +223,7 @@ export function FlowsPage() {
   return (
     <div className="flex w-full flex-col gap-6">
       <PageHeader
-        headingLevel={2}
+        headingLevel={levels.title}
         headingRef={headingRef}
         title={t("flows")}
         description={t("flows_list_description")}
@@ -233,7 +235,7 @@ export function FlowsPage() {
             <EmptyState
               icon={<Workflow />}
               hue="purple"
-              headingLevel={3}
+              headingLevel={levels.sub}
               title={t("flows_empty_title")}
               description={t("flows_empty_description")}
               actions={createButton}
@@ -274,7 +276,7 @@ export function FlowsPage() {
                 draft.trim() ? (
                   <EmptyState
                     icon={<SearchX />}
-                    headingLevel={3}
+                    headingLevel={levels.sub}
                     isCompact
                     title={t("flow_list_no_match_title")}
                     actions={
@@ -290,7 +292,7 @@ export function FlowsPage() {
                 ) : (
                   <EmptyState
                     icon={<SearchX />}
-                    headingLevel={3}
+                    headingLevel={levels.sub}
                     isCompact
                     title={
                       status === "published"

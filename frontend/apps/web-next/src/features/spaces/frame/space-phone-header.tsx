@@ -6,7 +6,7 @@ import { ClassificationToken } from "@/components/composites/classification-toke
 import { PageBar } from "@/components/shell/page-bar";
 import { useSpace } from "../use-space";
 import { useSpaceDisplayName } from "../space-display-name";
-import { useSpaceSections } from "./space-header";
+import { useSpaceSections } from "./use-space-sections";
 import { phoneSections, spaceLandingHref, type SpaceRoute } from "./space-sections";
 import { SpaceTabs } from "./space-tabs";
 
