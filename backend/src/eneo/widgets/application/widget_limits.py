@@ -36,6 +36,9 @@ logger = get_logger(__name__)
 VISITOR_WINDOW_SECONDS = 600
 IP_WINDOW_SECONDS = 3600
 CHALLENGE_WINDOW_SECONDS = 60
+# A conversation answers one question at a time; the hold outlives any stream
+# only if the process holding it died.
+TURN_HOLD_SECONDS = 15 * 60
 
 
 def _widget_key(widget: Widget, *parts: str) -> str:
@@ -89,6 +92,42 @@ class WidgetLimiter:
             code="rate_limited_mint",
             message="Too many session requests. Try again shortly.",
         )
+
+    async def hold_turn(self, widget: Widget, session_id: UUID) -> None:
+        """Admit one follow-up at a time per conversation.
+
+        The turn cap is read and the question stored in separate transactions,
+        so two follow-ups arriving together could both see one slot left. The
+        second waits for the first answer instead.
+        """
+        key = _widget_key(widget, "session", str(session_id), "turn")
+        try:
+            fresh = await self.redis.set(key, b"1", nx=True, ex=TURN_HOLD_SECONDS)
+        except Exception as exc:
+            if self.settings.widget_rate_limit_fail_open:
+                logger.warning(
+                    "Widget turn hold skipped: Redis unavailable",
+                    extra={"key": key, "error": str(exc)},
+                )
+                return
+            raise WidgetProtectionUnavailableError() from exc
+        if not fresh:
+            raise WidgetRateLimitedError(
+                "rate_limited_session",
+                retry_after=3,
+                message="An answer is still being written in this conversation.",
+            )
+
+    async def release_turn(self, widget: Widget, session_id: UUID) -> None:
+        key = _widget_key(widget, "session", str(session_id), "turn")
+        try:
+            await self.redis.delete(key)
+        except Exception as exc:
+            # The hold expires on its own; the next follow-up only waits longer.
+            logger.warning(
+                "Widget turn hold not released: Redis unavailable",
+                extra={"key": key, "error": str(exc)},
+            )
 
     async def check_message(
         self, widget: Widget, visitor_id: UUID, client_ip: Optional[str]

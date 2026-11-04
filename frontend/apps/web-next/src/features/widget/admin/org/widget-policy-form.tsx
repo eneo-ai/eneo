@@ -12,7 +12,7 @@ import { toastWidgetError } from "../errors";
 import { MAX_DAILY_TOKEN_BUDGET } from "@eneo/eneo-js/widgets/limits";
 import { widgetPolicyQueryOptions, type WidgetPolicy } from "../queries";
 import { useAutosave } from "../use-widget-autosave";
-import { widgetPolicyApi, type WidgetPolicyUpdate } from "./queries";
+import { WIDGET_OVERVIEW_KEY, widgetPolicyApi, type WidgetPolicyUpdate } from "./queries";
 
 const MAX_RETENTION_DAYS = 3650;
 
@@ -37,6 +37,8 @@ export function WidgetPolicyForm({ policy: initial }: { policy: WidgetPolicy }) 
         try {
           const saved = await widgetPolicyApi.update(update);
           queryClient.setQueryData(widgetPolicyQueryOptions(browserApi).queryKey, saved);
+          // The overview folds policy violations into each widget's blockers.
+          void queryClient.invalidateQueries({ queryKey: WIDGET_OVERVIEW_KEY });
           return saved;
         } catch (error) {
           toastWidgetError(error, t);

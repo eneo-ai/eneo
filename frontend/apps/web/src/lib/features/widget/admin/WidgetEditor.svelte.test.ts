@@ -85,7 +85,11 @@ function widget(overrides: Partial<Widget> = {}): Widget {
   } as unknown as Widget;
 }
 
-function renderEditor(current: Widget, assistant: Partial<Assistant> = {}) {
+function renderEditor(
+  current: Widget,
+  assistant: Partial<Assistant> = {},
+  widgets: Record<string, unknown> = {}
+) {
   const update = vi.fn(async ({ update: patch }: { update: Partial<Widget> }) => ({
     ...current,
     ...patch
@@ -95,7 +99,8 @@ function renderEditor(current: Widget, assistant: Partial<Assistant> = {}) {
     widgets: {
       update,
       previewToken: vi.fn(() => new Promise(() => {})),
-      usage
+      usage,
+      ...widgets
     }
   } as unknown as Eneo;
   render(WidgetEditor, {
@@ -115,6 +120,8 @@ function renderEditor(current: Widget, assistant: Partial<Assistant> = {}) {
   return { update, usage };
 }
 
+const click = (locator: { element: () => Element }) => (locator.element() as HTMLElement).click();
+
 function leavingAsks(): boolean {
   const leave = vi.mocked(beforeNavigate).mock.lastCall![0];
   const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
@@ -127,6 +134,28 @@ function leavingAsks(): boolean {
 }
 
 describe("WidgetEditor", () => {
+  test("an edit made while the widget pauses is saved with the revision the pause returned", async () => {
+    const current = widget({ revision: 3 });
+    let finishPause!: (paused: Widget) => void;
+    const pause = vi.fn(() => new Promise<Widget>((resolve) => (finishPause = resolve)));
+    const { update } = renderEditor(current, {}, { pause });
+    click(page.getByRole("button", { name: "widget_admin_pause" }));
+    await vi.waitFor(() => expect(pause).toHaveBeenCalledTimes(1));
+
+    // Typed while the pause is still in flight: it waits for the new revision.
+    await userEvent.fill(page.getByLabelText("name", { exact: true }), "Kaffe och te");
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    expect(update).not.toHaveBeenCalled();
+
+    finishPause({ ...current, status: "paused", revision: 7 });
+    await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    expect(update).toHaveBeenLastCalledWith({
+      widget: { id: current.id },
+      update: { name: "Kaffe och te", revision: 7 }
+    });
+    await expect.element(page.getByLabelText("name", { exact: true })).toHaveValue("Kaffe och te");
+  });
+
   test.each(["upload", "copy"])("clearing a persona releases a late avatar %s", async (source) => {
     let complete!: (icon: { id: string }) => void;
     icons.upload.mockClear().mockImplementationOnce(

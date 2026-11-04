@@ -171,6 +171,19 @@ class _FakeRedis:
             raise ConnectionError("down")
         return 1 if key in self.keys else 0
 
+    async def set(self, key, value, *, nx=False, ex=None):
+        if self.fail:
+            raise ConnectionError("down")
+        if nx and key in self.keys:
+            return None
+        self.keys[key] = ex or 0
+        return True
+
+    async def delete(self, key):
+        if self.fail:
+            raise ConnectionError("down")
+        return 1 if self.keys.pop(key, None) is not None else 0
+
 
 def _claims(
     widget: Widget, *, jti: str = "abc", expires_in: int = 900
@@ -271,3 +284,31 @@ async def test_revocation_follows_the_limiter_fail_policy():
     )
     await opened.ensure_current(widget, claims)
     await opened.consume_for_rotation(widget, claims, grace_seconds=900)
+
+
+async def test_a_conversation_answers_one_follow_up_at_a_time():
+    redis = _FakeRedis()
+    limiter = WidgetLimiter(redis_client=redis, settings=_settings())
+    widget = _widget()
+    session_id = uuid4()
+    await limiter.hold_turn(widget, session_id)
+    with pytest.raises(WidgetRateLimitedError) as refused:
+        await limiter.hold_turn(widget, session_id)
+    assert refused.value.code == "rate_limited_session"
+    # Another conversation of the same widget is not held up by it.
+    await limiter.hold_turn(widget, uuid4())
+    await limiter.release_turn(widget, session_id)
+    await limiter.hold_turn(widget, session_id)
+
+
+async def test_the_turn_hold_follows_the_limiter_fail_policy():
+    widget = _widget()
+    closed = WidgetLimiter(redis_client=_FakeRedis(fail=True), settings=_settings())
+    with pytest.raises(WidgetProtectionUnavailableError):
+        await closed.hold_turn(widget, uuid4())
+    opened = WidgetLimiter(
+        redis_client=_FakeRedis(fail=True),
+        settings=_settings(widget_rate_limit_fail_open=True),
+    )
+    await opened.hold_turn(widget, uuid4())
+    await opened.release_turn(widget, uuid4())

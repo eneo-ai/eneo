@@ -135,6 +135,28 @@ describe("WidgetsAdminPage", () => {
 });
 
 describe("WidgetsAdminPage policy", () => {
+  it("a policy change refreshes the overview, whose blockers fold the policy in", async () => {
+    api.PATCH.mockImplementation((_path: string, init: { body: Record<string, unknown> }) =>
+      ok({ ...policy, ...init.body })
+    );
+    const { queryClient } = showPage({ route: "/admin/widgets?tab=policy" });
+    fireEvent.click(await screen.findByRole("switch", { name: "Tillåt widgetar utan botskydd" }));
+    await waitFor(
+      () =>
+        expect(api.PATCH).toHaveBeenCalledWith(
+          "/api/v1/admin/widget-policy/",
+          expect.objectContaining({ body: { allow_bot_protection_none: true } })
+        ),
+      { timeout: 2000 }
+    );
+    await waitFor(() => {
+      const refetched =
+        api.GET.mock.calls.filter(([p]) => p === "/api/v1/admin/widgets/").length > 1;
+      const stale = queryClient.getQueryState(["admin", "widgets", "overview"])?.isInvalidated;
+      expect(refetched || stale === true).toBe(true);
+    });
+  });
+
   it("the maximum budget may reach the API's ceiling but not pass it", async () => {
     api.PATCH.mockImplementation((_path: string, init: { body: Record<string, unknown> }) =>
       ok({ ...policy, ...init.body })

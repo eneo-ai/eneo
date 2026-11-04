@@ -763,3 +763,85 @@ async def test_zero_retention_closes_conversations_stored_before_it(
             )
         ).one()
     assert (row.feedback_value, row.feedback_text) == (1, "Första kommentaren")
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_conversation_takes_one_follow_up_at_a_time(
+    client, admin_token, active_widget, fake_assistant_ask, monkeypatch
+):
+    """Two follow-ups arriving together with one turn left: the second is
+    refused while the first answers, and the cap holds afterwards."""
+    public_id = active_widget["public_id"]
+    resp = await client.patch(
+        f"/api/v1/widgets/{active_widget['id']}/",
+        json={
+            "revision": active_widget["revision"],
+            "limits": {"max_session_turns": 2},
+        },
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 200, resp.text
+    token = await _mint(client, public_id)
+
+    # The first follow-up's answer streams only once the test lets it.
+    gate = asyncio.Event()
+    canned = AssistantService.ask
+
+    async def held_ask(self, *, question, **kwargs):
+        response = await canned(self, question=question, **kwargs)
+        if question == "Vänta":
+            inner = response.answer
+
+            async def answer():
+                await gate.wait()
+                async for chunk in inner:
+                    yield chunk
+
+            response.answer = answer()
+        return response
+
+    monkeypatch.setattr(AssistantService, "ask", held_ask)
+
+    resp = await client.post(
+        f"/api/v1/widgets/{public_id}/ask/",
+        json={"question": "Hej"},
+        headers=_auth(token),
+    )
+    assert resp.status_code == 200, resp.text
+    session_id = _sse_events(resp.text)[0][1]["session_id"]
+
+    first = asyncio.create_task(
+        client.post(
+            f"/api/v1/widgets/{public_id}/ask/",
+            json={"question": "Vänta", "session_id": session_id},
+            headers=_auth(token),
+        )
+    )
+    await asyncio.sleep(0.3)
+    second = await client.post(
+        f"/api/v1/widgets/{public_id}/ask/",
+        json={"question": "Också", "session_id": session_id},
+        headers=_auth(token),
+    )
+    assert second.status_code == 429, second.text
+    assert second.json()["detail"]["code"] == "rate_limited_session"
+    gate.set()
+    resp = await first
+    assert resp.status_code == 200, resp.text
+
+    # The hold is gone with the answer; the cap now closes the conversation.
+    resp = await client.post(
+        f"/api/v1/widgets/{public_id}/ask/",
+        json={"question": "En till", "session_id": session_id},
+        headers=_auth(token),
+    )
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["detail"]["code"] == "session_turns_exceeded"
+    async with sessionmanager.session() as session, session.begin():
+        stored = await session.scalar(
+            sa.select(sa.func.count())
+            .select_from(Questions)
+            .where(Questions.session_id == UUID(session_id))
+        )
+    assert stored == 2

@@ -174,6 +174,37 @@ describe("widget template page", () => {
     expect(document.querySelector('[role="alertdialog"]')).toBeNull();
   });
 
+  test("an edit made while a template publishes is saved afterwards, not lost", async () => {
+    const first = template({ linked_widgets: 0, has_unpublished_changes: true });
+    let release!: (published: WidgetTemplate) => void;
+    const publish = vi.fn(() => new Promise<WidgetTemplate>((resolve) => (release = resolve)));
+    const update = vi.fn(async ({ update: patch }: { update: Partial<WidgetTemplate> }) => ({
+      ...first,
+      ...patch,
+      has_unpublished_changes: true
+    }));
+    const eneo = { widgets: { templates: { update, publish } } };
+    render(TemplatePage, { data: { template: first, eneo } as never });
+    click(page.getByRole("button", { name: "widget_admin_template_publish" }));
+    await vi.waitFor(() => expect(publish).toHaveBeenCalledTimes(1), { timeout: 3000 });
+
+    // The radius edit lands while the release is still being made.
+    click(page.getByRole("tab", { name: "widget_admin_tab_appearance" }));
+    const radius = page.getByLabelText("widget_admin_radius", { exact: true });
+    await userEvent.fill(radius, "8");
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    expect(update).not.toHaveBeenCalled();
+
+    release({ ...first, has_unpublished_changes: false, published_at: "2026-09-21T12:00:00Z" });
+    await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    expect(update).toHaveBeenLastCalledWith({
+      template: { id: "t1" },
+      update: { theme: { primary_color: "#1F4E79", radius: 8 } }
+    });
+    await expect.element(radius).toHaveValue(8);
+    await expect.element(page.getByText("widget_admin_template_unpublished_changes")).toBeVisible();
+  });
+
   // History navigation between two templates reuses the page; a publication
   // that finishes after the move belongs to the template it was asked for.
   test("a disclosure emptied under one template's lock is not sent to the next template", async () => {

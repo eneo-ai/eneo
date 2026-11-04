@@ -173,6 +173,34 @@ export class Autosave<Resource extends object, Update extends object> {
     this.#emit();
   }
 
+  /**
+   * Run another action on the resource (publish, pause, link a template…)
+   * with no save overlapping it: pending edits are saved first, and edits
+   * made meanwhile wait for the result, whose revision the server moves to,
+   * instead of carrying the one before it. The action returns the new
+   * resource, or null to leave the baseline alone (the editor moved on).
+   */
+  async exclusive(action: () => Promise<Resource | null>): Promise<void> {
+    await this.flush();
+    const held = action().then((result) => {
+      if (result !== null) this.replace(result);
+    });
+    this.#inflight = held
+      .then(
+        () => undefined,
+        () => undefined
+      )
+      .finally(() => {
+        this.#inflight = null;
+      });
+    try {
+      await held;
+    } finally {
+      this.#dirtyWhileSaving = false;
+      if (this.hasPending) void this.flush();
+    }
+  }
+
   /** Drop refused edits of these groups (all by default), e.g. before an action that overwrites them. */
   discardRefused(keys: string[] = Object.keys(this.#refused)): void {
     this.#release(keys);

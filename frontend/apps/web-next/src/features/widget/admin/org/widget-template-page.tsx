@@ -168,11 +168,16 @@ function TemplateEditor({ template: initial }: { template: WidgetTemplate }) {
     if (publishing) return;
     setPublishing(true);
     try {
-      await autosave.flush();
-      if (autosave.hasPending) return;
-      const saved = await widgetTemplateApi.publish(initial.id);
-      cacheWidgetTemplate(queryClient, saved);
-      autosave.replace(saved);
+      let published = false;
+      // Edits made while publishing wait for the release and are saved after it.
+      await autosave.exclusive(async () => {
+        if (autosave.hasPending) return null;
+        const saved = await widgetTemplateApi.publish(initial.id);
+        cacheWidgetTemplate(queryClient, saved);
+        published = true;
+        return saved;
+      });
+      if (!published) return;
       await queryClient.invalidateQueries({
         queryKey: ["spaces"],
         predicate: ({ queryKey }) => queryKey[2] === "widgets"

@@ -67,15 +67,21 @@ export function WidgetAdminPage({
   const archivedNote = useRef<HTMLParagraphElement>(null);
 
   function replaceInList(updated: Widget | null, previousId?: string) {
-    queryClient.setQueryData(
-      spaceWidgetsQueryOptions(browserApi, space.id).queryKey,
-      (current: Widget[] | undefined) => {
-        const rest = (current ?? []).filter(
-          (item) => item.id !== previousId && item.id !== updated?.id
-        );
-        return updated ? [...rest, updated] : rest;
-      }
+    const key = spaceWidgetsQueryOptions(browserApi, space.id).queryKey;
+    const before = (queryClient.getQueryData<Widget[]>(key) ?? []).find(
+      (item) => item.id === (updated?.id ?? previousId)
     );
+    queryClient.setQueryData(key, (current: Widget[] | undefined) => {
+      const rest = (current ?? []).filter(
+        (item) => item.id !== previousId && item.id !== updated?.id
+      );
+      return updated ? [...rest, updated] : rest;
+    });
+    // A template's follower count lives in its own cache; a widget that
+    // starts or stops following one changes it.
+    if ((before?.template?.id ?? null) !== (updated?.template?.id ?? null)) {
+      void queryClient.invalidateQueries({ queryKey: ["widget-templates"] });
+    }
   }
 
   const sections = spaceSections(space, spaceCan, routeId);

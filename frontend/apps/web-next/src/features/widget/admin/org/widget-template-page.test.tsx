@@ -148,6 +148,60 @@ describe("WidgetTemplatePage", () => {
     expect(within(dialog).queryByText(/^Ersätts på widgetarna/)).toBeNull();
   });
 
+  it("an edit made while a template publishes is saved afterwards, not lost", async () => {
+    const current = template({
+      linked_widgets: 0,
+      published_at: null,
+      published: null,
+      has_unpublished_changes: true
+    });
+    showPage(current);
+    // Saves after the release keep it published, with new unpublished changes.
+    api.PATCH.mockImplementation((_path: string, init: { body: Partial<WidgetTemplate> }) =>
+      ok({
+        ...current,
+        published_at: "2026-09-21T12:00:00Z",
+        ...init.body,
+        has_unpublished_changes: true
+      })
+    );
+    let release!: (published: WidgetTemplate) => void;
+    api.POST.mockImplementation(
+      () =>
+        new Promise<{ data: WidgetTemplate; response: Response }>((resolve) => {
+          release = (data) => resolve({ data, response: new Response("{}") });
+        })
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Publicera" }));
+    await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(1));
+
+    // The radius edit lands while the release is still being made.
+    fireEvent.click(screen.getByRole("tab", { name: "Utseende" }));
+    const radius = (await screen.findByRole("spinbutton", {
+      name: /Hörnradie/
+    })) as HTMLInputElement;
+    fireEvent.change(radius, { target: { value: "8" } });
+    fireEvent.blur(radius);
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    expect(api.PATCH).not.toHaveBeenCalled();
+
+    await act(async () =>
+      release({ ...current, has_unpublished_changes: false, published_at: "2026-09-21T12:00:00Z" })
+    );
+    await waitFor(
+      () =>
+        expect(api.PATCH).toHaveBeenCalledWith(
+          "/api/v1/admin/widget-templates/{id}/",
+          expect.objectContaining({
+            body: expect.objectContaining({ theme: expect.objectContaining({ radius: 8 }) })
+          })
+        ),
+      { timeout: 2000 }
+    );
+    expect(radius.value).toBe("8");
+    expect(await screen.findByText("Opublicerade ändringar")).toBeTruthy();
+  });
+
   it("a template nobody follows publishes without a question", async () => {
     showPage(
       template({

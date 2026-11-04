@@ -365,6 +365,60 @@ describe("WidgetAdminPage", () => {
     );
   });
 
+  it("an edit made while the widget pauses is saved with the revision the pause returned", async () => {
+    let finishPause!: (paused: Widget) => void;
+    api.PATCH.mockImplementation((_path: string, init: { body: Record<string, unknown> }) =>
+      ok(widget({ ...init.body, status: "paused", revision: 8 }))
+    );
+    showPage([widget({ status: "active", activated_at: "2026-09-01T00:00:00Z" })]);
+    // After showPage, whose default POST answers every call with the draft.
+    api.POST.mockImplementation((path: string) =>
+      path === "/api/v1/widgets/{id}/pause/"
+        ? new Promise<{ data: Widget; response: Response }>((resolve) => {
+            finishPause = (data) => resolve({ data, response: new Response("{}") });
+          })
+        : ok({ token: "preview-token", expires_in: 900 })
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Pausa" }));
+    await waitFor(() =>
+      expect(api.POST).toHaveBeenCalledWith("/api/v1/widgets/{id}/pause/", expect.anything())
+    );
+
+    // Typed while the pause is still in flight: it waits for the new revision.
+    const [name] = await screen.findAllByRole("textbox", { name: /^Namn/ });
+    fireEvent.change(name!, { target: { value: "Kaffe och te" } });
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    expect(api.PATCH).not.toHaveBeenCalled();
+
+    await act(async () => finishPause(widget({ status: "paused", revision: 7 })));
+    await waitFor(
+      () =>
+        expect(api.PATCH).toHaveBeenCalledWith(
+          WIDGET_PATH,
+          expect.objectContaining({ body: { name: "Kaffe och te", revision: 7 } })
+        ),
+      { timeout: 2000 }
+    );
+  });
+
+  it("linking a template lets its cached follower count go", async () => {
+    const queryClient = testQueryClient();
+    queryClient.setQueryData(["widget-templates", "t1"], template());
+    api.PATCH.mockImplementation((_path: string, init: { body: Record<string, unknown> }) =>
+      ok(widget({ ...init.body, revision: 4 }))
+    );
+    showPage([widget()], ["widgets"], { templates: [template()], queryClient });
+    api.POST.mockImplementation((path: string) =>
+      path === LINK_PATH ? ok(linked()) : ok({ token: "preview-token", expires_in: 900 })
+    );
+    await screen.findAllByRole("textbox", { name: /^Namn/ });
+    expect(queryClient.getQueryState(["widget-templates", "t1"])?.isInvalidated).toBe(false);
+    await applyTemplate();
+    await waitFor(() =>
+      expect(queryClient.getQueryState(["widget-templates", "t1"])?.isInvalidated).toBe(true)
+    );
+  });
+
   it("links a template with the revision the save it waited for returned", async () => {
     api.PATCH.mockImplementation((_path: string, init: { body: Record<string, unknown> }) =>
       ok(widget({ ...init.body, revision: 4 }))

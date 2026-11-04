@@ -108,11 +108,10 @@
   ]);
   const tab = urlTab(["content", "appearance", "rules", "publish"] as const, "content");
 
-  // Pending edits are saved first so pause and archive never race the
-  // autosave; a save that fails does not stop the kill switch.
+  // Pending edits are saved first and later ones wait, so pause and archive
+  // never race the autosave; a save that fails does not stop the kill switch.
   const lifecycle = (action: (params: { id: string }) => Promise<Widget>) => async () => {
-    await autosave.flush();
-    autosave.replace(await action({ id: widget.id }));
+    await autosave.exclusive(() => action({ id: widget.id }));
   };
 
   // Linking a template overwrites texts and appearance, so it asks first;
@@ -154,14 +153,17 @@
   ): Promise<boolean> {
     applying = true;
     try {
-      await autosave.flush();
-      if (autosave.hasPending) return false;
-      const updated = await action();
-      // Refused edits of the groups the release replaced are moot; any other
-      // refused edit stays on screen, held with its reason.
-      autosave.discardRefused(replaced);
-      autosave.replace(updated);
-      return true;
+      let applied = false;
+      await autosave.exclusive(async () => {
+        if (autosave.hasPending) return null;
+        const updated = await action();
+        // Refused edits of the groups the release replaced are moot; any other
+        // refused edit stays on screen, held with its reason.
+        autosave.discardRefused(replaced);
+        applied = true;
+        return updated;
+      });
+      return applied;
     } catch (error) {
       toastWidgetError(error, failure());
       return false;

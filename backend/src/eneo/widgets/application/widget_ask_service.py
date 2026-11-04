@@ -268,13 +268,28 @@ class WidgetAskService:
             raise
 
         if session_id is not None:
-            session = await self._owned_session(widget, session_id)
-            if len(session.questions) >= widget.limits.max_session_turns:
-                raise WidgetPublicError(
-                    "This conversation has reached its length limit. Start a new one.",
-                    code="session_turns_exceeded",
-                )
+            # Held until the answer ends (_finish) or the request fails before
+            # it: the turn count below is only exact for one follow-up at a time.
+            await self.limiter.hold_turn(widget, session_id)
+        try:
+            if session_id is not None:
+                session = await self._owned_session(widget, session_id)
+                if len(session.questions) >= widget.limits.max_session_turns:
+                    raise WidgetPublicError(
+                        "This conversation has reached its length limit. Start a new one.",
+                        code="session_turns_exceeded",
+                    )
+            return await self._ask_admitted(widget, cleaned, session_id)
+        except BaseException:
+            if session_id is not None:
+                with finalizing("widget turn release"):
+                    await self.limiter.release_turn(widget, session_id)
+            raise
 
+    async def _ask_admitted(
+        self, widget: Widget, cleaned: str, session_id: Optional[UUID]
+    ) -> AssistantResponse:
+        assert widget.id is not None
         try:
             reservation = await self.budget.reserve(
                 widget, self.settings.widget_budget_reservation_tokens
@@ -320,6 +335,7 @@ class WidgetAskService:
                 response.question_id,
                 reservation,
                 completed=completed,
+                asked_in=session_id,
             ),
         )
         return visible
@@ -332,8 +348,10 @@ class WidgetAskService:
         reservation: BudgetReservation,
         *,
         completed: bool,
+        asked_in: UUID | None = None,
     ) -> None:
-        """Settle the budget, record usage and apply "never persist".
+        """Settle the budget, record usage, apply "never persist" and release
+        the conversation's turn hold (``asked_in`` is the follow-up's session).
 
         Runs when the answer stream ends. The ask pipeline has by then stored
         the answer and its token counts, but only inside the request
@@ -358,8 +376,12 @@ class WidgetAskService:
         finally:
             # Retention is not conditional on successful budget/statistics
             # writes. Failure here propagates and rolls back the chat write.
-            if widget.privacy.never_persists:
-                await self.usage_repo.delete_session(session_id)
+            try:
+                if widget.privacy.never_persists:
+                    await self.usage_repo.delete_session(session_id)
+            finally:
+                if asked_in is not None:
+                    await self.limiter.release_turn(widget, asked_in)
 
     @staticmethod
     async def _question_tokens(

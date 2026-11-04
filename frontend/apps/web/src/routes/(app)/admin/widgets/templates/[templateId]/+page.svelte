@@ -183,12 +183,14 @@
   const publish = createAsyncState(async () => {
     const visit = owner;
     try {
-      await autosave.flush();
-      if (!isCurrent(visit) || autosave.hasPending) return;
-      const published = await data.eneo.widgets.templates.publish({ id: visit.templateId });
-      if (!isCurrent(visit)) return;
-      autosave.replace(published);
-      confirmPublish = false;
+      // Edits made while publishing wait for the release and are saved after it.
+      await autosave.exclusive(async () => {
+        if (!isCurrent(visit) || autosave.hasPending) return null;
+        const published = await data.eneo.widgets.templates.publish({ id: visit.templateId });
+        if (!isCurrent(visit)) return null;
+        confirmPublish = false;
+        return published;
+      });
     } catch (error) {
       if (isCurrent(visit)) toastWidgetError(error, m.widget_admin_template_could_not_publish());
     }
