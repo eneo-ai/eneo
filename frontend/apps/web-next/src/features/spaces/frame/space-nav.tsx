@@ -23,7 +23,7 @@ import {
   type LucideIcon
 } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { flushSync } from "react-dom";
 import { blockingError } from "@/components/composites/query-state";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
@@ -110,14 +110,18 @@ function SpaceChip({ space }: { space: Space }) {
 }
 
 /**
- * Whether the switcher has opened. Astryx mounts a heading's menu with the
- * page, so a row per space would render, hidden, on every page of a space;
- * an account with many spaces paid for it on each one. The menu is a native
- * popover, and its `beforetoggle` renders the rows before it shows; they then
- * stay. A browser without the Popover API (Astryx shows the menu by `display`
- * there) gets the rows at once.
+ * Whether the switcher has opened, and how to close it. Astryx mounts a
+ * heading's menu with the page, so a row per space would render, hidden, on
+ * every page of a space; an account with many spaces paid for it on each one.
+ * The menu is a native popover, and its `beforetoggle` renders the rows before
+ * it shows; they then stay. A browser without the Popover API (Astryx shows the
+ * menu by `display` there) gets the rows at once.
+ *
+ * Astryx closes a heading's menu on a pick only in the icon rail, and exports
+ * nothing that closes it in the full sidebar, where the heading stays mounted
+ * across spaces. `hidePopover` returns focus to the heading in both.
  */
-function useOpenedOnce() {
+function useSwitcherPopover() {
   const marker = useRef<HTMLSpanElement>(null);
   const [opened, setOpened] = useState(
     () => typeof HTMLElement === "undefined" || !("showPopover" in HTMLElement.prototype)
@@ -131,46 +135,76 @@ function useOpenedOnce() {
     popover.addEventListener("beforetoggle", open);
     return () => popover.removeEventListener("beforetoggle", open);
   }, [opened]);
-  return { marker, opened };
+  const close = () => marker.current?.closest<HTMLElement>("[popover]")?.hidePopover?.();
+  return { marker, opened, close };
+}
+
+/**
+ * Astryx handles a list key on the heading's popover as well as on its menu, so
+ * left to both an arrow moves two rows. Escape is the popover's alone.
+ */
+function keepKeyInMenu(event: KeyboardEvent) {
+  if (event.key !== "Escape") event.stopPropagation();
 }
 
 /**
  * Svelte's space selector (`SpaceSelector.svelte`): "Dina ytor", every
  * shared space (the current one checked) and "Skapa en ny yta" for those who
- * may. Picking a space opens its overview.
+ * may. Picking a space opens its overview. The spaces scroll between the two,
+ * as there, so neither leaves the screen however many spaces there are.
  */
 function SwitcherMenu({ currentId }: { currentId: string | null }) {
   const t = useTranslations();
   const { can } = useAppContext();
   const { openCreateSpace } = useShell();
-  const spaces = useQuery(spacesListQueryOptions(browserApi)).data ?? [];
-  const { marker, opened } = useOpenedOnce();
+  const query = useQuery(spacesListQueryOptions(browserApi));
+  const { marker, opened, close } = useSwitcherPopover();
 
   return (
-    <NavHeadingMenu>
+    <NavHeadingMenu onKeyDown={keepKeyInMenu}>
       <span ref={marker} hidden />
-      <NavHeadingMenuItem label={t("your_spaces")} href="/spaces/list" />
-      {(opened ? spaces : [])
-        .filter((space) => !space.personal && !space.organization)
-        .map((space) => (
-          <NavHeadingMenuItem
-            key={space.id}
-            href={`/spaces/${space.id}/overview`}
-            label={
-              <span className="flex min-w-0 items-center justify-between gap-2">
-                <span className="truncate">{space.name}</span>
-                {space.id === currentId && (
-                  <Check aria-hidden="true" className="text-ax-accent size-4 shrink-0" />
-                )}
-              </span>
-            }
-            icon={<EntityAvatar id={space.id} name={space.name} size="sm" />}
-            // The current space, not the page: the sidebar's section link stays the only "page".
-            aria-current={space.id === currentId ? "true" : undefined}
-          />
-        ))}
+      <NavHeadingMenuItem label={t("your_spaces")} href="/spaces/list" onClick={close} />
+      {blockingError(query) && (
+        <NavHeadingMenuItem
+          label={t("shell_spaces_retry")}
+          description={t("shell_spaces_load_failed")}
+          icon={<Icon icon={RotateCcw} />}
+          onClick={() => {
+            close();
+            void query.refetch();
+          }}
+        />
+      )}
+      <div className="flex max-h-[50dvh] flex-col gap-0.5 overflow-y-auto">
+        {(opened ? (query.data ?? []) : [])
+          .filter((space) => !space.personal && !space.organization)
+          .map((space) => (
+            <NavHeadingMenuItem
+              key={space.id}
+              href={`/spaces/${space.id}/overview`}
+              onClick={close}
+              label={
+                <span className="flex min-w-0 items-center justify-between gap-2">
+                  <span className="truncate">{space.name}</span>
+                  {space.id === currentId && (
+                    <Check aria-hidden="true" className="text-ax-accent size-4 shrink-0" />
+                  )}
+                </span>
+              }
+              icon={<EntityAvatar id={space.id} name={space.name} size="sm" />}
+              // The current space, not the page: the sidebar's section link stays the only "page".
+              aria-current={space.id === currentId ? "true" : undefined}
+            />
+          ))}
+      </div>
       {can("shared_spaces") && (
-        <NavHeadingMenuItem label={t("create_new_space")} onClick={() => openCreateSpace()} />
+        <NavHeadingMenuItem
+          label={t("create_new_space")}
+          onClick={() => {
+            close();
+            openCreateSpace();
+          }}
+        />
       )}
     </NavHeadingMenu>
   );

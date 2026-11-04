@@ -139,6 +139,41 @@ describe("SpaceNav", () => {
     expect(shell.openCreateSpace).toHaveBeenCalled();
   });
 
+  it("moves one row per arrow key, however many handlers Astryx stacks", () => {
+    renderNav("/spaces/s1/overview");
+    fireEvent.click(screen.getByRole("button", { name: "Öppna meny" }));
+    const [yours, current, other] = screen.getAllByRole("menuitem");
+    yours!.focus();
+    fireEvent.keyDown(yours!, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(current);
+    fireEvent.keyDown(current!, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(other);
+  });
+
+  it("keeps Dina ytor and Skapa en ny yta outside the spaces' scroll area", () => {
+    renderNav("/spaces/s1/overview");
+    fireEvent.click(screen.getByRole("button", { name: "Öppna meny" }));
+    const scroll = screen.getByRole("menuitem", { name: "Socialtjänst" }).parentElement!;
+    expect(scroll.className).toMatch(/(^| )max-h-\[50dvh\]( |$)/);
+    expect(scroll.className).toMatch(/(^| )overflow-y-auto( |$)/);
+    expect(scroll.contains(screen.getByRole("menuitem", { name: "Dina ytor" }))).toBe(false);
+    expect(scroll.contains(screen.getByRole("menuitem", { name: "Skapa en ny yta" }))).toBe(false);
+  });
+
+  it("closes on a pick, in the full sidebar too, where the heading stays mounted", () => {
+    const proto = HTMLElement.prototype as Partial<HTMLElement>;
+    const hidePopover = vi.fn();
+    proto.hidePopover = hidePopover;
+    try {
+      renderNav("/spaces/s1/overview");
+      fireEvent.click(screen.getByRole("button", { name: "Öppna meny" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Socialtjänst" }));
+      expect(hidePopover).toHaveBeenCalled();
+    } finally {
+      delete proto.hidePopover;
+    }
+  });
+
   it("mounts a row per space only once the switcher opens, where popovers are native", () => {
     // A browser with the Popover API: opening fires beforetoggle on the menu's popover.
     const proto = HTMLElement.prototype as Partial<HTMLElement>;
