@@ -1,13 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { Browser, BrowserContext } from "@playwright/test";
 import { expect, test } from "./csp";
-import { STORAGE_STATE } from "../playwright.config";
-import { createFixtures, openRoute, walkTags } from "./responsive-fixtures";
+import { hiddenFocusProbe } from "./hidden-focus-probe";
+import { createFixtures, walkRoutes, walkTags } from "./responsive-fixtures";
 import { measure, type PageMeasure, type Violation } from "./responsive-measure";
-import { ROUTES, type Fixtures } from "./responsive-routes";
-
-test.skip(!process.env.E2E_BASE_URL, "Requires the FastAPI-served Vite build");
+import type { Fixtures } from "./responsive-routes";
 
 /*
  * The responsive contract: every screen, opened on a handful of real device
@@ -19,6 +16,9 @@ test.skip(!process.env.E2E_BASE_URL, "Requires the FastAPI-served Vite build");
  * it, do not add it). A baseline entry that no longer occurs also fails the
  * run, so the file only shrinks. Sideways scroll is never baselined.
  *
+ * The sizes marked `keyboard` also Tab through each screen (tests/hidden-focus-probe.ts): it
+ * is the same visit, last, since Tabbing changes what the page shows.
+ *
  * tests/responsive-routes.ts decides which screens are opened; a unit test
  * keeps it equal to the route tree. CONTRACT_UPDATE=1 rewrites the baseline
  * from the current run; CONTRACT_VIEWPORTS=390x844,820x1180 narrows a run.
@@ -26,13 +26,13 @@ test.skip(!process.env.E2E_BASE_URL, "Requires the FastAPI-served Vite build");
 
 const VIEWPORTS = [
   { name: "phone-320", width: 320, height: 568 },
-  { name: "phone-390", width: 390, height: 844 },
+  { name: "phone-390", width: 390, height: 844, keyboard: true },
   // A phone turned: the browser's own bars leave about 300 px of height.
-  { name: "phone-landscape", width: 667, height: 300 },
+  { name: "phone-landscape", width: 667, height: 300, keyboard: true },
   // A larger phone turned: wider than 768 px but under 500 px tall, it keeps the phone's layout.
   { name: "phone-turned", width: 844, height: 390 },
-  { name: "ipad-portrait", width: 820, height: 1180 },
-  { name: "ipad-landscape", width: 1180, height: 820 }
+  { name: "ipad-portrait", width: 820, height: 1180, keyboard: true },
+  { name: "ipad-landscape", width: 1180, height: 820, keyboard: true }
 ].filter(
   ({ width, height }) =>
     !process.env.CONTRACT_VIEWPORTS ||
@@ -53,21 +53,6 @@ test.beforeAll(async ({ browser, baseURL }) => {
   fixtures = await createFixtures(browser, baseURL, "Contract");
 });
 
-async function contextFor(
-  browser: Browser,
-  baseURL: string | undefined,
-  vp: (typeof VIEWPORTS)[number],
-  signedIn: boolean
-) {
-  return browser.newContext({
-    baseURL,
-    storageState: signedIn ? STORAGE_STATE : { cookies: [], origins: [] },
-    viewport: { width: vp.width, height: vp.height },
-    hasTouch: true,
-    isMobile: true
-  });
-}
-
 for (const vp of VIEWPORTS) {
   test(
     `every screen holds up at ${vp.name} (${vp.width} × ${vp.height})`,
@@ -76,24 +61,18 @@ for (const vp of VIEWPORTS) {
       test.setTimeout(15 * 60_000);
       const problems: string[] = [];
       const seen: Record<string, { stable: Set<string>; either: Set<string> }> = {};
-      const contexts: Record<string, BrowserContext> = {
-        in: await contextFor(browser, baseURL, vp, true),
-        out: await contextFor(browser, baseURL, vp, false)
+      const walk = {
+        baseURL,
+        fixtures,
+        context: {
+          viewport: { width: vp.width, height: vp.height },
+          hasTouch: true,
+          isMobile: true
+        },
+        only: process.env.CONTRACT_ROUTES
       };
-      const pages = { in: await contexts.in!.newPage(), out: await contexts.out!.newPage() };
-
-      for (const [pattern, entry] of Object.entries(ROUTES)) {
-        if ("skip" in entry) continue;
-        if (process.env.CONTRACT_ROUTES && !new RegExp(process.env.CONTRACT_ROUTES).test(pattern))
-          continue;
-        const signedIn = entry.auth !== "out";
-        const page = pages[signedIn ? "in" : "out"];
-        try {
-          await openRoute(page, entry.url(fixtures), signedIn);
-        } catch (error) {
-          problems.push(`${pattern}: did not open (${String(error).split("\n")[0]})`);
-          continue;
-        }
+      const found = await walkRoutes(browser, walk, async (page, pattern) => {
+        const problems: string[] = [];
         const result = await measure(page);
         if (result.overflowDoc > 0 || result.overflowPanel > 1) {
           problems.push(
@@ -115,8 +94,16 @@ for (const vp of VIEWPORTS) {
           either = new Set([...either, ...again]);
         }
         seen[key] = { stable, either };
-      }
-      for (const context of Object.values(contexts)) await context.close();
+        if (vp.keyboard) {
+          try {
+            problems.push(...(await hiddenFocusProbe(page, pattern)));
+          } catch (error) {
+            problems.push(`${pattern}: Tabbing failed (${String(error).split("\n")[0]})`);
+          }
+        }
+        return problems;
+      });
+      problems.push(...found);
 
       for (const [key, { stable, either }] of Object.entries(seen)) {
         recorded[key] = [...stable].sort();

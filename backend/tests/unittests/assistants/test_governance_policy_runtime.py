@@ -1312,7 +1312,9 @@ async def test_personal_chat_preflight_counts_blocked_own_skills_without_failing
         effective_config=_personal_chat_config(),
     )
 
-    baseline = await service.get_preflight_baseline(assistant.id)
+    baseline = await service.get_preflight_baseline(
+        await service.get_preflight_target(assistant.id)
+    )
 
     assert baseline.skill_context_tokens >= 0
 
@@ -1337,7 +1339,9 @@ async def test_personal_chat_preflight_measures_what_the_turn_runs():
             effective_config=_personal_chat_config(organisation),
         )
 
-        baseline = await service.get_preflight_baseline(assistant.id)
+        baseline = await service.get_preflight_baseline(
+            await service.get_preflight_target(assistant.id)
+        )
         await service.ask(question="hello", assistant_id=assistant.id)
 
         activation = (

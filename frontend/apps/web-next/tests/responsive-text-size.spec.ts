@@ -1,11 +1,7 @@
 import type { Browser, Page } from "@playwright/test";
 import { expect, test } from "./csp";
-import { STORAGE_STATE } from "../playwright.config";
-import { createFixtures, openRoute } from "./responsive-fixtures";
+import { createFixtures, walkRoutes } from "./responsive-fixtures";
 import { measure } from "./responsive-measure";
-import { ROUTES } from "./responsive-routes";
-
-test.skip(!process.env.E2E_BASE_URL, "Requires the FastAPI-served Vite build");
 
 /*
  * What the reader changes about the text, on a 390 px phone, must not cost
@@ -35,44 +31,13 @@ async function walkScreens(
   check: (page: Page, pattern: string) => Promise<string[]>
 ) {
   const fixtures = await createFixtures(browser, baseURL, prefix);
-  const viewport = { width: 390, height: 844 };
-  const contexts = {
-    in: await browser.newContext({
-      baseURL,
-      storageState: STORAGE_STATE,
-      viewport,
-      hasTouch: true,
-      isMobile: true
-    }),
-    out: await browser.newContext({
-      baseURL,
-      storageState: { cookies: [], origins: [] },
-      viewport,
-      hasTouch: true,
-      isMobile: true
-    })
-  };
-  const pages = { in: await contexts.in.newPage(), out: await contexts.out.newPage() };
-  const problems: string[] = [];
-  for (const [pattern, entry] of Object.entries(ROUTES)) {
-    if ("skip" in entry) continue;
-    const signedIn = entry.auth !== "out";
-    const page = pages[signedIn ? "in" : "out"];
-    try {
-      await openRoute(page, entry.url(fixtures), signedIn);
-    } catch (error) {
-      problems.push(`${pattern}: did not open (${String(error).split("\n")[0]})`);
-      continue;
-    }
-    problems.push(...(await check(page, pattern)));
-  }
-  for (const context of Object.values(contexts)) await context.close();
-  return problems;
+  const context = { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true };
+  return walkRoutes(browser, { baseURL, fixtures, context }, check);
 }
 
 test(
   "no screen scrolls sideways with the text at 200%",
-  { tag: ["@vite", "@text-size"] },
+  { tag: "@text-size" },
   async ({ browser, baseURL }) => {
     test.setTimeout(15 * 60_000);
     const problems = await walkScreens(browser, baseURL, "Text", async (page, pattern) => {
@@ -98,7 +63,7 @@ test(
 
 test(
   "no text is cut off, and nothing scrolls sideways, with the text spacing of WCAG 1.4.12",
-  { tag: ["@vite", "@text-size"] },
+  { tag: "@text-size" },
   async ({ browser, baseURL }) => {
     test.setTimeout(15 * 60_000);
     const problems = await walkScreens(browser, baseURL, "Spacing", async (page, pattern) => {

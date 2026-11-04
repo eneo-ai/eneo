@@ -1,8 +1,6 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "./csp";
 
-test.skip(!process.env.E2E_BASE_URL, "Requires the FastAPI-served Vite build");
-
 // On a phone a page with its own header (the chat's, a pushed screen's
 // PageBar) replaces the shell's top bar, which gives way to it in CSS. The
 // SPA has no server HTML: the page's code decides what the first frame holds.
@@ -125,24 +123,18 @@ test.describe("what the detector counts", () => {
     at
   });
 
-  test(
-    "a top bar replaced by a page's own header is a swap, two headers or none is not one",
-    {
-      tag: "@vite"
-    },
-    () => {
-      const swapped = [frame(true, false, 0), frame(true, false, 600), frame(false, true, 1800)];
-      expect(headerSwaps(swapped)).toBe(1);
-      expect(notOneHeader(swapped)).toEqual([]);
-      expect(notOneHeader([frame(true, true, 0)])).toHaveLength(1);
-      expect(notOneHeader([frame(false, false, 0)])).toHaveLength(1);
-      expect(headerSwaps([frame(false, true, 0), frame(false, true, 50)])).toBe(0);
-      // Before the panel exists nothing counts: a blank page is not a missing header.
-      expect(
-        withPanel([{ ...frame(false, false, 0), main: false }, frame(false, true, 40)])
-      ).toHaveLength(1);
-    }
-  );
+  test("a top bar replaced by a page's own header is a swap, two headers or none is not one", () => {
+    const swapped = [frame(true, false, 0), frame(true, false, 600), frame(false, true, 1800)];
+    expect(headerSwaps(swapped)).toBe(1);
+    expect(notOneHeader(swapped)).toEqual([]);
+    expect(notOneHeader([frame(true, true, 0)])).toHaveLength(1);
+    expect(notOneHeader([frame(false, false, 0)])).toHaveLength(1);
+    expect(headerSwaps([frame(false, true, 0), frame(false, true, 50)])).toBe(0);
+    // Before the panel exists nothing counts: a blank page is not a missing header.
+    expect(
+      withPanel([{ ...frame(false, false, 0), main: false }, frame(false, true, 40)])
+    ).toHaveLength(1);
+  });
 });
 
 const COLD = [
@@ -156,109 +148,91 @@ const COLD = [
 
 test.describe("a screen opened cold", () => {
   for (const [path, header] of COLD) {
-    test(
-      `${path} appears with ${header === "own" ? "its own header" : "the top bar"}, from its first frame`,
-      {
-        tag: "@vite"
-      },
-      async ({ page }) => {
-        await recordHeaders(page);
-        await page.mainFrame().goto(path, { waitUntil: "commit" });
-        await expect(page.locator(header === "own" ? OWN_HEADER : TOP_BAR)).toBeVisible({
-          timeout: 15_000
-        });
-        if (header === "top")
-          await expect(page.locator("main h1").filter({ visible: true })).toBeVisible();
-        await page.waitForTimeout(300);
+    test(`${path} appears with ${header === "own" ? "its own header" : "the top bar"}, from its first frame`, async ({
+      page
+    }) => {
+      await recordHeaders(page);
+      await page.mainFrame().goto(path, { waitUntil: "commit" });
+      await expect(page.locator(header === "own" ? OWN_HEADER : TOP_BAR)).toBeVisible({
+        timeout: 15_000
+      });
+      if (header === "top")
+        await expect(page.locator("main h1").filter({ visible: true })).toBeVisible();
+      await page.waitForTimeout(300);
 
-        const frames = withPanel(await headerFrames(page));
-        expect(frames.length, "the page panel was on screen").toBeGreaterThan(0);
-        for (const frame of frames) {
-          // Every recorded frame in the message, so a rare failure shows what came before and after.
-          expect(frame, `at ${frame.at} ms of ${JSON.stringify(frames)}`).toMatchObject(
-            header === "own" ? { top: false, own: true } : { top: true, own: false }
-          );
-        }
+      const frames = withPanel(await headerFrames(page));
+      expect(frames.length, "the page panel was on screen").toBeGreaterThan(0);
+      for (const frame of frames) {
+        // Every recorded frame in the message, so a rare failure shows what came before and after.
+        expect(frame, `at ${frame.at} ms of ${JSON.stringify(frames)}`).toMatchObject(
+          header === "own" ? { top: false, own: true } : { top: true, own: false }
+        );
       }
-    );
+    });
   }
 
-  test(
-    "a pushed screen whose code arrives late is not shown before it, nor under the wrong header",
-    {
-      tag: "@vite"
-    },
-    async ({ page }) => {
-      const hold = await holdUsersPage(page);
-      await recordHeaders(page);
-      await page.mainFrame().goto("/admin/users", { waitUntil: "commit" });
-      await expect.poll(hold.held, { timeout: 15_000 }).toBeGreaterThan(0);
-      // The page's code is still on its way: no panel with a header it will not keep.
-      await page.waitForTimeout(500);
-      expect(withPanel(await headerFrames(page)).filter((frame) => frame.top)).toEqual([]);
+  test("a pushed screen whose code arrives late is not shown before it, nor under the wrong header", async ({
+    page
+  }) => {
+    const hold = await holdUsersPage(page);
+    await recordHeaders(page);
+    await page.mainFrame().goto("/admin/users", { waitUntil: "commit" });
+    await expect.poll(hold.held, { timeout: 15_000 }).toBeGreaterThan(0);
+    // The page's code is still on its way: no panel with a header it will not keep.
+    await page.waitForTimeout(500);
+    expect(withPanel(await headerFrames(page)).filter((frame) => frame.top)).toEqual([]);
 
-      hold.release();
-      await expect(page.locator(OWN_HEADER)).toBeVisible({ timeout: 15_000 });
-      await page.waitForTimeout(300);
-      const frames = withPanel(await headerFrames(page));
-      expect(frames.length).toBeGreaterThan(0);
-      for (const frame of frames) {
-        expect(frame, `at ${frame.at} ms`).toMatchObject({ top: false, own: true });
-      }
+    hold.release();
+    await expect(page.locator(OWN_HEADER)).toBeVisible({ timeout: 15_000 });
+    await page.waitForTimeout(300);
+    const frames = withPanel(await headerFrames(page));
+    expect(frames.length).toBeGreaterThan(0);
+    for (const frame of frames) {
+      expect(frame, `at ${frame.at} ms`).toMatchObject({ top: false, own: true });
     }
-  );
+  });
 });
 
 test.describe("moving between a root screen and a pushed one", () => {
-  test(
-    "one header is on screen in every frame, in both directions",
-    { tag: "@vite" },
-    async ({ page }) => {
-      await recordHeaders(page);
-      await page.goto("/admin");
-      await expect(page.locator(TOP_BAR)).toBeVisible();
-      await clearFrames(page);
+  test("one header is on screen in every frame, in both directions", async ({ page }) => {
+    await recordHeaders(page);
+    await page.goto("/admin");
+    await expect(page.locator(TOP_BAR)).toBeVisible();
+    await clearFrames(page);
 
-      await openMenuLink(page, /^(Användare|Users)$/);
-      await expect(page.locator(OWN_HEADER)).toBeVisible();
-      await expect(page.locator(TOP_BAR)).toBeHidden();
-      await page.getByRole("link", { name: /^(Tillbaka till|Back to) Administration$/ }).click();
-      await expect(page).toHaveURL(/\/admin$/);
-      await expect(page.locator(TOP_BAR)).toBeVisible();
-      await page.waitForTimeout(300);
+    await openMenuLink(page, /^(Användare|Users)$/);
+    await expect(page.locator(OWN_HEADER)).toBeVisible();
+    await expect(page.locator(TOP_BAR)).toBeHidden();
+    await page.getByRole("link", { name: /^(Tillbaka till|Back to) Administration$/ }).click();
+    await expect(page).toHaveURL(/\/admin$/);
+    await expect(page.locator(TOP_BAR)).toBeVisible();
+    await page.waitForTimeout(300);
 
-      const frames = await headerFrames(page);
-      expect(notOneHeader(frames)).toEqual([]);
-      expect(
-        frames.some((frame) => frame.own),
-        "the pushed screen was on screen"
-      ).toBe(true);
-    }
-  );
+    const frames = await headerFrames(page);
+    expect(notOneHeader(frames)).toEqual([]);
+    expect(
+      frames.some((frame) => frame.own),
+      "the pushed screen was on screen"
+    ).toBe(true);
+  });
 
-  test(
-    "a slow pushed screen never leaves two headers or none while it loads",
-    {
-      tag: "@vite"
-    },
-    async ({ page }) => {
-      await recordHeaders(page);
-      await page.goto("/admin");
-      await expect(page.locator(TOP_BAR)).toBeVisible();
-      await clearFrames(page);
+  test("a slow pushed screen never leaves two headers or none while it loads", async ({ page }) => {
+    await recordHeaders(page);
+    await page.goto("/admin");
+    await expect(page.locator(TOP_BAR)).toBeVisible();
+    await clearFrames(page);
 
-      const hold = await holdUsersPage(page);
-      await openMenuLink(page, /^(Användare|Users)$/);
-      await expect.poll(hold.held, { timeout: 15_000 }).toBeGreaterThan(0);
-      // Past the pending delay: the loading state has replaced the root screen.
-      await expect(page.locator('main [aria-busy="true"]')).toBeVisible({ timeout: 5_000 });
-      hold.release();
-      await expect(page.locator(OWN_HEADER)).toBeVisible({ timeout: 15_000 });
-      await page.waitForTimeout(300);
+    const hold = await holdUsersPage(page);
+    await openMenuLink(page, /^(Användare|Users)$/);
+    await expect.poll(hold.held, { timeout: 15_000 }).toBeGreaterThan(0);
+    // Past the pending delay: the loading state has replaced the root screen.
+    await expect(page.locator('main [aria-busy="true"]')).toBeVisible({ timeout: 5_000 });
+    hold.release();
+    await expect(page.locator(OWN_HEADER)).toBeVisible({ timeout: 15_000 });
+    await page.waitForTimeout(300);
 
-      expect(notOneHeader(await headerFrames(page))).toEqual([]);
-    }
-  );
+    expect(notOneHeader(await headerFrames(page))).toEqual([]);
+  });
 
   // Measured on 7b40894d5 at 390x844 with the users page held 1.5 s and 6 s:
   // 196 ms after the URL changes the loading state replaces the root screen
@@ -267,27 +241,23 @@ test.describe("moving between a root screen and a pushed one", () => {
   // A pushed destination needs its header (a bar of the same height, the
   // back link still loading) while it loads. Owner: the route files (Beads
   // eneo-web-next-vite-ded5.8.5).
-  test.fixme(
-    "a slow pushed screen keeps its destination's header while it loads",
-    {
-      tag: "@vite"
-    },
-    async ({ page }) => {
-      await recordHeaders(page);
-      await page.goto("/admin");
-      await expect(page.locator(TOP_BAR)).toBeVisible();
-      await clearFrames(page);
+  test.fixme("a slow pushed screen keeps its destination's header while it loads", async ({
+    page
+  }) => {
+    await recordHeaders(page);
+    await page.goto("/admin");
+    await expect(page.locator(TOP_BAR)).toBeVisible();
+    await clearFrames(page);
 
-      const hold = await holdUsersPage(page);
-      await openMenuLink(page, /^(Användare|Users)$/);
-      await expect.poll(hold.held, { timeout: 15_000 }).toBeGreaterThan(0);
-      await expect(page.locator('main [aria-busy="true"]')).toBeVisible({ timeout: 5_000 });
-      hold.release();
-      await expect(page.locator(OWN_HEADER)).toBeVisible({ timeout: 15_000 });
-      await page.waitForTimeout(300);
+    const hold = await holdUsersPage(page);
+    await openMenuLink(page, /^(Användare|Users)$/);
+    await expect.poll(hold.held, { timeout: 15_000 }).toBeGreaterThan(0);
+    await expect(page.locator('main [aria-busy="true"]')).toBeVisible({ timeout: 5_000 });
+    hold.release();
+    await expect(page.locator(OWN_HEADER)).toBeVisible({ timeout: 15_000 });
+    await page.waitForTimeout(300);
 
-      const frames = await headerFrames(page);
-      expect(headerSwaps(frames), "the header changed once the page arrived").toBe(0);
-    }
-  );
+    const frames = await headerFrames(page);
+    expect(headerSwaps(frames), "the header changed once the page arrived").toBe(0);
+  });
 });

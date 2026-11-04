@@ -1,9 +1,7 @@
 import { expect, test } from "./csp";
 import { chatComposer, collectAssetFailures, productionAsset } from "./helpers";
 
-test.describe("production chunk recovery", { tag: "@vite" }, () => {
-  test.skip(!process.env.E2E_BASE_URL, "Requires the FastAPI-served production Vite build.");
-
+test.describe("production chunk recovery", () => {
   test("shares one reload between a missing feature chunk and a later missing route", async ({
     page
   }) => {

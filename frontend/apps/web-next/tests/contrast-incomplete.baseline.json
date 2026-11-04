@@ -28,14 +28,6 @@
   "pseudoContent": 4,
   "shortTextContent": 2
  },
- "ipad-dark|/admin/widgets": {
-  "bgOverlap": 3,
-  "shortTextContent": 2
- },
- "ipad-dark|/admin/widgets/templates/$": {
-  "bgOverlap": 2,
-  "nonBmp": 2
- },
  "ipad-dark|/dashboard/$/*": {
   "bgOverlap": 2
  },
@@ -68,10 +60,6 @@
  },
  "ipad-dark|/spaces/$/assistants/$/edit": {
   "bgOverlap": 17
- },
- "ipad-dark|/spaces/$/assistants/$/widget": {
-  "bgOverlap": 5,
-  "nonBmp": 2
  },
  "ipad-dark|/spaces/$/chat": {
   "bgOverlap": 2
@@ -156,13 +144,6 @@
   "pseudoContent": 4,
   "shortTextContent": 2
  },
- "ipad-landscape-dark|/admin/widgets": {
-  "bgOverlap": 5
- },
- "ipad-landscape-dark|/admin/widgets/templates/$": {
-  "bgOverlap": 2,
-  "nonBmp": 2
- },
  "ipad-landscape-dark|/dashboard/$/*": {
   "bgOverlap": 2
  },
@@ -195,10 +176,6 @@
  },
  "ipad-landscape-dark|/spaces/$/assistants/$/edit": {
   "bgOverlap": 5
- },
- "ipad-landscape-dark|/spaces/$/assistants/$/widget": {
-  "bgOverlap": 5,
-  "nonBmp": 2
  },
  "ipad-landscape-dark|/spaces/$/chat": {
   "bgOverlap": 2
@@ -280,13 +257,6 @@
   "pseudoContent": 4,
   "shortTextContent": 2
  },
- "ipad-landscape-light|/admin/widgets": {
-  "bgOverlap": 5
- },
- "ipad-landscape-light|/admin/widgets/templates/$": {
-  "bgOverlap": 2,
-  "nonBmp": 2
- },
  "ipad-landscape-light|/dashboard/$/*": {
   "bgOverlap": 2
  },
@@ -319,10 +289,6 @@
  },
  "ipad-landscape-light|/spaces/$/assistants/$/edit": {
   "bgOverlap": 5
- },
- "ipad-landscape-light|/spaces/$/assistants/$/widget": {
-  "bgOverlap": 5,
-  "nonBmp": 2
  },
  "ipad-landscape-light|/spaces/$/chat": {
   "bgOverlap": 2
@@ -394,14 +360,6 @@
   "pseudoContent": 4,
   "shortTextContent": 2
  },
- "ipad-light|/admin/widgets": {
-  "bgOverlap": 3,
-  "shortTextContent": 2
- },
- "ipad-light|/admin/widgets/templates/$": {
-  "bgOverlap": 2,
-  "nonBmp": 2
- },
  "ipad-light|/dashboard/$/*": {
   "bgOverlap": 2
  },
@@ -434,10 +392,6 @@
  },
  "ipad-light|/spaces/$/assistants/$/edit": {
   "bgOverlap": 17
- },
- "ipad-light|/spaces/$/assistants/$/widget": {
-  "bgOverlap": 5,
-  "nonBmp": 2
  },
  "ipad-light|/spaces/$/chat": {
   "bgOverlap": 2
@@ -510,14 +464,6 @@
   "bgOverlap": 2,
   "shortTextContent": 2
  },
- "ipad-mini-light|/admin/widgets": {
-  "bgOverlap": 3,
-  "shortTextContent": 2
- },
- "ipad-mini-light|/admin/widgets/templates/$": {
-  "bgOverlap": 2,
-  "nonBmp": 2
- },
  "ipad-mini-light|/spaces/$": {
   "bgOverlap": 4
  },
@@ -526,10 +472,6 @@
  },
  "ipad-mini-light|/spaces/$/assistants": {
   "bgOverlap": 4
- },
- "ipad-mini-light|/spaces/$/assistants/$/widget": {
-  "bgOverlap": 5,
-  "nonBmp": 2
  },
  "ipad-mini-light|/spaces/$/knowledge": {
   "bgOverlap": 4
@@ -579,14 +521,6 @@
   "bgOverlap": 2,
   "shortTextContent": 2
  },
- "phone-dark|/admin/widgets": {
-  "bgOverlap": 3,
-  "shortTextContent": 2
- },
- "phone-dark|/admin/widgets/templates/$": {
-  "bgOverlap": 2,
-  "nonBmp": 2
- },
  "phone-dark|/spaces/$": {
   "bgOverlap": 4
  },
@@ -595,10 +529,6 @@
  },
  "phone-dark|/spaces/$/assistants": {
   "bgOverlap": 4
- },
- "phone-dark|/spaces/$/assistants/$/widget": {
-  "bgOverlap": 5,
-  "nonBmp": 2
  },
  "phone-dark|/spaces/$/knowledge": {
   "bgOverlap": 4
@@ -648,14 +578,6 @@
   "bgOverlap": 2,
   "shortTextContent": 2
  },
- "phone-light|/admin/widgets": {
-  "bgOverlap": 3,
-  "shortTextContent": 2
- },
- "phone-light|/admin/widgets/templates/$": {
-  "bgOverlap": 2,
-  "nonBmp": 2
- },
  "phone-light|/spaces/$": {
   "bgOverlap": 4
  },
@@ -664,10 +586,6 @@
  },
  "phone-light|/spaces/$/assistants": {
   "bgOverlap": 4
- },
- "phone-light|/spaces/$/assistants/$/widget": {
-  "bgOverlap": 5,
-  "nonBmp": 2
  },
  "phone-light|/spaces/$/knowledge": {
   "bgOverlap": 4
@@ -689,60 +607,12 @@
   "bgOverlap": 6,
   "shortTextContent": 1
  },
- "WCAG 2.2 AA, dark mode › iPad landscape (1180 × 820)|a space's assistants, apps and members, an editor and an app result #1": {
+ "WCAG 2.2 AA, dark mode › iPad landscape (1180 × 820)|an app result while it generates #1": {
   "bgOverlap": 7,
   "shortTextContent": 4
- },
- "WCAG 2.2 AA, dark mode › iPad landscape (1180 × 820)|a space's assistants, apps and members, an editor and an app result #2": {
-  "bgOverlap": 7,
-  "shortTextContent": 4
- },
- "WCAG 2.2 AA, dark mode › iPad landscape (1180 × 820)|a space's assistants, apps and members, an editor and an app result #3": {
-  "bgOverlap": 7,
-  "shortTextContent": 4
- },
- "WCAG 2.2 AA, dark mode › iPad landscape (1180 × 820)|a space's assistants, apps and members, an editor and an app result #4": {
-  "bgOverlap": 5
- },
- "WCAG 2.2 AA, dark mode › iPad landscape (1180 × 820)|a space's assistants, apps and members, an editor and an app result #5": {
-  "bgOverlap": 7,
-  "shortTextContent": 4
- },
- "WCAG 2.2 AA, dark mode › iPad landscape (1180 × 820)|account #1": {
-  "bgOverlap": 3
- },
- "WCAG 2.2 AA, dark mode › iPad landscape (1180 × 820)|account #2": {
-  "bgOverlap": 3
- },
- "WCAG 2.2 AA, dark mode › iPad landscape (1180 × 820)|admin overview and models #2": {
-  "bgOverlap": 3
- },
- "WCAG 2.2 AA, dark mode › iPad landscape (1180 × 820)|admin users #1": {
-  "bgOverlap": 2,
-  "pseudoContent": 4,
-  "shortTextContent": 2
- },
- "WCAG 2.2 AA, dark mode › iPad landscape (1180 × 820)|Konto's pages #1": {
-  "bgOverlap": 3
- },
- "WCAG 2.2 AA, dark mode › iPad landscape (1180 × 820)|Konto's pages #2": {
-  "bgOverlap": 3
- },
- "WCAG 2.2 AA, dark mode › iPad landscape (1180 × 820)|Konto's pages #3": {
-  "bgOverlap": 8
- },
- "WCAG 2.2 AA, dark mode › iPad landscape (1180 × 820)|Konto's pages #4": {
-  "bgOverlap": 3
  },
  "WCAG 2.2 AA, dark mode › iPad landscape (1180 × 820)|personal chat #1": {
   "bgOverlap": 2
- },
- "WCAG 2.2 AA, dark mode › iPad landscape (1180 × 820)|space app pages, app editor and group-chat editor #1": {
-  "bgOverlap": 7,
-  "shortTextContent": 4
- },
- "WCAG 2.2 AA, dark mode › iPad landscape (1180 × 820)|space app pages, app editor and group-chat editor #2": {
-  "bgOverlap": 5
  },
  "WCAG 2.2 AA, dark mode › iPad portrait (820 × 1180)|a space, and the organisation space #1": {
   "bgOverlap": 7,
@@ -752,48 +622,12 @@
   "bgOverlap": 6,
   "shortTextContent": 1
  },
- "WCAG 2.2 AA, dark mode › iPad portrait (820 × 1180)|a space's assistants, apps and members, an editor and an app result #1": {
+ "WCAG 2.2 AA, dark mode › iPad portrait (820 × 1180)|an app result while it generates #1": {
   "bgOverlap": 7,
   "shortTextContent": 4
- },
- "WCAG 2.2 AA, dark mode › iPad portrait (820 × 1180)|a space's assistants, apps and members, an editor and an app result #2": {
-  "bgOverlap": 7,
-  "shortTextContent": 4
- },
- "WCAG 2.2 AA, dark mode › iPad portrait (820 × 1180)|a space's assistants, apps and members, an editor and an app result #3": {
-  "bgOverlap": 7,
-  "shortTextContent": 4
- },
- "WCAG 2.2 AA, dark mode › iPad portrait (820 × 1180)|a space's assistants, apps and members, an editor and an app result #4": {
-  "bgOverlap": 17
- },
- "WCAG 2.2 AA, dark mode › iPad portrait (820 × 1180)|a space's assistants, apps and members, an editor and an app result #5": {
-  "bgOverlap": 7,
-  "shortTextContent": 4
- },
- "WCAG 2.2 AA, dark mode › iPad portrait (820 × 1180)|admin overview and models #2": {
-  "bgOverlap": 3
- },
- "WCAG 2.2 AA, dark mode › iPad portrait (820 × 1180)|admin users #1": {
-  "bgOverlap": 2,
-  "pseudoContent": 4,
-  "shortTextContent": 2
- },
- "WCAG 2.2 AA, dark mode › iPad portrait (820 × 1180)|Konto's pages #3": {
-  "bgOverlap": 5
  },
  "WCAG 2.2 AA, dark mode › iPad portrait (820 × 1180)|personal chat #1": {
   "bgOverlap": 2
- },
- "WCAG 2.2 AA, dark mode › iPad portrait (820 × 1180)|space app pages, app editor and group-chat editor #1": {
-  "bgOverlap": 7,
-  "shortTextContent": 4
- },
- "WCAG 2.2 AA, dark mode › iPad portrait (820 × 1180)|space app pages, app editor and group-chat editor #2": {
-  "bgOverlap": 14
- },
- "WCAG 2.2 AA, dark mode › iPad portrait (820 × 1180)|space app pages, app editor and group-chat editor #3": {
-  "bgOverlap": 4
  },
  "WCAG 2.2 AA, dark mode › phone (390 × 844)|a space, and the organisation space #1": {
   "bgOverlap": 4
@@ -801,21 +635,8 @@
  "WCAG 2.2 AA, dark mode › phone (390 × 844)|a space, and the organisation space #2": {
   "bgOverlap": 3
  },
- "WCAG 2.2 AA, dark mode › phone (390 × 844)|a space's assistants, apps and members, an editor and an app result #1": {
-  "bgOverlap": 4
- },
- "WCAG 2.2 AA, dark mode › phone (390 × 844)|a space's assistants, apps and members, an editor and an app result #2": {
-  "bgOverlap": 4
- },
  "WCAG 2.2 AA, dark mode › phone (390 × 844)|admin audit log #1": {
   "pseudoContent": 3
- },
- "WCAG 2.2 AA, dark mode › phone (390 × 844)|admin overview and models #2": {
-  "bgOverlap": 3
- },
- "WCAG 2.2 AA, dark mode › phone (390 × 844)|admin users #1": {
-  "bgOverlap": 2,
-  "shortTextContent": 2
  },
  "WCAG 2.2 AA, dark mode › phone (390 × 844)|chat: an answer, and its activity sheet #1": {
   "bgOverlap": 1
@@ -823,9 +644,6 @@
  "WCAG 2.2 AA, dark mode › phone (390 × 844)|chat: an answer, and its activity sheet #2": {
   "bgOverlap": 3,
   "shortTextContent": 1
- },
- "WCAG 2.2 AA, dark mode › phone (390 × 844)|Konto's pages #3": {
-  "bgOverlap": 5
  },
  "WCAG 2.2 AA, dark mode|a dialog open: the session is about to end #1": {
   "elmPartiallyObscuring": 1
@@ -913,60 +731,12 @@
   "bgOverlap": 6,
   "shortTextContent": 1
  },
- "WCAG 2.2 AA, light mode › iPad landscape (1180 × 820)|a space's assistants, apps and members, an editor and an app result #1": {
+ "WCAG 2.2 AA, light mode › iPad landscape (1180 × 820)|an app result while it generates #1": {
   "bgOverlap": 7,
   "shortTextContent": 4
- },
- "WCAG 2.2 AA, light mode › iPad landscape (1180 × 820)|a space's assistants, apps and members, an editor and an app result #2": {
-  "bgOverlap": 7,
-  "shortTextContent": 4
- },
- "WCAG 2.2 AA, light mode › iPad landscape (1180 × 820)|a space's assistants, apps and members, an editor and an app result #3": {
-  "bgOverlap": 7,
-  "shortTextContent": 4
- },
- "WCAG 2.2 AA, light mode › iPad landscape (1180 × 820)|a space's assistants, apps and members, an editor and an app result #4": {
-  "bgOverlap": 5
- },
- "WCAG 2.2 AA, light mode › iPad landscape (1180 × 820)|a space's assistants, apps and members, an editor and an app result #5": {
-  "bgOverlap": 7,
-  "shortTextContent": 4
- },
- "WCAG 2.2 AA, light mode › iPad landscape (1180 × 820)|account #1": {
-  "bgOverlap": 3
- },
- "WCAG 2.2 AA, light mode › iPad landscape (1180 × 820)|account #2": {
-  "bgOverlap": 3
- },
- "WCAG 2.2 AA, light mode › iPad landscape (1180 × 820)|admin overview and models #2": {
-  "bgOverlap": 3
- },
- "WCAG 2.2 AA, light mode › iPad landscape (1180 × 820)|admin users #1": {
-  "bgOverlap": 2,
-  "pseudoContent": 4,
-  "shortTextContent": 2
- },
- "WCAG 2.2 AA, light mode › iPad landscape (1180 × 820)|Konto's pages #1": {
-  "bgOverlap": 3
- },
- "WCAG 2.2 AA, light mode › iPad landscape (1180 × 820)|Konto's pages #2": {
-  "bgOverlap": 3
- },
- "WCAG 2.2 AA, light mode › iPad landscape (1180 × 820)|Konto's pages #3": {
-  "bgOverlap": 8
- },
- "WCAG 2.2 AA, light mode › iPad landscape (1180 × 820)|Konto's pages #4": {
-  "bgOverlap": 3
  },
  "WCAG 2.2 AA, light mode › iPad landscape (1180 × 820)|personal chat #1": {
   "bgOverlap": 2
- },
- "WCAG 2.2 AA, light mode › iPad landscape (1180 × 820)|space app pages, app editor and group-chat editor #1": {
-  "bgOverlap": 7,
-  "shortTextContent": 4
- },
- "WCAG 2.2 AA, light mode › iPad landscape (1180 × 820)|space app pages, app editor and group-chat editor #2": {
-  "bgOverlap": 5
  },
  "WCAG 2.2 AA, light mode › iPad portrait (820 × 1180)|a space, and the organisation space #1": {
   "bgOverlap": 7,
@@ -976,48 +746,12 @@
   "bgOverlap": 6,
   "shortTextContent": 1
  },
- "WCAG 2.2 AA, light mode › iPad portrait (820 × 1180)|a space's assistants, apps and members, an editor and an app result #1": {
+ "WCAG 2.2 AA, light mode › iPad portrait (820 × 1180)|an app result while it generates #1": {
   "bgOverlap": 7,
   "shortTextContent": 4
- },
- "WCAG 2.2 AA, light mode › iPad portrait (820 × 1180)|a space's assistants, apps and members, an editor and an app result #2": {
-  "bgOverlap": 7,
-  "shortTextContent": 4
- },
- "WCAG 2.2 AA, light mode › iPad portrait (820 × 1180)|a space's assistants, apps and members, an editor and an app result #3": {
-  "bgOverlap": 7,
-  "shortTextContent": 4
- },
- "WCAG 2.2 AA, light mode › iPad portrait (820 × 1180)|a space's assistants, apps and members, an editor and an app result #4": {
-  "bgOverlap": 17
- },
- "WCAG 2.2 AA, light mode › iPad portrait (820 × 1180)|a space's assistants, apps and members, an editor and an app result #5": {
-  "bgOverlap": 7,
-  "shortTextContent": 4
- },
- "WCAG 2.2 AA, light mode › iPad portrait (820 × 1180)|admin overview and models #2": {
-  "bgOverlap": 3
- },
- "WCAG 2.2 AA, light mode › iPad portrait (820 × 1180)|admin users #1": {
-  "bgOverlap": 2,
-  "pseudoContent": 4,
-  "shortTextContent": 2
- },
- "WCAG 2.2 AA, light mode › iPad portrait (820 × 1180)|Konto's pages #3": {
-  "bgOverlap": 5
  },
  "WCAG 2.2 AA, light mode › iPad portrait (820 × 1180)|personal chat #1": {
   "bgOverlap": 2
- },
- "WCAG 2.2 AA, light mode › iPad portrait (820 × 1180)|space app pages, app editor and group-chat editor #1": {
-  "bgOverlap": 7,
-  "shortTextContent": 4
- },
- "WCAG 2.2 AA, light mode › iPad portrait (820 × 1180)|space app pages, app editor and group-chat editor #2": {
-  "bgOverlap": 14
- },
- "WCAG 2.2 AA, light mode › iPad portrait (820 × 1180)|space app pages, app editor and group-chat editor #3": {
-  "bgOverlap": 4
  },
  "WCAG 2.2 AA, light mode › phone (390 × 844)|a space, and the organisation space #1": {
   "bgOverlap": 4
@@ -1025,21 +759,8 @@
  "WCAG 2.2 AA, light mode › phone (390 × 844)|a space, and the organisation space #2": {
   "bgOverlap": 3
  },
- "WCAG 2.2 AA, light mode › phone (390 × 844)|a space's assistants, apps and members, an editor and an app result #1": {
-  "bgOverlap": 4
- },
- "WCAG 2.2 AA, light mode › phone (390 × 844)|a space's assistants, apps and members, an editor and an app result #2": {
-  "bgOverlap": 4
- },
  "WCAG 2.2 AA, light mode › phone (390 × 844)|admin audit log #1": {
   "pseudoContent": 3
- },
- "WCAG 2.2 AA, light mode › phone (390 × 844)|admin overview and models #2": {
-  "bgOverlap": 3
- },
- "WCAG 2.2 AA, light mode › phone (390 × 844)|admin users #1": {
-  "bgOverlap": 2,
-  "shortTextContent": 2
  },
  "WCAG 2.2 AA, light mode › phone (390 × 844)|chat: an answer, and its activity sheet #1": {
   "bgOverlap": 1
@@ -1047,9 +768,6 @@
  "WCAG 2.2 AA, light mode › phone (390 × 844)|chat: an answer, and its activity sheet #2": {
   "bgOverlap": 3,
   "shortTextContent": 1
- },
- "WCAG 2.2 AA, light mode › phone (390 × 844)|Konto's pages #3": {
-  "bgOverlap": 5
  },
  "WCAG 2.2 AA, light mode|a dialog open: the session is about to end #1": {
   "elmPartiallyObscuring": 1
@@ -1128,5 +846,87 @@
  },
  "WCAG 2.2 AA, light mode|website detail and indexed content #2": {
   "bgOverlap": 3
+ },
+ "ipad-dark|/admin/widgets": {
+  "bgOverlap": 3,
+  "shortTextContent": 2
+ },
+ "ipad-dark|/admin/widgets/templates/$": {
+  "bgOverlap": 2,
+  "nonBmp": 2
+ },
+ "ipad-dark|/spaces/$/assistants/$/widget": {
+  "bgOverlap": 5,
+  "nonBmp": 2
+ },
+ "ipad-landscape-dark|/admin/widgets": {
+  "bgOverlap": 5
+ },
+ "ipad-landscape-dark|/admin/widgets/templates/$": {
+  "bgOverlap": 2,
+  "nonBmp": 2
+ },
+ "ipad-landscape-dark|/spaces/$/assistants/$/widget": {
+  "bgOverlap": 5,
+  "nonBmp": 2
+ },
+ "ipad-landscape-light|/admin/widgets": {
+  "bgOverlap": 5
+ },
+ "ipad-landscape-light|/admin/widgets/templates/$": {
+  "bgOverlap": 2,
+  "nonBmp": 2
+ },
+ "ipad-landscape-light|/spaces/$/assistants/$/widget": {
+  "bgOverlap": 5,
+  "nonBmp": 2
+ },
+ "ipad-light|/admin/widgets": {
+  "bgOverlap": 3,
+  "shortTextContent": 2
+ },
+ "ipad-light|/admin/widgets/templates/$": {
+  "bgOverlap": 2,
+  "nonBmp": 2
+ },
+ "ipad-light|/spaces/$/assistants/$/widget": {
+  "bgOverlap": 5,
+  "nonBmp": 2
+ },
+ "ipad-mini-light|/admin/widgets": {
+  "bgOverlap": 3,
+  "shortTextContent": 2
+ },
+ "ipad-mini-light|/admin/widgets/templates/$": {
+  "bgOverlap": 2,
+  "nonBmp": 2
+ },
+ "ipad-mini-light|/spaces/$/assistants/$/widget": {
+  "bgOverlap": 5,
+  "nonBmp": 2
+ },
+ "phone-dark|/admin/widgets": {
+  "bgOverlap": 3,
+  "shortTextContent": 2
+ },
+ "phone-dark|/admin/widgets/templates/$": {
+  "bgOverlap": 2,
+  "nonBmp": 2
+ },
+ "phone-dark|/spaces/$/assistants/$/widget": {
+  "bgOverlap": 5,
+  "nonBmp": 2
+ },
+ "phone-light|/admin/widgets": {
+  "bgOverlap": 3,
+  "shortTextContent": 2
+ },
+ "phone-light|/admin/widgets/templates/$": {
+  "bgOverlap": 2,
+  "nonBmp": 2
+ },
+ "phone-light|/spaces/$/assistants/$/widget": {
+  "bgOverlap": 5,
+  "nonBmp": 2
  }
 }

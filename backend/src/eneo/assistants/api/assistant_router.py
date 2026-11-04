@@ -464,12 +464,7 @@ def _build_assistant_update_changes(
 
             # Special handling for FileAttachment objects
             if is_attachment:
-                # For attachments, extract just the filename and optionally blob ID
                 item_name = str(getattr(item, "name", "unknown_file"))
-                # Add blob ID if it exists and is not None
-                blob = getattr(item, "blob", None)
-                if blob:
-                    item_name = f"{item_name} (blob: {blob})"
             else:
                 # For other types, use the specified attribute or a safe fallback
                 if hasattr(item, name_attr):

@@ -5,14 +5,21 @@
 tenant and modules cost a batch of statements per 500 members.
 """
 
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
+from pydantic import BaseModel, EmailStr, ValidationError
 
+from eneo.database.tables.user_groups_table import UserGroups
 from eneo.database.tables.users_table import Users, usergroups_users_table
 from eneo.main.models import ModelId
-from eneo.user_groups.user_group import UserGroupCreate, UserGroupUpdate
+from eneo.user_groups.user_group import (
+    UserGroupCreate,
+    UserGroupState,
+    UserGroupUpdate,
+)
+from eneo.user_groups.user_groups_repo import _listed_email
 from eneo.users.user import UserAdd, UserState
 from tests.integration.flows.statement_capture_support import capture_queries
 
@@ -127,3 +134,125 @@ async def test_the_list_returns_a_member_with_an_empty_username(
     assert response.status_code == 200, response.text
     [listed] = [g for g in response.json()["items"] if g["id"] == str(created.id)]
     assert [(u["email"], u["username"]) for u in listed["users"]] == [(email, "")]
+
+
+async def test_the_list_returns_a_member_whose_stored_email_is_malformed(
+    client, db_container, admin_user, token
+) -> None:
+    """One unusable stored address does not fail every member picker."""
+    email = f"not an address {uuid4().hex[:8]}"
+    async with db_container() as container:
+        member_id = await container.session().scalar(
+            sa.insert(Users)
+            .values(
+                email=email,
+                username="x",
+                state="active",
+                tenant_id=admin_user.tenant_id,
+            )
+            .returning(Users.id)
+        )
+        created = await container.user_groups_repo().create_user_group(
+            UserGroupCreate(
+                name=f"group-{uuid4().hex[:8]}", tenant_id=admin_user.tenant_id
+            )
+        )
+        await container.session().execute(
+            sa.insert(usergroups_users_table).values(
+                user_group_id=created.id, user_id=member_id
+            )
+        )
+
+    response = await client.get(
+        "/api/v1/user-groups/", headers={"Authorization": f"Bearer {token}"}
+    )
+
+    assert response.status_code == 200, response.text
+    [listed] = [g for g in response.json()["items"] if g["id"] == str(created.id)]
+    assert [u["email"] for u in listed["users"]] == [email]
+
+
+async def _group_with(container, tenant_id, member_ids) -> UUID:
+    created = await container.user_groups_repo().create_user_group(
+        UserGroupCreate(name=f"group-{uuid4().hex[:8]}", tenant_id=tenant_id)
+    )
+    for member_id in member_ids:
+        await container.session().execute(
+            sa.insert(usergroups_users_table).values(
+                user_group_id=created.id, user_id=member_id
+            )
+        )
+    return created.id
+
+
+async def test_the_list_keeps_each_tenants_groups_and_each_member_once(
+    client, db_container, admin_user, token, tenant_factory, user_factory
+) -> None:
+    async with db_container() as container:
+        session = container.session()
+        other_tenant = await tenant_factory(session)
+        other_member = await user_factory(session, tenant_id=other_tenant.id)
+        first_member = await user_factory(session)
+        second_member = await user_factory(session)
+        other_member_id = other_member.id
+        first_id, second_id = first_member.id, second_member.id
+        foreign = await _group_with(container, other_tenant.id, [other_member_id])
+        shared = await _group_with(
+            container, admin_user.tenant_id, [first_id, second_id]
+        )
+        overlapping = await _group_with(container, admin_user.tenant_id, [first_id])
+        deleted = await _group_with(container, admin_user.tenant_id, [first_id])
+        await container.session().execute(
+            sa.update(UserGroups)
+            .where(UserGroups.id == deleted)
+            .values(state=UserGroupState.DELETED)
+        )
+
+    response = await client.get(
+        "/api/v1/user-groups/", headers={"Authorization": f"Bearer {token}"}
+    )
+
+    assert response.status_code == 200, response.text
+    members = {
+        group["id"]: sorted(user["id"] for user in group["users"])
+        for group in response.json()["items"]
+    }
+    assert str(foreign) not in members
+    assert str(deleted) not in members
+    assert members[str(shared)] == sorted([str(first_id), str(second_id)])
+    assert members[str(overlapping)] == [str(first_id)]
+    assert str(other_member_id) not in {id for ids in members.values() for id in ids}
+
+
+@pytest.mark.parametrize(
+    "stored",
+    [
+        "anna@example.com",
+        "Anna.Berg+tag@Example.COM",
+        "anna@xn--rebro-jua.se",
+        "ANNA@XN--REBRO-JUA.SE",
+        "  anna@example.com  ",
+        "Anna Berg <anna@example.com>",
+        "anna..berg@example.com",
+        "anna@example.test",
+        "åsa@example.com",
+        "xn--anna@example.com",
+        "anna@example.com.",
+        f"{'a' * 65}@example.com",
+        f"anna@{'a.' * 130}se",
+        "not an address",
+    ],
+)
+def test_a_listed_email_is_what_validation_gives_or_the_stored_value(stored) -> None:
+    """The list agrees with ``GET /user-groups/{id}/`` on every address it could
+    return before, and shows the rest as stored."""
+
+    class Member(BaseModel):
+        email: EmailStr
+
+    try:
+        validated = Member(email=stored).email
+    except ValidationError:
+        validated = stored
+
+    assert _listed_email(stored).lower() == validated.lower()

@@ -288,7 +288,8 @@ jobs:
         # next step. Each module runs in its own pytest process, so modules that
         # share the session database each start from a fresh schema, and each
         # process has its own Postgres container, so four run side by side. A
-        # module's output stays together. Modules in
+        # module's output stays together under its name, and one that hangs is
+        # stopped with what it printed, so the log names it. Modules in
         # tests/integration/quarantined-migration-tests.txt are not started.
         run: |
           uv run pytest -q --collect-only -m migration_isolation tests \
@@ -296,15 +297,28 @@ jobs:
             --ignore=tests/integration/migrations/test_file_icon_legacy_cleanup.py \
             --ignore=tests/integration/migrations/test_file_icon_bridge_rehearsal.py \
             | grep '::' | cut -d: -f1 | sort -u > "$RUNNER_TEMP/migration-modules.txt"
+          # The whole runner every 5 s: the modules' containers count too.
+          while sleep 5; do free -m | awk '/^Mem:/ { print $3 }'; done >"$RUNNER_TEMP/memory.txt" &
+          sampler=$!
+          status=0
           grep -vxFf tests/integration/quarantined-migration-tests.txt \
             "$RUNNER_TEMP/migration-modules.txt" |
             xargs -P 4 -I '{}' bash -c '
               log=$(mktemp)
-              uv run pytest -q -m migration_isolation "$1" >"$log" 2>&1
+              timeout --kill-after=30s 5m uv run pytest -q -m migration_isolation "$1" >"$log" 2>&1
               status=$?
-              cat "$log"
+              (
+                flock 9
+                echo "=== $1: exit $status (124: stopped after 5 min)"
+                cat "$log"
+              ) 9>"$RUNNER_TEMP/migration-output.lock"
               exit "$status"
-            ' _ '{}'
+            ' _ '{}' || status=$?
+          kill "$sampler"
+          peak=$(sort -n "$RUNNER_TEMP/memory.txt" | tail -n 1)
+          total=$(free -m | awk '/^Mem:/ { print $2 }')
+          echo "Migration round trips: peak memory ${peak} of ${total} MiB." | tee -a "$GITHUB_STEP_SUMMARY"
+          exit "$status"
         env:
           TESTCONTAINERS_RYUK_DISABLED: "true"
           DOCKER_HOST: unix:///var/run/docker.sock
@@ -582,12 +596,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { leg: walks-1, grep: "@a11y-routes @phone|@keyboard @desktop|@keyboard @ipad|@turn", grep_invert: "@upload-worker" }
-          - { leg: walks-2, grep: "@a11y-routes @ipad|@contract @ipad", grep_invert: "@upload-worker" }
-          - { leg: walks-3, grep: "@keyboard @phone|@layout-shift", grep_invert: "@upload-worker" }
+          - { leg: walks-1, grep: "@a11y-routes @phone|@contract @ipad|@keyboard @desktop|@turn", grep_invert: "@upload-worker" }
+          - { leg: walks-2, grep: "@a11y-routes @ipad", grep_invert: "@upload-worker" }
+          - { leg: walks-3, grep: "@layout-shift", grep_invert: "@upload-worker" }
           - { leg: walks-4, grep: "@contract @phone|@text-size|@a11y-dark", grep_invert: "@upload-worker" }
-          - { leg: screens, grep: " (admin|assistant|document|editor|forced|knowledge|mcp|resource|sharepoint|skills|space)-[^ ]*[.]spec[.]ts ", grep_invert: "@upload-worker|@a11y-routes @phone|@keyboard @desktop|@keyboard @ipad|@turn|@a11y-routes @ipad|@contract @ipad|@keyboard @phone|@layout-shift|@contract @phone|@text-size|@a11y-dark" }
-          - { leg: rest, grep: ".", grep_invert: "@upload-worker|@a11y-routes @phone|@keyboard @desktop|@keyboard @ipad|@turn|@a11y-routes @ipad|@contract @ipad|@keyboard @phone|@layout-shift|@contract @phone|@text-size|@a11y-dark| (admin|assistant|document|editor|forced|knowledge|mcp|resource|sharepoint|skills|space)-[^ ]*[.]spec[.]ts ", upload_worker: true }
+          - { leg: screens, grep: " (admin|assistant|document|editor|forced|knowledge|mcp|resource|sharepoint|skills|space)-[^ ]*[.]spec[.]ts ", grep_invert: "@upload-worker|@a11y-routes @phone|@contract @ipad|@keyboard @desktop|@turn|@a11y-routes @ipad|@layout-shift|@contract @phone|@text-size|@a11y-dark" }
+          - { leg: rest, grep: ".", grep_invert: "@upload-worker|@a11y-routes @phone|@contract @ipad|@keyboard @desktop|@turn|@a11y-routes @ipad|@layout-shift|@contract @phone|@text-size|@a11y-dark| (admin|assistant|document|editor|forced|knowledge|mcp|resource|sharepoint|skills|space)-[^ ]*[.]spec[.]ts ", upload_worker: true }
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

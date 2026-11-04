@@ -84,109 +84,99 @@ function knowledgePdf(size: number): Buffer {
   return result;
 }
 
-test(
-  "a real provider stream runs longer than 60 seconds and completes in chat",
-  { tag: "@vite" },
-  async ({ page }, testInfo) => {
-    test.setTimeout(110_000);
-    await page.goto("/spaces/personal/chat");
-    const stream = page.waitForResponse(
-      (response) => response.request().method() === "POST" && isChatStream(new URL(response.url()))
-    );
-    const question = uniqueName(`${SLOW_MARKER} complete`);
-    const started = performance.now();
-    await askChatQuestion(page, question);
-    const response = await stream;
-    expect(response.status()).toBe(200);
-    const log = conversationLog(page);
-    await expect(log.getByText(new RegExp(PARTIAL))).toBeVisible({ timeout: 15_000 });
-    const firstPartialMs = performance.now() - started;
-    await expect(log.getByText(new RegExp(FINISHED))).toHaveCount(0);
-    await expect(
-      page.getByRole("button", { name: "Stoppa generering", exact: true })
-    ).toBeVisible();
-    await expect(log.getByText(new RegExp(FINISHED))).toBeVisible({ timeout: 85_000 });
-    await expect(page.getByRole("button", { name: "Stoppa generering", exact: true })).toHaveCount(
-      0
-    );
-    expect(await response.finished()).toBeNull();
-    const durationMs = performance.now() - started;
-    expect(durationMs).toBeGreaterThan(60_000);
-    const sessionId = new URL(page.url()).searchParams.get("session_id");
-    expect(sessionId).toBeTruthy();
-    const saved = await page.request.get(apiPath(`/conversations/${sessionId}/`));
-    expect(saved.ok()).toBe(true);
-    const session: Schema<"SessionPublic"> = await saved.json();
-    const message = session.messages.find((item) => item.question === question);
-    expect(message?.answer).toContain(FINISHED);
-    await testInfo.attach("completed-provider-stream.json", {
-      body: JSON.stringify(
-        {
-          session_id: sessionId,
-          question_id: message?.id,
-          first_partial_ms: firstPartialMs,
-          duration_ms: durationMs,
-          completed: true
-        },
-        null,
-        2
-      ),
-      contentType: "application/json"
-    });
-  }
-);
+test("a real provider stream runs longer than 60 seconds and completes in chat", async ({
+  page
+}, testInfo) => {
+  test.setTimeout(110_000);
+  await page.goto("/spaces/personal/chat");
+  const stream = page.waitForResponse(
+    (response) => response.request().method() === "POST" && isChatStream(new URL(response.url()))
+  );
+  const question = uniqueName(`${SLOW_MARKER} complete`);
+  const started = performance.now();
+  await askChatQuestion(page, question);
+  const response = await stream;
+  expect(response.status()).toBe(200);
+  const log = conversationLog(page);
+  await expect(log.getByText(new RegExp(PARTIAL))).toBeVisible({ timeout: 15_000 });
+  const firstPartialMs = performance.now() - started;
+  await expect(log.getByText(new RegExp(FINISHED))).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Stoppa generering", exact: true })).toBeVisible();
+  await expect(log.getByText(new RegExp(FINISHED))).toBeVisible({ timeout: 85_000 });
+  await expect(page.getByRole("button", { name: "Stoppa generering", exact: true })).toHaveCount(0);
+  expect(await response.finished()).toBeNull();
+  const durationMs = performance.now() - started;
+  expect(durationMs).toBeGreaterThan(60_000);
+  const sessionId = new URL(page.url()).searchParams.get("session_id");
+  expect(sessionId).toBeTruthy();
+  const saved = await page.request.get(apiPath(`/conversations/${sessionId}/`));
+  expect(saved.ok()).toBe(true);
+  const session: Schema<"SessionPublic"> = await saved.json();
+  const message = session.messages.find((item) => item.question === question);
+  expect(message?.answer).toContain(FINISHED);
+  await testInfo.attach("completed-provider-stream.json", {
+    body: JSON.stringify(
+      {
+        session_id: sessionId,
+        question_id: message?.id,
+        first_partial_ms: firstPartialMs,
+        duration_ms: durationMs,
+        completed: true
+      },
+      null,
+      2
+    ),
+    contentType: "application/json"
+  });
+});
 
-test(
-  "Stop persists the visible partial answer from the real slow provider",
-  { tag: "@vite" },
-  async ({ page }, testInfo) => {
-    await page.goto("/spaces/personal/chat");
-    const question = uniqueName(`${SLOW_MARKER} cancel`);
-    await askChatQuestion(page, question);
-    const answer = conversationLog(page).getByText(new RegExp(PARTIAL));
-    await expect(answer).toBeVisible();
-    const visiblePartial = (await answer.innerText()).trim();
-    await page.getByRole("button", { name: "Stoppa generering", exact: true }).click();
-    await expect(page.getByRole("button", { name: "Stoppa generering", exact: true })).toHaveCount(
-      0
-    );
-    const sessionId = new URL(page.url()).searchParams.get("session_id");
-    expect(sessionId).toBeTruthy();
-    let persisted: Schema<"Message"> | undefined;
-    await expect
-      .poll(
-        async () => {
-          const response = await page.request.get(apiPath(`/conversations/${sessionId}/`));
-          expect(response.ok()).toBe(true);
-          const session: Schema<"SessionPublic"> = await response.json();
-          persisted = session.messages.find((message) => message.question === question);
-          return persisted?.answer ?? "";
-        },
-        { timeout: 15_000 }
-      )
-      .toContain(visiblePartial);
-    expect(persisted?.answer).not.toContain(FINISHED);
-    await page.reload();
-    await expect(conversationLog(page).getByText(persisted!.answer, { exact: true })).toBeVisible();
-    await testInfo.attach("cancelled-provider-stream.json", {
-      body: JSON.stringify(
-        {
-          session_id: sessionId,
-          question_id: persisted!.id,
-          visible_partial: visiblePartial,
-          persisted_partial: persisted!.answer
-        },
-        null,
-        2
-      ),
-      contentType: "application/json"
-    });
-  }
-);
+test("Stop persists the visible partial answer from the real slow provider", async ({
+  page
+}, testInfo) => {
+  await page.goto("/spaces/personal/chat");
+  const question = uniqueName(`${SLOW_MARKER} cancel`);
+  await askChatQuestion(page, question);
+  const answer = conversationLog(page).getByText(new RegExp(PARTIAL));
+  await expect(answer).toBeVisible();
+  const visiblePartial = (await answer.innerText()).trim();
+  await page.getByRole("button", { name: "Stoppa generering", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Stoppa generering", exact: true })).toHaveCount(0);
+  const sessionId = new URL(page.url()).searchParams.get("session_id");
+  expect(sessionId).toBeTruthy();
+  let persisted: Schema<"Message"> | undefined;
+  await expect
+    .poll(
+      async () => {
+        const response = await page.request.get(apiPath(`/conversations/${sessionId}/`));
+        expect(response.ok()).toBe(true);
+        const session: Schema<"SessionPublic"> = await response.json();
+        persisted = session.messages.find((message) => message.question === question);
+        return persisted?.answer ?? "";
+      },
+      { timeout: 15_000 }
+    )
+    .toContain(visiblePartial);
+  expect(persisted?.answer).not.toContain(FINISHED);
+  await page.reload();
+  await expect(conversationLog(page).getByText(persisted!.answer, { exact: true })).toBeVisible();
+  await testInfo.attach("cancelled-provider-stream.json", {
+    body: JSON.stringify(
+      {
+        session_id: sessionId,
+        question_id: persisted!.id,
+        visible_partial: visiblePartial,
+        persisted_partial: persisted!.answer
+      },
+      null,
+      2
+    ),
+    contentType: "application/json"
+  });
+});
 
 test(
   "uploads 25 MiB of knowledge and downloads the same original bytes",
-  { tag: ["@vite", "@upload-worker"] },
+  { tag: "@upload-worker" },
   async ({ page }, testInfo) => {
     test.setTimeout(120_000);
     await page.goto("/spaces/personal/chat");
@@ -284,39 +274,38 @@ test(
   }
 );
 
-test(
-  "an expired browser session redirects once and real login resumes chat",
-  { tag: "@vite" },
-  async ({ page, context }, testInfo) => {
-    const resume = "/spaces/personal/chat";
-    await page.goto(resume);
-    await expect(page.getByRole("textbox", { name: /^(Fråga|Ask) / })).toBeVisible();
-    const cookies = await context.cookies();
-    const sessions = cookies.filter((cookie) => /^(eneo_web|__Host-eneo_web)$/.test(cookie.name));
-    expect(sessions.length).toBeGreaterThan(0);
-    await context.clearCookies({ name: /^(eneo_web|__Host-eneo_web)$/ });
-    const redirects: string[] = [];
-    page.on("request", (request) => {
-      if (
-        request.isNavigationRequest() &&
-        request.frame() === page.mainFrame() &&
-        new URL(request.url()).pathname === "/login"
-      )
-        redirects.push(request.url());
-    });
-    await askChatQuestion(page, "Trigger session expiry");
-    await page.waitForURL((url) => url.pathname === "/login");
-    expect(new URL(page.url()).searchParams.get("next")).toBe(resume);
-    expect(redirects).toHaveLength(1);
-    await page.locator('input[name="email"]').fill(E2E_CREDENTIALS.username);
-    await page.locator('input[name="password"]').fill(E2E_CREDENTIALS.password);
-    await page.locator('button[type="submit"]').click();
-    await page.waitForURL((url) => url.pathname === resume);
-    await expect(page.getByRole("textbox", { name: /^(Fråga|Ask) / })).toBeVisible();
-    expect(redirects).toHaveLength(1);
-    await testInfo.attach("expired-session-resume.json", {
-      body: JSON.stringify({ login_documents: redirects.length, next: resume, resumed: true }),
-      contentType: "application/json"
-    });
-  }
-);
+test("an expired browser session redirects once and real login resumes chat", async ({
+  page,
+  context
+}, testInfo) => {
+  const resume = "/spaces/personal/chat";
+  await page.goto(resume);
+  await expect(page.getByRole("textbox", { name: /^(Fråga|Ask) / })).toBeVisible();
+  const cookies = await context.cookies();
+  const sessions = cookies.filter((cookie) => /^(eneo_web|__Host-eneo_web)$/.test(cookie.name));
+  expect(sessions.length).toBeGreaterThan(0);
+  await context.clearCookies({ name: /^(eneo_web|__Host-eneo_web)$/ });
+  const redirects: string[] = [];
+  page.on("request", (request) => {
+    if (
+      request.isNavigationRequest() &&
+      request.frame() === page.mainFrame() &&
+      new URL(request.url()).pathname === "/login"
+    )
+      redirects.push(request.url());
+  });
+  await askChatQuestion(page, "Trigger session expiry");
+  await page.waitForURL((url) => url.pathname === "/login");
+  expect(new URL(page.url()).searchParams.get("next")).toBe(resume);
+  expect(redirects).toHaveLength(1);
+  await page.locator('input[name="email"]').fill(E2E_CREDENTIALS.username);
+  await page.locator('input[name="password"]').fill(E2E_CREDENTIALS.password);
+  await page.locator('button[type="submit"]').click();
+  await page.waitForURL((url) => url.pathname === resume);
+  await expect(page.getByRole("textbox", { name: /^(Fråga|Ask) / })).toBeVisible();
+  expect(redirects).toHaveLength(1);
+  await testInfo.attach("expired-session-resume.json", {
+    body: JSON.stringify({ login_documents: redirects.length, next: resume, resumed: true }),
+    contentType: "application/json"
+  });
+});
