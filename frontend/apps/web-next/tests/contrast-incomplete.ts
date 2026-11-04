@@ -7,7 +7,11 @@ import type { Result } from "axe-core";
  * an image or another element in `incomplete`, not `violations`, and Astryx and
  * the legacy buttons paint hover and pressed as a gradient, so that text is never
  * judged. tests/contrast-incomplete.baseline.json holds, per scan, how many such
- * nodes there were and why (axe's messageKey: bgImage, bgGradient, bgOverlap, …).
+ * places there were and why (axe's messageKey: bgImage, bgGradient, bgOverlap, …).
+ * A place is a node's path from the document root (axe's `ancestry`, so scans
+ * run with it on) without a row's position, so the same cell in 4 rows or in 40
+ * is one and any other node is a place of its own: the count follows the page,
+ * not its data.
  *
  * The baseline is a ratchet: a scan may not leave more text unjudged than its
  * entry (a missing entry is 0). CONTRAST_UPDATE=1 rewrites the entries of the
@@ -25,13 +29,23 @@ function read(): Baseline {
 const total = (counts: Record<string, number> = {}) =>
   Object.values(counts).reduce((sum, count) => sum + count, 0);
 
-/** The baseline's verdict on one scan's `incomplete` results: a problem, or nothing. */
-export function contrastIncomplete(key: string, incomplete: Result[]): string[] {
-  const counts: Record<string, number> = {};
+/** A path without a row's or a list item's position; a column keeps its own. */
+const placeOf = (path: unknown) => String(path).replace(/\b(tr|li|option):nth-child\(\d+\)/g, "$1");
+
+/** Per reason, how many distinct places axe could not judge for contrast. */
+export function incompleteCounts(incomplete: Result[]): Record<string, number> {
+  const places: Record<string, Set<string>> = {};
   for (const node of incomplete.find((result) => result.id === "color-contrast")?.nodes ?? []) {
     const reason = String(node.any[0]?.data?.messageKey ?? "unknown");
-    counts[reason] = (counts[reason] ?? 0) + 1;
+    const place = JSON.stringify((node.ancestry ?? node.target).map(placeOf));
+    (places[reason] ??= new Set()).add(place);
   }
+  return Object.fromEntries(Object.entries(places).map(([reason, set]) => [reason, set.size]));
+}
+
+/** The baseline's verdict on one scan's `incomplete` results: a problem, or nothing. */
+export function contrastIncomplete(key: string, incomplete: Result[]): string[] {
+  const counts = incompleteCounts(incomplete);
   const baseline = read();
   if (update) {
     // workers: 1 (playwright.config.ts), so read-merge-write cannot interleave.
@@ -46,7 +60,7 @@ export function contrastIncomplete(key: string, incomplete: Result[]): string[] 
   const allowed = total(baseline[key]);
   return total(counts) > allowed
     ? [
-        `${key}: axe could not judge the contrast of ${total(counts)} nodes, baseline ${allowed} ` +
+        `${key}: axe could not judge the contrast of ${total(counts)} places, baseline ${allowed} ` +
           `(${JSON.stringify(counts)}); fix the new ones, or CONTRAST_UPDATE=1 when the change is reviewed`
       ]
     : [];

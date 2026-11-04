@@ -1,9 +1,10 @@
+import AxeBuilder from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
 import { expect, test } from "./csp";
 import {
   askChatQuestion,
+  CHAT_COMPOSER_NAME,
   chatComposer,
-  apiPost,
   conversationLog,
   createSpace,
   fetchChatStream,
@@ -62,14 +63,19 @@ test("one page link stays current across a saved chat and administration", async
   await askChatQuestion(page, uniqueName("Current conversation"));
   await expect(conversationLog(page).getByText(MOCK_REPLY)).toBeVisible();
   await expect(page).toHaveURL(/\/spaces\/personal\/chat\?session_id=/);
-  const savedChat = new URL(page.url()).pathname + new URL(page.url()).search;
+  const sessionId = new URL(page.url()).searchParams.get("session_id");
+  // A saved conversation belongs to the personal space's Chatt, as in the Svelte app's space menu.
+  const chat = "/spaces/personal/chat?tab=chat";
   const current = page.locator('a[aria-current="page"]');
   await page.reload();
   await expect(conversationLog(page).getByText(MOCK_REPLY)).toBeVisible();
   await expect(current).toHaveCount(1);
-  await expect(current).toHaveAttribute("href", savedChat);
+  await expect(current).toHaveAttribute("href", chat);
 
-  await page.getByRole("link", { name: "Administration", exact: true }).click();
+  await page
+    .getByRole("navigation", { name: "Huvudområden", exact: true })
+    .getByRole("link", { name: "Administratör", exact: true })
+    .click();
   await page
     .getByRole("navigation", { name: "Administration", exact: true })
     .getByRole("link", { name: "Användare", exact: true })
@@ -79,10 +85,11 @@ test("one page link stays current across a saved chat and administration", async
   await expect(current).toHaveAttribute("href", "/admin/users");
 
   await page.getByRole("link", { name: "Tillbaka till Eneo", exact: true }).click();
-  await page.locator(`nav a[href="${savedChat}"]`).click();
+  await page.getByRole("tab", { name: "Historik", exact: true }).click();
+  await page.locator(`button[data-session-row="${sessionId}"]`).click();
   await expect(conversationLog(page).getByText(MOCK_REPLY)).toBeVisible();
   await expect(current).toHaveCount(1);
-  await expect(current).toHaveAttribute("href", savedChat);
+  await expect(current).toHaveAttribute("href", chat);
 });
 
 test("a page in a menu is a link: a modified click opens it in a new tab", async ({
@@ -189,21 +196,33 @@ for (const control of ["new", "history", "same-URL new"] as const) {
     });
     const attachment = page.getByRole("button", { name: "Ta bort draft.txt", exact: true });
     await expect(attachment).toBeVisible();
-    if (control === "history") {
-      await page.getByRole("button", { name: /^Konversationer med / }).click();
-    }
-    const switchConversation = () =>
-      control === "history"
-        ? page.locator(`button[data-session-row="${destinationId}"]`).click()
-        : page.getByRole("button", { name: "Ny konversation", exact: true }).click();
+    // Historik is a tab beside the chat, as in the Svelte app.
+    const tab = (name: string) => page.getByRole("tab", { name, exact: true });
+    const switchConversation = async () => {
+      if (control !== "history") {
+        await page.getByRole("button", { name: "Ny konversation", exact: true }).click();
+        return;
+      }
+      await tab("Historik").click();
+      await page.locator(`button[data-session-row="${destinationId}"]`).click();
+    };
     const confirmation = page.getByRole("alertdialog", { name: "Lämna sidan?", exact: true });
     try {
       await switchConversation();
       await expect(confirmation).toBeVisible();
-      await expect(page).toHaveURL(originalUrl);
-      await expect(chatComposer(page)).toHaveValue(draft);
-      await expect(attachment).toBeVisible();
+      // Historik writes ?tab=history; the conversation stays mounted behind it.
+      const shown = new URL(originalUrl);
+      if (control === "history") shown.searchParams.set("tab", "history");
+      await expect(page).toHaveURL(shown.href);
+      // Behind Historik the conversation is hidden, not gone: its draft and file are there.
+      await expect(
+        page.getByRole("textbox", { name: CHAT_COMPOSER_NAME, includeHidden: true })
+      ).toHaveValue(draft);
+      await expect(
+        page.getByRole("button", { name: "Ta bort draft.txt", exact: true, includeHidden: true })
+      ).toHaveCount(1);
       await confirmation.getByRole("button", { name: "Avbryt", exact: true }).click();
+      if (control === "history") await tab("Chatt").click();
       await expect(chatComposer(page)).toBeEditable();
       await expect(chatComposer(page)).toHaveValue(draft);
       await expect(page).toHaveURL(originalUrl);
@@ -235,19 +254,16 @@ for (const cached of [false, true]) {
   test(`a pending ${cached ? "cached" : "new"} space keeps the current frame until its data arrives`, async ({
     page
   }) => {
-    // The sidebar only lists eight spaces; full-suite data can exceed that.
     await page.goto("/spaces/personal/chat");
-    for (let index = 0; index < 8; index++)
-      await apiPost(page, "/spaces/", { name: uniqueName("Older space") });
     const secondName = uniqueName("Next space");
     const second = await createSpace(page, secondName);
     const firstName = uniqueName("Current space");
     const first = await createSpace(page, firstName);
     // Prime the destination only for the cached-return case.
     await page.goto(`${cached ? second : first}/overview`);
-    const nav = page.getByRole("navigation", { name: "Huvudmeny", exact: true });
-    const firstLink = nav.getByRole("link", { name: firstName, exact: true });
-    const secondLink = nav.getByRole("link", { name: secondName, exact: true });
+    // The space's sidebar: its switcher names the space, its sections link it.
+    const nav = page.getByRole("navigation", { name: "Ytans meny", exact: true });
+    const sectionsOf = (space: string) => nav.locator(`a[href="${space}/members"]`);
     const main = page.getByRole("main");
     await expect(
       main.getByRole("heading", { name: cached ? secondName : firstName, exact: true })
@@ -259,7 +275,7 @@ for (const cached of [false, true]) {
       await palette.getByRole("option", { name: new RegExp(name) }).click();
     }
     if (cached) await openSpace(firstName);
-    await expect(firstLink).toHaveAttribute("aria-current", "page");
+    await expect(sectionsOf(first)).toBeVisible();
     await expect(main.getByRole("heading", { name: firstName, exact: true })).toBeVisible();
     // Expire Query's 30 s freshness window without delaying the suite or its timers.
     if (cached) await page.clock.setFixedTime(Date.now() + 31_000);
@@ -281,17 +297,16 @@ for (const cached of [false, true]) {
       // Exercise the slow path past the router's 200 ms pending threshold and
       // 400 ms minimum display time, not just the first frame after a click.
       await page.waitForTimeout(1_000);
-      await expect(firstLink).toHaveAttribute("aria-current", "page");
-      await expect(nav.locator(`a[href="${second}/overview"][aria-current="page"]`)).toHaveCount(0);
+      await expect(sectionsOf(first)).toBeVisible();
+      await expect(sectionsOf(second)).toHaveCount(0);
       await expect(main.getByRole("heading", { name: firstName, exact: true })).toBeVisible();
-      await expect(main.locator(`a[href="${first}/members"]`)).toBeVisible();
       await expect(main.getByRole("heading", { name: secondName, exact: true })).toHaveCount(0);
 
       release();
       await expect(page).toHaveURL(new RegExp(`${second}/overview$`));
       await expect(main.getByRole("heading", { name: secondName, exact: true })).toBeVisible();
-      await expect(secondLink).toHaveAttribute("aria-current", "page");
-      await expect(main.locator(`a[href="${second}/members"]`)).toBeVisible();
+      await expect(sectionsOf(second)).toBeVisible();
+      await expect(nav.locator(`a[href="${second}/overview"][aria-current="page"]`)).toBeVisible();
     } finally {
       release();
       await page.unrouteAll({ behavior: "ignoreErrors" });
@@ -358,7 +373,7 @@ test.describe("unsaved edits on Vite", { tag: "@vite" }, () => {
     await expect(name).toHaveValue(draft);
 
     const catalogue = page
-      .getByLabel(/^(Ytans innehåll|Space sections)$/)
+      .getByRole("navigation", { name: /^(Ytans meny|Space menu)$/ })
       .getByRole("link", { name: "Skills", exact: true });
     await catalogue.focus();
     await catalogue.press("Enter");
@@ -474,16 +489,18 @@ test.describe("unsaved edits on Vite", { tag: "@vite" }, () => {
     await expect(
       page.getByText("Ändringarna kunde inte sparas. Försök igen.", { exact: true })
     ).toBeVisible();
-    const dashboard = page.getByRole("link", { name: "Assistenter", exact: true });
-    await dashboard.click();
+    const personal = page
+      .getByRole("navigation", { name: "Huvudområden", exact: true })
+      .getByRole("link", { name: "Personligt", exact: true });
+    await personal.click();
     const dialog = page.getByRole("alertdialog", { name: "Lämna sidan?" });
     await dialog.getByRole("button", { name: "Avbryt", exact: true }).click();
     await expect(editor).toHaveText("Changed document.");
     refuseSave = false;
     await page.getByRole("button", { name: "Spara", exact: true }).click();
     await expect(page.getByRole("button", { name: "Spara", exact: true })).not.toBeVisible();
-    await dashboard.click();
-    await expect(page).toHaveURL(/\/dashboard$/);
+    await personal.click();
+    await expect(page).toHaveURL(/\/spaces\/personal\/chat$/);
     await expect(dialog).not.toBeVisible();
   });
 });
@@ -515,3 +532,163 @@ test("a page in a menu opens from the keyboard, and Escape returns to the menu's
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/\/account$/);
 });
+
+test(
+  "Tab runs from the space switcher to the sidebar's toggle, which keeps focus",
+  { tag: ["@vite"] },
+  async ({ page }) => {
+    await page.goto("/spaces/personal/chat");
+    const space = await createSpace(page, uniqueName("Toggle order"));
+    await page.goto(`${space}/overview`);
+    const nav = page.getByRole("navigation", { name: "Ytans meny", exact: true });
+    const toggle = nav.getByRole("button", { name: /sidomenyn$/ });
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await nav.locator("button").first().focus();
+    await page.keyboard.press("Tab");
+    await expect(toggle).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(toggle).toBeFocused();
+  }
+);
+
+test(
+  "the space switcher moves one row per key, closes on a pick and returns focus",
+  { tag: ["@vite"] },
+  async ({ page }) => {
+    await page.goto("/spaces/personal/chat");
+    const first = await createSpace(page, uniqueName("Switcher one"));
+    const second = uniqueName("Switcher two");
+    await createSpace(page, second);
+    await page.goto(`${first}/overview`);
+    const nav = page.getByRole("navigation", { name: "Ytans meny", exact: true });
+    const trigger = nav.getByRole("button", { name: "Öppna meny" });
+    await trigger.focus();
+    await page.keyboard.press("Enter");
+    const items = page.getByRole("menu").getByRole("menuitem");
+    await expect(items.first()).toBeFocused();
+    // The spaces arrive after the menu opens.
+    await expect(page.getByRole("menuitem", { name: second })).toBeVisible();
+    // Each row in turn: Astryx's two list handlers would land on every second one.
+    for (const row of [1, 2]) {
+      await page.keyboard.press("ArrowDown");
+      await expect(items.nth(row)).toBeFocused();
+    }
+    // Tab stays in the open menu, and the palette's key still reaches the page.
+    await page.keyboard.press("Tab");
+    await expect(page.locator("[popover]:popover-open :focus")).toHaveCount(1);
+    await page.keyboard.press("ControlOrMeta+k");
+    await expect(page.getByRole("combobox").first()).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("combobox")).toHaveCount(0);
+    await trigger.focus();
+    if (!(await items.first().isVisible())) await page.keyboard.press("Enter");
+    await expect(page.getByRole("menuitem", { name: second })).toBeVisible();
+    await page.getByRole("menuitem", { name: second }).focus();
+    await page.keyboard.press("Enter");
+    await page.waitForURL(/\/spaces\/[^/]+\/overview$/);
+    await expect(page).not.toHaveURL(`${first}/overview`);
+    await expect(items.first()).toBeHidden();
+    await expect(trigger).toBeFocused();
+  }
+);
+
+test(
+  "the space switcher keeps Skapa en ny yta on the screen with many spaces",
+  { tag: ["@vite"] },
+  async ({ page }) => {
+    await page.goto("/spaces/personal/chat");
+    const space = await createSpace(page, uniqueName("Many spaces"));
+    await page.route(
+      (url) => url.pathname.endsWith("/api/v1/spaces/"),
+      async (route) => {
+        const response = await route.fetch();
+        const { items, ...page_ } = await response.json();
+        const copies = Array.from({ length: 80 }, (_, index) => ({
+          ...items.at(-1),
+          id: crypto.randomUUID(),
+          name: `Kopia ${index}`
+        }));
+        await route.fulfill({ response, json: { ...page_, items: [...items, ...copies] } });
+      }
+    );
+    await page.goto(`${space}/overview`);
+    await page
+      .getByRole("navigation", { name: "Ytans meny", exact: true })
+      .getByRole("button", { name: "Öppna meny" })
+      .press("Enter");
+    await page.getByRole("menuitem", { name: "Kopia 0" }).waitFor();
+    await expect(page.getByRole("menuitem", { name: "Skapa en ny yta" })).toBeInViewport();
+    const last = page.getByRole("menuitem", { name: "Kopia 79" });
+    await expect(last).not.toBeInViewport();
+    await last.scrollIntoViewIfNeeded();
+    await expect(last).toBeInViewport();
+    await expect(page.getByRole("menuitem", { name: "Skapa en ny yta" })).toBeInViewport();
+    // Only a list that overflows can fail the first: it is about reaching the scroll area.
+    // Two builders, as withRules replaces withTags.
+    const menu = () => new AxeBuilder({ page }).include("[popover]:popover-open");
+    const rules = ["scrollable-region-focusable", "aria-required-children"];
+    const tags = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
+    for (const scan of [menu().withRules(rules), menu().withTags(tags)]) {
+      expect((await scan.analyze()).violations.map(({ id }) => id)).toEqual([]);
+    }
+  }
+);
+
+for (const form of ["full sidebar", "icon rail"]) {
+  test(
+    `the keys work from the switcher's scroll area in the ${form}`,
+    { tag: ["@vite"] },
+    async ({ page }) => {
+      await page.goto("/spaces/personal/chat");
+      const first = await createSpace(page, uniqueName("Scroll area"));
+      const second = uniqueName("Typeahead");
+      await createSpace(page, second);
+      await page.goto(`${first}/overview`);
+      const nav = page.getByRole("navigation", { name: "Ytans meny", exact: true });
+      const toggle = nav.getByRole("button", { name: /sidomenyn$/ });
+      await expect(toggle).toHaveAttribute("aria-expanded", "true");
+      if (form === "icon rail") {
+        await toggle.click();
+        await expect(toggle).toHaveAttribute("aria-expanded", "false");
+      }
+      const trigger = nav.locator("button[aria-haspopup]").first();
+      await trigger.focus();
+      await page.keyboard.press("Enter");
+      await expect(page.getByRole("menuitem", { name: second })).toBeVisible();
+      const items = page.getByRole("menu").getByRole("menuitem");
+      const area = page.getByRole("group", { name: "Dina ytor" });
+      const enterArea = async () => {
+        await area.focus();
+        await expect(area).toBeFocused();
+      };
+
+      await enterArea();
+      await page.keyboard.press("ArrowDown");
+      await expect(items.first()).toBeFocused();
+      await enterArea();
+      await page.keyboard.press("End");
+      await expect(items.last()).toBeFocused();
+      await enterArea();
+      await page.keyboard.press("Home");
+      await expect(items.first()).toBeFocused();
+      await enterArea();
+      await page.keyboard.type("Typeahead");
+      await expect(page.locator("[popover]:popover-open :focus")).toHaveText(/^Typeahead/);
+      await enterArea();
+      await page.keyboard.press("Tab");
+      await expect(page.locator("[popover]:popover-open :focus")).toHaveCount(1);
+
+      // Picking closes the menu, in the rail by Astryx alone, and the page takes no error.
+      const errors: string[] = [];
+      page.on("pageerror", (error) => errors.push(error.message));
+      await page.getByRole("menuitem", { name: second }).focus();
+      await page.keyboard.press("Enter");
+      await page.waitForURL(/\/spaces\/[^/]+\/overview$/);
+      await expect(page).not.toHaveURL(`${first}/overview`);
+      await expect(items.first()).toBeHidden();
+      await expect(trigger).toBeFocused();
+      expect(errors).toEqual([]);
+    }
+  );
+}

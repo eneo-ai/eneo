@@ -65,6 +65,7 @@ import {
   sortMembersByRole
 } from "./member-avatar";
 import { KEYBOARD } from "@/components/astryx/keyboard-hints";
+import { useSectionHeadingLevels } from "@/features/spaces/frame/space-frame";
 
 function useInvalidateSpace() {
   const { routeId } = useSpace();
@@ -852,6 +853,7 @@ function PhoneMembers() {
 
 export function SpaceMembers() {
   const t = useTranslations();
+  const levels = useSectionHeadingLevels();
   const { space, can } = useSpace();
   const phone = usePhoneScreen();
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -887,7 +889,7 @@ export function SpaceMembers() {
     <RemovalFocusScope target={headingRef}>
       <div className="phone:gap-4 flex w-full flex-col gap-8">
         <PageHeader
-          headingLevel={2}
+          headingLevel={levels.title}
           headingRef={headingRef}
           title={t("members")}
           actions={

@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { API_BASE, apiFetch } from "@/lib/api/base";
 import { browserApi } from "@/lib/api/browser";
 import { toast } from "@/lib/toast";
+import { iconUrl } from "./icon-url";
 
 /** Uploads an image to the icons endpoint; the caller stores the id on its resource. */
 export async function uploadIcon(file: File): Promise<{ id: string }> {
@@ -30,10 +31,7 @@ export function releaseIcon(iconId: string): Promise<void> {
     .catch(() => {});
 }
 
-/** Icon uploads are served under the API base, which authenticates the request. */
-export function iconUrl(iconId: string | null | undefined): string | null {
-  return iconId ? `${API_BASE}/api/v1/icons/${encodeURIComponent(iconId)}/` : null;
-}
+export { iconUrl } from "./icon-url";
 
 const MAX_ICON_BYTES = 256 * 1024;
 const ICON_TYPES = ["image/png", "image/jpeg", "image/webp"];

@@ -6,14 +6,16 @@ import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from "v
 import { SpaceFrame } from "@/features/spaces/frame/space-frame";
 import { readCached } from "@/lib/api/query";
 import { renderWithRouter } from "@/test/router";
+import { PHONE_VIEWPORT, setViewport } from "@/test/setup-dom";
 import type * as NextNavigation from "./navigation";
 import * as navigation from "./navigation";
 
 vi.unmock("@/lib/link");
 
 // SpaceFrame (and anything else) reads the seam: here, the TanStack one.
-vi.mock("@/features/spaces/frame/space-header", () => ({
-  SpaceHeader: () => <p>Space header</p>
+// The space's own header is the phone's: the test runs at a phone's width.
+vi.mock("@/features/spaces/frame/space-phone-header", () => ({
+  SpacePhoneHeader: () => <p>Space header</p>
 }));
 
 let finishSlow: () => void;
@@ -95,6 +97,7 @@ describe("while the next page loads", () => {
   });
 
   it("keeps the space's chrome", async () => {
+    setViewport(PHONE_VIEWPORT);
     const { router } = await renderWithRouter(<SpaceFrame>{null}</SpaceFrame>, {
       route: "/spaces/s1/chat",
       routes

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { openMenuOnRelease, tap } from "@/test/menus";
 import { router } from "@/test/navigation";
@@ -60,6 +60,25 @@ describe("CreateChatAppMenu", () => {
     expect(create.className.split(" ")).toEqual(
       expect.arrayContaining(["h-auto", "min-h-(--size-element-md)", "whitespace-normal"])
     );
+  });
+
+  it("keeps its menu half as tall as a wrapped label, small or not", () => {
+    // In the overview's create card the secondary label wraps to two lines:
+    // the chevron half stretches with it instead of keeping one line's height.
+    for (const secondary of [false, true]) {
+      renderInApp(<CreateChatAppMenu secondary={secondary} />);
+      const more = screen.getByRole("button", { name: "Fler sätt att skapa" });
+      // Stretched, it keeps a square's width (a 44 px target on touch).
+      expect(more.className.split(" ")).toEqual(
+        expect.arrayContaining([
+          "h-auto",
+          "self-stretch",
+          "pointer-coarse:min-w-11",
+          secondary ? "min-w-(--size-element-sm)" : "min-w-(--size-element-md)"
+        ])
+      );
+      cleanup();
+    }
   });
 
   it("creates the assistant as 'Ny assistent' at once and opens its editor", async () => {

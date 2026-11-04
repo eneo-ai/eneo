@@ -35,12 +35,14 @@ import { DockedActions } from "@/components/shell/docked-actions";
 import { useSpace } from "@/features/spaces/use-space";
 import { PersonalChatSkillStatus } from "./personal-chat-skills";
 import { skillQueryKey } from "./skill-revisions";
+import { useSectionHeadingLevels } from "@/features/spaces/frame/space-frame";
 
 type Skill = Schema<"SkillSparse">;
 const PAGE_SIZE = 25;
 
 export function SpaceSkillsPage() {
   const t = useTranslations();
+  const levels = useSectionHeadingLevels();
   const { space, routeId, can } = useSpace();
   const queryClient = useQueryClient();
   const [searchInput, setSearchInput] = useState("");
@@ -180,7 +182,7 @@ export function SpaceSkillsPage() {
   return (
     <div className="flex w-full flex-col gap-6 pb-16">
       <PageHeader
-        headingLevel={2}
+        headingLevel={levels.title}
         headingRef={headingRef}
         title={t("skills")}
         description={t("skills_library_intro")}
@@ -222,7 +224,7 @@ export function SpaceSkillsPage() {
           items.length === 0 ? (
             <EmptyState
               icon={<BookOpenCheck />}
-              headingLevel={3}
+              headingLevel={levels.sub}
               title={search ? t("skills_library_no_results") : t("skills_library_empty_title")}
               description={search ? undefined : t("skills_library_empty_description")}
               actions={

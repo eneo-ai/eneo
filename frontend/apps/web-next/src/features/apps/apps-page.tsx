@@ -1,4 +1,5 @@
 import { useCollator } from "@astryxdesign/core/i18n";
+import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { AppWindow, SearchX } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useCallback, useMemo, useRef, useState } from "react";
@@ -30,9 +31,11 @@ import { spaceApps, type AppSparse } from "./apps";
 import { CreateAppButton } from "./create-app";
 import { AppActions } from "./actions";
 import { AppTile } from "./tile";
+import { useSectionHeadingLevels } from "@/features/spaces/frame/space-frame";
 
 export function AppsPage() {
   const t = useTranslations();
+  const levels = useSectionHeadingLevels();
   const { space, routeId, can } = useSpace();
   const collator = useCollator();
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -106,7 +109,7 @@ export function AppsPage() {
       : []),
     {
       key: "actions",
-      header: t("actions"),
+      header: <VisuallyHidden>{t("actions")}</VisuallyHidden>,
       width: pixel(64),
       renderCell: (item) => <AppActions app={item} />
     }
@@ -149,7 +152,7 @@ export function AppsPage() {
           className="focus-visible:outline-ring rounded-ax-element flex w-full flex-col gap-6 focus-visible:outline-2 focus-visible:outline-offset-4"
         >
           <PageHeader
-            headingLevel={2}
+            headingLevel={levels.title}
             headingRef={headingRef}
             title={t("apps")}
             isTitleHiddenOnPhone
@@ -167,7 +170,7 @@ export function AppsPage() {
               hue={AREA_HUES.apps}
               title={t("space_apps_empty_title")}
               description={t("space_apps_empty_description")}
-              headingLevel={3}
+              headingLevel={levels.sub}
               actions={canCreate ? <CreateAppButton /> : undefined}
             />
           ) : (
@@ -197,7 +200,7 @@ export function AppsPage() {
                   isAnnounced={false}
                   icon={<SearchX />}
                   title={t("no_results_found")}
-                  headingLevel={3}
+                  headingLevel={levels.sub}
                   isCompact
                 />
               ) : groupByStatus ? (
@@ -206,6 +209,7 @@ export function AppsPage() {
                     <ResourceGroup
                       key={String(group.published)}
                       title={group.title}
+                      headingLevel={levels.sub}
                       hidden={group.members.length === 0}
                     >
                       {collection(group.members, false, `${t("apps")} · ${group.title}`)}

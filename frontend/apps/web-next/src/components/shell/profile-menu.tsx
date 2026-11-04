@@ -14,6 +14,8 @@ import {
   Building2,
   ChevronRight,
   ChevronsUpDown,
+  CircleHelp,
+  ExternalLink,
   Globe,
   KeyRound,
   LogOut,
@@ -103,12 +105,20 @@ export function ProfileLink() {
  * deployment configures one, WCAG 3.2.6 keeps it here on every page),
  * organisation switch, versions and logout.
  */
-export function ProfileMenu() {
+export function ProfileMenu({
+  inTopBar = false,
+  withHelpCenter = false
+}: {
+  inTopBar?: boolean;
+  /** A page without a SideNav: the help centre has no foot (nav-footer.tsx) to sit at. */
+  withHelpCenter?: boolean;
+}) {
   const t = useTranslations();
   const { user, federationStatus, links, versions } = useAppContext();
   const { enabled: whatsNewEnabled, hasUnseen } = useWhatsNew();
   const { locale, switchLocale } = useLocaleSwitch();
-  const { isCollapsed } = useSideNavCollapse();
+  // In the top bar only the avatar shows, as in the Svelte app, and the menu opens below it.
+  const isCollapsed = useSideNavCollapse().isCollapsed || inTopBar;
 
   const { name, organisation, label: buttonLabel, avatar } = useProfile();
 
@@ -141,9 +151,12 @@ export function ProfileMenu() {
         )
       }}
       hasChevron={false}
-      placement={isCollapsed ? "end" : "above"}
+      placement={inTopBar ? "below" : isCollapsed ? "end" : "above"}
       alignment={isCollapsed ? "end" : "start"}
       menuWidth={272}
+      // Every row fits, Logga ut and the versions too; Astryx's default 300 px
+      // cap scrolls them out of a menu with room to spare. The viewport still bounds it.
+      menuMaxHeight={560}
     >
       <div className="flex flex-col px-2 py-1.5 text-sm">
         <span className="truncate font-semibold">{name}</span>
@@ -195,6 +208,17 @@ export function ProfileMenu() {
           icon={Accessibility}
           label={t("a11y_statement_link")}
           href={links.accessibilityStatement}
+        />
+      )}
+      {withHelpCenter && links.helpCenter && (
+        <DropdownMenuItem
+          icon={CircleHelp}
+          label={t("have_a_question")}
+          aria-label={`${t("have_a_question")} ${t("chat_opens_in_new_tab")}`}
+          href={links.helpCenter}
+          target="_blank"
+          rel="noopener noreferrer"
+          endContent={<ExternalLink aria-hidden="true" className="size-3.5" />}
         />
       )}
       <DropdownMenuDivider />

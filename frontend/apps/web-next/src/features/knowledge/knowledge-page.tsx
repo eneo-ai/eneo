@@ -14,6 +14,7 @@ import { KnowledgeActionScope } from "./knowledge-action-scope";
 import { IntegrationsTab } from "./integrations/tab";
 import { WebsitesTab } from "./websites";
 import { KNOWLEDGE_TABS, readKnowledgeTab, type KnowledgeTab } from "./knowledge";
+import { useSectionHeadingLevels } from "@/features/spaces/frame/space-frame";
 
 /**
  * The space knowledge hub: collections / websites / integrations as Astryx
@@ -38,6 +39,7 @@ export function KnowledgePage({
   integrationRequestFormUrl?: string;
 }) {
   const t = useTranslations();
+  const levels = useSectionHeadingLevels();
   const { can } = useSpace();
   const searchParams = useSearchParams();
   const baseId = useId();
@@ -62,7 +64,7 @@ export function KnowledgePage({
   return (
     <div className="flex w-full flex-col gap-6">
       <PageHeader
-        headingLevel={2}
+        headingLevel={levels.title}
         title={t("knowledge")}
         description={t("space_knowledge_description")}
         isTitleHiddenOnPhone

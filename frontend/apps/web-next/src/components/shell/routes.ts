@@ -51,6 +51,40 @@ export function isAdminRoute(pathname: string): boolean {
   return segmentsOf(pathname)[0] === "admin";
 }
 
+/** A top-bar area: Personligt, Delat, Organisation or Administratör. */
+export type Area = "personal" | "shared" | "organization" | "admin";
+
+/**
+ * The top-bar area a route belongs to, as Svelte's top bar marks it: the
+ * personal and organisation spaces their own, every other space route (the
+ * list included) Delat, and the admin pages Administratör. Null elsewhere.
+ */
+export function areaOf(pathname: string): Area | null {
+  const [first, second] = segmentsOf(pathname);
+  if (first === "admin") return "admin";
+  if (first !== "spaces") return null;
+  if (second === "personal") return "personal";
+  if (second === "organization") return "organization";
+  return "shared";
+}
+
+/** The sidebar beside a page from 768 px. */
+export type SideNavKind = "space" | "spaces-list" | "account" | "admin";
+
+/**
+ * Which sidebar a page has, as in the Svelte app: a space's own (its
+ * switcher and sections), the spaces list's, the account's (which the release
+ * notes share, Svelte's /news), or administration's. Other pages, the
+ * assistant catalogue among them, have none.
+ */
+export function sideNavKind(pathname: string): SideNavKind | null {
+  const [first, second] = segmentsOf(pathname);
+  if (first === "admin") return "admin";
+  if (first === "account" || first === "whats-new") return "account";
+  if (first !== "spaces" || !second) return null;
+  return second === "list" ? "spaces-list" : "space";
+}
+
 /** The space route id (`personal`, `organization` or a space id) of a space page. */
 export function spaceRouteIdFromPath(pathname: string): string | null {
   const [first, second] = segmentsOf(pathname);

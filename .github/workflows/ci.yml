@@ -286,7 +286,9 @@ jobs:
         # schema, so the parallel suite skips them. Discovery over all of tests/
         # finds every one, new ones included, except the File/Icon tests of the
         # next step. Each module runs in its own pytest process, so modules that
-        # share the session database each start from a fresh schema. Modules in
+        # share the session database each start from a fresh schema, and each
+        # process has its own Postgres container, so four run side by side. A
+        # module's output stays together. Modules in
         # tests/integration/quarantined-migration-tests.txt are not started.
         run: |
           uv run pytest -q --collect-only -m migration_isolation tests \
@@ -294,13 +296,15 @@ jobs:
             --ignore=tests/integration/migrations/test_file_icon_legacy_cleanup.py \
             --ignore=tests/integration/migrations/test_file_icon_bridge_rehearsal.py \
             | grep '::' | cut -d: -f1 | sort -u > "$RUNNER_TEMP/migration-modules.txt"
-          mapfile -t modules < <(grep -vxFf tests/integration/quarantined-migration-tests.txt \
-            "$RUNNER_TEMP/migration-modules.txt")
-          status=0
-          for module in "${modules[@]}"; do
-            uv run pytest -q -m migration_isolation "$module" || status=1
-          done
-          exit "$status"
+          grep -vxFf tests/integration/quarantined-migration-tests.txt \
+            "$RUNNER_TEMP/migration-modules.txt" |
+            xargs -P 4 -I '{}' bash -c '
+              log=$(mktemp)
+              uv run pytest -q -m migration_isolation "$1" >"$log" 2>&1
+              status=$?
+              cat "$log"
+              exit "$status"
+            ' _ '{}'
         env:
           TESTCONTAINERS_RYUK_DISABLED: "true"
           DOCKER_HOST: unix:///var/run/docker.sock

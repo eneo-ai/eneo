@@ -6111,7 +6111,6 @@
   "shell_spaces": "Spaces",
   "shell_spaces_load_failed": "Spaces could not be loaded.",
   "shell_spaces_retry": "Try loading spaces again",
-  "shell_all_spaces": "All spaces",
   "shell_recent": "Recent",
   "shell_conversations": "Conversations",
   "shell_untitled_conversation": "Untitled conversation",
@@ -6303,7 +6302,6 @@
   "chat_tool_approval_record": "Tool approval",
   "chat_tool_approval_timed_out": "Denied, timed out",
   "chat_tools": "Tools",
-  "chat_view_label": "Chat or insights",
   "chat_your_assistants": "Your assistants",
   "chat_your_message": "Your message",
   "chat_greeting_morning": "Good morning, {name}",
@@ -7568,7 +7566,7 @@
   "website_detail_actions": "Website, actions",
   "space_apps_actions": "Apps, actions",
   "chat_composer_hint_touch": "Return adds a line. Send with the Send button.",
-  "chat_composer_key_newline": "New line",
+  "chat_send_tooltip": "Send (Return). Shift+Return adds a line.",
   "app_run_start": "Run the app",
   "admin_mcp_servers_empty_title": "No MCP servers yet",
   "space_assistants_actions": "Assistants, actions",
@@ -7606,5 +7604,10 @@
   "session_expiring_announcement": "Your session ends in {seconds, plural, one {# second} other {# seconds}}.",
   "session_extended": "You are still signed in.",
   "session_extend_failed": "The session could not be extended. Try again.",
-  "tools_bundled_unavailable": "Eneo's built-in tools could not be read"
+  "tools_bundled_unavailable": "Eneo's built-in tools could not be read",
+  "shell_area_shared": "Spaces",
+  "shell_top_nav_label": "Main areas",
+  "show_header": "Show header",
+  "shell_space_nav_label": "Space menu",
+  "shell_palette_catalog": "All assistants and apps"
 }

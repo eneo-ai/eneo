@@ -8,12 +8,14 @@ import { useTranslations } from "use-intl";
 import { AnimatedLayoutScope } from "@/components/astryx/collapsible";
 import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { CreateSpaceDialog } from "@/features/spaces/create-space-dialog";
-import { PHONE_SCREEN_QUERY } from "@/lib/hooks/use-media-match";
+import { PHONE_SCREEN_QUERY, useTouchTablet } from "@/lib/hooks/use-media-match";
+import { cn } from "@/lib/utils";
 import { ConnectionAnnouncer, ConnectionBanner } from "./connection-banner";
 import { MobileTopBar } from "./mobile-top-bar";
-import { isAdminRoute, OPEN_NAV_EVENT, type NavVariant } from "./routes";
+import { isAdminRoute, OPEN_NAV_EVENT, sideNavKind, type NavVariant } from "./routes";
 import { isOtherDialogOpen, ShellContext, type ShellContextValue } from "./shell-context";
-import { DesktopSideNav, MobileNavDrawer } from "./side-nav";
+import { DesktopSideNav, MobileNavDrawer, useSideNavRail } from "./side-nav";
+import { TopBar } from "./top-bar";
 
 // Loaded the first time the palette opens: nothing of it ships with page loads.
 const ShellCommandPalette = lazy(() => import("./command-palette"));
@@ -52,9 +54,19 @@ export function AppShellFrame({
   const t = useTranslations();
   const pathname = usePathname();
   const isMobile = useMediaQuery(PHONE_SCREEN_QUERY);
+  // A tablet keeps the touch shell: no top bar, the SideNav on every page.
+  const tablet = useTouchTablet();
+  // A tablet's space header is a chunk of its own (space-frame.tsx): fetch it
+  // before the first space page asks for it.
+  useEffect(() => {
+    if (tablet) void import("@/features/spaces/frame/space-header");
+  }, [tablet]);
   const navId = useId();
   const drawerId = useId();
+  const rail = useSideNavRail(sideNavCollapsed);
   const variant: NavVariant = isAdminRoute(pathname) ? "admin" : "main";
+  // From 768 px the sidebar holds the place the page is in, as in Svelte; some pages have none.
+  const sideNav = sideNavKind(pathname);
 
   const [navOpen, setNavOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -138,7 +150,7 @@ export function AppShellFrame({
           frame, so the strip under the status bar continues the top bar;
           otherwise (wide:) the page panel floats on the body colour. group/shell: the
           top bar hides while the page has its own header. */}
-      <div className="group/shell bg-ax-surface wide:bg-ax-body wide:flex-row wide:gap-2 wide:pt-[max(0.5rem,env(safe-area-inset-top,0px))] wide:pr-[max(0.5rem,env(safe-area-inset-right,0px))] wide:pb-[max(0.5rem,env(safe-area-inset-bottom,0px))] wide:pl-[max(0.5rem,env(safe-area-inset-left,0px))] flex h-svh flex-col pt-[env(safe-area-inset-top,0px)] pr-[env(safe-area-inset-right,0px)] pl-[env(safe-area-inset-left,0px)]">
+      <div className="group/shell bg-ax-surface wide:bg-ax-body wide:pt-[max(0.5rem,env(safe-area-inset-top,0px))] wide:pr-[max(0.5rem,env(safe-area-inset-right,0px))] wide:pb-[max(0.5rem,env(safe-area-inset-bottom,0px))] wide:pl-[max(0.5rem,env(safe-area-inset-left,0px))] flex h-svh flex-col pt-[env(safe-area-inset-top,0px)] pr-[env(safe-area-inset-right,0px)] pl-[env(safe-area-inset-left,0px)]">
         <a
           href="#main-content"
           className="focus:bg-ax-surface focus:text-ax-text focus:rounded-ax-element focus:border-ax-border-strong focus:shadow-ax-med focus-visible:outline-ring sr-only focus:not-sr-only focus:absolute focus:top-3 focus:left-3 focus:z-50 focus:border focus:px-3 focus:py-2 focus-visible:outline-2 focus-visible:outline-offset-2"
@@ -147,11 +159,37 @@ export function AppShellFrame({
         </a>
         <AppShellMobileContext value={mobileNav}>
           <MobileTopBar />
-          <div className="wide:flex wide:flex-col hidden min-h-0 shrink-0">
-            <DesktopSideNav variant={variant} navId={navId} defaultCollapsed={sideNavCollapsed} />
-          </div>
         </AppShellMobileContext>
-        {/* tabIndex -1: the skip link moves focus here, not just the scroll
+        {/* From 768 px with a mouse, as in the Svelte app: one card holding the
+            top bar above the SideNav and the page panel. A tablet keeps the
+            SideNav on the body colour beside the page panel, its own card. */}
+        <div
+          className={
+            tablet
+              ? "flex min-h-0 flex-1 gap-2"
+              : "wide:rounded-ax-page wide:shadow-ax-low wide:border wide:border-ax-border wide:overflow-hidden flex min-h-0 flex-1 flex-col"
+          }
+        >
+          {isMobile || tablet ? null : (
+            <TopBar railCollapsed={rail.collapsed} hasSideNav={sideNav !== null} />
+          )}
+          <div className={tablet ? "contents" : "flex min-h-0 flex-1"}>
+            <AppShellMobileContext value={mobileNav}>
+              {sideNav === null && !tablet ? null : (
+                <div
+                  // Pages read the icon rail in CSS (`group-has-[[data-side-nav-rail]]/shell`).
+                  // A tablet's rail lists every space: its pages name theirs in their header.
+                  data-side-nav-rail={rail.collapsed && !tablet ? "" : undefined}
+                  className={cn(
+                    "wide:flex wide:flex-col hidden min-h-0 shrink-0",
+                    !tablet && "border-ax-border border-e"
+                  )}
+                >
+                  <DesktopSideNav kind={sideNav} navId={navId} rail={rail} />
+                </div>
+              )}
+            </AppShellMobileContext>
+            {/* tabIndex -1: the skip link moves focus here, not just the scroll
             position (WCAG 2.4.1); tests/a11y.spec.ts checks it. relative:
             the panel contains what is absolutely positioned in it (visually
             hidden text), which otherwise escapes its scroll box and makes
@@ -162,17 +200,22 @@ export function AppShellFrame({
             (DockedActions), which it reserves room for. A disclosure in the
             page glides what follows it inside this panel
             (AnimatedLayoutScope). */}
-        <main
-          ref={mainRef}
-          id="main-content"
-          tabIndex={-1}
-          className="bg-ax-surface wide:rounded-ax-page wide:shadow-ax-low phone:has-[[data-docked-actions]]:scroll-pb-[var(--docked-actions-height,calc(4.5rem+env(safe-area-inset-bottom,0px)))] phone:has-[[data-docked-actions]]:pb-[var(--docked-actions-height,calc(4.5rem+env(safe-area-inset-bottom,0px)))] phone:has-[[data-phone-page-bar]]:scroll-pt-14 wide:pb-0 relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto pb-[env(safe-area-inset-bottom,0px)] focus:outline-none max-lg:has-[[data-page-bar]]:scroll-pt-14"
-        >
-          {/* Under the top bar; a page with its own header shows its own
+            <main
+              ref={mainRef}
+              id="main-content"
+              tabIndex={-1}
+              className={cn(
+                tablet && "rounded-ax-page shadow-ax-low",
+                "bg-ax-surface phone:has-[[data-docked-actions]]:scroll-pb-[var(--docked-actions-height,calc(4.5rem+env(safe-area-inset-bottom,0px)))] phone:has-[[data-docked-actions]]:pb-[var(--docked-actions-height,calc(4.5rem+env(safe-area-inset-bottom,0px)))] phone:has-[[data-phone-page-bar]]:scroll-pt-14 wide:pb-0 relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto pb-[env(safe-area-inset-bottom,0px)] focus:outline-none max-lg:has-[[data-page-bar]]:scroll-pt-14"
+              )}
+            >
+              {/* Under the top bar; a page with its own header shows its own
               under that header, and this one gives way. */}
-          <ConnectionBanner className="phone:group-has-[[data-own-phone-header]]/shell:hidden group-has-[[data-own-mobile-header]]/shell:hidden" />
-          <AnimatedLayoutScope containerRef={mainRef}>{children}</AnimatedLayoutScope>
-        </main>
+              <ConnectionBanner className="phone:group-has-[[data-own-phone-header]]/shell:hidden group-has-[[data-own-mobile-header]]/shell:hidden" />
+              <AnimatedLayoutScope containerRef={mainRef}>{children}</AnimatedLayoutScope>
+            </main>
+          </div>
+        </div>
         <ConnectionAnnouncer />
         {isMobile && (
           <AppShellMobileContext value={mobileNav}>

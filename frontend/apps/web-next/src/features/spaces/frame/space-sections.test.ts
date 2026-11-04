@@ -5,6 +5,7 @@ import {
   ownKnowledgeCount,
   phoneSections,
   spaceLandingHref,
+  spaceNavGroups,
   spaceRoute,
   spaceSections
 } from "./space-sections";
@@ -152,5 +153,48 @@ describe("phoneSections (decision 24)", () => {
     const { tabs, manage } = phoneSections(spaceSections(space, canFor(space), "organization"));
     expect(ids(tabs)).toEqual(["knowledge", "skills", "settings"]);
     expect(manage).toEqual([]);
+  });
+});
+
+describe("spaceNavGroups", () => {
+  const ids = (groups: ReturnType<typeof spaceNavGroups>) =>
+    groups.map((group) => group.map((item) => item.id));
+
+  // Svelte's SpaceMenu.svelte: personal Chatt, a divider, the content, a divider, the management.
+  it("starts the personal space with Chatt, then its sections", () => {
+    const space = makeSpace({
+      permissions: ["read"],
+      overrides: { personal: true, members: { items: [], count: 0, permissions: [] } }
+    });
+    const groups = spaceNavGroups(space, canFor(space), "personal");
+    expect(ids(groups)).toEqual([
+      ["chat"],
+      ["overview", "assistants", "apps", "knowledge", "skills"]
+    ]);
+    expect(groups[0]?.[0]?.href).toBe("/spaces/personal/chat?tab=chat");
+  });
+
+  it("sets members and settings apart in a shared space", () => {
+    const space = makeSpace();
+    expect(ids(spaceNavGroups(space, canFor(space), "space-1"))).toEqual([
+      ["overview", "assistants", "apps", "knowledge", "skills"],
+      ["members", "settings"]
+    ]);
+  });
+
+  it("keeps settings with the content in the organisation space, which has no members", () => {
+    const space = makeSpace({ overrides: { organization: true } });
+    expect(ids(spaceNavGroups(space, canFor(space), "organization"))).toEqual([
+      ["knowledge", "skills", "settings"]
+    ]);
+  });
+
+  it("drops empty groups", () => {
+    const space = makeSpace({
+      resourcePermissions: [],
+      skillPermissions: [],
+      permissions: ["read"]
+    });
+    expect(ids(spaceNavGroups(space, canFor(space), "space-1"))).toEqual([["overview"]]);
   });
 });

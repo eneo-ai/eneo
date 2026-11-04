@@ -6111,7 +6111,6 @@
   "shell_spaces": "Ytor",
   "shell_spaces_load_failed": "Ytorna kunde inte laddas.",
   "shell_spaces_retry": "Försök ladda ytorna igen",
-  "shell_all_spaces": "Alla ytor",
   "shell_recent": "Senaste",
   "shell_conversations": "Konversationer",
   "shell_untitled_conversation": "Namnlös konversation",
@@ -6303,7 +6302,6 @@
   "chat_tool_approval_record": "Verktygsgodkännande",
   "chat_tool_approval_timed_out": "Avvisad, tiden gick ut",
   "chat_tools": "Verktyg",
-  "chat_view_label": "Chatt eller insikter",
   "chat_your_assistants": "Dina assistenter",
   "chat_your_message": "Ditt meddelande",
   "chat_greeting_morning": "God morgon, {name}",
@@ -7568,7 +7566,7 @@
   "website_detail_actions": "Webbplats, åtgärder",
   "space_apps_actions": "Appar, åtgärder",
   "chat_composer_hint_touch": "Retur ger en ny rad. Skicka med Skicka-knappen.",
-  "chat_composer_key_newline": "Ny rad",
+  "chat_send_tooltip": "Skicka (Retur). Skift+Retur ger en ny rad.",
   "app_run_start": "Kör appen",
   "admin_mcp_servers_empty_title": "Inga MCP-servrar ännu",
   "space_assistants_actions": "Assistenter, åtgärder",
@@ -7606,5 +7604,10 @@
   "session_expiring_announcement": "Din session går ut om {seconds, plural, one {# sekund} other {# sekunder}}.",
   "session_extended": "Du är fortsatt inloggad.",
   "session_extend_failed": "Det gick inte att förlänga sessionen. Försök igen.",
-  "tools_bundled_unavailable": "Det gick inte att läsa Eneos inbyggda verktyg"
+  "tools_bundled_unavailable": "Det gick inte att läsa Eneos inbyggda verktyg",
+  "shell_area_shared": "Delat",
+  "shell_top_nav_label": "Huvudområden",
+  "show_header": "Visa sidhuvudet",
+  "shell_space_nav_label": "Ytans meny",
+  "shell_palette_catalog": "Alla assistenter och appar"
 }

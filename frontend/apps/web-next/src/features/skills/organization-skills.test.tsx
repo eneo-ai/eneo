@@ -71,6 +71,19 @@ function show(page: "list" | "new") {
 }
 
 describe("organisation skill catalogue", () => {
+  it("heads an empty list one level under the page's title", async () => {
+    get.mockImplementation(() => ok({ items: [], next_cursor: null }));
+    show("list");
+    // Beside the sidebar the page's Skills is the h1.
+    expect(await screen.findByRole("heading", { level: 1, name: "skills" })).toBeTruthy();
+    expect(
+      await screen.findByRole("heading", {
+        level: 2,
+        name: "organization_skills_empty_manage_title"
+      })
+    ).toBeTruthy();
+  });
+
   it("shows the removal timestamp in removed list rows", async () => {
     removedFilter.value = true;
     get.mockImplementation(() =>
@@ -83,8 +96,8 @@ describe("organisation skill catalogue", () => {
     show("list");
     await screen.findByText("Search reports");
     // A tab of the organization space, whose header holds the page's h1.
-    expect(screen.getByRole("heading", { level: 2, name: "skills" })).toBeTruthy();
-    expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
+    expect(screen.getByRole("heading", { level: 1, name: "skills" })).toBeTruthy();
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
     // The list is named by that heading (translation keys stand in for the text).
     expect(screen.getByRole("table", { name: "skills" })).toBeTruthy();
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "Reports" } });

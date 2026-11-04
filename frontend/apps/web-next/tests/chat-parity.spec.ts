@@ -1,7 +1,15 @@
 import type { Page, Route } from "@playwright/test";
 import type { Schema } from "../src/lib/api/models";
 import { expect, test } from "./csp";
-import { apiPath, conversationLog, isChatStream, sessionResponseHeaders } from "./helpers";
+import {
+  apiPath,
+  apiPostJson,
+  conversationLog,
+  createSpace,
+  isChatStream,
+  sessionResponseHeaders,
+  uniqueName
+} from "./helpers";
 
 // Real cookie authentication and FastAPI/CSP; the response fixtures below isolate
 // route guards, token rejection and saved-message presentation from providers.
@@ -89,7 +97,7 @@ test(
     });
     await page.goto(`/dashboard/${assistant.id}?tab=insights`);
     await expect(page.getByRole("textbox", { name: /^Fråga / })).toBeVisible();
-    await expect(page.getByRole("radio", { name: "Insikter", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("tab", { name: "Insikter", exact: true })).toHaveCount(0);
     expect(insightReads).toBe(0);
     allowed = true;
     await page.reload();
@@ -227,11 +235,12 @@ test(
     );
     await page.goto(`/spaces/personal/chat?session_id=${SESSION}`);
     await expect(page.getByRole("log").getByText("Tredje svaret", { exact: true })).toBeVisible();
-    await page.getByRole("button", { name: /^Konversationer med / }).click();
+    await page.getByRole("tab", { name: "Historik", exact: true }).click();
     await expect(page.getByText("Laddade 2/3 konversationer", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Visa fler konversationer", exact: true }).click();
     await expect(page.getByText("Laddade 3/3 konversationer", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Äldre samtal", exact: true })).toBeFocused();
+    await page.getByRole("tab", { name: "Chatt", exact: true }).click();
     await page
       .getByRole("button", { name: "Visa sidopanelen med filer och vyer", exact: true })
       .click();
@@ -247,5 +256,60 @@ test(
       thirdGroup.getByRole("button", { name: "Förhandsgranska Policy.pdf", exact: true })
     ).toHaveCount(0);
     await page.screenshot({ path: testInfo.outputPath("chat-upload-groups.png") });
+  }
+);
+
+test(
+  "the chat header keeps its buttons whole and the switcher readable at every width",
+  { tag: "@vite" },
+  async ({ page }) => {
+    await page.goto("/spaces/personal/chat");
+    const space = await createSpace(page, uniqueName("Header widths"));
+    const spaceId = space.split("/").pop()!;
+    const assistant = await apiPostJson<Schema<"AssistantPublic">>(
+      page,
+      `/spaces/${spaceId}/applications/assistants/`,
+      { name: "Assistent med ett långt namn för rubriken" }
+    );
+    await page.route(
+      (url) => url.pathname.endsWith(`/api/v1/spaces/${spaceId}/`),
+      async (route) => {
+        const response = await route.fetch();
+        const security_classification = {
+          id: "22222222-2222-4222-8222-222222222222",
+          name: "Konfidentiell",
+          description: null,
+          security_level: 3
+        };
+        await route.fulfill({
+          response,
+          json: { ...(await response.json()), security_classification }
+        });
+      }
+    );
+    await page.goto(`${space}/chat?type=assistant&id=${assistant.id}`);
+    const tabs = page.getByRole("tablist");
+    const header = page.locator("div.border-b", { has: tabs });
+    const switcher = header.getByRole("button", { name: /Byt assistent$/ });
+    await expect(switcher).toBeVisible();
+    for (const width of [768, 820, 1024, 1280, 1366, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      await expect(switcher).toBeVisible();
+      // Astryx clips a label on its own span. The switcher's name may truncate: not measured here.
+      const cut = await header
+        .locator("a, button:not([aria-haspopup=menu])")
+        .evaluateAll((all) =>
+          all
+            .filter((control) =>
+              [control, ...control.querySelectorAll("span")].some(
+                (box) => box.scrollWidth > box.clientWidth + 1
+              )
+            )
+            .map((control) => control.getAttribute("aria-label") ?? control.textContent)
+        );
+      expect(cut, `cut controls at ${width} px`).toEqual([]);
+      // The only assistant switcher at this width, under the 44 px of a touch target if squeezed.
+      expect((await switcher.boundingBox())!.width, `switcher at ${width} px`).toBeGreaterThan(180);
+    }
   }
 );

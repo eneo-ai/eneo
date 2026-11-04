@@ -15,7 +15,8 @@ const TURNED = [
 // The shell's top bar: a space's own header (tablets, desktop) is a <header> in main.
 const TOP_BAR = "header:not(main *)";
 // The side navigation; on a phone its twin is in the closed drawer, out of the accessibility tree.
-const sideNav = (page: Page) => page.getByRole("navigation", { name: /^(Huvudmeny|Main menu)$/ });
+const sideNav = (page: Page) =>
+  page.getByRole("navigation", { name: /^(Huvudmeny|Main menu|Ytans meny|Space menu)$/ });
 
 async function spaceWithAssistant(page: Page) {
   const name = uniqueName("E2E Turned");
@@ -39,7 +40,7 @@ for (const size of TURNED) {
 
       await page.goto(`${space}/overview`);
       await expect(
-        page.getByRole("link", { name: /^(Tillbaka till|Back to) (Ytor|Spaces)$/ })
+        page.getByRole("link", { name: /^(Tillbaka till|Back to) (Dina ytor|Your spaces)$/ })
       ).toBeVisible();
       await expect(page.locator(TOP_BAR)).toBeHidden();
       await expect(sideNav(page)).toBeHidden();
@@ -74,6 +75,46 @@ for (const size of TURNED) {
     });
   });
 }
+
+test.describe("a docked bar on a phone turned sideways", () => {
+  test.use({ viewport: { width: 844, height: 390 }, hasTouch: true, isMobile: true });
+
+  test("gives way to a text field's keyboard, not to a switch", async ({ page }) => {
+    await page.goto("/account/api-keys");
+    const main = page.getByRole("main");
+    const bar = page.locator("[data-docked-actions]");
+    await expect(bar).toBeVisible();
+
+    await main.getByRole("switch").first().focus();
+    await expect(bar).toBeVisible();
+
+    await main.getByRole("textbox").first().focus();
+    await expect(bar).toBeHidden();
+    await main.getByRole("switch").first().focus();
+    await expect(bar).toBeVisible();
+  });
+});
+
+test.describe("a docked bar on an upright phone", () => {
+  // Android resizes the window for the keyboard (interactive-widget=resizes-content);
+  // the small phone's window is then wider than tall.
+  for (const viewport of [
+    { width: 390, height: 460 },
+    { width: 360, height: 320 }
+  ]) {
+    test.describe(`${viewport.width} × ${viewport.height}`, () => {
+      test.use({ viewport, hasTouch: true, isMobile: true });
+
+      test("stays above the keyboard while a text field has focus", async ({ page }) => {
+        await page.goto("/account/api-keys");
+        const bar = page.locator("[data-docked-actions]");
+        await expect(bar).toBeVisible();
+        await page.getByRole("main").getByRole("textbox").first().focus();
+        await expect(bar).toBeVisible();
+      });
+    });
+  }
+});
 
 test.describe("a phone turned while an editor's section is open", () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
