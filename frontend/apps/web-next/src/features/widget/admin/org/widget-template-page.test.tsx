@@ -44,8 +44,8 @@ afterEach(() => {
 
 describe("WidgetTemplatePage", () => {
   it("reports an in-flight draft save before confirming that all changes are saved", async () => {
-    showPage(template());
-    await screen.findByRole("heading", { level: 1, name: "Kommunmallen" });
+    const view = within(showPage(template()).container);
+    await view.findByRole("heading", { level: 1, name: "Kommunmallen" });
     let finishSave: (saved: WidgetTemplate) => void = () => {};
     api.PATCH.mockReturnValue(
       new Promise<{ data: WidgetTemplate; response: Response }>((resolve) => {
@@ -54,8 +54,8 @@ describe("WidgetTemplatePage", () => {
     );
 
     fireEvent.click(screen.getByRole("switch", { name: "Upplysning och sidfot" }));
-    await screen.findByText("Sparar…", {}, { timeout: 2000 });
-    expect(screen.queryByText("Alla ändringar sparade")).toBeNull();
+    await view.findByText("Sparar…", {}, { timeout: 2000 });
+    expect(view.queryByText("Alla ändringar sparade")).toBeNull();
     await act(async () =>
       finishSave(
         template({
@@ -64,12 +64,12 @@ describe("WidgetTemplatePage", () => {
         })
       )
     );
-    expect(await screen.findByText("Alla ändringar sparade")).toBeTruthy();
+    expect(await view.findByText("Alla ändringar sparade")).toBeTruthy();
   });
 
   it("keeps a failed draft save visible in the header instead of claiming the changes were saved", async () => {
-    showPage(template());
-    await screen.findByRole("heading", { level: 1, name: "Kommunmallen" });
+    const view = within(showPage(template()).container);
+    await view.findByRole("heading", { level: 1, name: "Kommunmallen" });
     let refuseSave: () => void = () => {};
     api.PATCH.mockReturnValue(
       new Promise<never>((_resolve, reject) => {
@@ -78,10 +78,10 @@ describe("WidgetTemplatePage", () => {
     );
 
     fireEvent.click(screen.getByRole("switch", { name: "Upplysning och sidfot" }));
-    await screen.findByText("Sparar…", {}, { timeout: 2000 });
+    await view.findByText("Sparar…", {}, { timeout: 2000 });
     await act(async () => refuseSave());
     expect(await screen.findByRole("link", { name: "Kunde inte spara ändringarna" })).toBeTruthy();
-    expect(screen.queryByText("Alla ändringar sparade")).toBeNull();
+    expect(view.queryByText("Alla ändringar sparade")).toBeNull();
   });
 
   it("a lock toggle only edits the draft and marks it unpublished", async () => {
