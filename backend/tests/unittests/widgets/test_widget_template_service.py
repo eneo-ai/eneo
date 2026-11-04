@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -531,9 +531,40 @@ async def test_template_avatars_follow_the_icon_lifecycle():
     result = await service.publish_template(template.id)
     assert [w.id for w in result.synced_widgets] == [follower.id]
     assert (await widgets.get(follower.id)).persona.avatar_icon_id == second
-    assert (first, second) in icons.released
+    assert icons.deleted == [first]
 
     # Deleting the template releases the draft's and the release's avatars.
     widgets.rows.clear()
+    icons.deleted.clear()
     await service.delete_template(template.id)
     assert icons.deleted == [second]
+
+
+async def test_publication_releases_replaced_avatars_once_each_in_id_order():
+    """Two followers show the same two icons in opposite order; a publication
+    takes their icon locks after every follower is written, each once and in
+    id order, so a concurrent publication cannot wait on it the other way."""
+    repo, widgets, icons = _InMemoryRepo(), _InMemoryWidgetRepo(), _FakeIconRepo()
+    service = _template_service(_user(Permission.ADMIN), repo, widgets, icons)
+    template = await service.create_template(name="Mall")
+    low, high, avatar = UUID(int=1), UUID(int=2), uuid4()
+    template = await service.update_template(
+        template.id,
+        {
+            "persona": {"name": "Sigge", "avatar_icon_id": avatar},
+            "locked_groups": [TemplateLockGroup.PERSONA],
+        },
+    )
+    for shown in (high, low, high):
+        follower = _widget_for(template)
+        follower.template_id = template.id
+        follower.persona = follower.persona.model_copy(
+            update={"name": "Egen", "avatar_icon_id": shown}
+        )
+        await widgets.add(follower)
+    icons.deleted.clear()
+
+    result = await service.publish_template(template.id)
+
+    assert len(result.synced_widgets) == 3
+    assert icons.deleted == [low, high]

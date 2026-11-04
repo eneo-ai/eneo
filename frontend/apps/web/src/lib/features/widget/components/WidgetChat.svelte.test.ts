@@ -475,6 +475,12 @@ describe("WidgetChat", () => {
     await userEvent.click(dialog.getByRole("button", { name: "cancel" }));
     await vi.waitFor(() => expect(page.getByRole("dialog").elements()).toHaveLength(0));
     await expect.element(page.getByRole("button", { name: "widget_feedback_more" })).toBeDisabled();
+    // Nor can the rating change under the comment: it carries the vote it was typed under.
+    await userEvent.click(page.getByRole("button", { name: "widget_feedback_change" }));
+    const unhelpful = page.getByRole("button", { name: "widget_feedback_unhelpful" });
+    await expect.element(unhelpful).toBeDisabled();
+    expect(fake.feedback).toHaveLength(1);
+    await userEvent.click(page.getByRole("button", { name: "widget_feedback_change" }));
 
     fake.releaseFeedback!();
     const edit = page.getByRole("button", { name: "widget_feedback_edit_comment" });

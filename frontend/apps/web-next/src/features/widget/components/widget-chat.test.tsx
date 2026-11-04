@@ -271,6 +271,15 @@ describe("WidgetChat", () => {
     expect(
       (screen.getByRole("button", { name: "Vill du berätta mer?" }) as HTMLButtonElement).disabled
     ).toBe(true);
+    // Nor can the rating change under the comment: it carries the vote it was typed under.
+    fireEvent.click(screen.getByRole("button", { name: "Ändra omdöme" }));
+    const unhelpful = (await screen.findByRole("button", {
+      name: "Inte hjälpsam konversation"
+    })) as HTMLButtonElement;
+    expect(unhelpful.disabled).toBe(true);
+    fireEvent.click(unhelpful);
+    expect(leaveFeedback).toHaveBeenCalledTimes(2);
+    fireEvent.click(screen.getByRole("button", { name: "Ändra omdöme" }));
 
     await act(async () => finishComment());
     const edit = await screen.findByRole("button", { name: "Redigera kommentar" });

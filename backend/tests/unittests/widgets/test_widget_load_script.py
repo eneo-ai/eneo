@@ -122,3 +122,17 @@ async def test_redis_down_fails_when_the_refusal_is_not_the_protection():
         f"with Redis down, {VISITORS} of {VISITORS} visitors were not refused"
         " with 503 rate_limit_unavailable"
     ]
+
+
+async def test_visitors_that_never_get_an_answer_fail_the_run():
+    """A deployment nobody could reach validated nothing; the verdict says so."""
+
+    def refuse_connection(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused", request=request)
+
+    args = _args()
+    report = await widget_load.run(args, httpx.MockTransport(refuse_connection))
+    assert report.transport_errors == {"ConnectError": args.visitors}
+    [reason] = widget_load.failures(report, args)
+    assert reason.startswith(f"{args.visitors} requests got no response")
+    assert "ConnectError" in reason

@@ -90,8 +90,10 @@ export function WidgetFeedback({
     }
   }
 
+  // One feedback write at a time: a comment carries the vote it was typed
+  // under, so a vote change racing it could write the old value back.
   async function vote(value: Vote) {
-    if (voting || disabled) return;
+    if (voting || sending || disabled) return;
     if (given === value) return finishVoting();
     setVoting(true);
     setError(null);
@@ -113,7 +115,7 @@ export function WidgetFeedback({
   async function sendComment() {
     const value = given;
     const comment = text.trim();
-    if (!value || !comment || sending) return;
+    if (!value || !comment || sending || voting) return;
     setSending(true);
     setError(null);
     try {
@@ -132,7 +134,7 @@ export function WidgetFeedback({
 
   function openDialog() {
     // A comment on its way would otherwise clear the draft typed after it.
-    if (sending) return;
+    if (sending || voting) return;
     setText(savedComment);
     setError(null);
     setDialogOpen(true);
@@ -150,7 +152,7 @@ export function WidgetFeedback({
       )}
       aria-label={label}
       aria-pressed={given === value}
-      disabled={disabled}
+      disabled={disabled || sending}
       onClick={() => void vote(value)}
     >
       <Icon className="size-4" aria-hidden="true" />
@@ -195,7 +197,7 @@ export function WidgetFeedback({
               <button
                 type="button"
                 className="text-ax-text-accent min-h-11 w-fit rounded-md text-xs underline-offset-2 hover:underline disabled:opacity-50"
-                disabled={disabled || sending}
+                disabled={disabled || sending || voting}
                 onClick={openDialog}
               >
                 {sent

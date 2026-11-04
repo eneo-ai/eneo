@@ -155,12 +155,19 @@ class WidgetTemplateService:
         # New locks with unchanged values still change what the editor may
         # touch; bump the followers so open editors reload and see them.
         locks_changed = set(template.published.locked_groups) != previous_locks
-        synced = await self._sync_followers(template, force=locks_changed)
-        # Followers and the release itself may have dropped an avatar; those
-        # icons go once nothing shows them any more.
-        await self.icon_repo.release_replaced(
-            previous_avatar, template.published.persona.avatar_icon_id
-        )
+        synced, replaced = await self._sync_followers(template, force=locks_changed)
+        if (
+            previous_avatar is not None
+            and previous_avatar != template.published.persona.avatar_icon_id
+        ):
+            replaced.add(previous_avatar)
+        # Followers and the release itself may have dropped avatars; those
+        # icons go once nothing shows them any more. Each icon is locked once,
+        # in id order, after every follower is written: two publications
+        # releasing shared icons in different follower orders would otherwise
+        # wait for each other.
+        for icon_id in sorted(replaced):
+            await self.icon_repo.delete_if_unreferenced(icon_id)
         return TemplatePublishResult(template=template, synced_widgets=synced)
 
     @staticmethod
@@ -171,10 +178,13 @@ class WidgetTemplateService:
 
     async def _sync_followers(
         self, template: WidgetTemplate, *, force: bool = False
-    ) -> list[Widget]:
+    ) -> tuple[list[Widget], set[UUID]]:
+        """Write the release onto the followers; returns them and the avatars
+        the release took off them, for the caller to release together."""
         assert template.id is not None and template.published is not None
         release = template.published
         synced: list[Widget] = []
+        replaced: set[UUID] = set()
         for widget in await self.widget_repo.list_by_template(template.id):
             # Archived widgets are frozen history; nothing follows them.
             if widget.status == WidgetStatus.ARCHIVED:
@@ -182,10 +192,12 @@ class WidgetTemplateService:
             previous_avatar = widget.persona.avatar_icon_id
             if release.project_onto(widget, release.locked_groups) or force:
                 synced.append(await self.widget_repo.update(widget))
-                await self.icon_repo.release_replaced(
-                    previous_avatar, widget.persona.avatar_icon_id
-                )
-        return synced
+                if (
+                    previous_avatar is not None
+                    and previous_avatar != widget.persona.avatar_icon_id
+                ):
+                    replaced.add(previous_avatar)
+        return synced, replaced
 
     async def delete_template(self, template_id: UUID) -> WidgetTemplate:
         validate_permission(self.user, Permission.ADMIN)

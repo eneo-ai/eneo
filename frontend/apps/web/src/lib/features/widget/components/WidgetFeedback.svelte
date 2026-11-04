@@ -83,8 +83,10 @@
     }
   }
 
+  // One feedback write at a time: a comment carries the vote it was typed
+  // under, so a vote change racing it could write the old value back.
   async function vote(value: Vote) {
-    if (voting || disabled) return;
+    if (voting || sending || disabled) return;
     if (given === value) return finishVoting();
     voting = true;
     error = null;
@@ -104,7 +106,7 @@
   async function sendComment() {
     const value = given;
     const comment = text.trim();
-    if (!value || !comment || sending) return;
+    if (!value || !comment || sending || voting) return;
     sending = true;
     error = null;
     try {
@@ -122,7 +124,7 @@
 
   function openDialog() {
     // A comment on its way would otherwise clear the draft typed after it.
-    if (sending) return;
+    if (sending || voting) return;
     text = savedComment;
     error = null;
     dialogOpen = true;
@@ -150,7 +152,7 @@
       ]}
       aria-label={m.widget_feedback_helpful()}
       aria-pressed={given === 1}
-      {disabled}
+      disabled={disabled || sending}
       onclick={() => vote(1)}
     >
       <ThumbsUp class="size-4" aria-hidden="true" />
@@ -164,7 +166,7 @@
       ]}
       aria-label={m.widget_feedback_unhelpful()}
       aria-pressed={given === -1}
-      {disabled}
+      disabled={disabled || sending}
       onclick={() => vote(-1)}
     >
       <ThumbsDown class="size-4" aria-hidden="true" />
@@ -198,7 +200,7 @@
       <button
         type="button"
         class="text-accent-default min-h-11 w-fit rounded-md text-xs underline-offset-2 hover:underline disabled:opacity-50"
-        disabled={disabled || sending}
+        disabled={disabled || sending || voting}
         onclick={openDialog}
       >
         {sent

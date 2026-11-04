@@ -210,6 +210,15 @@ def print_report(report: Report, args: argparse.Namespace) -> None:
 def failures(report: Report, args: argparse.Namespace) -> list[str]:
     """Why the run fails; empty when it passes."""
     found: list[str] = []
+    if report.transport_errors:
+        # Nothing was validated for a visitor whose request never got an answer.
+        found.append(
+            f"{sum(report.transport_errors.values())} requests got no response: "
+            + ", ".join(
+                f"{name} x{count}"
+                for name, count in sorted(report.transport_errors.items())
+            )
+        )
     if report.unauthenticated_asks_allowed:
         found.append("an ask without a visitor token was answered")
     if report.retry_after_missing:
