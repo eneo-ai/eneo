@@ -152,6 +152,27 @@ describe("WidgetThemeFields radius", () => {
     await expect.element(radius).toHaveValue(8);
     expect(onHeld).toHaveBeenLastCalledWith(false);
   });
+
+  test("a lock taking hold drops a fraction and an incomplete colour even when the template repeats the saved values", async () => {
+    const onHeld = vi.fn<(held: boolean) => void>();
+    const theme = { primary_color: "#1F4E79", radius: 12 } as WidgetTheme;
+    const screen = render(WidgetThemeFields, { theme, onChange: vi.fn(), onHeld });
+    const radius = page.getByLabelText("widget_admin_radius", { exact: true });
+    await userEvent.fill(radius, "1.5");
+    await userEvent.fill(primary(), "#1");
+    await expect.element(radius).toHaveAttribute("aria-invalid", "true");
+    await expect.element(primary()).toHaveAttribute("aria-invalid", "true");
+    expect(onHeld).toHaveBeenLastCalledWith(true);
+
+    // The template's values equal the saved ones: nothing changes but the lock,
+    // and the disabled controls could not be corrected by typing.
+    await screen.rerender({ theme, locked: true, lockHint: "Styrs av mallen" });
+    await expect.element(radius).toHaveAttribute("aria-invalid", "false");
+    await expect.element(radius).toHaveValue(12);
+    await expect.element(primary()).toHaveValue("#1F4E79");
+    await expect.element(primary()).toHaveAttribute("aria-invalid", "false");
+    expect(onHeld).toHaveBeenLastCalledWith(false);
+  });
 });
 
 describe("WidgetThemeFields errors", () => {

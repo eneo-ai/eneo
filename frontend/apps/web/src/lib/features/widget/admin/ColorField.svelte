@@ -72,6 +72,19 @@
       if (!isHexColor(draft) || normalizeHexColor(draft) !== saved) draft = saved;
     }
   });
+  // A lock taking hold (a template applied) replaces what was typed with the
+  // saved colour, even one equal to what was saved before: a disabled field
+  // cannot be corrected, so no draft may stay held in it.
+  let wasDisabled = untrack(() => disabled);
+  $effect(() => {
+    const now = disabled;
+    if (now === wasDisabled) return;
+    wasDisabled = now;
+    if (!now) return;
+    untrack(() => {
+      draft = value ?? "";
+    });
+  });
   const current = $derived(draft);
   const pickerValue = $derived(
     isHexColor(current) ? normalizeHexColor(current) : DEFAULT_PRIMARY_COLOR

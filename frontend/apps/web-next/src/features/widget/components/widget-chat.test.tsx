@@ -399,6 +399,45 @@ describe("WidgetChat", () => {
     }
   );
 
+  it("an old vote landing after a follow-up neither moves focus nor speaks over the composer", async () => {
+    let finishVote!: () => void;
+    const leaveFeedback = vi
+      .fn()
+      .mockImplementationOnce(
+        () => new Promise<object>((resolve) => (finishVote = () => resolve({})))
+      );
+    const { client } = clientWith({ ask: fakeClient().ask, leaveFeedback });
+    renderChat(config(), client);
+    fireEvent.click(screen.getByRole("button", { name: "Hur brygger jag pour over?" }));
+    await screen.findByText("Pour over: 15 g kaffe på 250 g vatten.");
+    const helpful = await screen.findByRole("button", { name: "Hjälpsam konversation" });
+    await waitFor(() => expect((helpful as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(helpful);
+    await waitFor(() => expect(leaveFeedback).toHaveBeenCalledTimes(1));
+
+    // The vote is still on its way when the next question is asked and answered.
+    typeQuestion("Och nu?");
+    await waitFor(() =>
+      expect(screen.getAllByText("Pour over: 15 g kaffe på 250 g vatten.")).toHaveLength(2)
+    );
+    const field = screen.getByRole("textbox", { name: "Din fråga" }) as HTMLTextAreaElement;
+    await waitFor(() => expect(field.disabled).toBe(false));
+    field.focus();
+    fireEvent.change(field, { target: { value: "Och sed" } });
+    expect(document.activeElement).toBe(field);
+
+    await act(async () => finishVote());
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    await flushAnnouncements();
+    // The vote stands, but the thanks and the focus move belonged to the earlier turn.
+    expect(document.activeElement).toBe(field);
+    expect(field.value).toBe("Och sed");
+    expect(announced()).not.toContain("Tack för din återkoppling");
+    expect(screen.getByRole("button", { name: "Ändra omdöme" })).toBeTruthy();
+  });
+
   it("retries a vote on the conversation it was given for, not the one started since", async () => {
     const SESSION_B = "66666666-7777-4888-8999-000000000000";
     const sessions = [SESSION, SESSION_B];

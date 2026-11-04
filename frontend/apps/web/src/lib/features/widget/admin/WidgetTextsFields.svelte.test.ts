@@ -157,4 +157,34 @@ describe("WidgetTextsFields and the save's echo", () => {
     await vi.waitFor(() => expect(onChange).toHaveBeenCalledWith({ subtitle: "" }));
     expect(onChange).toHaveBeenCalledTimes(1);
   });
+
+  test("a lock on the subtitle drops a held blank even when the template repeats the saved text", async () => {
+    const onChange = vi.fn();
+    const onSubtitleHeld = vi.fn<(held: boolean) => void>();
+    const screen = render(WidgetTextsFields, {
+      texts,
+      onChange,
+      onSubtitleHeld,
+      subtitleRequired: "Widgeten är aktiv"
+    });
+    const subtitle = page.getByLabelText("widget_admin_text_subtitle", { exact: true });
+    await userEvent.clear(subtitle);
+    await expect.element(subtitle).toHaveAttribute("aria-invalid", "true");
+    expect(onSubtitleHeld).toHaveBeenLastCalledWith(true);
+
+    // The template supplies the very text that was saved: only the lock changes.
+    await screen.rerender({
+      lockedFields: lockedTextFields({ locked_groups: ["legal_texts"] }),
+      lockHint: "Styrs av mallen",
+      subtitleRequired: "Mallen låser upplysningen"
+    });
+    await expect.element(subtitle).toHaveValue("Du chattar med en AI-assistent.");
+    await expect.element(subtitle).toHaveAttribute("aria-invalid", "false");
+    expect(onSubtitleHeld).toHaveBeenLastCalledWith(false);
+
+    // Once the subtitle may be emptied again, the discarded blank is not sent.
+    await screen.rerender({ subtitleRequired: undefined });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(onChange).not.toHaveBeenCalled();
+  });
 });

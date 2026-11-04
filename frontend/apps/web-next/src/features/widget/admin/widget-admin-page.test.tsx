@@ -608,6 +608,99 @@ describe("WidgetAdminPage", () => {
     expect(api.PATCH).not.toHaveBeenCalled();
   });
 
+  it("a template that repeats the saved subtitle and locks it drops a blank held before it", async () => {
+    api.PATCH.mockImplementation((_path: string, init: { body: Record<string, unknown> }) =>
+      ok(widget({ ...init.body, status: "active", revision: 4 }))
+    );
+    const live = { status: "active" as const, activated_at: "2026-09-01T00:00:00Z" };
+    showPage([widget(live)], ["widgets"], { templates: [template()] });
+    api.POST.mockImplementation((path: string) =>
+      path === LINK_PATH
+        ? ok(
+            linked({
+              ...live,
+              template: {
+                id: "t1",
+                name: "Kommunmallen",
+                locked_groups: ["persona", "legal_texts"]
+              }
+            })
+          )
+        : path === "/api/v1/widgets/{id}/pause/"
+          ? ok(widget({ status: "paused", revision: 6 }))
+          : ok({ token: "preview-token", expires_in: 900 })
+    );
+    const subtitle = await screen.findByRole("textbox", { name: /^Beskrivning/ });
+    const saved = (subtitle as HTMLInputElement).value;
+    fireEvent.change(subtitle, { target: { value: "" } });
+    expect(await screen.findByText("1 osparad ändring")).toBeTruthy();
+
+    // The template's subtitle is the one saved before: only the lock changes.
+    await applyTemplate();
+    await waitFor(() => expect((subtitle as HTMLInputElement).value).toBe(saved));
+    expect(subtitle.getAttribute("aria-invalid")).toBeNull();
+    await waitFor(() => expect(screen.queryByText("1 osparad ändring")).toBeNull());
+
+    // Pausing frees the subtitle; the discarded blank must not be sent then.
+    fireEvent.click(screen.getByRole("button", { name: "Pausa" }));
+    await waitFor(() =>
+      expect(api.POST).toHaveBeenCalledWith("/api/v1/widgets/{id}/pause/", expect.anything())
+    );
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    expect(api.PATCH).not.toHaveBeenCalled();
+  });
+
+  it("a template that repeats the saved colour and locks it drops an incomplete one held before it", async () => {
+    showPage([widget()], ["widgets"], { templates: [template()] });
+    api.POST.mockImplementation((path: string) =>
+      path === LINK_PATH
+        ? ok(
+            linked({ template: { id: "t1", name: "Kommunmallen", locked_groups: ["appearance"] } })
+          )
+        : ok({ token: "preview-token", expires_in: 900 })
+    );
+    fireEvent.click(await screen.findByRole("tab", { name: /Utseende/ }));
+    const colour = await screen.findByRole("textbox", { name: /^Primärfärg/ });
+    const saved = (colour as HTMLInputElement).value;
+    fireEvent.change(colour, { target: { value: "#1" } });
+    expect(await screen.findByText("1 osparad ändring")).toBeTruthy();
+    expect(colour.getAttribute("aria-invalid")).toBe("true");
+
+    await applyTemplate();
+    await waitFor(() => expect((colour as HTMLInputElement).value).toBe(saved));
+    expect(colour.getAttribute("aria-invalid")).not.toBe("true");
+    await waitFor(() => expect(screen.queryByText("1 osparad ändring")).toBeNull());
+    expect(api.PATCH).not.toHaveBeenCalled();
+  });
+
+  it("a website list typed but not yet committed counts as unsaved", async () => {
+    api.PATCH.mockImplementation((_path: string, init: { body: Record<string, unknown> }) =>
+      ok(widget({ ...init.body, revision: 4 }))
+    );
+    showPage([widget()]);
+    fireEvent.click(await screen.findByRole("tab", { name: /Regler/ }));
+    const origins = await screen.findByRole("textbox", { name: /Tillåtna webbplatser/ });
+    fireEvent.change(origins, {
+      target: { value: "https://www.kommun.se\nhttps://ny.kommun.se" }
+    });
+    expect(await screen.findByText("1 osparad ändring")).toBeTruthy();
+    expect(api.PATCH).not.toHaveBeenCalled();
+    fireEvent.blur(origins);
+    await waitFor(
+      () =>
+        expect(api.PATCH).toHaveBeenCalledWith(
+          WIDGET_PATH,
+          expect.objectContaining({
+            body: expect.objectContaining({
+              allowed_origins: ["https://www.kommun.se", "https://ny.kommun.se"]
+            })
+          })
+        ),
+      { timeout: 2000 }
+    );
+    await screen.findByText("Alla ändringar sparade", { selector: "section *" });
+  });
+
   it("linking a template lets its cached follower count go", async () => {
     const queryClient = testQueryClient();
     queryClient.setQueryData(["widget-templates", "t1"], template());

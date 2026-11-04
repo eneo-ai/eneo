@@ -44,6 +44,13 @@ function DraftedText({
   onTyped: (value: string) => void;
 }) {
   const draft = useTextDraft(texts[field] ?? "");
+  // A lock taking hold (a template applied) shows the saved text, even one
+  // equal to the text saved before: the disabled field cannot be corrected.
+  const [wasLocked, setWasLocked] = useState(locked);
+  if (locked !== wasLocked) {
+    setWasLocked(locked);
+    if (locked) draft.setText(texts[field] ?? "");
+  }
   const status = error ? ({ type: "error", message: error } as const) : undefined;
   const change = (value: string) => {
     const next = value.slice(0, maxLength);
@@ -206,6 +213,14 @@ export function WidgetTextsFields({
   if (savedSubtitle !== seenSubtitle) {
     setSeenSubtitle(savedSubtitle);
     if (heldSubtitle !== null && savedSubtitle.trim()) setHeldSubtitle(null);
+  }
+  // A lock taking hold on the subtitle drops a held blank: the template's
+  // text stands, and the blank must not be sent once the widget is paused.
+  const subtitleLocked = locked("subtitle");
+  const [subtitleWasLocked, setSubtitleWasLocked] = useState(subtitleLocked);
+  if (subtitleLocked !== subtitleWasLocked) {
+    setSubtitleWasLocked(subtitleLocked);
+    if (subtitleLocked && heldSubtitle !== null) setHeldSubtitle(null);
   }
   const [wasRequired, setWasRequired] = useState(!!subtitleRequired);
   if (!!subtitleRequired !== wasRequired) {

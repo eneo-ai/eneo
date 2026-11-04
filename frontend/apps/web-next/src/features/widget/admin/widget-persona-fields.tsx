@@ -76,15 +76,19 @@ export function WidgetPersonaFields({
   // avatar is attached to the persona as it is then, never as it was when
   // the upload began.
   const latest = useRef(persona);
+  const lockedNow = useRef(locked);
   useEffect(() => {
     latest.current = persona;
+    lockedNow.current = locked;
   });
 
   async function attachAvatar(iconId: string) {
     const current = latest.current;
-    // No name, no face: the API refuses an avatar on an empty persona, so
-    // an upload that lands after the persona was cleared is let go.
-    if (!current.name) {
+    // No name, no face: the API refuses an avatar on an empty persona, so an
+    // upload that lands after the persona was cleared is let go. So is one
+    // that lands after a template took the persona over: a locked persona
+    // cannot change.
+    if (!current.name || lockedNow.current) {
       await releaseIcon(iconId);
       return;
     }

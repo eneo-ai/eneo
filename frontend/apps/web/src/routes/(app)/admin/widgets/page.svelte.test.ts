@@ -1,3 +1,4 @@
+/* eslint-disable eneo/no-raw-color -- fixtures use literal widget colours */
 import { page, userEvent } from "vitest/browser";
 import { render } from "vitest-browser-svelte";
 import type { WidgetPolicy } from "@eneo/eneo-js";
@@ -32,7 +33,7 @@ vi.mock("$lib/paraglide/runtime", () => ({
   localizeHref: (href: string) => href
 }));
 
-import { invalidateAll } from "$app/navigation";
+import { goto, invalidateAll } from "$app/navigation";
 import WidgetsAdminPage from "./+page.svelte";
 
 const policy: WidgetPolicy = {
@@ -44,7 +45,8 @@ const policy: WidgetPolicy = {
 
 function renderPage(
   update: (patch: Partial<WidgetPolicy>) => Promise<WidgetPolicy>,
-  totals = { widgets: 0, active: 0, questions_30d: 0, tokens_30d: 0, blocked_30d: 0 }
+  totals = { widgets: 0, active: 0, questions_30d: 0, tokens_30d: 0, blocked_30d: 0 },
+  create: () => Promise<unknown> = vi.fn()
 ) {
   return render(WidgetsAdminPage, {
     data: {
@@ -54,7 +56,7 @@ function renderPage(
       eneo: {
         widgets: {
           policy: { update },
-          templates: { create: vi.fn(), update: vi.fn(), delete: vi.fn() },
+          templates: { create, update: vi.fn(), delete: vi.fn() },
           pause: vi.fn(),
           activate: vi.fn()
         }
@@ -215,5 +217,50 @@ describe("widget policy retention window", () => {
     await expect
       .element(page.getByRole("heading", { level: 2, name: "widget_admin_policy" }))
       .toBeVisible();
+  });
+});
+
+describe("widget templates", () => {
+  test("a created template is listed even when leaving the page is declined", async () => {
+    const created = {
+      id: "t9",
+      name: "Ny mall",
+      description: "",
+      theme: { primary_color: "#1F4E79", radius: 12 },
+      language: "sv",
+      is_default: false,
+      locked_groups: [],
+      linked_widgets: 0,
+      published_at: null,
+      has_unpublished_changes: true,
+      created_at: "2026-11-05T08:00:00Z",
+      updated_at: "2026-11-05T08:00:00Z"
+    };
+    const create = vi.fn(async () => created);
+    renderPage(vi.fn(), undefined, create);
+
+    // A policy edit the page cannot save makes the leave guard ask; here the
+    // navigation is a stub, which is what a declined leave looks like.
+    const min = page.getByLabelText("widget_admin_policy_retention_min");
+    await userEvent.fill(min, "400");
+    await userEvent.tab();
+    await expect.element(min).toHaveAttribute("aria-invalid", "true");
+
+    // bits-ui tabs and buttons answer a DOM click; the pointer path is flaky here.
+    const press = (locator: { element: () => Element }) =>
+      (locator.element() as HTMLElement).click();
+    press(page.getByRole("tab", { name: /widget_admin_templates/ }));
+    await expect
+      .element(page.getByRole("button", { name: "widget_admin_template_new" }))
+      .toBeVisible();
+    press(page.getByRole("button", { name: "widget_admin_template_new" }));
+    await vi.waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(goto).toHaveBeenCalledWith("/admin/widgets/templates/t9"));
+
+    const list = page.getByRole("list", { name: "widget_admin_templates" });
+    await expect.element(list.getByRole("link", { name: "Ny mall" }).first()).toBeVisible();
+    await expect
+      .element(page.getByRole("button", { name: "widget_admin_template_new" }))
+      .toBeEnabled();
   });
 });

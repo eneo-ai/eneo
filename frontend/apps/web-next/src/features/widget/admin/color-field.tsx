@@ -69,6 +69,15 @@ export function ColorField({
     if (!isHexColor(draft) || normalizeHexColor(draft) !== saved) setDraft(saved);
   }
 
+  // A lock taking hold (a template applied) replaces what was typed with the
+  // saved colour, even one equal to what was saved before: a disabled field
+  // cannot be corrected, so no draft may stay held in it.
+  const [wasDisabled, setWasDisabled] = useState(disabled);
+  if (disabled !== wasDisabled) {
+    setWasDisabled(disabled);
+    if (disabled) setDraft(saved);
+  }
+
   const pickerValue = isHexColor(draft) ? normalizeHexColor(draft) : DEFAULT_PRIMARY_COLOR;
   const contrast =
     checkContrast && draft

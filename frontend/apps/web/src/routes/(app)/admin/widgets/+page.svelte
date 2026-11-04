@@ -172,6 +172,9 @@
       const created = await data.eneo.widgets.templates.create({
         name: m.widget_admin_template_new_name()
       });
+      // Listed before leaving: a held policy edit may make the editor decline
+      // to leave, and the template exists either way.
+      templates = [...templates, created];
       // eslint-disable-next-line svelte/no-navigation-without-resolve -- localized href built from a typed route segment
       await goto(localizeHref(`/admin/widgets/templates/${created.id}`));
     } catch (error) {

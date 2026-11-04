@@ -70,6 +70,21 @@
       radiusInvalid = false;
     });
   });
+  // A lock taking hold (a template applied) drops a typed fraction, even when
+  // the template's radius equals the saved one: the disabled field cannot be
+  // corrected, so no error may stay in it.
+  let radiusInput = $state<HTMLInputElement | null>(null);
+  let wasLocked = untrack(() => locked);
+  $effect(() => {
+    const now = locked;
+    if (now === wasLocked) return;
+    wasLocked = now;
+    if (!now) return;
+    untrack(() => {
+      radiusInvalid = false;
+      if (radiusInput) radiusInput.value = String(theme.radius ?? 12);
+    });
+  });
   let colorHeld = $state<Record<string, boolean>>({});
   const held = $derived(radiusInvalid || Object.values(colorHeld).some(Boolean));
   $effect(() => {
@@ -242,6 +257,7 @@
           step={1}
           class="max-w-32"
           value={theme.radius ?? 12}
+          bind:ref={radiusInput}
           aria-invalid={radiusInvalid}
           aria-describedby={radiusInvalid
             ? `${describedBy("radius-help")} ${id("radius-error")}`

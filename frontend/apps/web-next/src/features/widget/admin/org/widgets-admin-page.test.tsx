@@ -140,6 +140,9 @@ describe("WidgetsAdminPage policy", () => {
       ok({ ...policy, ...init.body })
     );
     const { queryClient } = showPage({ route: "/admin/widgets?tab=policy" });
+    // A space's widget list, cached by an editor visited before the change.
+    queryClient.setQueryData(["spaces", "s1", "widgets"], { items: [], count: 0, total_count: 0 });
+    queryClient.setQueryData(["spaces", "s1"], { id: "s1" });
     fireEvent.click(await screen.findByRole("switch", { name: "Tillåt widgetar utan botskydd" }));
     await waitFor(
       () =>
@@ -155,6 +158,11 @@ describe("WidgetsAdminPage policy", () => {
       const stale = queryClient.getQueryState(["admin", "widgets", "overview"])?.isInvalidated;
       expect(refetched || stale === true).toBe(true);
     });
+    // Editors fold the policy into their widgets' blockers too; the space itself is untouched.
+    await waitFor(() =>
+      expect(queryClient.getQueryState(["spaces", "s1", "widgets"])?.isInvalidated).toBe(true)
+    );
+    expect(queryClient.getQueryState(["spaces", "s1"])?.isInvalidated).toBe(false);
   });
 
   it("the maximum budget may reach the API's ceiling but not pass it", async () => {

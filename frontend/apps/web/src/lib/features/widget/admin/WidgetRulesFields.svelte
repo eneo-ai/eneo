@@ -35,6 +35,12 @@
   // half-typed budget must not reach the API as "2". Out-of-range values
   // stay in the field with an error instead of a failed save.
   let rangeErrors = $state<Record<string, string>>({});
+  // A number typed but not yet committed (blur) is an edit too.
+  let pendingNumbers = $state<Record<string, boolean>>({});
+  const typedNumber = (key: string, saved: number | null | undefined) => (event: Event) => {
+    const raw = (event.currentTarget as HTMLInputElement).value;
+    pendingNumbers = { ...pendingNumbers, [key]: raw !== String(saved ?? "") };
+  };
   function commitNumber(
     event: Event,
     key: string,
@@ -45,6 +51,8 @@
     // valueAsNumber is NaN for an empty field. Number("") is 0, which would
     // silently switch retention to "do not persist" when the policy permits 0.
     const value = (event.currentTarget as HTMLInputElement).valueAsNumber;
+    const { [key]: _typed, ...pending } = pendingNumbers;
+    pendingNumbers = pending;
     if (!Number.isInteger(value) || value < min || value > max) {
       rangeErrors = {
         ...rangeErrors,
@@ -117,16 +125,21 @@
     if ((widget.allowed_origins ?? []).length === 0) return blockerLabel("allowed_origins_empty");
     return undefined;
   });
-  // Lines that cannot be sent yet hold back the valid ones with them.
+  // Lines that cannot be sent yet hold back the valid ones with them, and a
+  // valid list typed but not yet committed (blur) is an edit too.
   $effect(() => {
     const held =
-      (parsedOrigins.invalid.length > 0 || parsedOrigins.tooMany || emptiedWhileActive) &&
-      origins.text.trim() !== (widget.allowed_origins ?? []).join("\n");
+      parsedOrigins.invalid.length > 0 ||
+      parsedOrigins.tooMany ||
+      parsedOrigins.origins.join("\n") !== (widget.allowed_origins ?? []).join("\n");
     autosave.markDraft("allowed_origins", held);
     return () => autosave.markDraft("allowed_origins", false);
   });
   $effect(() => {
-    autosave.markDraft("rule-numbers", Object.keys(rangeErrors).length > 0);
+    autosave.markDraft(
+      "rule-numbers",
+      Object.keys(rangeErrors).length > 0 || Object.values(pendingNumbers).some(Boolean)
+    );
     return () => autosave.markDraft("rule-numbers", false);
   });
 
@@ -204,6 +217,7 @@
             step={1000}
             max={budgetMax}
             value={widget.limits.daily_token_budget}
+            oninput={typedNumber("budget", widget.limits.daily_token_budget)}
             aria-invalid={!!budgetProblem}
             aria-describedby={describedBy("budget", "widget-budget-help", budgetProblem)}
             onchange={(event) =>
@@ -230,6 +244,7 @@
             min={1}
             max={1000}
             value={widget.limits.messages_per_ip_hour}
+            oninput={typedNumber("ip-rate", widget.limits.messages_per_ip_hour)}
             aria-invalid={!!rangeErrors["ip-rate"]}
             aria-describedby={describedBy("ip-rate", "widget-ip-rate-help")}
             onchange={(event) =>
@@ -255,6 +270,7 @@
             max={8000}
             step={100}
             value={widget.limits.max_question_chars}
+            oninput={typedNumber("question-chars", widget.limits.max_question_chars)}
             aria-invalid={!!rangeErrors["question-chars"]}
             aria-describedby={describedBy("question-chars", "widget-question-chars-help")}
             onchange={(event) =>
@@ -279,6 +295,7 @@
             min={1}
             max={100}
             value={widget.limits.max_session_turns}
+            oninput={typedNumber("turns", widget.limits.max_session_turns)}
             aria-invalid={!!rangeErrors.turns}
             aria-describedby={describedBy("turns", "widget-turns-help")}
             onchange={(event) =>
@@ -311,6 +328,7 @@
             min={policy?.min_retention_days ?? 0}
             max={policy?.max_retention_days ?? 3650}
             value={widget.privacy.retention_days}
+            oninput={typedNumber("retention", widget.privacy.retention_days)}
             aria-invalid={!!retentionProblem}
             aria-describedby={describedBy("retention", "widget-retention-help", retentionProblem)}
             onchange={(event) =>

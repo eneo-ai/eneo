@@ -48,8 +48,38 @@ function Owner({
   );
 }
 
+/** An owner whose persona a template can take over while an upload runs. */
+function LockableOwner({
+  initial,
+  onChange
+}: {
+  initial: WidgetPersona;
+  onChange: (persona: WidgetPersona) => void;
+}) {
+  const [persona, setPersona] = useState(initial);
+  const [locked, setLocked] = useState(false);
+  return (
+    <>
+      <button type="button" onClick={() => setLocked(true)}>
+        Koppla mallen
+      </button>
+      <WidgetPersonaFields
+        persona={persona}
+        assistantIconId="icon-a"
+        locked={locked}
+        lockHint="Styrs av mallen"
+        onChange={(next) => {
+          setPersona(next);
+          onChange(next);
+        }}
+      />
+    </>
+  );
+}
+
 function show(
-  initial: WidgetPersona = { name: "Kim", avatar_icon_id: null, avatar_in_launcher: false }
+  initial: WidgetPersona = { name: "Kim", avatar_icon_id: null, avatar_in_launcher: false },
+  Component: typeof Owner = Owner
 ) {
   const onChange = vi.fn<(persona: WidgetPersona) => void>();
   // The assistant's icon, fetched to be uploaded again as the persona's own.
@@ -61,7 +91,7 @@ function show(
     )
   );
   api.DELETE.mockResolvedValue({});
-  const rendered = renderInApp(<Owner initial={initial} onChange={onChange} />);
+  const rendered = renderInApp(<Component initial={initial} onChange={onChange} />);
   return { ...rendered, onChange };
 }
 
@@ -114,6 +144,25 @@ describe("WidgetPersonaFields avatar uploads", () => {
     );
     expect(onChange).toHaveBeenLastCalledWith(cleared);
     expect(screen.getByText("Ge personan ett namn innan du väljer avatar.")).toBeTruthy();
+  });
+
+  it("lets a copied icon go when a template took the persona over while it was uploading", async () => {
+    const finish = slowUpload();
+    const { onChange } = show(undefined, LockableOwner);
+    fireEvent.click(screen.getByRole("button", { name: "Använd assistentens ikon" }));
+    await waitFor(() => expect(upload).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole("button", { name: "Koppla mallen" }));
+    expect(screen.getAllByText("Styrs av mallen").length).toBeGreaterThan(0);
+
+    finish();
+    await waitFor(() =>
+      expect(api.DELETE).toHaveBeenCalledWith("/api/v1/icons/{id}/", {
+        params: { path: { id: "icon-new" } }
+      })
+    );
+    // A locked persona cannot change: no avatar is attached to it.
+    expect(onChange).not.toHaveBeenCalled();
   });
 
   it("attaches an uploaded file to the name typed while it was uploading", async () => {

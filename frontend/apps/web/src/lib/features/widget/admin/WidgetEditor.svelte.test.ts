@@ -301,6 +301,103 @@ describe("WidgetEditor", () => {
     await vi.waitFor(() => expect(leavingAsks()).toBe(false));
   });
 
+  test("a website or a number typed but not yet committed counts as unsaved", async () => {
+    const { update } = renderEditor(widget());
+    click(page.getByRole("tab", { name: /widget_admin_tab_rules/ }));
+    const origins = page.getByLabelText("widget_admin_allowed_origins", { exact: true });
+    await userEvent.fill(origins, "https://www.kommun.se\nhttps://ny.kommun.se");
+    expect(leavingAsks()).toBe(true);
+    expect(update).not.toHaveBeenCalled();
+    await userEvent.tab();
+    await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    expect(update.mock.lastCall![0].update).toMatchObject({
+      allowed_origins: ["https://www.kommun.se", "https://ny.kommun.se"]
+    });
+    await vi.waitFor(() => expect(leavingAsks()).toBe(false));
+
+    const budget = page.getByLabelText("widget_admin_daily_budget", { exact: true });
+    await userEvent.fill(budget, "5000");
+    expect(leavingAsks()).toBe(true);
+    await userEvent.tab();
+    await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(2), { timeout: 3000 });
+    expect(update.mock.lastCall![0].update).toMatchObject({
+      limits: expect.objectContaining({ daily_token_budget: 5000 })
+    });
+    await vi.waitFor(() => expect(leavingAsks()).toBe(false));
+    // Typing the saved value back is not an edit.
+    await userEvent.fill(budget, "5000");
+    expect(leavingAsks()).toBe(false);
+  });
+
+  test("a template taking the persona over releases a late avatar upload", async () => {
+    let complete!: (icon: { id: string }) => void;
+    icons.upload.mockClear().mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          complete = resolve;
+        })
+    );
+    icons.delete.mockClear();
+    const linked = widget({
+      persona: { name: "Robo", avatar_icon_id: null, avatar_in_launcher: false },
+      template: { id: "t1", name: "Kommunblå", locked_groups: [] }
+    } as unknown as Partial<Widget>);
+    const update = vi.fn(async ({ update: patch }: { update: Partial<Widget> }) => ({
+      ...linked,
+      ...patch
+    }));
+    const linkTemplate = vi.fn(async () => ({
+      ...linked,
+      persona: { name: "Kommunboten", avatar_icon_id: null, avatar_in_launcher: false },
+      template: { id: "t1", name: "Kommunblå", locked_groups: ["persona"] },
+      revision: 1
+    }));
+    const eneo = {
+      widgets: {
+        update,
+        linkTemplate,
+        previewToken: vi.fn(() => new Promise(() => {})),
+        usage: vi.fn(() => new Promise(() => {}))
+      }
+    } as unknown as Eneo;
+    render(WidgetEditor, {
+      onReloaded: vi.fn(),
+      widget: linked,
+      assistant: {
+        id: "a1",
+        published: true,
+        mcp_servers: [],
+        icon_id: "assistant-icon"
+      } as unknown as Assistant,
+      eneo,
+      isAdmin: true,
+      policy: null,
+      release: null
+    });
+
+    await userEvent.click(
+      page.getByRole("button", { name: "widget_admin_persona_use_assistant_icon" })
+    );
+    await vi.waitFor(() => expect(icons.upload).toHaveBeenCalledTimes(1));
+
+    // The template takes the persona over while the copy is still uploading.
+    await userEvent.click(page.getByRole("tab", { name: /widget_admin_tab_appearance/ }));
+    await userEvent.click(page.getByRole("button", { name: "widget_admin_template_reapply" }));
+    await userEvent.click(
+      page.getByRole("alertdialog").getByRole("button", { name: "widget_admin_template_reapply" })
+    );
+    await vi.waitFor(() => expect(linkTemplate).toHaveBeenCalledTimes(1));
+    await userEvent.click(page.getByRole("tab", { name: /widget_admin_tab_content/ }));
+    await expect
+      .element(page.getByLabelText("widget_admin_persona_name", { exact: true }))
+      .toBeDisabled();
+
+    complete({ id: "unused-icon" });
+    await vi.waitFor(() => expect(icons.delete).toHaveBeenCalledWith({ id: "unused-icon" }));
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    expect(update).not.toHaveBeenCalled();
+  });
+
   test("a refusal of the whole texts group is tied to every text field", async () => {
     const { update } = renderEditor(widget());
     update.mockRejectedValueOnce(

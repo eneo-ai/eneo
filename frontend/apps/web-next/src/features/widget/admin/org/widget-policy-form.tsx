@@ -37,8 +37,14 @@ export function WidgetPolicyForm({ policy: initial }: { policy: WidgetPolicy }) 
         try {
           const saved = await widgetPolicyApi.update(update);
           queryClient.setQueryData(widgetPolicyQueryOptions(browserApi).queryKey, saved);
-          // The overview folds policy violations into each widget's blockers.
+          // The overview and every space's widget list fold policy violations
+          // into each widget's blockers; an editor reopened within its stale
+          // time would otherwise still refuse to resume a now-valid widget.
           void queryClient.invalidateQueries({ queryKey: WIDGET_OVERVIEW_KEY });
+          void queryClient.invalidateQueries({
+            queryKey: ["spaces"],
+            predicate: ({ queryKey }) => queryKey[2] === "widgets"
+          });
           return saved;
         } catch (error) {
           toastWidgetError(error, t);

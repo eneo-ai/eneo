@@ -99,7 +99,9 @@
   let uploadError = $state<string | null>(null);
 
   async function attachAvatar(id: string) {
-    if (hasName && mounted) onChange({ ...persona, avatar_icon_id: id });
+    // A template that took the persona over while the upload ran owns the
+    // avatar now; the API refuses a change to a locked persona.
+    if (hasName && mounted && !locked) onChange({ ...persona, avatar_icon_id: id });
     else await eneo.icons.delete({ id }).catch(() => {});
   }
 

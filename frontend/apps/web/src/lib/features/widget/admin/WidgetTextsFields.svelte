@@ -105,6 +105,21 @@
       onChange({ subtitle: drafts.subtitle.text });
     });
   });
+  // A lock taking hold on the subtitle (a template applied) replaces a held
+  // blank with the saved text, even one equal to the text saved before: the
+  // disabled field cannot be corrected, and the blank must not be sent once
+  // the widget is paused.
+  let subtitleWasLocked = untrack(() => locked("subtitle"));
+  $effect(() => {
+    const now = locked("subtitle");
+    if (now === subtitleWasLocked) return;
+    subtitleWasLocked = now;
+    if (!now) return;
+    untrack(() => {
+      subtitleBlankHeld = false;
+      drafts.subtitle.text = texts.subtitle ?? "";
+    });
+  });
   const problems = $derived<Partial<Record<keyof WidgetTexts, string>>>({
     ...errors,
     subtitle:

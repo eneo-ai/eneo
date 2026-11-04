@@ -4,7 +4,7 @@ import { useAnnounce } from "@astryxdesign/core/hooks";
 import { Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
 import { Check, ThumbsDown, ThumbsUp } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 
 type Vote = 1 | -1;
@@ -66,6 +66,11 @@ export function WidgetFeedback({
     }
   }
   const error = failure && failure.generation === generation ? failure.message : null;
+  // Read after a vote's await: the question asked meanwhile moved the visitor on.
+  const generationNow = useRef(generation);
+  useEffect(() => {
+    generationNow.current = generation;
+  });
   const setError = (message: string | null) =>
     setFailure(message === null ? null : { generation, message });
 
@@ -100,10 +105,14 @@ export function WidgetFeedback({
     try {
       // The error is stamped with this attempt's generation; a later question
       // hides it, and the focus move is skipped once the editor is gone.
+      const started = generation;
       const problem = await submit({ value });
       setError(problem);
       if (!problem) {
         setVotes((state) => ({ ...state, [sessionId]: value }));
+        // The vote is kept; the acknowledgement and the focus move belong to
+        // the turn it was given in, not to the question being typed now.
+        if (generationNow.current !== started) return;
         announce(sent ? t("widget_feedback_received") : t("widget_feedback_thanks"));
         finishVoting();
       }

@@ -141,10 +141,12 @@ export function WidgetRulesFields({
             : (widget.allowed_origins ?? []).length === 0
               ? blockerLabel("allowed_origins_empty", t)
               : undefined;
-  // Lines that cannot be sent yet hold back the valid ones with them.
+  // Lines that cannot be sent yet hold back the valid ones with them, and a
+  // valid list typed but not yet committed (blur) is an edit too.
   const originsHeld =
-    (parsedOrigins.invalid.length > 0 || parsedOrigins.tooMany || emptiedWhileActive) &&
-    origins.text.trim() !== savedOrigins;
+    parsedOrigins.invalid.length > 0 ||
+    parsedOrigins.tooMany ||
+    parsedOrigins.origins.join("\n") !== savedOrigins;
   useEffect(() => {
     autosave.markDraft("allowed_origins", originsHeld);
     return () => autosave.markDraft("allowed_origins", false);
