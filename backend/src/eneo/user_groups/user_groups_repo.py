@@ -36,7 +36,7 @@ _NOT_DELETED = sa.or_(
 _PLAIN_EMAIL = re.compile(
     r"(?!.*[xX][nN]--)[A-Za-z0-9._+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+"
 )
-_EMAIL = TypeAdapter(EmailStr)
+_EMAIL: TypeAdapter[str] = TypeAdapter(EmailStr)
 
 
 def _listed_email(stored: str) -> str:
