@@ -96,6 +96,27 @@ test.describe("a docked bar on a phone turned sideways", () => {
   });
 });
 
+test.describe("a docked bar on an upright phone", () => {
+  // Android resizes the window for the keyboard (interactive-widget=resizes-content);
+  // the small phone's window is then wider than tall.
+  for (const viewport of [
+    { width: 390, height: 460 },
+    { width: 360, height: 320 }
+  ]) {
+    test.describe(`${viewport.width} × ${viewport.height}`, () => {
+      test.use({ viewport, hasTouch: true, isMobile: true });
+
+      test("stays above the keyboard while a text field has focus", async ({ page }) => {
+        await page.goto("/account/api-keys");
+        const bar = page.locator("[data-docked-actions]");
+        await expect(bar).toBeVisible();
+        await page.getByRole("main").getByRole("textbox").first().focus();
+        await expect(bar).toBeVisible();
+      });
+    });
+  }
+});
+
 test.describe("a phone turned while an editor's section is open", () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
 

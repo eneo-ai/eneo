@@ -18,7 +18,9 @@ import { useLayoutEffect, useRef, type ReactNode } from "react";
  * container it sits in adds no gap for it. On a touch phone turned sideways
  * it gives way while a text field in the page has focus: with the software
  * keyboard up it would cover the field being typed in. A switch or a checkbox
- * opens no keyboard, so the bar stays.
+ * opens no keyboard, so the bar stays. Sideways is told by width: an upright
+ * phone's bar rises above its keyboard, and that keyboard can leave a small
+ * phone's window wider than tall, so `landscape:` would match it too.
  */
 export function DockedActions({ label, children }: { label: string; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -48,7 +50,7 @@ export function DockedActions({ label, children }: { label: string; children: Re
       role="group"
       aria-label={label}
       data-docked-actions=""
-      className="phone:border-ax-border phone:bg-ax-surface phone:fixed phone:inset-x-0 phone:bottom-0 phone:z-10 phone:border-t phone:px-4 phone:pt-3 phone:pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] phone:[&>*]:min-w-0 phone:short:pointer-coarse:group-has-[main_:is(input:not([type=checkbox],[type=radio],[type=file],[type=range],[type=button],[type=submit]),textarea,[contenteditable=true]):focus]/shell:invisible flex flex-wrap justify-end gap-2 max-sm:[&>*]:flex-[1_1_auto]"
+      className="phone:border-ax-border phone:bg-ax-surface phone:fixed phone:inset-x-0 phone:bottom-0 phone:z-10 phone:border-t phone:px-4 phone:pt-3 phone:pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] phone:[&>*]:min-w-0 phone:short:pointer-coarse:min-[30rem]:group-has-[main_:is(input:not([type=checkbox],[type=radio],[type=file],[type=range],[type=button],[type=submit]),textarea,[contenteditable=true]):focus]/shell:invisible flex flex-wrap justify-end gap-2 max-sm:[&>*]:flex-[1_1_auto]"
     >
       {children}
     </div>

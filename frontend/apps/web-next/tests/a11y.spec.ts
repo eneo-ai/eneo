@@ -116,7 +116,7 @@ async function expectNoAxeViolations(
   ]);
   // options() replaces the run options, so it goes before withTags().
   let builder = new AxeBuilder({ page: page as unknown as AxePage })
-    .options({ rules })
+    .options({ rules, ancestry: true })
     .withTags(WCAG_22_AA_TAGS);
   for (const selector of [...DEV_ONLY, ...Object.keys(exclude)]) {
     builder = builder.exclude(selector);

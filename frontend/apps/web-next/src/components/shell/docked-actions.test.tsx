@@ -13,6 +13,6 @@ it("gives way to the keyboard on a short screen while the page's field has focus
     </DockedActions>
   );
   expect(screen.getByRole("group", { name: "Åtgärder" }).className).toContain(
-    "phone:short:pointer-coarse:group-has-[main_:is(input:not([type=checkbox],[type=radio],[type=file],[type=range],[type=button],[type=submit]),textarea,[contenteditable=true]):focus]/shell:invisible"
+    "phone:short:pointer-coarse:min-[30rem]:group-has-[main_:is(input:not([type=checkbox],[type=radio],[type=file],[type=range],[type=button],[type=submit]),textarea,[contenteditable=true]):focus]/shell:invisible"
   );
 });

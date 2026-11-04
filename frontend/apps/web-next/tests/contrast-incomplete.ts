@@ -8,9 +8,10 @@ import type { Result } from "axe-core";
  * the legacy buttons paint hover and pressed as a gradient, so that text is never
  * judged. tests/contrast-incomplete.baseline.json holds, per scan, how many such
  * places there were and why (axe's messageKey: bgImage, bgGradient, bgOverlap, …).
- * A place is a node's selector without a row's position, generated ids and the
- * attributes that hold a row's data, so the same cell in 4 rows or in 40 is one:
- * the count follows the page, not its data.
+ * A place is a node's path from the document root (axe's `ancestry`, so scans
+ * run with it on) without a row's position, so the same cell in 4 rows or in 40
+ * is one and any other node is a place of its own: the count follows the page,
+ * not its data.
  *
  * The baseline is a ratchet: a scan may not leave more text unjudged than its
  * entry (a missing entry is 0). CONTRAST_UPDATE=1 rewrites the entries of the
@@ -28,27 +29,15 @@ function read(): Baseline {
 const total = (counts: Record<string, number> = {}) =>
   Object.values(counts).reduce((sum, count) => sum + count, 0);
 
-/**
- * A selector without what tells copies of one place apart: a row's or a list
- * item's position, generated ids (`#space-3`), and the attributes that hold a
- * row's data (`DATA_ATTRIBUTES`). Columns, components, named ids and every
- * other attribute stay, so another column or control is a place of its own.
- */
-const DATA_ATTRIBUTES = /\[(?:href|src|data-row|data-id)\b[^\]]*\]/g;
-
-function placeOf(selector: unknown): string {
-  return String(selector)
-    .replace(/\b(tr|li|option):nth-(?:child|of-type)\(\d+\)/g, "$1")
-    .replace(DATA_ATTRIBUTES, "")
-    .replace(/#(?:\\.|[\w-])*\d(?:\\.|[\w-])*/g, "");
-}
+/** A path without a row's or a list item's position; a column keeps its own. */
+const placeOf = (path: unknown) => String(path).replace(/\b(tr|li|option):nth-child\(\d+\)/g, "$1");
 
 /** Per reason, how many distinct places axe could not judge for contrast. */
 export function incompleteCounts(incomplete: Result[]): Record<string, number> {
   const places: Record<string, Set<string>> = {};
   for (const node of incomplete.find((result) => result.id === "color-contrast")?.nodes ?? []) {
     const reason = String(node.any[0]?.data?.messageKey ?? "unknown");
-    const place = JSON.stringify(node.target.map(placeOf));
+    const place = JSON.stringify((node.ancestry ?? node.target).map(placeOf));
     (places[reason] ??= new Set()).add(place);
   }
   return Object.fromEntries(Object.entries(places).map(([reason, set]) => [reason, set.size]));
