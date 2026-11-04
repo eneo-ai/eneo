@@ -819,16 +819,29 @@ async def test_task_timeout_terminalization_rejects_late_completed_step_write(
             )
         ):
             started.set()
+            # The budget ends here, not on a clock the claim above could outrun.
+            task_timeouts[0].reschedule(asyncio.get_running_loop().time())
             try:
                 await asyncio.Event().wait()
             except asyncio.CancelledError:
                 cancelled.set()
                 raise
 
+    task_budget_seconds = 3600
+    task_timeouts: list[asyncio.Timeout] = []
+    real_timeout = asyncio.timeout
+
+    def _recording_timeout(delay: float | None) -> asyncio.Timeout:
+        timeout = real_timeout(delay)
+        if delay == task_budget_seconds:
+            task_timeouts.append(timeout)
+        return timeout
+
+    monkeypatch.setattr(asyncio, "timeout", _recording_timeout)
     monkeypatch.setattr(
         tasks_module,
         "get_settings",
-        lambda: SimpleNamespace(task_execution_timeout_seconds=0.01),
+        lambda: SimpleNamespace(task_execution_timeout_seconds=task_budget_seconds),
     )
     monkeypatch.setattr(
         tasks_module, "_execute_flow_run_async", _execute_until_cancelled
