@@ -19,6 +19,7 @@ import type { ChatPartnerSwitcherItem } from "./partner-switcher";
 import { DeleteSessionDialog, RenameSessionDialog, useSessionMutations } from "./session-actions";
 import { CHAT_PANEL_IDS, readChatTab, type ChatTab } from "./chat-url";
 import { useAppContext } from "@/components/providers/app-context";
+import { useFocusRescue } from "@/lib/focus-rescue";
 import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 
 type ActiveConversation = {
@@ -122,6 +123,7 @@ export function ChatPage({
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
   const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(null);
   const historyTrigger = useRef<HTMLElement | null>(null);
+  const rescueFocus = useFocusRescue();
   const debugRef = useRef<ChatDebugHandle>(null);
   const { can } = useAppContext();
   const debugAvailable = can("assistant_debug") && partner.type !== "group-chat";
@@ -217,17 +219,24 @@ export function ChatPage({
     setHistoryOpen(true);
   }
 
+  /** Historik's rows go with the tab, the picked one too: focus moves to the conversation's panel. */
+  function moveFocusToChat() {
+    if (viewTab === "history") rescueFocus(() => document.getElementById(CHAT_PANEL_IDS.chat));
+  }
+
   function selectSession(sessionId: string) {
     const showing = pendingSessionId ?? active?.sessionId ?? null;
     if (sessionId !== showing) {
       // Picked from Historik, it opens in Chatt, as in Svelte.
       confirmConversationChange(() => {
+        moveFocusToChat();
         openSession(sessionId);
         updateUrl(sessionId, { ignoreBlocker: true }, "chat");
         closeHistory();
       });
       return;
     }
+    moveFocusToChat();
     if (viewTab === "history") selectTab("chat");
     // The phone's history sheet covers the chat: it closes so the conversation shows.
     closeHistory();
@@ -353,8 +362,8 @@ export function ChatPage({
         historyOpen={historyOpen}
         onToggleHistory={toggleHistory}
         onNewConversation={newConversation}
-        menuItems={menuItems}
         minimal={isPersonal && !started && pendingSessionId === null && viewTab === "chat"}
+        menuItems={menuItems}
       />
       <div ref={rowRef} className="flex min-h-0 flex-1">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -401,7 +410,8 @@ export function ChatPage({
             role={phone ? undefined : "tabpanel"}
             aria-label={t("chat")}
             hidden={viewTab !== "chat"}
-            className="flex min-h-0 min-w-0 flex-1 flex-col"
+            tabIndex={-1}
+            className="flex min-h-0 min-w-0 flex-1 flex-col outline-none"
           >
             {active ? (
               <ChatView

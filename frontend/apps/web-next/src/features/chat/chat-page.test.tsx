@@ -7,6 +7,7 @@ import { renderInApp, testAppContext } from "@/test/render";
 import { replaceUrl, setRoute } from "@/test/navigation";
 import { setViewport } from "@/test/setup-dom";
 import { ChatPage } from "./chat-page";
+import { CHAT_PANEL_IDS } from "./chat-url";
 
 type Chunk = Record<string, unknown>;
 
@@ -444,6 +445,16 @@ describe("ChatPage Historik tab, as in Svelte", () => {
     );
     expect(new URLSearchParams(window.location.search).get("tab")).toBeNull();
     expect(await screen.findByRole("log", { name: "Konversation" })).toBeTruthy();
+  });
+
+  it("moves focus to the conversation when the Historik row that held it goes", async () => {
+    window.history.replaceState(null, "", "/chat?tab=history");
+    setRoute("/chat?tab=history");
+    renderPage(null);
+    const row = await within(historyPanel()).findByRole("button", { name: /^Samtal s-1/ });
+    row.focus();
+    fireEvent.click(row);
+    await waitFor(() => expect(document.activeElement?.id).toBe(CHAT_PANEL_IDS.chat));
   });
 
   it("starts a new conversation in Chatt from Historik", async () => {
