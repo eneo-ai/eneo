@@ -365,7 +365,7 @@ export type ChatHeaderProps = {
   editHref?: string | null;
   /** Felsökning; isEnabled is false until a saved answer exists to inspect. */
   debug?: { isEnabled: boolean; onOpen: (trigger: HTMLElement) => void } | null;
-  /** Personal assistant start state: the selector lives in the composer instead. */
+  /** A space's default assistant before its first question: the selector lives in the composer. */
   minimal?: boolean;
 };
 
@@ -421,11 +421,16 @@ export function ChatHeader({
     <>
       {/* Beside the SideNav, as Svelte's chat page header: who you talk to and
           the conversation's title, the views as tabs in the middle, then
-          Felsökning, Redigera and Ny konversation. */}
-      <div className="border-ax-border wide:flex hidden min-h-14 shrink-0 items-center gap-3 border-b ps-4 pe-3">
-        <div className="flex min-w-0 flex-1 items-center gap-3">
-          {partner.type === "default-assistant" || minimal ? (
-            <span className="shrink-0 text-lg font-bold">{t("personal_assistant")}</span>
+          Felsökning, Redigera and Ny konversation. By what the space beside the
+          SideNav holds, not the window: the title gives way, then the switcher
+          down to its floor, and past that the buttons move to a row of their
+          own, whole. */}
+      <div className="border-ax-border wide:flex hidden min-h-14 shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b py-1.5 ps-4 pe-3">
+        <div className="flex min-w-48 flex-1 items-center gap-3">
+          {(partner.type === "default-assistant" && partner.personalSpace) || minimal ? (
+            <span className="min-w-0 truncate text-lg font-bold">
+              {displayPartnerName(partner, t)}
+            </span>
           ) : (
             <PartnerSwitcher
               partner={partner}
@@ -440,7 +445,7 @@ export function ChatHeader({
           ) : title !== null ? (
             <>
               <span aria-hidden="true" className="bg-ax-border-strong h-[22px] w-px shrink-0" />
-              <h1 className="text-ax-text-secondary min-w-0 truncate text-sm font-medium">
+              <h1 className="text-ax-text-secondary min-w-0 shrink-[9999] truncate text-sm font-medium">
                 {title}
               </h1>
             </>
@@ -454,6 +459,7 @@ export function ChatHeader({
             view.onChange(value === "history" || value === "insights" ? value : "chat")
           }
           size="sm"
+          className="shrink-0"
         >
           <Tab value="chat" label={t("chat")} panelId={CHAT_PANEL_IDS.chat} />
           <Tab value="history" label={t("history")} panelId={CHAT_PANEL_IDS.history} />
@@ -462,14 +468,8 @@ export function ChatHeader({
           )}
         </TabList>
         {/* Beside an icon rail (below 1280 px: an iPad either way, a small laptop)
-            Felsökning and Redigera are named icons, and the row keeps its
-            buttons whole: the conversation's title gives way instead. */}
-        <div
-          className={cn(
-            "flex items-center justify-end gap-2",
-            compact ? "shrink-0" : "min-w-0 flex-1"
-          )}
-        >
+            Felsökning and Redigera are named icons. */}
+        <div className="flex min-w-max flex-1 items-center justify-end gap-2">
           <ClassificationToken name={partner.securityClassification} />
           {debug && (debug.isEnabled || !coarse) && (
             <Button

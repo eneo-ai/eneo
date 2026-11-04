@@ -212,8 +212,33 @@ describe("ChatHeader beside an icon rail (below 1280 px: an iPad, a small laptop
     expect(within(wide).getByRole("button", { name: "Ny konversation" }).textContent).toContain(
       "Ny konversation"
     );
-    // The title gives way first: the buttons do not shrink.
-    expect(debug.closest("div")!.className).toMatch(/(^| )shrink-0( |$)/);
+    // The title gives way first: the buttons do not shrink, at any width.
+    expect(debug.closest("div")!.className).toMatch(/(^| )min-w-max( |$)/);
+  });
+
+  it("names a space's default assistant after the space, and only the personal one Personlig assistent", () => {
+    const shared = {
+      ...partner,
+      type: "default-assistant",
+      name: "Default",
+      personalSpace: false
+    } as const;
+    renderHeader({ partner: shared, minimal: true });
+    const wide = screen.getByRole("tablist").closest<HTMLElement>("[class*='wide:flex']")!;
+    expect(within(wide).getByText("Assistent för Upphandling")).toBeTruthy();
+    expect(within(wide).queryByText("Personlig assistent")).toBeNull();
+    cleanup();
+    renderHeader({ partner: { ...shared, personalSpace: true } });
+    const personal = screen.getByRole("tablist").closest<HTMLElement>("[class*='wide:flex']")!;
+    expect(within(personal).getByText("Personlig assistent")).toBeTruthy();
+  });
+
+  it("gives a shared space's default assistant its switcher once the conversation has started", () => {
+    renderHeader({
+      partner: { ...partner, type: "default-assistant", name: "Default", personalSpace: false }
+    });
+    const wide = screen.getByRole("tablist").closest<HTMLElement>("[class*='wide:flex']")!;
+    expect(within(wide).getByRole("button", { name: /Byt assistent$/ })).toBeTruthy();
   });
 
   it("hides Felsökning on touch until a saved answer exists: its reason is a tooltip touch cannot reach", () => {
