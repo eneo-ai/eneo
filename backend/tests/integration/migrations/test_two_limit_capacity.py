@@ -39,7 +39,7 @@ def test_two_limit_capacity_round_trip(test_settings):
                     (identity, identity, identity, input_tokens, output_tokens),
                 )
         connection.commit()
-        command.upgrade(config, "heads")
+        command.upgrade(config, "202609171100")
         with connection.cursor() as cursor:
             cursor.execute(
                 "SELECT column_name FROM information_schema.columns WHERE table_name = 'completion_models' AND column_name = 'context_window_tokens'"
@@ -61,5 +61,5 @@ def test_two_limit_capacity_round_trip(test_settings):
                 )
                 assert cursor.fetchone() == (*expected, None)
         connection.commit()
-        command.upgrade(config, "heads")
-        command.upgrade(config, "heads")
+        command.upgrade(config, "202609171100")
+        command.upgrade(config, "202609171100")
