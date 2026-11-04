@@ -133,11 +133,17 @@ export function ResourceCard({
         label={<span className="block truncate font-semibold">{name}</span>}
         description={
           status || description || hasMeta ? (
-            <span className="flex min-w-0 flex-col">
+            <span
+              // Without a description the status and the meta share a line: two lines to a row.
+              className={cn(
+                "flex min-w-0",
+                description ? "flex-col" : "items-center gap-x-1.5 [&>*:last-child]:min-w-0"
+              )}
+            >
               {status || description ? (
                 <span className="flex min-w-0 flex-wrap items-center gap-x-1.5">
                   {status ? (
-                    <span className="flex max-w-full min-w-0 [&>span]:min-w-0 [&>span>span:last-child]:truncate">
+                    <span className="flex max-w-full min-w-0 [&>span]:min-w-0 [&>span]:font-normal [&>span>span:last-child]:truncate">
                       {status}
                     </span>
                   ) : null}

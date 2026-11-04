@@ -150,9 +150,18 @@ function JobRow({ job }: { job: Job }) {
  * An Astryx Popover lives in the top layer next to its trigger, so it also
  * opens from inside the modal navigation drawer on phones.
  */
-export function JobIndicator({ alignment = "end" }: { alignment?: "start" | "end" }) {
+export function JobIndicator({
+  alignment = "end",
+  isHiddenWhenIdle = false
+}: {
+  alignment?: "start" | "end";
+  /** Only while something runs: for a phone's top bar, where the drawer always has the bell. */
+  isHiddenWhenIdle?: boolean;
+}) {
   const t = useTranslations();
   const { jobs, uploads, runningCount } = useJobActivity();
+  const [isOpen, setIsOpen] = useState(false);
+  const [isHeld, setIsHeld] = useState(false);
 
   const sections = TASK_SECTIONS.map(([task, titleKey]) => ({
     titleKey,
@@ -162,12 +171,19 @@ export function JobIndicator({ alignment = "end" }: { alignment?: "start" | "end
   const label =
     runningCount > 0 ? t("fix_notifications_running", { count: runningCount }) : t("notifications");
 
+  // A job that settles takes away neither its open panel nor the focused bell.
+  if (isHiddenWhenIdle && runningCount === 0 && !isHeld) return null;
+
   return (
     <Popover
       label={t("notifications_and_jobs")}
       placement="below"
       alignment={alignment}
       width={384}
+      onOpenChange={(open) => {
+        setIsOpen(open);
+        if (open) setIsHeld(true);
+      }}
       content={
         <div className="flex flex-col gap-3">
           <p className="text-ax-text-secondary font-mono text-sm font-medium">
@@ -209,6 +225,10 @@ export function JobIndicator({ alignment = "end" }: { alignment?: "start" | "end
         variant="ghost"
         label={label}
         tooltip={label}
+        onFocus={() => setIsHeld(true)}
+        onBlur={() => {
+          if (!isOpen) setIsHeld(false);
+        }}
         icon={
           <Icon
             icon={runningCount === 0 ? Bell : BellDot}

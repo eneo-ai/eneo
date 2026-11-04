@@ -71,10 +71,13 @@ type IndicatorState = "error" | "saving" | "dirty" | "saved";
  */
 export function SaveStatusIndicator({
   isQuiet = false,
-  isCompact = false
+  isCompact = false,
+  isHiddenWhenSaved = false
 }: {
   isQuiet?: boolean;
   isCompact?: boolean;
+  /** Says nothing while nothing is happening: for a place with no field of its own. */
+  isHiddenWhenSaved?: boolean;
 }) {
   const t = useTranslations();
   const statuses = useContext(StatusMapContext);
@@ -139,6 +142,8 @@ export function SaveStatusIndicator({
         {isCompact ? t("save_status_unsaved_short") : t("unsaved_changes", { count: dirtyCount })}
       </span>
     );
+  } else if (isHiddenWhenSaved) {
+    return null;
   } else {
     content = (
       <span className="text-muted-foreground inline-flex items-center gap-1.5 text-sm">

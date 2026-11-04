@@ -34,7 +34,11 @@ export function OverviewApps() {
       end={
         items.length > 0 ? (
           <>
-            {canCreate ? <CreateAppButton secondary /> : null}
+            {canCreate ? (
+              <span className="phone:hidden contents">
+                <CreateAppButton secondary />
+              </span>
+            ) : null}
             <OverviewLink href={`/spaces/${routeId}/apps`} label={t("space_view_all_apps")}>
               {t("space_view_all")}
             </OverviewLink>

@@ -27,7 +27,7 @@ export function AppDetail({ appId }: { appId: string }) {
         <BackLink href={`/spaces/${routeId}/apps`} hideOnPhone>
           {t("apps")}
         </BackLink>
-        <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2">
             <PageHeader title={app.name} className="min-w-0" />
             <AppSwitcher key={app.id} appId={app.id} />

@@ -42,9 +42,7 @@ export function SpacePhoneHeader({
   const fromMenu = space.personal || space.organization;
   const canChat =
     !space.organization && space.default_assistant != null && can("read", "default_assistant");
-  const description = space.personal
-    ? t("personal_space_description")
-    : space.description?.trim() || null;
+  const description = space.personal ? null : space.description?.trim() || null;
   const spaceHref =
     sections.find((candidate) => candidate.id === "overview")?.href ??
     spaceLandingHref(sections, routeId);

@@ -175,26 +175,27 @@ export function AppsPage() {
             />
           ) : (
             <>
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                {filterShown ? (
+              {filterShown ? (
+                <div className="phone:flex-nowrap flex flex-wrap items-center justify-between gap-3">
                   <ResourceFilterInput
+                    className="phone:flex-1"
                     value={filter}
                     onChange={setFilter}
                     label={t("space_filter_apps_label")}
                     placeholder={t("filter_apps_placeholder")}
                     resultCount={filteredItems.length}
                   />
-                ) : null}
-                <ResourceViewControls
-                  view={view}
-                  onViewChange={chooseView}
-                  sortConfig={sortConfig}
-                  options={[
-                    { key: "name", label: t("name") },
-                    ...(showStatus ? [{ key: "published" as const, label: t("status") }] : [])
-                  ]}
-                />
-              </div>
+                  <ResourceViewControls
+                    view={view}
+                    onViewChange={chooseView}
+                    sortConfig={sortConfig}
+                    options={[
+                      { key: "name", label: t("name") },
+                      ...(showStatus ? [{ key: "published" as const, label: t("status") }] : [])
+                    ]}
+                  />
+                </div>
+              ) : null}
               {filteredItems.length === 0 ? (
                 <EmptyState
                   isAnnounced={false}

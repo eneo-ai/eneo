@@ -313,6 +313,9 @@ function usePhoneView(ids: readonly string[], openFirst: string | undefined) {
   return { view, href, open, back, reveal, rootRef };
 }
 
+const PHONE_TITLE_CLASSES =
+  "text-ax-text m-0 px-4 pt-4 text-2xl leading-tight font-semibold break-words";
+
 function SettingsLayout({
   header,
   navigationLabel,
@@ -380,6 +383,8 @@ function SettingsLayout({
     else views.open(section, field);
   };
 
+  const PhoneTitle = views?.phone.parent ? "h1" : "h2";
+
   return (
     <div
       ref={views?.rootRef}
@@ -397,8 +402,6 @@ function SettingsLayout({
                 label: views.phone.title,
                 ...inPlaceLink(views.href(null), views.back)
               }}
-              title={shown.label}
-              isTitleShown
               actions={
                 <span className="pe-2.5">
                   <SaveStatusIndicator isQuiet isCompact />
@@ -410,30 +413,30 @@ function SettingsLayout({
               until="phone"
               parent={views.phone.parent}
               title={views.phone.title}
-              isTitleShown
               // A filled button needs more room from the edge than the bar's ghost back link.
               actions={
                 views.phone.actions ? <span className="pe-2.5">{views.phone.actions}</span> : null
               }
             />
           ) : null}
-          {/* The header is the tablet's. A phone shows the name in the bar,
-              the h1 for assistive technology, and the save state: here on
-              the index, in the bar on a section, where it stays in view. */}
-          {views.phone.parent ? (
-            <h1 className="wide:hidden sr-only">{views.phone.title}</h1>
-          ) : shown ? null : (
-            // The page's frame has the h1 (the space) and a bar whose title shows only once
-            // the page has scrolled: the index names itself.
-            <h2 className="text-ax-text wide:hidden m-0 px-4 pt-4 text-2xl leading-tight font-semibold">
+          {/* The header is the tablet's. On a phone the index names itself, and
+              the bar takes the name over once it has scrolled away. On a
+              section the section's own heading is the title, so the h1 stays
+              for assistive technology; the page's frame has the h1 of a page
+              inside a space. */}
+          {views.phone.parent || !shown ? (
+            <PhoneTitle className={cn("wide:hidden", shown ? "sr-only" : PHONE_TITLE_CLASSES)}>
               {views.phone.title}
-            </h2>
-          )}
+            </PhoneTitle>
+          ) : null}
           <div
             data-editor-strip
-            className={cn("wide:hidden flex min-h-11 items-center px-4 pt-2", shown && "hidden")}
+            className={cn(
+              "wide:hidden flex min-h-11 items-center px-4 pt-2 empty:hidden",
+              shown && "hidden"
+            )}
           >
-            <SaveStatusIndicator isQuiet />
+            <SaveStatusIndicator isQuiet isHiddenWhenSaved />
           </div>
         </>
       ) : null}
@@ -555,7 +558,7 @@ function PhoneIndex({
     <nav
       data-editor-index
       aria-label={label}
-      className={cn("flex flex-col gap-6 pt-2 pb-8", className)}
+      className={cn("flex flex-col gap-6 pt-4 pb-8", className)}
     >
       {groupSections(sections).map((group, index) => (
         <IndexGroup key={group.label ?? index} title={group.label}>

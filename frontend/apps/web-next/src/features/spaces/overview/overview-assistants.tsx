@@ -13,9 +13,9 @@ import { OverviewLink, OverviewSection } from "./overview-section";
 /**
  * The newest assistants and group chats as cards (three, one row on a tablet),
  * with a small secondary create control in the heading for users who may
- * create: the tab's docked button is the primary action. One control at every
- * width, so a dialog it opened stays open when the screen turns. "Visa alla"
- * leads to the assistants tab.
+ * create, hidden on a phone, where the tab's docked button is one tap away.
+ * One control at every width, so a dialog it opened stays open when the screen
+ * turns. "Visa alla" leads to the assistants tab.
  */
 export function OverviewAssistants() {
   const t = useTranslations();
@@ -33,7 +33,11 @@ export function OverviewAssistants() {
       end={
         items.length > 0 ? (
           <>
-            {canCreate ? <CreateChatAppMenu secondary /> : null}
+            {canCreate ? (
+              <span className="phone:hidden contents">
+                <CreateChatAppMenu secondary />
+              </span>
+            ) : null}
             <OverviewLink
               href={`/spaces/${routeId}/assistants`}
               label={t("space_view_all_assistants")}

@@ -13,6 +13,7 @@ import { useShell } from "./shell-context";
  * Phones, held either way (below 768 px, or turned sideways; otherwise the
  * SideNav carries all of it): menu, Eneo, search (the ⌘K palette), the
  * notification bells and "Ny konversation", 56 px high with 44 px targets.
+ * The job bell shows here only while a job runs; the drawer always has it.
  * With text enlarged to about 125% or more (the bar is then narrower than
  * 22 rem) the bells and "Ny konversation" leave it: their rem-sized buttons
  * no longer fit and pushed the page sideways. Both stay in the drawer.
@@ -52,7 +53,7 @@ export function MobileTopBar() {
         className="size-11"
       />
       <div className="flex items-center @max-[22rem]/topbar:hidden">
-        <NotificationBells />
+        <NotificationBells isJobBellHiddenWhenIdle />
       </div>
       <Button
         href={NEW_CONVERSATION_HREF}

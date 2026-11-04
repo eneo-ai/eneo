@@ -29,6 +29,7 @@ import {
 } from "react";
 import { useFileDrop } from "@/features/files/use-file-drop";
 import { revealProblems } from "@/components/composites/field-problem";
+import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 import type { ChatPartner, KnowledgeOrigin } from "@/lib/chat/types";
 import { cn } from "@/lib/utils";
 import { ComposerAttachments } from "./attachments";
@@ -334,6 +335,7 @@ export function Composer({
   // A touch screen has no Shift, Ctrl or Enter key to point at, and its
   // Return adds a line.
   const coarse = useMediaQuery("(pointer: coarse)");
+  const phone = usePhoneScreen();
   const announce = useAnnounce();
   const hintId = useId();
   const problemId = useId();
@@ -377,7 +379,7 @@ export function Composer({
   return (
     // Toasts rise above the whole composer while focus is in it (toast-lift.ts),
     // so Send stays in view while the user types.
-    <div className="group/composer flex w-full flex-col gap-2" data-clear-of-toasts="">
+    <div className="group/composer phone:gap-3 flex w-full flex-col gap-2" data-clear-of-toasts="">
       <div className="relative" {...handlers}>
         <ChatComposer
           value={value}
@@ -498,7 +500,7 @@ export function Composer({
       {contextBar}
       <p className="text-ax-text-secondary flex items-center justify-center gap-1.5 text-center text-xs">
         <ShieldCheck aria-hidden="true" className="size-3.5 shrink-0" />
-        {variant === "start" || beforeAnswer
+        {variant === "start" || beforeAnswer || phone
           ? t("chat_sovereignty_hint")
           : t("chat_sovereignty_hint_full")}
       </p>

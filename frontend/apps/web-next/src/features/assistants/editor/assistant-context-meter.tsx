@@ -102,8 +102,8 @@ export function AssistantContextMeter({
           }
         ]}
       />
-      <p className="text-ax-text-secondary text-sm">{t("assistant_context_scope")}</p>
-      <p className="text-ax-text-secondary text-sm">
+      <p className="text-ax-text-secondary phone:hidden text-sm">{t("assistant_context_scope")}</p>
+      <p className="text-ax-text-secondary phone:hidden text-sm">
         {t("assistant_context_reserve", { tokens: format.number(reserve) })}
       </p>
       {variant !== "neutral" && (
