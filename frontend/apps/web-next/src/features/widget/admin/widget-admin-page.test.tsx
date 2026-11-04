@@ -673,6 +673,41 @@ describe("WidgetAdminPage", () => {
     expect(api.PATCH).not.toHaveBeenCalled();
   });
 
+  it("a template that repeats the saved link and persona name and locks them drops refused drafts held before it", async () => {
+    showPage([widget()], ["widgets"], { templates: [template()] });
+    api.POST.mockImplementation((path: string) =>
+      path === LINK_PATH
+        ? ok(
+            linked({
+              persona: widget().persona,
+              template: {
+                id: "t1",
+                name: "Kommunmallen",
+                locked_groups: ["persona", "legal_texts"]
+              }
+            })
+          )
+        : ok({ token: "preview-token", expires_in: 900 })
+    );
+    const link = await screen.findByRole("textbox", { name: /^Länk i sidfoten/ });
+    fireEvent.change(link, { target: { value: "invalid" } });
+    fireEvent.blur(link);
+    expect(await screen.findByText("1 osparad ändring")).toBeTruthy();
+    expect(link.getAttribute("aria-invalid")).toBe("true");
+    const [, personaName] = screen.getAllByRole("textbox", { name: /^Namn/ });
+    fireEvent.change(personaName!, { target: { value: "1Robo" } });
+    expect(personaName!.getAttribute("aria-invalid")).toBe("true");
+
+    // The template's link and persona are the ones saved before: only the locks change.
+    await applyTemplate();
+    await waitFor(() => expect((link as HTMLInputElement).value).toBe(""));
+    await waitFor(() => expect((personaName as HTMLInputElement).value).toBe(""));
+    expect(link.getAttribute("aria-invalid")).not.toBe("true");
+    expect(personaName!.getAttribute("aria-invalid")).not.toBe("true");
+    await waitFor(() => expect(screen.queryByText("1 osparad ändring")).toBeNull());
+    expect(api.PATCH).not.toHaveBeenCalled();
+  });
+
   it("a website list typed but not yet committed counts as unsaved", async () => {
     api.PATCH.mockImplementation((_path: string, init: { body: Record<string, unknown> }) =>
       ok(widget({ ...init.body, revision: 4 }))

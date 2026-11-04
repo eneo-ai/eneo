@@ -136,6 +136,17 @@ function LinkField({
     setDraft(value);
     setInvalid(false);
   }
+  // A lock taking hold (a template applied) shows the saved address, even
+  // one equal to the address saved before: the disabled field cannot be
+  // corrected, so no refused draft may stay held in it.
+  const [wasLocked, setWasLocked] = useState(locked);
+  if (locked !== wasLocked) {
+    setWasLocked(locked);
+    if (locked) {
+      setDraft(value);
+      setInvalid(false);
+    }
+  }
   function commit() {
     const trimmed = draft.trim();
     if (trimmed === "") {

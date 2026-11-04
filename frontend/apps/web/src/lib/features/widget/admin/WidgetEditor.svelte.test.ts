@@ -398,6 +398,58 @@ describe("WidgetEditor", () => {
     expect(update).not.toHaveBeenCalled();
   });
 
+  test("a template that repeats the saved persona name and locks it drops a refused name held before it", async () => {
+    const linked = widget({
+      persona: { name: "Robo", avatar_icon_id: null, avatar_in_launcher: false },
+      template: { id: "t1", name: "Kommunblå", locked_groups: [] }
+    } as unknown as Partial<Widget>);
+    const update = vi.fn(async ({ update: patch }: { update: Partial<Widget> }) => ({
+      ...linked,
+      ...patch
+    }));
+    const linkTemplate = vi.fn(async () => ({
+      ...linked,
+      template: { id: "t1", name: "Kommunblå", locked_groups: ["persona"] },
+      revision: 1
+    }));
+    const eneo = {
+      widgets: {
+        update,
+        linkTemplate,
+        previewToken: vi.fn(() => new Promise(() => {})),
+        usage: vi.fn(() => new Promise(() => {}))
+      }
+    } as unknown as Eneo;
+    render(WidgetEditor, {
+      onReloaded: vi.fn(),
+      widget: linked,
+      assistant: { id: "a1", published: true, mcp_servers: [] } as unknown as Assistant,
+      eneo,
+      isAdmin: true,
+      policy: null,
+      release: null
+    });
+
+    const persona = page.getByLabelText("widget_admin_persona_name", { exact: true });
+    await userEvent.fill(persona, "1Robo");
+    await expect.element(persona).toHaveAttribute("aria-invalid", "true");
+    expect(leavingAsks()).toBe(true);
+
+    // The template's persona is the one saved before: only the lock changes.
+    await userEvent.click(page.getByRole("tab", { name: /widget_admin_tab_appearance/ }));
+    await userEvent.click(page.getByRole("button", { name: "widget_admin_template_reapply" }));
+    await userEvent.click(
+      page.getByRole("alertdialog").getByRole("button", { name: "widget_admin_template_reapply" })
+    );
+    await vi.waitFor(() => expect(linkTemplate).toHaveBeenCalledTimes(1));
+    await userEvent.click(page.getByRole("tab", { name: /widget_admin_tab_content/ }));
+    await expect.element(persona).toHaveValue("Robo");
+    await expect.element(persona).toHaveAttribute("aria-invalid", "false");
+    await expect.element(persona).toBeDisabled();
+    await vi.waitFor(() => expect(leavingAsks()).toBe(false));
+    expect(update).not.toHaveBeenCalled();
+  });
+
   test("a refusal of the whole texts group is tied to every text field", async () => {
     const { update } = renderEditor(widget());
     update.mockRejectedValueOnce(

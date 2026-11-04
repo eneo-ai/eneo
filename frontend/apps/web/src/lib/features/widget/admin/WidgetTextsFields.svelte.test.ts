@@ -187,4 +187,27 @@ describe("WidgetTextsFields and the save's echo", () => {
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(onChange).not.toHaveBeenCalled();
   });
+
+  test("a lock on the link drops a refused address even when the template repeats the saved one", async () => {
+    const onChange = vi.fn();
+    const onLinkHeld = vi.fn<(held: boolean) => void>();
+    const screen = render(WidgetTextsFields, { texts, onChange, onLinkHeld });
+    const link = page.getByLabelText("widget_admin_text_footer_link_url", { exact: true });
+    await userEvent.fill(link, "invalid");
+    await userEvent.tab();
+    await expect.element(link).toHaveAttribute("aria-invalid", "true");
+    expect(onLinkHeld).toHaveBeenLastCalledWith(true);
+    expect(onChange).not.toHaveBeenCalled();
+
+    // The template's link is the one saved before (none): only the lock changes.
+    await screen.rerender({
+      lockedFields: lockedTextFields({ locked_groups: ["legal_texts"] }),
+      lockHint: "Styrs av mallen"
+    });
+    await expect.element(link).toHaveValue("");
+    await expect.element(link).toHaveAttribute("aria-invalid", "false");
+    await expect.element(link).toBeDisabled();
+    expect(onLinkHeld).toHaveBeenLastCalledWith(false);
+    expect(onChange).not.toHaveBeenCalled();
+  });
 });

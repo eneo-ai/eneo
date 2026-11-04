@@ -50,6 +50,14 @@ export function WidgetPersonaFields({
   // The name is typed; the API echoes it cleaned, so the draft keeps the
   // editor's spacing while they type.
   const name = useTextDraft(persona.name ?? "");
+  // A lock taking hold (a template applied) shows the saved name, even one
+  // equal to the name saved before: the disabled field cannot be corrected,
+  // so no refused draft may stay held in it. Adjusted during render.
+  const [wasLocked, setWasLocked] = useState(locked);
+  if (locked !== wasLocked) {
+    setWasLocked(locked);
+    if (locked) name.setText(persona.name ?? "");
+  }
   // A monogram is the first character, so it must be a letter; the API
   // refuses anything else, and the field says so before a save is tried.
   const nameInvalid = !!collapseWhitespace(name.text) && !/^\p{L}/u.test(name.text.trim());

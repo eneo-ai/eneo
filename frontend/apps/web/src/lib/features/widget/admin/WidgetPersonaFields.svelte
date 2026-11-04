@@ -70,6 +70,19 @@
         collapseWhitespace(title).toLocaleLowerCase()
   );
   const savedName = $derived(persona.name ?? "");
+  // A lock taking hold (a template applied) shows the saved name, even one
+  // equal to the name saved before: the disabled field cannot be corrected,
+  // so no refused draft may stay held in it.
+  let wasLocked = untrack(() => locked);
+  $effect(() => {
+    const now = locked;
+    if (now === wasLocked) return;
+    wasLocked = now;
+    if (!now) return;
+    untrack(() => {
+      name.text = persona.name ?? "";
+    });
+  });
   $effect(() => {
     const held = nameInvalid;
     untrack(() => onHeld?.(held));

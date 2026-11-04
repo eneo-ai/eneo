@@ -33,8 +33,37 @@ vi.mock("$lib/paraglide/runtime", () => ({
   localizeHref: (href: string) => href
 }));
 
-import { goto, invalidateAll } from "$app/navigation";
+import { beforeNavigate, goto, invalidateAll } from "$app/navigation";
 import WidgetsAdminPage from "./+page.svelte";
+
+/** Whether leaving the page right now would ask for confirmation. */
+function leavingAsks(): boolean {
+  const leave = vi.mocked(beforeNavigate).mock.lastCall![0];
+  const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+  try {
+    leave({ cancel: vi.fn() } as unknown as Parameters<typeof leave>[0]);
+    return confirm.mock.calls.length > 0;
+  } finally {
+    confirm.mockRestore();
+  }
+}
+
+function tpl(id: string, name: string, is_default = false) {
+  return {
+    id,
+    name,
+    description: "",
+    theme: { primary_color: "#1F4E79", radius: 12 },
+    language: "sv",
+    is_default,
+    locked_groups: [],
+    linked_widgets: 0,
+    published_at: "2026-09-21T10:00:00Z",
+    has_unpublished_changes: false,
+    created_at: "2026-09-21T10:00:00Z",
+    updated_at: "2026-09-21T10:00:00Z"
+  };
+}
 
 const policy: WidgetPolicy = {
   max_daily_token_budget: 1000,
@@ -46,17 +75,18 @@ const policy: WidgetPolicy = {
 function renderPage(
   update: (patch: Partial<WidgetPolicy>) => Promise<WidgetPolicy>,
   totals = { widgets: 0, active: 0, questions_30d: 0, tokens_30d: 0, blocked_30d: 0 },
-  create: () => Promise<unknown> = vi.fn()
+  create: () => Promise<unknown> = vi.fn(),
+  templates: { items?: unknown[]; update?: (args: unknown) => Promise<unknown> } = {}
 ) {
   return render(WidgetsAdminPage, {
     data: {
       policy,
-      templates: [],
+      templates: templates.items ?? [],
       overview: { totals, items: [] },
       eneo: {
         widgets: {
           policy: { update },
-          templates: { create, update: vi.fn(), delete: vi.fn() },
+          templates: { create, update: templates.update ?? vi.fn(), delete: vi.fn() },
           pause: vi.fn(),
           activate: vi.fn()
         }
@@ -212,6 +242,22 @@ describe("widget policy retention window", () => {
     await expect.element(max).toHaveAttribute("aria-invalid", "false");
   });
 
+  test("a budget typed but not yet committed counts as unsaved", async () => {
+    const update = vi.fn(async (patch: Partial<WidgetPolicy>) => ({ ...policy, ...patch }));
+    renderPage(update);
+    const budget = page.getByLabelText("widget_admin_policy_max_budget");
+    await userEvent.fill(budget, "5000");
+    expect(leavingAsks()).toBe(true);
+    expect(update).not.toHaveBeenCalled();
+    await userEvent.tab();
+    await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    expect(update).toHaveBeenCalledWith({ max_daily_token_budget: 5000 });
+    await vi.waitFor(() => expect(leavingAsks()).toBe(false));
+    // Typing the saved value back is not an edit.
+    await userEvent.fill(budget, "5000");
+    expect(leavingAsks()).toBe(false);
+  });
+
   test("the policy card title is a section heading", async () => {
     renderPage(vi.fn());
     await expect
@@ -262,5 +308,55 @@ describe("widget templates", () => {
     await expect
       .element(page.getByRole("button", { name: "widget_admin_template_new" }))
       .toBeEnabled();
+  });
+});
+
+describe("widget templates default", () => {
+  const row = (name: string) =>
+    [...document.querySelectorAll("li")].find((li) => li.textContent?.includes(name))!;
+  const defaultButton = (name: string) =>
+    [...row(name).querySelectorAll("button")].find((button) =>
+      /widget_admin_template_(set|unset)_default/.test(button.textContent ?? "")
+    )!;
+  const isDefault = (name: string) =>
+    row(name).textContent?.includes("widget_admin_template_default") ?? false;
+
+  test("default changes are taken one at a time, so a late answer cannot undo a newer choice", async () => {
+    let answerFirst!: (template: unknown) => void;
+    const update = vi
+      .fn<
+        (args: { template: { id: string }; update: { is_default: boolean } }) => Promise<unknown>
+      >()
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            answerFirst = resolve;
+          })
+      )
+      .mockImplementation(async ({ template, update: patch }) =>
+        tpl(template.id, template.id === "t1" ? "Alfa" : "Beta", patch.is_default)
+      );
+    renderPage(vi.fn(), undefined, vi.fn(), {
+      items: [tpl("t1", "Alfa"), tpl("t2", "Beta")],
+      update: update as (args: unknown) => Promise<unknown>
+    });
+    (page.getByRole("tab", { name: /widget_admin_templates/ }).element() as HTMLElement).click();
+    await expect.element(page.getByRole("list", { name: "widget_admin_templates" })).toBeVisible();
+
+    defaultButton("Alfa").click();
+    await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(1));
+    // While Alfa's answer is on its way, no other default can be chosen.
+    await vi.waitFor(() => expect(defaultButton("Beta").disabled).toBe(true));
+    defaultButton("Beta").click();
+    expect(update).toHaveBeenCalledTimes(1);
+
+    answerFirst(tpl("t1", "Alfa", true));
+    await vi.waitFor(() => expect(isDefault("Alfa")).toBe(true));
+    await vi.waitFor(() => expect(defaultButton("Beta").disabled).toBe(false));
+
+    defaultButton("Beta").click();
+    await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(isDefault("Beta")).toBe(true));
+    expect(isDefault("Alfa")).toBe(false);
   });
 });

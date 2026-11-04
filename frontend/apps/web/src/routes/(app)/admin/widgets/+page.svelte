@@ -71,6 +71,16 @@
   // Committed when the field is left, never per keystroke, and kept local
   // with an error while out of range instead of failing the save.
   let rangeErrors = $state<Record<string, string>>({});
+  // A number typed but not yet committed (blur) is an edit too.
+  let pendingNumbers = $state<Record<string, boolean>>({});
+  const typedNumber = (key: string, saved: number | null | undefined) => (event: Event) => {
+    const raw = (event.currentTarget as HTMLInputElement).value;
+    pendingNumbers = { ...pendingNumbers, [key]: raw !== String(saved ?? "") };
+  };
+  function settled(key: string) {
+    const { [key]: _typed, ...pending } = pendingNumbers;
+    pendingNumbers = pending;
+  }
   function commitNumber(
     event: Event,
     key: string,
@@ -78,6 +88,7 @@
     max: number,
     apply: (value: number) => void
   ) {
+    settled(key);
     const value = Number((event.currentTarget as HTMLInputElement).value);
     if (!Number.isInteger(value) || value < min || value > max) {
       rangeErrors = {
@@ -102,6 +113,7 @@
     max: null
   });
   function commitRetention(event: Event, bound: "min" | "max") {
+    settled(`retention-${bound}`);
     retentionTyped = {
       ...retentionTyped,
       [bound]: (event.currentTarget as HTMLInputElement).value
@@ -141,9 +153,13 @@
     if (Object.keys(update).length > 0) patch(update);
   }
 
-  // Out-of-range numbers stay in their fields; leaving the page asks first.
+  // Out-of-range numbers stay in their fields, and typed ones await their
+  // commit; leaving the page asks first either way.
   $effect(() => {
-    autosave.markDraft("policy-numbers", Object.keys(rangeErrors).length > 0);
+    autosave.markDraft(
+      "policy-numbers",
+      Object.keys(rangeErrors).length > 0 || Object.values(pendingNumbers).some(Boolean)
+    );
   });
 
   const statusLabel = $derived.by(() => {
@@ -182,7 +198,12 @@
     }
   });
 
+  // One default change at a time: a late answer to an earlier choice would
+  // otherwise paint it over a newer one the server has already accepted.
+  let defaultPending = $state(false);
   async function setDefault(template: WidgetTemplate, isDefault: boolean) {
+    if (defaultPending) return;
+    defaultPending = true;
     try {
       const updated = await data.eneo.widgets.templates.update({
         template: { id: template.id },
@@ -193,6 +214,8 @@
       );
     } catch (error) {
       toastError(error, m.widget_admin_save_failed());
+    } finally {
+      defaultPending = false;
     }
   }
 
@@ -348,6 +371,7 @@
                     step={1000}
                     max={MAX_DAILY_TOKEN_BUDGET}
                     value={policy.max_daily_token_budget}
+                    oninput={typedNumber("budget", policy.max_daily_token_budget)}
                     aria-invalid={!!rangeErrors.budget}
                     aria-describedby={rangeErrors.budget
                       ? "policy-max-budget-help policy-max-budget-error"
@@ -374,6 +398,7 @@
                     min={0}
                     max={3650}
                     value={policy.min_retention_days}
+                    oninput={typedNumber("retention-min", policy.min_retention_days)}
                     aria-invalid={!!rangeErrors["retention-min"]}
                     aria-describedby={rangeErrors["retention-min"]
                       ? "policy-retention-help policy-retention-min-error"
@@ -399,6 +424,7 @@
                     min={0}
                     max={3650}
                     value={policy.max_retention_days}
+                    oninput={typedNumber("retention-max", policy.max_retention_days)}
                     aria-invalid={!!rangeErrors["retention-max"]}
                     aria-describedby={rangeErrors["retention-max"]
                       ? "policy-retention-help policy-retention-max-error"
@@ -512,6 +538,7 @@
                         <Button
                           variant="outline"
                           size="sm"
+                          disabled={defaultPending}
                           onclick={() => setDefault(template, !template.is_default)}
                         >
                           {#if template.is_default}

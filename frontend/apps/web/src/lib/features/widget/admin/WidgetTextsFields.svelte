@@ -139,6 +139,20 @@
       if (held) onLinkHeld?.(false);
     };
   });
+  // A lock taking hold on the link (a template applied) shows the saved
+  // address, even one equal to the address saved before: the disabled field
+  // cannot be corrected, so no refused draft may stay held in it.
+  let linkWasLocked = untrack(() => locked("footer_link_url"));
+  $effect(() => {
+    const now = locked("footer_link_url");
+    if (now === linkWasLocked) return;
+    linkWasLocked = now;
+    if (!now) return;
+    untrack(() => {
+      linkDraft = texts.footer_link_url ?? "";
+      linkInvalid = false;
+    });
+  });
   let lastSavedLink = untrack(() => texts.footer_link_url ?? "");
   $effect(() => {
     const saved = texts.footer_link_url ?? "";
