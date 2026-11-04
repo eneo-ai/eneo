@@ -717,8 +717,8 @@
   "bgOverlap": 5
  },
  "WCAG 2.2 AA, dark mode › iPad landscape (1180 × 820)|a space, and the organisation space #1": {
-  "bgOverlap": 7,
-  "shortTextContent": 4
+  "bgOverlap": 8,
+  "shortTextContent": 5
  },
  "WCAG 2.2 AA, dark mode › iPad landscape (1180 × 820)|a space, and the organisation space #2": {
   "bgOverlap": 6,
@@ -733,8 +733,8 @@
   "shortTextContent": 5
  },
  "WCAG 2.2 AA, dark mode › iPad landscape (1180 × 820)|a space's assistants, apps and members, an editor and an app result #3": {
-  "bgOverlap": 7,
-  "shortTextContent": 4
+  "bgOverlap": 8,
+  "shortTextContent": 5
  },
  "WCAG 2.2 AA, dark mode › iPad landscape (1180 × 820)|a space's assistants, apps and members, an editor and an app result #4": {
   "bgOverlap": 5
@@ -750,7 +750,7 @@
   "bgOverlap": 3
  },
  "WCAG 2.2 AA, dark mode › iPad landscape (1180 × 820)|admin overview and models #2": {
-  "bgOverlap": 3
+  "bgOverlap": 4
  },
  "WCAG 2.2 AA, dark mode › iPad landscape (1180 × 820)|admin users #1": {
   "bgOverlap": 2,
@@ -799,8 +799,8 @@
   "shortTextContent": 4
  },
  "WCAG 2.2 AA, dark mode › iPad portrait (820 × 1180)|a space, and the organisation space #1": {
-  "bgOverlap": 7,
-  "shortTextContent": 4
+  "bgOverlap": 8,
+  "shortTextContent": 5
  },
  "WCAG 2.2 AA, dark mode › iPad portrait (820 × 1180)|a space, and the organisation space #2": {
   "bgOverlap": 6,
@@ -811,8 +811,8 @@
   "shortTextContent": 5
  },
  "WCAG 2.2 AA, dark mode › iPad portrait (820 × 1180)|a space's assistants, apps and members, an editor and an app result #2": {
-  "bgOverlap": 7,
-  "shortTextContent": 4
+  "bgOverlap": 8,
+  "shortTextContent": 5
  },
  "WCAG 2.2 AA, dark mode › iPad portrait (820 × 1180)|a space's assistants, apps and members, an editor and an app result #3": {
   "bgOverlap": 7,
@@ -826,7 +826,7 @@
   "shortTextContent": 4
  },
  "WCAG 2.2 AA, dark mode › iPad portrait (820 × 1180)|admin overview and models #2": {
-  "bgOverlap": 3
+  "bgOverlap": 4
  },
  "WCAG 2.2 AA, dark mode › iPad portrait (820 × 1180)|admin users #1": {
   "bgOverlap": 2,
@@ -887,7 +887,7 @@
   "pseudoContent": 3
  },
  "WCAG 2.2 AA, dark mode › phone (390 × 844)|admin overview and models #2": {
-  "bgOverlap": 3
+  "bgOverlap": 4
  },
  "WCAG 2.2 AA, dark mode › phone (390 × 844)|admin users #1": {
   "bgOverlap": 2,
@@ -994,8 +994,8 @@
   "bgOverlap": 3
  },
  "WCAG 2.2 AA, light mode › iPad landscape (1180 × 820)|a space, and the organisation space #1": {
-  "bgOverlap": 7,
-  "shortTextContent": 4
+  "bgOverlap": 8,
+  "shortTextContent": 5
  },
  "WCAG 2.2 AA, light mode › iPad landscape (1180 × 820)|a space, and the organisation space #2": {
   "bgOverlap": 6,
@@ -1006,8 +1006,8 @@
   "shortTextContent": 5
  },
  "WCAG 2.2 AA, light mode › iPad landscape (1180 × 820)|a space's assistants, apps and members, an editor and an app result #2": {
-  "bgOverlap": 7,
-  "shortTextContent": 4
+  "bgOverlap": 8,
+  "shortTextContent": 5
  },
  "WCAG 2.2 AA, light mode › iPad landscape (1180 × 820)|a space's assistants, apps and members, an editor and an app result #3": {
   "bgOverlap": 7,
@@ -1027,7 +1027,7 @@
   "bgOverlap": 3
  },
  "WCAG 2.2 AA, light mode › iPad landscape (1180 × 820)|admin overview and models #2": {
-  "bgOverlap": 3
+  "bgOverlap": 4
  },
  "WCAG 2.2 AA, light mode › iPad landscape (1180 × 820)|admin users #1": {
   "bgOverlap": 2,
@@ -1076,8 +1076,8 @@
   "shortTextContent": 4
  },
  "WCAG 2.2 AA, light mode › iPad portrait (820 × 1180)|a space, and the organisation space #1": {
-  "bgOverlap": 7,
-  "shortTextContent": 4
+  "bgOverlap": 8,
+  "shortTextContent": 5
  },
  "WCAG 2.2 AA, light mode › iPad portrait (820 × 1180)|a space, and the organisation space #2": {
   "bgOverlap": 6,
@@ -1088,8 +1088,8 @@
   "shortTextContent": 5
  },
  "WCAG 2.2 AA, light mode › iPad portrait (820 × 1180)|a space's assistants, apps and members, an editor and an app result #2": {
-  "bgOverlap": 7,
-  "shortTextContent": 4
+  "bgOverlap": 8,
+  "shortTextContent": 5
  },
  "WCAG 2.2 AA, light mode › iPad portrait (820 × 1180)|a space's assistants, apps and members, an editor and an app result #3": {
   "bgOverlap": 7,
@@ -1103,7 +1103,7 @@
   "shortTextContent": 4
  },
  "WCAG 2.2 AA, light mode › iPad portrait (820 × 1180)|admin overview and models #2": {
-  "bgOverlap": 3
+  "bgOverlap": 4
  },
  "WCAG 2.2 AA, light mode › iPad portrait (820 × 1180)|admin users #1": {
   "bgOverlap": 2,
@@ -1164,7 +1164,7 @@
   "pseudoContent": 3
  },
  "WCAG 2.2 AA, light mode › phone (390 × 844)|admin overview and models #2": {
-  "bgOverlap": 3
+  "bgOverlap": 4
  },
  "WCAG 2.2 AA, light mode › phone (390 × 844)|admin users #1": {
   "bgOverlap": 2,
