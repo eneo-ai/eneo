@@ -4,8 +4,6 @@ import { STORAGE_STATE } from "../playwright.config";
 import { createFixtures, openRoute } from "./responsive-fixtures";
 import { ROUTES, type Fixtures } from "./responsive-routes";
 
-test.skip(!process.env.E2E_BASE_URL, "Requires the FastAPI-served Vite build");
-
 /*
  * The turn-and-resize contract: a phone turned, an iPad split or a window dragged
  * crosses 768 px with something open, and nothing may be lost or swapped. Every
@@ -47,7 +45,7 @@ async function openerNames(page: Page): Promise<string[]> {
 
 test(
   "a dialog's field survives crossing 768 px and back",
-  { tag: ["@vite", "@turn"] },
+  { tag: "@turn" },
   async ({ browser, baseURL }) => {
     test.setTimeout(15 * 60_000);
     const context = await browser.newContext({

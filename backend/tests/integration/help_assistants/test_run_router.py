@@ -35,7 +35,7 @@ from eneo.ai_models.completion_models.completion_model import (
 )
 from eneo.completion_models.infrastructure.completion_service import CompletionService
 from eneo.database.tables.ai_models_table import CompletionModels
-from eneo.database.tables.assistant_table import Assistants
+from eneo.database.tables.assistant_table import Assistants, AssistantsFiles
 from eneo.database.tables.spaces_table import Spaces
 from eneo.help_assistants.domain.helper_kind import HelperKind
 from eneo.main.models import ModelId
@@ -493,6 +493,49 @@ async def test_non_admin_can_run_on_own_target(
 # ---------------------------------------------------------------------------
 # Tests — follow-up
 # ---------------------------------------------------------------------------
+
+
+async def test_a_run_sends_the_helpers_attachments(
+    client,
+    db_container,
+    admin_user,
+    admin_token,
+    monkeypatch,
+):
+    sent: list[list[str]] = []
+
+    async def fake_get_response(self: CompletionService, **kwargs: Any):
+        sent.append([file.text for file in kwargs["prompt_files"]])
+        return _non_stream_response(model=kwargs["model"], captured={})
+
+    monkeypatch.setattr(CompletionService, "get_response", fake_get_response)
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    async with db_container() as container:
+        helper_id, target_id = await _seed_helper_and_target(container, admin_user)
+    upload = await client.post(
+        "/api/v1/files/",
+        files={"upload_file": ("guide.txt", b"helper guide", "text/plain")},
+        headers=headers,
+    )
+    assert upload.status_code == 200, upload.text
+    async with db_container() as container:
+        container.session().add(
+            AssistantsFiles(assistant_id=helper_id, file_id=UUID(upload.json()["id"]))
+        )
+
+    response = await client.post(
+        "/api/v1/help-assistants/runs/",
+        headers=headers,
+        json={
+            "kind": HelperKind.PROMPT_GUIDE.value,
+            "target_type": "assistant",
+            "target_id": str(target_id),
+            "question": "Help me write a system prompt.",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert sent == [["helper guide"]]
 
 
 async def _start_run_and_get_id(client, *, admin_token, target_id: UUID) -> UUID:

@@ -327,6 +327,13 @@ class NonStreamingAnswer:
 
 
 @dataclass(frozen=True)
+class AssistantPreflightTarget:
+    space: "Space"
+    assistant: Assistant
+    effective_config: "EffectiveConfig | None"
+
+
+@dataclass(frozen=True)
 class AssistantPreflightBaseline:
     prompt_tokens: int
     skill_context_tokens: int
@@ -2544,9 +2551,29 @@ class AssistantService:
 
         return assistant, permissions, effective_config
 
+    async def get_preflight_target(
+        self, assistant_id: UUID
+    ) -> AssistantPreflightTarget:
+        """The assistant a preflight estimates for, with the same read
+        authorization as get_assistant_with_effective_config (including the
+        personal-default carve-out) so it can't probe assistants the caller
+        cannot access. One read serves the whole estimate: a space read costs
+        far more than the token count, and this runs on every typing pause.
+        """
+        space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
+        assistant = space.get_assistant(assistant_id=assistant_id)
+        self._authorize_read_assistant(space=space, assistant=assistant)
+        return AssistantPreflightTarget(
+            space=space,
+            assistant=assistant,
+            effective_config=await self._resolve_effective_config(
+                space=space, assistant=assistant
+            ),
+        )
+
     async def get_preflight_baseline(
         self,
-        assistant_id: UUID,
+        target: AssistantPreflightTarget,
         *,
         prompt_override: str | None = None,
     ) -> AssistantPreflightBaseline:
@@ -2554,15 +2581,12 @@ class AssistantService:
         its persistent attachments, which ride along on every question.
 
         Preflight uses this so the meter can show the baseline, not just the
-        per-message delta. Applies the same read authorization as
-        get_assistant_with_effective_config (including the personal-default
-        carve-out) so it can't probe assistants the caller cannot access.
+        per-message delta.
         """
-        space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
-        assistant = space.get_assistant(assistant_id=assistant_id)
-        self._authorize_read_assistant(space=space, assistant=assistant)
-        effective_config = await self._resolve_effective_config(
-            space=space, assistant=assistant
+        space, assistant, effective_config = (
+            target.space,
+            target.assistant,
+            target.effective_config,
         )
         model = self._context_model(assistant, effective_config=effective_config)
         skill_plan = await self._create_skill_turn_plan(
@@ -3663,10 +3687,7 @@ class AssistantService:
 
         space = await self.space_repo.get_space_by_assistant(
             assistant_id=assistant_id,
-            hidden_assistant_ids={
-                assistant_id,
-                *({tool_assistant_id} if tool_assistant_id is not None else set()),
-            },
+            tool_assistant_id=tool_assistant_id,
         )
         active_assistant = space.get_assistant(assistant_id=assistant_id)
         authoring_flow_id: UUID | None = None

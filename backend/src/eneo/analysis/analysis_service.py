@@ -400,7 +400,14 @@ class AnalysisService:
                 "Group chat has no assistants to process the analysis"
             )
 
-        model_to_use: Assistant = group_chat.assistants[0].assistant
+        # A group chat's space carries no attachment content; this assistant
+        # answers with its attachments, so it needs a read of its own.
+        first_assistant_id = group_chat.assistants[0].assistant.id
+        model_to_use: Assistant = (
+            await self.space_service.get_space_by_assistant(
+                assistant_id=first_assistant_id
+            )
+        ).get_assistant(assistant_id=first_assistant_id)
         rows = await self.repo.get_group_chat_question_texts_since(
             group_chat_id=group_chat_id,
             from_date=from_date,

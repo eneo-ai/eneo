@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from enum import Enum, StrEnum
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -230,6 +230,27 @@ class File(InDB, FileBaseWithContent):
     # that is the file's only original. False for rows predating durable
     # originals and for derived images (rendered pages, embedded images).
     original_available: bool = False
+
+
+class FileContentNotLoadedError(RuntimeError):
+    """Code read the content of a file that was loaded for its facts only."""
+
+
+class FileWithoutContent(File):
+    """An attachment's facts, for reads that never use its content.
+
+    Reading ``text`` or ``blob`` raises: ``None`` would pass as an empty file
+    and a model would silently get nothing.
+    """
+
+    @model_validator(mode="after")
+    def require_one_of_text_or_image(self) -> "FileWithoutContent":
+        return self
+
+    def __getattribute__(self, name: str) -> Any:
+        if name in ("text", "blob"):
+            raise FileContentNotLoadedError(f"File content was not loaded: {name}")
+        return super().__getattribute__(name)
 
 
 class FilePublic(InDB):

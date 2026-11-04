@@ -11,7 +11,7 @@ test.use({ viewport: { width: 1280, height: 800 } });
 // The top bar's search: an icon button whose tooltip names it, on every page beside the sidebar.
 const TRIGGER = /^(Sök|Search)$/;
 
-test("a tooltip is dismissible, hoverable and persistent", { tag: "@vite" }, async ({ page }) => {
+test("a tooltip is dismissible, hoverable and persistent", async ({ page }) => {
   await page.goto("/spaces/personal/chat");
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
   const trigger = page.getByRole("banner").getByRole("button", { name: TRIGGER });

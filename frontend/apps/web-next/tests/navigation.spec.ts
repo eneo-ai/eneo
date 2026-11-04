@@ -345,7 +345,7 @@ test("a direct space load shows progress while waiting for its data", async ({ p
   }
 });
 
-test.describe("unsaved edits on Vite", { tag: "@vite" }, () => {
+test.describe("unsaved edits on Vite", () => {
   test("Skills keep edits on cancelled Back and link navigation, then leave on confirmation", async ({
     page
   }) => {
@@ -538,7 +538,7 @@ test("a page in a menu opens from the keyboard, and Escape returns to the menu's
 
 test(
   "Tab runs from the space switcher to the sidebar's toggle, which keeps focus",
-  { tag: ["@vite"] },
+  {},
   async ({ page }) => {
     await page.goto("/spaces/personal/chat");
     const space = await createSpace(page, uniqueName("Toggle order"));
@@ -557,7 +557,7 @@ test(
 
 test(
   "the space switcher moves one row per key, closes on a pick and returns focus",
-  { tag: ["@vite"] },
+  {},
   async ({ page }) => {
     await page.goto("/spaces/personal/chat");
     const first = await createSpace(page, uniqueName("Switcher one"));
@@ -598,7 +598,7 @@ test(
 
 test(
   "the space switcher keeps Skapa en ny yta on the screen with many spaces",
-  { tag: ["@vite"] },
+  {},
   async ({ page }) => {
     await page.goto("/spaces/personal/chat");
     const space = await createSpace(page, uniqueName("Many spaces"));
@@ -639,59 +639,55 @@ test(
 );
 
 for (const form of ["full sidebar", "icon rail"]) {
-  test(
-    `the keys work from the switcher's scroll area in the ${form}`,
-    { tag: ["@vite"] },
-    async ({ page }) => {
-      await page.goto("/spaces/personal/chat");
-      const first = await createSpace(page, uniqueName("Scroll area"));
-      const second = uniqueName("Typeahead");
-      await createSpace(page, second);
-      await page.goto(`${first}/overview`);
-      const nav = page.getByRole("navigation", { name: "Ytans meny", exact: true });
-      const toggle = nav.getByRole("button", { name: /sidomenyn$/ });
-      await expect(toggle).toHaveAttribute("aria-expanded", "true");
-      if (form === "icon rail") {
-        await toggle.click();
-        await expect(toggle).toHaveAttribute("aria-expanded", "false");
-      }
-      const trigger = nav.locator("button[aria-haspopup]").first();
-      await trigger.focus();
-      await page.keyboard.press("Enter");
-      await expect(page.getByRole("menuitem", { name: second })).toBeVisible();
-      const items = page.getByRole("menu").getByRole("menuitem");
-      const area = page.getByRole("group", { name: "Dina ytor" });
-      const enterArea = async () => {
-        await area.focus();
-        await expect(area).toBeFocused();
-      };
-
-      await enterArea();
-      await page.keyboard.press("ArrowDown");
-      await expect(items.first()).toBeFocused();
-      await enterArea();
-      await page.keyboard.press("End");
-      await expect(items.last()).toBeFocused();
-      await enterArea();
-      await page.keyboard.press("Home");
-      await expect(items.first()).toBeFocused();
-      await enterArea();
-      await page.keyboard.type("Typeahead");
-      await expect(page.locator("[popover]:popover-open :focus")).toHaveText(/^Typeahead/);
-      await enterArea();
-      await page.keyboard.press("Tab");
-      await expect(page.locator("[popover]:popover-open :focus")).toHaveCount(1);
-
-      // Picking closes the menu, in the rail by Astryx alone, and the page takes no error.
-      const errors: string[] = [];
-      page.on("pageerror", (error) => errors.push(error.message));
-      await page.getByRole("menuitem", { name: second }).focus();
-      await page.keyboard.press("Enter");
-      await page.waitForURL(/\/spaces\/[^/]+\/overview$/);
-      await expect(page).not.toHaveURL(`${first}/overview`);
-      await expect(items.first()).toBeHidden();
-      await expect(trigger).toBeFocused();
-      expect(errors).toEqual([]);
+  test(`the keys work from the switcher's scroll area in the ${form}`, {}, async ({ page }) => {
+    await page.goto("/spaces/personal/chat");
+    const first = await createSpace(page, uniqueName("Scroll area"));
+    const second = uniqueName("Typeahead");
+    await createSpace(page, second);
+    await page.goto(`${first}/overview`);
+    const nav = page.getByRole("navigation", { name: "Ytans meny", exact: true });
+    const toggle = nav.getByRole("button", { name: /sidomenyn$/ });
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    if (form === "icon rail") {
+      await toggle.click();
+      await expect(toggle).toHaveAttribute("aria-expanded", "false");
     }
-  );
+    const trigger = nav.locator("button[aria-haspopup]").first();
+    await trigger.focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("menuitem", { name: second })).toBeVisible();
+    const items = page.getByRole("menu").getByRole("menuitem");
+    const area = page.getByRole("group", { name: "Dina ytor" });
+    const enterArea = async () => {
+      await area.focus();
+      await expect(area).toBeFocused();
+    };
+
+    await enterArea();
+    await page.keyboard.press("ArrowDown");
+    await expect(items.first()).toBeFocused();
+    await enterArea();
+    await page.keyboard.press("End");
+    await expect(items.last()).toBeFocused();
+    await enterArea();
+    await page.keyboard.press("Home");
+    await expect(items.first()).toBeFocused();
+    await enterArea();
+    await page.keyboard.type("Typeahead");
+    await expect(page.locator("[popover]:popover-open :focus")).toHaveText(/^Typeahead/);
+    await enterArea();
+    await page.keyboard.press("Tab");
+    await expect(page.locator("[popover]:popover-open :focus")).toHaveCount(1);
+
+    // Picking closes the menu, in the rail by Astryx alone, and the page takes no error.
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await page.getByRole("menuitem", { name: second }).focus();
+    await page.keyboard.press("Enter");
+    await page.waitForURL(/\/spaces\/[^/]+\/overview$/);
+    await expect(page).not.toHaveURL(`${first}/overview`);
+    await expect(items.first()).toBeHidden();
+    await expect(trigger).toBeFocused();
+    expect(errors).toEqual([]);
+  });
 }

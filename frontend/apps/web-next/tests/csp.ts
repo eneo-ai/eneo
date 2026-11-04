@@ -1,9 +1,32 @@
-import { expect, test as base, type Cookie, type Page } from "@playwright/test";
+import {
+  expect,
+  test as base,
+  type BrowserContext,
+  type Cookie,
+  type Page
+} from "@playwright/test";
 import { STORAGE_STATE } from "../playwright.config";
 import { E2E_CREDENTIALS } from "./helpers";
 
 const SESSION_COOKIES = /^(eneo_web|__Host-eneo_web)$/;
 const SAME_ORIGIN = { "Sec-Fetch-Site": "same-origin" };
+
+/** Collects in `violations` what the policy blocks on every page of `context`. */
+export async function watchCsp(context: BrowserContext, violations: string[]) {
+  await context.exposeBinding("__eneoCspViolation", (_source, violation: string) => {
+    violations.push(violation);
+  });
+  await context.addInitScript(() => {
+    document.addEventListener("securitypolicyviolation", (event) => {
+      const report = (window as unknown as { __eneoCspViolation?: (text: string) => void })
+        .__eneoCspViolation;
+      report?.(
+        `${event.effectiveDirective} blocked ${event.blockedURI || "inline"} ` +
+          `(${event.sourceFile || location.href}:${event.lineNumber})`
+      );
+    });
+  });
+}
 
 /**
  * Playwright's `test`, failing any test during which a page broke the
@@ -66,19 +89,7 @@ export const test = base.extend<{
   cspViolations: [
     async ({ context }, use) => {
       const violations: string[] = [];
-      await context.exposeBinding("__eneoCspViolation", (_source, violation: string) => {
-        violations.push(violation);
-      });
-      await context.addInitScript(() => {
-        document.addEventListener("securitypolicyviolation", (event) => {
-          const report = (window as unknown as { __eneoCspViolation?: (text: string) => void })
-            .__eneoCspViolation;
-          report?.(
-            `${event.effectiveDirective} blocked ${event.blockedURI || "inline"} ` +
-              `(${event.sourceFile || location.href}:${event.lineNumber})`
-          );
-        });
-      });
+      await watchCsp(context, violations);
       await use(violations);
       expect(violations, "Content-Security-Policy violations").toEqual([]);
     },

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 from uuid import UUID, uuid4
@@ -9,6 +10,7 @@ import pytest
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.assistants.assistant import AssistantOrigin
 from eneo.assistants.assistant_factory import AssistantFactory
+from eneo.files.file_models import FileType, FileWithoutContent
 from eneo.flows.assistant_execution_snapshot import (
     assistant_execution_surface_hash,
     build_assistant_execution_snapshot,
@@ -401,3 +403,27 @@ def test_v2_rejects_unknown_field():
         validate_assistant_execution_snapshot(
             snapshot=snapshot, assistant_id=UUID(snapshot["assistant_id"])
         )
+
+
+def test_a_snapshot_needs_no_attachment_content():
+    # Publishing reads the assistant from a space, whose attachments have no content.
+    now = datetime.now(UTC)
+    file = FileWithoutContent(
+        id=uuid4(),
+        created_at=now,
+        updated_at=now,
+        name="underlag.txt",
+        checksum="abc",
+        size=3,
+        mimetype="text/plain",
+        file_type=FileType.TEXT,
+        user_id=uuid4(),
+        tenant_id=uuid4(),
+    )
+    assistant = _assistant()
+    assistant.attachments = [file]
+
+    snapshot = build_assistant_execution_snapshot(assistant=assistant)
+
+    assert snapshot is not None
+    assert snapshot["attachments"] == [{"file_id": str(file.id), "checksum": "abc"}]

@@ -1,6 +1,6 @@
 from collections import defaultdict
-from collections.abc import AsyncIterator, Sequence
-from dataclasses import dataclass
+from collections.abc import AsyncIterator, Collection, Sequence
+from dataclasses import dataclass, replace
 from uuid import UUID
 
 from eneo.files.file_models import (
@@ -8,6 +8,7 @@ from eneo.files.file_models import (
     FileContentVariant,
     FileMetadata,
     FileType,
+    FileWithoutContent,
 )
 from eneo.files.file_repo import (
     FileContentReferenceRecord,
@@ -73,6 +74,9 @@ class _FileContentSelection:
             if isinstance(reference, FileContentReferenceRecord)
         )
 
+    def without_content(self) -> "_FileContentSelection":
+        return replace(self, text_reference=None, blob_reference=None)
+
 
 class FileContentLoader:
     """Hydrate already-authorized File metadata through object content."""
@@ -91,6 +95,7 @@ class FileContentLoader:
         *,
         include_transcription: bool = True,
         include_text_original_bytes: bool = False,
+        content_of: Collection[UUID] | None = None,
     ) -> dict[UUID, File]:
         """Load each referenced content object at most once.
 
@@ -98,6 +103,9 @@ class FileContentLoader:
         File relationship or FileService ownership check. This loader owns byte
         projection only; it deliberately does not invent a second authorization
         policy.
+
+        With ``content_of``, only those files get their text or blob; the rest
+        come back as ``FileWithoutContent``.
         """
         if not metadata:
             return {}
@@ -111,6 +119,7 @@ class FileContentLoader:
             legacy_infos,
             include_transcription=include_transcription,
             include_text_original_bytes=include_text_original_bytes,
+            content_of=content_of,
         )
 
     async def _load_from_facts(
@@ -121,6 +130,7 @@ class FileContentLoader:
         *,
         include_transcription: bool,
         include_text_original_bytes: bool = False,
+        content_of: Collection[UUID] | None = None,
     ) -> dict[UUID, File]:
         selections = await self._select_content_from_facts(
             metadata,
@@ -129,7 +139,7 @@ class FileContentLoader:
             include_transcription=include_transcription,
             include_text_original_bytes=include_text_original_bytes,
         )
-        return await self._hydrate_selected_files(metadata, selections)
+        return await self._hydrate_selected_files(metadata, selections, content_of)
 
     async def _select_content_from_facts(
         self,
@@ -245,7 +255,14 @@ class FileContentLoader:
         self,
         metadata: dict[UUID, FileMetadata],
         selections: dict[UUID, _FileContentSelection],
+        content_of: Collection[UUID] | None = None,
     ) -> dict[UUID, File]:
+        selections = {
+            file_id: selection
+            if content_of is None or file_id in content_of
+            else selection.without_content()
+            for file_id, selection in selections.items()
+        }
         grants: list[ContentReadGrant] = []
         for file in metadata.values():
             selection = selections[file.id]
@@ -280,7 +297,12 @@ class FileContentLoader:
                     payloads,
                 ).decode("utf-8")
             )
-            hydrated[file.id] = File(
+            file_class = (
+                File
+                if content_of is None or file.id in content_of
+                else FileWithoutContent
+            )
+            hydrated[file.id] = file_class(
                 id=file.id,
                 created_at=file.created_at,
                 updated_at=file.updated_at,
@@ -315,12 +337,25 @@ class FileContentLoader:
         groups: Sequence[FileAttachmentGroup],
         *,
         include_transcription: bool = True,
+        content_owners: Collection[tuple[str, UUID]] | None = None,
     ) -> dict[tuple[str, UUID], list[File]]:
-        """Validate, deduplicate, hydrate, and regroup concrete attachments."""
+        """Validate, deduplicate, hydrate, and regroup concrete attachments.
+
+        With ``content_owners``, only their files get text or blob; see ``load``.
+        """
         metadata_by_id, ids_by_group = self._index_attachment_groups(groups)
         loaded = await self.load(
             list(metadata_by_id.values()),
             include_transcription=include_transcription,
+            content_of=(
+                None
+                if content_owners is None
+                else {
+                    file_id
+                    for owner in content_owners
+                    for file_id in ids_by_group.get(owner, ())
+                }
+            ),
         )
         return {
             key: [loaded[file_id] for file_id in file_ids]

@@ -18,6 +18,9 @@ import {
   chatComposer,
   conversationLog,
   createSpace,
+  expectNoCollapsedTableColumns,
+  expectNothingBusy,
+  expectShellHoldsStill,
   MOCK_REPLY,
   openCreateCollectionDialog,
   sessionResponseHeaders,
@@ -56,37 +59,6 @@ type Exceptions = {
   disableRules?: Record<string, string>;
 };
 
-// Narrowest content box a table column may have. A collapsed one has none:
-// its header cell is only padding wide.
-const MIN_COLUMN_CONTENT_PX = 16;
-
-/**
- * Fails on a table column that collapsed (axe has no rule for it). Astryx
- * header cells truncate with `max-width: 0`, which cancels a plain `w-*`
- * width, so the column shrinks until its text wraps a letter per line or a
- * control is clipped (AGENTS.md → Tables). A data table may scroll sideways
- * instead of reflowing (1.4.10); it may not squeeze its columns.
- */
-async function expectNoCollapsedTableColumns(page: Page) {
-  const collapsed = await page.locator("table th").evaluateAll(
-    (cells, minContent) =>
-      cells.flatMap((cell) => {
-        // A table in a hidden tab panel has no boxes to measure.
-        if (cell.getClientRects().length === 0) return [];
-        const style = getComputedStyle(cell);
-        const content =
-          cell.getBoundingClientRect().width -
-          parseFloat(style.paddingInlineStart) -
-          parseFloat(style.paddingInlineEnd);
-        return content < minContent
-          ? [`"${cell.textContent?.trim()}": ${Math.round(content)} px`]
-          : [];
-      }),
-    MIN_COLUMN_CONTENT_PX
-  );
-  expect(collapsed, `Collapsed table columns on ${page.url()}`).toEqual([]);
-}
-
 // Scans made so far by each test: the contrast-incomplete baseline keys a test's
 // scans by their order (`<describe path>|<test> #<n>`), stable where a URL is not.
 const scansByTest = new Map<string, number>();
@@ -108,7 +80,7 @@ async function expectNoAxeViolations(
   assertDocumented(disableRules, (rule) => `Skipping the axe rule "${rule}"`);
   // Wait for exposed loading regions. A queued run keeps a decorative skeleton
   // under aria-hidden after the result page has loaded; that state is scanned too.
-  await expect(page.locator('[aria-busy="true"]:not([aria-hidden="true"] *)')).toHaveCount(0);
+  await expectNothingBusy(page);
 
   const rules = Object.fromEntries([
     ...PAGE_STRUCTURE_RULES.map((rule) => [rule, { enabled: true }]),
@@ -122,9 +94,8 @@ async function expectNoAxeViolations(
     builder = builder.exclude(selector);
   }
 
-  // The document title arrives with the route's metadata, which a client
-  // navigation streams after the page is interactive; scanning before it
-  // lands reports a false "document-title" violation.
+  // A client navigation sets the document title after the page is interactive;
+  // scanning before it lands reports a false "document-title" violation.
   await expect(page).toHaveTitle(/\S/);
   const { violations, incomplete } = await builder.analyze();
   const report = violations.map((violation) => ({
@@ -215,38 +186,6 @@ async function expectFocusClearOfToasts(page: Page) {
 }
 
 /** Opens a route, waits until it shows real content, then scans it. */
-/**
- * The shell is locked to the viewport: pages scroll inside the page panel
- * (main#main-content), never the document, or the whole shell slides up. An
- * absolutely positioned box (visually hidden text) whose containing block is
- * the document, not a region that scrolls, makes the document taller.
- */
-async function expectShellHoldsStill(page: Page) {
-  const overflow = await page.evaluate(() => {
-    const main = document.getElementById("main-content");
-    if (!main || getComputedStyle(main).overflowY === "visible") return null;
-    const escaped = [...document.body.querySelectorAll("*")]
-      .filter(
-        (el) =>
-          el instanceof HTMLElement &&
-          getComputedStyle(el).position === "absolute" &&
-          el.offsetParent === document.body &&
-          el.getBoundingClientRect().bottom > window.innerHeight + 1
-      )
-      .slice(0, 5)
-      .map((el) => `${el.tagName.toLowerCase()}.${(el.getAttribute("class") ?? "").slice(0, 60)}`);
-    return {
-      scrolls: document.documentElement.scrollHeight > window.innerHeight + 1,
-      escaped
-    };
-  });
-  if (!overflow) return;
-  expect(
-    overflow.scrolls,
-    `The document scrolls under the shell on ${page.url()}: ${overflow.escaped.join(", ")}`
-  ).toBe(false);
-}
-
 async function scan(page: Page, path: string, ready: () => Promise<void>, exceptions?: Exceptions) {
   await page.goto(path);
   await ready();
@@ -254,7 +193,7 @@ async function scan(page: Page, path: string, ready: () => Promise<void>, except
   await expectShellHoldsStill(page);
 }
 
-/** The personal assistant's greeting, the chat start state's h1 (set once hydrated). */
+/** The personal assistant's greeting, the chat start state's h1. */
 const GREETING = /^(God (morgon|dag|kväll)|Good (morning|afternoon|evening)), /;
 
 async function chatStartReady(page: Page) {
@@ -441,7 +380,7 @@ for (const colorScheme of ["light", "dark"] as const) {
       );
     });
 
-    test("personal chat", { tag: "@vite" }, async ({ page }) => {
+    test("personal chat", async ({ page }) => {
       await scan(page, "/spaces/personal/chat", () => chatStartReady(page));
     });
 
@@ -460,7 +399,7 @@ for (const colorScheme of ["light", "dark"] as const) {
       await expectNoAxeViolations(page);
     });
 
-    test("spaces list", { tag: "@vite" }, async ({ page }) => {
+    test("spaces list", async ({ page }) => {
       await scan(page, "/spaces/list", async () => {
         await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
       });
@@ -520,29 +459,25 @@ for (const colorScheme of ["light", "dark"] as const) {
       await expectNoAxeViolations(page);
     });
 
-    test("assistant catalogue (dashboard)", { tag: "@vite" }, async ({ page }) => {
+    test("assistant catalogue (dashboard)", async ({ page }) => {
       await scan(page, "/dashboard", async () => {
         await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
       });
     });
 
-    test(
-      "personal chat with the SideNav collapsed to its icon rail",
-      { tag: "@vite" },
-      async ({ page, baseURL }) => {
-        await page
-          .context()
-          .addCookies([{ name: SIDE_NAV_COLLAPSED_COOKIE, value: "1", url: baseURL! }]);
-        await scan(page, "/spaces/personal/chat", async () => {
-          await chatStartReady(page);
-          await expect(
-            page.getByRole("button", { name: /fäll ut sidomenyn|expand the side menu/i })
-          ).toBeVisible();
-        });
-      }
-    );
+    test("personal chat with the SideNav collapsed to its icon rail", async ({ page, baseURL }) => {
+      await page
+        .context()
+        .addCookies([{ name: SIDE_NAV_COLLAPSED_COOKIE, value: "1", url: baseURL! }]);
+      await scan(page, "/spaces/personal/chat", async () => {
+        await chatStartReady(page);
+        await expect(
+          page.getByRole("button", { name: /fäll ut sidomenyn|expand the side menu/i })
+        ).toBeVisible();
+      });
+    });
 
-    test("dashboard app and result", { tag: "@vite" }, async ({ page }) => {
+    test("dashboard app and result", async ({ page }) => {
       const work = await spaceWithWork(page, uniqueName("E2E Dashboard App"));
       for (const width of [1280, 390]) {
         await page.setViewportSize({ width, height: 844 });
@@ -558,7 +493,7 @@ for (const colorScheme of ["light", "dark"] as const) {
       }
     });
 
-    test("space overview, members and settings", { tag: "@vite" }, async ({ page }) => {
+    test("space overview, members and settings", async ({ page }) => {
       const name = uniqueName(`E2E Space Shell ${colorScheme}`);
       const space = await createSpace(page, name);
       await scan(page, `${space}/overview`, async () => {
@@ -579,193 +514,183 @@ for (const colorScheme of ["light", "dark"] as const) {
       }
     });
 
-    test(
-      "space overview, knowledge and websites, and the create-collection dialog",
-      { tag: "@vite" },
-      async ({ page }) => {
-        const name = uniqueName(`E2E A11y Space ${colorScheme}`);
-        const space = await createSpace(page, name);
+    test("space overview, knowledge and websites, and the create-collection dialog", async ({
+      page
+    }) => {
+      const name = uniqueName(`E2E A11y Space ${colorScheme}`);
+      const space = await createSpace(page, name);
 
-        await scan(page, `${space}/overview`, async () => {
-          await expect(page.getByRole("heading", { level: 2, name })).toBeVisible();
-        });
-        await scan(page, `${space}/knowledge`, async () => {
-          await expect(
-            page.getByRole("heading", { level: 1, name: /^(Kunskap|Knowledge)$/ })
-          ).toBeVisible();
-        });
-        await scan(page, `${space}/knowledge?tab=websites`, async () => {
-          await expect(
-            page.getByRole("tab", { name: /^(Webbplatser|Websites)$/, selected: true })
-          ).toBeVisible();
-          const panel = page.getByRole("tabpanel");
-          // A new space has no websites: the empty state, under the page's h1 (a list shows a table).
-          await expect(
-            panel.getByRole("heading", { level: 2 }).or(panel.getByRole("table")).first()
-          ).toBeVisible();
-        });
-
-        await page.goto(`${space}/knowledge`);
-        await openCreateCollectionDialog(page);
-        await expectNoAxeViolations(page);
-      }
-    );
-
-    test(
-      "organization Skills: create, saved detail and catalogue",
-      { tag: "@vite" },
-      async ({ page }) => {
-        const name = uniqueName(`Organization Skill ${colorScheme}`);
-        await page.goto("/spaces/organization/skills");
-        await page.getByRole("link", { name: /^(Skapa skill|Create skill)$/i }).click();
-        await expect(page).toHaveURL(/\/spaces\/organization\/skills\/new$/);
+      await scan(page, `${space}/overview`, async () => {
+        await expect(page.getByRole("heading", { level: 2, name })).toBeVisible();
+      });
+      await scan(page, `${space}/knowledge`, async () => {
         await expect(
-          page.getByRole("textbox", { name: /^(Instruktioner|Instructions)$/ })
+          page.getByRole("heading", { level: 1, name: /^(Kunskap|Knowledge)$/ })
         ).toBeVisible();
-        await expectNoAxeViolations(page);
-        await page.getByRole("textbox", { name: /^(Namn|Name)$/ }).fill(name);
-        await page
-          .getByRole("textbox", { name: /^(Beskrivning|Description)$/ })
-          .fill("A report writing guide.");
-        await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
-        await page.evaluate(() =>
-          navigator.clipboard.writeText("Write clearly and check the report's facts.")
+      });
+      await scan(page, `${space}/knowledge?tab=websites`, async () => {
+        await expect(
+          page.getByRole("tab", { name: /^(Webbplatser|Websites)$/, selected: true })
+        ).toBeVisible();
+        const panel = page.getByRole("tabpanel");
+        // A new space has no websites: the empty state, under the page's h1 (a list shows a table).
+        await expect(
+          panel.getByRole("heading", { level: 2 }).or(panel.getByRole("table")).first()
+        ).toBeVisible();
+      });
+
+      await page.goto(`${space}/knowledge`);
+      await openCreateCollectionDialog(page);
+      await expectNoAxeViolations(page);
+    });
+
+    test("organization Skills: create, saved detail and catalogue", async ({ page }) => {
+      const name = uniqueName(`Organization Skill ${colorScheme}`);
+      await page.goto("/spaces/organization/skills");
+      await page.getByRole("link", { name: /^(Skapa skill|Create skill)$/i }).click();
+      await expect(page).toHaveURL(/\/spaces\/organization\/skills\/new$/);
+      await expect(
+        page.getByRole("textbox", { name: /^(Instruktioner|Instructions)$/ })
+      ).toBeVisible();
+      await expectNoAxeViolations(page);
+      await page.getByRole("textbox", { name: /^(Namn|Name)$/ }).fill(name);
+      await page
+        .getByRole("textbox", { name: /^(Beskrivning|Description)$/ })
+        .fill("A report writing guide.");
+      await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+      await page.evaluate(() =>
+        navigator.clipboard.writeText("Write clearly and check the report's facts.")
+      );
+      await page.getByRole("textbox", { name: /^(Instruktioner|Instructions)$/ }).focus();
+      await page.keyboard.press("ControlOrMeta+V");
+      await page.getByRole("button", { name: /^(Skapa skill|Create skill)$/i }).click();
+      await page.waitForURL(/\/spaces\/organization\/skills\/[\da-f-]+$/);
+      await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
+      await expectNoAxeViolations(page);
+      await page.reload();
+      await expect(page.getByRole("textbox", { name: /^(Namn|Name)$/ })).toHaveValue(name);
+      await page
+        .getByRole("navigation", { name: /^(Ytans meny|Space menu)$/ })
+        .getByRole("link", { name: "Skills", exact: true })
+        .click();
+      await expect(page).toHaveURL(/\/spaces\/organization\/skills$/);
+      await expect(page.getByRole("link", { name, exact: true })).toBeVisible();
+      await expectNoAxeViolations(page);
+    });
+
+    test("Skills: create, saved detail and a long reference preview", async ({ page }) => {
+      test.setTimeout(90_000);
+      const name =
+        `${uniqueName(`E2E A11y Skill ${colorScheme}`)} ${"Detailed communication guide ".repeat(8)}`.slice(
+          0,
+          200
         );
-        await page.getByRole("textbox", { name: /^(Instruktioner|Instructions)$/ }).focus();
-        await page.keyboard.press("ControlOrMeta+V");
-        await page.getByRole("button", { name: /^(Skapa skill|Create skill)$/i }).click();
-        await page.waitForURL(/\/spaces\/organization\/skills\/[\da-f-]+$/);
-        await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
-        await expectNoAxeViolations(page);
-        await page.reload();
-        await expect(page.getByRole("textbox", { name: /^(Namn|Name)$/ })).toHaveValue(name);
+      const description = "A writing guide with detailed editorial requirements. ".repeat(18);
+      const instructions =
+        "# Writing guide\n\nWrite clearly. Check facts and explain unfamiliar words.\n\n".repeat(
+          300
+        );
+
+      await page.goto("/spaces/personal/skills/new");
+      await expect(
+        page.getByRole("textbox", { name: /^(Instruktioner|Instructions)$/ })
+      ).toBeVisible();
+      await expectNoAxeViolations(page);
+      await page.getByRole("textbox", { name: /^(Namn|Name)$/ }).fill(name);
+      {
         await page
           .getByRole("navigation", { name: /^(Ytans meny|Space menu)$/ })
           .getByRole("link", { name: "Skills", exact: true })
           .click();
-        await expect(page).toHaveURL(/\/spaces\/organization\/skills$/);
-        await expect(page.getByRole("link", { name, exact: true })).toBeVisible();
+        const leave = page.getByRole("alertdialog", { name: "Lämna sidan?" });
+        await expect(leave).toBeVisible();
         await expectNoAxeViolations(page);
+        await leave.getByRole("button", { name: "Avbryt", exact: true }).click();
+        await expect(leave).not.toBeVisible();
       }
-    );
+      await page.getByRole("textbox", { name: /^(Beskrivning|Description)$/ }).fill(description);
+      await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+      await page.evaluate((text) => navigator.clipboard.writeText(text), instructions);
+      const editor = page.getByRole("textbox", { name: /^(Instruktioner|Instructions)$/ });
+      await editor.focus();
+      await page.keyboard.press("ControlOrMeta+V");
+      await expect(editor).toHaveText(instructions);
+      await page.getByRole("button", { name: /^(Skapa skill|Create skill)$/i }).click();
+      await page.waitForURL(/\/spaces\/personal\/skills\/[\da-f-]+$/);
+      await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
+      await expectNoAxeViolations(page);
 
-    test(
-      "Skills: create, saved detail and a long reference preview",
-      { tag: "@vite" },
-      async ({ page }) => {
-        test.setTimeout(90_000);
-        const name =
-          `${uniqueName(`E2E A11y Skill ${colorScheme}`)} ${"Detailed communication guide ".repeat(8)}`.slice(
-            0,
-            200
-          );
-        const description = "A writing guide with detailed editorial requirements. ".repeat(18);
-        const instructions =
-          "# Writing guide\n\nWrite clearly. Check facts and explain unfamiliar words.\n\n".repeat(
-            300
-          );
+      await page.goto("/spaces/personal/skills");
+      await expect(page.getByRole("link", { name, exact: true })).toBeVisible();
+      await expectNoAxeViolations(page);
 
-        await page.goto("/spaces/personal/skills/new");
-        await expect(
-          page.getByRole("textbox", { name: /^(Instruktioner|Instructions)$/ })
-        ).toBeVisible();
-        await expectNoAxeViolations(page);
-        await page.getByRole("textbox", { name: /^(Namn|Name)$/ }).fill(name);
-        {
-          await page
-            .getByRole("navigation", { name: /^(Ytans meny|Space menu)$/ })
-            .getByRole("link", { name: "Skills", exact: true })
-            .click();
-          const leave = page.getByRole("alertdialog", { name: "Lämna sidan?" });
-          await expect(leave).toBeVisible();
-          await expectNoAxeViolations(page);
-          await leave.getByRole("button", { name: "Avbryt", exact: true }).click();
-          await expect(leave).not.toBeVisible();
-        }
-        await page.getByRole("textbox", { name: /^(Beskrivning|Description)$/ }).fill(description);
-        await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
-        await page.evaluate((text) => navigator.clipboard.writeText(text), instructions);
-        const editor = page.getByRole("textbox", { name: /^(Instruktioner|Instructions)$/ });
-        await editor.focus();
-        await page.keyboard.press("ControlOrMeta+V");
-        await expect(editor).toHaveText(instructions);
-        await page.getByRole("button", { name: /^(Skapa skill|Create skill)$/i }).click();
-        await page.waitForURL(/\/spaces\/personal\/skills\/[\da-f-]+$/);
-        await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
-        await expectNoAxeViolations(page);
+      await page.goto("/spaces/personal/skills/new");
+      await page.getByRole("button", { name: /^(Infoga referens|Insert reference)$/ }).click();
+      const dialog = page.getByRole("dialog", { name: /^(Infoga referens|Insert reference)$/ });
+      await dialog.getByRole("textbox").fill(name);
+      await dialog.getByRole("button", { name: new RegExp(name) }).click();
+      await expect(dialog.getByRole("heading", { name })).toBeVisible();
+      await dialog.locator("summary", { hasText: /^(Beskrivning|Description)$/ }).click();
+      await expect(dialog.getByText(description, { exact: true })).toBeVisible();
+      const insert = dialog.getByRole("button", { name: /^(Infoga referens|Insert reference)$/ });
+      await expect(dialog.getByText(instructions, { exact: true })).toBeVisible();
+      await expect(insert).toBeEnabled();
+      await expectNoAxeViolations(page);
 
-        await page.goto("/spaces/personal/skills");
-        await expect(page.getByRole("link", { name, exact: true })).toBeVisible();
-        await expectNoAxeViolations(page);
+      const header = dialog.getByRole("heading", { name });
+      const before = { header: await header.boundingBox(), insert: await insert.boundingBox() };
+      await dialog
+        .locator("summary", { hasText: /^(Tekniska detaljer|Technical details)$/ })
+        .focus();
+      await expect(insert).toBeInViewport();
+      expect(await header.boundingBox()).toEqual(before.header);
+      expect(await insert.boundingBox()).toEqual(before.insert);
 
-        await page.goto("/spaces/personal/skills/new");
-        await page.getByRole("button", { name: /^(Infoga referens|Insert reference)$/ }).click();
-        const dialog = page.getByRole("dialog", { name: /^(Infoga referens|Insert reference)$/ });
-        await dialog.getByRole("textbox").fill(name);
-        await dialog.getByRole("button", { name: new RegExp(name) }).click();
-        await expect(dialog.getByRole("heading", { name })).toBeVisible();
-        await dialog.locator("summary", { hasText: /^(Beskrivning|Description)$/ }).click();
-        await expect(dialog.getByText(description, { exact: true })).toBeVisible();
-        const insert = dialog.getByRole("button", { name: /^(Infoga referens|Insert reference)$/ });
-        await expect(dialog.getByText(instructions, { exact: true })).toBeVisible();
-        await expect(insert).toBeEnabled();
-        await expectNoAxeViolations(page);
-
-        const header = dialog.getByRole("heading", { name });
-        const before = { header: await header.boundingBox(), insert: await insert.boundingBox() };
+      // CSS viewport equivalents of desktop zoom, followed by narrow reflow.
+      for (const viewport of [
+        { width: 640, height: 400 },
+        { width: 320, height: 200 },
+        { width: 320, height: 800 }
+      ]) {
+        await page.setViewportSize(viewport);
+        const instructionsHeading = dialog.getByRole("heading", {
+          name: /^(Instruktioner|Instructions)$/
+        });
+        const readingArea = await instructionsHeading.evaluate((element) => {
+          let scrollArea = element.parentElement;
+          while (scrollArea && getComputedStyle(scrollArea).overflowY !== "auto") {
+            scrollArea = scrollArea.parentElement;
+          }
+          if (!scrollArea) throw new Error("Missing scroll area for reference instructions");
+          const style = getComputedStyle(scrollArea);
+          return {
+            height:
+              scrollArea.clientHeight -
+              parseFloat(style.paddingTop) -
+              parseFloat(style.paddingBottom),
+            lineHeight: parseFloat(getComputedStyle(element).lineHeight)
+          };
+        });
+        expect(readingArea.height).toBeGreaterThanOrEqual(readingArea.lineHeight);
+        await instructionsHeading.scrollIntoViewIfNeeded();
+        await expect(instructionsHeading).toBeInViewport();
         await dialog
           .locator("summary", { hasText: /^(Tekniska detaljer|Technical details)$/ })
           .focus();
+        await insert.focus();
         await expect(insert).toBeInViewport();
-        expect(await header.boundingBox()).toEqual(before.header);
-        expect(await insert.boundingBox()).toEqual(before.insert);
-
-        // CSS viewport equivalents of desktop zoom, followed by narrow reflow.
-        for (const viewport of [
-          { width: 640, height: 400 },
-          { width: 320, height: 200 },
-          { width: 320, height: 800 }
-        ]) {
-          await page.setViewportSize(viewport);
-          const instructionsHeading = dialog.getByRole("heading", {
-            name: /^(Instruktioner|Instructions)$/
-          });
-          const readingArea = await instructionsHeading.evaluate((element) => {
-            let scrollArea = element.parentElement;
-            while (scrollArea && getComputedStyle(scrollArea).overflowY !== "auto") {
-              scrollArea = scrollArea.parentElement;
-            }
-            if (!scrollArea) throw new Error("Missing scroll area for reference instructions");
-            const style = getComputedStyle(scrollArea);
-            return {
-              height:
-                scrollArea.clientHeight -
-                parseFloat(style.paddingTop) -
-                parseFloat(style.paddingBottom),
-              lineHeight: parseFloat(getComputedStyle(element).lineHeight)
-            };
-          });
-          expect(readingArea.height).toBeGreaterThanOrEqual(readingArea.lineHeight);
-          await instructionsHeading.scrollIntoViewIfNeeded();
-          await expect(instructionsHeading).toBeInViewport();
-          await dialog
-            .locator("summary", { hasText: /^(Tekniska detaljer|Technical details)$/ })
-            .focus();
-          await insert.focus();
-          await expect(insert).toBeInViewport();
-          expect(
-            await dialog.evaluate((element) => element.scrollWidth > element.clientWidth)
-          ).toBe(false);
-        }
-        await page.keyboard.press("Escape");
-        await expect(dialog).not.toBeVisible();
-        await expect(
-          page.getByRole("textbox", { name: /^(Instruktioner|Instructions)$/ })
-        ).toBeFocused();
+        expect(await dialog.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(
+          false
+        );
       }
-    );
+      await page.keyboard.press("Escape");
+      await expect(dialog).not.toBeVisible();
+      await expect(
+        page.getByRole("textbox", { name: /^(Instruktioner|Instructions)$/ })
+      ).toBeFocused();
+    });
 
-    test("website detail and indexed content", { tag: "@vite" }, async ({ page }) => {
+    test("website detail and indexed content", async ({ page }) => {
       await page.goto("/spaces/list");
       const spaceId = await apiPost(page, "/spaces/", {
         name: uniqueName(`E2E Website ${colorScheme}`)
@@ -786,56 +711,52 @@ for (const colorScheme of ["light", "dark"] as const) {
       await expectNoAxeViolations(page);
     });
 
-    test(
-      "space flows, the new-flow dialog and a flow's page",
-      { tag: "@vite" },
-      async ({ page }) => {
-        const space = await createSpace(page, uniqueName(`E2E A11y Flows ${colorScheme}`));
-        await page.goto(`${space}/overview`);
-        // A loading tab or its item count must not be mistaken for a disabled feature.
-        const settings = await apiRequest<Schema<"SettingsPublic">>(page, "/settings/");
-        test.skip(
-          settings.flows_enabled !== true,
-          "The tenant's flows_core gate is off in this stack, so the flow routes 404."
-        );
-        // The tab is named by its label and, once the flows are read, their count (space-tabs.tsx).
-        await expect(page.getByRole("link", { name: /^(Flöden|Flows)( \d+)?$/ })).toBeVisible();
+    test("space flows, the new-flow dialog and a flow's page", async ({ page }) => {
+      const space = await createSpace(page, uniqueName(`E2E A11y Flows ${colorScheme}`));
+      await page.goto(`${space}/overview`);
+      // A loading tab or its item count must not be mistaken for a disabled feature.
+      const settings = await apiRequest<Schema<"SettingsPublic">>(page, "/settings/");
+      test.skip(
+        settings.flows_enabled !== true,
+        "The tenant's flows_core gate is off in this stack, so the flow routes 404."
+      );
+      // The tab is named by its label and, once the flows are read, their count (space-tabs.tsx).
+      await expect(page.getByRole("link", { name: /^(Flöden|Flows)( \d+)?$/ })).toBeVisible();
 
-        await scan(page, `${space}/flows`, async () => {
-          await expect(
-            page.getByRole("heading", { level: 1, name: /^(Flöden|Flows)$/ })
-          ).toBeVisible();
-        });
-
-        await page
-          .getByRole("main")
-          .getByRole("button", { name: /^(Nytt flöde|New flow)$/ })
-          .first()
-          .click();
-        const dialog = page.getByRole("dialog", { name: /^(Nytt flöde|New flow)$/ });
-        await expect(dialog.getByLabel(/^(namn|name)/i)).toBeVisible();
-        await expectNoAxeViolations(page);
-
-        const name = uniqueName("E2E A11y flöde");
-        await dialog.getByLabel(/^(namn|name)/i).fill(name);
-        await dialog.getByRole("button", { name: /^(skapa flöde|create flow)$/i }).click();
-        await page.waitForURL(/\/flows\/[^/?]+$/, { timeout: 15_000 });
-        await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
-        await expect(page.getByRole("heading", { level: 2, name: /^(Steg|Steps)$/ })).toBeVisible();
-        // The chat panel has settled: its composer (a combobox, as it offers
-        // references on "@"), or why the chat is not available.
+      await scan(page, `${space}/flows`, async () => {
         await expect(
-          page
-            .getByRole("combobox", { name: /^(Fråga Flödesassistenten|Ask Flow assistant)$/ })
-            .or(page.getByText(/^(Chatten är inte tillgänglig|The chat is not available)$/))
-            .or(page.getByText(/^(Chatten kunde inte öppnas|The chat could not be opened)$/))
-            .first()
-        ).toBeVisible({ timeout: 15_000 });
-        await expectNoAxeViolations(page);
-      }
-    );
+          page.getByRole("heading", { level: 1, name: /^(Flöden|Flows)$/ })
+        ).toBeVisible();
+      });
 
-    test("collection detail", { tag: "@vite" }, async ({ page }) => {
+      await page
+        .getByRole("main")
+        .getByRole("button", { name: /^(Nytt flöde|New flow)$/ })
+        .first()
+        .click();
+      const dialog = page.getByRole("dialog", { name: /^(Nytt flöde|New flow)$/ });
+      await expect(dialog.getByLabel(/^(namn|name)/i)).toBeVisible();
+      await expectNoAxeViolations(page);
+
+      const name = uniqueName("E2E A11y flöde");
+      await dialog.getByLabel(/^(namn|name)/i).fill(name);
+      await dialog.getByRole("button", { name: /^(skapa flöde|create flow)$/i }).click();
+      await page.waitForURL(/\/flows\/[^/?]+$/, { timeout: 15_000 });
+      await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
+      await expect(page.getByRole("heading", { level: 2, name: /^(Steg|Steps)$/ })).toBeVisible();
+      // The chat panel has settled: its composer (a combobox, as it offers
+      // references on "@"), or why the chat is not available.
+      await expect(
+        page
+          .getByRole("combobox", { name: /^(Fråga Flödesassistenten|Ask Flow assistant)$/ })
+          .or(page.getByText(/^(Chatten är inte tillgänglig|The chat is not available)$/))
+          .or(page.getByText(/^(Chatten kunde inte öppnas|The chat could not be opened)$/))
+          .first()
+      ).toBeVisible({ timeout: 15_000 });
+      await expectNoAxeViolations(page);
+    });
+
+    test("collection detail", async ({ page }) => {
       // A new space gets the organisation's embedding model (e2e/seed.py),
       // which a collection needs.
       const space = await createSpace(page, uniqueName(`E2E A11y Collection ${colorScheme}`));
@@ -850,7 +771,7 @@ for (const colorScheme of ["light", "dark"] as const) {
       await expectNoAxeViolations(page);
     });
 
-    test("admin overview", { tag: "@vite" }, async ({ page }) => {
+    test("admin overview", async ({ page }) => {
       await scan(page, "/admin", async () => {
         await expect(
           page.getByRole("heading", { level: 1, name: /^(Översikt|Overview)$/ })
@@ -865,7 +786,7 @@ for (const colorScheme of ["light", "dark"] as const) {
       });
     });
 
-    test("admin settings", { tag: "@vite" }, async ({ page }) => {
+    test("admin settings", async ({ page }) => {
       await scan(page, "/admin/settings", async () => {
         await expect(
           page.getByRole("heading", { level: 1, name: /^(Inställningar|Settings)$/ })
@@ -874,7 +795,7 @@ for (const colorScheme of ["light", "dark"] as const) {
       });
     });
 
-    test("admin users", { tag: "@vite" }, async ({ page }) => {
+    test("admin users", async ({ page }) => {
       await scan(page, "/admin/users", async () => {
         await expect(
           page.getByRole("heading", { level: 1, name: /^(Användare|Users)$/ })
@@ -883,7 +804,7 @@ for (const colorScheme of ["light", "dark"] as const) {
       });
     });
 
-    test("admin user groups", { tag: "@vite" }, async ({ page }) => {
+    test("admin user groups", async ({ page }) => {
       await scan(page, "/admin/user-groups", async () => {
         await expect(
           page.getByRole("heading", { level: 1, name: /^(Användargrupper|User Groups)$/ })
@@ -906,7 +827,7 @@ for (const colorScheme of ["light", "dark"] as const) {
       });
     });
 
-    test("admin federation", { tag: "@vite" }, async ({ page }) => {
+    test("admin federation", async ({ page }) => {
       // A configured IdP is a UI fixture; this scan never contacts an IdP or saves credentials.
       await page.route("**/api/v1/runtime-config", async (route) => {
         const response = await route.fetch();
@@ -944,7 +865,7 @@ for (const colorScheme of ["light", "dark"] as const) {
       });
     });
 
-    test("admin models", { tag: "@vite" }, async ({ page }) => {
+    test("admin models", async ({ page }) => {
       await scan(page, "/admin/models", async () => {
         await expect(page.getByRole("tab", { name: /migreringshistorik/i })).toBeVisible();
         // The seeded provider's model table (e2e/seed.py).
@@ -952,7 +873,7 @@ for (const colorScheme of ["light", "dark"] as const) {
       });
     });
 
-    test("admin integrations", { tag: "@vite" }, async ({ page }) => {
+    test("admin integrations", async ({ page }) => {
       await scan(page, "/admin/integrations", async () => {
         await expect(
           page.getByRole("heading", { level: 1, name: /^(Integrationer|Integrations)$/ })
@@ -962,7 +883,7 @@ for (const colorScheme of ["light", "dark"] as const) {
       });
     });
 
-    test("admin crawler", { tag: "@vite" }, async ({ page }) => {
+    test("admin crawler", async ({ page }) => {
       await scan(page, "/admin/crawler", async () => {
         await expect(page.getByRole("heading", { level: 1, name: /^Crawler$/ })).toBeVisible();
         await expect(page.getByRole("group", { name: /schemaläggare|scheduler/i })).toBeVisible();
@@ -970,7 +891,7 @@ for (const colorScheme of ["light", "dark"] as const) {
       });
     });
 
-    test("admin flow settings", { tag: "@vite" }, async ({ page }) => {
+    test("admin flow settings", async ({ page }) => {
       await page.goto("/admin");
       const settings = await apiRequest<Schema<"SettingsPublic">>(page, "/settings/");
       test.skip(
@@ -998,7 +919,7 @@ for (const colorScheme of ["light", "dark"] as const) {
       });
     });
 
-    test("account", { tag: "@vite" }, async ({ page }) => {
+    test("account", async ({ page }) => {
       await scan(page, "/account", async () => {
         await expect(page.getByText(/byt lösenord/i).first()).toBeVisible();
         await expect(page.locator('input[autocomplete="new-password"]').first()).toBeVisible();
@@ -1008,7 +929,9 @@ for (const colorScheme of ["light", "dark"] as const) {
     // Touch layouts: a phone, and an iPad upright and sideways. All report a
     // coarse pointer, so the 44 px touch targets apply; on the phone the top
     // bar or the chat's own header replaces the SideNav, which an iPad shows
-    // as an icon rail either way.
+    // as an icon rail either way. Screens at rest are the route walk's
+    // (tests/a11y-routes.spec.ts, CHECKS holds what these scans asserted); this
+    // holds what a walk cannot reach: an open layer, a state, a section.
     for (const layout of TOUCH_LAYOUTS) {
       test.describe(layout.name, () => {
         test.use({ viewport: layout.viewport, hasTouch: true, isMobile: true });
@@ -1018,7 +941,7 @@ for (const colorScheme of ["light", "dark"] as const) {
           expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
         });
 
-        test("personal chat", { tag: "@vite" }, async ({ page }) => {
+        test("personal chat", async ({ page }) => {
           await scan(page, "/spaces/personal/chat", () => chatStartReady(page));
         });
 
@@ -1063,22 +986,12 @@ for (const colorScheme of ["light", "dark"] as const) {
           });
         }
 
-        test("spaces list", { tag: "@vite" }, async ({ page }) => {
-          await scan(page, "/spaces/list", async () => {
-            await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
-          });
-        });
-
-        test("a space, and the organisation space", { tag: "@vite" }, async ({ page }) => {
+        test("a space, and the organisation space", async ({ page }) => {
+          // A new space, so the overview's empty states and their create actions are scanned.
           const name = uniqueName(`E2E A11y Touch Space ${colorScheme}`);
           const space = await createSpace(page, name);
           await scan(page, `${space}/overview`, async () => {
-            // A phone's and a tablet's space header names the space (#1328).
             await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
-            // A phone lists what manages the space; tablets keep a tab for each.
-            await expect(
-              page.getByRole("region", { name: /^(Hantera ytan|Manage space)$/ })
-            ).toHaveCount(layout.phone ? 1 : 0);
           });
           await scan(page, "/spaces/organization/knowledge", async () => {
             await expect(
@@ -1118,161 +1031,54 @@ for (const colorScheme of ["light", "dark"] as const) {
           });
         }
 
-        test("account", { tag: "@vite" }, async ({ page }) => {
-          // Below 1024 px Konto is a page (decision 22); sideways, the profile
-          // under the same title and its tabs.
-          await scan(page, "/account", async () => {
-            await expect(
-              page.getByRole("heading", { level: 1, name: /^(Konto|Account)$/ })
-            ).toBeVisible();
-          });
-          await scan(page, "/account/appearance", async () => {
-            await expect(page.getByRole("radiogroup", { name: /^(Tema|Theme)$/ })).toBeVisible();
-          });
-        });
-
         test("the command palette open", async ({ page }) => {
           await spacesList(page);
           await openPalette(page);
           await expectNoAxeViolations(page);
         });
 
-        test("admin users", { tag: "@vite" }, async ({ page }) => {
-          await scan(page, "/admin/users", async () => {
-            await expect(
-              page.getByRole("heading", { level: 1, name: /^(Användare|Users)$/ })
-            ).toBeVisible();
-            await expect(
-              page.getByRole("main").getByText(/^\d+ (användare|users?)$/)
-            ).toBeVisible();
-          });
-        });
-
-        test("admin overview and models", { tag: "@vite" }, async ({ page }) => {
-          await scan(page, "/admin", async () => {
-            await expect(
-              page.getByRole("heading", { level: 1, name: /^(Översikt|Overview)$/ })
-            ).toBeVisible();
-          });
-          await scan(page, "/admin/models", async () => {
-            await expect(
-              page.getByRole("heading", { level: 2, name: "E2E Mock Provider" })
-            ).toBeVisible();
-          });
-        });
-
         // A phone only: each scan opens an access session, and the backend
         // allows five an hour (admin-audit.spec.ts opens one more).
         if (layout.phone) {
-          test("admin audit log", { tag: "@vite" }, async ({ page }) => {
+          test("admin audit log", async ({ page }) => {
             await auditLogs(page);
             await expectNoAxeViolations(page);
           });
         }
 
-        test(
-          "a space's assistants, apps and members, an editor and an app result",
-          { tag: "@vite" },
-          async ({ page }) => {
-            const work = await spaceWithWork(
-              page,
-              uniqueName(`E2E A11y Touch Work ${colorScheme}`)
-            );
-            for (const [tab, name] of [
-              ["assistants", /^(Assistenter|Assistants)$/],
-              ["apps", /^(Appar|Apps)$/],
-              ["members", /^(Medlemmar|Members)$/]
-            ] as const) {
-              await scan(page, `${work.space}/${tab}`, async () => {
-                // Under a phone's or a tablet's space header the section's title is an h2.
-                await expect(page.getByRole("heading", { level: 2, name })).toBeVisible();
-              });
-            }
-            // A phone opens the editor on its index of sections (decision 21).
-            for (const editor of layout.phone
-              ? [work.editor, `${work.editor}?section=instructions`]
-              : [work.editor]) {
-              await scan(page, editor, async () => {
-                await expect(
-                  page.getByRole("heading", { level: 1, name: /^Bygglov / })
-                ).toBeVisible();
-              });
-            }
-            await scan(page, work.result, async () => {
-              await expect(
-                page.getByRole("heading", { level: 1, name: /^(Indata|Input): / })
-              ).toBeVisible();
-              await expect(
-                page.getByText(/^(Ditt resultat genereras\.|Your result is being generated\.)$/)
-              ).toBeVisible();
-              await expect(page.locator("[data-result-skeleton]")).toHaveAttribute(
-                "aria-hidden",
-                "true"
-              );
-            });
-          }
-        );
-
-        test(
-          "space app pages, app editor and group-chat editor",
-          { tag: "@vite" },
-          async ({ page }) => {
-            const work = await spaceWithWork(
-              page,
-              uniqueName(`E2E Resource Routes ${colorScheme}`)
-            );
-            const groupName = uniqueName("E2E Grupp");
-            const group = await apiPost(page, `${work.space}/applications/group-chats/`, {
-              name: groupName
-            });
-            await scan(page, work.app, async () => {
-              await expect(page.getByRole("tab", { name: /^(Resultat|Results)$/ })).toBeVisible();
-              await expect(page.getByRole("link", { name: /^(Redigera|Edit)$/ })).toHaveAttribute(
-                "href",
-                work.appEditor
-              );
-            });
-            for (const editor of layout.phone
-              ? [work.appEditor, `${work.appEditor}?section=instructions`]
-              : [work.appEditor]) {
-              await scan(page, editor, async () => {
-                await expect(
-                  page.getByRole("heading", { level: 1, name: /^Protokoll / })
-                ).toBeVisible();
-              });
-            }
-            await scan(page, `${work.space}/group-chats/${group}/edit`, async () => {
-              await expect(page.getByRole("heading", { level: 1, name: groupName })).toBeVisible();
-            });
-          }
-        );
-
-        test("Konto's pages", { tag: "@vite" }, async ({ page }) => {
-          for (const [path, title] of [
-            ["/account/password", /^(Byt lösenord|Change password)$/],
-            ["/account/copy-format", /^(Kopieringsformat|Copy format)$/],
-            ["/account/api-keys", /^(Mina API-nycklar|My API keys)$/],
-            ["/account/integrations", /^(Integrationer|Integrations)$/]
-          ] as const) {
-            await scan(page, path, async () => {
-              // Below 1024 px the page's own heading; sideways, "Konto".
-              await expect(
-                page.getByRole("heading", {
-                  level: 1,
-                  name: layout.viewport.width < 1024 ? title : /^(Konto|Account)$/
-                })
-              ).toBeAttached();
-            });
-          }
-        });
-
-        test("Nyheter", { tag: "@vite" }, async ({ page }) => {
-          await scan(page, "/whats-new", async () => {
+        test("an app result while it generates", async ({ page }) => {
+          const work = await spaceWithWork(page, uniqueName(`E2E A11y Touch Work ${colorScheme}`));
+          await scan(page, work.result, async () => {
             await expect(
-              page.getByRole("heading", { level: 1, name: /^(Nyheter|What's new)$/ })
+              page.getByRole("heading", { level: 1, name: /^(Indata|Input): / })
             ).toBeVisible();
+            await expect(
+              page.getByText(/^(Ditt resultat genereras\.|Your result is being generated\.)$/)
+            ).toBeVisible();
+            await expect(page.locator("[data-result-skeleton]")).toHaveAttribute(
+              "aria-hidden",
+              "true"
+            );
           });
         });
+
+        // A phone opens an editor on its index of sections (decision 21), and a section
+        // from there; the route walk covers the index.
+        if (layout.phone) {
+          test("an editor's section", async ({ page }) => {
+            const work = await spaceWithWork(page, uniqueName(`E2E A11y Section ${colorScheme}`));
+            await scan(page, `${work.editor}?section=instructions`, async () => {
+              await expect(
+                page.getByRole("heading", { level: 1, name: /^Bygglov / })
+              ).toBeVisible();
+            });
+            await scan(page, `${work.appEditor}?section=instructions`, async () => {
+              await expect(
+                page.getByRole("heading", { level: 1, name: /^Protokoll / })
+              ).toBeVisible();
+            });
+          });
+        }
       });
     }
   });
@@ -1282,18 +1088,18 @@ for (const colorScheme of ["light", "dark"] as const) {
 test.describe("reflow at 320 px (1.4.10)", () => {
   test.use({ viewport: { width: 320, height: 640 }, contextOptions: { reducedMotion: "reduce" } });
 
-  test("personal chat", { tag: "@vite" }, async ({ page }) => {
+  test("personal chat", async ({ page }) => {
     await page.goto("/spaces/personal/chat");
     await chatStartReady(page);
     await expectNoSidewaysPageScroll(page);
   });
 
-  test("spaces list", { tag: "@vite" }, async ({ page }) => {
+  test("spaces list", async ({ page }) => {
     await spacesList(page);
     await expectNoSidewaysPageScroll(page);
   });
 
-  test("space overview and knowledge", { tag: "@vite" }, async ({ page }) => {
+  test("space overview and knowledge", async ({ page }) => {
     const name = uniqueName("E2E Reflow Space");
     const space = await createSpace(page, name);
 
@@ -1308,7 +1114,7 @@ test.describe("reflow at 320 px (1.4.10)", () => {
     await expectNoSidewaysPageScroll(page);
   });
 
-  test("admin users", { tag: "@vite" }, async ({ page }) => {
+  test("admin users", async ({ page }) => {
     await page.goto("/admin/users");
     await expect(
       page.getByRole("heading", { level: 1, name: /^(Användare|Users)$/ })
@@ -1317,7 +1123,7 @@ test.describe("reflow at 320 px (1.4.10)", () => {
     await expectNoSidewaysPageScroll(page);
   });
 
-  test("admin models", { tag: "@vite" }, async ({ page }) => {
+  test("admin models", async ({ page }) => {
     await page.goto("/admin/models");
     await expect(page.getByRole("tab", { name: /migreringshistorik/i })).toBeVisible();
     // A phone lists a provider's models as rows (decision 31).
@@ -1325,7 +1131,7 @@ test.describe("reflow at 320 px (1.4.10)", () => {
     await expectNoSidewaysPageScroll(page);
   });
 
-  test("account", { tag: "@vite" }, async ({ page }) => {
+  test("account", async ({ page }) => {
     await page.goto("/account");
     await expect(page.getByText(/byt lösenord/i).first()).toBeVisible();
     await expectNoSidewaysPageScroll(page);
@@ -1344,34 +1150,28 @@ test.describe("reflow at 320 px (1.4.10)", () => {
     }
   });
 
-  test("Nyheter", { tag: "@vite" }, async ({ page }) => {
+  test("Nyheter", async ({ page }) => {
     await page.goto("/whats-new");
     await expect(page.getByRole("link", { name: /^(Tillbaka till|Back to) Konto$/ })).toBeVisible();
     await expectNoSidewaysPageScroll(page);
   });
 
-  test(
-    "a space's assistants, apps and members, an editor and an app result",
-    { tag: "@vite" },
-    async ({ page }) => {
-      const work = await spaceWithWork(page, uniqueName("E2E Reflow Work"));
-      for (const tab of ["assistants", "apps", "members"]) {
-        await page.goto(`${work.space}/${tab}`);
-        await expect(page.getByRole("heading", { level: 2 }).first()).toBeVisible();
-        await expectNoSidewaysPageScroll(page);
-      }
-      for (const editor of [work.editor, `${work.editor}?section=instructions`]) {
-        await page.goto(editor);
-        await expect(page.getByRole("heading", { level: 1, name: /^Bygglov / })).toBeVisible();
-        await expectNoSidewaysPageScroll(page);
-      }
-      await page.goto(work.result);
-      await expect(
-        page.getByRole("heading", { level: 1, name: /^(Indata|Input): / })
-      ).toBeVisible();
+  test("a space's assistants, apps and members, an editor and an app result", async ({ page }) => {
+    const work = await spaceWithWork(page, uniqueName("E2E Reflow Work"));
+    for (const tab of ["assistants", "apps", "members"]) {
+      await page.goto(`${work.space}/${tab}`);
+      await expect(page.getByRole("heading", { level: 2 }).first()).toBeVisible();
       await expectNoSidewaysPageScroll(page);
     }
-  );
+    for (const editor of [work.editor, `${work.editor}?section=instructions`]) {
+      await page.goto(editor);
+      await expect(page.getByRole("heading", { level: 1, name: /^Bygglov / })).toBeVisible();
+      await expectNoSidewaysPageScroll(page);
+    }
+    await page.goto(work.result);
+    await expect(page.getByRole("heading", { level: 1, name: /^(Indata|Input): / })).toBeVisible();
+    await expectNoSidewaysPageScroll(page);
+  });
 });
 
 // Focus not obscured (2.4.11): errors and warnings stay until closed, at the
@@ -1410,23 +1210,21 @@ test.describe("toasts never cover the focused element (2.4.11)", () => {
   }
 });
 
-test(
-  "the skip link is the first tab stop and moves focus to the main content",
-  { tag: "@vite" },
-  async ({ page }) => {
-    await page.goto("/spaces/list");
-    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+test("the skip link is the first tab stop and moves focus to the main content", async ({
+  page
+}) => {
+  await page.goto("/spaces/list");
+  await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
 
-    await page.keyboard.press("Tab");
-    const skipLink = page.getByRole("link", { name: /hoppa till innehåll|skip to content/i });
-    await expect(skipLink).toBeFocused();
-    // Visually hidden until focused (sr-only, a 1px clip): with focus it must be
-    // shown at full size (2.4.7) and be a real target (2.5.8).
-    const box = await skipLink.boundingBox();
-    expect(box?.width ?? 0).toBeGreaterThanOrEqual(24);
-    expect(box?.height ?? 0).toBeGreaterThanOrEqual(24);
+  await page.keyboard.press("Tab");
+  const skipLink = page.getByRole("link", { name: /hoppa till innehåll|skip to content/i });
+  await expect(skipLink).toBeFocused();
+  // Visually hidden until focused (sr-only, a 1px clip): with focus it must be
+  // shown at full size (2.4.7) and be a real target (2.5.8).
+  const box = await skipLink.boundingBox();
+  expect(box?.width ?? 0).toBeGreaterThanOrEqual(24);
+  expect(box?.height ?? 0).toBeGreaterThanOrEqual(24);
 
-    await page.keyboard.press("Enter");
-    await expect(page.locator("#main-content")).toBeFocused();
-  }
-);
+  await page.keyboard.press("Enter");
+  await expect(page.locator("#main-content")).toBeFocused();
+});

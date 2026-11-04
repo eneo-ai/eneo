@@ -19,10 +19,12 @@
 export type Fixtures = {
   /** `/spaces/<id>`: a shared space. */
   space: string;
+  spaceName: string;
   assistant: string;
   app: string;
   run: string;
   groupChat: string;
+  groupChatName: string;
   website: string;
   collection: string;
   /** A published flow in `space`, and a finished run of it. */

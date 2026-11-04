@@ -229,10 +229,10 @@ async def test_space_applications_view_does_not_read_attachment_content(
     byte_loads = 0
     original_load_attachment_groups = FileContentLoader.load_attachment_groups
 
-    async def count_attachment_byte_loads(self, groups):
+    async def count_attachment_byte_loads(self, groups, **kwargs):
         nonlocal byte_loads
         byte_loads += 1
-        return await original_load_attachment_groups(self, groups)
+        return await original_load_attachment_groups(self, groups, **kwargs)
 
     monkeypatch.setattr(
         FileContentLoader,

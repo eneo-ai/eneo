@@ -5,9 +5,17 @@ from hashlib import sha256
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
+import pytest
+
 from eneo.authentication.principal_types import PrincipalType
 from eneo.files.file_content_loader import FileContentLoader
-from eneo.files.file_models import FileContentVariant, FileMetadata, FileType
+from eneo.files.file_models import (
+    FileContentNotLoadedError,
+    FileContentVariant,
+    FileMetadata,
+    FileType,
+    FileWithoutContent,
+)
 from eneo.files.file_repo import (
     FileContentReferenceRecord,
     original_download_variants,
@@ -168,3 +176,76 @@ async def test_hydrated_file_without_an_original_has_no_original_size():
         _reference(metadata, FileContentVariant.EXTRACTED_TEXT, b"text only"),
     )
     assert loaded.original_size is None
+
+
+async def test_a_file_outside_content_of_keeps_its_facts_and_reads_no_bytes():
+    wanted = _metadata(FileType.TEXT)
+    other = _metadata(FileType.TEXT)
+    wanted_text = _reference(wanted, FileContentVariant.EXTRACTED_TEXT, b"wanted")
+    other_original = _reference(other, FileContentVariant.ORIGINAL, b"the upload")
+    other_text = _reference(other, FileContentVariant.EXTRACTED_TEXT, b"other text")
+    repository = AsyncMock()
+    repository.get_content_references.return_value = [
+        wanted_text,
+        other_original,
+        other_text,
+    ]
+    repository.get_legacy_infos.return_value = []
+    object_content = AsyncMock()
+    object_content.object_store_configured = False
+    object_content.read_content_bytes.return_value = {wanted_text.content_id: b"wanted"}
+
+    loaded = await FileContentLoader(repository, object_content).load(
+        [wanted, other], content_of={wanted.id}
+    )
+
+    grants = object_content.read_content_bytes.await_args.args[0]
+    assert [grant.content_id for grant in grants] == [wanted_text.content_id]
+    assert loaded[wanted.id].text == "wanted"
+    assert isinstance(loaded[other.id], FileWithoutContent)
+    assert loaded[other.id].size == len(b"other text")
+    assert loaded[other.id].original_size == len(b"the upload")
+    assert loaded[other.id].original_available is True
+
+
+async def test_a_file_without_content_still_reads_its_transcription():
+    metadata = _metadata(FileType.AUDIO)
+    audio = _reference(metadata, FileContentVariant.ORIGINAL, b"audio")
+    transcription = _reference(metadata, FileContentVariant.TRANSCRIPTION, b"said")
+    repository = AsyncMock()
+    repository.get_content_references.return_value = [audio, transcription]
+    repository.get_legacy_infos.return_value = []
+    object_content = AsyncMock()
+    object_content.object_store_configured = False
+    object_content.read_content_bytes.return_value = {transcription.content_id: b"said"}
+
+    loaded = await FileContentLoader(repository, object_content).load(
+        [metadata], content_of=()
+    )
+
+    grants = object_content.read_content_bytes.await_args.args[0]
+    assert [grant.content_id for grant in grants] == [transcription.content_id]
+    assert loaded[metadata.id].transcription == "said"
+
+
+def test_reading_the_content_of_a_file_without_content_raises():
+    now = datetime.now(UTC)
+    file = FileWithoutContent(
+        id=uuid4(),
+        created_at=now,
+        updated_at=now,
+        name="policy.txt",
+        checksum="00",
+        size=5,
+        mimetype="text/plain",
+        file_type=FileType.TEXT,
+        user_id=uuid4(),
+        tenant_id=uuid4(),
+    )
+
+    with pytest.raises(FileContentNotLoadedError):
+        _ = file.text
+    with pytest.raises(FileContentNotLoadedError):
+        _ = file.blob
+    assert file.model_dump()["name"] == "policy.txt"
+    assert "policy.txt" in repr(file)

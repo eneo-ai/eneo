@@ -4,45 +4,41 @@ import { expect, test } from "./csp";
 // authenticated and shows a marker element from the newly-ported feature.
 // Labels are the Swedish defaults (the app's default locale).
 
-test(
-  "starts a styled tour on first use and closes it with Escape",
-  { tag: "@vite" },
-  async ({ page }) => {
-    await page.goto("/whats-new");
-    await page.getByRole("button", { name: /^2\.2\.0/ }).click();
-    await page
-      .locator("#copy-rich-text")
-      .getByRole("button", { name: /visa mig|show me/i })
-      .click();
-    await expect(page).toHaveURL(/\/account$/);
-    const popover = page.locator(".driver-popover.eneo-spotlight");
-    await expect(popover).toBeVisible();
-    await expect(popover).toHaveCSS("position", "fixed");
-    await expect(popover).toContainText(/kopiera svar|copy answers/i);
-    await page.keyboard.press("Escape");
-    await expect(popover).not.toBeVisible();
-  }
-);
+test("starts a styled tour on first use and closes it with Escape", async ({ page }) => {
+  await page.goto("/whats-new");
+  await page.getByRole("button", { name: /^2\.2\.0/ }).click();
+  await page
+    .locator("#copy-rich-text")
+    .getByRole("button", { name: /visa mig|show me/i })
+    .click();
+  await expect(page).toHaveURL(/\/account$/);
+  const popover = page.locator(".driver-popover.eneo-spotlight");
+  await expect(popover).toBeVisible();
+  await expect(popover).toHaveCSS("position", "fixed");
+  await expect(popover).toContainText(/kopiera svar|copy answers/i);
+  await page.keyboard.press("Escape");
+  await expect(popover).not.toBeVisible();
+});
 
-test("admin usage has a per-user tab", { tag: "@vite" }, async ({ page }) => {
+test("admin usage has a per-user tab", async ({ page }) => {
   await page.goto("/admin/usage");
   await expect(page.getByRole("tab", { name: /användare/i })).toBeVisible();
 });
 
-test("admin api-keys exposes the tenant policy + filters", { tag: "@vite" }, async ({ page }) => {
+test("admin api-keys exposes the tenant policy + filters", async ({ page }) => {
   await page.goto("/admin/api-keys");
   await expect(page.getByRole("button", { name: /organisationspolicy/i })).toBeVisible();
 });
 
 // The route walks open /admin/storage in their own contexts, which the CSP fixture does not watch.
-test("admin storage loads under the production CSP", { tag: "@vite" }, async ({ page }) => {
+test("admin storage loads under the production CSP", async ({ page }) => {
   await page.goto("/admin/storage");
   await expect(page.getByText("Flytta befintligt innehåll", { exact: true })).toBeVisible();
 });
 
 // Fonts (src/styles/globals.css "2b. Fonts"): self-hosted, only the UI font preloaded.
 
-test("preloads only Figtree and renders with it", { tag: "@vite" }, async ({ page }) => {
+test("preloads only Figtree and renders with it", async ({ page }) => {
   await page.goto("/spaces/list");
   const preloads = await page
     .locator('link[rel="preload"][as="font"]')
@@ -92,7 +88,7 @@ test("profile language selection reloads the document in either language", async
 });
 
 // As in the Svelte app no sidebar links the catalogue; the palette does.
-test("the command palette reaches the assistant catalog", { tag: "@vite" }, async ({ page }) => {
+test("the command palette reaches the assistant catalog", async ({ page }) => {
   await page.goto("/spaces/list");
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
   await page.keyboard.press("ControlOrMeta+k");
@@ -106,20 +102,16 @@ test("the command palette reaches the assistant catalog", { tag: "@vite" }, asyn
   ).toBeVisible();
 });
 
-test(
-  "Ctrl/⌘+K opens the command palette and Escape closes it",
-  { tag: "@vite" },
-  async ({ page }) => {
-    await page.goto("/spaces/list");
-    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
-    await page.keyboard.press("ControlOrMeta+k");
-    const palette = page.getByRole("dialog", { name: /sök i eneo|search eneo/i });
-    await expect(palette).toBeVisible();
-    await expect(palette.getByRole("combobox")).toBeFocused();
-    await page.keyboard.press("Escape");
-    await expect(palette).toBeHidden();
-  }
-);
+test("Ctrl/⌘+K opens the command palette and Escape closes it", async ({ page }) => {
+  await page.goto("/spaces/list");
+  await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+  await page.keyboard.press("ControlOrMeta+k");
+  const palette = page.getByRole("dialog", { name: /sök i eneo|search eneo/i });
+  await expect(palette).toBeVisible();
+  await expect(palette.getByRole("combobox")).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(palette).toBeHidden();
+});
 
 test.describe("on a phone", () => {
   test.use({
@@ -128,19 +120,15 @@ test.describe("on a phone", () => {
       "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
   });
 
-  test(
-    "stays on the requested page and opens the navigation drawer",
-    { tag: "@vite" },
-    async ({ page }) => {
-      await page.goto("/spaces/list");
-      await expect(page).toHaveURL(/\/spaces\/list$/);
-      await page.getByRole("button", { name: /öppna menyn|open menu/i }).click();
-      const drawer = page.getByRole("dialog", { name: /^(meny|menu)$/i });
-      await expect(drawer.getByRole("navigation", { name: /huvudmeny|main menu/i })).toBeVisible();
-      await page.keyboard.press("Escape");
-      await expect(drawer).toBeHidden();
-    }
-  );
+  test("stays on the requested page and opens the navigation drawer", async ({ page }) => {
+    await page.goto("/spaces/list");
+    await expect(page).toHaveURL(/\/spaces\/list$/);
+    await page.getByRole("button", { name: /öppna menyn|open menu/i }).click();
+    const drawer = page.getByRole("dialog", { name: /^(meny|menu)$/i });
+    await expect(drawer.getByRole("navigation", { name: /huvudmeny|main menu/i })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(drawer).toBeHidden();
+  });
 });
 
 test.describe("signed out", () => {

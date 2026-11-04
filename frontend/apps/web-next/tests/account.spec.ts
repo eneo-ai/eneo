@@ -4,7 +4,7 @@ import { apiPost, uniqueName } from "./helpers";
 
 const PHONE = { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true };
 
-test.describe("Konto on a phone (decision 22)", { tag: "@vite" }, () => {
+test.describe("Konto on a phone (decision 22)", () => {
   test.use(PHONE);
 
   test("opens from the drawer's profile row, one page of 44 px rows with Logga ut last", async ({
@@ -162,7 +162,7 @@ test.describe("Konto on a phone (decision 22)", { tag: "@vite" }, () => {
   });
 });
 
-test.describe("Konto on an iPad held upright", { tag: "@vite" }, () => {
+test.describe("Konto on an iPad held upright", () => {
   test.use({ viewport: { width: 820, height: 1180 }, hasTouch: true });
 
   test("is a 42 rem column on the page's left edge with inset groups; a phone keeps its edge-to-edge rows", async ({
@@ -193,7 +193,7 @@ test.describe("Konto on an iPad held upright", { tag: "@vite" }, () => {
   });
 });
 
-test.describe("the account pages on an iPad held sideways", { tag: "@vite" }, () => {
+test.describe("the account pages on an iPad held sideways", () => {
   test.use({ viewport: { width: 1180, height: 820 }, hasTouch: true });
 
   test("keep the title Konto, as upright, its tabs and the profile menu", async ({ page }) => {
