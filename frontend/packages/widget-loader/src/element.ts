@@ -424,8 +424,10 @@ export class EneoWidgetElement extends HTMLElement {
         this.avatar.addEventListener("error", () => this.launcher.classList.remove("avatar"));
         this.launcher.prepend(this.avatar);
       }
-      if (this.avatar.getAttribute("src") !== url) this.avatar.src = url;
-      this.launcher.classList.add("avatar");
+      if (this.avatar.getAttribute("src") !== url) {
+        this.avatar.src = url;
+        this.launcher.classList.add("avatar");
+      }
     } else {
       this.avatar?.remove();
       this.avatar = null;
@@ -490,7 +492,7 @@ export class EneoWidgetElement extends HTMLElement {
   }
 
   toggle(): void {
-    if (this.isOpen) this.closePanel();
+    if (this.isOpen || this.openWhenSettled) this.closePanel();
     else this.openPanel();
   }
 

@@ -211,6 +211,7 @@ describe("launcher", () => {
 
     // A host CSP that refuses the image leaves the plain bubble.
     image.dispatchEvent(new Event("error"));
+    element.setAttribute("color-scheme", "dark");
     expect(launcher.classList.contains("avatar")).toBe(false);
     expect(getComputedStyle(image).display).toBe("none");
 
@@ -342,6 +343,17 @@ describe("saved settings", () => {
     held.answer(null);
     await flushSettings();
     expect(element.open).toBe(false);
+  });
+
+  it("cancels a pending open when the host toggles twice", async () => {
+    const held = heldSettings();
+    const element = attach();
+    element.toggle();
+    element.toggle();
+    held.answer(null);
+    await flushSettings();
+    expect(element.open).toBe(false);
+    expect(frameOf(element)).toBeNull();
   });
 
   it("forgets an early open when the host removes it before the settings are in", async () => {
