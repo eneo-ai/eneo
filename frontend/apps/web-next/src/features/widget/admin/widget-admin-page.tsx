@@ -13,7 +13,7 @@ import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
 import { toastApiError } from "@/lib/api/toast";
 import { assistantQueryOptions } from "@/features/assistants/editor/use-assistant";
-import { useSpaceDisplayName } from "@/features/spaces/frame/space-header";
+import { useSpaceDisplayName } from "@/features/spaces/space-display-name";
 import { spaceLandingHref, spaceSections } from "@/features/spaces/frame/space-sections";
 import { useSpace } from "@/features/spaces/use-space";
 import {
