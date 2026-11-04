@@ -67,6 +67,7 @@ export class Autosave<Resource extends object, Update extends object> {
   #timer: ReturnType<typeof setTimeout> | null = null;
   #inflight: Promise<void> | null = null;
   #dirtyWhileSaving = false;
+  #exclusiveTail: Promise<void> = Promise.resolve();
 
   #listeners = new Set<() => void>();
   #snapshot: AutosaveSnapshot<Resource>;
@@ -180,7 +181,18 @@ export class Autosave<Resource extends object, Update extends object> {
    * instead of carrying the one before it. The action returns the new
    * resource, or null to leave the baseline alone (the editor moved on).
    */
-  async exclusive(action: () => Promise<Resource | null>): Promise<void> {
+  exclusive(action: () => Promise<Resource | null>): Promise<void> {
+    // One action at a time, its flush included: two actions waiting on the
+    // same save would otherwise both start from the revision it returns.
+    const run = this.#exclusiveTail.then(() => this.#runExclusive(action));
+    this.#exclusiveTail = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
+  }
+
+  async #runExclusive(action: () => Promise<Resource | null>): Promise<void> {
     await this.flush();
     const held = action().then((result) => {
       if (result !== null) this.replace(result);
@@ -318,16 +330,18 @@ export class Autosave<Resource extends object, Update extends object> {
     this.#emit();
     try {
       const saved = await this.#save(update, this.#baseline);
+      // A save from before a reload belongs to the resource that was shown
+      // then: neither its answer nor its failure may touch the current one.
+      if (replacement !== this.#replacement) return;
       // Newer edits win over what the server echoes back for the same keys.
-      if (replacement === this.#replacement) {
-        this.#baseline = saved;
-        this.#widget = this.#onTop(saved);
-      }
+      this.#baseline = saved;
+      this.#widget = this.#onTop(saved);
       // The server accepted the whole resource, so only refusals of values
       // still held back remain true.
       this.#keepRefusals((path) => group(path) in this.#refused);
       this.#status = this.hasRefused ? "refused" : "saved";
     } catch (error) {
+      if (replacement !== this.#replacement) return;
       this.#error = error;
       if (isStaleEditorError(error)) {
         this.#pending = { ...update, ...this.#pending };

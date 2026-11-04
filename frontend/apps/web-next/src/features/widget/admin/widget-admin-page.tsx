@@ -24,6 +24,7 @@ import {
   type Widget,
   type WidgetTemplate
 } from "./queries";
+import { WIDGET_OVERVIEW_KEY } from "./org/queries";
 import type { LoaderRelease } from "@eneo/eneo-js/widgets/snippet";
 import { TemplatePicker } from "./template-picker";
 import { WidgetEditor } from "./widget-editor";
@@ -82,6 +83,8 @@ export function WidgetAdminPage({
     if ((before?.template?.id ?? null) !== (updated?.template?.id ?? null)) {
       void queryClient.invalidateQueries({ queryKey: ["widget-templates"] });
     }
+    // The organisation's overview folds each widget's blockers in.
+    void queryClient.invalidateQueries({ queryKey: WIDGET_OVERVIEW_KEY });
   }
 
   const sections = spaceSections(space, spaceCan, routeId);

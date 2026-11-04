@@ -8,6 +8,7 @@ from pydantic import ValidationError
 
 from eneo.widgets.domain.widget import (
     MAX_DAILY_TOKEN_BUDGET,
+    MAX_SUGGESTED_QUESTION_LENGTH,
     BotProtection,
     Widget,
     WidgetLimits,
@@ -159,6 +160,13 @@ def test_the_editors_budget_ceiling_is_the_apis():
     )
     assert copy is not None
     assert int(copy.group(1)) == MAX_DAILY_TOKEN_BUDGET
+    question = re.search(
+        r"^export const MAX_SUGGESTED_QUESTION_LENGTH = (\d+);$",
+        WIDGET_CLIENT_LIMITS.read_text(),
+        re.MULTILINE,
+    )
+    assert question is not None
+    assert int(question.group(1)) == MAX_SUGGESTED_QUESTION_LENGTH
 
     def maximum(schema: dict) -> int | None:
         if "maximum" in schema:

@@ -12,10 +12,11 @@
   import { Input } from "$lib/components/ui/input/index.js";
   import { m } from "$lib/paraglide/messages";
   import { collapseWhitespace } from "./textDraft.svelte";
+  import { MAX_SUGGESTED_QUESTION_LENGTH } from "@eneo/eneo-js/widgets/limits";
 
   // Mirrors MAX_SUGGESTED_QUESTIONS in the backend's WidgetTexts.
   const MAX = 4;
-  const MAX_LENGTH = 120;
+  const MAX_LENGTH = MAX_SUGGESTED_QUESTION_LENGTH;
 
   type Props = {
     questions: string[];

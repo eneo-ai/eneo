@@ -146,6 +146,49 @@ describe("WidgetAutosave", () => {
     expect(autosave.hasPending).toBe(false);
   });
 
+  it("ignores both the answer and the failure of a save from before a reload", async () => {
+    let fail!: (error: unknown) => void;
+    const save = vi
+      .fn()
+      .mockImplementationOnce(() => new Promise<Widget>((_, reject) => (fail = reject)))
+      .mockImplementation(async (update) => widget({ ...update, revision: update.revision + 1 }));
+    const autosave = new WidgetAutosave(widget({ revision: 3 }), save);
+    autosave.patch({ name: "Namn från A" });
+    const stale = autosave.flush();
+    // The page moved on to another widget while A's save was in flight.
+    autosave.reload(widget({ id: "w2", revision: 10 }));
+    fail(new Error("network"));
+    await stale;
+    expect(autosave.status).toBe("idle");
+
+    autosave.patch({ theme: { radius: 4 } });
+    await autosave.flush();
+    expect(save).toHaveBeenLastCalledWith({ theme: { radius: 4 }, revision: 10 });
+    expect(autosave.widget.name).not.toBe("Namn från A");
+  });
+
+  it("runs exclusive actions one at a time, each after the save before it", async () => {
+    let finishSave!: (saved: Widget) => void;
+    const save = vi.fn(() => new Promise<Widget>((resolve) => (finishSave = resolve)));
+    const autosave = new WidgetAutosave(widget({ revision: 3 }), save);
+    autosave.patch({ name: "Kaffe" });
+    const seen: number[] = [];
+    const pause = autosave.exclusive(async () => {
+      seen.push(autosave.widget.revision);
+      return widget({ name: "Kaffe", revision: 7, status: "paused" });
+    });
+    const reapply = autosave.exclusive(async () => {
+      seen.push(autosave.widget.revision);
+      return widget({ name: "Kaffe", revision: 8 });
+    });
+    await Promise.resolve();
+    finishSave(widget({ name: "Kaffe", revision: 4 }));
+    await Promise.all([pause, reapply]);
+    // Reapply started only once the pause had returned its revision.
+    expect(seen).toEqual([4, 7]);
+    expect(autosave.widget.revision).toBe(8);
+  });
+
   it("keeps unsaved edits when the widget is replaced by a lifecycle action", () => {
     const autosave = new WidgetAutosave(widget(), vi.fn(), { delay: 1000 });
     autosave.patch({ name: "Utkast" });

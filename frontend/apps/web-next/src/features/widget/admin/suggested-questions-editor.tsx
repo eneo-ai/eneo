@@ -1,5 +1,6 @@
 "use client";
 
+import { MAX_SUGGESTED_QUESTION_LENGTH } from "@eneo/eneo-js/widgets/limits";
 import { Button } from "@astryxdesign/core/Button";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { IconButton } from "@astryxdesign/core/IconButton";
@@ -12,7 +13,7 @@ import { DraftWrapper } from "./use-text-draft";
 
 // Mirrors MAX_SUGGESTED_QUESTIONS in the backend's WidgetTexts.
 const MAX = 4;
-const MAX_LENGTH = 120;
+const MAX_LENGTH = MAX_SUGGESTED_QUESTION_LENGTH;
 
 type Row = { key: number; text: string };
 

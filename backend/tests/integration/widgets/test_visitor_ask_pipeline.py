@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 from hashlib import sha256
+from types import SimpleNamespace
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -18,6 +19,7 @@ import altcha
 import pytest
 import sqlalchemy as sa
 
+import eneo.files.file_reference as file_reference_mod
 from eneo.ai_models.completion_models.completion_model import (
     Completion,
     GeneratedFile,
@@ -673,10 +675,24 @@ async def test_hidden_tool_activity_still_delivers_tool_sources(
 FEE_TEXT = "Avgiften f\u00f6r bygglov \u00e4r 4 500 kronor."
 
 
+@pytest.fixture
+def reference_base_url(monkeypatch):
+    """ "Open with tool" is only a mode where a signed reference URL can serve
+    the file; CI has no public origin, so the predicate gets one here."""
+    monkeypatch.setattr(
+        file_reference_mod,
+        "get_settings",
+        lambda: SimpleNamespace(
+            file_reference_base_url="http://host.docker.internal:8123",
+            public_origin=None,
+        ),
+    )
+
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_an_open_with_tool_attachment_reaches_the_visitor_turn_as_text(
-    client, admin_token, active_widget, visitor_pipeline
+    client, admin_token, active_widget, visitor_pipeline, reference_base_url
 ):
     """Visitors never get the files tool, so the attachment the admin marked
     "open with tool" is inlined for them instead of sent as a link nothing
@@ -711,7 +727,7 @@ async def test_an_open_with_tool_attachment_reaches_the_visitor_turn_as_text(
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_an_oversized_open_with_tool_attachment_refuses_the_visitor_turn(
-    client, admin_token, active_widget, visitor_pipeline
+    client, admin_token, active_widget, visitor_pipeline, reference_base_url
 ):
     """Inlined for the visitor, the attachment does not fit the model's
     window; the turn is refused before a conversation or question exists

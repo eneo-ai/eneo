@@ -2,7 +2,7 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderInApp } from "@/test/render";
+import { renderInApp, testQueryClient } from "@/test/render";
 import type { WidgetTemplate } from "../autosave";
 import { template, texts } from "./fixtures";
 
@@ -16,7 +16,7 @@ function ok(data: unknown) {
   return Promise.resolve({ data, response: new Response("{}") });
 }
 
-function showPage(current: WidgetTemplate) {
+function showPage(current: WidgetTemplate, queryClient = testQueryClient()) {
   api.GET.mockImplementation((path: string) =>
     path === "/api/v1/admin/widget-templates/{id}/"
       ? ok(current)
@@ -32,7 +32,8 @@ function showPage(current: WidgetTemplate) {
     ok({ ...current, has_unpublished_changes: false, published_at: "2026-09-21T12:00:00Z" })
   );
   return renderInApp(<WidgetTemplatePage templateId="t1" />, {
-    route: "/admin/widgets/templates/t1"
+    route: "/admin/widgets/templates/t1",
+    queryClient
   });
 }
 
@@ -203,18 +204,24 @@ describe("WidgetTemplatePage", () => {
   });
 
   it("a template nobody follows publishes without a question", async () => {
+    const queryClient = testQueryClient();
+    const overviewKey = ["admin", "widgets", "overview"];
+    queryClient.setQueryData(overviewKey, { totals: {}, items: [] });
     showPage(
       template({
         linked_widgets: 0,
         published_at: null,
         published: null,
         has_unpublished_changes: true
-      })
+      }),
+      queryClient
     );
     expect(await screen.findByText("Inte publicerad")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Publicera" }));
     await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(1));
     expect(screen.queryByRole("dialog")).toBeNull();
+    // Followers' blockers may have changed with what the release wrote.
+    await waitFor(() => expect(queryClient.getQueryState(overviewKey)?.isInvalidated).toBe(true));
   });
 
   it("a blank name is flagged and never sent", async () => {

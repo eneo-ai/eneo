@@ -221,7 +221,11 @@ describe("WidgetAdminPage", () => {
     api.PATCH.mockImplementation((_path: string, init: { body: Record<string, unknown> }) =>
       ok(widget({ ...init.body, revision: 4 }))
     );
-    showPage([widget()]);
+    // The organisation's overview, fresh from a recent visit: its blockers follow the widget.
+    const queryClient = testQueryClient();
+    const overviewKey = ["admin", "widgets", "overview"];
+    queryClient.setQueryData(overviewKey, { totals: {}, items: [] });
+    showPage([widget()], ["widgets"], { queryClient });
     // The widget's own name comes first; the persona's name field is below it.
     const [name] = await screen.findAllByRole("textbox", { name: /^Namn/ });
     fireEvent.change(name!, { target: { value: "Kaffe och te" } });
@@ -234,6 +238,7 @@ describe("WidgetAdminPage", () => {
       { timeout: 2000 }
     );
     await screen.findByText("Alla ändringar sparade", { selector: "section *" });
+    expect(queryClient.getQueryState(overviewKey)?.isInvalidated).toBe(true);
   });
 
   it("offers activation to tenant admins only and says why to the others", async () => {

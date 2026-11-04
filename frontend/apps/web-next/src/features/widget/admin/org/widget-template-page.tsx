@@ -30,7 +30,12 @@ import { useAutosave } from "../use-widget-autosave";
 import { WidgetPersonaFields } from "../widget-persona-fields";
 import { WidgetTextsFields } from "../widget-texts-fields";
 import { WidgetThemeFields } from "../widget-theme-fields";
-import { cacheWidgetTemplate, widgetTemplateApi, widgetTemplateQueryOptions } from "./queries";
+import {
+  cacheWidgetTemplate,
+  WIDGET_OVERVIEW_KEY,
+  widgetTemplateApi,
+  widgetTemplateQueryOptions
+} from "./queries";
 import { WidgetMockPreview } from "./widget-mock-preview";
 
 type TabId = "content" | "appearance";
@@ -178,10 +183,14 @@ function TemplateEditor({ template: initial }: { template: WidgetTemplate }) {
         return saved;
       });
       if (!published) return;
-      await queryClient.invalidateQueries({
-        queryKey: ["spaces"],
-        predicate: ({ queryKey }) => queryKey[2] === "widgets"
-      });
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: ["spaces"],
+          predicate: ({ queryKey }) => queryKey[2] === "widgets"
+        }),
+        // Followers' blockers may have changed with what the release wrote.
+        queryClient.invalidateQueries({ queryKey: WIDGET_OVERVIEW_KEY })
+      ]);
       setConfirmOpen(false);
     } catch (error) {
       toastWidgetError(error, t);
