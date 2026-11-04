@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { Dialog } from "@astryxdesign/core/Dialog";
-import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
@@ -202,19 +202,28 @@ describe("JobIndicator", () => {
     expect(panel.querySelector("[title]")).toBeNull();
   });
 
-  it("on a phone's top bar shows only while something runs, not while the user is in it", async () => {
-    jobs.state = {
-      runningCount: 1,
-      uploads: [],
-      jobs: [job({ status: "in progress" })]
-    };
+  const idle = (bell: HTMLElement) =>
+    bell.closest("[data-job-bell]")!.className.includes(":sr-only");
+
+  it("on a phone's top bar hides when idle, unless the bell is in use", () => {
+    renderInApp(<JobIndicator isHiddenWhenIdle />);
+    // Hidden, not gone: the keyboard reaches it, and focus or an open panel shows it.
+    expect(idle(screen.getByRole("button", { name: "Aviseringar", hidden: true }))).toBe(true);
+    cleanup();
+    jobs.state = { runningCount: 1, uploads: [], jobs: [job({ status: "in progress" })] };
+    renderInApp(<JobIndicator isHiddenWhenIdle />);
+    expect(idle(screen.getByRole("button", { name: "Aviseringar, 1 pågår" }))).toBe(false);
+  });
+
+  it("keeps the panel and the bell when the last job settles while the panel is open", async () => {
+    jobs.state = { runningCount: 1, uploads: [], jobs: [job({ status: "in progress" })] };
     const { rerender } = renderInApp(<JobIndicator isHiddenWhenIdle />);
     const bell = screen.getByRole("button", { name: "Aviseringar, 1 pågår" });
     bell.focus();
     fireEvent.click(bell);
     const panel = await screen.findByRole("dialog", { name: "Aviseringar och jobb" });
 
-    // The last job fails while its panel is open: the result is what the user came for.
+    // The last job fails: the result is what the user came for.
     jobs.state = {
       runningCount: 0,
       uploads: [],
@@ -223,23 +232,8 @@ describe("JobIndicator", () => {
     rerender(<JobIndicator isHiddenWhenIdle />);
     expect(screen.getByRole("dialog", { name: "Aviseringar och jobb" })).toBe(panel);
 
-    // Closing it returns to the bell, which goes when focus does.
     fireEvent.keyDown(panel, { key: "Escape" });
-    await waitFor(() =>
-      expect(document.activeElement).toBe(screen.getByRole("button", { name: "Aviseringar" }))
-    );
-    act(() => (document.activeElement as HTMLElement).blur());
-    expect(screen.queryByRole("button", { name: "Aviseringar" })).toBeNull();
-  });
-
-  it("on a phone's top bar keeps a focused bell when the last job settles", () => {
-    jobs.state = { runningCount: 1, uploads: [], jobs: [job({ status: "in progress" })] };
-    const { rerender } = renderInApp(<JobIndicator isHiddenWhenIdle />);
-    act(() => screen.getByRole("button", { name: "Aviseringar, 1 pågår" }).focus());
-
-    jobs.state = { runningCount: 0, uploads: [], jobs: [job({})] };
-    rerender(<JobIndicator isHiddenWhenIdle />);
-    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Aviseringar" }));
+    await waitFor(() => expect(document.activeElement).toBe(bell));
   });
 
   it("opens inside a modal dialog such as the navigation drawer", async () => {

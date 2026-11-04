@@ -33,11 +33,7 @@ export function OverviewAssistants() {
       end={
         items.length > 0 ? (
           <>
-            {canCreate ? (
-              <span className="phone:hidden contents">
-                <CreateChatAppMenu secondary />
-              </span>
-            ) : null}
+            {canCreate ? <CreateChatAppMenu secondary isHiddenOnPhone /> : null}
             <OverviewLink
               href={`/spaces/${routeId}/assistants`}
               label={t("space_view_all_assistants")}

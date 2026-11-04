@@ -29,7 +29,6 @@ import {
 } from "react";
 import { useFileDrop } from "@/features/files/use-file-drop";
 import { revealProblems } from "@/components/composites/field-problem";
-import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 import type { ChatPartner, KnowledgeOrigin } from "@/lib/chat/types";
 import { cn } from "@/lib/utils";
 import { ComposerAttachments } from "./attachments";
@@ -335,7 +334,6 @@ export function Composer({
   // A touch screen has no Shift, Ctrl or Enter key to point at, and its
   // Return adds a line.
   const coarse = useMediaQuery("(pointer: coarse)");
-  const phone = usePhoneScreen();
   const announce = useAnnounce();
   const hintId = useId();
   const problemId = useId();
@@ -500,7 +498,7 @@ export function Composer({
       {contextBar}
       <p className="text-ax-text-secondary flex items-center justify-center gap-1.5 text-center text-xs">
         <ShieldCheck aria-hidden="true" className="size-3.5 shrink-0" />
-        {variant === "start" || beforeAnswer || phone
+        {variant === "start" || beforeAnswer
           ? t("chat_sovereignty_hint")
           : t("chat_sovereignty_hint_full")}
       </p>

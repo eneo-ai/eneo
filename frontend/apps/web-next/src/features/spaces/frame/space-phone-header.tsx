@@ -8,6 +8,7 @@ import { useSpace } from "../use-space";
 import { useSpaceDisplayName } from "../space-display-name";
 import { phoneSections, spaceLandingHref, spaceSections, type SpaceRoute } from "./space-sections";
 import { SpaceTabs } from "./space-tabs";
+import { cn } from "@/lib/utils";
 
 /**
  * A space on a phone, held either way (decision 24), in place of the header with breadcrumbs.
@@ -42,7 +43,9 @@ export function SpacePhoneHeader({
   const fromMenu = space.personal || space.organization;
   const canChat =
     !space.organization && space.default_assistant != null && can("read", "default_assistant");
-  const description = space.personal ? null : space.description?.trim() || null;
+  const description = space.personal
+    ? t("personal_space_description")
+    : space.description?.trim() || null;
   const spaceHref =
     sections.find((candidate) => candidate.id === "overview")?.href ??
     spaceLandingHref(sections, routeId);
@@ -105,7 +108,15 @@ export function SpacePhoneHeader({
             </Heading>
             <ClassificationToken name={space.security_classification?.name} />
             {description && route.section === "overview" ? (
-              <p className="text-ax-text-secondary text-sm text-pretty">{description}</p>
+              <p
+                className={cn(
+                  "text-ax-text-secondary text-sm text-pretty",
+                  // The heading says what the personal space is; a phone keeps the room.
+                  space.personal && "sr-only"
+                )}
+              >
+                {description}
+              </p>
             ) : null}
           </div>
           {/* Gives way while a settings section is open (it has a bar back to its index); the

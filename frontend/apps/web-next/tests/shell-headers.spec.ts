@@ -309,3 +309,25 @@ test("the organisation space's tab strip gives way while a settings section is o
   // The page keeps its heading for a screen reader.
   await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
 });
+
+test("the idle job bell stays out of the way until focus shows it, and focus can come back to it", async ({
+  page
+}) => {
+  await page.route(/\/api\/v1\/jobs\/$/, (route) => route.fulfill({ json: { items: [] } }));
+  await page.goto("/dashboard");
+  const slot = page.getByRole("banner").locator("[data-job-bell]");
+  const bell = slot.getByRole("button", { name: "Aviseringar" });
+  await expect(bell).toBeAttached();
+  expect((await slot.boundingBox())!.width).toBeLessThanOrEqual(1);
+
+  await bell.focus();
+  expect((await slot.boundingBox())!.width).toBeGreaterThanOrEqual(32);
+  // A dialog over it, then back: the bell is still there to come back to.
+  await page.keyboard.press("Control+k");
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(bell).toBeFocused();
+
+  await bell.blur();
+  expect((await slot.boundingBox())!.width).toBeLessThanOrEqual(1);
+});

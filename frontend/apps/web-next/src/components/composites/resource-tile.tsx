@@ -107,7 +107,8 @@ export type ResourceCardProps = {
  *
  * As a row (a phone): the tile, the name, then the status and description
  * on one line (the description wraps under a status it cannot fit beside,
- * at large text) and the tokens on the next; the menu at the end, or a
+ * at large text) and the tokens on the next, or beside the status when there
+ * is no description; the menu at the end, or a
  * chevron where there is none (a menu with nothing the user may do renders
  * nothing). The whole row is the link (globals.css, section 12b), the menu
  * above it.
@@ -141,7 +142,13 @@ export function ResourceCard({
               )}
             >
               {status || description ? (
-                <span className="flex min-w-0 flex-wrap items-center gap-x-1.5">
+                <span
+                  // Beside the meta, which gives way first: a status stays whole.
+                  className={cn(
+                    "flex min-w-0 flex-wrap items-center gap-x-1.5",
+                    !description && "shrink-0"
+                  )}
+                >
                   {status ? (
                     <span className="flex max-w-full min-w-0 [&>span]:min-w-0 [&>span]:font-normal [&>span>span:last-child]:truncate">
                       {status}

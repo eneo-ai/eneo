@@ -51,6 +51,33 @@ test.describe("an editor on a phone (decision 21)", () => {
     await expect(prompt).toBeHidden();
   });
 
+  test("keeps the index's rows still when a save lands on it", async ({ page }) => {
+    const { editor } = await assistantEditor(page);
+    await page.goto(`${editor}?section=instructions`);
+    let land = () => {};
+    const held = new Promise<void>((resolve) => (land = resolve));
+    await page.route(/\/api\/v1\/assistants\/[^/]+\/$/, async (route) => {
+      if (route.request().method() === "POST") await held;
+      await route.fallback();
+    });
+    await page.locator("#assistant-prompt").fill("Svara kort.");
+    await page
+      .locator("[data-phone-page-bar]")
+      .getByRole("link", { name: /^Tillbaka till / })
+      .click();
+
+    const row = page.getByRole("navigation", { name: "Avsnitt" }).getByRole("link", {
+      name: /^Instruktioner/
+    });
+    await expect(row).toBeVisible();
+    const strip = page.locator("[data-editor-strip]");
+    await expect(strip).not.toBeEmpty();
+    const before = (await row.boundingBox())!.y;
+    land();
+    await expect(strip).toBeEmpty();
+    expect((await row.boundingBox())!.y).toBe(before);
+  });
+
   test("opens a section from its address, after a reload too", async ({ page }) => {
     const { editor } = await assistantEditor(page);
     await page.goto(`${editor}?section=ai`);

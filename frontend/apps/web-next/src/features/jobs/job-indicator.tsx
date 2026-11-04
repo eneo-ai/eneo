@@ -155,13 +155,11 @@ export function JobIndicator({
   isHiddenWhenIdle = false
 }: {
   alignment?: "start" | "end";
-  /** Only while something runs: for a phone's top bar, where the drawer always has the bell. */
+  /** Shown only while something runs or it is in use: a phone's top bar; the drawer has the bell. */
   isHiddenWhenIdle?: boolean;
 }) {
   const t = useTranslations();
   const { jobs, uploads, runningCount } = useJobActivity();
-  const [isOpen, setIsOpen] = useState(false);
-  const [isHeld, setIsHeld] = useState(false);
 
   const sections = TASK_SECTIONS.map(([task, titleKey]) => ({
     titleKey,
@@ -171,71 +169,70 @@ export function JobIndicator({
   const label =
     runningCount > 0 ? t("fix_notifications_running", { count: runningCount }) : t("notifications");
 
-  // A job that settles takes away neither its open panel nor the focused bell.
-  if (isHiddenWhenIdle && runningCount === 0 && !isHeld) return null;
-
   return (
-    <Popover
-      label={t("notifications_and_jobs")}
-      placement="below"
-      alignment={alignment}
-      width={384}
-      onOpenChange={(open) => {
-        setIsOpen(open);
-        if (open) setIsHeld(true);
-      }}
-      content={
-        <div className="flex flex-col gap-3">
-          <p className="text-ax-text-secondary font-mono text-sm font-medium">
-            {t("notifications_and_jobs")}
-          </p>
-          {uploads.length > 0 && (
-            <Section title={t("uploading")}>
-              {uploads.map((upload) => (
-                <UploadRow key={upload.id} upload={upload} />
-              ))}
-            </Section>
-          )}
-          {sections.map((section) => (
-            <Section key={section.titleKey} title={t(section.titleKey)}>
-              {section.jobs.map((job) => (
-                <JobRow key={job.id} job={job} />
-              ))}
-            </Section>
-          ))}
-          {otherJobs.length > 0 && (
-            <Section title={t("activity")}>
-              {otherJobs.map((job) => (
-                <JobRow key={job.id} job={job} />
-              ))}
-            </Section>
-          )}
-          {runningCount === 0 &&
-            sections.length === 0 &&
-            otherJobs.length === 0 &&
-            uploads.length === 0 && (
-              <p className="text-ax-text-secondary flex min-h-24 items-center justify-center text-sm">
-                {t("everything_up_to_date")}
-              </p>
-            )}
-        </div>
-      }
+    // Hidden, not removed: a job that settles takes away neither the open panel nor the bell
+    // that focus is on or comes back to, and the keyboard can still reach it.
+    <span
+      data-job-bell=""
+      className={cn(
+        "flex",
+        isHiddenWhenIdle && runningCount === 0 && "not-has-[:focus,[aria-expanded=true]]:sr-only"
+      )}
     >
-      <IconButton
-        variant="ghost"
-        label={label}
-        tooltip={label}
-        onFocus={() => setIsHeld(true)}
-        onBlur={() => {
-          if (!isOpen) setIsHeld(false);
-        }}
-        icon={
-          <Icon
-            icon={runningCount === 0 ? Bell : BellDot}
-            color={runningCount === 0 ? "inherit" : "accent"}
-          />
+      <Popover
+        label={t("notifications_and_jobs")}
+        placement="below"
+        alignment={alignment}
+        width={384}
+        content={
+          <div className="flex flex-col gap-3">
+            <p className="text-ax-text-secondary font-mono text-sm font-medium">
+              {t("notifications_and_jobs")}
+            </p>
+            {uploads.length > 0 && (
+              <Section title={t("uploading")}>
+                {uploads.map((upload) => (
+                  <UploadRow key={upload.id} upload={upload} />
+                ))}
+              </Section>
+            )}
+            {sections.map((section) => (
+              <Section key={section.titleKey} title={t(section.titleKey)}>
+                {section.jobs.map((job) => (
+                  <JobRow key={job.id} job={job} />
+                ))}
+              </Section>
+            ))}
+            {otherJobs.length > 0 && (
+              <Section title={t("activity")}>
+                {otherJobs.map((job) => (
+                  <JobRow key={job.id} job={job} />
+                ))}
+              </Section>
+            )}
+            {runningCount === 0 &&
+              sections.length === 0 &&
+              otherJobs.length === 0 &&
+              uploads.length === 0 && (
+                <p className="text-ax-text-secondary flex min-h-24 items-center justify-center text-sm">
+                  {t("everything_up_to_date")}
+                </p>
+              )}
+          </div>
         }
-      />
-    </Popover>
+      >
+        <IconButton
+          variant="ghost"
+          label={label}
+          tooltip={label}
+          icon={
+            <Icon
+              icon={runningCount === 0 ? Bell : BellDot}
+              color={runningCount === 0 ? "inherit" : "accent"}
+            />
+          }
+        />
+      </Popover>
+    </span>
   );
 }

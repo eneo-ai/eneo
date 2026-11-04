@@ -132,6 +132,29 @@ test.describe("a phone turned while an editor's section is open", () => {
   });
 });
 
+test.describe("a tablet that becomes a phone's layout with a dialog open", () => {
+  test.use({ viewport: { width: 820, height: 1180 }, hasTouch: true });
+
+  test("keeps the dialog, and focus comes back to the page, not to a hidden opener", async ({
+    page
+  }) => {
+    const { space } = await spaceWithAssistant(page);
+    await page.goto(`${space}/overview`);
+    const more = page.getByRole("button", { name: "Fler sätt att skapa" }).first();
+    await more.click();
+    await page.getByRole("menuitem", { name: "Skapa ny gruppchatt" }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+
+    // An iPad into Split View.
+    await page.setViewportSize({ width: 590, height: 820 });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("button", { name: "Avbryt" }).click();
+    await expect(dialog).toBeHidden();
+    await expect(page.locator("main#main-content")).toBeFocused();
+  });
+});
+
 test.describe("an iPad keeps the tablet's layout", () => {
   for (const size of [
     { name: "turned with its keyboard up", width: 1180, height: 470 },

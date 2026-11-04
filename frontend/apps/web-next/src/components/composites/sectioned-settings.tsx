@@ -414,8 +414,14 @@ function SettingsLayout({
               parent={views.phone.parent}
               title={views.phone.title}
               // A filled button needs more room from the edge than the bar's ghost back link.
+              // The save state is here, not above the rows: they stay still when it lands.
               actions={
-                views.phone.actions ? <span className="pe-2.5">{views.phone.actions}</span> : null
+                <span className="flex items-center gap-2 pe-2.5">
+                  <span data-editor-strip className="contents">
+                    <SaveStatusIndicator isQuiet isCompact isHiddenWhenSaved />
+                  </span>
+                  {views.phone.actions}
+                </span>
               }
             />
           ) : null}
@@ -423,20 +429,26 @@ function SettingsLayout({
               the bar takes the name over once it has scrolled away. On a
               section the section's own heading is the title, so the h1 stays
               for assistive technology; the page's frame has the h1 of a page
-              inside a space. */}
-          {views.phone.parent || !shown ? (
-            <PhoneTitle className={cn("wide:hidden", shown ? "sr-only" : PHONE_TITLE_CLASSES)}>
-              {views.phone.title}
-            </PhoneTitle>
-          ) : null}
-          <div
-            data-editor-strip
-            className={cn(
-              "wide:hidden flex min-h-11 items-center px-4 pt-2 empty:hidden",
-              shown && "hidden"
+              inside a space. Such a page has no bar of its own, and its title
+              is one word: the save state rests on the title's line, out of
+              the flow. */}
+          <div className="relative">
+            {views.phone.parent || !shown ? (
+              <PhoneTitle className={cn("wide:hidden", shown ? "sr-only" : PHONE_TITLE_CLASSES)}>
+                {views.phone.title}
+              </PhoneTitle>
+            ) : null}
+            {views.phone.parent ? null : (
+              <div
+                data-editor-strip
+                className={cn(
+                  "wide:hidden absolute end-4 top-2 flex min-h-11 items-center empty:hidden",
+                  shown && "hidden"
+                )}
+              >
+                <SaveStatusIndicator isQuiet isCompact isHiddenWhenSaved />
+              </div>
             )}
-          >
-            <SaveStatusIndicator isQuiet isHiddenWhenSaved />
           </div>
         </>
       ) : null}
