@@ -269,7 +269,7 @@ describe("RunTrace", () => {
     await expectNoAxeViolations(container);
 
     fireEvent.click(trigger);
-    expect(rows[1]!.querySelector("[data-json-block]")).toBeNull();
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
     expect(document.activeElement).toBe(trigger);
   });
 

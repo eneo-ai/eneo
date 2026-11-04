@@ -1,5 +1,5 @@
 import { Button } from "@astryxdesign/core/Button";
-import { Collapsible } from "@/components/astryx/collapsible";
+import { LazyCollapsible } from "@/components/astryx/collapsible";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
 import { useState } from "react";
@@ -60,7 +60,7 @@ function EditRow({
   const [open, setOpen] = useState(false);
   return (
     <li className="border-ax-border border-t py-1 first:border-t-0">
-      <Collapsible
+      <LazyCollapsible
         isOpen={open}
         onOpenChange={setOpen}
         chevronPosition="start"
@@ -81,25 +81,21 @@ function EditRow({
           </span>
         }
       >
-        {open ? (
-          <div className="grid grid-cols-1 gap-3 pt-2 lg:grid-cols-2">
-            <div className="flex min-w-0 flex-col gap-1">
-              <p className="text-ax-text text-sm font-medium">
-                {beforeIsOriginal
-                  ? t("flow_run_extras_history_original")
-                  : t("flow_run_extras_history_before")}
-              </p>
-              <PayloadValue payload={before} outputType={outputType} />
-            </div>
-            <div className="flex min-w-0 flex-col gap-1">
-              <p className="text-ax-text text-sm font-medium">
-                {t("flow_run_extras_history_after")}
-              </p>
-              <PayloadValue payload={edit.payload_json} outputType={outputType} />
-            </div>
+        <div className="grid grid-cols-1 gap-3 pt-2 lg:grid-cols-2">
+          <div className="flex min-w-0 flex-col gap-1">
+            <p className="text-ax-text text-sm font-medium">
+              {beforeIsOriginal
+                ? t("flow_run_extras_history_original")
+                : t("flow_run_extras_history_before")}
+            </p>
+            <PayloadValue payload={before} outputType={outputType} />
           </div>
-        ) : null}
-      </Collapsible>
+          <div className="flex min-w-0 flex-col gap-1">
+            <p className="text-ax-text text-sm font-medium">{t("flow_run_extras_history_after")}</p>
+            <PayloadValue payload={edit.payload_json} outputType={outputType} />
+          </div>
+        </div>
+      </LazyCollapsible>
     </li>
   );
 }
@@ -166,17 +162,15 @@ export function ReviewHistory({ checkpoint }: { checkpoint: ReviewCheckpoint }) 
   const t = useTranslations();
   const [open, setOpen] = useState(false);
   return (
-    <Collapsible
+    <LazyCollapsible
       isOpen={open}
       onOpenChange={setOpen}
       chevronPosition="start"
       trigger={<span className="text-sm font-medium">{t("flow_run_extras_history_heading")}</span>}
     >
-      {open ? (
-        <div className="pt-2">
-          <HistoryList checkpoint={checkpoint} />
-        </div>
-      ) : null}
-    </Collapsible>
+      <div className="pt-2">
+        <HistoryList checkpoint={checkpoint} />
+      </div>
+    </LazyCollapsible>
   );
 }

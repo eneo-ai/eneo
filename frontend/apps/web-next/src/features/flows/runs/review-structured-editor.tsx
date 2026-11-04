@@ -1,5 +1,5 @@
 import { Button } from "@astryxdesign/core/Button";
-import { Collapsible } from "@/components/astryx/collapsible";
+import { Collapsible, LazyCollapsible } from "@/components/astryx/collapsible";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { NumberInput } from "@astryxdesign/core/NumberInput";
 import { Selector } from "@astryxdesign/core/Selector";
@@ -57,18 +57,16 @@ export function ChangedMarker({ original }: { original: ReviewValue | undefined 
       <p className="text-ax-text-secondary m-0 text-xs font-medium">
         {t("flow_run_review_changed")}
       </p>
-      <Collapsible
+      <LazyCollapsible
         isOpen={open}
         onOpenChange={setOpen}
         chevronPosition="start"
         trigger={<span className="text-xs font-medium">{t("flow_run_review_previous_value")}</span>}
       >
-        {open ? (
-          <div className="border-ax-border ml-1 border-l pt-1 pl-3">
-            <ShownValue label={t("flow_run_review_previous_value")} value={original} />
-          </div>
-        ) : null}
-      </Collapsible>
+        <div className="border-ax-border ml-1 border-l pt-1 pl-3">
+          <ShownValue label={t("flow_run_review_previous_value")} value={original} />
+        </div>
+      </LazyCollapsible>
     </div>
   );
 }

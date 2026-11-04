@@ -4,7 +4,7 @@ import { fireEvent, screen } from "@testing-library/react";
 import { useRef, type ReactNode } from "react";
 import { beforeEach, expect, it, vi } from "vitest";
 import { renderInApp } from "@/test/render";
-import { AnimatedLayoutScope, Collapsible, StillLayoutScope } from "./collapsible";
+import { AnimatedLayoutScope, Collapsible, LazyCollapsible, StillLayoutScope } from "./collapsible";
 
 // The handle each Astryx Collapsible was given, by its trigger; it still renders.
 const handles = vi.hoisted(() => new Map<unknown, unknown>());
@@ -84,4 +84,21 @@ it("still opens and closes in a scope where nothing can animate", () => {
   expect(trigger.getAttribute("aria-expanded")).toBe("false");
   expect(content.hasAttribute("inert")).toBe(false);
   expect(content.style.marginBlockEnd).toBe("");
+});
+
+it("renders lazy content on the first open and keeps it through a close", () => {
+  const Content = vi.fn(() => <p>Innehåll</p>);
+  const panel = (isOpen: boolean) => (
+    <LazyCollapsible trigger="Panel" isOpen={isOpen}>
+      <Content />
+    </LazyCollapsible>
+  );
+  const { rerender } = renderInApp(panel(false));
+  expect(Content).not.toHaveBeenCalled();
+
+  rerender(panel(true));
+  expect(screen.getByText("Innehåll")).toBeTruthy();
+
+  rerender(panel(false));
+  expect(screen.getByText("Innehåll", { selector: "p" })).toBeTruthy();
 });

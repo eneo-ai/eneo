@@ -1,5 +1,5 @@
 import { useLocale, useTranslations } from "use-intl";
-import { Collapsible } from "@/components/astryx/collapsible";
+import { LazyCollapsible } from "@/components/astryx/collapsible";
 import { useState } from "react";
 import { StatusLabel, type StatusTone } from "@/components/composites/status-label";
 import type { Schema } from "@/lib/api/models";
@@ -65,7 +65,7 @@ function AttemptRow({ attempt }: { attempt: Attempt }) {
           {runErrorText({ code: attempt.error_code, details: null }, t)}
         </span>
       ) : null}
-      <Collapsible
+      <LazyCollapsible
         isOpen={open}
         onOpenChange={setOpen}
         chevronPosition="start"
@@ -75,16 +75,14 @@ function AttemptRow({ attempt }: { attempt: Attempt }) {
           </span>
         }
       >
-        {open ? (
-          <div className="min-w-0 pt-2">
-            <JsonBlock
-              value={attempt}
-              maxHeight="20rem"
-              copy={{ label: t("flow_run_extras_attempt_copy", { number: attempt.attempt_no }) }}
-            />
-          </div>
-        ) : null}
-      </Collapsible>
+        <div className="min-w-0 pt-2">
+          <JsonBlock
+            value={attempt}
+            maxHeight="20rem"
+            copy={{ label: t("flow_run_extras_attempt_copy", { number: attempt.attempt_no }) }}
+          />
+        </div>
+      </LazyCollapsible>
     </li>
   );
 }

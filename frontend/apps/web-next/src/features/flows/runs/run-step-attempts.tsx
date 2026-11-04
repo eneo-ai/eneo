@@ -1,4 +1,4 @@
-import { Collapsible } from "@/components/astryx/collapsible";
+import { LazyCollapsible } from "@/components/astryx/collapsible";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
 import { useState } from "react";
@@ -37,33 +37,33 @@ export function StepAttempts({
     (attempt) => attempt.step_order === order
   );
   return (
-    <Collapsible
+    <LazyCollapsible
       isOpen={open}
       onOpenChange={setOpen}
       chevronPosition="start"
-      trigger={<span className="text-sm font-medium">{t("flow_run_more_attempts")}</span>}
+      trigger={
+        <span className="block py-1.5 text-sm font-medium">{t("flow_run_more_attempts")}</span>
+      }
     >
-      {open ? (
-        <div className="pt-2">
-          {evidence.isPending ? (
-            <LoadingState rows={2} label={t("flow_run_more_attempts_loading")} />
-          ) : evidence.isError ? (
-            <ListError
-              error={evidence.error}
-              title={t("flow_run_more_attempts_failed")}
-              onRetry={() => void evidence.refetch()}
-              isRetrying={evidence.isFetching}
-            />
-          ) : attempts.length === 0 ? (
-            <p className="text-ax-text-secondary m-0 text-sm">{t("flow_run_more_attempts_none")}</p>
-          ) : (
-            <StepAttemptList
-              attempts={attempts}
-              label={t("flow_run_more_attempts_of", { step: title })}
-            />
-          )}
-        </div>
-      ) : null}
-    </Collapsible>
+      <div className="pt-2">
+        {evidence.isPending ? (
+          <LoadingState rows={2} label={t("flow_run_more_attempts_loading")} />
+        ) : evidence.isError ? (
+          <ListError
+            error={evidence.error}
+            title={t("flow_run_more_attempts_failed")}
+            onRetry={() => void evidence.refetch()}
+            isRetrying={evidence.isFetching}
+          />
+        ) : attempts.length === 0 ? (
+          <p className="text-ax-text-secondary m-0 text-sm">{t("flow_run_more_attempts_none")}</p>
+        ) : (
+          <StepAttemptList
+            attempts={attempts}
+            label={t("flow_run_more_attempts_of", { step: title })}
+          />
+        )}
+      </div>
+    </LazyCollapsible>
   );
 }

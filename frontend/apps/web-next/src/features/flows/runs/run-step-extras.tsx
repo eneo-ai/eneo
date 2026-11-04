@@ -1,4 +1,4 @@
-import { Collapsible } from "@/components/astryx/collapsible";
+import { LazyCollapsible } from "@/components/astryx/collapsible";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { Token } from "@astryxdesign/core/Token";
 import { useLocale, useTranslations } from "use-intl";
@@ -62,24 +62,26 @@ export function StepRejectedOutput({ payload }: { payload: RunStep["output_paylo
   const rejected = rejectedOutput(payload);
   if (!rejected) return null;
   return (
-    <Collapsible
+    <LazyCollapsible
       isOpen={open}
       onOpenChange={setOpen}
       chevronPosition="start"
-      trigger={<span className="text-sm font-medium">{t("flow_run_rejected_output_title")}</span>}
+      trigger={
+        <span className="block py-1.5 text-sm font-medium">
+          {t("flow_run_rejected_output_title")}
+        </span>
+      }
     >
-      {open ? (
-        <div className="pt-2">
-          {typeof rejected.value === "string" ? (
-            <pre className="bg-ax-sunken rounded-ax-inner text-ax-text max-h-96 overflow-auto p-2 text-xs break-words whitespace-pre-wrap">
-              {rejected.value}
-            </pre>
-          ) : (
-            <JsonValue value={rejected.value} />
-          )}
-        </div>
-      ) : null}
-    </Collapsible>
+      <div className="pt-2">
+        {typeof rejected.value === "string" ? (
+          <pre className="bg-ax-sunken rounded-ax-inner text-ax-text max-h-96 overflow-auto p-2 text-xs break-words whitespace-pre-wrap">
+            {rejected.value}
+          </pre>
+        ) : (
+          <JsonValue value={rejected.value} />
+        )}
+      </div>
+    </LazyCollapsible>
   );
 }
 

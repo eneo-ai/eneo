@@ -1,4 +1,4 @@
-import { Collapsible } from "@/components/astryx/collapsible";
+import { LazyCollapsible } from "@/components/astryx/collapsible";
 import { HStack } from "@astryxdesign/core/HStack";
 import { ScrollableArea } from "@astryxdesign/core/ScrollableArea";
 import { Text } from "@astryxdesign/core/Text";
@@ -102,7 +102,7 @@ function StepOutput({
   }
   return (
     <HStack gap={2} vAlign="start">
-      <Collapsible
+      <LazyCollapsible
         className="min-w-0 flex-1"
         isOpen={open}
         onOpenChange={setToggled}
@@ -111,23 +111,21 @@ function StepOutput({
           <span className="block py-1.5 text-sm font-medium">{t("flow_runs_step_output")}</span>
         }
       >
-        {open ? (
-          <VStack gap={1} paddingBlockStart={2}>
-            {speakerMapping(payload) ? (
-              <StepSpeakerMapping flowId={flowId} runId={runId} payload={payload} />
-            ) : structured !== undefined ? (
-              <VStack gap={1} hAlign="start">
-                <Token size="sm" label={t("flow_run_more_json")} />
-                <JsonValue value={structured} />
-              </VStack>
-            ) : transcript ? (
-              <TranscriptSlot host={transcript} />
-            ) : (
-              <StepOutputText payload={payload} />
-            )}
-          </VStack>
-        ) : null}
-      </Collapsible>
+        <VStack gap={1} paddingBlockStart={2}>
+          {speakerMapping(payload) ? (
+            <StepSpeakerMapping flowId={flowId} runId={runId} payload={payload} />
+          ) : structured !== undefined ? (
+            <VStack gap={1} hAlign="start">
+              <Token size="sm" label={t("flow_run_more_json")} />
+              <JsonValue value={structured} />
+            </VStack>
+          ) : transcript ? (
+            <TranscriptSlot host={transcript} />
+          ) : (
+            <StepOutputText payload={payload} />
+          )}
+        </VStack>
+      </LazyCollapsible>
       {transcript ? null : (
         // Centred on the trigger's row, which is 4 px taller than the button.
         <span className="pt-0.5">
@@ -240,7 +238,7 @@ function StepInput({ result }: { result: RunStep }) {
   const text = inputText(rest);
   const copyLabel = t("flow_run_more_copy_input");
   return (
-    <Collapsible
+    <LazyCollapsible
       className="min-w-0"
       isOpen={open}
       onOpenChange={setOpen}
@@ -249,21 +247,19 @@ function StepInput({ result }: { result: RunStep }) {
         <span className="block py-1.5 text-sm font-medium">{t("flow_run_step_input_show")}</span>
       }
     >
-      {open ? (
-        <div className="pt-2">
-          {text !== null ? (
-            <HStack gap={2} vAlign="start">
-              <div className="min-w-0 flex-1">
-                <StepText text={text} label={t("flow_runs_input_heading")} plain />
-              </div>
-              <CopyButton label={copyLabel} value={text} />
-            </HStack>
-          ) : (
-            <JsonBlock value={rest} copy={{ label: copyLabel, value: result.input_payload_json }} />
-          )}
-        </div>
-      ) : null}
-    </Collapsible>
+      <div className="pt-2">
+        {text !== null ? (
+          <HStack gap={2} vAlign="start">
+            <div className="min-w-0 flex-1">
+              <StepText text={text} label={t("flow_runs_input_heading")} plain />
+            </div>
+            <CopyButton label={copyLabel} value={text} />
+          </HStack>
+        ) : (
+          <JsonBlock value={rest} copy={{ label: copyLabel, value: result.input_payload_json }} />
+        )}
+      </div>
+    </LazyCollapsible>
   );
 }
 
@@ -272,7 +268,7 @@ function StepTranscriptSection({ host }: { host: HTMLElement }) {
   const t = useTranslations();
   const [open, setOpen] = useState(true);
   return (
-    <Collapsible
+    <LazyCollapsible
       className="min-w-0"
       isOpen={open}
       onOpenChange={setOpen}
@@ -283,12 +279,10 @@ function StepTranscriptSection({ host }: { host: HTMLElement }) {
         </span>
       }
     >
-      {open ? (
-        <div className="pt-2">
-          <TranscriptSlot host={host} />
-        </div>
-      ) : null}
-    </Collapsible>
+      <div className="pt-2">
+        <TranscriptSlot host={host} />
+      </div>
+    </LazyCollapsible>
   );
 }
 

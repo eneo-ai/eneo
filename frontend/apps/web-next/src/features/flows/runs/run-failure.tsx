@@ -1,5 +1,5 @@
 import { Button } from "@astryxdesign/core/Button";
-import { Collapsible } from "@/components/astryx/collapsible";
+import { LazyCollapsible } from "@/components/astryx/collapsible";
 import { useTranslations } from "use-intl";
 import { useState } from "react";
 import { Banner } from "@astryxdesign/core/Banner";
@@ -196,7 +196,7 @@ export function RunFailure({
             ))}
           </ul>
         )}
-        <Collapsible
+        <LazyCollapsible
           isOpen={technicalOpen}
           onOpenChange={setTechnicalOpen}
           chevronPosition="start"
@@ -204,25 +204,23 @@ export function RunFailure({
             <span className="text-sm font-medium">{t("flow_run_extras_failure_technical")}</span>
           }
         >
-          {technicalOpen ? (
-            <dl className="grid grid-cols-1 gap-x-4 gap-y-1 pt-2 text-sm sm:grid-cols-[max-content_1fr]">
-              <dt className="text-ax-text-secondary">{t("flow_run_extras_failure_code")}</dt>
-              <dd className="text-ax-text m-0 font-mono break-all">{error.code}</dd>
-              <dt className="text-ax-text-secondary">{t("flow_run_extras_failure_message")}</dt>
-              <dd className="text-ax-text m-0 break-words whitespace-pre-wrap">{error.message}</dd>
-              {error.consumer_action ? (
-                <>
-                  <dt className="text-ax-text-secondary">
-                    {t("flow_run_journey_failure_consumer_action")}
-                  </dt>
-                  <dd lang="en" className="text-ax-text m-0 break-words">
-                    {error.consumer_action}
-                  </dd>
-                </>
-              ) : null}
-            </dl>
-          ) : null}
-        </Collapsible>
+          <dl className="grid grid-cols-1 gap-x-4 gap-y-1 pt-2 text-sm sm:grid-cols-[max-content_1fr]">
+            <dt className="text-ax-text-secondary">{t("flow_run_extras_failure_code")}</dt>
+            <dd className="text-ax-text m-0 font-mono break-all">{error.code}</dd>
+            <dt className="text-ax-text-secondary">{t("flow_run_extras_failure_message")}</dt>
+            <dd className="text-ax-text m-0 break-words whitespace-pre-wrap">{error.message}</dd>
+            {error.consumer_action ? (
+              <>
+                <dt className="text-ax-text-secondary">
+                  {t("flow_run_journey_failure_consumer_action")}
+                </dt>
+                <dd lang="en" className="text-ax-text m-0 break-words">
+                  {error.consumer_action}
+                </dd>
+              </>
+            ) : null}
+          </dl>
+        </LazyCollapsible>
       </div>
     </Banner>
   );

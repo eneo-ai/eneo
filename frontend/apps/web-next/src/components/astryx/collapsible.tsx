@@ -3,7 +3,7 @@ import {
   type CollapsibleProps
 } from "@astryxdesign/core/Collapsible";
 import { useAnimatedLayout, type AnimatedLayout } from "@astryxdesign/core/hooks";
-import { createContext, use, type ReactNode, type RefObject } from "react";
+import { createContext, use, useState, type ReactNode, type RefObject } from "react";
 
 export { CollapsibleGroup } from "@astryxdesign/core/Collapsible";
 
@@ -45,4 +45,24 @@ export function StillLayoutScope({ children }: { children: ReactNode }) {
  */
 export function Collapsible(props: CollapsibleProps) {
   return <AstryxCollapsible animatedLayout={use(AnimatedLayoutContext) ?? undefined} {...props} />;
+}
+
+/**
+ * A controlled Collapsible whose content is costly to render: it is rendered on
+ * the first open and then stays. Content that left on close could not glide out,
+ * as the exit holds the element and not what the page renders into it, so the
+ * panel would snap shut and everything below it jump.
+ */
+export function LazyCollapsible({
+  isOpen,
+  children,
+  ...props
+}: Omit<CollapsibleProps, "isOpen"> & { isOpen: boolean }) {
+  const [opened, setOpened] = useState(isOpen);
+  if (isOpen && !opened) setOpened(true);
+  return (
+    <Collapsible isOpen={isOpen} {...props}>
+      {opened ? children : null}
+    </Collapsible>
+  );
 }

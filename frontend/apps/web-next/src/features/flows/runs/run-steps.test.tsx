@@ -106,7 +106,7 @@ describe("RunSteps output", () => {
     await expectNoAxeViolations(container);
 
     fireEvent.click(trigger);
-    expect(within(card).queryByText("Resultat från steg 1")).toBeNull();
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
     expect(document.activeElement).toBe(trigger);
   });
 
@@ -198,7 +198,7 @@ describe("RunSteps copying", () => {
     expect(within(shown).queryByRole("heading")).toBeNull();
   });
 
-  it("renders what a step was sent only while it is open", () => {
+  it("renders what a step was sent on the first open, and keeps it for the closing", () => {
     const steps = runStepViews(
       makeRunGraph([{ order: 1, label: "Sammanfatta", status: "completed" }]),
       [makeRunStep(1, { input_payload_json: { text: "Ärendet gäller bygglov." } })]
@@ -214,9 +214,10 @@ describe("RunSteps copying", () => {
     fireEvent.click(trigger);
     expect(card.textContent).toContain("Ärendet gäller bygglov.");
     fireEvent.click(trigger);
-    expect(card.textContent).not.toContain("Ärendet gäller bygglov.");
-    fireEvent.click(trigger);
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
     expect(card.textContent).toContain("Ärendet gäller bygglov.");
+    fireEvent.click(trigger);
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
     expect(
       within(card).getByRole("button", { name: messages.flow_run_more_copy_input })
     ).toBeTruthy();
@@ -358,7 +359,7 @@ describe("RunSteps input and output", () => {
     expect(within(two).getByText("Transkriptet från steg 2")).toBeTruthy();
     // Folding it keeps the transcript's element, to show it again as it was.
     fireEvent.click(section);
-    expect(transcripts.get("step-2")!.isConnected).toBe(false);
+    expect(section.getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(section);
     expect(within(two).getByText("Transkriptet från steg 2")).toBe(transcripts.get("step-2"));
   });

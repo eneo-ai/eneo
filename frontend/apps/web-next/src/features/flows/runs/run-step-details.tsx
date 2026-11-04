@@ -1,4 +1,4 @@
-import { Collapsible } from "@/components/astryx/collapsible";
+import { LazyCollapsible } from "@/components/astryx/collapsible";
 import { useTranslations } from "use-intl";
 import { useState } from "react";
 import { CopyButton } from "./run-copy";
@@ -82,7 +82,7 @@ export function StepPromptDetails({
   const prompt = result.effective_prompt?.trim() ? result.effective_prompt : null;
   const settings = modelSettings(result.model_parameters_json);
   return (
-    <Collapsible
+    <LazyCollapsible
       isOpen={open}
       onOpenChange={setOpen}
       chevronPosition="start"
@@ -92,41 +92,39 @@ export function StepPromptDetails({
         </span>
       }
     >
-      {open ? (
-        <div className="flex flex-col gap-3 pt-2">
-          {prompt ? (
-            <div className="flex flex-col gap-1">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-ax-text text-sm font-medium">{t("flow_run_extras_prompt")}</p>
-                <CopyButton label={t("flow_run_more_copy_prompt")} value={prompt} />
-              </div>
-              <pre className="bg-ax-sunken rounded-ax-inner text-ax-text max-h-96 overflow-auto p-2 text-xs break-words whitespace-pre-wrap">
-                {prompt}
-              </pre>
-              {result.effective_prompt_truncated ? (
-                <p className="text-ax-text-secondary text-xs">
-                  {t("flow_run_extras_prompt_truncated")}
-                </p>
-              ) : null}
+      <div className="flex flex-col gap-3 pt-2">
+        {prompt ? (
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-ax-text text-sm font-medium">{t("flow_run_extras_prompt")}</p>
+              <CopyButton label={t("flow_run_more_copy_prompt")} value={prompt} />
             </div>
-          ) : null}
-          {settings.length > 0 ? (
-            <div className="flex flex-col gap-1">
-              <p className="text-ax-text text-sm font-medium">
-                {t("flow_run_extras_model_parameters")}
+            <pre className="bg-ax-sunken rounded-ax-inner text-ax-text max-h-96 overflow-auto p-2 text-xs break-words whitespace-pre-wrap">
+              {prompt}
+            </pre>
+            {result.effective_prompt_truncated ? (
+              <p className="text-ax-text-secondary text-xs">
+                {t("flow_run_extras_prompt_truncated")}
               </p>
-              <JsonValue
-                value={Object.fromEntries(
-                  settings.map(([key, value]) => {
-                    const label = SETTING_LABELS[key];
-                    return [label ? t(label) : key, value];
-                  })
-                )}
-              />
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-    </Collapsible>
+            ) : null}
+          </div>
+        ) : null}
+        {settings.length > 0 ? (
+          <div className="flex flex-col gap-1">
+            <p className="text-ax-text text-sm font-medium">
+              {t("flow_run_extras_model_parameters")}
+            </p>
+            <JsonValue
+              value={Object.fromEntries(
+                settings.map(([key, value]) => {
+                  const label = SETTING_LABELS[key];
+                  return [label ? t(label) : key, value];
+                })
+              )}
+            />
+          </div>
+        ) : null}
+      </div>
+    </LazyCollapsible>
   );
 }
