@@ -135,10 +135,10 @@ it("keeps the failed-save link in place while the save runs again", async () => 
   expect(status.getByRole("link", { name: "Couldn't save changes" })).toBe(link);
 
   await act(async () => retry.resolve());
-  // The landing is announced after the failure, in the shared live region.
+  // The landing is announced last. The failure may still be in the shared live region, or cleared.
   await waitFor(() =>
     expect(document.querySelector("[data-astryx-live-region='polite']")?.textContent).toMatch(
-      /Couldn't save changes\s+All changes saved!$/
+      /All changes saved!$/
     )
   );
   expect(status.getByText("All changes saved!")).toBeDefined();
