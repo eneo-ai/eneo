@@ -1,14 +1,15 @@
-"use client";
+import { invalidateSpacesList } from "@/features/spaces/space";
 
 import { Button } from "@astryxdesign/core/Button";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
+import { FormLayout } from "@astryxdesign/core/FormLayout";
 import { Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
+import { revealProblems } from "@/components/composites/field-problem";
 import { TextInput } from "@/components/astryx/text-input";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useRouter } from "@/lib/navigation";
+import { useTranslations } from "use-intl";
 import { useId, useRef, useState } from "react";
-import { flushSync } from "react-dom";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
@@ -39,7 +40,8 @@ export function CreateSpaceDialog({
   const createSpace = useMutation({
     mutationFn: (body: { name: string }) => unwrap(browserApi.POST("/api/v1/spaces/", { body })),
     onSuccess: (space) => {
-      void queryClient.invalidateQueries({ queryKey: ["spaces"] });
+      // A new space changes the list of spaces, not the spaces already loaded.
+      void invalidateSpacesList(queryClient);
       close();
       router.push(`/spaces/${space.id}/overview`);
     },
@@ -63,9 +65,7 @@ export function CreateSpaceDialog({
     if (createSpace.isPending) return;
     const trimmed = name.trim();
     if (!trimmed) {
-      // Rendered before focus moves, so the field is read with its error.
-      flushSync(() => setShowError(true));
-      inputRef.current?.focus();
+      revealProblems(() => setShowError(true), inputRef.current);
       return;
     }
     createSpace.mutate({ name: trimmed });
@@ -80,23 +80,26 @@ export function CreateSpaceDialog({
           open ? (
             <LayoutContent>
               <form id={formId} onSubmit={submit} noValidate>
-                <TextInput
-                  ref={inputRef}
-                  label={t("name")}
-                  value={name}
-                  onChange={(value) => {
-                    setName(value);
-                    if (value.trim()) setShowError(false);
-                  }}
-                  isRequired
-                  htmlName="name"
-                  autoComplete="off"
-                  status={
-                    showError
-                      ? { type: "error", message: t("shell_create_space_name_required") }
-                      : undefined
-                  }
-                />
+                {/* Required is the default and unmarked (decision 40). */}
+                <FormLayout defaultOptionality="required">
+                  <TextInput
+                    ref={inputRef}
+                    label={t("name")}
+                    value={name}
+                    onChange={(value) => {
+                      setName(value);
+                      if (value.trim()) setShowError(false);
+                    }}
+                    isRequired
+                    htmlName="name"
+                    autoComplete="off"
+                    status={
+                      showError
+                        ? { type: "error", message: t("shell_create_space_name_required") }
+                        : undefined
+                    }
+                  />
+                </FormLayout>
               </form>
             </LayoutContent>
           ) : null

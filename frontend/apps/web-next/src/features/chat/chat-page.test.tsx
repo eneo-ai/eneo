@@ -1,10 +1,13 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatPartner } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderInApp } from "@/test/render";
+import { renderInApp, testAppContext } from "@/test/render";
+import { replaceUrl, setRoute } from "@/test/navigation";
+import { setViewport } from "@/test/setup-dom";
 import { ChatPage } from "./chat-page";
+import { CHAT_PANEL_IDS } from "./chat-url";
 
 type Chunk = Record<string, unknown>;
 
@@ -81,7 +84,10 @@ const api = vi.hoisted(() => ({
                 question: `Fråga i ${id}`,
                 answer: `Svar i ${id}`,
                 references: [],
-                files: [],
+                files:
+                  id === "s-file"
+                    ? [{ id: "f-1", name: "Policy.pdf", mimetype: "application/pdf", size: 2048 }]
+                    : [],
                 generated_files: [],
                 tools: { assistants: [] },
                 feedback: id === "s-rated" ? { value: -1, text: "Fel paragraf" } : null
@@ -125,7 +131,7 @@ const api = vi.hoisted(() => ({
   DELETE: vi.fn(async () => ({ data: null, response: new Response(null, { status: 204 }) }))
 }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 vi.mock("@astryxdesign/core/hooks", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@astryxdesign/core/hooks")>()),
   useAnnounce: () => spies.announce
@@ -172,15 +178,15 @@ function renderPage(sessionId: string | null, pagePartner: ChatPartner = partner
 }
 
 function composer() {
-  return screen.getByRole("textbox", { name: /Meddelande till/ }) as HTMLTextAreaElement;
+  return screen.getByRole("textbox", { name: /^Fråga / }) as HTMLTextAreaElement;
 }
 
-/** Types a question and presses Enter in the composer, as a keyboard user does. */
+/** Types a question and sends it with Ctrl+Return in the composer, as a keyboard user does. */
 function askWithKeyboard(question: string) {
   const textarea = composer();
   textarea.focus();
   fireEvent.change(textarea, { target: { value: question } });
-  fireEvent.keyDown(textarea, { key: "Enter" });
+  fireEvent.keyDown(textarea, { key: "Enter", ctrlKey: true });
 }
 
 /** Streams a complete answer for a question that is waiting for one. */
@@ -291,12 +297,13 @@ describe("ChatPage", () => {
     ).toBe("true");
   });
 
-  it("starts over with focus in the composer after deleting the open conversation", async () => {
+  it("starts over and returns focus to the menu after deleting the open conversation", async () => {
     renderPage("s-1");
     await screen.findByRole("log", { name: "Konversation" });
     const [more] = screen.getAllByRole("button", { name: "Fler alternativ" });
     fireEvent.click(more!);
     const menu = document.getElementById(more!.getAttribute("aria-controls") ?? "")!;
+    await waitFor(() => expect(menu.contains(document.activeElement)).toBe(true));
     fireEvent.click(within(menu).getByRole("menuitem", { name: "Ta bort konversationen" }));
     const dialog = await screen.findByRole("alertdialog", { name: "Ta bort konversationen" });
     fireEvent.click(within(dialog).getByRole("button", { name: "Bekräfta borttagning" }));
@@ -325,6 +332,27 @@ describe("ChatPage", () => {
     window.localStorage.clear();
   });
 
+  it("links the assistant's editor from the header, and from the menu sheet on a phone", async () => {
+    const editHref = "/spaces/s/assistants/assistant-1/edit";
+    const page = <ChatPage {...{ partner, buildSessionUrl, editHref }} sessionId={null} />;
+    renderInApp(page);
+    // Beside the SideNav: Redigera in the header, as in Svelte.
+    expect(screen.getByRole("link", { name: "Redigera" }).getAttribute("href")).toBe(editHref);
+    cleanup();
+
+    setViewport("phone");
+    renderInApp(page);
+    fireEvent.click(
+      within(document.querySelector<HTMLElement>("[data-own-mobile-header]")!).getByRole("button", {
+        name: "Fler alternativ"
+      })
+    );
+    const sheet = await screen.findByRole("dialog");
+    expect(
+      within(sheet).getByRole("link", { name: "Redigera assistenten" }).getAttribute("href")
+    ).toBe(editHref);
+  });
+
   it("has no axe violations with a loaded conversation", async () => {
     renderPage("s-1");
     await screen.findByRole("log", { name: "Konversation" });
@@ -332,9 +360,214 @@ describe("ChatPage", () => {
   });
 });
 
+describe("ChatPage Historik tab, as in Svelte", () => {
+  // The tabs write ?tab=, which the next page would open on.
+  beforeEach(() => window.history.replaceState(null, "", "/"));
+  const tab = (name: string) => screen.getByRole("tab", { name });
+  const openHistory = () => fireEvent.click(tab("Historik"));
+  const historyPanel = () => screen.getByRole("tabpanel", { name: "Historik" });
+
+  it.each([false, true])(
+    "resets only after a confirmed history deletion succeeds, staying on Historik (failure: %s)",
+    async (fails) => {
+      window.history.replaceState(null, "", "/chat?session_id=s-1");
+      setRoute("/chat?session_id=s-1");
+      if (fails) api.DELETE.mockRejectedValueOnce(new Error("Unavailable"));
+      const rerender = renderPage("s-1");
+      await screen.findByRole("log", { name: "Konversation" });
+      const input = composer();
+      fireEvent.change(input, { target: { value: "Unsent follow-up" } });
+      openHistory();
+      setRoute(window.location.pathname + window.location.search);
+      rerender("s-1");
+      fireEvent.click(await screen.findByRole("button", { name: "Åtgärder för Samtal s-1" }));
+      fireEvent.click(await screen.findByRole("menuitem", { name: "Ta bort" }));
+      const confirmation = await screen.findByRole("alertdialog", {
+        name: "Ta bort konversationen"
+      });
+      fireEvent.click(within(confirmation).getByRole("button", { name: "Bekräfta borttagning" }));
+      if (fails) {
+        await waitFor(() => expect(spies.toastError).toHaveBeenCalled());
+        fireEvent.click(within(confirmation).getByRole("button", { name: "Avbryt" }));
+        expect(input.value).toBe("Unsent follow-up");
+        expect(window.location.search).toBe("?session_id=s-1&tab=history");
+      } else {
+        await waitFor(() => expect(window.location.search).toBe("?tab=history"));
+        expect(screen.queryByRole("alertdialog")).toBeNull();
+      }
+    }
+  );
+
+  it("lists the conversations across the page, the chat kept mounted behind it", async () => {
+    renderPage(null);
+    askWithKeyboard("Vilken gräns gäller?");
+    await waitFor(() => expect(spies.streams).toHaveLength(1));
+    openHistory();
+    setRoute("/chat?tab=history");
+    expect(new URLSearchParams(window.location.search).get("tab")).toBe("history");
+    expect(await within(historyPanel()).findByText("Samtal s-1")).toBeTruthy();
+    // The answer streams on behind Historik and is there in Chatt.
+    await act(async () => answer(spies.streams[0]!, "session-h", "Gränsen är 700 000 kr."));
+    fireEvent.click(tab("Chatt"));
+    setRoute("/chat?session_id=session-h");
+    const log = screen.getByRole("log", { name: "Konversation" });
+    expect(within(log).getByText("Gränsen är 700 000 kr.")).toBeTruthy();
+    expect(within(log).getByText("Vilken gräns gäller?")).toBeTruthy();
+  });
+
+  it("names Historik as the page's h1 before a conversation has one, as Insikter", () => {
+    renderPage(null);
+    openHistory();
+    setRoute("/chat?tab=history");
+    // The wide header's h1 (a phone's header names it too; jsdom shows both).
+    expect(screen.getAllByRole("heading", { level: 1, name: "Historik" })).not.toHaveLength(0);
+  });
+
+  it("switches views past the leave guard: the conversation and its draft stay", () => {
+    renderPage(null);
+    fireEvent.change(composer(), { target: { value: "Unsent question" } });
+    openHistory();
+    expect(replaceUrl).toHaveBeenLastCalledWith(expect.any(URL), { ignoreBlocker: true });
+    fireEvent.click(tab("Chatt"));
+    expect(replaceUrl).toHaveBeenLastCalledWith(expect.any(URL), { ignoreBlocker: true });
+    expect(composer().value).toBe("Unsent question");
+    // The draft is kept for the tab (sessionStorage); the next test starts without it.
+    fireEvent.change(composer(), { target: { value: "" } });
+  });
+
+  it("opens a conversation picked in Historik in Chatt", async () => {
+    window.history.replaceState(null, "", "/chat?tab=history");
+    setRoute("/chat?tab=history");
+    renderPage(null);
+    fireEvent.click(await within(historyPanel()).findByRole("button", { name: /^Samtal s-1/ }));
+    await waitFor(() =>
+      expect(new URLSearchParams(window.location.search).get("session_id")).toBe("s-1")
+    );
+    expect(new URLSearchParams(window.location.search).get("tab")).toBeNull();
+    expect(await screen.findByRole("log", { name: "Konversation" })).toBeTruthy();
+  });
+
+  it("moves focus to the conversation when the Historik row that held it goes", async () => {
+    window.history.replaceState(null, "", "/chat?tab=history");
+    setRoute("/chat?tab=history");
+    renderPage(null);
+    const row = await within(historyPanel()).findByRole("button", { name: /^Samtal s-1/ });
+    row.focus();
+    fireEvent.click(row);
+    await waitFor(() => expect(document.activeElement?.id).toBe(CHAT_PANEL_IDS.chat));
+  });
+
+  it("moves focus to the conversation when a narrowed window takes the Historik row away", async () => {
+    window.history.replaceState(null, "", "/chat?tab=history");
+    setRoute("/chat?tab=history");
+    renderPage(null);
+    const row = await within(historyPanel()).findByRole("button", { name: /^Samtal s-1/ });
+    row.focus();
+    act(() => setViewport("phone"));
+    await waitFor(() => expect(document.activeElement?.id).toBe(CHAT_PANEL_IDS.chat));
+  });
+
+  it("leaves focus elsewhere alone when a narrowed window takes Historik away", async () => {
+    window.history.replaceState(null, "", "/chat?tab=history");
+    setRoute("/chat?tab=history");
+    renderPage(null);
+    await within(historyPanel()).findByRole("button", { name: /^Samtal s-1/ });
+    const outside = document.body.appendChild(document.createElement("button"));
+    outside.focus();
+    act(() => setViewport("phone"));
+    await waitFor(() => expect(screen.queryAllByRole("tabpanel")).toEqual([]));
+    await act(() => new Promise(requestAnimationFrame));
+    expect(document.activeElement).toBe(outside);
+    outside.remove();
+  });
+
+  it("starts a new conversation in Chatt from Historik", async () => {
+    window.history.replaceState(null, "", "/chat?tab=history");
+    setRoute("/chat?tab=history");
+    renderPage(null);
+    fireEvent.click(screen.getAllByRole("button", { name: "Ny konversation" })[0]!);
+    await waitFor(() => expect(window.location.search).toBe(""));
+  });
+
+  it("keeps the history a sheet on a phone, which has no tabs", async () => {
+    setViewport("phone");
+    renderPage(null);
+    // No tab panels: the phone's header has no tabs.
+    expect(screen.queryAllByRole("tabpanel")).toHaveLength(0);
+    const header = document.querySelector<HTMLElement>("[data-own-mobile-header]")!;
+    fireEvent.click(within(header).getByRole("button", { name: "Fler alternativ" }));
+    // On a phone the menu is a sheet of rows.
+    const sheet = await screen.findByRole("dialog");
+    fireEvent.click(within(sheet).getByText("Konversationer med Upphandlingsassistenten"));
+    expect(await screen.findByRole("dialog", { name: "Konversationer" })).toBeTruthy();
+  });
+
+  it("has no axe violations on Historik", async () => {
+    window.history.replaceState(null, "", "/chat?tab=history");
+    setRoute("/chat?tab=history");
+    renderPage(null);
+    await within(historyPanel()).findByText("Samtal s-1");
+    await expectNoAxeViolations(document.body);
+  });
+});
+
+describe("ChatPage Felsökning", () => {
+  const debugPartner: ChatPartner = { ...partner };
+  const renderDebug = (sessionId: string | null) =>
+    renderInApp(
+      <ChatPage partner={debugPartner} sessionId={sessionId} buildSessionUrl={buildSessionUrl} />,
+      { appContext: testAppContext({ permissions: ["assistant_debug"] }) }
+    );
+
+  it("waits for a saved answer before it opens", () => {
+    renderDebug(null);
+    const debug = screen.getByRole("button", { name: "Felsökning" });
+    fireEvent.click(debug);
+    expect(screen.queryByRole("tab", { name: "Felsök", selected: true })).toBeNull();
+  });
+
+  it("stays disabled while the first answer streams, though its session id has come", async () => {
+    renderDebug(null);
+    askWithKeyboard("Vilken gräns gäller?");
+    await waitFor(() => expect(spies.streams).toHaveLength(1));
+    const stream = spies.streams[0]!;
+    await act(async () => {
+      stream.enqueue({
+        type: "data-session",
+        data: { session_id: "session-d", files: [], web_search_references: [] }
+      });
+      stream.enqueue({ type: "text-start", id: "t" });
+      stream.enqueue({ type: "text-delta", id: "t", delta: "Gränsen" });
+    });
+    const debug = screen.getByRole("button", { name: "Felsökning" });
+    expect(debug.getAttribute("aria-disabled")).toBe("true");
+    await act(async () => {
+      stream.enqueue({ type: "text-end", id: "t" });
+      stream.enqueue({ type: "finish" });
+      stream.close();
+    });
+    await waitFor(() => expect(debug.getAttribute("aria-disabled")).not.toBe("true"));
+  });
+
+  it("opens the latest answer's debug view in Chatt, from Historik too", async () => {
+    window.history.replaceState(null, "", "/chat?session_id=s-1&tab=history");
+    setRoute("/chat?session_id=s-1&tab=history");
+    renderDebug("s-1");
+    const debug = screen.getByRole("button", { name: "Felsökning" });
+    await waitFor(() => expect(debug.getAttribute("aria-disabled")).not.toBe("true"));
+    fireEvent.click(debug);
+    await waitFor(() => expect(window.location.search).toBe("?session_id=s-1"));
+    expect(await screen.findByRole("tab", { name: "Felsök", selected: true })).toBeTruthy();
+  });
+
+  it("is not offered without the debug permission or in a group chat", () => {
+    renderPage(null);
+    expect(screen.queryByRole("button", { name: "Felsökning" })).toBeNull();
+  });
+});
+
 describe("ChatPage while an answer streams", () => {
   it("keeps an answer that finishes after the user left it out of the next conversation", async () => {
-    const replaceState = vi.spyOn(window.history, "replaceState");
     renderPage(null);
     askWithKeyboard("Vilken gräns gäller?");
     await screen.findByRole("log", { name: "Konversation" });
@@ -347,28 +580,103 @@ describe("ChatPage while an answer streams", () => {
     // The left conversation still gets its title (the history lists it)…
     await waitFor(() => expect(spies.titled).toEqual(["session-old"]));
     // …but the new one keeps its URL, heading and silence.
-    expect(replaceState).not.toHaveBeenCalledWith(null, "", "/chat?session_id=session-old");
+    expect(window.location.pathname + window.location.search).toBe("/chat");
     expect(spies.announce).not.toHaveBeenCalledWith("Svaret är klart");
     expect(h1Texts()).toEqual(["Upphandlingsassistenten"]);
     expect(screen.queryByText("Gammalt svar")).toBeNull();
   });
 
+  it.each<{ permissions: ChatPartner["permissions"] }>([
+    { permissions: undefined },
+    { permissions: [] },
+    { permissions: ["read"] }
+  ])("hides Insights without insight_view (%j)", ({ permissions }) => {
+    renderPage(null, {
+      ...partner,
+      insightEnabled: true,
+      permissions
+    });
+    expect(screen.queryByRole("tab", { name: "Insikter" })).toBeNull();
+    expect(composer()).toBeTruthy();
+  });
+
+  it("keeps Insights selected when the first session id arrives in the background", async () => {
+    renderPage(null, { ...partner, insightEnabled: true, permissions: ["insight_view"] });
+    askWithKeyboard("Vilken gräns gäller?");
+    await waitFor(() => expect(spies.streams).toHaveLength(1));
+    fireEvent.click(screen.getByRole("tab", { name: "Insikter" }));
+    expect(await screen.findByText("Totala konversationer")).toBeTruthy();
+    await act(async () => answer(spies.streams[0]!, "session-late", "Gränsen är 700 000 kr."));
+    await waitFor(() =>
+      expect(new URLSearchParams(window.location.search).get("session_id")).toBe("session-late")
+    );
+    expect(new URLSearchParams(window.location.search).get("tab")).toBe("insights");
+    expect(screen.getByRole("tab", { name: "Insikter", selected: true })).toBeTruthy();
+    expect(screen.getByText("Totala konversationer")).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "Chatt" }));
+    const log = screen.getByRole("log", { name: "Konversation" });
+    expect(within(log).getByText("Gränsen är 700 000 kr.")).toBeTruthy();
+    expect(within(log).getByText("Vilken gräns gäller?")).toBeTruthy();
+  });
+
   it("keeps this visit's turns when switching to Insikter and back", async () => {
-    renderPage(null, { ...partner, insightEnabled: true });
+    renderPage(null, { ...partner, insightEnabled: true, permissions: ["insight_view"] });
     askWithKeyboard("Vilken gräns gäller?");
     await waitFor(() => expect(spies.streams).toHaveLength(1));
     await act(async () => answer(spies.streams[0]!, "session-1", "Gränsen är 700 000 kr."));
     const log = await screen.findByRole("log", { name: "Konversation" });
     expect(await within(log).findByText("Gränsen är 700 000 kr.")).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("radio", { name: "Insikter" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Insikter" }));
     expect(await screen.findByText("Totala konversationer")).toBeTruthy();
     expect(screen.queryByRole("log")).toBeNull();
 
-    fireEvent.click(screen.getByRole("radio", { name: "Chatt" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Chatt" }));
     expect(within(screen.getByRole("log")).getByText("Gränsen är 700 000 kr.")).toBeTruthy();
     expect(within(screen.getByRole("log")).getByText("Vilken gräns gäller?")).toBeTruthy();
   });
+
+  it("follows external tab changes without mistaking another parameter for the insights tab", async () => {
+    const rerender = renderPage(null, {
+      ...partner,
+      insightEnabled: true,
+      permissions: ["insight_view"]
+    });
+    setRoute("/chat?tab=insights");
+    rerender(null);
+    expect(await screen.findByText("Totala konversationer")).toBeTruthy();
+    setRoute("/chat?other=tab%3Dinsights");
+    rerender(null);
+    expect(composer()).toBeTruthy();
+    expect(screen.queryByText("Totala konversationer")).toBeNull();
+  });
+
+  it.each([false, true])(
+    "preserves the draft after a late context rejection (newer draft: %s)",
+    async (newerDraft) => {
+      renderPage(null);
+      askWithKeyboard("Vilken gräns gäller?");
+      await waitFor(() => expect(spies.streams).toHaveLength(1));
+      const stream = spies.streams[0]!;
+      await act(async () =>
+        stream.enqueue({
+          type: "data-session",
+          data: { session_id: "s-context", files: [], web_search_references: [] }
+        })
+      );
+      if (newerDraft) fireEvent.change(composer(), { target: { value: "Mitt nästa utkast" } });
+      await act(async () => {
+        stream.enqueue({ type: "data-error", data: { code: 9003 } });
+        stream.enqueue({ type: "error", errorText: "Context window exceeded" });
+        stream.close();
+      });
+      await screen.findByText(/Din input är för stor för denna modell/);
+      expect(composer().value).toBe(newerDraft ? "Mitt nästa utkast" : "Vilken gräns gäller?");
+      expect(within(screen.getByRole("log")).getByText("Vilken gräns gäller?")).toBeTruthy();
+      const notice = screen.getByText(/Din input är för stor för denna modell/).parentElement!;
+      expect(within(notice).getByRole("button", { name: "Ny konversation" })).toBeTruthy();
+    }
+  );
 
   it("returns a first question that fails before it is sent to the start composer", async () => {
     const failure = deferred();

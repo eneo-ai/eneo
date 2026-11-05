@@ -1,15 +1,15 @@
-"use client";
-
 import { Badge } from "@astryxdesign/core/Badge";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
-import { Collapsible } from "@astryxdesign/core/Collapsible";
+import { Collapsible } from "@/components/astryx/collapsible";
 import { ProgressBar } from "@astryxdesign/core/ProgressBar";
 import { ChevronDown } from "lucide-react";
-import { useFormatter, useTranslations } from "next-intl";
+import { useFormatter, useTranslations } from "use-intl";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { CopyableValue, DebugSection } from "./debug-section";
+import { DebugSkillReferences } from "./debug-skill-references";
+import type { Schema } from "@/lib/api/models";
 import {
   buildSkillActivationRows,
   summarizeSkillActivation,
@@ -165,7 +165,13 @@ function CandidateRow({
  * why a fallback applied, counts, the Skill token budget and every candidate
  * in evaluation order with what happened to it (50 at a time).
  */
-export function SkillActivationSection({ evidence }: { evidence: SkillActivationEvidence }) {
+export function SkillActivationSection({
+  evidence,
+  toolCalls = []
+}: {
+  evidence: SkillActivationEvidence;
+  toolCalls?: Schema<"ToolCallInfo">[];
+}) {
   const t = useTranslations();
   const format = useFormatter();
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
@@ -217,6 +223,7 @@ export function SkillActivationSection({ evidence }: { evidence: SkillActivation
 
   return (
     <DebugSection title={t("chat_debug_skill_activation")} count={rows.length}>
+      {evidence.version === 3 && <DebugSkillReferences evidence={evidence} toolCalls={toolCalls} />}
       <div className="flex flex-col gap-1.5">
         <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
           <p className="text-sm font-semibold tabular-nums">{verdict}</p>
@@ -254,7 +261,10 @@ export function SkillActivationSection({ evidence }: { evidence: SkillActivation
       >
         {stats.map(([label, value]) => (
           <div key={label} className="bg-ax-surface min-w-0 px-3 py-1.5">
-            <dt className="text-ax-text-secondary truncate text-xs leading-4" title={label}>
+            <dt
+              className="text-ax-text-secondary truncate text-xs leading-4 pointer-coarse:break-words pointer-coarse:whitespace-normal"
+              title={label}
+            >
               {label}
             </dt>
             <dd className="mt-0.5 text-sm font-semibold tabular-nums">{value}</dd>

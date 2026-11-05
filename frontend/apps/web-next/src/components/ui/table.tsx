@@ -1,5 +1,3 @@
-"use client";
-
 import { useScrollableArea } from "@astryxdesign/core/hooks";
 import { useTranslator } from "@astryxdesign/core/i18n";
 import * as React from "react";

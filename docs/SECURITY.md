@@ -62,7 +62,12 @@ The repository uses GitHub security features and CI to prevent regressions:
 - The reusable `Security` workflow audits the complete runtime Python lock and
   frontend lock, runs Semgrep security-audit/GitHub Actions rules, and scans the
   added Git history with Gitleaks. It is included in the required CI aggregate
-  and runs before image publication. Reports are retained as CI artifacts.
+  and runs before image publication. The dependency gate blocks `high` and
+  `critical` findings, including those without a fix; lower severities emit
+  warnings. Exact, unexpired exceptions are retained. Unknown severities,
+  failed scans, invalid reports and expired exceptions still fail the check.
+  Python severity ratings come from the GitHub Advisory Database and are
+  retained alongside the raw audit reports as CI artifacts.
 - Temporary dependency mitigations belong in `frontend/patches/SECURITY.md`, with
   an owner, exact advisory, regression tests and review expiry. The audit retains
   the raw finding and only accepts the named mitigation after its tests pass.
@@ -77,7 +82,7 @@ The repository uses GitHub security features and CI to prevent regressions:
   setup that gives developers useful feedback without high false-positive noise.
   Re-enable code scanning only after the query set and triage process are tuned
   enough that alerts are actionable for maintainers.
-- Release SBOMs are generated from the published backend, Svelte frontend, Next frontend, and bundled
+- Release SBOMs are generated from the published backend (including the React web build), Svelte frontend, tools runtime, and bundled
   SeaweedFS container
   image digests and attached to GitHub Releases as CycloneDX JSON, SPDX JSON,
   and human-readable table files. The backend release also includes a narrower
@@ -167,8 +172,13 @@ on the documentation site.
   merge. Core Maintainers may queue their own pull requests without a second
   approval.
 - **Releases.** Only Core Maintainers can create, update or delete
-  `release/**` branches and `v*` tags. A `v*` tag starts image publication,
-  so this restriction controls who can publish a release.
+  `release/**` branches and control human `v*` tag operations. When configured
+  and enabled with repository variable `RELEASE_MANAGED`,
+  the repository-scoped release App can create final tags after a reviewed
+  preparation PR is merged and push CI succeeds on that exact commit. Its tag
+  creation permission must be separate from update/deletion protections; it
+  cannot merge PRs, move/delete tags or bypass branch checks. A `v*` tag starts
+  image publication, so these restrictions control who can publish a release.
 - **`main`.** Protected against deletion and force pushes.
 - **No bypass on `develop`.** The `develop` ruleset has no bypass actors, so
   no one can skip the required checks or the merge queue. Repository
@@ -183,6 +193,8 @@ on the documentation site.
   why write access is not granted outside Core Maintainers. Keep repository
   and organisation secrets limited to those referenced by workflows; when a
   secret is no longer used, delete it and revoke it at its source.
+  The release controller's privileged `workflow_run` jobs execute only code
+  from `develop`; release checkouts are validated as data, never executed.
 - **Changes to access.** Only organisation owners change team roles, rulesets
   or bypass lists. Record each change in a GitHub issue so the access history
   is reviewable.

@@ -370,7 +370,7 @@ function ResultView() {
         </>
       }
       notices={
-        failure && <Banner status="error" container="section" title={text.failed} description={failure} />
+        failure && <Banner status="error" role="alert" container="section" title={text.failed} description={failure} />
       }
       footer={
         <>

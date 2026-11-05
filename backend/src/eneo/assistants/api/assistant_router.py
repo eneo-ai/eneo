@@ -12,6 +12,7 @@ from eneo.assistants.api.assistant_models import (
     AssistantCreatePublic,
     AssistantPublic,
     AssistantUpdatePublic,
+    AssistantWidgetStatus,
 )
 
 # Audit logging - module level imports for consistency
@@ -56,8 +57,8 @@ from eneo.sessions.session import (
     SessionPublic,
 )
 from eneo.sessions.session_protocol import (
+    to_session_metadata_paginated_response,
     to_session_public,
-    to_sessions_paginated_response,
 )
 from eneo.skills.presentation.skill_assembler import (
     assistant_skill_binding_intents_from_input,
@@ -277,6 +278,36 @@ async def get_assistant(
     return await _assistant_response(container, id)
 
 
+@router.get(
+    "/{id}/widget-status/",
+    response_model=AssistantWidgetStatus,
+    description=(
+        "Whether an active web widget publishes the assistant, for anyone who "
+        "can read it. Says nothing else about the widget. Requires a session token."
+    ),
+    responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason=(
+        "Assistant readers learn whether a widget publishes the assistant;"
+        " AssistantService enforces read access, and the session-only policy"
+        " keeps widgets invisible to API keys."
+    ),
+)
+async def get_assistant_widget_status(
+    id: UUID,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    assistant, _ = await container.assistant_service().get_assistant(id)
+    return AssistantWidgetStatus(
+        serves_active_widget=await container.widget_repo().serves_target(
+            tenant_id=container.user().tenant_id, target_id=assistant.id
+        )
+    )
+
+
 def _build_assistant_update_changes(
     *,
     assistant: AssistantUpdatePublic,
@@ -433,12 +464,7 @@ def _build_assistant_update_changes(
 
             # Special handling for FileAttachment objects
             if is_attachment:
-                # For attachments, extract just the filename and optionally blob ID
                 item_name = str(getattr(item, "name", "unknown_file"))
-                # Add blob ID if it exists and is not None
-                blob = getattr(item, "blob", None)
-                if blob:
-                    item_name = f"{item_name} (blob: {blob})"
             else:
                 # For other types, use the specified attribute or a safe fallback
                 if hasattr(item, name_attr):
@@ -1038,7 +1064,7 @@ async def get_assistant_sessions(
         previous=previous,
     )
 
-    return to_sessions_paginated_response(
+    return to_session_metadata_paginated_response(
         sessions=sessions,
         limit=limit,
         cursor=cursor,
@@ -1217,8 +1243,11 @@ async def leave_feedback(
 @router.post(
     "/{id}/transfer/",
     status_code=204,
-    description="Transfer an assistant to another space.",
-    responses=responses.get_responses([403, 404]),
+    description=(
+        "Transfer an assistant to another space. Refused with 400 while the "
+        "assistant has Skill bindings or a web widget that is not archived."
+    ),
+    responses=responses.get_responses([400, 403, 404]),
 )
 @endpoint_access(
     authentication=Authentication.USER,

@@ -1,0 +1,58 @@
+import { notFound } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
+import { browserApi } from "@/lib/api/browser";
+import { assistantQueryOptions } from "@/features/assistants/editor/use-assistant";
+import type { ChatPartner } from "@/lib/chat/types";
+import { ChatPartnerError, ChatPartnerLoading } from "@/features/chat/chat-partner-state";
+import { ChatPage } from "@/features/chat/chat-page";
+import { partnerKnowledge } from "@/features/chat/partner-knowledge";
+import { partnerCompletionModel } from "@/features/chat/partner-model";
+
+export function DashboardChat({
+  assistantId,
+  sessionId
+}: {
+  assistantId: string;
+  sessionId: string | null;
+}) {
+  const assistantQuery = useQuery(assistantQueryOptions(browserApi, assistantId));
+  const assistant = assistantQuery.data;
+
+  if (!assistant) {
+    return assistantQuery.isError ? (
+      <ChatPartnerError onRetry={() => void assistantQuery.refetch()} />
+    ) : (
+      <ChatPartnerLoading />
+    );
+  }
+
+  if (assistant.is_help_assistant) throw notFound();
+
+  const partner: ChatPartner = {
+    type: "assistant",
+    id: assistant.id,
+    name: assistant.name,
+    allowedAttachments: assistant.allowed_attachments,
+    insightEnabled: assistant.insight_enabled,
+    permissions: assistant.permissions,
+    description: assistant.description ?? null,
+    iconId: assistant.icon_id ?? null,
+    knowledge: partnerKnowledge(assistant),
+    knowledgeMode: assistant.knowledge_mode,
+    mcpServers: assistant.mcp_servers ?? [],
+    enabledCapabilities: assistant.enabled_capabilities,
+    availableCapabilities: assistant.available_capabilities,
+    effectiveConfig: assistant.effective_config ?? null,
+    completionModel: partnerCompletionModel(assistant)
+  };
+
+  return (
+    <ChatPage
+      partner={partner}
+      sessionId={sessionId}
+      buildSessionUrl={(nextSessionId) =>
+        nextSessionId ? `/dashboard/${assistantId}/${nextSessionId}` : `/dashboard/${assistantId}`
+      }
+    />
+  );
+}

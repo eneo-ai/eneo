@@ -211,7 +211,9 @@ it("shows the assistant's ready replacement after undo returns to the original t
   const preview = new FilePreview({ resolveOriginalUrl: async () => "/original" } as never);
   preview.saved(file, "Original document");
   render(FilePreviewPanel, { preview, saverOf: () => ({ save: vi.fn() }) });
-  await editDocument("Modified document");
+  // One edit must be one undo step: slow per-character typing can span
+  // several history groups when the CI runner is busy.
+  await userEvent.fill(await editorSurface(), "Modified document");
   await vi.waitFor(() => expect(preview.dirty).toBe(true));
   vi.mocked(loadPreview).mockResolvedValueOnce({
     kind: "markdown",

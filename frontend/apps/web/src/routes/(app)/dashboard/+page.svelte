@@ -15,6 +15,7 @@
 
   export let data;
   const { user } = getAppContext();
+  let logoutForm: HTMLFormElement;
 
   // Consolidated filtering - spaces with any content (assistants, default_assistant for personal spaces, OR apps)
   const spacesWithContent = data.spaces.filter(
@@ -43,6 +44,8 @@
   <title>Eneo.ai – {m.dashboard()}</title>
 </svelte:head>
 
+<form bind:this={logoutForm} method="POST" action={localizeHref("/logout?/logout")} hidden></form>
+
 <div
   class="outer bg-primary max-h-full w-full flex-col overflow-y-auto"
   bind:this={div}
@@ -67,16 +70,10 @@
           {m.logged_in_as()}<br /><span class="font-mono text-sm">{user.email}</span>
         </DropdownMenu.Label>
         <DropdownMenu.Separator />
-        <!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing -->
-        <DropdownMenu.Item variant="destructive">
-          {#snippet child({ props })}
-            <a {...props} href={localizeHref("/logout")} data-sveltekit-preload-data="false">
-              <IconLogout />
-              {m.logout()}
-            </a>
-          {/snippet}
+        <DropdownMenu.Item variant="destructive" onSelect={() => logoutForm.requestSubmit()}>
+          <IconLogout />
+          {m.logout()}
         </DropdownMenu.Item>
-        <!-- eslint-enable svelte/no-navigation-without-resolve -->
       </DropdownMenu.Content>
     </DropdownMenu.Root>
   </div>

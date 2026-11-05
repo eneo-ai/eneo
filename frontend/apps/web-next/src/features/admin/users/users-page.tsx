@@ -1,97 +1,137 @@
-"use client";
-
+import { BottomSheet } from "@astryxdesign/core/BottomSheet";
 import { Button } from "@astryxdesign/core/Button";
 import { useAnnounce, useMediaQuery } from "@astryxdesign/core/hooks";
 import { Pagination } from "@astryxdesign/core/Pagination";
+import { Selector, type SelectorOptionType } from "@astryxdesign/core/Selector";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { TextInput } from "@/components/astryx/text-input";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { Search, UserPlus } from "lucide-react";
-import { useSearchParams } from "next/navigation";
-import { useFormatter, useTranslations } from "next-intl";
-import { useEffect, useId, useRef, useState } from "react";
+import { ListFilter, Search, UserPlus } from "lucide-react";
+import { replaceUrl, usePathname, useSearchParams } from "@/lib/navigation";
+import { useFormatter, useTranslations } from "use-intl";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
 import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
 import { browserApi } from "@/lib/api/browser";
+import { MEDIA } from "@/lib/breakpoints";
 import { rolesQueryOptions } from "@/features/admin/roles/roles";
 import { useFocusRescue } from "@/lib/focus-rescue";
+import { PHONE_QUERY } from "@/lib/hooks/use-media-match";
+import { useSearchDraft } from "@/lib/hooks/use-search-draft";
+import { cn } from "@/lib/utils";
 import { PasswordPolicyPanel } from "./password-policy-panel";
-import { UserEditorDialog } from "./user-editor";
-import { UserTable } from "./user-table";
-import { adminUsersQueryOptions, MIN_SEARCH_LENGTH, type StateFilter } from "./users";
+import { IssuedPasswordDialog, UserEditorDialog, type IssuedPassword } from "./user-editor";
+import { UserActionScope } from "./user-actions";
+import { UserList } from "./user-table";
+import {
+  adminUsersQueryOptions,
+  isSearchable,
+  readUsersFilters,
+  usersFiltersSearchParams,
+  type StateFilter,
+  type UsersFilters
+} from "./users";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
-const SEARCH_DEBOUNCE_MS = 250;
 const STATE_TABS: StateFilter[] = ["active", "inactive"];
 /** Below Tailwind's `sm`, page numbers at 44 px touch sizes overflow a phone. */
-const NARROW_QUERY = "(width < 40rem)";
-
-/** Sync the current filter state into the URL for shareable links. */
-function syncUrl(stateFilter: StateFilter, search: string, page: number, roleId: string | null) {
-  const params = new URLSearchParams();
-  if (stateFilter !== "active") params.set("tab", stateFilter);
-  if (search) params.set("search", search);
-  if (page > 1) params.set("page", String(page));
-  if (roleId) params.set("role_id", roleId);
-  const query = params.toString();
-  window.history.replaceState(null, "", query ? `?${query}` : window.location.pathname);
-}
+const NARROW_QUERY = `not all and ${MEDIA.sm}`;
+/** The role filter's "all roles" option (role ids are UUIDs). */
+const ALL_ROLES = "all";
 
 export function AdminUsersPage() {
   const t = useTranslations();
   const format = useFormatter();
   const searchParams = useSearchParams();
 
-  const initialTab = searchParams.get("tab") === "inactive" ? "inactive" : "active";
-  const initialSearch = searchParams.get("search") ?? "";
-  const initialPage = Math.max(1, Number(searchParams.get("page")) || 1);
-  const [roleId, setRoleId] = useState(searchParams.get("role_id"));
-
-  const [stateFilter, setStateFilter] = useState<StateFilter>(initialTab);
-  const [searchInput, setSearchInput] = useState(initialSearch);
-  const [search, setSearch] = useState(initialSearch);
-  const [page, setPage] = useState(initialPage);
+  const pathname = usePathname();
+  const filters = useMemo(() => readUsersFilters(searchParams), [searchParams]);
+  const { stateFilter, search, searchName, page, roleId } = filters;
   const [showCreate, setShowCreate] = useState(false);
+  // Passwords the editor set, shown one at a time in the order the saves
+  // landed. Held here, not in the row whose editor set them: a refetch may
+  // drop that row mid-save, and the save then lands with its editor gone. A
+  // queue, as the admin may save another user meanwhile, so a second password
+  // can land before the first has been handed over.
+  const [issued, setIssued] = useState<{ key: number; password: IssuedPassword }[]>([]);
+  const issuedCount = useRef(0);
+  function showIssued(password: IssuedPassword) {
+    const key = ++issuedCount.current;
+    setIssued((queue) => [...queue, { key, password }]);
+  }
+  // E-mail and username searches combine (AND); a new search starts over at page 1.
+  const emailBox = useSearchDraft(search);
+  const nameBox = useSearchDraft(searchName);
+  const nextEmail = isSearchable(emailBox.settled) ? emailBox.settled : search;
+  const nextName = isSearchable(nameBox.settled) ? nameBox.settled : searchName;
+  useEffect(() => {
+    if (nextEmail !== filters.search || nextName !== filters.searchName) {
+      const query = usersFiltersSearchParams({
+        ...filters,
+        search: nextEmail,
+        searchName: nextName,
+        page: 1
+      }).toString();
+      replaceUrl(query ? `${pathname}?${query}` : pathname);
+    }
+  }, [filters, nextEmail, nextName, pathname]);
+
+  function changeFilters(next: Partial<UsersFilters>) {
+    const query = usersFiltersSearchParams({ ...filters, ...next }).toString();
+    replaceUrl(query ? `${pathname}?${query}` : pathname);
+  }
 
   const baseId = useId();
   const panelId = `${baseId}-panel`;
+  const hintId = `${baseId}-search-hint`;
   const tabId = (value: StateFilter) => `${baseId}-tab-${value}`;
   const tabLabel = (value: StateFilter) =>
     value === "active" ? t("active_users") : t("inactive_users");
+  // Under the "Användare" heading a tab says only which ones (both fit a 320
+  // px phone); the table keeps the full name.
+  const tabName = (value: StateFilter) =>
+    value === "active" ? t("admin_users_tab_active") : t("admin_users_tab_inactive");
   const panelRef = useRef<HTMLDivElement>(null);
   const rescue = useFocusRescue();
   const announce = useAnnounce();
   const isNarrow = useMediaQuery(NARROW_QUERY);
-
-  // Debounce the search box; only commit at 0 or ≥3 chars (backend rule).
-  const debounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useEffect(() => {
-    clearTimeout(debounce.current);
-    debounce.current = setTimeout(() => {
-      const trimmed = searchInput.trim();
-      if (trimmed.length > 0 && trimmed.length < MIN_SEARCH_LENGTH) return;
-      if (trimmed !== search) {
-        setSearch(trimmed);
-        setPage(1);
-      }
-    }, SEARCH_DEBOUNCE_MS);
-    return () => clearTimeout(debounce.current);
-  }, [searchInput, search]);
-
-  useEffect(() => {
-    syncUrl(stateFilter, search, page, roleId);
-  }, [stateFilter, search, page, roleId]);
+  // A phone searches by e-mail and keeps username and role in a sheet, so
+  // its first screen shows users rather than filters.
+  const phone = useMediaQuery(PHONE_QUERY);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  // The sheet goes with a turn past 768 px; turning back must not reopen it.
+  if (!phone && filtersOpen) setFiltersOpen(false);
+  const sheetHintId = `${baseId}-sheet-hint`;
 
   const roles = useQuery(rolesQueryOptions(browserApi));
-  const selectedRole = [...(roles.data?.custom ?? []), ...(roles.data?.predefined ?? [])].find(
-    (role) => role.id === roleId
-  );
+  const predefined = roles.data?.predefined ?? [];
+  const custom = roles.data?.custom ?? [];
+  const roleKnown = [...predefined, ...custom].some((role) => role.id === roleId);
+  const roleOptions: SelectorOptionType[] = [
+    { value: ALL_ROLES, label: t("admin_users_all_roles") },
+    ...[
+      { title: t("default_roles"), roles: predefined },
+      { title: t("custom_roles"), roles: custom }
+    ]
+      .filter((section) => section.roles.length > 0)
+      .map((section) => ({
+        type: "section" as const,
+        title: section.title,
+        options: section.roles.map((role) => ({ value: role.id, label: role.name }))
+      })),
+    // A role from an old link that no longer exists still shows as the filter.
+    ...(roleId && roles.data && !roleKnown
+      ? [{ value: roleId, label: t("admin_users_unknown_role") }]
+      : [])
+  ];
 
   const { data, isPending, isPlaceholderData } = useQuery({
     ...adminUsersQueryOptions(browserApi, {
       page,
       stateFilter,
       search,
+      searchName: searchName || undefined,
       roleId: roleId ?? undefined
     }),
     placeholderData: keepPreviousData
@@ -105,12 +145,23 @@ export function AdminUsersPage() {
 
   // A page past the end (its last user was deactivated or deleted, or an old
   // link): show the last page rather than an empty list.
-  if (metadata && !isPlaceholderData && page > totalPages) setPage(totalPages);
+  useEffect(() => {
+    if (metadata && !isPlaceholderData && filters.page > totalPages) {
+      const query = usersFiltersSearchParams({ ...filters, page: totalPages }).toString();
+      replaceUrl(query ? `${pathname}?${query}` : pathname);
+    }
+  }, [metadata, isPlaceholderData, filters, totalPages, pathname]);
+
+  // Past the backend's page cap the rest can only be reached by filtering.
+  const capped =
+    metadata != null &&
+    !isPlaceholderData &&
+    metadata.total_count > metadata.total_pages * metadata.page_size;
 
   // Announce the result count once the results of a new search, tab or role
   // filter are in (WCAG 4.1.3); not on first load, not for page changes
   // (Pagination announces those).
-  const resultsFor = `${stateFilter}|${search}|${roleId ?? ""}`;
+  const resultsFor = `${stateFilter}|${search}|${searchName}|${roleId ?? ""}`;
   const announcedFor = useRef(resultsFor);
   useEffect(() => {
     if (total == null || announcedFor.current === resultsFor) return;
@@ -118,13 +169,29 @@ export function AdminUsersPage() {
     announce(t("admin_users_count", { count: total }));
   }, [announce, resultsFor, t, total]);
 
+  // The sheet's filters as applied, so the button's count matches the list.
+  const sheetFilterCount = (searchName ? 1 : 0) + (roleId ? 1 : 0);
+
   function selectTab(next: StateFilter) {
-    setStateFilter(next);
-    setPage(1);
+    changeFilters({ stateFilter: next, page: 1 });
+  }
+
+  function selectRole(next: string) {
+    changeFilters({ roleId: next === ALL_ROLES ? null : next, page: 1 });
+  }
+
+  const filtered = Boolean(emailBox.draft || nameBox.draft || search || searchName || roleId);
+
+  function clearFilters() {
+    emailBox.setDraft("");
+    nameBox.setDraft("");
+    changeFilters({ search: "", searchName: "", roleId: null, page: 1 });
+    // The pressed button leaves with the filters: focus goes to the list.
+    rescue(panelRef.current);
   }
 
   function changePage(next: number) {
-    setPage(next);
+    changeFilters({ page: next });
     // The pressed button stays focused, except "next"/"previous" at the last
     // or first page, which becomes disabled: then focus moves to the panel.
     rescue(panelRef.current);
@@ -134,28 +201,45 @@ export function AdminUsersPage() {
   if (isPending) {
     results = <LoadingState rows={5} />;
   } else if (users.length === 0) {
-    results = <EmptyState title={t("no_users_found")} />;
+    results = <EmptyState isAnnounced={false} title={t("no_users_found")} />;
   } else {
     results = (
-      <div className="bg-ax-card border-ax-border rounded-ax-container overflow-hidden border">
-        <UserTable
-          users={users}
-          label={tabLabel(stateFilter)}
-          onRemoved={() => rescue(panelRef.current)}
-        />
-      </div>
+      <UserList
+        users={users}
+        label={tabLabel(stateFilter)}
+        onRemoved={() => rescue(panelRef.current)}
+      />
     );
   }
 
+  const nameField = (describedBy: string) => (
+    <TextInput
+      label={t("username")}
+      {...KEYBOARD.identifier}
+      value={nameBox.draft}
+      onChange={nameBox.setDraft}
+      hasClear
+      autoComplete="off"
+      aria-describedby={describedBy}
+      width="100%"
+    />
+  );
+  const roleField = (
+    <Selector
+      label={t("roles_filter_label")}
+      options={roleOptions}
+      value={roleId ?? ALL_ROLES}
+      onChange={selectRole}
+      isLoading={roles.isPending}
+      width="100%"
+    />
+  );
+
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-5">
+    <div className="flex w-full flex-col gap-5">
       <PageHeader
         title={t("users")}
         description={t("admin_users_description")}
-        breadcrumbs={[
-          { label: t("admin_breadcrumb_root"), href: "/admin" },
-          { label: t("admin_section_organisation") }
-        ]}
         tour="admin-users"
         actions={
           <Button
@@ -181,7 +265,7 @@ export function AdminUsersPage() {
               key={value}
               id={tabId(value)}
               value={value}
-              label={tabLabel(value)}
+              label={tabName(value)}
               panelId={panelId}
               endContent={
                 count != null ? (
@@ -205,41 +289,100 @@ export function AdminUsersPage() {
         tabIndex={-1}
         className="focus-visible:outline-ring rounded-ax-element flex flex-col gap-4 focus-visible:outline-2 focus-visible:outline-offset-4"
       >
-        <div className="flex flex-wrap items-center gap-2.5">
-          <TextInput
-            label={t("admin_users_search")}
-            isLabelHidden
-            placeholder={t("admin_users_search_placeholder")}
-            startIcon={Search}
-            value={searchInput}
-            onChange={setSearchInput}
-            hasClear
-            autoComplete="off"
-            className="w-full sm:w-80"
-          />
-          {roleId && (
-            <div className="bg-ax-muted rounded-ax-element flex items-center gap-2 py-1 ps-3 pe-1 text-sm">
-              <span>
-                {t("roles_filter_label")}:{" "}
-                <strong className="font-semibold">{selectedRole?.name ?? roleId}</strong>
-              </span>
-              <Button
-                variant="ghost"
-                size="sm"
-                label={t("roles_clear_filter")}
-                onClick={() => {
-                  setRoleId(null);
-                  setPage(1);
-                }}
+        {/* The filters search the whole list (the backend filters), not the page. */}
+        <div role="search" aria-label={t("users")} className="flex flex-col gap-3">
+          {/* One e-mail field for both layouts: a turn across 768 px keeps it,
+              with the focus and what was typed. */}
+          <div
+            className={
+              phone ? "flex flex-wrap items-end gap-2" : "grid gap-3 sm:grid-cols-2 md:grid-cols-3"
+            }
+          >
+            <div className={phone ? "min-w-40 flex-1" : undefined}>
+              <TextInput
+                label={phone ? t("admin_users_email_search") : t("email")}
+                isLabelHidden={phone}
+                placeholder={phone ? t("admin_users_email_search") : undefined}
+                startIcon={phone ? Search : undefined}
+                {...(phone ? KEYBOARD.search : KEYBOARD.email)}
+                value={emailBox.draft}
+                onChange={emailBox.setDraft}
+                hasClear
+                autoComplete="off"
+                aria-describedby={hintId}
+                width="100%"
               />
             </div>
-          )}
-          <p className="text-ax-text-secondary ms-auto text-sm">
-            {total != null ? t("admin_users_count", { count: total }) : ""}
-          </p>
+            {phone ? (
+              <>
+                <Button
+                  label={
+                    sheetFilterCount > 0
+                      ? t("audit_filters_button_count", { count: sheetFilterCount })
+                      : t("audit_filters_button")
+                  }
+                  icon={<ListFilter aria-hidden="true" />}
+                  aria-haspopup="dialog"
+                  aria-expanded={filtersOpen}
+                  onClick={() => setFiltersOpen(true)}
+                />
+                <BottomSheet
+                  isOpen={filtersOpen}
+                  onOpenChange={setFiltersOpen}
+                  label={t("audit_filters_button")}
+                  height="tall"
+                >
+                  {/* Each change applies at once, as in the fields above the table. */}
+                  <div className="flex flex-col gap-4 p-4">
+                    <p id={sheetHintId} className="text-ax-text-secondary text-sm">
+                      {t("admin_users_filters_description")}
+                    </p>
+                    {nameField(sheetHintId)}
+                    {roleField}
+                    <div className="flex justify-end">
+                      <Button
+                        variant="primary"
+                        label={t("done")}
+                        onClick={() => setFiltersOpen(false)}
+                      />
+                    </div>
+                  </div>
+                </BottomSheet>
+              </>
+            ) : (
+              <>
+                {nameField(hintId)}
+                {roleField}
+              </>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            {/* On a phone for screen readers only, so the first screen keeps its room
+                for users, and for the e-mail field alone; the sheet states the rule
+                for usernames. */}
+            <p
+              id={hintId}
+              className={cn("text-ax-text-secondary max-w-xl text-sm", phone && "sr-only")}
+            >
+              {phone ? t("admin_users_email_search_hint") : t("admin_users_search_hint")}
+            </p>
+            {/* Only while there is something to clear, as the crawler's filters. */}
+            {filtered ? (
+              <Button label={t("admin_users_clear_filters")} size="sm" onClick={clearFilters} />
+            ) : null}
+            <p className="text-ax-text-secondary ms-auto text-sm">
+              {total != null ? t("admin_users_count", { count: total }) : ""}
+            </p>
+          </div>
         </div>
 
-        <div aria-busy={isPlaceholderData || undefined}>{results}</div>
+        <UserActionScope focusTarget={panelRef} onIssued={showIssued}>
+          <div aria-busy={isPlaceholderData || undefined}>{results}</div>
+        </UserActionScope>
+
+        {capped ? (
+          <p className="text-ax-text-secondary text-sm">{t("admin_users_refine_search")}</p>
+        ) : null}
 
         {/* Never disabled while a page loads: that would take focus from the
             pressed button. The previous page stays visible (aria-busy) and
@@ -256,7 +399,17 @@ export function AdminUsersPage() {
 
       <PasswordPolicyPanel />
 
-      <UserEditorDialog open={showCreate} onOpenChange={setShowCreate} />
+      <UserEditorDialog open={showCreate} onOpenChange={setShowCreate} onIssued={showIssued} />
+      <IssuedPasswordDialog
+        // A fresh view for each password.
+        key={issued[0]?.key}
+        issued={issued[0]?.password ?? null}
+        onClose={() => {
+          setIssued((queue) => queue.slice(1));
+          // The row whose menu opened the editor may have gone meanwhile.
+          rescue(panelRef.current);
+        }}
+      />
     </div>
   );
 }

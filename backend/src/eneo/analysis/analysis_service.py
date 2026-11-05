@@ -400,7 +400,14 @@ class AnalysisService:
                 "Group chat has no assistants to process the analysis"
             )
 
-        model_to_use: Assistant = group_chat.assistants[0].assistant
+        # A group chat's space carries no attachment content; this assistant
+        # answers with its attachments, so it needs a read of its own.
+        first_assistant_id = group_chat.assistants[0].assistant.id
+        model_to_use: Assistant = (
+            await self.space_service.get_space_by_assistant(
+                assistant_id=first_assistant_id
+            )
+        ).get_assistant(assistant_id=first_assistant_id)
         rows = await self.repo.get_group_chat_question_texts_since(
             group_chat_id=group_chat_id,
             from_date=from_date,
@@ -501,7 +508,7 @@ class AnalysisService:
 
     @validate_permissions(Permission.INSIGHTS)
     async def get_metadata_statistics_aggregated(
-        self, start_date: datetime, end_date: datetime
+        self, start_date: datetime, end_date: datetime, time_zone: str | None = None
     ):
         """Get aggregated metadata statistics for the tenant.
 
@@ -511,16 +518,19 @@ class AnalysisService:
             tenant_id=self.user.tenant_id,
             start_date=start_date,
             end_date=end_date,
+            time_zone=time_zone,
         )
         sessions = await self.repo.get_session_counts_by_hour_for_tenant(
             tenant_id=self.user.tenant_id,
             start_date=start_date,
             end_date=end_date,
+            time_zone=time_zone,
         )
         questions = await self.repo.get_question_counts_by_hour_for_tenant(
             tenant_id=self.user.tenant_id,
             start_date=start_date,
             end_date=end_date,
+            time_zone=time_zone,
         )
 
         return assistants, sessions, questions

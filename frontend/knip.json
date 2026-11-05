@@ -14,6 +14,7 @@
     ".": {
       "entry": [
         "scripts/audit-dependencies.mjs",
+        "scripts/audit-dependencies.test.mjs",
         "scripts/security-patches.test.mjs"
       ]
     },
@@ -23,7 +24,6 @@
     },
     "apps/web-next": {
       "entry": [
-        "src/lib/i18n/request.ts",
         "src/theme/eneo-theme.ts",
         "scripts/*.mjs"
       ]

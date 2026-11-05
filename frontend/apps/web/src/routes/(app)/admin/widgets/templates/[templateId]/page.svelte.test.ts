@@ -1,0 +1,406 @@
+/* eslint-disable eneo/no-raw-color -- fixtures use literal widget colours */
+import { page, userEvent } from "vitest/browser";
+import { render } from "vitest-browser-svelte";
+import type { WidgetTemplate } from "@eneo/eneo-js";
+import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
+import { beforeNavigate } from "$app/navigation";
+import "../../../../../../app.css";
+
+vi.mock("$app/navigation", () => ({
+  afterNavigate: vi.fn(),
+  beforeNavigate: vi.fn(),
+  goto: vi.fn(),
+  invalidate: vi.fn(),
+  invalidateAll: vi.fn(),
+  onNavigate: vi.fn(),
+  preloadData: vi.fn(),
+  pushState: vi.fn(),
+  replaceState: vi.fn()
+}));
+vi.mock("$app/state", () => ({
+  page: { url: new URL("http://localhost/admin/widgets/templates/t1"), state: {} }
+}));
+vi.mock("$lib/paraglide/messages", () => ({
+  m: new Proxy<Record<string, () => string>>({}, { get: (_target, key) => () => String(key) })
+}));
+vi.mock("$lib/paraglide/runtime", () => ({
+  getLocale: () => "sv",
+  localizeHref: (href: string) => href
+}));
+
+import TemplatePage from "./+page.svelte";
+
+function template(overrides: Partial<WidgetTemplate> = {}): WidgetTemplate {
+  return {
+    id: "t1",
+    name: "Kommunblå",
+    description: "",
+    texts: { title: "", welcome: "", placeholder: "", suggested_questions: [], subtitle: "AI" },
+    theme: { primary_color: "#1F4E79", radius: 12 },
+    language: "sv",
+    is_default: false,
+    locked_groups: ["appearance", "language"],
+    linked_widgets: 3,
+    published_at: "2026-09-21T10:00:00Z",
+    published_by_user_id: null,
+    published: {
+      texts: { title: "", welcome: "", placeholder: "", suggested_questions: [], subtitle: "AI" },
+      theme: { primary_color: "#1F4E79", radius: 12 },
+      language: "sv",
+      locked_groups: ["appearance", "language"]
+    },
+    has_unpublished_changes: false,
+    created_at: "2026-09-21T10:00:00Z",
+    updated_at: "2026-09-21T10:00:00Z",
+    ...overrides
+  } as unknown as WidgetTemplate;
+}
+
+function renderPage(current: WidgetTemplate) {
+  const update = vi.fn(async ({ update: patch }: { update: Partial<WidgetTemplate> }) => ({
+    ...current,
+    ...patch,
+    has_unpublished_changes: true
+  }));
+  const publish = vi.fn(async () => ({
+    ...current,
+    has_unpublished_changes: false,
+    published_at: "2026-09-21T12:00:00Z"
+  }));
+  render(TemplatePage, {
+    data: { template: current, eneo: { widgets: { templates: { update, publish } } } } as never
+  });
+  return { update, publish };
+}
+
+const click = (locator: { element: () => Element }) => (locator.element() as HTMLElement).click();
+
+// A dialog a test leaves open keeps bits-ui reading destroyed state in the
+// tests after it, which Svelte only warns about.
+const svelteWarnings: string[] = [];
+beforeAll(() => {
+  const warn = console.warn.bind(console);
+  vi.spyOn(console, "warn").mockImplementation((...args: unknown[]) => {
+    if (String(args[0]).includes("[svelte]")) svelteWarnings.push(String(args[0]));
+    warn(...args);
+  });
+});
+afterAll(() => {
+  vi.mocked(console.warn).mockRestore();
+  expect(svelteWarnings).toEqual([]);
+});
+
+async function cancelDialog() {
+  click(page.getByRole("alertdialog").getByRole("button", { name: "cancel" }));
+  await vi.waitFor(() => expect(document.querySelector('[role="alertdialog"]')).toBeNull());
+}
+
+describe("widget template page", () => {
+  test("a lock toggle only edits the draft and marks it unpublished", async () => {
+    const { update, publish } = renderPage(template());
+    await expect.element(page.getByText("widget_admin_template_linked_count")).toBeVisible();
+    const publishButton = page.getByRole("button", { name: "widget_admin_template_publish" });
+    await expect.element(publishButton).toBeDisabled();
+
+    click(page.getByRole("switch", { name: "widget_admin_template_lock_wording" }));
+    await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    expect(update).toHaveBeenLastCalledWith({
+      template: { id: "t1" },
+      update: { locked_groups: ["appearance", "language", "wording"] }
+    });
+    expect(publish).not.toHaveBeenCalled();
+    await expect.element(page.getByText("widget_admin_template_unpublished_changes")).toBeVisible();
+    await expect.element(publishButton).toBeEnabled();
+  });
+
+  test("publishing to followers asks first and then shows the release as current", async () => {
+    const { publish } = renderPage(template({ has_unpublished_changes: true }));
+    click(page.getByRole("button", { name: "widget_admin_template_publish" }));
+    await expect
+      .element(page.getByText("widget_admin_template_publish_confirm_title"))
+      .toBeVisible();
+    expect(publish).not.toHaveBeenCalled();
+    const dialogButtons = page.getByRole("button", { name: "widget_admin_template_publish" });
+    click(dialogButtons.nth(1));
+    await vi.waitFor(() => expect(publish).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    await expect.element(page.getByText("widget_admin_template_published_at")).toBeVisible();
+  });
+
+  test("the publish dialog says which parts the followers lose or keep", async () => {
+    renderPage(
+      template({
+        has_unpublished_changes: true,
+        theme: { primary_color: "#654321", radius: 12 },
+        texts: {
+          title: "Fråga oss",
+          welcome: "",
+          placeholder: "",
+          suggested_questions: [],
+          subtitle: "AI"
+        },
+        locked_groups: ["appearance"]
+      })
+    );
+    click(page.getByRole("button", { name: "widget_admin_template_publish" }));
+    const changes = page.getByRole("list", { name: "widget_admin_template_publish_changes_label" });
+    await expect.element(changes.getByText("widget_admin_template_publish_writes")).toBeVisible();
+    await expect
+      .element(changes.getByText("widget_admin_template_publish_released_locks"))
+      .toBeVisible();
+    await expect
+      .element(changes.getByText("widget_admin_template_publish_unlocked_changes"))
+      .toBeVisible();
+    expect(changes.getByText("widget_admin_template_publish_no_widget_changes").query()).toBeNull();
+    await cancelDialog();
+  });
+
+  test("the publish dialog says when the followers do not change at all", async () => {
+    renderPage(template({ has_unpublished_changes: true, description: "Ny beskrivning" }));
+    click(page.getByRole("button", { name: "widget_admin_template_publish" }));
+    await expect
+      .element(page.getByText("widget_admin_template_publish_no_widget_changes"))
+      .toBeVisible();
+    expect(page.getByText("widget_admin_template_publish_writes").query()).toBeNull();
+    await cancelDialog();
+  });
+
+  test("a template nobody follows publishes without a question", async () => {
+    const { publish } = renderPage(
+      template({ linked_widgets: 0, published_at: null, has_unpublished_changes: true })
+    );
+    await expect.element(page.getByText("widget_admin_template_unpublished")).toBeVisible();
+    click(page.getByRole("button", { name: "widget_admin_template_publish" }));
+    await vi.waitFor(() => expect(publish).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+  });
+
+  test("a name cleared on one template does not follow into the next with the same name", async () => {
+    const first = template();
+    const second = template({ id: "t2" });
+    expect(second.name).toBe(first.name);
+    const update = vi.fn(async ({ update: patch }: { update: Partial<WidgetTemplate> }) => ({
+      ...second,
+      ...patch,
+      has_unpublished_changes: true
+    }));
+    const eneo = { widgets: { templates: { update, publish: vi.fn() } } };
+    const screen = render(TemplatePage, { data: { template: first, eneo } as never });
+    const name = page.getByLabelText("name", { exact: true });
+    await userEvent.clear(name);
+    await expect.element(name).toHaveAttribute("aria-invalid", "true");
+
+    // Leaving discards the blank; the next template starts from its saved name.
+    await screen.rerender({ data: { template: second, eneo } as never });
+    await expect.element(name).toHaveValue(second.name);
+    await expect.element(name).toHaveAttribute("aria-invalid", "false");
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  test("an edit made while a template publishes is saved afterwards, not lost", async () => {
+    const first = template({ linked_widgets: 0, has_unpublished_changes: true });
+    let release!: (published: WidgetTemplate) => void;
+    const publish = vi.fn(() => new Promise<WidgetTemplate>((resolve) => (release = resolve)));
+    const update = vi.fn(async ({ update: patch }: { update: Partial<WidgetTemplate> }) => ({
+      ...first,
+      ...patch,
+      has_unpublished_changes: true
+    }));
+    const eneo = { widgets: { templates: { update, publish } } };
+    render(TemplatePage, { data: { template: first, eneo } as never });
+    click(page.getByRole("button", { name: "widget_admin_template_publish" }));
+    await vi.waitFor(() => expect(publish).toHaveBeenCalledTimes(1), { timeout: 3000 });
+
+    // The radius edit lands while the release is still being made.
+    click(page.getByRole("tab", { name: "widget_admin_tab_appearance" }));
+    const radius = page.getByLabelText("widget_admin_radius", { exact: true });
+    await userEvent.fill(radius, "8");
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    expect(update).not.toHaveBeenCalled();
+
+    release({ ...first, has_unpublished_changes: false, published_at: "2026-09-21T12:00:00Z" });
+    await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    expect(update).toHaveBeenLastCalledWith({
+      template: { id: "t1" },
+      update: { theme: { primary_color: "#1F4E79", radius: 8 } }
+    });
+    await expect.element(radius).toHaveValue(8);
+    await expect.element(page.getByText("widget_admin_template_unpublished_changes")).toBeVisible();
+  });
+
+  // History navigation between two templates reuses the page; a publication
+  // that finishes after the move belongs to the template it was asked for.
+  test("a disclosure emptied under one template's lock is not sent to the next template", async () => {
+    const first = template({ locked_groups: ["legal_texts"] });
+    const second = template({ id: "t2", name: "Skogsgrön", locked_groups: [] });
+    const update = vi.fn(
+      async ({
+        template: { id },
+        update: patch
+      }: {
+        template: { id: string };
+        update: Partial<WidgetTemplate>;
+      }) => ({ ...(id === "t2" ? second : first), ...patch, has_unpublished_changes: true })
+    );
+    const eneo = { widgets: { templates: { update, publish: vi.fn() } } };
+    const screen = render(TemplatePage, { data: { template: first, eneo } as never });
+    const subtitle = page.getByLabelText("widget_admin_text_subtitle", { exact: true });
+    await userEvent.clear(subtitle);
+    await expect.element(subtitle).toHaveAttribute("aria-invalid", "true");
+
+    // Both templates save the same subtitle, so only the held blank differs.
+    await screen.rerender({ data: { template: second, eneo } as never });
+    await expect.element(page.getByLabelText("name", { exact: true })).toHaveValue("Skogsgrön");
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    expect(update).not.toHaveBeenCalled();
+    await expect
+      .element(page.getByLabelText("widget_admin_text_subtitle", { exact: true }))
+      .toHaveValue("AI");
+  });
+
+  test("a publication that lands after moving to another template leaves that one alone", async () => {
+    const first = template({ linked_widgets: 0, has_unpublished_changes: true });
+    const second = template({
+      id: "t2",
+      name: "Skogsgrön",
+      theme: { primary_color: "#2E7D32", radius: 4 },
+      linked_widgets: 0
+    });
+    let release!: (published: WidgetTemplate) => void;
+    const publish = vi.fn(() => new Promise<WidgetTemplate>((resolve) => (release = resolve)));
+    const update = vi.fn(
+      async ({
+        template: { id },
+        update: patch
+      }: {
+        template: { id: string };
+        update: Partial<WidgetTemplate>;
+      }) => ({ ...(id === "t2" ? second : first), ...patch, has_unpublished_changes: true })
+    );
+    const eneo = { widgets: { templates: { update, publish } } };
+    const screen = render(TemplatePage, { data: { template: first, eneo } as never });
+    click(page.getByRole("button", { name: "widget_admin_template_publish" }));
+    await vi.waitFor(() => expect(publish).toHaveBeenCalledWith({ id: "t1" }), { timeout: 3000 });
+
+    await screen.rerender({ data: { template: second, eneo } as never });
+    const name = page.getByLabelText("name", { exact: true });
+    await expect.element(name).toHaveValue("Skogsgrön");
+    release({ ...first, has_unpublished_changes: false, published_at: "2026-09-21T12:00:00Z" });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await expect.element(name).toHaveValue("Skogsgrön");
+    expect(document.body.textContent).not.toContain("Kommunblå");
+
+    click(page.getByRole("tab", { name: "widget_admin_tab_appearance" }));
+    await userEvent.fill(page.getByLabelText("widget_admin_radius", { exact: true }), "8");
+    await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    expect(update).toHaveBeenLastCalledWith({
+      template: { id: "t2" },
+      update: { theme: { primary_color: "#2E7D32", radius: 8 } }
+    });
+  });
+});
+
+describe("widget template details", () => {
+  // The API collapses whitespace in names and descriptions, like it does in texts.
+  function renderNormalising(current: WidgetTemplate) {
+    const clean = (value: string) => value.split(/\s+/).filter(Boolean).join(" ");
+    const update = vi.fn(async ({ update: patch }: { update: Partial<WidgetTemplate> }) => ({
+      ...current,
+      ...patch,
+      ...(patch.name !== undefined ? { name: clean(patch.name) } : {}),
+      ...(patch.description !== undefined ? { description: clean(patch.description) } : {})
+    }));
+    render(TemplatePage, {
+      data: { template: current, eneo: { widgets: { templates: { update } } } } as never
+    });
+    return { update };
+  }
+
+  test("the trimmed echo of a name being typed leaves the typed space alone", async () => {
+    const { update } = renderNormalising(template());
+    const name = page.getByLabelText("name", { exact: true });
+    await userEvent.fill(name, "Kommun ");
+    await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    expect(update).toHaveBeenLastCalledWith({
+      template: { id: "t1" },
+      update: { name: "Kommun " }
+    });
+    await expect.element(page.getByText("widget_admin_saved")).toBeVisible();
+
+    await expect.element(name).toHaveValue("Kommun ");
+    await expect.element(name).toHaveFocus();
+    const input = name.element() as HTMLInputElement;
+    input.setSelectionRange(input.value.length, input.value.length);
+    await userEvent.keyboard("blå");
+    await expect.element(name).toHaveValue("Kommun blå");
+  });
+
+  test("a blank name is flagged and never sent", async () => {
+    const { update } = renderNormalising(template());
+    const name = page.getByLabelText("name", { exact: true });
+    await userEvent.fill(name, "   ");
+    await expect.element(name).toHaveAttribute("aria-invalid", "true");
+    await expect.element(name).toHaveAccessibleDescription("widget_admin_name_required");
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  // Whether an emptied required text asks before leaving is an open product
+  // decision; whichever way it goes, the name and the disclosure agree.
+  test("leaving with the name or the locked disclosure emptied is handled alike", async () => {
+    renderNormalising(template({ locked_groups: ["legal_texts"] }));
+    const leavingAsks = () => {
+      const leave = vi.mocked(beforeNavigate).mock.lastCall![0];
+      const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+      try {
+        leave({ cancel: vi.fn() } as unknown as Parameters<typeof leave>[0]);
+        return confirm.mock.calls.length > 0;
+      } finally {
+        confirm.mockRestore();
+      }
+    };
+    const name = page.getByLabelText("name", { exact: true });
+    await userEvent.clear(name);
+    await expect.element(name).toHaveAttribute("aria-invalid", "true");
+    const askedWithoutName = leavingAsks();
+
+    await userEvent.fill(name, "Kommunblå");
+    await expect.element(name).toHaveAttribute("aria-invalid", "false");
+    const subtitle = page.getByLabelText("widget_admin_text_subtitle", { exact: true });
+    await userEvent.clear(subtitle);
+    await expect.element(subtitle).toHaveAttribute("aria-invalid", "true");
+    expect(leavingAsks()).toBe(askedWithoutName);
+  });
+
+  test("an invalid footer link counts as unsaved until it is corrected", async () => {
+    const { update } = renderPage(template());
+    const leavingAsks = () => {
+      const leave = vi.mocked(beforeNavigate).mock.lastCall![0];
+      const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+      try {
+        leave({ cancel: vi.fn() } as unknown as Parameters<typeof leave>[0]);
+        return confirm.mock.calls.length > 0;
+      } finally {
+        confirm.mockRestore();
+      }
+    };
+    const link = page.getByLabelText("widget_admin_text_footer_link_url", { exact: true });
+    await userEvent.fill(link, "https://");
+    await userEvent.tab();
+    await expect.element(link).toHaveAttribute("aria-invalid", "true");
+    expect(update).not.toHaveBeenCalled();
+    expect(leavingAsks()).toBe(true);
+
+    await userEvent.fill(link, "https://www.kommun.se/chatt");
+    await userEvent.tab();
+    await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    await vi.waitFor(() => expect(leavingAsks()).toBe(false));
+  });
+
+  test("each card title is a section heading", async () => {
+    renderNormalising(template());
+    for (const name of ["widget_admin_template_details", "widget_admin_template_locks"]) {
+      await expect.element(page.getByRole("heading", { level: 2, name })).toBeVisible();
+    }
+  });
+});

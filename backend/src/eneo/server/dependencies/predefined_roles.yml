@@ -31,12 +31,14 @@ roles:
   - name: 'Owner'
     permissions:
       - admin
+      - widgets
       - storage
       - modules
       - personal_chat
       - assistants
       - skills
       - skills_management
+      - personal_skills
       - group_chats
       - apps
       - services

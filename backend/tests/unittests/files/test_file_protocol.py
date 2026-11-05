@@ -1,5 +1,11 @@
 """Tests for FileProtocol limits from the immutable upload-admission snapshot."""
 
+import asyncio
+import gc
+import threading
+import time
+import weakref
+from contextvars import ContextVar
 from dataclasses import replace
 from io import BytesIO
 from pathlib import Path
@@ -36,6 +42,7 @@ _UPLOAD_ADMISSION = UploadAdmissionSnapshot(
     knowledge_file_maximum_bytes=30_000_000,
     knowledge_audio_maximum_bytes=220_000_000,
 )
+_REQUEST: ContextVar[str | None] = ContextVar("request", default=None)
 _OBJECT_STORE_ENVELOPE = 10_000_000
 _OBJECT_STORE_ADMISSION = replace(
     _UPLOAD_ADMISSION,
@@ -174,6 +181,149 @@ async def test_prepare_image_keeps_original_separate_from_model_input(
             await _content_bytes(by_variant[FileContentVariant.MODEL_INPUT])
             == b"bounded model image"
         )
+
+
+@pytest.mark.asyncio
+async def test_prepare_image_reads_and_downscales_off_the_event_loop(
+    protocol, tmp_path, monkeypatch
+):
+    """Decoding a photo takes about 0.1 s of CPU; on the loop it stalls every
+    request and stream the worker serves."""
+    original = b"exact uploaded image"
+    upload = UploadFile(
+        file=BytesIO(original),
+        filename="photo.png",
+        headers={"content-type": "image/png"},
+    )
+    protocol.file_size_service.get_file_size.return_value = len(original)
+
+    async def save_original(_file):
+        path = tmp_path / "photo.png"
+        path.write_bytes(original)
+        return str(path)
+
+    protocol.file_size_service.save_file_to_disk = save_original
+    loop_thread = threading.get_ident()
+    threads: dict[str, int] = {}
+    # Log records carry the request's context; the worker must still see it.
+    _REQUEST.set("request-1")
+
+    def extract(*_args):
+        threads["extract"] = threading.get_ident()
+        return b"image-bytes"
+
+    def downscale(blob, mimetype):
+        threads["downscale"] = threading.get_ident()
+        assert _REQUEST.get() == "request-1"
+        return SimpleNamespace(blob=blob, mimetype=mimetype)
+
+    protocol.image_extractor.extract.side_effect = extract
+    monkeypatch.setattr(file_protocol_module, "downscale_image", downscale)
+
+    async with protocol.prepare_upload(
+        upload,
+        upload_admission_snapshot=_UPLOAD_ADMISSION,
+    ) as prepared:
+        by_variant = {content.variant: content for content in prepared.contents}
+        assert (
+            await _content_bytes(by_variant[FileContentVariant.MODEL_INPUT])
+            == b"image-bytes"
+        )
+
+    assert threads.keys() == {"extract", "downscale"}
+    assert loop_thread not in threads.values()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_image_uploads_decode_one_at_a_time(protocol):
+    """A decoding 12 MP photo holds about 80 MB; photos uploaded together must
+    not all hold it at once."""
+    active = 0
+    most_active = 0
+    lock = threading.Lock()
+
+    def extract(*_args):
+        nonlocal active, most_active
+        with lock:
+            active += 1
+            most_active = max(most_active, active)
+        time.sleep(0.02)
+        with lock:
+            active -= 1
+        return b"image-bytes"
+
+    protocol.image_extractor.extract.side_effect = extract
+    protocol.file_size_service.get_file_size.return_value = 3
+
+    async def upload():
+        async with protocol.prepare_upload(
+            UploadFile(
+                file=BytesIO(b"img"),
+                filename="photo.png",
+                headers={"content-type": "image/png"},
+            ),
+            upload_admission_snapshot=_UPLOAD_ADMISSION,
+        ):
+            pass
+
+    await asyncio.gather(*(upload() for _ in range(4)))
+
+    assert most_active == 1
+
+
+@pytest.mark.asyncio
+async def test_cancelled_image_uploads_behind_a_slow_decode_hold_nothing(protocol):
+    """Uploads cancelled while a photo decodes must not leave jobs queued
+    behind it: each queued job keeps its upload alive until the decoder
+    reaches it, so repeated cancellation would grow memory without bound."""
+    started = threading.Event()
+    release = threading.Event()
+
+    def extract(*_args):
+        started.set()
+        release.wait(timeout=5)
+        return b"image-bytes"
+
+    protocol.image_extractor.extract.side_effect = extract
+    protocol.file_size_service.get_file_size.return_value = 3
+
+    def photo() -> UploadFile:
+        return UploadFile(
+            file=BytesIO(b"img"),
+            filename="photo.png",
+            headers={"content-type": "image/png"},
+        )
+
+    async def upload(file: UploadFile):
+        async with protocol.prepare_upload(
+            file, upload_admission_snapshot=_UPLOAD_ADMISSION
+        ):
+            pass
+
+    first = asyncio.create_task(upload(photo()))
+    try:
+        assert await asyncio.to_thread(started.wait, 2)
+        files = [photo() for _ in range(64)]
+        alive = [weakref.ref(file) for file in files]
+        waiting = [asyncio.create_task(upload(file)) for file in files]
+        del files
+        await asyncio.sleep(0.05)
+        # Every upload is past its size check and waiting for the decoder.
+        assert protocol.file_size_service.get_file_size.call_count == 65
+        for task in waiting:
+            task.cancel()
+        await asyncio.wait(waiting)
+        del waiting, task
+        gc.collect()
+
+        assert not first.done()
+        assert sum(ref() is not None for ref in alive) == 0
+        decoder = file_protocol_module._IMAGE_DECODER
+        assert decoder._executor._work_queue.qsize() == 0
+    finally:
+        release.set()
+        await first
+    assert protocol.image_extractor.extract.call_count == 1
 
 
 @pytest.mark.asyncio

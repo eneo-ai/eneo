@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 from uuid import uuid4
 
+import anyio
 import httpx
 import pytest
 
@@ -13,6 +15,7 @@ from eneo.ai_models.completion_models.completion_model import (
     GeneratedFile,
     ResponseType,
 )
+from eneo.completion_models.infrastructure.adapters import tenant_model_adapter
 from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
     MCP_IMAGE_PLACEHOLDER_TEMPLATE,
     TOOL_RESULT_BUDGET_NOTICE,
@@ -23,6 +26,8 @@ from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import 
     _ToolResultBudget,
 )
 from eneo.files.model_file_references import file_handle
+from eneo.main import stream_lifecycle
+from eneo.main.config import get_settings
 from eneo.main.exceptions import OpenAIException
 from eneo.mcp_apps.domain.mcp_app_view import McpAppViewInfo
 from eneo.mcp_servers.infrastructure.tool_approval import (
@@ -1167,9 +1172,10 @@ async def test_iterate_stream_stops_at_max_rounds():
     # One follow-up per executed round, then one forced toolless final. The
     # mock keeps emitting tool calls even then; those are dropped and the
     # turn still ends cleanly.
-    assert mocked_acompletion.await_count == 11
+    max_rounds = get_settings().max_tool_rounds
+    assert mocked_acompletion.await_count == max_rounds + 1
     assert mocked_acompletion.await_args_list[-1].kwargs["tool_choice"] == "none"
-    assert len(mcp_proxy.calls) == 10
+    assert len(mcp_proxy.calls) == max_rounds
     assert any(chunk.stop for chunk in completions)
 
 
@@ -1632,10 +1638,18 @@ async def test_iterate_stream_approved_tools_execute_and_continue():
     assert execution_events
 
 
-async def test_non_streaming_round_cap_refuses_calls_and_forces_final_answer():
+def _cap_tool_rounds(monkeypatch: pytest.MonkeyPatch, rounds: int) -> int:
+    settings = get_settings().model_copy(update={"max_tool_rounds": rounds})
+    monkeypatch.setattr(tenant_model_adapter, "get_settings", lambda: settings)
+    return rounds
+
+
+async def test_non_streaming_round_cap_refuses_calls_and_forces_final_answer(
+    monkeypatch: pytest.MonkeyPatch,
+):
     adapter = _make_completion_adapter()
     mcp_proxy = _FakeMCPProxy()
-    max_rounds = TenantModelAdapter.MAX_TOOL_ROUNDS
+    max_rounds = _cap_tool_rounds(monkeypatch, 3)
     responses = [
         _response(
             tool_calls=[_response_tool_call(f"call_{i}", '{"q":"x"}')],
@@ -1674,11 +1688,13 @@ async def test_non_streaming_round_cap_refuses_calls_and_forces_final_answer():
     assert refusals[0]["tool_call_id"] == f"call_{max_rounds}"
 
 
-async def test_iterate_stream_round_cap_refuses_calls_and_forces_final_answer():
+async def test_iterate_stream_round_cap_refuses_calls_and_forces_final_answer(
+    monkeypatch: pytest.MonkeyPatch,
+):
     adapter = _make_adapter()
     mcp_proxy = _FakeMCPProxy()
     messages: list[dict] = []
-    max_rounds = TenantModelAdapter.MAX_TOOL_ROUNDS
+    max_rounds = _cap_tool_rounds(monkeypatch, 3)
     follow_ups = [
         _AsyncChunkStream([_tool_call_chunk(tool_call_id=f"call_{i}")])
         for i in range(1, max_rounds + 1)
@@ -1723,6 +1739,13 @@ async def test_iterate_stream_round_cap_refuses_calls_and_forces_final_answer():
     ]
     assert len(refusals) == 1
     assert refusals[0]["tool_call_id"] == f"call_{max_rounds}"
+    last_executed = next(
+        message
+        for message in messages
+        if message["role"] == "tool"
+        and message["tool_call_id"] == f"call_{max_rounds - 1}"
+    )
+    assert "No tool rounds remain" in last_executed["content"]
     streamed_text = "".join(c.text for c in completions if c.text)
     assert "partial answer" in streamed_text
     refused_events = [
@@ -1734,11 +1757,13 @@ async def test_iterate_stream_round_cap_refuses_calls_and_forces_final_answer():
     assert refused_events
 
 
-async def test_forced_final_drops_ignored_tool_calls_without_pending_events():
+async def test_forced_final_drops_ignored_tool_calls_without_pending_events(
+    monkeypatch: pytest.MonkeyPatch,
+):
     adapter = _make_adapter()
     mcp_proxy = _FakeMCPProxy()
     messages: list[dict] = []
-    max_rounds = TenantModelAdapter.MAX_TOOL_ROUNDS
+    max_rounds = _cap_tool_rounds(monkeypatch, 3)
     follow_ups = [
         _AsyncChunkStream([_tool_call_chunk(tool_call_id=f"call_{i}")])
         for i in range(1, max_rounds + 1)
@@ -1791,6 +1816,64 @@ async def test_forced_final_drops_ignored_tool_calls_without_pending_events():
     # Text streamed by the final response is preserved and the turn stops.
     assert "partial answer" in "".join(c.text for c in completions if c.text)
     assert any(c.stop for c in completions)
+
+
+async def test_model_is_told_how_many_tool_rounds_remain_near_the_cap(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    adapter = _make_completion_adapter()
+    mcp_proxy = _FakeMCPProxy()
+    max_rounds = _cap_tool_rounds(monkeypatch, 4)
+    responses = [
+        _response(
+            tool_calls=[_response_tool_call(f"call_{i}", '{"q":"x"}')],
+            finish_reason="tool_calls",
+        )
+        for i in range(max_rounds)
+    ]
+    responses.append(_response(content="answer"))
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(side_effect=responses),
+    ) as completion_call:
+        completion = await adapter.get_response(
+            context=SimpleNamespace(),
+            model_kwargs={},
+            mcp_proxy=mcp_proxy,
+        )
+
+    assert completion.text == "answer"
+    results = {
+        message["tool_call_id"]: message["content"]
+        for message in completion_call.await_args_list[-1].kwargs["messages"]
+        if message.get("role") == "tool"
+    }
+    assert "tool round" not in results["call_0"]
+    assert "2 tool round(s) remain" in results["call_1"]
+    assert "1 tool round(s) remain" in results["call_2"]
+    assert "No tool rounds remain" in results["call_3"]
+    # The model finished inside the budget, so nothing was refused.
+    assert "tool_choice" not in completion_call.await_args_list[-1].kwargs
+
+
+async def test_completion_requests_carry_the_configured_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    settings = get_settings().model_copy(
+        update={"completion_request_timeout_seconds": 12.5}
+    )
+    monkeypatch.setattr(tenant_model_adapter, "get_settings", lambda: settings)
+    transport = AsyncMock(return_value="response")
+    monkeypatch.setattr(
+        tenant_model_adapter.litellm_transport, "acompletion", transport
+    )
+
+    assert (
+        await tenant_model_adapter._acompletion_call(model="m", messages=[])
+        == "response"
+    )
+    assert transport.await_args.kwargs["timeout"] == 12.5
 
 
 async def _stream_rounds(rounds: list[list[SimpleNamespace]]):
@@ -2363,3 +2446,87 @@ async def test_provider_file_echo_is_converted_before_next_model_request(streami
     results = [message["content"] for message in messages if message["role"] == "tool"]
     assert results == [file_handle(file_id)]
     assert "synthetic-secret" not in str(messages)
+
+
+class _ClosableChunkStream(_AsyncChunkStream):
+    def __init__(self, chunks, eneo_context=None):
+        super().__init__(chunks, eneo_context)
+        self.closed = False
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+@pytest.mark.asyncio
+async def test_closing_the_adapter_stream_closes_the_provider_stream():
+    """An aborted answer must release the provider's HTTP response at once."""
+    provider = _ClosableChunkStream([_text_chunk("hello"), _text_chunk(" world")])
+    adapter = _make_adapter()
+
+    stream = adapter.iterate_stream(provider)
+    assert (await anext(stream)).text == "hello"
+    await stream.aclose()
+
+    assert provider.closed
+
+
+@pytest.mark.asyncio
+async def test_closing_the_adapter_bounds_a_shielded_provider_close(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(stream_lifecycle, "FINALIZATION_BUDGET_SECONDS", 0.02)
+    cancelled = False
+
+    class ShieldedStream(_AsyncChunkStream):
+        async def aclose(self) -> None:
+            nonlocal cancelled
+            with anyio.CancelScope(shield=True):
+                try:
+                    await asyncio.sleep(0.2)
+                except asyncio.CancelledError:
+                    cancelled = True
+
+    stream = _make_adapter().iterate_stream(ShieldedStream([_text_chunk("hello")]))
+    assert (await anext(stream)).text == "hello"
+    await stream.aclose()
+
+    assert cancelled
+
+
+@pytest.mark.asyncio
+async def test_closing_after_a_tool_round_closes_the_follow_up_stream():
+    """Each round replaces the provider stream; the one being read when the
+    answer is aborted is the one to release."""
+    adapter = _make_adapter()
+    first = _ClosableChunkStream([_tool_call_chunk()])
+    follow_up = _ClosableChunkStream(
+        [_text_chunk("after the tool"), _text_chunk(" call", finish_reason="stop")]
+    )
+    prepared = PreparedModelStream(
+        stream=first,
+        messages=[],
+        kwargs={},
+        mcp_proxy=_FakeMCPProxy(),
+        has_tools=True,
+    )
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(return_value=follow_up),
+    ):
+        stream = adapter.iterate_stream(
+            stream=prepared,
+            context=None,
+            model_kwargs={},
+            require_tool_approval=False,
+            approval_manager=None,
+            approval_context=None,
+            pending_approval_ids=set(),
+        )
+        async for chunk in stream:
+            if chunk.text == "after the tool":
+                break
+        await stream.aclose()
+
+    assert follow_up.closed
+    assert not first.closed, "the exhausted first-round stream needs no close"

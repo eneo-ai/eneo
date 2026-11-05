@@ -15,10 +15,12 @@ from eneo.assistants.assistant_service import (
 )
 from eneo.files.file_models import File, FileType
 from eneo.questions.question import ToolCallInfo
+from tests.fixtures import TEST_USER
 
 
 def _service() -> AssistantService:
     service = AssistantService.__new__(AssistantService)
+    service.user = TEST_USER
     service.file_service = AsyncMock()
     return service
 
@@ -92,10 +94,8 @@ async def test_non_streaming_answer_hands_back_the_files_its_tools_made():
         user_id=uuid4(),
         tenant_id=uuid4(),
     )
-    service = AssistantService.__new__(AssistantService)
-    service.user = SimpleNamespace(id=uuid4(), tenant_id=uuid4(), active_api_key=None)
+    service = _service()
     service.session_service = AsyncMock()
-    service.file_service = AsyncMock()
     service.file_service.save_image_from_bytes = AsyncMock(return_value=saved)
     response = SimpleNamespace(
         completion=SimpleNamespace(

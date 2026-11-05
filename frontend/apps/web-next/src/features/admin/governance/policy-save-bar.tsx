@@ -1,8 +1,7 @@
-"use client";
-
 import { AlertCircle, CheckCircle2 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useRef } from "react";
+import { ListError } from "@/components/composites/query-state";
 import { Button } from "@/components/ui/button";
 
 /**
@@ -19,7 +18,8 @@ export function PolicySaveBar({
   onSave
 }: {
   dirty: boolean;
-  saveError: string | null;
+  /** The failed save, shown with `ListError`; null when the last save did not fail. */
+  saveError: unknown;
   canSave: boolean;
   saving: boolean;
   onDiscard: () => void;
@@ -27,7 +27,7 @@ export function PolicySaveBar({
 }) {
   const t = useTranslations();
   const statusRef = useRef<HTMLSpanElement>(null);
-  if (!dirty && !saveError) return null;
+  if (!dirty && saveError == null) return null;
 
   function save() {
     if (saving) return;
@@ -41,19 +41,18 @@ export function PolicySaveBar({
 
   return (
     <div
-      className="bg-background fixed inset-x-0 bottom-0 z-50 border-t shadow-lg md:left-60"
+      // Sticks to the bottom of the page panel, in the page's own column: it
+      // lines up with the content, sits above the home indicator, and the
+      // panel scrolls clear of it (a fixed bar was offset for a sidebar that
+      // phones and iPads held upright do not have).
+      className="bg-background sticky bottom-0 z-10 border-t pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] shadow-lg"
       role="region"
       aria-label={t("governance_unsaved_changes_aria")}
     >
-      <div className="mx-auto flex max-w-[1100px] items-center justify-between gap-4 px-6 py-3">
-        <div className="flex items-center gap-2 text-sm">
-          {saveError ? (
-            <>
-              <AlertCircle className="text-destructive size-4 shrink-0" aria-hidden="true" />
-              <span className="text-destructive" role="alert">
-                {saveError}
-              </span>
-            </>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 flex-1 items-center gap-2 text-sm">
+          {saveError != null ? (
+            <ListError error={saveError} title={t("governance_save_error")} compact />
           ) : !canSave ? (
             <>
               <AlertCircle className="text-muted-foreground size-4 shrink-0" aria-hidden="true" />

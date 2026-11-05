@@ -1,6 +1,6 @@
 {
   "name": "backend-error",
-  "description": "The provider failed mid-answer. data-error (transient) carries the numeric code for the UI, the error part fails the request; the parts that follow (text-end, finish) are never applied by the client.",
+  "description": "The provider failed mid-answer. The transient data-error carries its public reason and numeric code; the error part fails the request while preserving partial text.",
   "terminal": "error",
   "events": [
     {
@@ -128,7 +128,8 @@
     {
       "type": "data-error",
       "data": {
-        "code": 503
+        "code": 503,
+        "reason": "provider_unavailable"
       },
       "transient": true
     },
@@ -268,7 +269,8 @@
     },
     "error": {
       "message": "The model is unavailable",
-      "code": 503
+      "code": 503,
+      "reason": "provider_unavailable"
     }
   }
 }

@@ -7,7 +7,7 @@ from uuid import UUID
 
 from eneo.ai_models.completion_models.completion_model import CompletionModel
 from eneo.assistants.assistant_service import AssistantService
-from eneo.authentication.auth_models import is_service_api_key
+from eneo.authentication.auth_models import is_service_api_key, is_widget_visitor
 from eneo.completion_models.infrastructure.context_builder import count_tokens
 from eneo.database.database import AsyncSession, sessionmanager
 from eneo.files.file_content_loader import FileContentLoader
@@ -28,11 +28,16 @@ from eneo.sessions.session import (
     SessionAdd,
     SessionFeedback,
     SessionInDB,
+    SessionMetadataPublic,
     SessionUpdate,
 )
-from eneo.sessions.sessions_repo import OwnedChatPartner, SessionRepository
+from eneo.sessions.sessions_repo import (
+    OwnedChatPartner,
+    SessionOwnership,
+    SessionRepository,
+)
 from eneo.skills.domain.skill import (
-    SkillActivationEvidenceV1,
+    SkillActivationEvidence,
     SkillExecutionReference,
 )
 from eneo.users.user import UserInDB
@@ -66,6 +71,29 @@ def safe_count_tokens(text: str, model_name: str | None) -> int:
 _background_save_tasks: set[asyncio.Task[None]] = set()
 
 
+async def drain_background_saves(timeout: float) -> int:
+    """Wait for scheduled saves at shutdown; return how many were pending.
+
+    Partial answers are saved on a task of their own after the request ends.
+    The database pool they write through closes after this, so a save that
+    is still running then would be lost.
+    """
+    pending = {task for task in _background_save_tasks if not task.done()}
+    if not pending:
+        return 0
+    logger.info("Waiting for %d background save(s) before shutdown", len(pending))
+    try:
+        async with asyncio.timeout(timeout):
+            await asyncio.wait(pending)
+    except TimeoutError:
+        logger.error(
+            "%d background save(s) did not finish within %.0fs at shutdown",
+            sum(1 for task in pending if not task.done()),
+            timeout,
+        )
+    return len(pending)
+
+
 def schedule_background_save(coro: Coroutine[Any, Any, None]) -> asyncio.Task[None]:
     """Schedule a fire-and-forget background save with GC protection.
 
@@ -89,7 +117,7 @@ async def persist_partial_question_answer(
     completion_model_id: UUID | None = None,
     reasoning: str | None = None,
     skill_provenance: Sequence[SkillExecutionReference] | None = None,
-    skill_activation: SkillActivationEvidenceV1 | None = None,
+    skill_activation: SkillActivationEvidence | None = None,
     generated_files: Sequence[File] | None = None,
     tool_calls: list[ToolCallInfo] | None = None,
 ) -> None:
@@ -138,7 +166,7 @@ async def persist_final_skill_runtime_state(
     tenant_id: UUID,
     question_id: UUID,
     skill_provenance: Sequence[SkillExecutionReference],
-    skill_activation: SkillActivationEvidenceV1,
+    skill_activation: SkillActivationEvidence,
 ) -> None:
     """Commit final Skill evidence independently of a failing request transaction."""
 
@@ -206,50 +234,81 @@ class SessionService:
         async with session.begin():
             yield
 
-    def _principal_columns(self) -> tuple[UUID | None, UUID | None]:
-        """Return (user_id, api_key_id) for the current authenticated principal.
+    def _never_persist(self) -> bool:
+        if not is_widget_visitor(self.user):
+            return False
+        widget = self.user.active_widget
+        return widget is not None and widget.never_persist
+
+    @asynccontextmanager
+    async def _placeholder_transaction(self) -> AsyncGenerator[AsyncSession]:
+        """Where a new conversation or question placeholder is written.
+
+        Normally its own committed transaction, so the user's message survives
+        a completion failure. A zero-retention widget visitor must leave no
+        content behind on any exit, so its placeholders stay in the request
+        transaction: rolled back with a failure, deleted after the answer.
+        """
+        if self._never_persist():
+            async with self._write_transaction():
+                yield self.session_repo.session
+            return
+        async with sessionmanager.session() as session, session.begin():
+            yield session
+
+    def _principal_columns(
+        self,
+    ) -> tuple[UUID | None, UUID | None, UUID | None, UUID | None]:
+        """Return (user_id, api_key_id, widget_id, visitor_id) for the current
+        authenticated principal.
 
         Service keys resolve to a synthetic UserInDB whose id is not in the
-        users table, so we cannot persist self.user.id as sessions.user_id.
-        Instead we record the API key id; the resolver-supplied UserInDB
-        carries it on .active_api_key.
+        users table, so we cannot persist self.user.id as sessions.user_id;
+        we record the API key id instead. Widget visitors are likewise
+        synthetic and are recorded as widget + visitor id.
 
-        Exactly one of the returned values is non-None.
+        Exactly one principal (user, key, or widget+visitor) is non-None.
         """
+        if is_widget_visitor(self.user):
+            widget = self.user.active_widget
+            assert widget is not None  # guaranteed by is_widget_visitor
+            return None, None, widget.widget_id, widget.visitor_id
         if is_service_api_key(self.user):
             key = self.user.active_api_key
             assert key is not None  # guaranteed by is_service_api_key
-            return None, key.id
-        return self.user.id, None
+            return None, key.id, None, None
+        return self.user.id, None, None, None
 
-    def _is_owner(self, session: SessionInDB) -> bool:
+    def _is_owner(self, session: SessionInDB | SessionOwnership) -> bool:
         """Match the session's principal against the current request's principal.
 
-        Both branches require a non-None match; we never treat NULL == NULL
+        Every branch requires a non-None match; we never treat NULL == NULL
         as a match (defends against the synthetic-user/no-user trap where two
         unrelated NULL fields would otherwise compare equal).
         """
-        user_id, api_key_id = self._principal_columns()
+        user_id, api_key_id, widget_id, visitor_id = self._principal_columns()
+        if widget_id is not None:
+            return session.widget_id == widget_id and session.visitor_id == visitor_id
         if user_id is not None:
             return session.user_id == user_id
         if api_key_id is not None:
             return session.api_key_id == api_key_id
         return False
 
-    def _check_exists_and_belongs_to_user(
+    def _check_owned(
         self,
-        session: SessionInDB | None,
+        owner: SessionOwnership | None,
         assistant_id: UUID | None = None,
         group_chat_id: UUID | None = None,
-    ) -> SessionInDB:
-        if session is None:
+    ) -> SessionOwnership:
+        if owner is None:
             raise NotFoundException("Session not found")
 
-        if not self._is_owner(session):
+        if not self._is_owner(owner):
             raise UnauthorizedException("Session belongs to other principal")
 
         # Handle cross-endpoint access attempt
-        if assistant_id is not None and session.group_chat_id is not None:
+        if assistant_id is not None and owner.group_chat_id is not None:
             raise BadRequestException(
                 "Cannot access a group chat session through the assistant endpoint. "
                 "Use the conversation endpoints instead."
@@ -258,13 +317,36 @@ class SessionService:
         # Verify the session belongs to the specified assistant/group chat
         if (
             assistant_id is not None
-            and session.assistant is not None
-            and session.assistant.id != assistant_id
+            and owner.assistant_id is not None
+            and owner.assistant_id != assistant_id
         ):
             raise NotFoundException("Session belongs to another assistant")
-        if group_chat_id is not None and session.group_chat_id != group_chat_id:
+        if group_chat_id is not None and owner.group_chat_id != group_chat_id:
             raise NotFoundException("Session belongs to another group chat")
 
+        return owner
+
+    def _check_exists_and_belongs_to_user(
+        self,
+        session: SessionInDB | None,
+        assistant_id: UUID | None = None,
+        group_chat_id: UUID | None = None,
+    ) -> SessionInDB:
+        self._check_owned(
+            None
+            if session is None
+            else SessionOwnership(
+                user_id=session.user_id,
+                api_key_id=session.api_key_id,
+                widget_id=session.widget_id,
+                visitor_id=session.visitor_id,
+                assistant_id=session.assistant.id if session.assistant else None,
+                group_chat_id=session.group_chat_id,
+            ),
+            assistant_id=assistant_id,
+            group_chat_id=group_chat_id,
+        )
+        assert session is not None
         return session
 
     async def get_session_by_uuid(
@@ -277,6 +359,20 @@ class SessionService:
 
         return self._check_exists_and_belongs_to_user(
             session, assistant_id=assistant_id, group_chat_id=group_chat_id
+        )
+
+    async def get_session_ownership(
+        self,
+        id: UUID,
+        assistant_id: UUID | None = None,
+        group_chat_id: UUID | None = None,
+    ) -> SessionOwnership:
+        """``get_session_by_uuid`` for callers that need only the owner and chat
+        partner: the same refusals, without reading the turns."""
+        return self._check_owned(
+            await self.session_repo.get_ownership(id),
+            assistant_id=assistant_id,
+            group_chat_id=group_chat_id,
         )
 
     async def get_tool_call_result(
@@ -298,12 +394,14 @@ class SessionService:
         cursor: datetime | None = None,
         previous: bool = False,
         name_filter: str | None = None,
-    ) -> tuple[list[SessionInDB], int]:
-        user_id, api_key_id = self._principal_columns()
-        return await self.session_repo.get_by_assistant(
+    ) -> tuple[list[SessionMetadataPublic], int]:
+        user_id, api_key_id, widget_id, visitor_id = self._principal_columns()
+        return await self.session_repo.get_metadata_by_assistant(
             assistant_id=assistant_id,
             user_id=user_id,
             api_key_id=api_key_id,
+            widget_id=widget_id,
+            visitor_id=visitor_id,
             limit=limit,
             cursor=cursor,
             previous=previous,
@@ -320,11 +418,10 @@ class SessionService:
         assistant_id: UUID | None = None,
         group_chat_id: UUID | None = None,
     ) -> SessionInDB | None:
-        session = await self.session_repo.get(id)
-        owned_session = self._check_exists_and_belongs_to_user(
-            session, assistant_id=assistant_id, group_chat_id=group_chat_id
+        await self.get_session_ownership(
+            id, assistant_id=assistant_id, group_chat_id=group_chat_id
         )
-        return await self.session_repo.delete(owned_session.id)
+        return await self.session_repo.delete(id)
 
     async def create_session(
         self,
@@ -344,7 +441,7 @@ class SessionService:
             assistant_id=assistant_id,
             group_chat_id=group_chat_id,
         )
-        async with sessionmanager.session() as session, session.begin():
+        async with self._placeholder_transaction() as session:
             return await self._session_repository(session).add(session_add)
 
     def _build_session_add(
@@ -354,11 +451,13 @@ class SessionService:
         assistant_id: UUID | None,
         group_chat_id: UUID | None,
     ) -> SessionAdd:
-        user_id, api_key_id = self._principal_columns()
+        user_id, api_key_id, widget_id, visitor_id = self._principal_columns()
         return SessionAdd(
             name=name,
             user_id=user_id,
             api_key_id=api_key_id,
+            widget_id=widget_id,
+            visitor_id=visitor_id,
             assistant_id=assistant_id,
             group_chat_id=group_chat_id,
         )
@@ -371,7 +470,7 @@ class SessionService:
         assistant_id: UUID | None,
         completion_model: CompletionModel | None,
         skill_provenance: Sequence[SkillExecutionReference] | None = None,
-        skill_activation: SkillActivationEvidenceV1 | None = None,
+        skill_activation: SkillActivationEvidence | None = None,
     ) -> QuestionAdd:
         completion_model_id = completion_model.id if completion_model else None
         completion_model_name = completion_model.name if completion_model else None
@@ -418,7 +517,7 @@ class SessionService:
         group_chat_id: UUID | None = None,
         completion_model: CompletionModel | None = None,
         skill_provenance: Sequence[SkillExecutionReference] | None = None,
-        skill_activation: SkillActivationEvidenceV1 | None = None,
+        skill_activation: SkillActivationEvidence | None = None,
     ) -> tuple[SessionInDB, UUID, datetime | None]:
         """Commit a new conversation and its first user message atomically."""
         session_add = self._build_session_add(
@@ -426,7 +525,7 @@ class SessionService:
             assistant_id=session_assistant_id,
             group_chat_id=group_chat_id,
         )
-        async with sessionmanager.session() as db_session, db_session.begin():
+        async with self._placeholder_transaction() as db_session:
             session_record = await self._session_repository(db_session).add(session_add)
             question_add = self._build_question_placeholder(
                 question=question,
@@ -450,7 +549,7 @@ class SessionService:
         assistant_id: UUID | None = None,
         completion_model: CompletionModel | None = None,
         skill_provenance: Sequence[SkillExecutionReference] | None = None,
-        skill_activation: SkillActivationEvidenceV1 | None = None,
+        skill_activation: SkillActivationEvidence | None = None,
     ) -> tuple[UUID, datetime | None]:
         """Persist a placeholder Question row with the user's message and an empty answer.
 
@@ -477,7 +576,7 @@ class SessionService:
             skill_activation=skill_activation,
         )
 
-        async with sessionmanager.session() as db_session, db_session.begin():
+        async with self._placeholder_transaction() as db_session:
             return await self._insert_question_placeholder(
                 self._question_repository(db_session), question_add, files
             )
@@ -500,7 +599,7 @@ class SessionService:
         mcp_tool_references: list["McpToolReference"] | None = None,
         reasoning: str | None = None,
         skill_provenance: Sequence[SkillExecutionReference] | None = None,
-        skill_activation: SkillActivationEvidenceV1 | None = None,
+        skill_activation: SkillActivationEvidence | None = None,
     ) -> None:
         """Update a placeholder Question row with the final assistant answer."""
         completion_model_id = completion_model.id if completion_model else None
@@ -531,13 +630,15 @@ class SessionService:
         feedback: SessionFeedback,
         assistant_id: UUID | None = None,
         group_chat_id: UUID | None = None,
+        keep_existing_text: bool = False,
     ) -> SessionInDB:
-        session = await self.session_repo.get(id=session_id)
-        owned_session = self._check_exists_and_belongs_to_user(
-            session, assistant_id=assistant_id, group_chat_id=group_chat_id
+        await self.get_session_ownership(
+            session_id, assistant_id=assistant_id, group_chat_id=group_chat_id
         )
         return await self.session_repo.add_feedback(
-            feedback=feedback, id=owned_session.id
+            feedback=feedback,
+            id=session_id,
+            keep_existing_text=keep_existing_text,
         )
 
     async def get_message_partner(
@@ -549,7 +650,7 @@ class SessionService:
         conversation of another principal and one without a chat partner, so
         callers learn nothing about conversations that are not theirs.
         """
-        user_id, api_key_id = self._principal_columns()
+        user_id, api_key_id, _, _ = self._principal_columns()
         partner = await self.session_repo.get_owned_message_partner(
             session_id=session_id,
             message_id=message_id,
@@ -569,7 +670,7 @@ class SessionService:
         Separate from the conversation-level feedback (``leave_feedback``):
         neither overwrites the other.
         """
-        user_id, api_key_id = self._principal_columns()
+        user_id, api_key_id, _, _ = self._principal_columns()
         stored = await self.session_repo.set_message_feedback(
             session_id=session_id,
             message_id=message_id,
@@ -591,7 +692,7 @@ class SessionService:
         message with ``get_message_partner`` first to report one that is not
         theirs.
         """
-        user_id, api_key_id = self._principal_columns()
+        user_id, api_key_id, _, _ = self._principal_columns()
         await self.session_repo.delete_message_feedback(
             session_id=session_id,
             message_id=message_id,
@@ -607,12 +708,14 @@ class SessionService:
         cursor: datetime | None = None,
         previous: bool = False,
         name_filter: str | None = None,
-    ) -> tuple[list[SessionInDB], int]:
-        user_id, api_key_id = self._principal_columns()
-        return await self.session_repo.get_by_group_chat(
+    ) -> tuple[list[SessionMetadataPublic], int]:
+        user_id, api_key_id, widget_id, visitor_id = self._principal_columns()
+        return await self.session_repo.get_metadata_by_group_chat(
             group_chat_id=group_chat_id,
             user_id=user_id,
             api_key_id=api_key_id,
+            widget_id=widget_id,
+            visitor_id=visitor_id,
             limit=limit,
             cursor=cursor,
             previous=previous,

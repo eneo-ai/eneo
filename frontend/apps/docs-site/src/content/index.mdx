@@ -206,6 +206,11 @@ Two ways to get a running instance: the Docker Compose reference stack (served b
 
     **Access:** `https://your-domain.com` (Traefik only routes the host name you set in `docker-compose.yml`; there is no localhost route)
 
+    The main host serves React from the backend. The Svelte service remains for
+    [UI rollback](/guides/deployment#main-host-and-ui-rollback), controlled by
+    `FRONTEND_ROUTER_PRIORITY=7` in the deployment `.env`. Switching from Svelte
+    requires users to sign in again; rolling back the UI does not undo data changes.
+
     **Default login:** `user@example.com` / `ChangeMePassword1!`
 
     The [deployment guide](/guides/deployment) walks through every value.

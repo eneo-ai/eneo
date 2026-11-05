@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { renderInApp } from "@/test/render";
 import type { Space } from "@/features/spaces/space";
@@ -14,7 +14,7 @@ const toast = vi.hoisted(() => ({
   error: vi.fn()
 }));
 vi.mock("@/lib/toast", () => ({ toast }));
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 const jobs = vi.hoisted(() => ({ trackJob: vi.fn() }));
 vi.mock("@/features/jobs/use-jobs", () => ({ useJobs: () => jobs }));
 vi.mock("@/features/spaces/use-space", async () => {
@@ -279,9 +279,16 @@ it("SharePoint: tells how many imports failed when only some were queued", async
   });
   fireEvent.click(within(dialog).getByRole("button", { name: "Importera" }));
 
-  await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
-  expect(toast.warning).toHaveBeenCalledWith("1 av 2 importer köades. 1 misslyckades.");
+  expect(await within(dialog).findByRole("heading", { name: "Import köad" })).toBeTruthy();
+  expect(within(dialog).getByText("1 objekt kunde inte köas.")).toBeTruthy();
+  expect(within(dialog).getByText("Rutiner: Mappen finns inte")).toBeTruthy();
+  expect(within(dialog).getByRole("link", { name: "Visa importen" }).getAttribute("href")).toBe(
+    "/spaces/space-1/knowledge/integrations/ik-1"
+  );
+  expect(onOpenChange).not.toHaveBeenCalled();
   expect(toast.error).not.toHaveBeenCalled();
+  fireEvent.click(within(dialog).getAllByRole("button", { name: "Stäng" }).at(-1)!);
+  expect(onOpenChange).toHaveBeenCalledWith(false);
 });
 
 it("SharePoint: shows why a batch could not start at all, and lets the import be tried again", async () => {
@@ -337,3 +344,201 @@ it("SharePoint: shows why a batch could not start at all, and lets the import be
   fireEvent.click(importButton);
   await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(2));
 });
+
+it("Confluence: starts over when reopened", async () => {
+  space.current = makeSpace();
+  api.GET.mockImplementation(() =>
+    ok({ items: [{ key: "HR", type: "space", name: "Personal", url: "https://wiki/HR" }] })
+  );
+  const dialog = (open: boolean) => (
+    <ConfluenceImportDialog
+      open={open}
+      onOpenChange={() => {}}
+      onBack={() => {}}
+      integration={integration("confluence")}
+    />
+  );
+  const { rerender } = renderInApp(dialog(true));
+  const search = () => document.getElementById("confluence-space-search") as HTMLInputElement;
+  await screen.findByRole("button", { name: "Personal" });
+  fireEvent.change(search(), { target: { value: "Pers" } });
+  fireEvent.click(await screen.findByRole("button", { name: "Personal" }));
+
+  rerender(dialog(false));
+  rerender(dialog(true));
+
+  await screen.findByRole("button", { name: "Personal" });
+  expect(search().value).toBe("");
+  expect(
+    (await screen.findByRole("button", { name: "Personal" })).getAttribute("aria-pressed")
+  ).toBe("false");
+});
+
+it("Confluence: keeps a pending import pending when closed and reopened", async () => {
+  space.current = makeSpace();
+  api.GET.mockImplementation(() =>
+    ok({ items: [{ key: "HR", type: "space", name: "Personal", url: "https://wiki/HR" }] })
+  );
+  api.POST.mockImplementation(() => new Promise(() => {}));
+  const dialog = (open: boolean) => (
+    <ConfluenceImportDialog
+      open={open}
+      onOpenChange={() => {}}
+      onBack={() => {}}
+      integration={integration("confluence")}
+    />
+  );
+  const { rerender } = renderInApp(dialog(true));
+  fireEvent.click(await screen.findByRole("button", { name: "Personal" }));
+  fireEvent.click(screen.getByRole("button", { name: "Importera yta" }));
+  await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(1));
+
+  rerender(dialog(false));
+  rerender(dialog(true));
+  fireEvent.click(await screen.findByRole("button", { name: "Personal" }));
+  const busy = screen.getByRole("button", { name: "Importerar..." });
+  fireEvent.click(busy);
+
+  expect(busy.getAttribute("aria-busy")).toBe("true");
+  expect(api.POST).toHaveBeenCalledTimes(1);
+});
+
+it("Confluence and SharePoint: the source search ignores a trailing space", async () => {
+  space.current = makeSpace();
+  api.GET.mockImplementation(() =>
+    ok({
+      items: [
+        { key: "HR", type: "space", name: "Personal", url: "https://wiki/HR" },
+        { key: "IT", type: "space", name: "IT-stöd", url: "https://wiki/IT" }
+      ]
+    })
+  );
+  renderInApp(
+    <ConfluenceImportDialog
+      open
+      onOpenChange={() => {}}
+      onBack={() => {}}
+      integration={integration("confluence")}
+    />
+  );
+  const spaces = await screen.findByRole("group", { name: "Confluence-ytor" });
+  await within(spaces).findByRole("button", { name: "IT-stöd" });
+  fireEvent.change(document.getElementById("confluence-space-search")!, {
+    target: { value: "personal " }
+  });
+  expect(within(spaces).getByRole("button", { name: "Personal" })).toBeTruthy();
+  expect(within(spaces).queryByRole("button", { name: "IT-stöd" })).toBeNull();
+  cleanup();
+
+  api.GET.mockImplementation(() =>
+    ok({
+      items: [
+        { key: "site-1", type: "site", name: "Intranätet", url: "https://sp/intra" },
+        { key: "site-2", type: "site", name: "Ekonomi", url: "https://sp/eko" }
+      ]
+    })
+  );
+  renderInApp(
+    <SharePointImportDialog
+      open
+      onOpenChange={() => {}}
+      onBack={() => {}}
+      integration={integration("sharepoint")}
+    />
+  );
+  const sites = await screen.findByRole("group", {
+    name: "Tillgängliga SharePoint- och OneDrive-källor"
+  });
+  await within(sites).findByRole("button", { name: "Intranätet" });
+  fireEvent.change(document.getElementById("sharepoint-site-search")!, {
+    target: { value: "ekonomi " }
+  });
+  expect(within(sites).getByRole("button", { name: "Ekonomi" })).toBeTruthy();
+  expect(within(sites).queryByRole("button", { name: "Intranätet" })).toBeNull();
+});
+
+it.each(["bulk", "accumulated"])(
+  "SharePoint: preserves an oversized %s selection until it is reduced to the batch limit",
+  async (mode) => {
+    space.current = makeSpace();
+    const files = Array.from({ length: 51 }, (_, index) => ({
+      id: `file-${index}`,
+      type: "file",
+      name: `Fil ${index}.pdf`,
+      path: `/Policyer/Fil ${index}.pdf`
+    }));
+    api.GET.mockImplementation((path: string, args?: { params: { query: { q?: string } } }) => {
+      if (path.endsWith("/preview/"))
+        return ok({
+          items: [{ key: "site", type: "site", name: "Intranätet", url: "https://sp/intra" }]
+        });
+      const q = args?.params.query.q;
+      return ok({
+        items: path.endsWith("/search/")
+          ? q === "first"
+            ? files.slice(0, 49)
+            : q === "last"
+              ? files.slice(49)
+              : files
+          : [
+              {
+                id: "parent",
+                type: "folder",
+                name: "Policyer",
+                path: "/Policyer",
+                has_children: true
+              }
+            ],
+        current_path: "/",
+        drive_id: "drive"
+      });
+    });
+    api.POST.mockImplementation(() => new Promise(() => {}));
+    renderInApp(
+      <SharePointImportDialog
+        open
+        onOpenChange={() => {}}
+        onBack={() => {}}
+        integration={integration("sharepoint")}
+      />
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Intranätet" }));
+    const search = screen.getByRole("searchbox");
+    fireEvent.change(search, { target: { value: mode === "bulk" ? "all" : "first" } });
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: `Välj alla träffar (${mode === "bulk" ? 51 : 49})`
+      })
+    );
+    if (mode === "accumulated") {
+      fireEvent.change(search, { target: { value: "last" } });
+      fireEvent.click(await screen.findByRole("button", { name: "Välj alla träffar (2)" }));
+    }
+    fireEvent.change(screen.getByRole("textbox", { name: /^Gruppnamn/ }), {
+      target: { value: "Policyer" }
+    });
+    expect(screen.getByText("51 av 50 objekt valda")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Importera högst 50 objekt åt gången. Ta bort valda filer eller mappar för att fortsätta."
+      )
+    ).toBeTruthy();
+    expect(screen.getAllByRole("textbox", { name: /^Importnamn för/ })).toHaveLength(51);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Importera" }));
+    });
+    expect(api.POST).not.toHaveBeenCalled();
+    if (mode === "bulk") {
+      fireEvent.click(screen.getByRole("checkbox", { name: "Fil 50.pdf" }));
+      expect(screen.getByText("50 av 50 objekt valda")).toBeTruthy();
+    } else {
+      fireEvent.change(search, { target: { value: "" } });
+      fireEvent.click(await screen.findByRole("checkbox", { name: "Policyer" }));
+      expect(screen.getByText("1 av 50 objekt valda")).toBeTruthy();
+      expect(screen.getAllByRole("textbox", { name: /^Importnamn för/ })).toHaveLength(1);
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Importera" }));
+    await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(1));
+    expect(api.POST.mock.calls[0]?.[1].body.items).toHaveLength(mode === "bulk" ? 50 : 1);
+  }
+);

@@ -1,5 +1,3 @@
-"use client";
-
 import { useSuspenseQuery } from "@tanstack/react-query";
 import {
   BookOpen,
@@ -7,6 +5,7 @@ import {
   Globe,
   KeyRound,
   MessageSquare,
+  MessageSquareCode,
   Paperclip,
   Play,
   Plug,
@@ -15,25 +14,34 @@ import {
   SlidersHorizontal,
   Sparkles
 } from "lucide-react";
-import Link from "next/link";
-import { useTranslations } from "next-intl";
+import Link from "@/lib/link";
+import { useTranslations } from "use-intl";
 import { SaveStatusProvider } from "@/components/composites/save-status";
 import {
   SectionedSettings,
   type SettingsSection
 } from "@/components/composites/sectioned-settings";
+import { Button as AstryxButton } from "@astryxdesign/core/Button";
 import { Button } from "@/components/ui/button";
 import { browserApi } from "@/lib/api/browser";
 import { ResourceApiKeysSection } from "@/features/api-keys/resource-api-keys-section";
-import { EditorHeader, useCreatedAnnouncement } from "@/features/spaces/editor-header";
+import { editorSummaries } from "@/features/spaces/editor-summaries";
+import {
+  EditorHeader,
+  useCreatedAnnouncement,
+  useEditorPhoneIndex
+} from "@/features/spaces/editor-header";
 import { useJustCreated } from "@/features/spaces/just-created";
 import { useSpace } from "@/features/spaces/use-space";
+import { AssistantWidgetSection } from "@/features/widget/admin/assistant-widget-section";
 import { SkillBindingsSection } from "@/features/skills/skill-bindings-section";
+import { useCanAttachSkills } from "@/features/skills/use-can-attach-skills";
 import { chatPartnerHref } from "../assistants";
 import { AiSection } from "./ai-section";
+import { useAssistantAiDraft } from "./use-assistant-ai-draft";
 import { GeneralSection } from "./general-section";
 import { AttachmentsSection } from "./attachments-section";
-import { CapabilitiesSection } from "./capabilities-section";
+import { CapabilitiesSection, selectedCapabilities } from "./capabilities-section";
 import { InstructionsSection } from "./instructions-section";
 import { KnowledgeSection } from "./knowledge-section";
 import { McpSection } from "./mcp-section";
@@ -50,45 +58,79 @@ import { assistantQueryOptions, type Assistant, useUpdateAssistant } from "./use
  * "Skapa assistent", it focuses the (default) name and announces the creation.
  */
 export function AssistantEditor({ assistantId }: { assistantId: string }) {
+  return (
+    <SaveStatusProvider>
+      <AssistantEditorContent assistantId={assistantId} />
+    </SaveStatusProvider>
+  );
+}
+
+function AssistantEditorContent({ assistantId }: { assistantId: string }) {
   const t = useTranslations();
-  const { space, routeId, can } = useSpace();
+  const { space, routeId } = useSpace();
+  const canAttachSkills = useCanAttachSkills();
   const { data: assistant } = useSuspenseQuery(assistantQueryOptions(browserApi, assistantId));
   const update = useUpdateAssistant(assistantId);
+  const ai = useAssistantAiDraft(assistant);
   const created = useJustCreated("assistant", assistantId);
   useCreatedAnnouncement(created, t("assistant_created_announcement"));
 
   const chatHref = chatPartnerHref(routeId, { ...assistant, type: "assistant" as const });
 
-  const hasMcp =
-    (space.mcp_servers?.length ?? 0) > 0 || assistant.effective_config?.mcp_enforced === true;
   const permissions = assistant.permissions ?? [];
   const hasPublishing = permissions.includes("publish") || permissions.includes("insight_toggle");
+  const summary = editorSummaries(t);
+  const content = t("editor_group_content");
+  const model = t("editor_group_model");
+  const access = t("editor_group_access");
 
   const sections: SettingsSection[] = [
     {
       id: "general",
       label: t("general"),
       icon: SlidersHorizontal,
+      group: content,
+      summary: summary.description(assistant.description),
       node: <GeneralSection assistant={assistant} focusName={created} />
     },
     {
       id: "instructions",
       label: t("instructions"),
       icon: MessageSquare,
-      node: <InstructionsSection assistant={assistant} />
+      group: content,
+      summary: summary.instructions(assistant.prompt?.text),
+      node: (
+        <InstructionsSection
+          assistant={assistant}
+          contextModel={ai.effectiveModel}
+          modelConfirmed={ai.confirmed}
+        />
+      )
     },
     {
       id: "knowledge",
       label: t("knowledge"),
       icon: BookOpen,
-      node: <KnowledgeSection assistant={assistant} />
+      group: content,
+      summary: summary.sources(
+        assistant.groups.length +
+          assistant.websites.length +
+          assistant.integration_knowledge_list.length
+      ),
+      node: (
+        <KnowledgeSection
+          assistant={assistant}
+          modelSupportsTools={ai.toolModel?.supports_tool_calling === true}
+        />
+      )
     },
-    ...(can("read", "skill") && (!space.personal || space.default_assistant?.id !== assistant.id)
+    ...(canAttachSkills && (!space.personal || space.default_assistant?.id !== assistant.id)
       ? [
           {
             id: "skills",
             label: t("skills"),
             icon: BookOpenCheck,
+            group: content,
             node: (
               <SkillBindingsSection
                 resource="assistant"
@@ -100,44 +142,51 @@ export function AssistantEditor({ assistantId }: { assistantId: string }) {
           }
         ]
       : []),
-    ...(hasMcp
-      ? [
-          {
-            id: "mcp",
-            label: t("mcp_servers"),
-            icon: Plug,
-            node: <McpSection assistant={assistant} />
-          }
-        ]
-      : []),
     {
-      id: "capabilities",
-      label: t("capabilities"),
-      icon: Globe,
-      node: <CapabilitiesSection assistant={assistant} />
+      id: "mcp",
+      label: t("mcp_servers"),
+      icon: Plug,
+      group: content,
+      summary: summary.chosen(assistant.mcp_servers?.length ?? 0),
+      node: <McpSection assistant={assistant} />
     },
     {
       id: "attachments",
       label: t("attachments"),
       icon: Paperclip,
-      node: <AttachmentsSection assistant={assistant} />
+      group: content,
+      summary: summary.files(assistant.attachments.length),
+      node: <AttachmentsSection assistant={assistant} model={ai.toolModel} />
     },
     {
       id: "ai",
       label: t("ai_settings"),
       icon: Sparkles,
-      node: <AiSection assistant={assistant} />
+      group: model,
+      summary: summary.model(assistant.completion_model),
+      node: <AiSection assistant={assistant} draft={ai} />
+    },
+    {
+      id: "capabilities",
+      label: t("capabilities"),
+      icon: Globe,
+      group: model,
+      summary: summary.chosen(selectedCapabilities(assistant).length),
+      node: <CapabilitiesSection assistant={assistant} />
     },
     {
       id: "security",
       label: t("security_and_privacy"),
       icon: ShieldCheck,
+      group: access,
+      summary: summary.retention(assistant.data_retention_days),
       node: <SecuritySection assistant={assistant} />
     },
     {
       id: "api-keys",
       label: t("api_keys"),
       icon: KeyRound,
+      group: access,
       node: (
         <ResourceApiKeysSection
           scopeType="assistant"
@@ -146,39 +195,60 @@ export function AssistantEditor({ assistantId }: { assistantId: string }) {
         />
       )
     },
+    ...(permissions.includes("edit")
+      ? [
+          {
+            id: "widget",
+            label: t("widget_admin_title"),
+            icon: MessageSquareCode,
+            group: access,
+            node: <AssistantWidgetSection assistantId={assistant.id} />
+          }
+        ]
+      : []),
     ...(hasPublishing
       ? [
           {
             id: "publishing",
             label: t("publishing"),
             icon: Send,
+            group: access,
+            summary: summary.publishing(assistant.published),
             node: <PublishingSection assistant={assistant} />
           }
         ]
       : [])
   ];
 
-  return (
-    <SaveStatusProvider>
-      <SectionedSettings
-        navigationLabel={t("editor_sections_label")}
-        sections={sections}
-        header={
-          <EditorHeader
-            section="assistants"
-            name={assistant.name}
-            actions={
-              <Button asChild size="sm">
-                <Link href={chatHref}>
-                  <Play className="size-4" />
-                  {t("test")}
-                </Link>
-              </Button>
-            }
-          />
-        }
+  const test = (
+    <Button asChild size="sm">
+      <Link href={chatHref}>
+        <Play className="size-4" />
+        {t("test")}
+      </Link>
+    </Button>
+  );
+  const phone = useEditorPhoneIndex({
+    section: "assistants",
+    name: assistant.name,
+    actions: (
+      <AstryxButton
+        href={chatHref}
+        variant="secondary"
+        icon={<Play aria-hidden="true" className="size-4" />}
+        label={t("test")}
       />
-    </SaveStatusProvider>
+    ),
+    created
+  });
+
+  return (
+    <SectionedSettings
+      navigationLabel={t("editor_sections_label")}
+      sections={sections}
+      phone={phone}
+      header={<EditorHeader section="assistants" name={assistant.name} actions={test} />}
+    />
   );
 }
 

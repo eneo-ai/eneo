@@ -38,6 +38,12 @@ from eneo.observability.error_text import user_visible_error
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 
+_CONNECTION_UPKEEP_ON_GET = (
+    "Using the connection renews its OAuth token when needed and records the "
+    "organization app's auth health. This is the upkeep any use of the connection "
+    "does; nothing in it is chosen by the request."
+)
+
 router = APIRouter()
 
 
@@ -360,6 +366,7 @@ async def get_sync_logs(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
     reason="Integration services enforce tenant, user and space access for this operation.",
+    effect_on_get=_CONNECTION_UPKEEP_ON_GET,
 )
 async def get_integration_preview(
     user_integration_id: UUID,
@@ -389,6 +396,7 @@ async def get_integration_preview(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
     reason="Integration services enforce tenant, user and space access for this operation.",
+    effect_on_get=_CONNECTION_UPKEEP_ON_GET,
 )
 async def search_sharepoint_library(
     user_integration_id: UUID,
@@ -457,6 +465,7 @@ async def search_sharepoint_library(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
     reason="Integration services enforce tenant, user and space access for this operation.",
+    effect_on_get=_CONNECTION_UPKEEP_ON_GET,
 )
 async def get_sharepoint_folder_tree(
     user_integration_id: UUID,

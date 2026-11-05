@@ -372,3 +372,60 @@ test("the documentation builder works before the What’s new package is introdu
     true,
   );
 });
+
+test("translations are selected with their ref in one build per version and receive stable aliases", async (t) => {
+  const f = fixture(t);
+  f.write(
+    "frontend/apps/docs-site/src/content/sv/index.mdx",
+    "Svensk utveckling",
+  );
+  f.git("add", ".");
+  f.git("commit", "-m", "Translations in new release");
+  f.git("tag", "v2.2.0");
+  f.write(
+    "frontend/apps/docs-site/src/content/sv/index.mdx",
+    "Ny svensk utveckling",
+  );
+  const versions = resolveVersions({ repoRoot: f.repoRoot });
+  const observed = [];
+  await buildSite({
+    ...f,
+    versions,
+    build: async (app, env) => {
+      const translation = path.join(app, "src/content/sv/index.mdx");
+      observed.push([
+        env.NEXT_PUBLIC_DOCS_VERSION,
+        fs.existsSync(translation)
+          ? fs.readFileSync(translation, "utf8")
+          : null,
+      ]);
+      exportPages(app);
+      // The current renderer exports fallback routes even for English-only refs.
+      fs.mkdirSync(path.join(app, "out/sv/guides"), { recursive: true });
+      fs.writeFileSync(
+        path.join(app, "out/sv.html"),
+        "Swedish home or fallback",
+      );
+      fs.writeFileSync(
+        path.join(app, "out/sv/guides/deployment.html"),
+        "Swedish guide or fallback",
+      );
+    },
+  });
+  assert.deepEqual(observed, [
+    ["v2.2", "Svensk utveckling"],
+    ["v2.1", null],
+    ["dev", "Ny svensk utveckling"],
+  ]);
+  assert.match(
+    fs.readFileSync(
+      path.join(f.appDir, "site/sv/guides/deployment.html"),
+      "utf8",
+    ),
+    /\/v2\.2\/sv\/guides\/deployment/,
+  );
+  assert.match(
+    fs.readFileSync(path.join(f.appDir, "site/sv.html"), "utf8"),
+    /\/v2\.2\/sv/,
+  );
+});

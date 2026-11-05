@@ -1,4 +1,5 @@
 import { m } from "$lib/paraglide/messages";
+import { assignLocation } from "$lib/core/navigation";
 
 export const SHAREPOINT_SERVICE_ACCOUNT_OAUTH_KEY = "sharepoint_service_account_oauth";
 
@@ -21,5 +22,5 @@ export function followServiceAccountSignIn(start: ServiceAccountSignInStart): vo
     SHAREPOINT_SERVICE_ACCOUNT_OAUTH_KEY,
     JSON.stringify({ state: start.state })
   );
-  window.location.assign(url.href);
+  assignLocation(url.href);
 }

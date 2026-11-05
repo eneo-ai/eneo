@@ -51,6 +51,7 @@ from eneo.authentication.api_key_resolver import ApiKeyAuthResolver
 from eneo.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
 from eneo.authentication.api_key_v2_repo import ApiKeysV2Repository
 from eneo.authentication.auth_service import AuthService
+from eneo.authentication.browser_session_service import BrowserSessionService
 from eneo.collections.application.collection_crud_service import CollectionCRUDService
 from eneo.completion_models.application import CompletionModelCRUDService
 from eneo.completion_models.application.completion_model_migration_history_service import (
@@ -378,6 +379,7 @@ from eneo.templates.assistant_template.assistant_template_service import (
 )
 from eneo.templates.templates_service import TemplateService
 from eneo.tenants.tenant import TenantInDB
+from eneo.tenants.tenant_federation_service import TenantFederationService
 from eneo.tenants.tenant_repo import TenantRepository
 from eneo.tenants.tenant_service import TenantService
 from eneo.token_usage.application.token_usage_service import TokenUsageService
@@ -418,6 +420,29 @@ from eneo.websites.infrastructure.website_cleaner_service import WebsiteCleanerS
 from eneo.websites.infrastructure.website_repo import WebsiteRepository
 from eneo.whats_new.whats_new_repo import WhatsNewRepository
 from eneo.whats_new.whats_new_service import WhatsNewService
+from eneo.widgets.application.altcha_service import AltchaService
+from eneo.widgets.application.visitor_identity import VisitorIdentity
+from eneo.widgets.application.visitor_token_service import VisitorTokenService
+from eneo.widgets.application.widget_ask_service import WidgetAskService
+from eneo.widgets.application.widget_authentication_service import (
+    WidgetAuthenticationService,
+)
+from eneo.widgets.application.widget_limits import (
+    VisitorTokenRevocations,
+    WidgetBudget,
+    WidgetLimiter,
+)
+from eneo.widgets.application.widget_service import WidgetService
+from eneo.widgets.application.widget_template_service import WidgetTemplateService
+from eneo.widgets.infrastructure.widget_overview_repo_impl import (
+    WidgetOverviewRepoImpl,
+)
+from eneo.widgets.infrastructure.widget_repo_impl import WidgetRepoImpl
+from eneo.widgets.infrastructure.widget_template_repo_impl import (
+    WidgetTemplateRepoImpl,
+)
+from eneo.widgets.infrastructure.widget_usage_repo_impl import WidgetUsageRepoImpl
+from eneo.widgets.presentation.widget_assembler import WidgetAssembler
 from eneo.worker.task_manager import TaskManager
 from eneo.workflows.step_repo import StepRepository
 
@@ -679,6 +704,19 @@ class Container(containers.DeclarativeContainer):
         GovernancePolicyRepoImpl, session=session
     )
     governance_policy_assembler = providers.Factory(GovernancePolicyAssembler)
+    widget_repo = providers.Factory(WidgetRepoImpl, session=session)
+    widget_template_repo = providers.Factory(WidgetTemplateRepoImpl, session=session)
+    widget_overview_repo = providers.Factory(WidgetOverviewRepoImpl, session=session)
+    widget_assembler = providers.Factory(WidgetAssembler)
+    widget_usage_repo = providers.Factory(WidgetUsageRepoImpl, session=session)
+    widget_visitor_token_service = providers.Factory(VisitorTokenService)
+    widget_visitor_identity = providers.Factory(VisitorIdentity)
+    widget_altcha_service = providers.Factory(AltchaService, redis_client=redis_client)
+    widget_limiter = providers.Factory(WidgetLimiter, redis_client=redis_client)
+    widget_token_revocations = providers.Factory(
+        VisitorTokenRevocations, redis_client=redis_client
+    )
+    widget_budget = providers.Factory(WidgetBudget)
     org_space_assistant_role_repo = providers.Factory(
         OrgSpaceAssistantRoleRepo,
         session=session,
@@ -897,6 +935,12 @@ class Container(containers.DeclarativeContainer):
         audit_config_service=audit_config_service,
         feature_flag_service=feature_flag_service,
     )
+    tenant_federation_service = providers.Factory(
+        TenantFederationService,
+        tenant_repo=tenant_repo,
+        encryption_service=encryption_service,
+        audit_service=audit_service,
+    )
 
     # Completion model adapters
     context_builder = providers.Factory(ContextBuilder)
@@ -1014,6 +1058,12 @@ class Container(containers.DeclarativeContainer):
         transcription_model_repo=transcription_model_repo,
     )
     auth_service = providers.Factory(AuthService)
+    browser_session_service = providers.Factory(
+        BrowserSessionService,
+        session=session,
+        auth_service=auth_service,
+        audit_service=audit_service,
+    )
     scim_token_repository = providers.Factory(
         ScimTokenRepository,
         session=session,
@@ -1240,6 +1290,25 @@ class Container(containers.DeclarativeContainer):
         object_content=object_content_service,
         upload_admission=upload_admission,
     )
+    widget_service = providers.Factory(
+        WidgetService,
+        user=user,
+        repo=widget_repo,
+        template_repo=widget_template_repo,
+        space_service=space_service,
+        actor_manager=actor_manager,
+        tenant_service=tenant_service,
+        icon_repo=icon_repo,
+        space_repo=space_repo,
+        token_service=widget_visitor_token_service,
+    )
+    widget_template_service = providers.Factory(
+        WidgetTemplateService,
+        user=user,
+        repo=widget_template_repo,
+        widget_repo=widget_repo,
+        icon_repo=icon_repo,
+    )
     assistant_template_service = providers.Factory(
         AssistantTemplateService,
         repo=assistant_template_repo,
@@ -1267,6 +1336,7 @@ class Container(containers.DeclarativeContainer):
         space_service=space_service,
         actor_manager=actor_manager,
         skill_repo=skill_repo,
+        widget_repo=widget_repo,
         assistant_repo=assistant_repo,
     )
     # Personal assistant governance services are declared before assistant_service
@@ -1324,6 +1394,16 @@ class Container(containers.DeclarativeContainer):
         effective_config_service=effective_config_service,
         skill_service=skill_service,
         rerank_service=rerank_service,
+    )
+    widget_ask_service = providers.Factory(
+        WidgetAskService,
+        user=user,
+        assistant_service=assistant_service,
+        session_service=session_service,
+        widget_limiter=widget_limiter,
+        widget_budget=widget_budget,
+        widget_usage_repo=widget_usage_repo,
+        audit_service=audit_service,
     )
     org_space_assistant_role_service = providers.Factory(
         OrgSpaceAssistantRoleService,
@@ -1407,6 +1487,14 @@ class Container(containers.DeclarativeContainer):
         api_key_rate_limiter=api_key_rate_limiter,
         feature_flag_service=feature_flag_service,
         session=session,
+        browser_session_service=browser_session_service,
+    )
+    widget_authentication_service = providers.Factory(
+        WidgetAuthenticationService,
+        widget_repo=widget_repo,
+        tenant_repo=tenant_repo,
+        user_service=user_service,
+        visitor_tokens=widget_visitor_token_service,
     )
     module_auth_broker = providers.Factory(
         ModuleAuthBroker,

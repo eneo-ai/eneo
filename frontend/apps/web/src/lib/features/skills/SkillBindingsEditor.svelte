@@ -23,6 +23,8 @@
   import * as Select from "$lib/components/ui/select/index.js";
   import { m } from "$lib/paraglide/messages";
   import SkillForm from "./SkillForm.svelte";
+  import SkillDependencies from "./SkillDependencies.svelte";
+  import type { ReferenceCatalog } from "@eneo/skill-instructions";
   import SkillPreview from "./SkillPreview.svelte";
   import { skillBindingPreviewTarget } from "./skillBindingCatalog";
   import type {
@@ -50,6 +52,7 @@
   } from "./skillBindings";
 
   type Props = {
+    referenceCatalog?: ReferenceCatalog;
     bindings: SkillBindingDraftReference[];
     initialCatalogPage: SkillBindingCatalogPage;
     bindingSummaries: SkillBindingSummary[];
@@ -76,6 +79,7 @@
     skillRuntime = null,
     onListCatalog,
     onGetSkillPreview,
+    referenceCatalog,
     onCreateSkill
   }: Props = $props();
 
@@ -448,6 +452,9 @@
             </Badge>
             <div class="min-w-0">
               <p class="truncate text-sm font-medium">{rowName(row)}</p>
+              {#if row.summary?.skill_revision_id === row.reference.skill_revision_id}<SkillDependencies
+                  dependencies={row.summary?.dependencies}
+                />{/if}
               {#if row.description}
                 <p class="text-muted-foreground mt-1 line-clamp-2 max-w-[75ch] text-sm leading-6">
                   {row.description}
@@ -802,6 +809,8 @@
               </Alert.Root>
 
               <SkillForm
+                {referenceCatalog}
+                referencePickerInline
                 mode="create"
                 onSubmit={createSkill}
                 onDirtyChange={(dirty) => (createFormDirty = dirty)}

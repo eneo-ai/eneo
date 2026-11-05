@@ -3,13 +3,13 @@ import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/re
 import { useState } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderInApp } from "@/test/render";
+import { renderInApp, testQueryClient } from "@/test/render";
 import { CreateSpaceDialog } from "./create-space-dialog";
 
 const router = vi.hoisted(() => ({ push: vi.fn() }));
 const api = vi.hoisted(() => ({ POST: vi.fn() }));
 
-vi.mock("next/navigation", () => ({ useRouter: () => router }));
+vi.mock("@/lib/navigation", () => ({ useRouter: () => router }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
@@ -25,8 +25,8 @@ function Harness() {
   );
 }
 
-async function openDialog() {
-  renderInApp(<Harness />);
+async function openDialog(queryClient = testQueryClient()) {
+  renderInApp(<Harness />, { queryClient });
   const opener = screen.getByRole("button", { name: "Ny yta" });
   opener.focus();
   fireEvent.click(opener);
@@ -48,7 +48,11 @@ it("is a named modal form dialog with a labelled, required name field", async ()
   fireEvent.click(screen.getByRole("button", { name: "Ny yta" }));
   const dialog = await screen.findByRole("dialog", { name: "Skapa en ny yta" });
   expect(dialog.getAttribute("aria-modal")).toBe("true");
-  expect(within(dialog).getByLabelText(/Namn/).getAttribute("aria-required")).toBe("true");
+  // Required is the default and unmarked (decision 40), and still told to
+  // assistive technology.
+  const name = within(dialog).getByRole("textbox", { name: "Namn" });
+  expect(name.getAttribute("aria-required")).toBe("true");
+  expect(dialog.textContent).not.toContain("Obligatoriskt");
   await expectNoAxeViolations(document.body);
 });
 
@@ -73,6 +77,23 @@ it("creates the space, opens its overview and leaves no form behind", async () =
   await waitFor(() => expect(router.push).toHaveBeenCalledWith("/spaces/new-space/overview"));
   expect(api.POST).toHaveBeenCalledWith("/api/v1/spaces/", { body: { name: "Upphandling" } });
   expect(screen.queryByLabelText(/Namn/)).toBeNull();
+});
+
+it("refreshes the list of spaces, not the spaces already loaded", async () => {
+  api.POST.mockResolvedValue({ data: { id: "new-space" }, response: new Response(null) });
+  const queryClient = testQueryClient();
+  const keys = [["spaces"], ["spaces", "space-1"], ["spaces", "space-1", "applications"]];
+  for (const key of keys) queryClient.setQueryData(key, {});
+  const { dialog } = await openDialog(queryClient);
+  fireEvent.change(within(dialog).getByLabelText(/Namn/), { target: { value: "Upphandling" } });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Skapa yta" }));
+
+  await waitFor(() => expect(router.push).toHaveBeenCalledWith("/spaces/new-space/overview"));
+  expect(keys.map((key) => queryClient.getQueryState(key)?.isInvalidated)).toEqual([
+    true,
+    false,
+    false
+  ]);
 });
 
 it("keeps focus on the busy Skapa yta and ignores a second press", async () => {

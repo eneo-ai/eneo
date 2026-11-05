@@ -63,6 +63,7 @@ class ReferencesService:
         integration_knowledge_list: Sequence["IntegrationKnowledge"] | None = None,
         context_window_tokens: Optional[int] = None,
         version: int = 1,
+        num_chunks_override: int | None = None,
         rerank: Optional["RerankSpec"] = None,
     ) -> list["InfoBlobChunkInDBWithScore"]:
         integration_knowledge_list = list(integration_knowledge_list or [])
@@ -90,6 +91,10 @@ class ReferencesService:
                 chunk_limit = _candidate_count(context_window_tokens, embedding_model)
             else:
                 raise ValueError(f"Unsupported retrieval version: {version}")
+            if num_chunks_override is not None:
+                # A caller with its own size, e.g. the widget's fixed retrieval
+                # size for visitors, instead of the context-derived default.
+                chunk_limit = num_chunks_override
 
             return await self.datastore.semantic_search(
                 input_string,
@@ -192,6 +197,7 @@ class ReferencesService:
         embed_method: EmbedMethod = EmbedMethod.CONCATENATE,
         context_window_tokens: Optional[int] = None,
         version: int = 1,
+        num_chunks_override: int | None = None,
         rerank: Optional["RerankSpec"] = None,
     ) -> "DatastoreResult":
         files = files or []
@@ -214,6 +220,7 @@ class ReferencesService:
             integration_knowledge_list=integration_knowledge_list,
             context_window_tokens=context_window_tokens,
             version=version,
+            num_chunks_override=num_chunks_override,
             rerank=rerank,
         )
         no_duplicate_chunks = self._get_info_blob_chunks_without_duplicates(chunks)

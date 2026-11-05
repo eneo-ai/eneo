@@ -16,6 +16,7 @@ from pydantic import (
 from eneo.authentication.auth_models import (
     AccessToken,
     ApiKeyV2InDB,
+    JWTPayload,
 )
 from eneo.main.models import BaseModel, InDB, ModelId, partial_model
 from eneo.roles.permissions import Permission
@@ -23,6 +24,7 @@ from eneo.roles.role import RoleInDB, RolePublic
 from eneo.tenants.tenant import TenantInDB, TenantPublic
 from eneo.users.password import LOCAL_PASSWORD_POLICY, LocalPasswordPolicy
 from eneo.users.password_lifecycle import PasswordStatusPublic
+from eneo.widgets.domain.visitor import WidgetVisitorContext
 
 
 class UserState(str, Enum):
@@ -298,9 +300,18 @@ class UserInDB(UserInDBBase):
     user_groups: list[UserGroupInDBRead] = []
     tenant: TenantInDB
     active_api_key: Optional[ApiKeyV2InDB] = None
+    # Set only on the synthetic visitor user built for the anonymous widget
+    # surface; never persisted and never present on a real user.
+    active_widget: Optional[WidgetVisitorContext] = None
     # The session's ``auth_method`` claim (eneo.users.password_lifecycle).
     # Request-scoped like active_api_key; never persisted or returned.
     session_auth_method: Optional[str] = Field(default=None, exclude=True, repr=False)
+    # The verified claims of the browser session (a token with ``sid``,
+    # eneo.authentication.browser_session_service) the request was admitted
+    # under, request-scoped in the same way.
+    browser_session: Optional[JWTPayload] = Field(
+        default=None, exclude=True, repr=False
+    )
     roles: list[RoleInDB] = []
     quota_used: int = 0
     deleted_at: Optional[datetime] = Field(

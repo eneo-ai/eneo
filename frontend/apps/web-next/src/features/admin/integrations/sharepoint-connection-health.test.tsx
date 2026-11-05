@@ -23,6 +23,7 @@ vi.mock("@astryxdesign/core/hooks", async (importOriginal) => ({
   useAnnounce: () => spies.announce
 }));
 
+import { SHAREPOINT_SUBSCRIPTIONS_KEY } from "./integrations";
 import { SharePointConnectionHealth, worstHealth } from "./sharepoint-connection-health";
 
 type App = Schema<"TenantSharePointAppPublic">;
@@ -81,7 +82,7 @@ function show(config: App) {
   const onEdit = vi.fn();
   const view = renderInApp(<SharePointConnectionHealth config={config} onEdit={onEdit} />);
   const health = screen.getByRole("region", { name: "Anslutningens hälsa" });
-  return { onEdit, health, container: view.container };
+  return { onEdit, health, container: view.container, queryClient: view.queryClient };
 }
 
 beforeEach(() => {
@@ -274,6 +275,38 @@ describe("SharePointConnectionHealth", () => {
     expect(
       await screen.findByRole("table", { name: "SharePoint Webhook-prenumerationer" })
     ).toBeTruthy();
+  });
+
+  it("keeps the watch summary when a refresh fails, with the error and a retry beside it", async () => {
+    subscriptions = [subscription()];
+    const view = show(app());
+    expect(
+      await within(view.health).findByText(
+        "1 bevakning aktiv. Nya och ändrade filer hämtas inom några minuter."
+      )
+    ).toBeTruthy();
+
+    api.GET.mockImplementation((path: string) =>
+      path === "/api/v1/admin/sharepoint/subscriptions"
+        ? Promise.resolve({
+            error: { message: "Graph down" },
+            response: new Response(null, { status: 502 })
+          })
+        : ok(null)
+    );
+    const { queryClient } = view;
+    await queryClient.refetchQueries({ queryKey: SHAREPOINT_SUBSCRIPTIONS_KEY });
+
+    const title = await within(view.health).findByText(
+      "Innehållet kunde inte uppdateras. Senast hämtade uppgifter visas."
+    );
+    expect(title.closest('[role="alert"]')).not.toBeNull();
+    expect(
+      within(view.health).getByText(
+        "1 bevakning aktiv. Nya och ändrade filer hämtas inom några minuter."
+      )
+    ).toBeTruthy();
+    expect(within(view.health).getByRole("button", { name: /^Försök igen/ })).toBeTruthy();
   });
 
   it("leaves a count of none out of the watch issues", async () => {

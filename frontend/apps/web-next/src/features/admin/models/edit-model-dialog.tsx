@@ -1,10 +1,11 @@
-"use client";
-
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useState } from "react";
-import { flushSync } from "react-dom";
-import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
+import {
+  FieldProblem,
+  fieldProblemProps,
+  revealProblems
+} from "@/components/composites/field-problem";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -38,6 +39,12 @@ import {
   isImageSize,
   useImageOptionLabels
 } from "./image-model-options";
+import {
+  EMBEDDING_FAMILIES,
+  HOSTING_REGIONS,
+  isEmbeddingFamily,
+  isHostingRegion
+} from "./model-metadata-options";
 import { type AdminModel, MODELS_KEY, type ModelKind, updateTenantModel } from "./models";
 import {
   isCandidateSetting,
@@ -87,7 +94,7 @@ type EditModelDialogProps = {
 };
 
 export function EditModelDialog(props: EditModelDialogProps) {
-  return props.open ? <EditModelForm {...props} /> : null;
+  return props.open ? <EditModelForm key={`${props.kind}:${props.model.id}`} {...props} /> : null;
 }
 
 function EditModelForm({
@@ -108,6 +115,10 @@ function EditModelForm({
   const [family, setFamily] = useState(model.family ?? "");
   const [hosting, setHosting] = useState(model.hosting ?? "");
   const [stability, setStability] = useState(model.stability ?? "");
+  const hasDefaultToggle = "is_org_default" in model;
+  const [isDefault, setIsDefault] = useState(
+    "is_org_default" in model && model.is_org_default === true
+  );
   const [openSource, setOpenSource] = useState(model.open_source ?? false);
   const [maxInput, setMaxInput] = useState(
     "max_input_tokens" in model
@@ -156,6 +167,12 @@ function EditModelForm({
       : null;
   const factorProblem = candidateProblem(candidateFactor, RERANK_CANDIDATE_FACTOR);
   const capProblem = candidateProblem(maxCandidates, RERANK_MAX_CANDIDATES);
+  const tokenProblem = (value: string) =>
+    kind === "completion" && (!Number.isInteger(Number(value)) || Number(value) <= 0)
+      ? t("provider_form_token_limit_required")
+      : null;
+  const inputProblem = tokenProblem(maxInput);
+  const outputProblem = tokenProblem(maxOutput);
   const [vision, setVision] = useState("vision" in model ? (model.vision ?? false) : false);
   const [reasoning, setReasoning] = useState(
     "reasoning" in model ? (model.reasoning ?? false) : false
@@ -169,6 +186,7 @@ function EditModelForm({
 
   const save = useMutation({
     mutationFn: () => {
+      const defaultPatch = hasDefaultToggle ? { is_default: isDefault } : {};
       const security_classification =
         securityEnabled && classificationId !== "__none__" ? { id: classificationId } : null;
       if (kind === "embedding") {
@@ -183,6 +201,7 @@ function EditModelForm({
           stability: stability.trim() || null,
           input_cost_per_token: perMillionToPerToken(inputCost),
           output_cost_per_token: perMillionToPerToken(outputCost),
+          ...defaultPatch,
           security_classification
         });
       }
@@ -196,6 +215,7 @@ function EditModelForm({
           cost_per_image: numericOrNull(costPerImage),
           default_size: defaultSize,
           default_quality: defaultQuality,
+          ...defaultPatch,
           security_classification
         });
       }
@@ -208,6 +228,7 @@ function EditModelForm({
           stability: stability.trim() || null,
           candidate_factor: Number(candidateFactor),
           max_candidates: Number(maxCandidates),
+          ...defaultPatch,
           security_classification
         });
       }
@@ -219,6 +240,7 @@ function EditModelForm({
           open_source: openSource,
           stability: stability.trim() || null,
           cost_per_minute: numericOrNull(costPerMinute),
+          ...defaultPatch,
           security_classification
         });
       }
@@ -236,6 +258,7 @@ function EditModelForm({
         vision,
         reasoning,
         supports_tool_calling: tools,
+        ...defaultPatch,
         security_classification
       });
     },
@@ -249,7 +272,7 @@ function EditModelForm({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+      <DialogContent className="overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{t("edit_model")}</DialogTitle>
           <DialogDescription>{model.name}</DialogDescription>
@@ -258,6 +281,15 @@ function EditModelForm({
           className="flex flex-col gap-4"
           onSubmit={(event) => {
             event.preventDefault();
+            const invalidToken = inputProblem
+              ? "model-max-input"
+              : outputProblem
+                ? "model-max-output"
+                : null;
+            if (invalidToken) {
+              revealProblems(() => setSaveTried(true), invalidToken);
+              return;
+            }
             if (kind === "rerank") {
               const firstInvalid = !isCandidateSetting(candidateFactor, RERANK_CANDIDATE_FACTOR)
                 ? "model-candidate-factor"
@@ -265,9 +297,7 @@ function EditModelForm({
                   ? "model-max-candidates"
                   : null;
               if (firstInvalid) {
-                // Rendered before focus moves, so the field is read with its problem.
-                flushSync(() => setSaveTried(true));
-                document.getElementById(firstInvalid)?.focus();
+                revealProblems(() => setSaveTried(true), firstInvalid);
                 return;
               }
             }
@@ -301,6 +331,7 @@ function EditModelForm({
               id="model-description"
               value={description}
               rows={3}
+              maxLength={500}
               onChange={(event) => setDescription(event.target.value)}
             />
           </div>
@@ -308,20 +339,66 @@ function EditModelForm({
           <div className="grid grid-cols-2 gap-4">
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="model-family">{t("model_family")}</Label>
-              <Input
-                id="model-family"
-                value={family}
-                onChange={(event) => setFamily(event.target.value)}
-                readOnly={kind === "rerank"}
-              />
+              {kind === "embedding" ? (
+                <>
+                  <Select
+                    value={family || "__none__"}
+                    onValueChange={(value) => isEmbeddingFamily(value) && setFamily(value)}
+                  >
+                    <SelectTrigger
+                      id="model-family"
+                      className="w-full"
+                      aria-describedby="model-family-help"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {!isEmbeddingFamily(family) && (
+                        <SelectItem value={family || "__none__"} disabled>
+                          {family || t("none")}
+                        </SelectItem>
+                      )}
+                      {EMBEDDING_FAMILIES.map((value) => (
+                        <SelectItem key={value} value={value}>
+                          {t(`model_family_${value}`)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p id="model-family-help" className="text-muted-foreground text-xs">
+                    {t("model_family_help")}
+                  </p>
+                </>
+              ) : (
+                <Input id="model-family" value={family} readOnly />
+              )}
             </div>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="model-hosting">{t("hosting_region")}</Label>
-              <Input
-                id="model-hosting"
-                value={hosting}
-                onChange={(event) => setHosting(event.target.value)}
-              />
+              <Select
+                value={hosting || "__none__"}
+                onValueChange={(value) => {
+                  if (value === "__none__") setHosting("");
+                  else if (isHostingRegion(value)) setHosting(value);
+                }}
+              >
+                <SelectTrigger id="model-hosting" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">{t("none")}</SelectItem>
+                  {hosting && !isHostingRegion(hosting) && (
+                    <SelectItem value={hosting} disabled>
+                      {hosting}
+                    </SelectItem>
+                  )}
+                  {HOSTING_REGIONS.map((value) => (
+                    <SelectItem key={value} value={value}>
+                      {t(`hosting_${value}`)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
 
@@ -347,11 +424,14 @@ function EditModelForm({
                 <Input
                   id="model-max-input"
                   type="number"
-                  min={0}
+                  min={kind === "completion" ? undefined : 0}
+                  step="any"
                   inputMode="numeric"
                   value={maxInput}
                   onChange={(event) => setMaxInput(event.target.value)}
+                  {...fieldProblemProps("model-max-input", saveTried ? inputProblem : null)}
                 />
+                <FieldProblem id="model-max-input" problem={saveTried ? inputProblem : null} />
               </div>
               {kind === "completion" ? (
                 <div className="flex flex-col gap-1.5">
@@ -359,11 +439,13 @@ function EditModelForm({
                   <Input
                     id="model-max-output"
                     type="number"
-                    min={0}
+                    step="any"
                     inputMode="numeric"
                     value={maxOutput}
                     onChange={(event) => setMaxOutput(event.target.value)}
+                    {...fieldProblemProps("model-max-output", saveTried ? outputProblem : null)}
                   />
+                  <FieldProblem id="model-max-output" problem={saveTried ? outputProblem : null} />
                 </div>
               ) : (
                 <div className="flex flex-col gap-1.5">
@@ -590,6 +672,13 @@ function EditModelForm({
                 <Switch checked={tools} onCheckedChange={setTools} />
               </Label>
             </fieldset>
+          )}
+
+          {hasDefaultToggle && (
+            <Label className="flex items-center justify-between gap-2 font-normal">
+              {t("set_as_default_model")}
+              <Switch checked={isDefault} onCheckedChange={setIsDefault} />
+            </Label>
           )}
 
           <DialogFooter>

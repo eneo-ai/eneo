@@ -2,6 +2,15 @@ name: CI
 
 on:
   workflow_call:
+    inputs:
+      # Image publication builds the backend and frontend images itself; its CI skips
+      # their dry-run builds.
+      publication:
+        type: boolean
+        default: false
+  # A branch that is not a pull request (a feature integration branch) can
+  # run the full CI by hand without publishing images.
+  workflow_dispatch:
   # Develop pushes are validated once by Build and Push Docker Images.
   push:
     branches:
@@ -10,7 +19,8 @@ on:
     branches:
       - develop
       - "release/**"
-  # Classify the entire candidate diff, including preceding queued PRs.
+  # The full suite: the candidate is what lands on develop, and image publication
+  # reuses this run's result for that commit.
   merge_group:
     types: [checks_requested]
 
@@ -18,9 +28,12 @@ permissions:
   contents: read
   pull-requests: read
 
+# A newer push to a pull request or branch replaces its older CI run. Called by image
+# publication, CI takes the caller's workflow name: there it belongs to that one
+# publication run and is never cancelled or replaced by another publication's checks.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow == 'CI' && format('CI-{0}', github.event.pull_request.number || github.ref) || format('{0}-checks-{1}', github.workflow, github.run_id) }}
+  cancel-in-progress: ${{ github.workflow == 'CI' }}
 
 env:
   POSTGRES_USER: placeholder
@@ -76,6 +89,8 @@ jobs:
 
       - name: Plan CI from the event's complete diff
         id: scope
+        env:
+          CI_PUBLICATION: ${{ inputs.publication }}
         run: node .github/scripts/ci-change-scope.mjs --github-event >> "$GITHUB_OUTPUT"
 
       - name: Check branch name
@@ -99,6 +114,16 @@ jobs:
       - name: Guard against re-introducing the old product name
         run: python3 scripts/check_no_intric.py --repo-root .
 
+      # User-facing release notes: schema, sv+en parity, newest-first order,
+      # that every "Show me" anchor and route still exists in either web app or
+      # the backend's legacy-page map, and the rules of the branch the change
+      # lands on (unreleased notes only on develop). It reads all three apps,
+      # so it runs on every change; it needs only Python and the checkout.
+      - name: Check What's new release notes
+        env:
+          TARGET_BRANCH: ${{ github.base_ref || github.event.merge_group.base_ref || github.ref_name }}
+        run: python3 scripts/check_whats_new.py --repo-root . --branch "$TARGET_BRANCH"
+
       - name: Check all HTTP route decorators
         if: steps.scope.outputs.route_metadata == 'true'
         run: python3 scripts/check_route_metadata.py --repo-root . --all
@@ -112,7 +137,11 @@ jobs:
         run: |
           node .github/scripts/ensure-project-fields.mjs --self-test
           node .github/scripts/project-intake.mjs --self-test
-          node --test --test-concurrency=1 .github/scripts/label-policy.test.mjs .github/scripts/project-intake.test.mjs .github/scripts/evaluate-backend-audit.test.mjs
+          node --test --test-concurrency=1 .github/scripts/label-policy.test.mjs .github/scripts/project-intake.test.mjs
+          node --test --test-concurrency=1 \
+            .github/scripts/evaluate-backend-audit.test.mjs \
+            .github/scripts/fetch-backend-audit-severities.test.mjs \
+            frontend/scripts/audit-dependencies.test.mjs
           node --test --test-concurrency=1 .github/scripts/ci-contract.test.mjs
           node .github/scripts/check-user-facing.mjs --self-test
           node scripts/collect_user_facing.mjs --self-test
@@ -251,13 +280,45 @@ jobs:
           TESTCONTAINERS_RYUK_DISABLED: "true"
           DOCKER_HOST: unix:///var/run/docker.sock
 
-      - name: Verify crawler migration rollback
-        # These tests own disposable databases and deliberately change their schema.
-        run: >-
-          uv run pytest -q -m migration_isolation
-          tests/integration/migrations/test_crawl_lifecycle_round_trip.py
-          tests/integration/migrations/test_website_source_url_identity.py
-          tests/integration/migrations/test_crawler_develop_rollback.py
+      - name: Verify migration round trips
+        if: matrix.suite == 'migrations'
+        # Each migration_isolation test owns a disposable database and changes its
+        # schema, so the parallel suite skips them. Discovery over all of tests/
+        # finds every one, new ones included, except the File/Icon tests of the
+        # next step. Each module runs in its own pytest process, so modules that
+        # share the session database each start from a fresh schema, and each
+        # process has its own Postgres container, so four run side by side. A
+        # module's output stays together under its name, and one that hangs is
+        # stopped with what it printed, so the log names it. Modules in
+        # tests/integration/quarantined-migration-tests.txt are not started.
+        run: |
+          uv run pytest -q --collect-only -m migration_isolation tests \
+            --ignore=tests/integration/migrations/test_file_icon_preflight.py \
+            --ignore=tests/integration/migrations/test_file_icon_legacy_cleanup.py \
+            --ignore=tests/integration/migrations/test_file_icon_bridge_rehearsal.py \
+            | grep '::' | cut -d: -f1 | sort -u > "$RUNNER_TEMP/migration-modules.txt"
+          # The whole runner every 5 s: the modules' containers count too.
+          while sleep 5; do free -m | awk '/^Mem:/ { print $3 }'; done >"$RUNNER_TEMP/memory.txt" &
+          sampler=$!
+          status=0
+          grep -vxFf tests/integration/quarantined-migration-tests.txt \
+            "$RUNNER_TEMP/migration-modules.txt" |
+            xargs -P 4 -I '{}' bash -c '
+              log=$(mktemp)
+              timeout --kill-after=30s 5m uv run pytest -q -m migration_isolation "$1" >"$log" 2>&1
+              status=$?
+              (
+                flock 9
+                echo "=== $1: exit $status (124: stopped after 5 min)"
+                cat "$log"
+              ) 9>"$RUNNER_TEMP/migration-output.lock"
+              exit "$status"
+            ' _ '{}' || status=$?
+          kill "$sampler"
+          peak=$(sort -n "$RUNNER_TEMP/memory.txt" | tail -n 1)
+          total=$(free -m | awk '/^Mem:/ { print $2 }')
+          echo "Migration round trips: peak memory ${peak} of ${total} MiB." | tee -a "$GITHUB_STEP_SUMMARY"
+          exit "$status"
         env:
           TESTCONTAINERS_RYUK_DISABLED: "true"
           DOCKER_HOST: unix:///var/run/docker.sock
@@ -308,17 +369,14 @@ jobs:
           python3 apps/web/scripts/check-i18n-parity.py
           python3 apps/web/scripts/check-i18n-unused.py
 
-      # User-facing release notes: schema, sv+en parity, newest-first order and
-      # that every "Show me" anchor still exists in the web app.
-      - name: Check What's new release notes
-        working-directory: .
-        run: python3 scripts/check_whats_new.py --repo-root .
-
       - name: Set up frontend dependencies
         uses: ./.github/actions/setup-frontend
 
+      # The web app's server tests read the loader's dist like the app does.
       - name: Build workspace dependencies
-        run: bun run --filter @eneo/ui build
+        run: |
+          bun run --filter @eneo/ui build
+          bun run --filter @eneo/widget-loader build
 
       - name: Run type checks
         run: FORCE_COLOR=1 bun run --filter '@eneo/*' --filter '!@eneo/web-next' check
@@ -342,22 +400,27 @@ jobs:
         run: FORCE_COLOR=1 bun run test:dev-lifecycle
 
       - name: Run web unit & component tests
+        # Usually ~2 min. Vitest browser mode has no per-file timeout: a test
+        # that unloads the tester iframe (e.g. a real navigation) stalls the
+        # run silently, so the step bounds it.
+        timeout-minutes: 10
         run: FORCE_COLOR=1 bun run --filter '@eneo/web' test
+
+      # Reuse the loader built above; that build enforces size and pinned bytes.
+      # Its browser and release contracts still run here.
+      - name: Run widget loader tests
+        run: FORCE_COLOR=1 bun run --filter '@eneo/widget-loader' test:built
 
   frontend-web-next:
     name: Frontend (web-next)
     needs: changes
     if: needs.changes.outputs.web_next == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    # The job takes 12-20 minutes.
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: frontend
-    env:
-      # env.ts validates at import time; build/test need a valid baseline
-      ENEO_BACKEND_URL: http://localhost:8123
-      SESSION_SECRET: ci-only-session-secret-32-chars-min!!
-
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -365,17 +428,22 @@ jobs:
       - name: Set up frontend dependencies
         uses: ./.github/actions/setup-frontend
 
+      # Fail early when generated routes differ from the committed tree.
+      - name: Check route tree drift
+        run: bun run --filter '@eneo/web-next' routes:generate && git diff --exit-code -- apps/web-next/src/routeTree.gen.ts
+
       - name: Lint
         run: FORCE_COLOR=1 bun run --filter '@eneo/web-next' lint
 
       - name: Type check
         run: FORCE_COLOR=1 bun run --filter '@eneo/web-next' check
 
+      # Before the E2E legs spend their minutes: every case runs in exactly one leg.
+      - name: Check the E2E legs' selections
+        run: node ../.github/scripts/ci-web-next-e2e-legs.mjs
+
       - name: Test
         run: FORCE_COLOR=1 bun run --filter '@eneo/web-next' test
-
-      - name: Build
-        run: FORCE_COLOR=1 bun run --filter '@eneo/web-next' build
 
   frontend-e2e:
     name: Frontend E2E
@@ -387,6 +455,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
+      - name: Free disk for the E2E stack
+        uses: ./.github/actions/free-disk
+
       # Isolated, prod-safe stack: own postgres/redis, a deterministic mock model,
       # and the backend built from its Dockerfile. Nothing touches a real provider.
       - name: Start isolated E2E stack in the background
@@ -395,6 +466,10 @@ jobs:
         # with bun install and the web build. "Wait for the E2E stack" collects
         # the exit status before the tests start.
         run: |
+          df -h
+          # Docker build space is freed again before the stack is healthy, so a
+          # snapshot afterwards misses the peak; sample free space while it builds.
+          nohup bash -c 'while :; do df --output=avail -BM / | tail -n1; sleep 5; done' > "$RUNNER_TEMP/disk-free.txt" 2>&1 &
           nohup bash -c 'docker compose -f docker-compose.e2e.ci.yml up -d --build --wait; echo $? > "$RUNNER_TEMP/e2e-stack.exit"' \
             > "$RUNNER_TEMP/e2e-stack.log" 2>&1 &
 
@@ -403,7 +478,9 @@ jobs:
 
       - name: Build workspace dependencies
         working-directory: frontend
-        run: bun run --filter @eneo/ui build
+        run: |
+          bun run --filter @eneo/ui build
+          bun run --filter @eneo/widget-loader build
 
       - name: Install Playwright Chromium
         uses: ./.github/actions/setup-playwright
@@ -445,6 +522,9 @@ jobs:
             sleep 2
           done
           cat "$RUNNER_TEMP/e2e-stack.log"
+          df -h
+          docker system df
+          echo "Least free space on / since the stack started: $(sort -n "$RUNNER_TEMP/disk-free.txt" | head -n1)"
           [ "$(cat "$RUNNER_TEMP/e2e-stack.exit" 2>/dev/null)" = "0" ]
 
       - name: Run E2E tests
@@ -461,6 +541,11 @@ jobs:
         if: ${{ failure() }}
         run: |
           mkdir -p e2e-artifacts
+          {
+            df -h
+            docker system df
+            echo "Least free space on /: $(sort -n "$RUNNER_TEMP/disk-free.txt" | head -n1)"
+          } | tee e2e-artifacts/disk.txt
           docker compose -f docker-compose.e2e.ci.yml ps --all \
             > e2e-artifacts/compose-ps.txt
           docker compose -f docker-compose.e2e.ci.yml logs \
@@ -487,30 +572,55 @@ jobs:
   # same isolated stack as "Frontend E2E". Both E2E suites are required by CI
   # when their app, shared frontend inputs, or the backend changes.
   frontend-web-next-e2e:
-    name: Frontend E2E (web-next)
+    name: Frontend E2E (web-next) ${{ matrix.leg }}
     needs: changes
     if: needs.changes.outputs.web_next_e2e == 'true'
     runs-on: ubuntu-24.04
-    # Stack build (~2 min), install, build and the specs take ~10 min; a hung
-    # stack or browser must not hold a runner for GitHub's 6-hour default.
-    timeout-minutes: 30
-    env:
-      # env.ts validates at import time, during the build and in `next start`.
-      # The server talks to the stack's backend on the loopback port.
-      ENEO_BACKEND_URL: http://127.0.0.1:8124
-      SESSION_SECRET: ci-only-session-secret-32-chars-min!!
+    # Legs take 20-24 minutes, but a route walk that hits its 15-minute test limit
+    # and its retry must still finish here: a job that times out also loses its
+    # !cancelled() report upload.
+    timeout-minutes: 60
+    # The suite outgrew one 45-minute job (run 41297645205). Each leg runs one worker
+    # on its own stack. Playwright's --shard splits by test count, which leaves the
+    # long route walks unbalanced, so four legs take the walks by tag, the screens
+    # leg takes the admin, space and editor screens' specs (and the forced-colors
+    # walk) by file name, and the rest leg excludes both: every case runs once.
+    # The a11y-routes, keyboard and contract walks also carry their viewport's
+    # device (walkTags in tests/responsive-fixtures.ts), so a leg takes one cell of
+    # them, such as "@a11y-routes @ipad". @a11y-light is in no walk leg and runs in
+    # the rest leg. The split follows the test minutes of the six-leg runs
+    # 41661461275, 41666456119 and 41668050527: about 16-17 for each walk leg and
+    # the rest leg, 11 for screens. A new route walk adds its tag to a walk leg and
+    # to the other legs' exclusions.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { leg: walks-1, grep: "@a11y-routes @phone|@contract @ipad|@keyboard @desktop|@turn", grep_invert: "@upload-worker" }
+          - { leg: walks-2, grep: "@a11y-routes @ipad", grep_invert: "@upload-worker" }
+          - { leg: walks-3, grep: "@layout-shift", grep_invert: "@upload-worker" }
+          - { leg: walks-4, grep: "@contract @phone|@text-size|@a11y-dark", grep_invert: "@upload-worker" }
+          - { leg: screens, grep: " (admin|assistant|document|editor|forced|knowledge|mcp|resource|sharepoint|skills|space)-[^ ]*[.]spec[.]ts ", grep_invert: "@upload-worker|@a11y-routes @phone|@contract @ipad|@keyboard @desktop|@turn|@a11y-routes @ipad|@layout-shift|@contract @phone|@text-size|@a11y-dark" }
+          - { leg: rest, grep: ".", grep_invert: "@upload-worker|@a11y-routes @phone|@contract @ipad|@keyboard @desktop|@turn|@a11y-routes @ipad|@layout-shift|@contract @phone|@text-size|@a11y-dark| (admin|assistant|document|editor|forced|knowledge|mcp|resource|sharepoint|skills|space)-[^ ]*[.]spec[.]ts ", upload_worker: true }
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Free disk for the E2E stack
+        uses: ./.github/actions/free-disk
 
       # Isolated, prod-safe stack: own postgres/redis, a deterministic mock model,
       # and the backend built from its Dockerfile. Nothing touches a real provider.
       - name: Start isolated E2E stack in the background
         # The backend image build and health checks overlap with bun install and
-        # the web-next build. "Wait for the E2E stack" collects the exit status
+        # browser setup. "Wait for the E2E stack" collects the exit status
         # before the tests start.
         run: |
-          nohup bash -c 'docker compose -f docker-compose.e2e.ci.yml up -d --build --wait; echo $? > "$RUNNER_TEMP/e2e-stack.exit"' \
+          df -h
+          # Docker build space is freed again before the stack is healthy, so a
+          # snapshot afterwards misses the peak; sample free space while it builds.
+          nohup bash -c 'while :; do df --output=avail -BM / | tail -n1; sleep 5; done' > "$RUNNER_TEMP/disk-free.txt" 2>&1 &
+          nohup bash -c 'docker compose -f docker-compose.e2e.ci.yml -f docker-compose.e2e.web-app.yml up -d --build --wait; echo $? > "$RUNNER_TEMP/e2e-stack.exit"' \
             > "$RUNNER_TEMP/e2e-stack.log" 2>&1 &
 
       - name: Set up frontend dependencies
@@ -521,20 +631,6 @@ jobs:
         with:
           working-directory: frontend/apps/web-next
 
-      # Next's incremental build cache: unchanged modules are not recompiled.
-      - name: Cache Next.js build
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: frontend/apps/web-next/.next/cache
-          key: next-web-next-${{ runner.os }}-${{ hashFiles('frontend/bun.lock') }}-${{ hashFiles('frontend/apps/web-next/src/**', 'frontend/apps/web-next/next.config.ts', 'frontend/apps/web-next/public/**') }}
-          restore-keys: next-web-next-${{ runner.os }}-${{ hashFiles('frontend/bun.lock') }}-
-
-      # Build up front so the Playwright webServer only has to run `next start`
-      # (playwright.config.ts), keeping the build out of its startup timeout.
-      - name: Build web-next for E2E
-        working-directory: frontend/apps/web-next
-        run: bun run build
-
       - name: Wait for the E2E stack
         run: |
           for _ in $(seq 1 300); do
@@ -542,24 +638,65 @@ jobs:
             sleep 2
           done
           cat "$RUNNER_TEMP/e2e-stack.log"
+          df -h
+          docker system df
+          echo "Least free space on / since the stack started: $(sort -n "$RUNNER_TEMP/disk-free.txt" | head -n1)"
           [ "$(cat "$RUNNER_TEMP/e2e-stack.exit" 2>/dev/null)" = "0" ]
+
+      - name: Copy browser asset map from the running backend
+        run: |
+          mkdir -p frontend/apps/web-next/node_modules/.cache
+          docker compose -f docker-compose.e2e.ci.yml -f docker-compose.e2e.web-app.yml cp \
+            e2e-backend:/app/web-bundle-report.json frontend/apps/web-next/node_modules/.cache/vite-bundle-report.json
 
       - name: Run E2E and accessibility tests
         working-directory: frontend/apps/web-next
         env:
-          E2E_PORT: "3100"
-          # The login seeded by docker-compose.e2e.ci.yml (DEFAULT_USER_*).
+          E2E_BASE_URL: http://localhost:8124
           E2E_USER: e2e@example.com
           E2E_PASSWORD: E2ePassword123!
-        run: bun run test:e2e
+          E2E_GREP: ${{ matrix.grep }}
+          E2E_GREP_INVERT: ${{ matrix.grep_invert }}
+        run: bun run test:e2e --grep "$E2E_GREP" --grep-invert "$E2E_GREP_INVERT"
+
+      # Pending app-result assertions above require the queue to remain idle. The
+      # upload leg runs them before it starts the worker on its own stack.
+      - name: Start and check the knowledge upload worker
+        if: matrix.upload_worker
+        run: |
+          docker compose -f docker-compose.e2e.ci.yml -f docker-compose.e2e.web-app.yml exec -T -d \
+            e2e-backend sh -c 'exec /app/.venv/bin/worker >/proc/1/fd/1 2>/proc/1/fd/2'
+          for _ in $(seq 1 15); do
+            if docker compose -f docker-compose.e2e.ci.yml -f docker-compose.e2e.web-app.yml exec -T \
+              e2e-backend /app/.venv/bin/worker --check; then
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+
+      - name: Run the native knowledge upload test
+        if: matrix.upload_worker
+        working-directory: frontend/apps/web-next
+        env:
+          E2E_BASE_URL: http://localhost:8124
+          E2E_USER: e2e@example.com
+          E2E_PASSWORD: E2ePassword123!
+          PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/upload-worker
+        run: bun run test:e2e --grep '@upload-worker' --output test-results/upload-worker
 
       - name: Capture E2E stack diagnostics
         if: ${{ failure() }}
         run: |
           mkdir -p e2e-artifacts
-          docker compose -f docker-compose.e2e.ci.yml ps --all \
+          {
+            df -h
+            docker system df
+            echo "Least free space on /: $(sort -n "$RUNNER_TEMP/disk-free.txt" | head -n1)"
+          } | tee e2e-artifacts/disk.txt
+          docker compose -f docker-compose.e2e.ci.yml -f docker-compose.e2e.web-app.yml ps --all \
             > e2e-artifacts/compose-ps.txt
-          docker compose -f docker-compose.e2e.ci.yml logs \
+          docker compose -f docker-compose.e2e.ci.yml -f docker-compose.e2e.web-app.yml logs \
             --no-color --timestamps \
             > e2e-artifacts/compose.log
 
@@ -567,17 +704,19 @@ jobs:
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: playwright-report-web-next
+          name: playwright-report-web-next-${{ matrix.leg }}
           path: |
             frontend/apps/web-next/playwright-report
             frontend/apps/web-next/test-results
+            frontend/apps/web-next/playwright-report-fastapi
+            frontend/apps/web-next/test-results-fastapi
             e2e-artifacts
           retention-days: 7
           if-no-files-found: ignore
 
       - name: Stop E2E stack
         if: ${{ always() }}
-        run: docker compose -f docker-compose.e2e.ci.yml down -v
+        run: docker compose -f docker-compose.e2e.ci.yml -f docker-compose.e2e.web-app.yml down -v
 
   schema-drift:
     name: Schema drift
@@ -718,11 +857,13 @@ jobs:
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.file }}
+          build-contexts: ${{ matrix.build_contexts }}
           pull: true
           push: false
-          # Default-branch publication exports each application image's cache
-          # under its own scope; a second export of the same layers here would
-          # only double cache storage. The devcontainer has no publication
+          # Default-branch publication exports the backend image's cache under
+          # its scope (not the Svelte frontend's, whose layers are rarely reused);
+          # an export of application layers here would only double cache
+          # storage. The devcontainer has no publication
           # build, so CI warms its cache itself, on branch pushes only:
           # PR/queue refs cannot share exported caches with later candidates.
           cache-from: |
@@ -757,3 +898,29 @@ jobs:
           EXPECTED_JOBS: ${{ needs.changes.outputs.expected_jobs }}
           JOB_RESULTS: ${{ toJSON(needs) }}
         run: node .github/scripts/ci-gate.mjs
+
+      # Evidence for image publication, written only once every required job passed:
+      # which commit passed which scope, in which run and attempt of which workflow.
+      # Publication reuses a merge-queue run only through this receipt, so only those
+      # runs write one; elsewhere an artifact-service hiccup cannot turn CI red.
+      - name: Write the validation receipt
+        if: github.event_name == 'merge_group'
+        env:
+          FULL: ${{ needs.changes.outputs.full }}
+        run: |
+          jq -n --arg sha "$GITHUB_SHA" --arg repository "$GITHUB_REPOSITORY" \
+            --arg workflow "$GITHUB_WORKFLOW_REF" --arg event "$GITHUB_EVENT_NAME" \
+            --argjson run_id "$GITHUB_RUN_ID" --argjson run_attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg scope "$([[ "$FULL" == true ]] && echo full || echo scoped)" \
+            '{schema: 1, sha: $sha, repository: $repository, workflow: $workflow, event: $event,
+              run_id: $run_id, run_attempt: $run_attempt, scope: $scope}' >ci-receipt.json
+          cat ci-receipt.json
+
+      - name: Keep the validation receipt
+        if: github.event_name == 'merge_group'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ci-receipt
+          path: ci-receipt.json
+          retention-days: 14
+          overwrite: true

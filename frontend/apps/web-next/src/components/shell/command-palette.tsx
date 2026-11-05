@@ -1,11 +1,11 @@
-"use client";
-
 import {
   CommandPalette,
   CommandPaletteFooter,
   CommandPaletteInput,
   useCommandPaletteContext
 } from "@astryxdesign/core/CommandPalette";
+import { Button } from "@astryxdesign/core/Button";
+import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { Kbd } from "@astryxdesign/core/Kbd";
 import type { SearchableItem, SearchSource } from "@astryxdesign/core/Typeahead";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
@@ -20,15 +20,15 @@ import {
   User,
   type LucideIcon
 } from "lucide-react";
-import { usePathname, useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { usePathname, useRouter } from "@/lib/navigation";
+import { useTranslations } from "use-intl";
 import { useId, useLayoutEffect, useMemo, useRef } from "react";
 import { ClientTime } from "@/components/composites/client-time";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
 import { recentConversationsQueryOptions } from "@/lib/api/conversations";
-import { dashboardQueryOptions } from "@/app/(app)/dashboard/queries";
+import { dashboardQueryOptions } from "@/features/dashboard/queries";
 import { spaceQueryOptions, spacesListQueryOptions } from "@/features/spaces/space";
 import { adminNavGroups } from "./admin-nav-items";
 import {
@@ -42,6 +42,7 @@ import {
   type PalettePermissions
 } from "./palette-items";
 import { spaceRouteIdFromPath } from "./routes";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
 type PaletteItem = SearchableItem<{ group: string; entry: PaletteEntry }>;
 
@@ -179,9 +180,32 @@ function EntryContent({ entry }: { entry: PaletteEntry }) {
   );
 }
 
+/** The palette's height on phones: all of it, clear of the notch and the home indicator. */
+const PHONE_MAX_HEIGHT =
+  "calc(100dvh - max(1rem, env(safe-area-inset-top, 0px)) - max(1rem, env(safe-area-inset-bottom, 0px)))";
+
+/**
+ * "Avbryt" at the end of the field on touch screens, as in iOS search: they
+ * have no Escape key and the sheet leaves little backdrop to tap.
+ */
+function CancelButton() {
+  const t = useTranslations();
+  const close = useCommandPaletteContext()?.onClose;
+  return (
+    <Button
+      variant="ghost"
+      size="lg"
+      label={t("cancel")}
+      onClick={close}
+      className="pointer-fine:hidden"
+    />
+  );
+}
+
+/** A key hint in the footer; touch screens and phone-width windows have no use for it. */
 function Hint({ keys, keyName, label }: { keys: string[]; keyName: string; label: string }) {
   return (
-    <span className="flex items-center gap-1.5">
+    <span className="flex items-center gap-1.5 max-md:hidden pointer-coarse:hidden">
       <span aria-hidden="true" className="flex items-center gap-1">
         {keys.map((key) => (
           <Kbd key={key} keys={key} />
@@ -213,9 +237,11 @@ export default function ShellCommandPalette({
 }) {
   const t = useTranslations();
   const router = useRouter();
+  // An overlay opened by the user: a media query, not markup, picks its size.
+  const phone = useMediaQuery("(width < 40rem)");
   const pathname = usePathname();
   const queryClient = useQueryClient();
-  const { can, settings } = useAppContext();
+  const { can, settings, featureFlags } = useAppContext();
   const entriesById = useRef(new Map<string, PaletteEntry>());
   const currentSpaceRouteId = spaceRouteIdFromPath(pathname);
 
@@ -236,7 +262,11 @@ export default function ShellCommandPalette({
     const permissions: PalettePermissions = {
       canCreateSpace,
       isAdmin,
-      adminGroups: adminNavGroups({ usingTemplates, canManageModules })
+      adminGroups: adminNavGroups({
+        usingTemplates,
+        canManageModules,
+        federationEnabled: featureFlags.federation
+      })
     };
     const toItems = (entries: PaletteEntry[]): PaletteItem[] => {
       for (const entry of entries) entriesById.current.set(entry.id, entry);
@@ -259,7 +289,8 @@ export default function ShellCommandPalette({
     canCreateSpace,
     isAdmin,
     canManageModules,
-    usingTemplates
+    usingTemplates,
+    featureFlags.federation
   ]);
 
   function run(id: string) {
@@ -268,11 +299,11 @@ export default function ShellCommandPalette({
     // Both wait until the palette has closed and returned focus: the dialog
     // then returns focus to the same place, and the drawer (when the palette
     // was opened from it) hands focus back to its menu button.
-    if (entry.action.type === "create-space") {
+    if (entry.command.type === "create-space") {
       window.setTimeout(onCreateSpace, 0);
       return;
     }
-    router.push(entry.action.href);
+    router.push(entry.command.href);
     if (onNavigate) window.setTimeout(onNavigate, 0);
   }
 
@@ -283,10 +314,17 @@ export default function ShellCommandPalette({
       searchSource={searchSource}
       label={t("shell_palette_label")}
       width="min(640px, calc(100vw - 2rem))"
+      // A centred panel that never outgrows a short window (a phone on its
+      // side). On touch screens it hangs from the top, clear of the notch, so
+      // the software keyboard never covers the field and the field stays put
+      // while the results change; on phones it may grow to the full height.
+      maxHeight={phone ? PHONE_MAX_HEIGHT : "min(480px, calc(100dvh - 2rem))"}
       input={
         <CommandPaletteInput
           label={t("shell_palette_input_label")}
           placeholder={t("shell_palette_placeholder")}
+          endContent={<CancelButton />}
+          {...KEYBOARD.search}
         />
       }
       renderItem={(item) =>
@@ -307,7 +345,9 @@ export default function ShellCommandPalette({
             label={t("shell_palette_hint_open")}
           />
           <Hint keys={["escape"]} keyName={t("shell_palette_key_escape")} label={t("close")} />
-          <span className="ms-auto hidden sm:inline">{t("shell_palette_scope")}</span>
+          <span className="ms-auto hidden sm:inline pointer-coarse:ms-0 pointer-coarse:inline">
+            {t("shell_palette_scope")}
+          </span>
         </CommandPaletteFooter>
       }
     />

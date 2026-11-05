@@ -7,7 +7,12 @@ export type ChatCapability = {
   reason: string | null;
 };
 
-/** Effective governance replaces the assistant's own capability list. */
+/**
+ * The capabilities (web search, image generation, ...) the partner enables,
+ * as the Svelte app's chatCapabilities: effective governance replaces the
+ * assistant's own list, a capability the user's role may not use is omitted,
+ * and one without an active provider is unavailable, with the reason.
+ */
 export function chatCapabilities(
   partner: ChatPartner,
   canUse: (purpose: Capability) => boolean
@@ -42,11 +47,7 @@ export function defaultDisabledCapabilities(partner: ChatPartner): Capability[] 
 
 /** The ask endpoint accepts capability purpose names, independently of MCP server IDs. */
 export function disabledCapabilitiesForRequest(
-  partner: ChatPartner,
-  disabled: Set<Capability>,
-  showWebSearch: boolean
+  disabled: Set<Capability>
 ): Capability[] | undefined {
-  const purposes = new Set(disabled);
-  if (partner.type === "default-assistant" && !showWebSearch) purposes.add("web_search");
-  return purposes.size > 0 ? [...purposes] : undefined;
+  return disabled.size > 0 ? [...disabled] : undefined;
 }

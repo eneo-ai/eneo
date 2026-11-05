@@ -27,7 +27,7 @@ afterEach(() => {
 });
 
 it("styles toasts from the bundled stylesheet instead of an injected <style>", async () => {
-  // The Toaster reads its labels from next-intl, so render it in the app providers.
+  // The Toaster reads its labels from use-intl, so render it in the app providers.
   renderInApp(<Toaster theme="light" />);
   toast("Sparat");
 

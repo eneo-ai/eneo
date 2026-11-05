@@ -18,11 +18,11 @@ class FakeRedis:
         self.raise_error = raise_error
         self.calls: list[tuple] = []
 
-    async def eval(self, script, numkeys, key, ttl):
-        self.calls.append((script, numkeys, key, ttl))
+    async def eval(self, script, numkeys, key, window):
+        self.calls.append((script, numkeys, key, window))
         if self.raise_error:
             raise redis.exceptions.RedisError("boom")
-        return self.count
+        return [self.count, 25]
 
 
 @pytest.mark.asyncio
@@ -168,7 +168,8 @@ async def test_rate_limit_exceeded_includes_headers():
         await limiter.enforce(key)
 
     assert exc.value.headers is not None
-    assert "Retry-After" in exc.value.headers
+    # The time left in the window, which the script reports with the count.
+    assert exc.value.headers["Retry-After"] == "25"
     assert "X-RateLimit-Limit" in exc.value.headers
     assert exc.value.headers["X-RateLimit-Remaining"] == "0"
     assert exc.value.headers["X-RateLimit-Limit"] == "1"

@@ -13,13 +13,6 @@
 export const MODULE_LOGIN_PATH = "/module-login";
 export const MODULE_LOGIN_FAILED_PATH = "/module-login/failed";
 
-/** Every response of the hand-off, the login redirect included, carries these. */
-export const MODULE_LOGIN_RESPONSE_HEADERS = {
-  "Cache-Control": "private, no-store, max-age=0",
-  "Referrer-Policy": "no-referrer",
-  "X-Robots-Tag": "noindex, nofollow, noarchive"
-} as const;
-
 export const MODULE_LOGIN_FAILURE_REASONS = [
   "invalid_request",
   "module_unavailable",

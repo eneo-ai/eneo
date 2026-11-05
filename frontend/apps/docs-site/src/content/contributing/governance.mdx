@@ -51,7 +51,7 @@ from a fork, in exactly the same way as Collaborators.
 
 ## How a change reaches Eneo
 
-![Six steps in three lanes. Collaborators agree on a change in an issue, build it in a fork and open a pull request. GitHub runs CI, dependency review and label checks. Core Maintainers approve the pull request, merge it through the merge queue into develop, and publish a release from a release branch with a v tag. GitHub rulesets ensure that only Core Maintainers can merge into develop, push to release branches and create v tags.](/diagrams/contribution-governance.svg)
+![Six steps in three lanes. Collaborators agree on a change in an issue, build it in a fork and open a pull request. GitHub runs CI, dependency review and label checks. Core Maintainers approve the pull request, merge it through the merge queue into develop, and authorise releases from release branches. GitHub rulesets reserve release authority for Core Maintainers; the configured release App executes approved final releases.](/diagrams/contribution-governance.svg)
 
 1. **Issue.** The change is described and agreed in an issue.
 2. **Fork and pull request.** The contributor builds it in a fork and opens a
@@ -86,8 +86,10 @@ depend on anyone remembering them.
 - **Green checks, no shortcuts.** Nothing reaches `develop` without passing the
   required checks. The ruleset has no bypass, so there is no way to skip CI or
   the merge queue.
-- **Tested before and after merging.** Required checks run on the pull request,
-  again in the merge queue and once more on `develop`.
+- **Tested before and after merging.** Required checks run on the pull request
+  and, as the full suite, in the merge queue. Publishing `develop` reuses that
+  full run for the exact commit and still runs a fresh security scan and scans
+  the published images.
 - **Isolated CI for contributions.** Pull requests from forks cannot read
   secrets or publish anything.
 - **Controlled releases.** Only Core Maintainers can create release branches
@@ -121,7 +123,7 @@ default. Any further rights come from the teams above.
 | `develop`    | Changes only through pull requests that a Core Maintainer adds to the merge queue. Required checks and resolved conversations. No bypass. Squash merges only. Cannot be deleted or force-pushed. |
 | `release/**` | Only Core Maintainers can create, update, merge into or delete release branches. Cannot be force-pushed. Pull requests must pass the PR label check.                                             |
 | `main`       | Cannot be deleted or force-pushed.                                                                                                                                                               |
-| `v*` tags    | Only Core Maintainers can create, move or delete version tags.                                                                                                                                   |
+| `v*` tags    | Core Maintainers control human tag operations. When configured, the release App can create a final tag after the reviewed preparation PR and merged-commit CI; it cannot move or delete tags.    |
 
 ## Releases
 
@@ -130,10 +132,18 @@ tag starts **Build and Push Docker Images**, which builds, tests, scans and
 attests the release images that deployments consume. Restricting who can create
 those tags is how Eneo controls what is released.
 
+For managed final releases, Core Maintainers approve and merge the preparation
+PR. A dedicated release App then creates the exact verified tag and publishes
+the release after the image, smoke-test and SBOM gates succeed. Its creation
+permission is separate from tag update/deletion protections; it never merges
+PRs or bypasses branch checks. The
+[release procedure](https://github.com/eneo-ai/eneo/blob/develop/docs/DEPLOYMENT_WORKFLOW.md#creating-a-production-release)
+describes the required App configuration. RCs remain maintainer-tagged.
+
 ```mermaid
 flowchart LR
   D["develop"] -->|"Core Maintainers cut"| R["release/vX.Y"]
-  R -->|"Core Maintainers tag"| T["vX.Y.Z-rc.N<br/>vX.Y.Z"]
+  R -->|"Core Maintainers authorise"| T["vX.Y.Z-rc.N<br/>vX.Y.Z"]
   T --> B["Build and Push<br/>Docker Images"]
   B --> I["Release images<br/>in GHCR"]
   I --> E["Test and production<br/>deployments"]

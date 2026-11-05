@@ -1,0 +1,159 @@
+[
+  {
+    "name": "unicode and whitespace",
+    "text": "  Skriv ✨ med [Klartext](eneo-skill:11111111-1111-4111-8111-111111111111@22222222-2222-4222-8222-222222222222).\n\nBehåll\t  rad.\n",
+    "targets": [
+      {
+        "kind": "skill",
+        "skill_id": "11111111-1111-4111-8111-111111111111",
+        "revision_id": "22222222-2222-4222-8222-222222222222"
+      }
+    ]
+  },
+  {
+    "name": "all tool kinds",
+    "text": "[Sök](eneo-function:web_search) [Time](eneo-mcp:33333333-3333-4333-8333-333333333333) [Beräkna](eneo-tool:33333333-3333-4333-8333-333333333333/r%C3%A4kna%2Fprocent%2520)",
+    "targets": [
+      {
+        "kind": "function",
+        "purpose": "web_search"
+      },
+      {
+        "kind": "mcp_server",
+        "server_id": "33333333-3333-4333-8333-333333333333"
+      },
+      {
+        "kind": "mcp_tool",
+        "server_id": "33333333-3333-4333-8333-333333333333",
+        "tool_name": "räkna/procent%20"
+      }
+    ]
+  },
+  {
+    "name": "inactive example 0",
+    "text": "`[Klartext](eneo-skill:11111111-1111-4111-8111-111111111111@22222222-2222-4222-8222-222222222222)`",
+    "targets": []
+  },
+  {
+    "name": "inactive example 1",
+    "text": "``before `[Klartext](eneo-skill:11111111-1111-4111-8111-111111111111@22222222-2222-4222-8222-222222222222)` after``",
+    "targets": []
+  },
+  {
+    "name": "inactive example 2",
+    "text": "```md\n[Klartext](eneo-skill:11111111-1111-4111-8111-111111111111@22222222-2222-4222-8222-222222222222)\n```",
+    "targets": []
+  },
+  {
+    "name": "inactive example 3",
+    "text": "~~~~\n[Klartext](eneo-skill:11111111-1111-4111-8111-111111111111@22222222-2222-4222-8222-222222222222)\n~~~~",
+    "targets": []
+  },
+  {
+    "name": "inactive example 4",
+    "text": "    [Klartext](eneo-skill:11111111-1111-4111-8111-111111111111@22222222-2222-4222-8222-222222222222)",
+    "targets": []
+  },
+  {
+    "name": "inactive example 5",
+    "text": "\t[Klartext](eneo-skill:11111111-1111-4111-8111-111111111111@22222222-2222-4222-8222-222222222222)",
+    "targets": []
+  },
+  {
+    "name": "inactive example 6",
+    "text": "\\[Klartext](eneo-skill:11111111-1111-4111-8111-111111111111@22222222-2222-4222-8222-222222222222)",
+    "targets": []
+  },
+  {
+    "name": "inactive example 7",
+    "text": "![Klartext](eneo-skill:11111111-1111-4111-8111-111111111111@22222222-2222-4222-8222-222222222222)",
+    "targets": []
+  },
+  {
+    "name": "inactive example 8",
+    "text": "> ```md\n> [Klartext](eneo-skill:11111111-1111-4111-8111-111111111111@22222222-2222-4222-8222-222222222222)\n> ```",
+    "targets": []
+  },
+  {
+    "name": "inactive example 9",
+    "text": "- ```md\n  [Klartext](eneo-skill:11111111-1111-4111-8111-111111111111@22222222-2222-4222-8222-222222222222)\n  ```",
+    "targets": []
+  },
+  {
+    "name": "inactive example 10",
+    "text": "<!-- [Klartext](eneo-skill:11111111-1111-4111-8111-111111111111@22222222-2222-4222-8222-222222222222) -->",
+    "targets": []
+  },
+  {
+    "name": "inactive example 11",
+    "text": "<!--\n[Klartext](eneo-skill:11111111-1111-4111-8111-111111111111@22222222-2222-4222-8222-222222222222)",
+    "targets": []
+  },
+  {
+    "name": "inactive example 12",
+    "text": "\\``[Klartext](eneo-skill:11111111-1111-4111-8111-111111111111@22222222-2222-4222-8222-222222222222)`",
+    "targets": []
+  },
+  {
+    "name": "inactive example 13",
+    "text": "[Klartext] @Klartext [Link](https://example.com)",
+    "targets": []
+  },
+  {
+    "name": "comment followed by reference",
+    "text": "<!-- [Klartext](eneo-skill:11111111-1111-4111-8111-111111111111@22222222-2222-4222-8222-222222222222) --> [Klartext](eneo-skill:11111111-1111-4111-8111-111111111111@22222222-2222-4222-8222-222222222222)",
+    "targets": [
+      {
+        "kind": "skill",
+        "skill_id": "11111111-1111-4111-8111-111111111111",
+        "revision_id": "22222222-2222-4222-8222-222222222222"
+      }
+    ]
+  },
+  {
+    "name": "matching fence",
+    "text": "````\n```\n[Klartext](eneo-skill:11111111-1111-4111-8111-111111111111@22222222-2222-4222-8222-222222222222)\n````\n[Klartext](eneo-skill:11111111-1111-4111-8111-111111111111@22222222-2222-4222-8222-222222222222)",
+    "targets": [
+      {
+        "kind": "skill",
+        "skill_id": "11111111-1111-4111-8111-111111111111",
+        "revision_id": "22222222-2222-4222-8222-222222222222"
+      }
+    ]
+  },
+  {
+    "name": "invalid target 0",
+    "text": "[Name](eneo-skill:invalid@none)",
+    "error": true
+  },
+  {
+    "name": "invalid target 1",
+    "text": "[Name](eneo-function:unknown)",
+    "error": true
+  },
+  {
+    "name": "invalid target 2",
+    "text": "[Name](eneo-tool:33333333-3333-4333-8333-333333333333/bad%ZZ)",
+    "error": true
+  },
+  {
+    "name": "invalid target 3",
+    "text": "[Name](eneo-tool:33333333-3333-4333-8333-333333333333/%FF)",
+    "error": true
+  },
+  {
+    "name": "invalid target 4",
+    "text": "[Name](eneo-tool:33333333-3333-4333-8333-333333333333/%00)",
+    "error": true
+  },
+  {
+    "name": "invalid target 5",
+    "text": "[Name](eneo-tool:33333333-3333-4333-8333-333333333333/unescaped/name)",
+    "error": true
+  },
+  {
+    "name": "invalid target 6",
+    "text": "[Name](eneo-mcp:33333333333343338333333333333333)",
+    "error": true
+  }
+]

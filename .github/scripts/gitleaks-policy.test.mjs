@@ -9,6 +9,7 @@ import test from "node:test";
 const config = fileURLToPath(new URL("../../.gitleaks.toml", import.meta.url));
 // Assemble public examples so this test does not itself introduce key findings.
 const examples = [
+  ["backend/src/eneo/authentication/api_key_rate_limiter.py", ["ApiKey", "V2InDB"]],
   ["docker-compose.e2e.yml", ["yPIAaWTENh5knUuz75NYHbl", "R3672X-7lH-W6AD4F1hs="]],
   ["docker-compose.e2e.ci.yml", ["yPIAaWTENh5knUuz75NYHbl", "R3672X-7lH-W6AD4F1hs="]],
   ["backend/tests/unittests/model_providers/test_provider_connection_probe.py", ["sk-live-", "secret-1234"]],
@@ -29,6 +30,10 @@ const examples = [
   ["backend/tests/unittests/integration/test_sharepoint_sync_ledger.py", ["integration_knowledge_id=", "ik.id"]],
   ["backend/tests/unittests/integration/test_sharepoint_failed_items.py", ["integration_knowledge_id=", "ik.id"]],
   ["backend/tests/unittests/observability/test_error_text.py", ["v1.eyJhdWQiOiJ4In0.", "c2lnbmF0dXJl"]],
+  ["frontend/apps/web-next/src/lib/api/use-secret-mutation.test.tsx", ["sk-synthetic-", "secret-1234"]],
+  ["frontend/apps/web-next/src/lib/api/use-secret-mutation.test.tsx", ["sk-synthetic-", "other-5678"]],
+  ["frontend/apps/web-next/src/lib/api/use-secret-mutation.test.tsx", ["sk-synthetic-", "second-2222"]],
+  ["frontend/apps/web-next/src/features/admin/models/provider-edit-dialog.test.tsx", ["synthetic-header-", "secret-9012"]],
 ].map(([path, parts]) => ({ path, value: parts.join("") }));
 
 function repository(t) {

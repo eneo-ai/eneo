@@ -72,6 +72,8 @@ describe("ProviderConnectionStatus", () => {
 
     expect(screen.getByText("Inte testad")).toBeTruthy();
     expect(testButton().textContent).toContain("Testa anslutning");
+    // The filled button keeps the card's 16 px edge, as the model rows below do.
+    expect(testButton().closest('[class~="ps-4"]')?.className.split(" ")).toContain("pe-4");
     await expectNoAxeViolations(document.body);
   });
 

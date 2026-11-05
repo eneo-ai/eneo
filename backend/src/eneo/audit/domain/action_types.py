@@ -45,6 +45,7 @@ class ActionType(str, Enum):
     PASSWORD_CHANGED = "password_changed"
     PASSWORD_CHANGE_FAILED = "password_change_failed"
     SESSIONS_INVALIDATED = "sessions_invalidated"
+    SESSION_EXTENDED = "session_extended"
 
     # User Actions (Priority 2)
     ASSISTANT_CREATED = "assistant_created"
@@ -185,3 +186,24 @@ class ActionType(str, Enum):
     AUDIT_SESSION_CREATED = "audit_session_created"
     AUDIT_LOG_VIEWED = "audit_log_viewed"
     AUDIT_LOG_EXPORTED = "audit_log_exported"
+
+    # Widget Actions
+    WIDGET_CREATED = "widget_created"
+    WIDGET_UPDATED = "widget_updated"
+    WIDGET_ACTIVATED = "widget_activated"
+    WIDGET_PAUSED = "widget_paused"
+    WIDGET_ARCHIVED = "widget_archived"
+    WIDGET_POLICY_UPDATED = "widget_policy_updated"
+    WIDGET_BUDGET_EXHAUSTED = "widget_budget_exhausted"
+    WIDGET_TEMPLATE_CREATED = "widget_template_created"
+    WIDGET_TEMPLATE_UPDATED = "widget_template_updated"
+    WIDGET_TEMPLATE_DELETED = "widget_template_deleted"
+    WIDGET_TEMPLATE_PUBLISHED = "widget_template_published"
+
+
+# Logged whatever the tenant's audit configuration says: a tenant admin can
+# switch off categories, actions and the whole audit log, and none of those may
+# hide a change to how the organisation signs in or a session renewing itself.
+ALWAYS_AUDITED_ACTIONS: frozenset[ActionType] = frozenset(
+    {ActionType.FEDERATION_UPDATED, ActionType.SESSION_EXTENDED}
+)

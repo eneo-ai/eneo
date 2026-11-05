@@ -1,14 +1,12 @@
-"use client";
-
 import { Badge } from "@astryxdesign/core/Badge";
 import { Button } from "@astryxdesign/core/Button";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { useQueries, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { useFormatter, useTranslations } from "next-intl";
-import { useId, useRef, useState, type ReactNode } from "react";
-import { QuietBanner } from "@/components/astryx/banner";
+import { replaceUrl, useRouter, useSearchParams } from "@/lib/navigation";
+import { useFormatter, useTranslations } from "use-intl";
+import { useId, useRef, type ReactNode } from "react";
+import { Banner } from "@astryxdesign/core/Banner";
 import { ClientTime } from "@/components/composites/client-time";
 import { PageHeader } from "@/components/composites/page-header";
 import { useAppContext } from "@/components/providers/app-context";
@@ -16,7 +14,6 @@ import { RemovalFocusScope } from "@/features/spaces/removal";
 import { useSpace } from "@/features/spaces/use-space";
 import { browserApi } from "@/lib/api/browser";
 import { useFocusRescue } from "@/lib/focus-rescue";
-import { useHydrated } from "@/lib/hooks/use-hydrated";
 import type { IntegrationKnowledge } from "../../knowledge";
 import { IntegrationActions, WrapperActions } from "../actions";
 import { safeExternalUrl } from "../external-url";
@@ -25,12 +22,15 @@ import { buildSourceProblems, type SkippedDocuments } from "../source-problems";
 import { useWatchStates } from "../source-status";
 import {
   isSyncActive,
+  readSourceView,
   sourceContentsLabel,
   sourceHref,
   sourceTabParam,
   summarizeSource,
+  wrapperPermissions,
   type IntegrationSource,
-  type SourceTab
+  type SourceTab,
+  type SourceView
 } from "../sources";
 import { useSourceAnnouncements } from "../use-sync-announcements";
 import { useSyncProgress } from "../use-sync-progress";
@@ -39,16 +39,9 @@ import { ActivityView } from "./activity-view";
 import { FolderDocuments } from "./folder-documents";
 import { FolderNav } from "./folder-nav";
 import { FolderOverview } from "./folder-overview";
-import { inPlaceLink, SamePageLink } from "./in-place-link";
+import { inPlaceLink, SamePageLink } from "@/components/composites/in-place-link";
 import { ProblemsView } from "./problems-view";
 import { SyncProgressPanel } from "./progress-panel";
-
-/** What the page shows: a tab and, on a source of many folders, the folder (null: all of them). */
-type SourceView = { tab: SourceTab; folder: string | null };
-
-function viewOfAddress(tab: string | null, folder: string | null): SourceView {
-  return { tab: sourceTabParam(tab ?? undefined) ?? "content", folder };
-}
 
 function Stat({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -113,7 +106,6 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
   const searchParams = useSearchParams();
   const { space, routeId } = useSpace();
   const { can } = useAppContext();
-  const hydrated = useHydrated();
   const headingRef = useRef<HTMLHeadingElement>(null);
   const baseId = useId();
   const panelId = `${baseId}-panel`;
@@ -121,24 +113,7 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
   const rescue = useFocusRescue();
   // By id, not a ref: the in-place links that call it are built during render (react-hooks/refs).
   const focusPanelIfLost = () => rescue(document.getElementById(panelId));
-  // The view follows the address: a navigation here with other parameters (a
-  // link, a toast's Show) changes it. An in-place change sets the view and
-  // writes the address it reads from, so the two never disagree.
-  const addressTab = searchParams.get("tab");
-  const addressFolder = searchParams.get("folder");
-  const [shown, setShown] = useState(() => ({
-    tab: addressTab,
-    folder: addressFolder,
-    view: viewOfAddress(addressTab, addressFolder)
-  }));
-  if (shown.tab !== addressTab || shown.folder !== addressFolder) {
-    setShown({
-      tab: addressTab,
-      folder: addressFolder,
-      view: viewOfAddress(addressTab, addressFolder)
-    });
-  }
-  const { view } = shown;
+  const view = readSourceView(searchParams);
   const { tab } = view;
 
   const { progress, queued, loaded: progressLoaded } = useSyncProgress();
@@ -179,12 +154,8 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
   );
 
   const listHref = `/spaces/${routeId}/knowledge?tab=integrations`;
-  const adminIntegrationsUrl = hydrated
-    ? new URL("/admin/integrations", window.location.origin).href
-    : "/admin/integrations";
-  const owned = source.items.filter((item) => item.space_id === space.id);
-  const permissions =
-    owned.length === source.items.length ? (owned[0]?.permissions ?? []) : ([] as string[]);
+  const adminIntegrationsUrl = new URL("/admin/integrations", window.location.origin).href;
+  const { canEdit, canDelete } = wrapperPermissions(source.items, space.id);
   const firstSync = source.items.every((item) => !item.metadata?.last_synced_at);
   // A folder's own feed already names its file, so only the overview lists them here.
   const nowReading =
@@ -197,13 +168,12 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
 
   // Like the knowledge page's tabs: the address follows, without a server round trip.
   function show(next: SourceView) {
-    setShown((current) => ({ ...current, view: next }));
     const url = new URL(window.location.href);
     if (next.tab === "content") url.searchParams.delete("tab");
     else url.searchParams.set("tab", next.tab);
     if (next.folder) url.searchParams.set("folder", next.folder);
     else url.searchParams.delete("folder");
-    window.history.replaceState(null, "", url);
+    replaceUrl(url);
     // The link that was pressed may have gone with the old view; a folder picked
     // from the overview takes focus at its heading, anything else at the panel.
     const folderHeading =
@@ -234,13 +204,13 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
 
   const actions =
     source.kind === "wrapper" ? (
-      permissions.includes("edit") || permissions.includes("delete") ? (
+      canEdit || canDelete ? (
         <WrapperActions
           wrapperId={source.id}
           wrapperName={source.name}
           items={source.items}
-          canEdit={permissions.includes("edit")}
-          canDelete={permissions.includes("delete")}
+          canEdit={canEdit}
+          canDelete={canDelete}
           syncActive={syncActive}
           onDeleted={toList}
         />
@@ -306,7 +276,7 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
         </div>
 
         {failureTitle !== null && tab !== "problems" ? (
-          <QuietBanner
+          <Banner
             status="error"
             title={failureTitle}
             description={
@@ -327,11 +297,7 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
         ) : null}
 
         {summary.state === "queued" && !summary.progress ? (
-          <QuietBanner
-            status="info"
-            title={t("integration_source_queued_notice")}
-            collapsible={false}
-          />
+          <Banner status="info" title={t("integration_source_queued_notice")} collapsible={false} />
         ) : null}
 
         {summary.progress ? (

@@ -1,8 +1,6 @@
 // @vitest-environment jsdom
 import { QueryClientProvider, useQuery } from "@tanstack/react-query";
-import { renderToString } from "react-dom/server";
-import { hydrateRoot } from "react-dom/client";
-import { act, cleanup, waitFor } from "@testing-library/react";
+import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { makeIntegration, makeSpace } from "@/features/spaces/testing/space-fixture";
 import type { IntegrationKnowledge } from "../knowledge";
@@ -36,7 +34,7 @@ it.each([-300_000, 300_000])(
   }
 );
 
-it("keeps the server copy through a failed read, then accepts a successful empty response", async () => {
+it("keeps the loaded items through a failed read, then accepts a successful empty response", async () => {
   const queryClient = testQueryClient();
   queryClient.setQueryData(key, makeSpace());
   const read = vi.fn(async () => makeSpace()).mockRejectedValueOnce(new Error("offline"));
@@ -55,10 +53,8 @@ it("keeps the server copy through a failed read, then accepts a successful empty
   await waitFor(() => expect(result.current).toEqual([]));
 });
 
-it("keeps the server item during hydration until the client reread completes", async () => {
-  const serverClient = testQueryClient();
+it("keeps the loaded item until the first successful reread completes", async () => {
   const browserClient = testQueryClient();
-  serverClient.setQueryData(key, makeSpace());
   browserClient.setQueryData(key, makeSpace());
   browserClient.setQueryData(key, makeSpace());
   let finish = () => {};
@@ -74,15 +70,7 @@ it("keeps the server item during hydration until the client reread completes", a
     );
     return <div>{items.map((entry) => entry.id).join(",") || "empty"}</div>;
   }
-  const container = document.createElement("div");
-  container.innerHTML = renderToString(
-    <QueryClientProvider client={serverClient}>
-      <Source />
-    </QueryClientProvider>
-  );
-  expect(container.textContent).toBe("i1");
-  const root = hydrateRoot(
-    container,
+  const { container, unmount } = render(
     <QueryClientProvider client={browserClient}>
       <Source />
     </QueryClientProvider>
@@ -95,8 +83,7 @@ it("keeps the server item during hydration until the client reread completes", a
     });
     await waitFor(() => expect(container.textContent).toBe("empty"));
   } finally {
-    await act(async () => root.unmount());
-    serverClient.clear();
+    unmount();
     browserClient.clear();
   }
 });

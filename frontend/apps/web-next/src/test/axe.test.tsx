@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { expectNoAxeViolations } from "./axe";
+import { expectNameToHoldVisibleText, expectNoAxeViolations } from "./axe";
 import { assertDocumented } from "./wcag";
 
 afterEach(cleanup);
@@ -91,5 +91,38 @@ describe("assertDocumented", () => {
       'Leaving "#composer" out of the page scan needs a reason and an issue link ' +
         '(ACCESSIBILITY.md → Exceptions); got "Astryx renders it twice".'
     );
+  });
+});
+
+describe("expectNameToHoldVisibleText", () => {
+  it("passes a name that holds the shown words in order, sr-only text left out", () => {
+    const { getByRole } = render(
+      <button type="button" aria-label="Verktyg: 2 av 3 aktiva">
+        <span>Verktyg</span> <span aria-hidden="true">2</span>
+        <span className="sr-only">av 3</span>
+      </button>
+    );
+    expectNameToHoldVisibleText(getByRole("button"), "Verktyg: 2 av 3 aktiva");
+  });
+
+  it("reads shown words in separate spans as one, as axe does, and counts aria-hidden text", () => {
+    const { getByRole } = render(
+      <button type="button" aria-label="Verktyg: 2 av 3 aktiva">
+        <span>Verktyg</span>
+        <span aria-hidden="true">2</span>
+      </button>
+    );
+    expect(() =>
+      expectNameToHoldVisibleText(getByRole("button"), "Verktyg: 2 av 3 aktiva")
+    ).toThrow(/"verktyg2"/);
+  });
+
+  it("leaves a control named by its content alone, as the rule does", () => {
+    const { getByRole } = render(
+      <a href="/x">
+        Assistenter<span className="sr-only"> (</span>2<span className="sr-only">)</span>
+      </a>
+    );
+    expectNameToHoldVisibleText(getByRole("link"), "Assistenter (2)");
   });
 });
