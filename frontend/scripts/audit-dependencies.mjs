@@ -15,8 +15,9 @@ const ACCEPTED = [
     name: "braces",
     url: "https://github.com/advisories/GHSA-vfj7-8cjw-p6xm",
     vulnerable_versions: "<=3.0.3",
-    expires: "2026-11-05",
-    reason: "mitigated by the tested downstream patch",
+    expires: "2026-12-15",
+    reason:
+      "mitigated by the tested downstream patch; GitHub withdrew the advisory on 2026-10-23 and no fixed release exists, so the patch and its regression tests stay",
   },
   {
     name: "@sveltejs/kit",
