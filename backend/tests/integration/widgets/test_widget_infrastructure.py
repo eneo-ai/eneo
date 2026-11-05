@@ -354,6 +354,35 @@ async def test_pause_cannot_overwrite_a_committed_archive(db_container, active_w
     assert saved.token_generation == archived.token_generation
 
 
+async def test_pause_and_archive_do_not_wait_for_a_zero_retention_stream(
+    db_container, active_widget
+):
+    """A zero-retention answer keeps its conversation row in the request
+    transaction while it streams; that row's ``widget_id`` holds ``KEY SHARE``
+    on the widget until the stream ends. The kill switch must not queue
+    behind it."""
+    widget_id = UUID(active_widget["id"])
+    async with sessionmanager.session() as stream:
+        async with stream.begin():
+            # What inserting ``sessions.widget_id`` takes on the widget row.
+            await stream.execute(
+                sa.select(Widgets.id)
+                .where(Widgets.id == widget_id)
+                .with_for_update(read=True, key_share=True)
+            )
+            paused = await asyncio.wait_for(
+                _pause_via_service(db_container, widget_id), timeout=5
+            )
+            assert paused.status == WidgetStatus.PAUSED
+            async with db_container() as admin:
+                archived = await asyncio.wait_for(
+                    admin.widget_service().archive_widget(widget_id), timeout=5
+                )
+            assert archived.widget.status == WidgetStatus.ARCHIVED
+    saved = await _load_widget(active_widget["id"])
+    assert saved.status == WidgetStatus.ARCHIVED
+
+
 async def test_draft_save_cannot_roll_back_a_concurrent_publication(db_container):
     async with db_container() as container:
         template = await container.widget_template_service().create_template(

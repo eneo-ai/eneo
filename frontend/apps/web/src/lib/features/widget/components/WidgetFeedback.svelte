@@ -109,12 +109,16 @@
     if (!value || !comment || sending || voting) return;
     sending = true;
     error = null;
+    // A question asked meanwhile owns the one alert; a failure of this
+    // comment is then kept to itself, and a success moves no focus.
+    const generation = questionGeneration;
     try {
-      error = await submit({ value, text: comment });
-      if (!error) {
+      const failure = await submit({ value, text: comment });
+      if (generation === questionGeneration) error = failure;
+      if (!failure) {
         comments = { ...comments, [sessionId]: comment };
         text = "";
-        refocusChange = true;
+        refocusChange = generation === questionGeneration;
         dialogOpen = false;
       }
     } finally {

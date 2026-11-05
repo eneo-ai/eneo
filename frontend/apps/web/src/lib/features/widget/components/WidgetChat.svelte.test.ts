@@ -548,6 +548,31 @@ describe("WidgetChat", () => {
     expect(document.querySelector("main [role='alert']")).toBeNull();
   });
 
+  test("a late comment failure cannot add a second alert after the next question", async () => {
+    renderApp();
+    await userEvent.click(suggestion());
+    await releaseAnswer();
+    await userEvent.click(page.getByRole("button", { name: "widget_feedback_helpful" }));
+    await userEvent.click(page.getByRole("button", { name: "widget_feedback_more" }));
+    const dialog = page.getByRole("dialog");
+    await userEvent.fill(dialog.getByRole("textbox"), "Ett försök.");
+    fake.failNextFeedback = true;
+    fake.holdNextFeedback = true;
+    await userEvent.click(dialog.getByRole("button", { name: "widget_feedback_send" }));
+    await vi.waitFor(() => expect(fake.releaseFeedback).not.toBeNull());
+    // The visitor gives up on the comment and moves on to the next question.
+    await userEvent.click(dialog.getByRole("button", { name: "cancel" }));
+    await vi.waitFor(() => expect(page.getByRole("dialog").elements()).toHaveLength(0));
+    fake.failNextAsk = true;
+    await userEvent.fill(composer(), "Vad är klockan?");
+    await userEvent.keyboard("{Enter}");
+    await expect.element(page.getByRole("alert")).toHaveTextContent("widget_error_generic");
+    fake.releaseFeedback!();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(page.getByRole("alert").elements()).toHaveLength(1);
+    expect(document.querySelector("main [role='alert']")).toBeNull();
+  });
+
   test("a feedback retry after starting over still goes to the conversation it was given in", async () => {
     renderApp();
     await userEvent.click(suggestion());

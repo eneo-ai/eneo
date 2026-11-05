@@ -104,10 +104,17 @@ class WidgetRepoImpl:
     async def get(self, widget_id: UUID, *, for_update: bool = False) -> Widget | None:
         """``for_update`` holds the row for the rest of the transaction. The
         lifecycle commands decide on what they read and write past the
-        revision check, so the row must not move in between."""
+        revision check, so the row must not move in between.
+
+        ``FOR NO KEY UPDATE``, not ``FOR UPDATE``: a zero-retention answer keeps
+        its conversation row, which references the widget, in the request
+        transaction while it streams (``KEY SHARE`` on this row). The writers
+        here never change the key, so they must not queue behind that stream;
+        the kill switch has to land at once. Writers still exclude each other.
+        """
         stmt = sa.select(Widgets).where(Widgets.id == widget_id)
         if for_update:
-            stmt = stmt.with_for_update()
+            stmt = stmt.with_for_update(key_share=True)
         row = await self.session.scalar(stmt)
         return to_entity(row) if row is not None else None
 
