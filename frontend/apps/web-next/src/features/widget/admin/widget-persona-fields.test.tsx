@@ -77,6 +77,35 @@ function LockableOwner({
   );
 }
 
+/** An owner that can be replaced while an upload runs, as a reloaded editor is. */
+function ReplaceableOwner({
+  initial,
+  onChange
+}: {
+  initial: WidgetPersona;
+  onChange: (persona: WidgetPersona) => void;
+}) {
+  const [persona, setPersona] = useState(initial);
+  const [shown, setShown] = useState(true);
+  return (
+    <>
+      <button type="button" onClick={() => setShown(false)}>
+        Ladda om och kasta
+      </button>
+      {shown && (
+        <WidgetPersonaFields
+          persona={persona}
+          assistantIconId="icon-a"
+          onChange={(next) => {
+            setPersona(next);
+            onChange(next);
+          }}
+        />
+      )}
+    </>
+  );
+}
+
 function show(
   initial: WidgetPersona = { name: "Kim", avatar_icon_id: null, avatar_in_launcher: false },
   Component: typeof Owner = Owner
@@ -162,6 +191,26 @@ describe("WidgetPersonaFields avatar uploads", () => {
       })
     );
     // A locked persona cannot change: no avatar is attached to it.
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("lets an upload go when the editor was replaced while it was uploading", async () => {
+    const finish = slowUpload();
+    const { onChange } = show(undefined, ReplaceableOwner);
+    fireEvent.click(screen.getByRole("button", { name: "Använd assistentens ikon" }));
+    await waitFor(() => expect(upload).toHaveBeenCalledTimes(1));
+
+    // A conflict elsewhere, answered with reload and discard, replaces the editor.
+    fireEvent.click(screen.getByRole("button", { name: "Ladda om och kasta" }));
+    expect(screen.queryByRole("textbox", { name: "Namn" })).toBeNull();
+
+    finish();
+    await waitFor(() =>
+      expect(api.DELETE).toHaveBeenCalledWith("/api/v1/icons/{id}/", {
+        params: { path: { id: "icon-new" } }
+      })
+    );
+    // The discarded edit is not saved into the editor that replaced it.
     expect(onChange).not.toHaveBeenCalled();
   });
 

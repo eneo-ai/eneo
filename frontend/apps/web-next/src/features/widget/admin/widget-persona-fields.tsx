@@ -89,14 +89,23 @@ export function WidgetPersonaFields({
     latest.current = persona;
     lockedNow.current = locked;
   });
+  // An editor reloaded after a conflict is a new owner; what the old one
+  // uploaded must not be saved into it. Cleared on unmount.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   async function attachAvatar(iconId: string) {
     const current = latest.current;
     // No name, no face: the API refuses an avatar on an empty persona, so an
     // upload that lands after the persona was cleared is let go. So is one
-    // that lands after a template took the persona over: a locked persona
-    // cannot change.
-    if (!current.name || lockedNow.current) {
+    // that lands after a template took the persona over (a locked persona
+    // cannot change) or after the editor was replaced (reload and discard).
+    if (!current.name || lockedNow.current || !mounted.current) {
       await releaseIcon(iconId);
       return;
     }
