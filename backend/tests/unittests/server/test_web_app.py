@@ -501,7 +501,7 @@ def test_csp_matches_the_production_policy():
         "img-src 'self' blob: data:; "
         "font-src 'self' data:; "
         "media-src 'self' blob: data:; "
-        "frame-src blob:; "
+        "frame-src 'self' blob:; "
         "connect-src 'self'; "
         "object-src 'none'; "
         "base-uri 'self'; "
@@ -511,7 +511,7 @@ def test_csp_matches_the_production_policy():
         "upgrade-insecure-requests"
     )
     framed = build_content_security_policy("abc", (CONTENT_BASE,))
-    assert f"frame-src blob: {CONTENT_BASE};" in framed
+    assert f"frame-src 'self' blob: {CONTENT_BASE};" in framed
     script_src = next(d for d in policy.split("; ") if d.startswith("script-src "))
     assert "unsafe-inline" not in script_src
     assert "unsafe-eval" not in script_src
@@ -524,7 +524,7 @@ def test_csp_frames_the_mcp_content_origin(monkeypatch: pytest.MonkeyPatch, dist
 
     csp = client.get("/").headers["content-security-policy"]
 
-    assert f"frame-src blob: {CONTENT_BASE};" in csp
+    assert f"frame-src 'self' blob: {CONTENT_BASE};" in csp
 
 
 @pytest.mark.parametrize(

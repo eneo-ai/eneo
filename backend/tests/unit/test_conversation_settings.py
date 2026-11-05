@@ -130,8 +130,10 @@ def service_with_policy():
     )
     assistant_service = SimpleNamespace(
         user=TEST_USER,
-        get_assistant_with_effective_config=AsyncMock(
-            return_value=(assistant, [], policy)
+        get_preflight_target=AsyncMock(
+            return_value=SimpleNamespace(
+                assistant=assistant, effective_config=policy, space=space
+            )
         ),
         resolve_personal_chat_model_override=AssistantService.resolve_personal_chat_model_override,
         personal_chat_model_rejection=AssistantService.personal_chat_model_rejection,
@@ -151,7 +153,6 @@ def service_with_policy():
         group_service,
         session_service,
         None,
-        SimpleNamespace(get_space_by_assistant=AsyncMock(return_value=space)),
         None,
     )
     return service, assistant, model, server, policy
@@ -474,7 +475,7 @@ async def test_settings_update_rechecks_access_to_the_current_chat_partner(group
     lookup = (
         service.group_chat_service.get_group_chat
         if group_chat
-        else service.assistant_service.get_assistant_with_effective_config
+        else service.assistant_service.get_preflight_target
     )
     lookup.side_effect = UnauthorizedException("Access revoked")
     with pytest.raises(UnauthorizedException, match="Access revoked"):
@@ -486,7 +487,7 @@ async def test_settings_update_rechecks_access_to_the_current_chat_partner(group
 @pytest.mark.parametrize("blocked_by", ["policy", "access", "security", "deleted"])
 async def test_resolve_preserves_unavailable_choice_and_offers_recovery(blocked_by):
     service, assistant, model, server, policy = service_with_policy()
-    space = await service.space_service.get_space_by_assistant(assistant.id)
+    space = service.assistant_service.get_preflight_target.return_value.space
     settings = ConversationSettings(
         completion_model_id=model.id,
         mcp_server_states={server.id: True},
@@ -598,15 +599,11 @@ async def test_tool_choices_survive_server_and_model_availability_transitions():
 @pytest.mark.asyncio
 async def test_ordinary_assistant_uses_current_model_and_reports_its_removal():
     service, assistant, model, _, _ = service_with_policy()
-    space = await service.space_service.get_space_by_assistant(assistant.id)
+    space = service.assistant_service.get_preflight_target.return_value.space
     space.is_personal = lambda: False
     space.enabled_capabilities = []
     assistant.available_capabilities = []
-    service.assistant_service.get_assistant_with_effective_config.return_value = (
-        assistant,
-        [],
-        None,
-    )
+    service.assistant_service.get_preflight_target.return_value.effective_config = None
     initial = await service.resolve_settings(assistant_id=assistant.id)
     assert initial.available_models is None
     assert initial.effective_model.id == assistant.completion_model.id
@@ -867,14 +864,10 @@ async def test_first_send_without_a_revision_still_fails_when_nothing_won():
 @pytest.mark.asyncio
 async def test_resolve_rejects_a_model_choice_for_an_ordinary_assistant():
     service, assistant, model, _, _ = service_with_policy()
-    space = await service.space_service.get_space_by_assistant(assistant.id)
+    space = service.assistant_service.get_preflight_target.return_value.space
     space.is_personal = lambda: False
     assistant.available_capabilities = []
-    service.assistant_service.get_assistant_with_effective_config.return_value = (
-        assistant,
-        [],
-        None,
-    )
+    service.assistant_service.get_preflight_target.return_value.effective_config = None
     with pytest.raises(BadRequestException, match="personal chat"):
         await service.resolve_settings(
             assistant_id=assistant.id,

@@ -1,30 +1,31 @@
 import { useChat } from "@ai-sdk/react";
 import { Button } from "@astryxdesign/core/Button";
 import { ChatMessageList, ChatSystemMessage } from "@astryxdesign/core/Chat";
-import { Collapsible } from "@astryxdesign/core/Collapsible";
-import { useAnnounce } from "@astryxdesign/core/hooks";
+import { Collapsible } from "@/components/astryx/collapsible";
+import { useAnnounce, useMediaQuery } from "@astryxdesign/core/hooks";
 import { Selector } from "@astryxdesign/core/Selector";
 import { useQueryClient } from "@tanstack/react-query";
 import { CircleAlert } from "lucide-react";
 import { useLocale, useTranslations } from "use-intl";
 import {
+  memo,
   useCallback,
   useEffect,
-  useEffectEvent,
   useLayoutEffect,
+  useEffectEvent,
   useMemo,
   useRef,
   useState,
   useSyncExternalStore,
   type ComponentProps,
   type Ref,
-  type ReactNode
+  type ReactNode,
+  useImperativeHandle
 } from "react";
 import { useAppContext } from "@/components/providers/app-context";
 import { EneoApiError, getErrorMessage } from "@/lib/api/errors";
 import { browserApi } from "@/lib/api/browser";
 import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
-import { useMediaMatch } from "@/lib/hooks/use-media-match";
 import { MEDIA } from "@/lib/breakpoints";
 import { useOnline } from "@/lib/hooks/use-online";
 import { invalidateConversationLists } from "@/lib/api/conversations";
@@ -191,21 +192,58 @@ function settingsVerdict(
  * conversation can be rated on its own; the rating starts from the one stored
  * with the answer.
  */
-function ConversationMessage({
+const ConversationMessage = memo(function ConversationMessage({
   sessionId,
+  onToggleActivity,
   ...props
-}: Omit<ComponentProps<typeof ChatMessage>, "feedback"> & { sessionId: string | null }) {
+}: Omit<ComponentProps<typeof ChatMessage>, "feedback" | "onActivityToggle"> & {
+  sessionId: string | null;
+  /** One handler for every message, so a finished message's props stay the same. */
+  onToggleActivity: (messageId: string, trigger: HTMLElement, request?: ActivityRequest) => void;
+}) {
   const { message, isStreaming } = props;
   const [rating, rate] = useAnswerFeedback(message.id, message.metadata?.feedback ?? null);
   const feedback =
     sessionId !== null && message.role === "assistant" && !isStreaming
       ? { value: rating, onChange: (value: AnswerRating) => rate(sessionId, value) }
       : null;
-  return <ChatMessage {...props} sessionId={sessionId} feedback={feedback} />;
+  return (
+    <ChatMessage
+      {...props}
+      sessionId={sessionId}
+      feedback={feedback}
+      onActivityToggle={(trigger, request) => onToggleActivity(message.id, trigger, request)}
+    />
+  );
+});
+
+/**
+ * What a file list shows of each file, as one string: a file's content (an
+ * upload's transcription) never changes under its id, so it is left out.
+ */
+function previewFilesKey(files: readonly PreviewFile[]): string {
+  return JSON.stringify(
+    files.map((file) => [
+      file.id,
+      file.name,
+      file.mimetype,
+      file.size,
+      file.original_size,
+      file.revises_file_id,
+      file.created_at
+    ])
+  );
 }
+
+/** Opens the latest answer's Felsökning tab; false when there is none to show yet. */
+export type ChatDebugHandle = { openDebug: (trigger: HTMLElement | null) => boolean };
 
 type ChatViewProps = {
   leaveConfirmationRef?: Ref<LeaveConfirmationHandle>;
+  /** The page header's Felsökning button opens the latest answer's debug view through it. */
+  debugRef?: Ref<ChatDebugHandle>;
+  /** Whether `debugRef` has a saved answer to open: the header enables Felsökning by it. */
+  onDebugReadyChange?: (ready: boolean) => void;
   partner: ChatPartner;
   initialSessionId?: string | null;
   initialMessages?: EneoUIMessage[];
@@ -235,9 +273,7 @@ type ChatViewProps = {
   partnerToken?: ReactNode;
   activity: ActivityState | null;
   onActivityChange: (next: ActivityState | null) => void;
-  /** Whether the side panel holds a file, view or the overview (the activity is the page's). */
-  onPanelOpenChange?: (open: boolean) => void;
-  /** The row the side panel shares with the page's history. */
+  /** The row the side panel measures, and whether the conversation is on screen. */
   layout?: SidePanelLayout;
 };
 
@@ -265,6 +301,8 @@ export function ChatView(props: ChatViewProps) {
 
 function ConversationView({
   leaveConfirmationRef,
+  debugRef,
+  onDebugReadyChange,
   partner: configuredPartner,
   initialSessionId = null,
   initialMessages = [],
@@ -278,7 +316,6 @@ function ConversationView({
   partnerToken,
   activity,
   onActivityChange,
-  onPanelOpenChange,
   layout
 }: ChatViewProps) {
   const conversationSettings = useConversationSettings();
@@ -353,14 +390,15 @@ function ConversationView({
   // draft survives a reload but not a closed tab, and files survive neither.
   // A question taken out of the composer is still unsent while it waits for
   // saves (`queuedQuestion`) or for its uploads (`pendingQuestion`).
-  useBeforeUnloadWarning(
+  // Leaving the chat inside the app asks about the same.
+  const unsent =
     input.trim() !== "" ||
-      attachments.attachments.length > 0 ||
-      queuedQuestion !== null ||
-      pendingQuestion !== null
-  );
-  // Ends the wait of a question not yet sent, for its uploads or for saves
-  // (a stop while it waits).
+    attachments.attachments.length > 0 ||
+    queuedQuestion !== null ||
+    pendingQuestion !== null;
+  useBeforeUnloadWarning(unsent);
+  // Ends the wait of a question not yet sent, for its uploads or a partner
+  // save (a stop while it waits).
   const pendingAbort = useRef<AbortController | null>(null);
   // The last question and its files, for "Försök igen" after an error.
   const [lastQuestion, setLastQuestion] = useState<{ text: string; files: SentFiles } | null>(null);
@@ -404,8 +442,8 @@ function ConversationView({
   const dockTextareaRef = useRef<HTMLTextAreaElement>(null);
   const startTextareaRef = useRef<HTMLTextAreaElement>(null);
   const startDockTextareaRef = useRef<HTMLTextAreaElement>(null);
-  const phone = useMediaMatch(PHONE);
-  const startDocked = useMediaMatch(DOCK_START);
+  const phone = useMediaQuery(PHONE);
+  const startDocked = useMediaQuery(DOCK_START);
   /** The start composer's field the user has: docked or centred (DOCK_START). */
   const startTextarea = () => (startDocked ? startDockTextareaRef : startTextareaRef).current;
   const startField = useEffectEvent(startTextarea);
@@ -560,7 +598,7 @@ function ConversationView({
   }, [timings, messages, busy]);
 
   // What the conversation has to show in the side panel.
-  const documents = useMemo(
+  const documentsNow = useMemo(
     () =>
       conversationDocuments(
         messages.map((message) => ({
@@ -570,14 +608,25 @@ function ConversationView({
       ),
     [messages]
   );
+  // A streamed chunk rarely changes the documents: keep them by content so
+  // finished messages keep the same props.
+  const documentsKey = useMemo(
+    () => documentsNow.documents.map((document) => previewFilesKey(document.versions)).join("\n"),
+    [documentsNow]
+  );
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- compared by content
+  const documents = useMemo(() => documentsNow, [documentsKey]);
   const uploads = useMemo(() => conversationUploads(messages), [messages]);
   useEffect(() => {
     uploadsRef.current = uploads;
   }, [uploads]);
-  const allFiles = useMemo<PreviewFile[]>(
+  const allFilesNow = useMemo<PreviewFile[]>(
     () => [...uploads, ...messages.flatMap(messageGeneratedFiles)],
     [uploads, messages]
   );
+  const allFilesKey = useMemo(() => previewFilesKey(allFilesNow), [allFilesNow]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- compared by content
+  const allFiles = useMemo(() => allFilesNow, [allFilesKey]);
   const panelContents: PanelContents = {
     views: messages
       .flatMap(messageAppViewCalls)
@@ -623,12 +672,6 @@ function ConversationView({
   useEffect(() => {
     if (panelOpen) onActivityChange(null);
   }, [panelOpen, onActivityChange]);
-  // Before paint: a history that gives way to the panel is gone in the same frame.
-  useLayoutEffect(() => {
-    if (!panelOpen) return;
-    onPanelOpenChange?.(true);
-    return () => onPanelOpenChange?.(false);
-  }, [panelOpen, onPanelOpenChange]);
 
   // The panel follows the answer being written: a document draft shows there
   // while the assistant writes it, and a file created in the live turn takes
@@ -1094,22 +1137,55 @@ function ConversationView({
   useEffect(() => {
     if (!activity) activityFocusedFor.current = null;
   }, [activity]);
-  const toggleActivity = (messageId: string, trigger: HTMLElement, request?: ActivityRequest) => {
-    const tab = request?.tab ?? "steps";
-    // The pill toggles; a citation (or menu item with a tab) opens or switches.
-    if (activity?.messageId === messageId && !request?.tab) {
-      closeActivity();
-      return;
-    }
-    activityTrigger.current = trigger;
-    onActivityChange({ messageId, tab, source: request?.source ?? null });
-  };
   const closeActivity = useCallback(() => {
     onActivityChange(null);
     const trigger = activityTrigger.current;
     activityTrigger.current = null;
     if (trigger) requestAnimationFrame(() => trigger.focus());
   }, [onActivityChange]);
+  const openActivityId = activity?.messageId;
+  const toggleActivity = useCallback(
+    (messageId: string, trigger: HTMLElement, request?: ActivityRequest) => {
+      const tab = request?.tab ?? "steps";
+      // The pill toggles; a citation (or menu item with a tab) opens or switches.
+      if (openActivityId === messageId && !request?.tab) {
+        closeActivity();
+        return;
+      }
+      activityTrigger.current = trigger;
+      onActivityChange({ messageId, tab, source: request?.source ?? null });
+    },
+    [openActivityId, closeActivity, onActivityChange]
+  );
+  // The header's Felsökning: the latest saved answer's debug view, its focus
+  // returning to the button as from a pill. An answer still being written has
+  // nothing saved to inspect yet, so it is never the target, and before the
+  // first answer is saved the button waits.
+  const debugAnswerId =
+    debugAvailable && sessionId !== null
+      ? (messages.findLast(
+          (message, index) =>
+            message.role === "assistant" && !(busy && index === messages.length - 1)
+        )?.id ?? null)
+      : null;
+  const debugReady = debugAnswerId !== null;
+  useEffect(() => {
+    onDebugReadyChange?.(debugReady);
+    // Gone with this conversation: the next one reports its own.
+    return () => onDebugReadyChange?.(false);
+  }, [debugReady, onDebugReadyChange]);
+  useImperativeHandle(
+    debugRef,
+    () => ({
+      openDebug: (trigger) => {
+        if (debugAnswerId === null) return false;
+        activityTrigger.current = trigger;
+        onActivityChange({ messageId: debugAnswerId, tab: "debug", source: null });
+        return true;
+      }
+    }),
+    [debugAnswerId, onActivityChange]
+  );
   // A call waiting for a decision takes the dock on a phone (decision 26): a
   // sheet over the dock gives way to it, and the focus goes back to what
   // opened the sheet.
@@ -1121,7 +1197,10 @@ function ConversationView({
   const failure = error ? describeChatFailure(error, streamError, t) : null;
 
   const partnerName = displayPartnerName(partner, t);
-  const assistantIdentity = { id: partner.id, name: partnerName, iconId: partner.iconId };
+  const assistantIdentity = useMemo(
+    () => ({ id: partner.id, name: partnerName, iconId: partner.iconId }),
+    [partner.id, partnerName, partner.iconId]
+  );
   const mention =
     partner.type === "group-chat" && (partner.mentionableAssistants?.length ?? 0) > 0 ? (
       <Selector
@@ -1172,7 +1251,7 @@ function ConversationView({
     sendBlocked,
     unavailable,
     busy: sending,
-    // A stop while the question still waits for its uploads takes it back.
+    // A stop while the question still waits for its uploads or a partner save takes it back.
     onStop: () => (pendingAbort.current ? pendingAbort.current.abort() : void stop()),
     label: composerLabel,
     placeholder: composerLabel,
@@ -1320,7 +1399,7 @@ function ConversationView({
   const leaveConfirmation = (
     <LeaveConfirmation
       ref={leaveConfirmationRef}
-      active={panel.dirty || input.trim() !== "" || attachments.attachments.length > 0}
+      active={panel.dirty || unsent}
       title={unsentQuestionOnly ? t("chat_unsent_navigation_title") : undefined}
       description={unsentQuestionOnly ? t("chat_unsent_navigation_description") : undefined}
       confirmLabel={unsentQuestionOnly ? t("chat_unsent_navigation_leave") : undefined}
@@ -1480,13 +1559,12 @@ function ConversationView({
                     assistant={assistantIdentity}
                     isStreaming={streaming}
                     showResponseLabel={partner.showResponseLabel ?? false}
-                    liveAnswering={liveAnswering}
+                    // Only the answer being written shows who is answering.
+                    liveAnswering={streaming ? liveAnswering : null}
                     knowledge={partner.knowledge}
                     durations={timings.durations(message.id)}
                     activityExpanded={activity?.messageId === message.id}
-                    onActivityToggle={(trigger, request) =>
-                      toggleActivity(message.id, trigger, request)
-                    }
+                    onToggleActivity={toggleActivity}
                     canDebug={debugAvailable && sessionId !== null}
                     conversationFiles={allFiles}
                     documents={documents.documents}

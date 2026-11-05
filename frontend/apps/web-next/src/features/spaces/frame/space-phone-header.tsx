@@ -5,13 +5,13 @@ import { useTranslations } from "use-intl";
 import { ClassificationToken } from "@/components/composites/classification-token";
 import { PageBar } from "@/components/shell/page-bar";
 import { useSpace } from "../use-space";
-import { useSpaceDisplayName } from "./space-header";
+import { useSpaceDisplayName } from "../space-display-name";
 import { phoneSections, spaceLandingHref, spaceSections, type SpaceRoute } from "./space-sections";
 import { SpaceTabs } from "./space-tabs";
 
 /**
  * A space on a phone, held either way (decision 24), in place of the header with breadcrumbs.
- * A shared space is pushed from Ytor: a page bar back to Ytor and to the
+ * A shared space is pushed from Dina ytor: a page bar back to it and to the
  * space chat, then the name with its classification and the content tabs
  * (Översikt, Assistenter, Appar, Kunskap). What manages the space is listed
  * under "Hantera ytan" on Översikt, and opens as a screen of its own, back to
@@ -60,7 +60,7 @@ export function SpacePhoneHeader({
   const parent = tabbed
     ? fromMenu
       ? null
-      : { label: t("spaces"), href: "/spaces/list" }
+      : { label: t("your_spaces"), href: "/spaces/list" }
     : route.isSectionRoot
       ? fromMenu && !managed
         ? null

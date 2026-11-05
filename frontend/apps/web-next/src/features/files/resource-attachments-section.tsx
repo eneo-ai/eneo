@@ -41,7 +41,7 @@ import { toastApiError } from "@/lib/api/toast";
 import type { Schema } from "@/lib/api/models";
 import { formatBytes } from "@/lib/format";
 import { matchesSearch } from "@/lib/search";
-import { useMediaMatch } from "@/lib/hooks/use-media-match";
+import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { cn } from "@/lib/utils";
 
 type Attachment = Schema<"FilePublic"> | Schema<"AssistantAttachmentPublic">;
@@ -231,7 +231,7 @@ function ResourceAttachmentIcon({ file }: { file: Attachment }) {
 }
 
 function AttachmentPreview({ file, onClose }: { file: Attachment; onClose: () => void }) {
-  const { url, error } = useSignedUrl(file.id);
+  const { url, error, resign } = useSignedUrl(file.id);
   return (
     <AttachmentPreviewDialog
       open
@@ -240,6 +240,7 @@ function AttachmentPreview({ file, onClose }: { file: Attachment; onClose: () =>
       mimetype={file.mimetype}
       url={url}
       error={error}
+      onImageError={resign}
     />
   );
 }
@@ -265,7 +266,7 @@ export function ResourceAttachmentsSection({
 }) {
   const t = useTranslations();
   // Dragging a file onto the page needs a mouse: a touch screen is told to choose files.
-  const coarse = useMediaMatch("(pointer: coarse)");
+  const coarse = useMediaQuery("(pointer: coarse)");
   const locale = useLocale();
   const format = useFormatter();
   const autosave = useAutosave("attachments");

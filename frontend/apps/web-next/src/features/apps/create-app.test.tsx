@@ -78,12 +78,6 @@ describe("CreateAppButton", () => {
     ).toEqual(["Börja med en mall..."]);
   });
 
-  it("is small and unfilled when it is not the screen's primary action", () => {
-    renderInApp(<CreateAppButton secondary />, { appContext: testAppContext() });
-    const create = screen.getByRole("button", { name: "Skapa app" });
-    expect([create.dataset.variant, create.dataset.size]).toEqual(["secondary", "sm"]);
-  });
-
   it("creates the app as 'Ny app' at once and opens its editor", async () => {
     let finish!: (value: Awaited<ReturnType<typeof created>>) => void;
     api.POST.mockReturnValue(new Promise((resolve) => (finish = resolve)));

@@ -59,7 +59,7 @@ import {
   type SecurityClassification
 } from "@/features/admin/security-classifications/security-classifications";
 import { parseRetentionDays } from "@/features/spaces/retention-days";
-import { invalidateSpaces, invalidateSpacesList, type Space } from "@/features/spaces/space";
+import { invalidateDeletedSpace, invalidateSpacesList, type Space } from "@/features/spaces/space";
 import { editorSummaries } from "@/features/spaces/editor-summaries";
 import { useSpace } from "@/features/spaces/use-space";
 import { PageHeader } from "@/components/composites/page-header";
@@ -80,6 +80,7 @@ import {
 } from "./security-impact";
 import { SpaceModelSelect, type ModelKind, type ModelSelectionChange } from "./space-model-select";
 import { SpaceDeletionHint } from "@/features/spaces/list/delete-space-dialog";
+import { useSectionHeadingLevels } from "@/features/spaces/frame/space-frame";
 
 type SpaceUpdate = Schema<"PartialUpdateSpaceRequest">;
 type SpaceUpdateRequest = SpaceUpdate | ((currentSpace: Space) => SpaceUpdate);
@@ -933,7 +934,7 @@ function SpaceMcpServerRow({
 
 function DangerSection() {
   const t = useTranslations();
-  const { space } = useSpace();
+  const { space, routeId } = useSpace();
   const router = useRouter();
   const queryClient = useQueryClient();
 
@@ -941,7 +942,7 @@ function DangerSection() {
     mutationFn: () =>
       unwrap(browserApi.DELETE("/api/v1/spaces/{id}/", { params: { path: { id: space.id } } })),
     onSuccess: () => {
-      invalidateSpaces(queryClient);
+      void invalidateDeletedSpace(queryClient, routeId);
       router.push("/spaces/list");
     },
     onError: (error) => toastApiError(error, t)
@@ -1035,6 +1036,7 @@ function SpaceCapabilitiesSection() {
 
 export function SpaceSettings() {
   const t = useTranslations();
+  const levels = useSectionHeadingLevels();
   const { space, can } = useSpace();
   const summary = editorSummaries(t);
   const isOrgSpace = space.organization;
@@ -1121,7 +1123,7 @@ export function SpaceSettings() {
         isFramed
         header={
           <PageHeader
-            headingLevel={2}
+            headingLevel={levels.title}
             title={t("settings")}
             actions={<SaveStatusIndicator />}
             className="py-3"

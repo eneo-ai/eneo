@@ -1,8 +1,6 @@
 import { Button } from "@astryxdesign/core/Button";
-import { useMediaMatch } from "@/lib/hooks/use-media-match";
 import { ChatComposer, ChatComposerDrawer, useChatComposerContext } from "@astryxdesign/core/Chat";
-import { useAnnounce, useMergedRefs } from "@astryxdesign/core/hooks";
-import { Kbd } from "@astryxdesign/core/Kbd";
+import { useAnnounce, useMediaQuery, useMergedRefs } from "@astryxdesign/core/hooks";
 import { Popover } from "@astryxdesign/core/Popover";
 import { isImeKeyEvent } from "@astryxdesign/core/utils";
 import {
@@ -348,7 +346,7 @@ export function Composer({
   const t = useTranslations();
   // A touch screen has no Shift, Ctrl or Enter key to point at, and its
   // Return adds a line.
-  const coarse = useMediaMatch("(pointer: coarse)");
+  const coarse = useMediaQuery("(pointer: coarse)");
   const announce = useAnnounce();
   const hintId = useId();
   const problemId = useId();
@@ -474,33 +472,20 @@ export function Composer({
             </div>
           }
           sendActions={
-            <>
-              {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */}
-              <span className="contents" onClick={keepFocusInsideLayers}>
-                {modelSelector}
-              </span>
-              {/* The keys beside the button they stand for, where there is a keyboard
-                  to press them and room for them: not on a touch screen, nor in a phone-width
-                  window, where they only crowd the send button. The field's description says
-                  it in words. */}
-              <span
-                aria-hidden="true"
-                className="text-ax-text-secondary hidden items-center gap-2 text-xs whitespace-nowrap md:pointer-fine:inline-flex"
-              >
-                <span className="inline-flex items-center gap-1">
-                  <Kbd keys="enter" />
-                  {t("send")}
-                </span>
-                <span className="inline-flex items-center gap-1">
-                  <Kbd keys="shift+enter" />
-                  {t("chat_composer_key_newline")}
-                </span>
-              </span>
-            </>
+            // The model picker opens a layer inside the composer: its clicks
+            // must not reach the shell's textarea-focus handler.
+            // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions
+            <span className="contents" onClick={keepFocusInsideLayers}>
+              {modelSelector}
+            </span>
           }
           sendButton={
             <Button
               label={busy ? t("stop_generating") : t("send_message")}
+              // The keys live on the button they stand for: beside it, with Verktyg,
+              // Skills and a reasoning level, they crowded the row into two at 720 px.
+              // A touch screen's Return makes a line; the field's description says so.
+              tooltip={busy || coarse ? undefined : t("chat_send_tooltip")}
               isIconOnly
               variant="primary"
               icon={

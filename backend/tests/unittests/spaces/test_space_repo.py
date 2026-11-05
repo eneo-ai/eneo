@@ -249,9 +249,32 @@ async def test_get_assistants_eager_loads_mcp_tool_settings():
     session.execute = AsyncMock(side_effect=[assistants_result, prompts_result])
 
     repo = _repo(session)
-    await repo._get_assistants(uuid4())
+    await repo._get_assistants([uuid4()])
 
     assistants_stmt = session.execute.await_args_list[0].args[0]
     loader_paths = [str(option.path) for option in assistants_stmt._with_options]
 
     assert any("assistant_mcp_server_tools" in path for path in loader_paths)
+
+
+async def test_each_application_gets_its_first_selected_prompt_across_spaces():
+    first, second = (
+        MagicMock(id=uuid4(), mcp_servers=[]),
+        MagicMock(id=uuid4(), mcp_servers=[]),
+    )
+    chosen, later, other = object(), object(), object()
+    assistants_result = MagicMock()
+    assistants_result.scalars.return_value.all.return_value = [first, second]
+    prompts_result = MagicMock()
+    prompts_result.all.return_value = [
+        (chosen, first.id),
+        (other, second.id),
+        (later, first.id),
+    ]
+    session = MagicMock()
+    session.execute = AsyncMock(side_effect=[assistants_result, prompts_result])
+
+    await _repo(session)._get_assistants([uuid4(), uuid4()])
+
+    assert first.prompt is chosen
+    assert second.prompt is other

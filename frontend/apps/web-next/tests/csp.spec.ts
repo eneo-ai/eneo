@@ -1,4 +1,6 @@
 import { expect, test } from "./csp";
+import { walkRoutes } from "./responsive-fixtures";
+import type { Fixtures } from "./responsive-routes";
 
 // The CSP fixture itself (tests/csp.ts): specs that import `test` from it
 // fail on any Content-Security-Policy violation.
@@ -49,4 +51,26 @@ test("a legacy Select opens without a <style> the CSP blocks", async ({ page, cs
   await page.keyboard.press("Escape");
   await expect(page.getByRole("listbox")).toBeHidden();
   expect(cspViolations, "violations while the Select was open").toEqual([]);
+});
+
+test("a route walk reports what the policy blocks on the screen it visits", async ({
+  browser,
+  baseURL
+}) => {
+  // /whats-new opens without a record, so the walk needs no fixtures.
+  const walk = { baseURL, fixtures: {} as Fixtures, context: {}, only: "^/whats-new$" };
+  const problems = await walkRoutes(browser, walk, async (page) => {
+    await page.evaluate(
+      () =>
+        new Promise((resolve) => {
+          document.addEventListener("securitypolicyviolation", resolve, { once: true });
+          new Image().src = "https://csp-probe.invalid/pixel.png";
+        })
+    );
+    return [];
+  });
+
+  expect(problems.join("\n")).toContain(
+    "/whats-new: CSP img-src blocked https://csp-probe.invalid"
+  );
 });

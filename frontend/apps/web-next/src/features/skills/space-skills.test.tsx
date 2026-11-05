@@ -148,9 +148,9 @@ describe("space Skills", () => {
       within(screen.getByRole("alertdialog")).getByRole("button", { name: "delete" })
     );
 
-    await screen.findByRole("heading", { level: 3, name: "skills_library_empty_title" });
+    await screen.findByRole("heading", { level: 2, name: "skills_library_empty_title" });
     await waitFor(() =>
-      expect(document.activeElement).toBe(screen.getByRole("heading", { level: 2, name: "skills" }))
+      expect(document.activeElement).toBe(screen.getByRole("heading", { level: 1, name: "skills" }))
     );
     expect(screen.getByText("skills_library_deleted_success").getAttribute("role")).toBe("status");
   });

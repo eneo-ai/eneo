@@ -607,7 +607,7 @@ describe("ChatView tool approval on a phone (decision 26)", () => {
     expect(screen.queryByRole("textbox", { name: /^Fråga / })).toBeNull();
     expect(within(bar).getByText("arendenummer: BN 2026-0412")).toBeTruthy();
     // Asked once: the card in the conversation shows the call, the bar decides.
-    const card = screen.getByRole("region", { name: "Väntar på godkännande" });
+    const card = await screen.findByRole("region", { name: "Väntar på godkännande" });
     expect(within(card).queryByRole("button", { name: /^Godkänn/ })).toBeNull();
 
     fireEvent.click(within(bar).getByRole("button", { name: "Granska Sök ärende i diariet" }));
@@ -1052,6 +1052,95 @@ describe("ChatView when generation fails", () => {
       }
     });
 
+  it("takes a question waiting for a Skills save back, its attachment included, when it is stopped", async () => {
+    const revoke = vi.fn();
+    vi.stubGlobal(
+      "URL",
+      Object.assign(URL, { createObjectURL: () => "blob:policy", revokeObjectURL: revoke })
+    );
+    spies.mode = "answer";
+    let release!: () => void;
+    const save = queuePartnerUpdate(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        })
+    );
+    try {
+      const { container } = renderInApp(<Harness />, { appContext: pdfContext() });
+      const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+      fireEvent.change(input, {
+        target: { files: [new File(["%PDF"], "Policy.pdf", { type: "application/pdf" })] }
+      });
+      const attachments = await screen.findByRole("list", { name: "1 bilaga bifogad" });
+      await waitFor(() => expect(within(attachments).queryByText("Laddar upp…")).toBeNull());
+
+      await ask("Sammanfatta policyn");
+      // Waiting behind the save, the question has taken its attachment along.
+      expect(screen.queryByRole("button", { name: "Ta bort Policy.pdf" })).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Stoppa generering" }));
+
+      expect(screen.getByRole<HTMLTextAreaElement>("textbox", { name: /^Fråga / }).value).toBe(
+        "Sammanfatta policyn"
+      );
+      expect(screen.getByRole("button", { name: "Ta bort Policy.pdf" })).toBeTruthy();
+      expect(revoke).not.toHaveBeenCalled();
+      // The save landing later sends nothing.
+      await act(async () => {
+        release();
+        await save;
+      });
+      expect(spies.sent).toHaveLength(0);
+    } finally {
+      // The save queue is module state: never leave it waiting for the next test.
+      release();
+      await save;
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("sends nothing, and lets its attachment go, when the view goes while the question waits for a Skills save", async () => {
+    const revoke = vi.fn();
+    vi.stubGlobal(
+      "URL",
+      Object.assign(URL, { createObjectURL: () => "blob:policy", revokeObjectURL: revoke })
+    );
+    spies.mode = "answer";
+    let release!: () => void;
+    const saving = new Promise<void>((resolve) => (release = resolve));
+    const save = queuePartnerUpdate(() => saving);
+    try {
+      const view = renderInApp(<Harness />, { appContext: pdfContext() });
+      const input = view.container.querySelector<HTMLInputElement>('input[type="file"]')!;
+      fireEvent.change(input, {
+        target: { files: [new File(["%PDF"], "Policy.pdf", { type: "application/pdf" })] }
+      });
+      const attachments = await screen.findByRole("list", { name: "1 bilaga bifogad" });
+      await waitFor(() => expect(within(attachments).queryByText("Laddar upp…")).toBeNull());
+      await ask("Sammanfatta policyn");
+      const deletes = vi.mocked(browserApi.DELETE).mock.calls.length;
+      view.unmount();
+      expect(revoke).not.toHaveBeenCalled();
+
+      // The save lands after the view has gone: the question is not sent, as one
+      // waiting for its uploads, and its file goes with it.
+      await act(async () => {
+        release();
+        await save;
+      });
+      expect(spies.sent).toHaveLength(0);
+      expect(revoke).toHaveBeenCalledWith("blob:policy");
+      expect(vi.mocked(browserApi.DELETE).mock.calls.slice(deletes)).toEqual([
+        ["/api/v1/files/{id}/", { params: { path: { id: "file-1" } } }]
+      ]);
+    } finally {
+      // The save queue is module state: never leave it waiting for the next test.
+      release();
+      await save;
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("keeps a first question in the conversation, and the focus in its composer, from its uploads through a Skills save", async () => {
     vi.stubGlobal(
       "URL",
@@ -1096,6 +1185,7 @@ describe("ChatView when generation fails", () => {
       expect(spies.sent[0]?.body).toMatchObject({ files: [{ id: "file-1" }] });
       expect(await within(log).findByText("Gränsen är 700 000 kr.")).toBeTruthy();
       expect(within(log).getAllByText("Sammanfatta policyn")).toHaveLength(1);
+      expect(within(log).getByRole("button", { name: /Policy\.pdf/ })).toBeTruthy();
       expect(document.activeElement).toBe(composer);
     } finally {
       // The save queue is module state: never leave it waiting for the next test.

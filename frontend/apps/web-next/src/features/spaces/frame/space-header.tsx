@@ -11,21 +11,14 @@ import { PAGE_COLUMN } from "@/components/composites/page-frame";
 import { cn } from "@/lib/utils";
 import { AddMemberDialog } from "../members/space-members";
 import { MemberStack } from "../members/member-stack";
+import { useSpaceDisplayName } from "../space-display-name";
 import { useSpace } from "../use-space";
 import { spaceLandingHref, spaceSections, type SpaceRoute } from "./space-sections";
 import { SpaceTabs } from "./space-tabs";
 
-/** The space's display name: personal and organization spaces use their alias. */
-export function useSpaceDisplayName(): string {
-  const t = useTranslations();
-  const { space } = useSpace();
-  if (space.personal) return t("personal");
-  if (space.organization) return t("organization");
-  return space.name;
-}
-
 /**
- * The header above every space page except the chat: breadcrumbs, the space
+ * A tablet's header above every space page except the chat (#1328; with a
+ * mouse the sidebar holds the space instead): breadcrumbs, the space
  * tile and name, its security classification and description, members and
  * the space's actions, then the section tabs. Those actions are secondary, so
  * a tab's own create button stays its one primary action. On a tab's own page
@@ -64,7 +57,7 @@ export function SpaceHeader({
       <div className={cn(PAGE_COLUMN, "flex flex-col gap-4")}>
         <Breadcrumbs variant="supporting">
           <BreadcrumbItem href="/spaces/list" isCurrent={false} className={CRUMB_TOUCH}>
-            {t("spaces")}
+            {t("your_spaces")}
           </BreadcrumbItem>
           {isOverview ? (
             <BreadcrumbItem isCurrent>{name}</BreadcrumbItem>

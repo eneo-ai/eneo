@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, renderHook } from "@testing-library/react";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { JOB_EVENTS_PATH } from "@/lib/api/base";
 import { FakeEventSource, installFakeEventSource } from "./job-events.test-support";
@@ -22,7 +22,16 @@ beforeEach(async () => {
   events = await import("./job-events");
 });
 
+// A subscriber left behind would keep its module's tab listener on document.
+const stops: (() => void)[] = [];
+const subscribe: Module["subscribeJobEvents"] = (...args) => {
+  const stop = events.subscribeJobEvents(...args);
+  stops.push(stop);
+  return stop;
+};
+
 afterEach(() => {
+  stops.splice(0).forEach((stop) => stop());
   fake.restore();
   vi.useRealTimers();
 });
@@ -30,8 +39,8 @@ afterEach(() => {
 const latest = () => fake.latest();
 
 it("opens one feed for every subscriber and closes it with the last one", () => {
-  const stopA = events.subscribeJobEvents(() => {});
-  const stopB = events.subscribeJobEvents(() => {});
+  const stopA = subscribe(() => {});
+  const stopB = subscribe(() => {});
   expect(FakeEventSource.instances).toHaveLength(1);
   expect(latest().url).toBe(JOB_EVENTS_PATH);
 
@@ -43,7 +52,7 @@ it("opens one feed for every subscriber and closes it with the last one", () => 
 
 it("hands every subscriber the parsed job and ignores malformed events", () => {
   const seen: unknown[] = [];
-  events.subscribeJobEvents((job) => seen.push(job));
+  subscribe((job) => seen.push(job));
   latest().open();
   latest().job({ id: "job-1", status: "complete" });
   latest().dispatchEvent(new MessageEvent("job", { data: "not json" }));
@@ -56,7 +65,7 @@ it("reports the connection and announces a reconnect, not the first open", () =>
   const { result } = renderHook(() => events.useJobEventsConnected());
   expect(result.current).toBe(false);
 
-  events.subscribeJobEvents(() => {}, reconnects);
+  subscribe(() => {}, reconnects);
   act(() => latest().open());
   expect(result.current).toBe(true);
   expect(reconnects).not.toHaveBeenCalled();
@@ -72,7 +81,7 @@ it("reports the connection and announces a reconnect, not the first open", () =>
 
 it("waits before reopening a feed the server refused", () => {
   vi.useFakeTimers();
-  events.subscribeJobEvents(() => {});
+  subscribe(() => {});
   latest().open();
   latest().refuse();
   expect(latest().closed).toBe(true);
@@ -86,9 +95,99 @@ it("waits before reopening a feed the server refused", () => {
 
 it("does not reopen after the last subscriber left", () => {
   vi.useFakeTimers();
-  const stop = events.subscribeJobEvents(() => {});
+  const stop = subscribe(() => {});
   latest().refuse();
   stop();
   vi.advanceTimersByTime(60_000);
   expect(FakeEventSource.instances).toHaveLength(1);
+});
+
+function setVisibility(state: DocumentVisibilityState) {
+  Object.defineProperty(document, "visibilityState", { value: state, configurable: true });
+  document.dispatchEvent(new Event("visibilitychange"));
+}
+
+describe("in a hidden tab", () => {
+  afterEach(() => {
+    Reflect.deleteProperty(document, "visibilityState");
+  });
+
+  it("closes the feed after the grace period and reopens it, with a refetch, when shown", () => {
+    vi.useFakeTimers();
+    const reconnects = vi.fn();
+    subscribe(() => {}, reconnects);
+    latest().open();
+
+    setVisibility("hidden");
+    vi.advanceTimersByTime(89_000);
+    expect(latest().closed).toBe(false);
+    vi.advanceTimersByTime(1_000);
+    expect(latest().closed).toBe(true);
+
+    setVisibility("visible");
+    expect(FakeEventSource.instances).toHaveLength(2);
+    latest().open();
+    expect(reconnects).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the feed through a short hide", () => {
+    vi.useFakeTimers();
+    subscribe(() => {});
+    latest().open();
+    setVisibility("hidden");
+    vi.advanceTimersByTime(60_000);
+    setVisibility("visible");
+    vi.advanceTimersByTime(60_000);
+    expect(FakeEventSource.instances).toHaveLength(1);
+    expect(latest().closed).toBe(false);
+  });
+
+  it("does not retry a refused feed while closed for a hidden tab", () => {
+    vi.useFakeTimers();
+    subscribe(() => {});
+    latest().refuse();
+    setVisibility("hidden");
+    vi.advanceTimersByTime(30_000);
+    expect(FakeEventSource.instances).toHaveLength(2);
+    vi.advanceTimersByTime(600_000);
+    expect(FakeEventSource.instances).toHaveLength(2);
+    expect(latest().closed).toBe(true);
+  });
+
+  it("keeps a refused feed's wait across the hidden tab's close", () => {
+    vi.useFakeTimers();
+    subscribe(() => {});
+    latest().open();
+    setVisibility("hidden");
+    vi.advanceTimersByTime(89_000);
+    latest().refuse();
+    // Closed for the hidden tab a second later, shown a second after that.
+    vi.advanceTimersByTime(2_000);
+    setVisibility("visible");
+    expect(FakeEventSource.instances).toHaveLength(1);
+    vi.advanceTimersByTime(27_000);
+    expect(FakeEventSource.instances).toHaveLength(1);
+    vi.advanceTimersByTime(1_000);
+    expect(FakeEventSource.instances).toHaveLength(2);
+  });
+
+  it("keeps a refused feed's wait when the tab is shown again", () => {
+    vi.useFakeTimers();
+    subscribe(() => {});
+    latest().refuse();
+    setVisibility("hidden");
+    setVisibility("visible");
+    expect(FakeEventSource.instances).toHaveLength(1);
+    vi.advanceTimersByTime(30_000);
+    expect(FakeEventSource.instances).toHaveLength(2);
+  });
+
+  it("stops watching the tab once the last subscriber leaves", () => {
+    vi.useFakeTimers();
+    const stop = subscribe(() => {});
+    stop();
+    setVisibility("hidden");
+    setVisibility("visible");
+    expect(FakeEventSource.instances).toHaveLength(1);
+  });
 });

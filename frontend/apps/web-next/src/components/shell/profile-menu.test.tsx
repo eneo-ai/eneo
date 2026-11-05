@@ -2,7 +2,6 @@
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNameToHoldVisibleText, expectNoAxeViolations } from "@/test/axe";
-import { router } from "@/test/navigation";
 import { renderInApp, testAppContext } from "@/test/render";
 import { ProfileMenu, profileDisplayName, profileInitials } from "./profile-menu";
 
@@ -49,15 +48,36 @@ describe("ProfileMenu", () => {
     await expectNoAxeViolations(document.body);
   });
 
-  it("navigates to the account page", async () => {
+  it("links each page it opens, so a modified click opens it in a new tab", async () => {
     await openMenu();
-    fireEvent.click(screen.getByRole("menuitem", { name: "Mitt konto" }));
-    expect(router.push).toHaveBeenCalledWith("/account");
+    for (const [name, href] of [
+      ["Mitt konto", "/account"],
+      ["Mina API-nycklar", "/account/api-keys"],
+      [/Nyheter/, "/whats-new"],
+      ["Integrationer", "/account/integrations"]
+    ] as const) {
+      const item = screen.getByRole("menuitem", { name });
+      expect(item.tagName).toBe("A");
+      expect(item.getAttribute("href")).toBe(href);
+    }
+  });
+
+  // A link would load them in the app, and ahead of a click on hover; they need a full page load.
+  it("keeps logout and the organisation switch as actions, not links", async () => {
+    renderInApp(<ProfileMenu />, {
+      appContext: testAppContext({ federationStatus: { has_multi_tenant_federation: true } })
+    });
+    fireEvent.click(screen.getByRole("button", { name: TRIGGER }));
+    for (const name of ["Välj en annan organisation", "Logga ut"]) {
+      expect((await screen.findByRole("menuitem", { name })).hasAttribute("href")).toBe(false);
+    }
   });
 
   it("links the accessibility statement when one is configured", async () => {
     await openMenu("https://example.se/tillganglighetsredogorelse");
-    expect(screen.getByRole("menuitem", { name: "Tillgänglighetsredogörelse" })).toBeTruthy();
+    expect(
+      screen.getByRole("menuitem", { name: "Tillgänglighetsredogörelse" }).getAttribute("href")
+    ).toBe("https://example.se/tillganglighetsredogorelse");
   });
 
   it("hides the accessibility statement link when it is not configured", async () => {
@@ -65,12 +85,48 @@ describe("ProfileMenu", () => {
     expect(screen.queryByRole("menuitem", { name: "Tillgänglighetsredogörelse" })).toBeNull();
   });
 
+  it("links the help centre on a page without a SideNav, in a new tab, when one is configured", async () => {
+    const helpCenter = "https://example.se/hjalp";
+    const { unmount } = renderInApp(<ProfileMenu inTopBar withHelpCenter />, {
+      appContext: testAppContext({ links: { helpCenter } })
+    });
+    fireEvent.click(screen.getByRole("button", { name: TRIGGER }));
+    const link = await screen.findByRole("menuitem", {
+      name: "Har du en fråga? (öppnas i en ny flik)"
+    });
+    expect(link.getAttribute("href")).toBe(helpCenter);
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("rel")).toBe("noopener noreferrer");
+    expect(link.querySelector("svg.lucide-external-link")).toBeTruthy();
+    unmount();
+
+    renderInApp(<ProfileMenu inTopBar withHelpCenter />, {
+      appContext: testAppContext({ links: { helpCenter: null } })
+    });
+    fireEvent.click(screen.getByRole("button", { name: TRIGGER }));
+    await screen.findByRole("menuitem", { name: "Mitt konto" });
+    expect(screen.queryByRole("menuitem", { name: /Har du en fråga/ })).toBeNull();
+  });
+
+  it("leaves the help centre to the SideNav's foot beside it", async () => {
+    renderInApp(<ProfileMenu inTopBar />, {
+      appContext: testAppContext({ links: { helpCenter: "https://example.se/hjalp" } })
+    });
+    fireEvent.click(screen.getByRole("button", { name: TRIGGER }));
+    await screen.findByRole("menuitem", { name: "Mitt konto" });
+    expect(screen.queryByRole("menuitem", { name: /Har du en fråga/ })).toBeNull();
+  });
+
   it("offers a return to the existing app only when configured", async () => {
     renderInApp(<ProfileMenu />, {
       appContext: testAppContext({ links: { legacyApp: "https://app.example" } })
     });
     fireEvent.click(screen.getByRole("button", { name: TRIGGER }));
-    expect(await screen.findByRole("menuitem", { name: "Tillbaka till gamla appen" })).toBeTruthy();
+    expect(
+      (await screen.findByRole("menuitem", { name: "Tillbaka till gamla appen" })).getAttribute(
+        "href"
+      )
+    ).toBe("https://app.example");
   });
 
   it("names each language in its own language", async () => {

@@ -4,8 +4,6 @@ import { WCAG_22_AA_TAGS } from "../src/test/wcag";
 import { expect, test } from "./csp";
 import { E2E_CREDENTIALS } from "./helpers";
 
-test.skip(!process.env.E2E_BASE_URL, "Requires the FastAPI-served Vite build");
-
 const LOGIN = "/login?showUsernameAndPassword=true";
 const SESSION = "/api/v1/auth/session/";
 const GENERATION = "Eneo-Session-Generation";

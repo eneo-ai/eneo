@@ -133,8 +133,11 @@ async def test_context_reads_only_metadata_without_question_or_file_content():
     sql = str(compiled)
     assert "questions" not in sql
     assert "sessions.name" not in sql
-    assert "coalesce(users.tenant_id, api_keys_v2.tenant_id)" in sql
+    assert "coalesce(users.tenant_id, api_keys_v2.tenant_id, widgets.tenant_id)" in sql
     assert "help_assistant_runs" in sql
+    assert "sessions.widget_id" in sql
+    assert "sessions.visitor_id" in sql
+    assert "LEFT OUTER JOIN widgets ON sessions.widget_id = widgets.id" in sql
     assert {session_id, tenant_id}.issubset(set(compiled.params.values()))
     session.execute.assert_awaited_once()
 

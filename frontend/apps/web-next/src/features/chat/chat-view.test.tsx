@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatPartner, EneoUIMessage } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
@@ -444,6 +444,77 @@ describe("ChatView composer drafts", () => {
       await Promise.resolve();
       saved();
     });
+  });
+
+  /** How many questions went out: each request is announced as it goes. */
+  const requestsSent = () =>
+    spies.announce.mock.calls.filter(([message]) => message === "Assistenten skriver ett svar")
+      .length;
+
+  it("sends one question at a time while a model switch is being saved", async () => {
+    sessionStorage.clear();
+    renderInApp(<Harness partner={assistant} />);
+    let saved!: () => void;
+    void queuePartnerUpdate(() => new Promise<void>((resolve) => (saved = resolve)));
+    fireEvent.change(screen.getByRole("textbox", { name: "Fråga Upphandlingsassistenten" }), {
+      target: { value: "Första frågan" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
+
+    // The first question waits for the save: a second stays in the composer.
+    const field = screen.getByRole<HTMLTextAreaElement>("textbox", {
+      name: "Fråga Upphandlingsassistenten"
+    });
+    fireEvent.change(field, { target: { value: "Andra frågan" } });
+    fireEvent.keyDown(field, { key: "Enter", ctrlKey: true });
+    expect(field.value).toBe("Andra frågan");
+
+    await act(async () => {
+      await Promise.resolve();
+      saved();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(requestsSent()).toBe(1);
+  });
+
+  it("shows a question waiting for a model switch in the conversation, and a stop takes it back to the start", async () => {
+    sessionStorage.clear();
+    renderInApp(<Harness partner={assistant} />);
+    let saved!: () => void;
+    const saving = new Promise<void>((resolve) => (saved = resolve));
+    void queuePartnerUpdate(() => saving);
+    const field = screen.getByRole("textbox", { name: "Fråga Upphandlingsassistenten" });
+    field.focus();
+    fireEvent.change(field, { target: { value: "Skicka när modellen är sparad" } });
+    fireEvent.keyDown(field, { key: "Enter", ctrlKey: true });
+
+    // It stands in the conversation while it waits, and the focus went to the docked composer.
+    const log = screen.getByRole("log", { name: "Konversation" });
+    expect(within(log).getByText("Skicka när modellen är sparad")).toBeTruthy();
+    expect(screen.queryByRole("heading", { level: 1, name: "Upphandlingsassistenten" })).toBeNull();
+    const docked = screen.getByRole<HTMLTextAreaElement>("textbox", {
+      name: "Fråga Upphandlingsassistenten"
+    });
+    expect(docked.value).toBe("");
+    expect(document.activeElement).toBe(docked);
+
+    // A first question goes back to the start state, its draft and the focus in that composer.
+    fireEvent.click(screen.getByRole("button", { name: "Stoppa generering" }));
+    expect(screen.queryByRole("log")).toBeNull();
+    expect(screen.getByRole("heading", { level: 1, name: "Upphandlingsassistenten" })).toBeTruthy();
+    const start = screen.getByRole<HTMLTextAreaElement>("textbox", {
+      name: "Fråga Upphandlingsassistenten"
+    });
+    expect(start.value).toBe("Skicka när modellen är sparad");
+    expect(document.activeElement).toBe(start);
+    expect(screen.getByRole("button", { name: "Skicka meddelande" })).toBeTruthy();
+
+    // Saved after the stop: nothing goes out.
+    await act(async () => {
+      saved();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(requestsSent()).toBe(0);
   });
 
   it("keeps a draft for the account that typed it, and gives it to no other", async () => {
@@ -1119,68 +1190,5 @@ describe("ChatView activity on a phone (decision 28)", () => {
     layOutConversation(844);
     expect(await screen.findByRole("complementary", { name: PANEL })).toBeTruthy();
     expect(document.activeElement).toBe(inAnswer);
-  });
-});
-
-describe("ChatView activity where the history gives way to it", () => {
-  /** The chat page's row: the conversation, and a 320 px history that yields to a panel. */
-  function Row({ messages }: { messages: EneoUIMessage[] }) {
-    const row = useRef<HTMLDivElement>(null);
-    const [historyOpen, setHistoryOpen] = useState(true);
-    const [activity, setActivity] = useState<ActivityState | null>(null);
-    return (
-      <div ref={row} data-testid="row" className="flex h-[600px]">
-        <ChatView
-          partner={assistant}
-          initialMessages={messages}
-          initialSessionId="session-1"
-          activity={activity}
-          onActivityChange={(next) => {
-            if (next) setHistoryOpen(false);
-            setActivity(next);
-          }}
-          layout={{ row, aside: historyOpen ? { width: 320, yields: true } : null }}
-        />
-        {historyOpen && <aside aria-label="Konversationer" style={{ width: 320 }} />}
-      </div>
-    );
-  }
-
-  it("opens beside the conversation without passing through the sheet", () => {
-    const sourced: EneoUIMessage[] = [
-      { id: "q1", role: "user", parts: [{ type: "text", text: "Vilken gräns gäller?" }] },
-      {
-        id: "a1",
-        role: "assistant",
-        parts: [
-          {
-            type: "source-document",
-            sourceId: "abcd1234-0000",
-            mediaType: "text/plain",
-            title: "LOU 19 kap."
-          },
-          { type: "text", text: 'Gränsen är 700 000 kr<inref id="abcd1234"/>.', state: "done" }
-        ] as EneoUIMessage["parts"]
-      }
-    ];
-    renderInApp(<Row messages={sourced} />);
-    act(() => reportResize(screen.getByTestId("row"), { width: 1000, height: 600 }));
-    const dock = screen.getByRole("textbox", { name: /^Fråga / });
-    const hidden: boolean[] = [];
-    const watch = new MutationObserver(() => hidden.push(Boolean(dock.closest("[hidden]"))));
-    watch.observe(document.body, { attributes: true, attributeFilter: ["hidden"], subtree: true });
-    const scrolled = vi.spyOn(HTMLElement.prototype, "scrollIntoView");
-    const opener = within(screen.getByRole("list", { name: "Källor" })).getByRole("button", {
-      name: "Källa 1: LOU 19 kap."
-    });
-
-    fireEvent.click(opener);
-
-    expect(screen.getByRole("complementary", { name: "Aktivitet för svaret" })).toBeTruthy();
-    watch.disconnect();
-    // The dock never gave way and the answer did not scroll for a sheet that never came.
-    expect(hidden.filter(Boolean)).toEqual([]);
-    expect(scrolled.mock.contexts).not.toContain(opener);
-    scrolled.mockRestore();
   });
 });

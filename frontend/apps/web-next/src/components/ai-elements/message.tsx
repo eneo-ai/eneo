@@ -2,12 +2,12 @@ import { cn } from "@/lib/utils";
 import { sanitizeImageSrc, sanitizeLinkHref } from "@/lib/safe-url";
 import { toast } from "@/lib/toast";
 import { cjk } from "@streamdown/cjk";
-import { createCodePlugin } from "@streamdown/code";
 import type { ComponentProps, ComponentType } from "react";
 import { useTranslations } from "use-intl";
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { CodeBlock, Streamdown, type CustomRendererProps, type UrlTransform } from "streamdown";
 import { answerRehypePlugins, answerRemarkPlugins } from "./answer-markdown";
+import { code, preloadCodeHighlighter } from "./code-highlighter";
 import { katexStore, mathPlugin, mayContainMath } from "./math";
 import "./message.css";
 import {
@@ -64,9 +64,6 @@ function AnswerDiagram(props: CustomRendererProps) {
   );
 }
 
-const code = createCodePlugin({
-  themes: ["github-light-high-contrast", "github-dark-high-contrast"]
-});
 const renderers = [{ language: "mermaid", component: AnswerDiagram }];
 // Formulas keep their TeX until KaTeX has loaded (with the first answer that
 // can hold math); then each answer that can hold math switches to the
@@ -137,7 +134,10 @@ export const MessageResponse = memo(
     useEffect(() => {
       if (canHoldMath && !typeset) katexStore.load();
     }, [canHoldMath, typeset]);
-    useEffect(() => katexStore.preload(), []);
+    useEffect(() => {
+      katexStore.preload();
+      preloadCodeHighlighter();
+    }, []);
 
     return (
       <Streamdown

@@ -101,6 +101,19 @@ class ReleaseNotesTests(_RepoCase):
         self.assertIn("entry 2.2.0 has no date", result.stdout)
         self.assertEqual((root / NOTES).read_text(encoding="utf-8"), before)
 
+    def test_finalize_preserves_an_existing_date_on_a_later_retry(self) -> None:
+        root = self.make_repo({"releases": [{"version": "2.3.0", "date": "2026-01-01", "entries": [ENTRY]}, HISTORY]})
+        result = self.run_notes(root, "finalize", "2.3.0")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(self.read(root)[0]["date"], "2026-01-01")
+
+    def test_finalize_rejects_impossible_calendar_dates_without_writing(self) -> None:
+        root = self.make_repo({"releases": [{"version": "2.3.0", "entries": [ENTRY]}, HISTORY]})
+        before = (root / NOTES).read_text(encoding="utf-8")
+        result = self.run_notes(root, "finalize", "2.3.0", "--date", "2026-02-30")
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertEqual((root / NOTES).read_text(encoding="utf-8"), before)
+
     def test_port_moves_released_entries_out_of_next(self) -> None:
         develop_only = entry(
             "shared", permissions={"allOf": ["assistants"]}, body={"en": "Old.", "sv": "Gammal."}

@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -6,6 +7,7 @@ import pytest
 
 import eneo.sessions.session_service as session_service_module
 from eneo.assistants.api.assistant_models import AssistantSparse
+from eneo.authentication.auth_models import ApiKeyOwnership
 from eneo.main.exceptions import (
     BadRequestException,
     NotFoundException,
@@ -14,13 +16,15 @@ from eneo.main.exceptions import (
 from eneo.questions.question import MessageFeedback
 from eneo.sessions.session import SessionContext, SessionInDB, SessionUpdate
 from eneo.sessions.session_service import SessionService
-from eneo.sessions.sessions_repo import OwnedChatPartner
+from eneo.sessions.sessions_repo import OwnedChatPartner, SessionOwnership
 from eneo.skills.domain.skill import (
     SkillActivationEvidenceV1,
     SkillExecutionReference,
     SkillTurnEffectiveMode,
 )
-from tests.fixtures import TEST_USER, TEST_UUID
+from eneo.widgets.application.visitor_user import build_visitor_user
+from eneo.widgets.domain.widget import Widget
+from tests.fixtures import TEST_TENANT, TEST_USER, TEST_UUID
 
 TEST_ASSISTANT = AssistantSparse(
     name="test_assistant",
@@ -113,21 +117,79 @@ async def test_update_error_when_user_is_not_owner_of_session(service: SessionSe
 
 
 async def test_delete_error_when_session_does_not_exist(service: SessionService):
-    service.session_repo.get.return_value = None
+    service.session_repo.get_ownership.return_value = None
 
     with pytest.raises(NotFoundException, match="not found"):
         await service.delete(1)
 
 
 async def test_delete_error_when_user_not_owner_of_session(service: SessionService):
-    service.session_repo.get.return_value = SessionInDB(
+    service.session_repo.get_ownership.return_value = SessionOwnership(
         user_id=uuid4(),
-        name="test_session",
-        id=TEST_UUID,
+        api_key_id=None,
+        widget_id=None,
+        visitor_id=None,
+        assistant_id=None,
+        group_chat_id=None,
     )
 
     with pytest.raises(UnauthorizedException, match="belongs to other principal"):
         await service.delete(1)
+
+
+async def test_a_service_key_owns_only_its_own_conversations(
+    service: SessionService,
+):
+    key_id = uuid4()
+    service.user = TEST_USER.model_copy(
+        update={
+            "active_api_key": SimpleNamespace(
+                id=key_id, ownership=ApiKeyOwnership.SERVICE
+            )
+        }
+    )
+    own = SessionOwnership(
+        user_id=None,
+        api_key_id=key_id,
+        widget_id=None,
+        visitor_id=None,
+        assistant_id=TEST_UUID,
+        group_chat_id=None,
+    )
+    service.session_repo.get_ownership.return_value = own
+
+    assert await service.get_session_ownership(TEST_UUID) == own
+
+    for other in (
+        own._replace(api_key_id=uuid4()),
+        own._replace(user_id=TEST_USER.id, api_key_id=None),
+    ):
+        service.session_repo.get_ownership.return_value = other
+        with pytest.raises(UnauthorizedException, match="belongs to other principal"):
+            await service.get_session_ownership(TEST_UUID)
+
+
+async def test_the_ownership_read_refuses_as_the_full_read(service: SessionService):
+    owned = SessionOwnership(
+        user_id=TEST_USER.id,
+        api_key_id=None,
+        widget_id=None,
+        visitor_id=None,
+        assistant_id=TEST_UUID,
+        group_chat_id=None,
+    )
+    service.session_repo.get_ownership.return_value = owned
+
+    with pytest.raises(NotFoundException, match="belongs to another assistant"):
+        await service.get_session_ownership(TEST_UUID, assistant_id=uuid4())
+
+    service.session_repo.get_ownership.return_value = owned._replace(
+        assistant_id=None, group_chat_id=uuid4()
+    )
+    with pytest.raises(BadRequestException, match="group chat session"):
+        await service.get_session_ownership(TEST_UUID, assistant_id=TEST_UUID)
+    with pytest.raises(NotFoundException, match="belongs to another group chat"):
+        await service.get_session_ownership(TEST_UUID, group_chat_id=uuid4())
 
 
 async def test_question_placeholder_persists_selected_skill_revision(
@@ -309,3 +371,38 @@ async def test_get_context_applies_the_chat_partner_checks(service: SessionServi
     assert (
         await service.get_context(TEST_UUID, group_chat_id=group_chat_id)
     ).id == TEST_UUID
+
+
+async def test_settings_context_belongs_to_the_widget_and_visitor_pair(
+    service: SessionService,
+):
+    widget = Widget.create(
+        tenant_id=TEST_TENANT.id,
+        space_id=uuid4(),
+        target_id=TEST_ASSISTANT.id,
+        name="Visitor chat",
+    ).model_copy(update={"id": uuid4()})
+    visitor_id = uuid4()
+    service.user = build_visitor_user(widget, visitor_id, TEST_TENANT)
+    own = SessionContext(
+        id=TEST_UUID,
+        user_id=None,
+        api_key_id=None,
+        widget_id=widget.id,
+        visitor_id=visitor_id,
+        assistant_id=TEST_ASSISTANT.id,
+        group_chat_id=None,
+        space_id=widget.space_id,
+        settings=None,
+    )
+    service.session_repo.get_context.return_value = own
+    assert await service.get_context(TEST_UUID, assistant_id=TEST_ASSISTANT.id) == own
+    for changes in (
+        {"visitor_id": uuid4()},
+        {"widget_id": uuid4()},
+        {"widget_id": None, "visitor_id": None, "user_id": TEST_USER.id},
+    ):
+        service.session_repo.get_context.return_value = own.model_copy(update=changes)
+        with pytest.raises(UnauthorizedException, match="belongs to other principal"):
+            await service.get_context(TEST_UUID)
+    service.session_repo.get.assert_not_awaited()

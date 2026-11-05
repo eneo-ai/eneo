@@ -4,8 +4,6 @@ import { STORAGE_STATE } from "../playwright.config";
 import { createFixtures, openRoute } from "./responsive-fixtures";
 import { ROUTES, type Fixtures } from "./responsive-routes";
 
-test.skip(!process.env.E2E_BASE_URL, "Requires the FastAPI-served Vite build");
-
 /*
  * Cumulative layout shift (Core Web Vitals; WCAG 3.2.x is about change on request, but a page
  * that moves under a finger or a reading eye is the same fault). Content that arrives late
@@ -41,7 +39,7 @@ const PROBE = `
 
 test.describe(
   "no screen shifts by more than 0.1 while it loads on a slow phone",
-  { tag: ["@vite", "@layout-shift"] },
+  { tag: "@layout-shift" },
   () => {
     let fixtures: Fixtures;
     test.beforeAll(async ({ browser, baseURL }) => {

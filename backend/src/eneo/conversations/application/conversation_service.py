@@ -1,6 +1,5 @@
 # Copyright (c) 2025 Sundsvalls Kommun
 
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Collection, Optional
 
 from eneo.completion_models.infrastructure.context_builder import (
@@ -53,7 +52,10 @@ if TYPE_CHECKING:
 
     from eneo.assistants.api.assistant_models import AssistantResponse
     from eneo.assistants.assistant import Assistant
-    from eneo.assistants.assistant_service import AssistantService
+    from eneo.assistants.assistant_service import (
+        AssistantPreflightTarget,
+        AssistantService,
+    )
     from eneo.completion_models.domain.completion_model import CompletionModel
     from eneo.completion_models.infrastructure.completion_service import (
         CompletionService,
@@ -65,7 +67,6 @@ if TYPE_CHECKING:
     from eneo.sessions.session import SessionContext, SessionInDB
     from eneo.sessions.session_service import SessionService
     from eneo.spaces.space import Space
-    from eneo.spaces.space_service import SpaceService
 
 
 def _litellm_token_counter_name(model: "CompletionModel") -> str:
@@ -75,15 +76,6 @@ def _litellm_token_counter_name(model: "CompletionModel") -> str:
     if model.provider_id and model.provider_type:
         return f"{model.provider_type}/{model.name}"
     return model.name
-
-
-@dataclass(frozen=True)
-class _AssistantContext:
-    """One load of what settings resolution needs for an assistant."""
-
-    assistant: "Assistant"
-    config: "EffectiveConfig | None"
-    space: "Space"
 
 
 class ConversationService:
@@ -98,7 +90,6 @@ class ConversationService:
         group_chat_service: "GroupChatService",
         session_service: "SessionService",
         completion_service: "CompletionService",
-        space_service: "SpaceService",
         file_service: "FileService",
     ) -> None:
         super().__init__()
@@ -106,19 +97,7 @@ class ConversationService:
         self.group_chat_service = group_chat_service
         self.session_service = session_service
         self.completion_service = completion_service
-        self.space_service = space_service
         self.file_service = file_service
-
-    async def _assistant_context(self, assistant_id: "UUID") -> _AssistantContext:
-        (
-            assistant,
-            _,
-            config,
-        ) = await self.assistant_service.get_assistant_with_effective_config(
-            assistant_id
-        )
-        space = await self.space_service.get_space_by_assistant(assistant_id)
-        return _AssistantContext(assistant=assistant, config=config, space=space)
 
     async def settings_defaults(
         self,
@@ -126,7 +105,7 @@ class ConversationService:
         session_id: "UUID | None" = None,
         assistant_id: "UUID | None" = None,
         group_chat_id: "UUID | None" = None,
-        context: _AssistantContext | None = None,
+        context: "AssistantPreflightTarget | None" = None,
     ) -> ConversationSettings:
         if session_id is not None:
             session = await self.session_service.get_context(session_id)
@@ -137,9 +116,11 @@ class ConversationService:
             return ConversationSettings()
         if assistant_id is None:
             raise BadRequestException("A conversation target is required.")
-        context = context or await self._assistant_context(assistant_id)
+        context = context or await self.assistant_service.get_preflight_target(
+            assistant_id
+        )
         return self._assistant_settings_defaults(
-            context.assistant, context.space, context.config
+            context.assistant, context.space, context.effective_config
         )
 
     @staticmethod
@@ -220,8 +201,12 @@ class ConversationService:
             )
         if assistant_id is None:
             raise BadRequestException("A conversation target is required.")
-        context = await self._assistant_context(assistant_id)
-        assistant, config, space = context.assistant, context.config, context.space
+        context = await self.assistant_service.get_preflight_target(assistant_id)
+        assistant, config, space = (
+            context.assistant,
+            context.effective_config,
+            context.space,
+        )
         if settings is None:
             settings = self._assistant_settings_defaults(assistant, space, config)
         result = ConversationSettingsResolution(
@@ -378,7 +363,7 @@ class ConversationService:
         group_chat_id: "UUID | None",
         previous_settings: ConversationSettings | None = None,
         running_settings: ConversationSettings | None = None,
-        context: _AssistantContext | None = None,
+        context: "AssistantPreflightTarget | None" = None,
     ) -> None:
         """Refuse choices the conversation's target cannot take.
 
@@ -399,16 +384,10 @@ class ConversationService:
             return
         if assistant_id is None:
             raise BadRequestException("A conversation target is required.")
-        if context is not None:
-            assistant, config = context.assistant, context.config
-        else:
-            (
-                assistant,
-                _,
-                config,
-            ) = await self.assistant_service.get_assistant_with_effective_config(
-                assistant_id
-            )
+        context = context or await self.assistant_service.get_preflight_target(
+            assistant_id
+        )
+        assistant, config = context.assistant, context.effective_config
         switched_from = (
             previous_settings if previous_settings is not None else running_settings
         )
@@ -417,11 +396,7 @@ class ConversationService:
             and settings.completion_model_id != switched_from.completion_model_id
         )
         space = (
-            (
-                context.space
-                if context is not None
-                else await self.space_service.get_space_by_assistant(assistant_id)
-            )
+            context.space
             if settings.completion_model_id is not None or model_switched
             else None
         )
@@ -489,6 +464,11 @@ class ConversationService:
         session = await self.session_service.get_context(session_id)
         if session.settings:
             session.settings.require_supported()
+        context = (
+            await self.assistant_service.get_preflight_target(session.assistant_id)
+            if session.group_chat_id is None and session.assistant_id is not None
+            else None
+        )
         await self.validate_settings(
             settings,
             assistant_id=session.assistant_id,
@@ -499,7 +479,9 @@ class ConversationService:
             else await self.settings_defaults(
                 assistant_id=session.assistant_id,
                 group_chat_id=session.group_chat_id,
+                context=context,
             ),
+            context=context,
         )
         return await self.session_service.update_settings(
             session_id, settings, expected_revision
@@ -538,7 +520,7 @@ class ConversationService:
         if state is None:
             # Defaults and validation share one assistant/policy/space load.
             context = (
-                await self._assistant_context(assistant_id)
+                await self.assistant_service.get_preflight_target(assistant_id)
                 if group_chat_id is None and assistant_id is not None
                 else None
             )
@@ -646,11 +628,12 @@ class ConversationService:
             if session.settings:
                 session.settings.require_supported()
                 settings = session.settings.settings
-        context = None
+        context = (
+            await self.assistant_service.get_preflight_target(assistant_id)
+            if group_chat_id is None and assistant_id is not None
+            else None
+        )
         if settings is None:
-            # The defaults and the model resolution below share this load.
-            if group_chat_id is None and assistant_id is not None:
-                context = await self._assistant_context(assistant_id)
             settings = await self.settings_defaults(
                 assistant_id=assistant_id,
                 group_chat_id=group_chat_id,
@@ -711,14 +694,16 @@ class ConversationService:
         assistant_attachment_tokens = 0
         prompt_tokens = 0
         skill_context_tokens = 0
-        # The persistent baseline only makes sense for a bare assistant target
-        # (the config page and a brand-new conversation). For an existing session
-        # or group chat the prompt + attachments are already inside the history
-        # the client tracks separately, so leave them at 0 and keep the hot chat
-        # path cost identical to before.
+        # Existing sessions already count their persistent baseline in history.
         if assistant_id is not None and session_id is None and group_chat_id is None:
+            baseline_target = context
+            if tool_assistant_id is not None:
+                baseline_target = await self.assistant_service.get_preflight_target(
+                    tool_assistant_id
+                )
+            assert baseline_target is not None
             baseline = await self.assistant_service.get_preflight_baseline(
-                tool_assistant_id or assistant_id,
+                baseline_target,
                 prompt_override=assistant_prompt,
                 completion_model_id=completion_model_id,
             )
@@ -828,7 +813,7 @@ class ConversationService:
         tool_assistant_id: Optional["UUID"] = None,
         completion_model_id: Optional["UUID"] = None,
         session: "SessionContext | None" = None,
-        context: _AssistantContext | None = None,
+        context: "AssistantPreflightTarget | None" = None,
     ) -> "tuple[CompletionModel, int, bool]":
         """Resolve the completion model the next chat request would target.
 
@@ -904,7 +889,7 @@ class ConversationService:
         assistant_id: "UUID",
         completion_model_id: Optional["UUID"] = None,
         tool_assistant_id: Optional["UUID"] = None,
-        context: _AssistantContext | None = None,
+        context: "AssistantPreflightTarget | None" = None,
     ) -> tuple["CompletionModel | None", bool]:
         """Governance-aware model and file-inlining mode for one assistant.
 
@@ -912,17 +897,9 @@ class ConversationService:
         assistant's own model is disallowed, and the governed file policy —
         so the estimate never disagrees with the actual request.
         """
-        if context is not None and context.assistant.id == assistant_id:
-            assistant, effective_config = context.assistant, context.config
-        else:
-            context = None
-            (
-                assistant,
-                _,
-                effective_config,
-            ) = await self.assistant_service.get_assistant_with_effective_config(
-                assistant_id
-            )
+        if context is None or context.assistant.id != assistant_id:
+            context = await self.assistant_service.get_preflight_target(assistant_id)
+        assistant, effective_config = context.assistant, context.effective_config
         if tool_assistant_id is not None:
             if tool_assistant_id not in [tool.id for tool in assistant.tool_assistants]:
                 raise BadRequestException(
@@ -930,13 +907,8 @@ class ConversationService:
                 )
             return await self._assistant_preflight_settings(tool_assistant_id)
         if completion_model_id is not None:
-            space = (
-                context.space
-                if context is not None
-                else await self.space_service.get_space_by_assistant(assistant_id)
-            )
             model = self.assistant_service.resolve_personal_chat_model_override(
-                space=space,
+                space=context.space,
                 assistant=assistant,
                 effective_config=effective_config,
                 completion_model_id=completion_model_id,
@@ -1033,19 +1005,21 @@ class ConversationService:
         return space.get_completion_model(model_id)
 
     def _conversation_model(
-        self, context: _AssistantContext, state: ConversationSettingsState | None
+        self,
+        context: "AssistantPreflightTarget",
+        state: ConversationSettingsState | None,
     ) -> "CompletionModel | None":
         choice = state.settings.completion_model_id if state is not None else None
         if choice is not None:
             return self.assistant_service.resolve_personal_chat_model_override(
                 space=context.space,
                 assistant=context.assistant,
-                effective_config=context.config,
+                effective_config=context.effective_config,
                 completion_model_id=choice,
             )
         return select_effective_completion_model(
             current_model=context.assistant.completion_model,
-            effective_config=context.config,
+            effective_config=context.effective_config,
         )
 
     async def set_title_of_conversation(
@@ -1056,7 +1030,9 @@ class ConversationService:
         assert session.assistant is not None
         if session.settings is not None:
             session.settings.require_supported()
-        context = await self._assistant_context(session.assistant.id)
+        context = await self.assistant_service.get_preflight_target(
+            session.assistant.id
+        )
         # The history goes to the model the conversation chose, under the
         # same policy checks as a turn; never to the assistant's stored model.
         model = self._conversation_model(context, session.settings)

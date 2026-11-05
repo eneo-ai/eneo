@@ -1,7 +1,7 @@
 import { Badge } from "@astryxdesign/core/Badge";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
-import { Collapsible } from "@astryxdesign/core/Collapsible";
+import { Collapsible } from "@/components/astryx/collapsible";
 import { ProgressBar } from "@astryxdesign/core/ProgressBar";
 import { ChevronDown } from "lucide-react";
 import { useFormatter, useTranslations } from "use-intl";

@@ -9,13 +9,9 @@ import { makeAssistant, makeSpace } from "./testing/space-fixture";
 
 const state = vi.hoisted(() => ({
   space: null as unknown,
-  pushed: [] as string[],
   deleted: [] as string[]
 }));
 
-vi.mock("@/lib/navigation", () => ({
-  useRouter: () => ({ push: (href: string) => state.pushed.push(href), prefetch: () => {} })
-}));
 vi.mock("@/features/spaces/use-space", async () => {
   const { useSpaceFromQuery } = await import("@/features/spaces/testing/space-query");
   return { useSpace: () => useSpaceFromQuery(() => state.space as Space) };
@@ -36,7 +32,6 @@ import { AssistantsPage } from "@/features/assistants/assistants-page";
 afterEach(() => {
   cleanup();
   window.localStorage.clear();
-  state.pushed = [];
   state.deleted = [];
 });
 
@@ -60,7 +55,7 @@ describe("AssistantsPage", () => {
   it("groups cards by status for publishers, each card a link to its chat", async () => {
     const { container } = show(makeSpace({ assistants }), <AssistantsPage />);
 
-    expect(screen.getByRole("heading", { level: 2, name: "Assistenter" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1, name: "Assistenter" })).toBeTruthy();
     expect(screen.getAllByRole("button", { name: "Skapa assistent" })).toHaveLength(1);
     // Docked at the bottom on a phone, like the apps tab. It is the tab's
     // primary action, so it stays filled (the overview's are secondary).
@@ -91,7 +86,7 @@ describe("AssistantsPage", () => {
       target: { value: "saknas" }
     });
     // Under the tab's h2, the empty result is an h3.
-    expect(screen.getByRole("heading", { level: 3, name: "Inga resultat hittades" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 2, name: "Inga resultat hittades" })).toBeTruthy();
     // The count owns the empty result: its empty state does not say it again.
     await waitFor(() => expect(said).toEqual(["1 träff", "Inga träffar"]));
     expect(liveRegion()?.textContent).toBe("Inga träffar");
@@ -112,9 +107,12 @@ describe("AssistantsPage", () => {
     const opened = vi.fn();
     card.addEventListener("click", opened);
     fireEvent.click(menu);
-    fireEvent.click(menuOf(menu).getByRole("menuitem", { name: "Redigera" }));
+    const edit = menuOf(menu).getByRole("menuitem", { name: "Redigera" });
+    expect(edit.getAttribute("href")).toBe("/spaces/space-1/assistants/assistant-1/edit");
+    // jsdom cannot navigate; the click only has to stay off the card's link.
+    edit.addEventListener("click", (event) => event.preventDefault());
+    fireEvent.click(edit);
     expect(opened).not.toHaveBeenCalled();
-    expect(state.pushed).toEqual(["/spaces/space-1/assistants/assistant-1/edit"]);
   });
 
   it.each(["cards", "list"])(
@@ -139,7 +137,7 @@ describe("AssistantsPage", () => {
       );
       await waitFor(() =>
         expect(document.activeElement).toBe(
-          screen.getByRole("heading", { level: 2, name: "Assistenter" })
+          screen.getByRole("heading", { level: 1, name: "Assistenter" })
         )
       );
     }
@@ -161,7 +159,7 @@ describe("AssistantsPage", () => {
 
   it("puts the create menu in the empty state", async () => {
     const { container } = show(makeSpace(), <AssistantsPage />);
-    expect(screen.getByRole("heading", { level: 3, name: "Inga assistenter ännu" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 2, name: "Inga assistenter ännu" })).toBeTruthy();
     expect(screen.getAllByRole("button", { name: "Skapa assistent" })).toHaveLength(1);
     await expectNoAxeViolations(container);
   });
@@ -196,9 +194,31 @@ describe("AppsPage", () => {
     await expectNoAxeViolations(apps.container);
   });
 
+  it("links an app's editor from its menu", () => {
+    show(
+      makeSpace({
+        apps: [
+          {
+            id: "app-1",
+            name: "Protokollsammanfattning",
+            published: true,
+            user_id: "u",
+            permissions: ["read", "edit"]
+          }
+        ]
+      }),
+      <AppsPage />
+    );
+    const menu = screen.getByRole("button", { name: "Fler åtgärder för Protokollsammanfattning" });
+    fireEvent.click(menu);
+    expect(menuOf(menu).getByRole("menuitem", { name: "Redigera" }).getAttribute("href")).toBe(
+      "/spaces/space-1/apps/app-1/edit"
+    );
+  });
+
   it("explains an empty list", () => {
     show(makeSpace(), <AppsPage />);
-    expect(screen.getByRole("heading", { level: 3, name: "Inga appar ännu" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 2, name: "Inga appar ännu" })).toBeTruthy();
   });
 });
 
@@ -261,10 +281,10 @@ for (const [Page, space] of [
         .getAllByRole("region")
         .filter((region) =>
           ["Publicerad", "Utkast"].includes(
-            region.getAttribute("aria-label") ?? region.querySelector("h3")?.textContent ?? ""
+            region.getAttribute("aria-label") ?? region.querySelector("h2, h3")?.textContent ?? ""
           )
         )
-        .map((region) => region.querySelector("h3")?.textContent)
+        .map((region) => region.querySelector("h2, h3")?.textContent)
     ).toEqual(["Utkast", "Publicerad"]);
     const name = within(table).getByRole("columnheader", { name: /Namn/ });
     fireEvent.click(within(name).getByRole("button"));

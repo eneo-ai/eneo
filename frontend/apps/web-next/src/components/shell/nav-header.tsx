@@ -9,18 +9,63 @@ import { EneoIcon, EneoWordMark } from "./eneo-logo";
 import { NotificationBells } from "./notification-bells";
 
 /**
- * Wordmark link home, the collapse toggle and the notification bells.
+ * The SideNav's collapse toggle. The wordmark and the bells live in the top
+ * bar (top-bar.tsx), as in the Svelte app.
  *
- * One element tree for both states, so the toggle keeps its DOM node, and
- * with it the keyboard focus, when it collapses or expands the nav (WCAG
- * 2.4.3). Expanded, the bells sit before the toggle at the end of the row; in
- * the icon rail the toggle stays right under the logo and the bells follow.
+ * One element for both states, so the toggle keeps its DOM node, and with it
+ * the keyboard focus, when it collapses or expands the nav (WCAG 2.4.3).
  */
-export function NavHeader({ navId }: { navId: string }) {
+export function NavHeader({
+  navId,
+  withBrand = false,
+  besideHeading = false
+}: {
+  navId: string;
+  /** A tablet's SideNav, which has no top bar: the wordmark and the bells too. */
+  withBrand?: boolean;
+  /** Expanded with a heading: the toggle lies over that row's end, not above it. */
+  besideHeading?: boolean;
+}) {
   const t = useTranslations();
   const { isCollapsed, toggle } = useSideNavCollapse();
   const toggleLabel = isCollapsed ? t("shell_expand_nav") : t("shell_collapse_nav");
+  if (withBrand) return <BrandedNavHeader navId={navId} />;
 
+  return (
+    <div
+      className={cn(
+        "flex items-center",
+        isCollapsed ? "justify-center" : "justify-end",
+        besideHeading && "absolute inset-y-0 end-0 z-1"
+      )}
+    >
+      {/* SideNav's own collapse state, through a plain IconButton rather than
+          SideNavCollapseButton: that one has no tooltip, and an icon-only
+          control needs its name visible on hover. aria-expanded/-controls
+          make it a disclosure for the nav. */}
+      <IconButton
+        variant="ghost"
+        icon={<Icon icon={PanelLeft} />}
+        label={toggleLabel}
+        tooltip={toggleLabel}
+        aria-expanded={!isCollapsed}
+        aria-controls={navId}
+        onClick={toggle}
+      />
+    </div>
+  );
+}
+
+/**
+ * A tablet's SideNav header: the wordmark link home, the collapse toggle and
+ * the notification bells. Expanded, the bells sit before the toggle at the
+ * end of the row; in the icon rail the toggle stays right under the logo and
+ * the bells follow. One element tree for both states keeps the toggle's focus.
+ */
+function BrandedNavHeader({ navId }: { navId: string }) {
+  const t = useTranslations();
+  const { isCollapsed, toggle } = useSideNavCollapse();
+  const toggleLabel = isCollapsed ? t("shell_expand_nav") : t("shell_collapse_nav");
   // The SideNav is on the left: the bells' popovers open toward the page.
   const bells = <NotificationBells alignment="start" />;
 
@@ -45,10 +90,6 @@ export function NavHeader({ navId }: { navId: string }) {
         )}
       </Link>
       {!isCollapsed && bells}
-      {/* SideNav's own collapse state, through a plain IconButton rather than
-          SideNavCollapseButton: that one has no tooltip, and an icon-only
-          control needs its name visible on hover. aria-expanded/-controls
-          make it a disclosure for the nav. */}
       <IconButton
         variant="ghost"
         icon={<Icon icon={PanelLeft} />}

@@ -3,10 +3,11 @@ import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatPartner } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderInApp } from "@/test/render";
-import { setRoute } from "@/test/navigation";
-import { observedElements, reportResize, setViewport } from "@/test/setup-dom";
+import { renderInApp, testAppContext } from "@/test/render";
+import { replaceUrl, setRoute } from "@/test/navigation";
+import { setViewport } from "@/test/setup-dom";
 import { ChatPage } from "./chat-page";
+import { CHAT_PANEL_IDS } from "./chat-url";
 
 type Chunk = Record<string, unknown>;
 
@@ -359,6 +360,27 @@ describe("ChatPage", () => {
     window.localStorage.clear();
   });
 
+  it("links the assistant's editor from the header, and from the menu sheet on a phone", async () => {
+    const editHref = "/spaces/s/assistants/assistant-1/edit";
+    const page = <ChatPage {...{ partner, buildSessionUrl, editHref }} sessionId={null} />;
+    renderInApp(page);
+    // Beside the SideNav: Redigera in the header, as in Svelte.
+    expect(screen.getByRole("link", { name: "Redigera" }).getAttribute("href")).toBe(editHref);
+    cleanup();
+
+    setViewport("phone");
+    renderInApp(page);
+    fireEvent.click(
+      within(document.querySelector<HTMLElement>("[data-own-mobile-header]")!).getByRole("button", {
+        name: "Fler alternativ"
+      })
+    );
+    const sheet = await screen.findByRole("dialog");
+    expect(
+      within(sheet).getByRole("link", { name: "Redigera assistenten" }).getAttribute("href")
+    ).toBe(editHref);
+  });
+
   it("has no axe violations with a loaded conversation", async () => {
     renderPage("s-1");
     await screen.findByRole("log", { name: "Konversation" });
@@ -366,38 +388,26 @@ describe("ChatPage", () => {
   });
 });
 
-describe("ChatPage history (decision 14: the conversation keeps 480 px)", () => {
-  const historyButton = "Konversationer med Upphandlingsassistenten";
-  const historyName = "Konversationer";
-  const panelName = "Filer och vyer";
-  // Switching to Insikter writes ?tab=insights, which the next page would open on.
+describe("ChatPage Historik tab, as in Svelte", () => {
+  // The tabs write ?tab=, which the next page would open on.
   beforeEach(() => window.history.replaceState(null, "", "/"));
-
-  /** Lays out the page's regions at `width` px, as a browser measures them. */
-  const layOut = (width: number) =>
-    act(() => {
-      for (const element of observedElements()) reportResize(element, { width, height: 800 });
-    });
-  const historyBeside = () => screen.queryByRole("complementary", { name: historyName });
-  const historySheet = () => screen.queryByRole("dialog", { name: historyName });
-  const openHistory = () => fireEvent.click(screen.getByRole("button", { name: historyButton }));
-  const openPanel = async () =>
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Visa sidopanelen med filer och vyer" })
-    );
+  const tab = (name: string) => screen.getByRole("tab", { name });
+  const openHistory = () => fireEvent.click(tab("Historik"));
+  const historyPanel = () => screen.getByRole("tabpanel", { name: "Historik" });
 
   it.each([false, true])(
-    "resets only after a confirmed history deletion succeeds (failure: %s)",
+    "resets only after a confirmed history deletion succeeds, staying on Historik (failure: %s)",
     async (fails) => {
       window.history.replaceState(null, "", "/chat?session_id=s-1");
       setRoute("/chat?session_id=s-1");
       if (fails) api.DELETE.mockRejectedValueOnce(new Error("Unavailable"));
-      renderPage("s-1");
+      const rerender = renderPage("s-1");
       await screen.findByRole("log", { name: "Konversation" });
-      layOut(1200);
       const input = composer();
       fireEvent.change(input, { target: { value: "Unsent follow-up" } });
       openHistory();
+      setRoute(window.location.pathname + window.location.search);
+      rerender("s-1");
       fireEvent.click(await screen.findByRole("button", { name: "Åtgärder för Samtal s-1" }));
       fireEvent.click(await screen.findByRole("menuitem", { name: "Ta bort" }));
       const confirmation = await screen.findByRole("alertdialog", {
@@ -408,127 +418,179 @@ describe("ChatPage history (decision 14: the conversation keeps 480 px)", () => 
         await waitFor(() => expect(spies.toastError).toHaveBeenCalled());
         fireEvent.click(within(confirmation).getByRole("button", { name: "Avbryt" }));
         expect(input.value).toBe("Unsent follow-up");
-        expect(window.location.search).toBe("?session_id=s-1");
-        expect(screen.getByRole("log")).toBeTruthy();
+        expect(window.location.search).toBe("?session_id=s-1&tab=history");
       } else {
-        await waitFor(() => expect(screen.queryByRole("log")).toBeNull());
+        await waitFor(() => expect(window.location.search).toBe("?tab=history"));
         expect(screen.queryByRole("alertdialog")).toBeNull();
-        expect(window.location.pathname + window.location.search).toBe("/chat");
       }
     }
   );
 
-  it("sits beside the conversation when that keeps 480 px, an iPad held upright included", async () => {
-    setViewport("tablet-portrait");
+  it("lists the conversations across the page, the chat kept mounted behind it", async () => {
     renderPage(null);
-    layOut(820);
+    askWithKeyboard("Vilken gräns gäller?");
+    await waitFor(() => expect(spies.streams).toHaveLength(1));
     openHistory();
-    expect(await screen.findByRole("complementary", { name: historyName })).toBeTruthy();
-    expect(historySheet()).toBeNull();
+    setRoute("/chat?tab=history");
+    expect(new URLSearchParams(window.location.search).get("tab")).toBe("history");
+    expect(await within(historyPanel()).findByText("Samtal s-1")).toBeTruthy();
+    // The answer streams on behind Historik and is there in Chatt.
+    await act(async () => answer(spies.streams[0]!, "session-h", "Gränsen är 700 000 kr."));
+    fireEvent.click(tab("Chatt"));
+    setRoute("/chat?session_id=session-h");
+    const log = screen.getByRole("log", { name: "Konversation" });
+    expect(within(log).getByText("Gränsen är 700 000 kr.")).toBeTruthy();
+    expect(within(log).getByText("Vilken gräns gäller?")).toBeTruthy();
   });
 
-  it("is a sheet where the conversation would keep less (a 1024 px window beside the SideNav)", async () => {
+  it("names Historik as the page's h1 before a conversation has one, as Insikter", () => {
     renderPage(null);
-    layOut(752);
     openHistory();
-    expect(await screen.findByRole("dialog", { name: historyName })).toBeTruthy();
-    expect(historyBeside()).toBeNull();
+    setRoute("/chat?tab=history");
+    // The wide header's h1 (a phone's header names it too; jsdom shows both).
+    expect(screen.getAllByRole("heading", { level: 1, name: "Historik" })).not.toHaveLength(0);
   });
 
-  it("gives way to a panel that opens where both cannot sit beside the conversation", async () => {
-    setViewport("tablet-landscape");
-    renderPage("s-file");
-    await screen.findByRole("log", { name: "Konversation" });
-    layOut(908);
+  it("switches views past the leave guard: the conversation and its draft stay", () => {
+    renderPage(null);
+    fireEvent.change(composer(), { target: { value: "Unsent question" } });
     openHistory();
-    expect(await screen.findByRole("complementary", { name: historyName })).toBeTruthy();
-
-    await openPanel();
-    expect(await screen.findByRole("complementary", { name: panelName })).toBeTruthy();
-    expect(historyBeside()).toBeNull();
-    expect(historySheet()).toBeNull();
+    expect(replaceUrl).toHaveBeenLastCalledWith(expect.any(URL), { ignoreBlocker: true });
+    fireEvent.click(tab("Chatt"));
+    expect(replaceUrl).toHaveBeenLastCalledWith(expect.any(URL), { ignoreBlocker: true });
+    expect(composer().value).toBe("Unsent question");
+    // The draft is kept for the tab (sessionStorage); the next test starts without it.
+    fireEvent.change(composer(), { target: { value: "" } });
   });
 
-  it("gives way without the panel showing as a sheet first", async () => {
-    setViewport("tablet-landscape");
-    renderPage("s-file");
-    await screen.findByRole("log", { name: "Konversation" });
-    layOut(908);
-    openHistory();
-    const history = await screen.findByRole("complementary", { name: historyName });
-    // In px, as the rule is: a larger default font size does not widen it.
-    expect(history.style.width).toBe("320px");
-    // As laid out: what holds the conversation keeps what the history leaves.
-    act(() => {
-      for (const element of observedElements()) {
-        if (!element.contains(history)) reportResize(element, { width: 588, height: 800 });
-      }
+  it("opens a conversation picked in Historik in Chatt", async () => {
+    window.history.replaceState(null, "", "/chat?tab=history");
+    setRoute("/chat?tab=history");
+    renderPage(null);
+    fireEvent.click(await within(historyPanel()).findByRole("button", { name: /^Samtal s-1/ }));
+    await waitFor(() =>
+      expect(new URLSearchParams(window.location.search).get("session_id")).toBe("s-1")
+    );
+    expect(new URLSearchParams(window.location.search).get("tab")).toBeNull();
+    expect(await screen.findByRole("log", { name: "Konversation" })).toBeTruthy();
+  });
+
+  it("moves focus to the conversation when the Historik row that held it goes", async () => {
+    window.history.replaceState(null, "", "/chat?tab=history");
+    setRoute("/chat?tab=history");
+    renderPage(null);
+    const row = await within(historyPanel()).findByRole("button", { name: /^Samtal s-1/ });
+    row.focus();
+    fireEvent.click(row);
+    await waitFor(() => expect(document.activeElement?.id).toBe(CHAT_PANEL_IDS.chat));
+  });
+
+  it("moves focus to the conversation when a narrowed window takes the Historik row away", async () => {
+    window.history.replaceState(null, "", "/chat?tab=history");
+    setRoute("/chat?tab=history");
+    renderPage(null);
+    const row = await within(historyPanel()).findByRole("button", { name: /^Samtal s-1/ });
+    row.focus();
+    act(() => setViewport("phone"));
+    await waitFor(() => expect(document.activeElement?.id).toBe(CHAT_PANEL_IDS.chat));
+  });
+
+  it("leaves focus elsewhere alone when a narrowed window takes Historik away", async () => {
+    window.history.replaceState(null, "", "/chat?tab=history");
+    setRoute("/chat?tab=history");
+    renderPage(null);
+    await within(historyPanel()).findByRole("button", { name: /^Samtal s-1/ });
+    const outside = document.body.appendChild(document.createElement("button"));
+    outside.focus();
+    act(() => setViewport("phone"));
+    await waitFor(() => expect(screen.queryAllByRole("tabpanel")).toEqual([]));
+    await act(() => new Promise(requestAnimationFrame));
+    expect(document.activeElement).toBe(outside);
+    outside.remove();
+  });
+
+  it("starts a new conversation in Chatt from Historik", async () => {
+    window.history.replaceState(null, "", "/chat?tab=history");
+    setRoute("/chat?tab=history");
+    renderPage(null);
+    fireEvent.click(screen.getAllByRole("button", { name: "Ny konversation" })[0]!);
+    await waitFor(() => expect(window.location.search).toBe(""));
+  });
+
+  it("keeps the history a sheet on a phone, which has no tabs", async () => {
+    setViewport("phone");
+    renderPage(null);
+    // No tab panels: the phone's header has no tabs.
+    expect(screen.queryAllByRole("tabpanel")).toHaveLength(0);
+    const header = document.querySelector<HTMLElement>("[data-own-mobile-header]")!;
+    fireEvent.click(within(header).getByRole("button", { name: "Fler alternativ" }));
+    // On a phone the menu is a sheet of rows.
+    const sheet = await screen.findByRole("dialog");
+    fireEvent.click(within(sheet).getByText("Konversationer med Upphandlingsassistenten"));
+    expect(await screen.findByRole("dialog", { name: "Konversationer" })).toBeTruthy();
+  });
+
+  it("has no axe violations on Historik", async () => {
+    window.history.replaceState(null, "", "/chat?tab=history");
+    setRoute("/chat?tab=history");
+    renderPage(null);
+    await within(historyPanel()).findByText("Samtal s-1");
+    await expectNoAxeViolations(document.body);
+  });
+});
+
+describe("ChatPage Felsökning", () => {
+  const debugPartner: ChatPartner = { ...partner };
+  const renderDebug = (sessionId: string | null) =>
+    renderInApp(
+      <ChatPage partner={debugPartner} sessionId={sessionId} buildSessionUrl={buildSessionUrl} />,
+      { appContext: testAppContext({ permissions: ["assistant_debug"] }) }
+    );
+
+  it("waits for a saved answer before it opens", () => {
+    renderDebug(null);
+    const debug = screen.getByRole("button", { name: "Felsökning" });
+    fireEvent.click(debug);
+    expect(screen.queryByRole("tab", { name: "Felsök", selected: true })).toBeNull();
+  });
+
+  it("stays disabled while the first answer streams, though its session id has come", async () => {
+    renderDebug(null);
+    askWithKeyboard("Vilken gräns gäller?");
+    await waitFor(() => expect(spies.streams).toHaveLength(1));
+    const stream = spies.streams[0]!;
+    await act(async () => {
+      stream.enqueue({
+        type: "data-session",
+        data: { session_id: "session-d", files: [], web_search_references: [] }
+      });
+      stream.enqueue({ type: "text-start", id: "t" });
+      stream.enqueue({ type: "text-delta", id: "t", delta: "Gränsen" });
     });
-    const showModal = vi.spyOn(HTMLDialogElement.prototype, "showModal");
-
-    await openPanel();
-    expect(await screen.findByRole("complementary", { name: panelName })).toBeTruthy();
-    expect(historyBeside()).toBeNull();
-    expect(showModal).not.toHaveBeenCalled();
+    const debug = screen.getByRole("button", { name: "Felsökning" });
+    expect(debug.getAttribute("aria-disabled")).toBe("true");
+    await act(async () => {
+      stream.enqueue({ type: "text-end", id: "t" });
+      stream.enqueue({ type: "finish" });
+      stream.close();
+    });
+    await waitFor(() => expect(debug.getAttribute("aria-disabled")).not.toBe("true"));
   });
 
-  it("leaves a panel open behind Insikter out of the history's room", async () => {
-    renderPage("s-file", { ...partner, insightEnabled: true, permissions: ["insight_view"] });
-    await screen.findByRole("log", { name: "Konversation" });
-    layOut(1000);
-    await openPanel();
-    fireEvent.click(screen.getByRole("radio", { name: "Insikter" }));
-    openHistory();
-    expect(await screen.findByRole("complementary", { name: historyName })).toBeTruthy();
+  it("opens the latest answer's debug view in Chatt, from Historik too", async () => {
+    window.history.replaceState(null, "", "/chat?session_id=s-1&tab=history");
+    setRoute("/chat?session_id=s-1&tab=history");
+    renderDebug("s-1");
+    const debug = screen.getByRole("button", { name: "Felsökning" });
+    await waitFor(() => expect(debug.getAttribute("aria-disabled")).not.toBe("true"));
+    fireEvent.click(debug);
+    await waitFor(() => expect(window.location.search).toBe("?session_id=s-1"));
+    expect(await screen.findByRole("tab", { name: "Felsök", selected: true })).toBeTruthy();
   });
 
-  it("lays nothing over Insikter for the conversation behind it", async () => {
-    renderPage("s-file", { ...partner, insightEnabled: true, permissions: ["insight_view"] });
-    await screen.findByRole("log", { name: "Konversation" });
-    layOut(1000);
-    await openPanel();
-    fireEvent.click(screen.getByRole("radio", { name: "Insikter" }));
-    const showModal = vi.spyOn(HTMLDialogElement.prototype, "showModal");
-    // The window narrows while Insikter is shown: the panel cannot sit beside.
-    layOut(800);
-    expect(showModal).not.toHaveBeenCalled();
-    expect(screen.queryByRole("dialog", { name: panelName })).toBeNull();
-  });
-
-  it("gives way, rather than turn into a sheet, when the window narrows under both", async () => {
-    renderPage("s-file");
-    await screen.findByRole("log", { name: "Konversation" });
-    layOut(1168);
-    await openPanel();
-    openHistory();
-    expect(await screen.findByRole("complementary", { name: historyName })).toBeTruthy();
-    const showModal = vi.spyOn(HTMLDialogElement.prototype, "showModal");
-
-    layOut(1100);
-    expect(historyBeside()).toBeNull();
-    expect(historySheet()).toBeNull();
-    expect(showModal).not.toHaveBeenCalled();
-    expect(screen.getByRole("complementary", { name: panelName })).toBeTruthy();
-  });
-
-  it("opens as a sheet beside a panel it cannot sit next to", async () => {
-    setViewport("tablet-landscape");
-    renderPage("s-file");
-    await screen.findByRole("log", { name: "Konversation" });
-    layOut(908);
-    await openPanel();
-    openHistory();
-    expect(await screen.findByRole("dialog", { name: historyName })).toBeTruthy();
-  });
-
-  it("sits beside the conversation and the panel where all three fit", async () => {
-    renderPage("s-file");
-    await screen.findByRole("log", { name: "Konversation" });
-    layOut(1168);
-    await openPanel();
-    openHistory();
-    expect(await screen.findByRole("complementary", { name: historyName })).toBeTruthy();
-    expect(screen.getByRole("complementary", { name: panelName })).toBeTruthy();
+  it("is not offered without the debug permission or in a group chat", () => {
+    renderPage(null);
+    expect(screen.queryByRole("button", { name: "Felsökning" })).toBeNull();
   });
 });
 
@@ -562,7 +624,7 @@ describe("ChatPage while an answer streams", () => {
       insightEnabled: true,
       permissions
     });
-    expect(screen.queryByRole("radio", { name: "Insikter" })).toBeNull();
+    expect(screen.queryByRole("tab", { name: "Insikter" })).toBeNull();
     expect(composer()).toBeTruthy();
   });
 
@@ -570,16 +632,16 @@ describe("ChatPage while an answer streams", () => {
     renderPage(null, { ...partner, insightEnabled: true, permissions: ["insight_view"] });
     await askWithKeyboard("Vilken gräns gäller?");
     await waitFor(() => expect(spies.streams).toHaveLength(1));
-    fireEvent.click(screen.getByRole("radio", { name: "Insikter" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Insikter" }));
     expect(await screen.findByText("Totala konversationer")).toBeTruthy();
     await act(async () => answer(spies.streams[0]!, "session-late", "Gränsen är 700 000 kr."));
     await waitFor(() =>
       expect(new URLSearchParams(window.location.search).get("session_id")).toBe("session-late")
     );
     expect(new URLSearchParams(window.location.search).get("tab")).toBe("insights");
-    expect(screen.getByRole("radio", { name: "Insikter", checked: true })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Insikter", selected: true })).toBeTruthy();
     expect(screen.getByText("Totala konversationer")).toBeTruthy();
-    fireEvent.click(screen.getByRole("radio", { name: "Chatt" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Chatt" }));
     const log = screen.getByRole("log", { name: "Konversation" });
     expect(within(log).getByText("Gränsen är 700 000 kr.")).toBeTruthy();
     expect(within(log).getByText("Vilken gräns gäller?")).toBeTruthy();
@@ -593,11 +655,11 @@ describe("ChatPage while an answer streams", () => {
     const log = await screen.findByRole("log", { name: "Konversation" });
     expect(await within(log).findByText("Gränsen är 700 000 kr.")).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("radio", { name: "Insikter" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Insikter" }));
     expect(await screen.findByText("Totala konversationer")).toBeTruthy();
     expect(screen.queryByRole("log")).toBeNull();
 
-    fireEvent.click(screen.getByRole("radio", { name: "Chatt" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Chatt" }));
     expect(within(screen.getByRole("log")).getByText("Gränsen är 700 000 kr.")).toBeTruthy();
     expect(within(screen.getByRole("log")).getByText("Vilken gräns gäller?")).toBeTruthy();
   });

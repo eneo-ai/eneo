@@ -1,6 +1,7 @@
 import { EneoError, type PasswordStatus } from "@eneo/eneo-js";
 import { browser } from "$app/environment";
 import { redirect } from "@sveltejs/kit";
+import { assignLocation } from "$lib/core/navigation";
 
 export const PASSWORD_CHANGE_PATH = "/password-change";
 
@@ -20,7 +21,7 @@ export function handlePasswordChangeRequired(error: EneoError, requestedUrl: URL
   if (!isPasswordChangeRequiredError(error)) return;
   if (browser) {
     // The user may have navigated since this client was created.
-    window.location.assign(passwordChangeUrl(new URL(window.location.href)));
+    assignLocation(passwordChangeUrl(new URL(window.location.href)));
   } else {
     redirect(302, passwordChangeUrl(requestedUrl));
   }

@@ -13,14 +13,17 @@
 export type Fixtures = {
   /** `/spaces/<id>`: a shared space. */
   space: string;
+  spaceName: string;
   assistant: string;
   app: string;
   run: string;
   groupChat: string;
+  groupChatName: string;
   website: string;
   collection: string;
   /** The signed-in user, who has token usage to show. */
   userId: string;
+  widgetTemplate: string;
 };
 
 export type Entry = { url: (f: Fixtures) => string; auth?: "in" | "out" } | { skip: string };
@@ -68,11 +71,17 @@ export const ROUTES: Record<string, Entry> = {
   "/admin/usage": open("/admin/usage"),
   "/admin/usage/users/$": { url: (f) => `/admin/usage/users/${f.userId}` },
   "/admin/users": open("/admin/users"),
+  "/admin/widgets": open("/admin/widgets"),
+  "/admin/widgets/templates/$": { url: (f) => `/admin/widgets/templates/${f.widgetTemplate}` },
   "/dashboard": open("/dashboard"),
   "/dashboard/$/*": { url: (f) => `/dashboard/${f.assistant}` },
   "/dashboard/app/$": { url: (f) => `/dashboard/app/${f.app}` },
   "/dashboard/app/$/results/$": { url: (f) => `/dashboard/app/${f.app}/results/${f.run}` },
   "/deactivated": closed("/deactivated"),
+  "/documents/$": open("/documents/00000000-0000-4000-8000-000000000000"),
+  // Offline widgets still render the visitor notice, without an Eneo account.
+  "/embed/$": closed("/embed/wgt_0000000000000000000000"),
+  "/en/embed/$": closed("/en/embed/wgt_0000000000000000000000"),
   "/integrations/callback/token": closed("/integrations/callback/token"),
   "/invite/*": closed("/invite/not-a-real-invitation"),
   "/login": closed("/login?showUsernameAndPassword=true"),
@@ -91,6 +100,7 @@ export const ROUTES: Record<string, Entry> = {
   "/spaces/$/apps/$/results/$": { url: (f) => `${f.space}/apps/${f.app}/results/${f.run}` },
   "/spaces/$/assistants": { url: (f) => `${f.space}/assistants` },
   "/spaces/$/assistants/$/edit": { url: (f) => `${f.space}/assistants/${f.assistant}/edit` },
+  "/spaces/$/assistants/$/widget": { url: (f) => `${f.space}/assistants/${f.assistant}/widget` },
   "/spaces/$/chat": { url: (f) => `${f.space}/chat` },
   "/spaces/$/group-chats/$/edit": { url: (f) => `${f.space}/group-chats/${f.groupChat}/edit` },
   "/spaces/$/knowledge": { url: (f) => `${f.space}/knowledge` },

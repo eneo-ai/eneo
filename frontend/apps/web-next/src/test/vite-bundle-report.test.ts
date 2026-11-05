@@ -104,7 +104,11 @@ it.each([
   ["chat", "node_modules/driver.js/index.js"],
   ["chat", "node_modules/@tiptap/core/index.js"],
   ["chat", "node_modules/prosemirror-view/index.js"],
-  ["chat", "src/components/ai-elements/answer-clipboard.ts"]
+  ["chat", "src/components/ai-elements/answer-clipboard.ts"],
+  ["startup", "src/features/widget/components/embed-app.tsx"],
+  ["startup", "src/features/widget/components/widget-chat.tsx"],
+  ["chat", "src/features/widget/components/embed-app.tsx"],
+  ["chat", "src/features/widget/components/widget-chat.tsx"]
 ])("rejects an eager %s dependency on %s", async (scope, dependency) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "eneo-bundle-boundary-"));
   try {

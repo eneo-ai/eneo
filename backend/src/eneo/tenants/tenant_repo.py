@@ -208,6 +208,42 @@ class TenantRepository:
             raise exceptions.NotFoundException(f"Tenant {tenant_id} not found.")
         return model
 
+    async def lock_widget_policy(self, tenant_id: UUID) -> dict[str, Any]:
+        """The stored widget policy, row-locked until the transaction ends.
+
+        A partial update merges into this value rather than into the policy
+        loaded with the user at request start, so two administrators saving
+        different fields at the same time never overwrite each other.
+        """
+        stmt = (
+            sa.select(Tenants.widget_policy)
+            .where(Tenants.id == tenant_id)
+            .with_for_update()
+        )
+        row = (await self.session.execute(stmt)).one_or_none()
+        if row is None:
+            raise exceptions.NotFoundException(f"Tenant {tenant_id} not found.")
+        return dict(row[0] or {})
+
+    async def update_widget_policy(
+        self,
+        tenant_id: UUID,
+        policy: dict[str, Any],
+    ) -> TenantInDB:
+        tenant = await self.get(tenant_id)
+        if tenant is None:
+            raise exceptions.NotFoundException(f"Tenant {tenant_id} not found.")
+
+        stmt = (
+            sa.update(Tenants)
+            .where(Tenants.id == tenant_id)
+            .values(widget_policy=policy, updated_at=datetime.now(timezone.utc))
+            .returning(Tenants)
+            .options(selectinload(Tenants.modules))
+        )
+        model = await self.delegate.get_model_from_query(stmt)
+        return cast(TenantInDB, model)
+
     async def update_show_model_pricing(
         self,
         tenant_id: UUID,

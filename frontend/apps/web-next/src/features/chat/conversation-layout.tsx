@@ -5,6 +5,7 @@ import {
 } from "@astryxdesign/core/Chat";
 import { useTranslator } from "@astryxdesign/core/i18n";
 import { useLayoutEffect, useRef, type ReactNode, type RefObject } from "react";
+import { StillLayoutScope } from "@/components/astryx/collapsible";
 import { cn } from "@/lib/utils";
 
 /**
@@ -18,6 +19,8 @@ import { cn } from "@/lib/utils";
  * latest, "Nya meddelanden" when an answer grew out of view
  * (`useChatNewMessages` watches the content wrapper, as ChatLayout's context
  * is not exported). It mounts with the scroller: the hooks attach to it once.
+ * Disclosures in the messages open and close at once (`StillLayoutScope`), so
+ * nothing but the follow hooks moves this scroller while an answer streams.
  *
  * `sheetOver`: a non-modal sheet covers the lower 62 % (decision 28, an
  * answer's activity where the side panel cannot sit beside it). The dock
@@ -84,7 +87,7 @@ export function ConversationLayout({
           )}
         >
           <div ref={contentRef} className="flex flex-1 flex-col">
-            {children}
+            <StillLayoutScope>{children}</StillLayoutScope>
           </div>
         </div>
         <div inert={sheetOver} className="pointer-events-none absolute inset-x-0 bottom-0">

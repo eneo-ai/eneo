@@ -34,6 +34,9 @@ from eneo.ai_models.completion_models.completion_model import (
     function_definition_to_tool,
 )
 from eneo.authentication.signed_urls import redact_reference_tokens_in_json
+from eneo.completion_models.domain.model_kwargs_capabilities import (
+    resolve_supported_model_kwargs,
+)
 from eneo.completion_models.domain.skill_activation import (
     SKILL_ACTIVATION_TOOL_NAME,
     InvalidSkillToolCallError,
@@ -1249,6 +1252,49 @@ class TenantModelAdapter(CompletionModelAdapter):
             built_in_tools=eneo_tools,
         )
 
+    def _prepare_reasoning_effort(self, effort: object) -> dict[str, Any]:
+        if effort in (None, ""):
+            return {}
+
+        # Snapshots are authoritative even when LiteLLM cannot recognize an
+        # opaque deployment name. Resolution also applies the model's flags.
+        if getattr(self.model, "model_kwargs_capabilities", None) is not None:
+            capability = resolve_supported_model_kwargs(
+                model_kwargs_capabilities=self.model.model_kwargs_capabilities,
+                reasoning=self.model.reasoning,
+            ).reasoning_effort
+            if not capability.accepts(effort):
+                return {}
+            kwargs: dict[str, Any] = {"reasoning_effort": effort}
+            if self.provider_type == "azure":
+                # LiteLLM's Azure mapping otherwise drops reasoning for opaque
+                # routes, including when drop_params=True is used.
+                kwargs["allowed_openai_params"] = ["reasoning_effort"]
+            return kwargs
+
+        supported_params = _get_supported_openai_params(self.litellm_model) or []
+        if "reasoning_effort" not in supported_params:
+            return {}
+        if effort == "none":
+            try:
+                if (
+                    litellm_transport.get_model_info(self.litellm_model).get(
+                        "supports_none_reasoning_effort"
+                    )
+                    is not True
+                ):
+                    return {}
+            except Exception:
+                # Legacy models without a snapshot need explicit confirmation
+                # before sending literal `none` instead of provider defaults.
+                logger.debug(
+                    "Could not confirm literal none reasoning support",
+                    extra={"model_route": self.litellm_model},
+                    exc_info=True,
+                )
+                return {}
+        return {"reasoning_effort": effort}
+
     def _prepare_kwargs(
         self,
         model_kwargs: ModelKwargs | dict[str, Any] | None = None,
@@ -1283,37 +1329,11 @@ class TenantModelAdapter(CompletionModelAdapter):
                         f"Scaled temperature for Anthropic: {temp} -> {temp / 2}"
                     )
 
-            # Only pass reasoning_effort if the model actually supports it
-            # (per LiteLLM's supported_openai_params) and the value is meaningful
             if "reasoning_effort" in model_kwargs_dict:
-                supported_params = (
-                    _get_supported_openai_params(self.litellm_model) or []
+                reasoning_effort = model_kwargs_dict.pop("reasoning_effort")
+                model_kwargs_dict.update(
+                    self._prepare_reasoning_effort(reasoning_effort)
                 )
-                reasoning_effort = model_kwargs_dict["reasoning_effort"]
-                remove_reasoning_effort = (
-                    "reasoning_effort" not in supported_params
-                    or reasoning_effort in (None, "")
-                )
-                if reasoning_effort == "none" and not remove_reasoning_effort:
-                    try:
-                        remove_reasoning_effort = (
-                            litellm_transport.get_model_info(self.litellm_model).get(
-                                "supports_none_reasoning_effort"
-                            )
-                            is not True
-                        )
-                    except Exception:
-                        # Old snapshots advertised `none` for every reasoning
-                        # route. Treat unavailable metadata conservatively so
-                        # those values retain their provider-default behavior.
-                        remove_reasoning_effort = True
-                        logger.debug(
-                            "Could not confirm literal none reasoning support",
-                            extra={"model_route": self.litellm_model},
-                            exc_info=True,
-                        )
-                if remove_reasoning_effort:
-                    del model_kwargs_dict["reasoning_effort"]
 
             # Ensure max_tokens is set - some APIs (e.g., vLLM, OpenAI-compatible)
             # require it explicitly or return empty responses

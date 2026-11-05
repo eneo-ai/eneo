@@ -23,7 +23,8 @@ import { useAppContext } from "@/components/providers/app-context";
 import { profileDisplayName, profileInitials } from "@/components/shell/profile-menu";
 import { THEMES } from "@/components/shell/theme-switcher";
 import { useWhatsNew } from "@/features/whats-new/whats-new-provider";
-import { MOBILE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
+import { useMediaQuery } from "@astryxdesign/core/hooks";
+import { MOBILE_QUERY } from "@/lib/hooks/use-media-match";
 import { LOCALE_LABELS } from "@/lib/i18n/locales";
 import { navigateTo } from "@/lib/navigate-to";
 import { AccountProfile } from "@/features/account/account-profile";
@@ -39,10 +40,10 @@ import { AccountVersions } from "./account-versions";
  * outlives a turn of an iPad across 1024 px.
  */
 export function AccountHome() {
-  const mobile = useMediaMatch(MOBILE_QUERY);
+  const mobile = useMediaQuery(MOBILE_QUERY);
   return (
     <>
-      {mobile !== false ? <Konto /> : null}
+      {mobile ? <Konto /> : null}
       <div className="flex flex-col gap-6 max-lg:hidden">
         <AccountProfile />
         <ChangePasswordCard />
@@ -72,8 +73,8 @@ function Konto() {
   const themeKey = THEMES.find((option) => option.value === theme)?.labelKey;
 
   return (
-    // From 768 px a readable column (42 rem), not a phone's rows stretched wide.
-    <div className="flex flex-col gap-6 md:mx-auto md:w-full md:max-w-2xl lg:hidden">
+    // From 768 px a readable column (42 rem) on the pages' edge, not a phone's rows stretched wide.
+    <div className="flex flex-col gap-6 md:max-w-2xl lg:hidden">
       <div className="flex flex-col gap-4">
         <PageHeader title={t("account")} />
         <div className="flex items-start gap-3">
@@ -98,7 +99,7 @@ function Konto() {
 
       {/* Edge to edge on a phone, out of the page's gutter; the rows' text keeps
           to it. From 768 px the groups are cards inside the column. */}
-      <div className="-mx-4 flex flex-col gap-6 sm:-mx-6 sm:[--index-inset:1.5rem] md:mx-0 md:[--index-inset:1rem]">
+      <div className="-mx-4 flex flex-col gap-6 md:mx-0">
         <IndexGroup title={t("settings")}>
           <IndexRow
             href="/account/appearance"

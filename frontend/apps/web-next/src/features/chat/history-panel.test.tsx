@@ -7,7 +7,7 @@ import type { ChatPartner } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
 import { router } from "@/test/navigation";
 import { renderInApp, testQueryClient } from "@/test/render";
-import { HistoryAside } from "./history-panel";
+import { HistoryAside, HistoryTab } from "./history-panel";
 import { RenameSessionDialog } from "./session-actions";
 
 const now = Date.now();
@@ -30,6 +30,8 @@ const api = vi.hoisted(() => ({
   /** The latest conversations with every assistant (`/conversations/recent/`). */
   recent: [] as Recent[],
   cursors: [] as (string | undefined)[],
+  /** While set, every read waits for it. */
+  hold: null as Promise<void> | null,
   GET: vi.fn(),
   PATCH: vi.fn(async () => ({ data: {}, response: new Response() })),
   POST: vi.fn(async () => ({ data: {}, response: new Response() })),
@@ -44,6 +46,7 @@ vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 beforeAll(() => {
   api.GET.mockImplementation(
     async (path: string, init: { params: { query: { cursor?: string } } }) => {
+      if (api.hold) await api.hold;
       if (path === "/api/v1/conversations/recent/") {
         return { data: { items: api.recent }, response: new Response() };
       }
@@ -65,6 +68,7 @@ beforeEach(() => {
     { id: "s2", name: "Protokoll KS", updated_at: new Date(now - 40 * day).toISOString() }
   ];
   api.cursors.length = 0;
+  api.hold = null;
   const space = { id: "space-1", name: "Upphandling", personal: false, organization: false };
   api.recent = [
     {
@@ -106,31 +110,30 @@ async function rowMenuItem(row: string, item: string) {
   return within(menu!).getByRole("menuitem", { name: item });
 }
 
+/** The chat page's Historik tab: the list across the page (a sheet on a phone). */
 function renderHistory({
-  onClose = vi.fn(),
   onSelect = vi.fn(),
   onDeleted = vi.fn(),
   queryClient = testQueryClient()
 } = {}) {
   renderInApp(
-    <HistoryAside
-      inline
-      partner={partner}
-      activeSessionId="s1"
-      onSelect={onSelect}
-      onDeleted={onDeleted}
-      onClose={onClose}
-    />,
+    <section aria-label={HEADING}>
+      <HistoryTab
+        partner={partner}
+        activeSessionId="s1"
+        onSelect={onSelect}
+        onDeleted={onDeleted}
+      />
+    </section>,
     { queryClient }
   );
-  return { onClose, onSelect, onDeleted };
+  return { onSelect, onDeleted };
 }
 
-describe("HistoryAside", () => {
+describe("HistoryTab", () => {
   it("groups conversations by date, marks the open one and selects on click", async () => {
     const { onSelect } = renderHistory();
-    const aside = screen.getByRole("complementary", { name: HEADING });
-    await waitFor(() => expect(document.activeElement?.textContent).toBe(HEADING));
+    const aside = screen.getByRole("region", { name: HEADING });
 
     const today = await within(aside).findByRole("region", { name: "Idag" });
     const current = within(today).getByRole("button", { name: "Upphandlingsanalys" });
@@ -140,10 +143,23 @@ describe("HistoryAside", () => {
     expect(onSelect).toHaveBeenCalledWith("s2");
   });
 
-  it("closes on Escape", async () => {
-    const { onClose } = renderHistory();
-    const heading = await screen.findByRole("heading", { name: HEADING });
-    fireEvent.keyDown(heading, { key: "Escape" });
+  it("has no close button as a tab, and one in the phone's sheet", async () => {
+    renderHistory();
+    expect(screen.queryByRole("button", { name: "Stäng listan med konversationer" })).toBeNull();
+    cleanup();
+    const onClose = vi.fn();
+    renderInApp(
+      <HistoryAside
+        partner={partner}
+        activeSessionId="s1"
+        onSelect={vi.fn()}
+        onDeleted={vi.fn()}
+        onClose={onClose}
+      />,
+      { queryClient: testQueryClient() }
+    );
+    const sheet = await screen.findByRole("dialog", { name: HEADING });
+    fireEvent.click(within(sheet).getByRole("button", { name: "Stäng listan med konversationer" }));
     expect(onClose).toHaveBeenCalled();
   });
 
@@ -201,6 +217,9 @@ describe("HistoryAside", () => {
     fireEvent.change(input, { target: { value: "Direktupphandling" } });
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() => expect(queryClient.getQueryState(recent)?.isInvalidated).toBe(true));
+    // The history is read again once, not once per list invalidated.
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+    expect(api.cursors).toEqual([undefined, undefined]);
 
     queryClient.setQueryData(recent, []);
     fireEvent.click(await rowMenuItem("Protokoll KS", "Ta bort"));
@@ -208,6 +227,47 @@ describe("HistoryAside", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Bekräfta borttagning" }));
     await waitFor(() => expect(onDeleted).toHaveBeenCalledWith("s2"));
     expect(queryClient.getQueryState(recent)?.isInvalidated).toBe(true);
+  });
+
+  it("shows a rename at once in the history and in Senaste, before either is read again", async () => {
+    const queryClient = testQueryClient();
+    const nav = recentConversationsQueryOptions(browserApi).queryKey;
+    queryClient.setQueryData(nav, api.recent);
+    renderHistory({ queryClient });
+    fireEvent.click(await rowMenuItem("Upphandlingsanalys", "Byt namn"));
+    const input = await screen.findByLabelText(/^Namn/);
+    api.hold = new Promise(() => {});
+    fireEvent.change(input, { target: { value: "Direktupphandling" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(await screen.findByRole("button", { name: "Direktupphandling" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Upphandlingsanalys" })).toBeNull();
+    expect(queryClient.getQueryData<Recent[]>(nav)?.map((row) => [row.id, row.name])).toEqual([
+      ["s9", "Avtalsgranskning"],
+      ["s1", "Direktupphandling"]
+    ]);
+    // The refetch still follows.
+    expect(queryClient.getQueryState(nav)?.isInvalidated).toBe(true);
+  });
+
+  it("changes no list when a rename fails", async () => {
+    const queryClient = testQueryClient();
+    const nav = recentConversationsQueryOptions(browserApi).queryKey;
+    queryClient.setQueryData(nav, api.recent);
+    renderHistory({ queryClient });
+    fireEvent.click(await rowMenuItem("Upphandlingsanalys", "Byt namn"));
+    const input = await screen.findByLabelText(/^Namn/);
+    api.PATCH.mockResolvedValueOnce({
+      error: { message: "Unavailable" },
+      response: new Response(null, { status: 503 })
+    } as never);
+    fireEvent.change(input, { target: { value: "Direktupphandling" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(api.PATCH).toHaveBeenCalledOnce());
+    await waitFor(() => expect(screen.getByLabelText(/^Namn/)).toBeTruthy());
+    expect(screen.getByRole("button", { name: "Upphandlingsanalys" })).toBeTruthy();
+    expect(queryClient.getQueryData<Recent[]>(nav)).toEqual(api.recent);
   });
 
   it("renames and deletes from a row's menu; answers are rated in the conversation", async () => {
@@ -257,13 +317,11 @@ describe("HistoryAside", () => {
   it("names the personal assistant's list after the personal assistant", async () => {
     api.rows = [];
     renderInApp(
-      <HistoryAside
-        inline
+      <HistoryTab
         partner={{ type: "default-assistant", id: "d", name: "Default", personalSpace: true }}
         activeSessionId={null}
         onSelect={vi.fn()}
         onDeleted={vi.fn()}
-        onClose={vi.fn()}
       />,
       { queryClient: testQueryClient() }
     );
@@ -355,15 +413,48 @@ describe("HistoryAside scope (decision 29)", () => {
     expect(queryClient.getQueryState(theirs)?.isInvalidated).toBe(true);
   });
 
+  it("renames under Alla at once in every list, a later history page included", async () => {
+    const queryClient = testQueryClient();
+    const nav = recentConversationsQueryOptions(browserApi).queryKey;
+    queryClient.setQueryData(nav, api.recent);
+    // The other assistant's history has it on its second loaded page.
+    const theirs = ["conversations", "assistant", "assistant-2"];
+    queryClient.setQueryData(theirs, {
+      pages: [
+        { items: [{ id: "s8", name: "Remiss" }], next_cursor: "1" },
+        { items: [{ id: "s9", name: "Avtalsgranskning" }], next_cursor: null }
+      ],
+      pageParams: [null, "1"]
+    });
+    renderHistory({ queryClient });
+    fireEvent.click(within(scope()).getByRole("radio", { name: "Alla" }));
+    fireEvent.click(await rowMenuItem("Avtalsgranskning", "Byt namn"));
+    const input = await screen.findByLabelText(/^Namn/);
+    api.hold = new Promise(() => {});
+    fireEvent.change(input, { target: { value: "Ramavtal" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(await screen.findByRole("button", { name: /^Ramavtal/ })).toBeTruthy();
+    expect(queryClient.getQueryData<Recent[]>(nav)?.map((row) => row.name)).toEqual([
+      "Ramavtal",
+      "Upphandlingsanalys"
+    ]);
+    expect(
+      queryClient
+        .getQueryData<{ pages: { items: { name: string }[] }[] }>(theirs)
+        ?.pages.map((page) => page.items.map((item) => item.name))
+    ).toEqual([["Remiss"], ["Ramavtal"]]);
+    expect(queryClient.getQueryState(nav)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(theirs)?.isInvalidated).toBe(true);
+  });
+
   it("scopes a group chat's list to the group chat", async () => {
     renderInApp(
-      <HistoryAside
-        inline
+      <HistoryTab
         partner={{ type: "group-chat", id: "g1", name: "Ledningsgruppen" }}
         activeSessionId={null}
         onSelect={vi.fn()}
         onDeleted={vi.fn()}
-        onClose={vi.fn()}
       />,
       { queryClient: testQueryClient() }
     );

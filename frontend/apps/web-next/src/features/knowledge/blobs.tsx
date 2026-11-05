@@ -49,7 +49,7 @@ import { useCopy } from "@/lib/hooks/use-copy";
 import { useRemovalMutation } from "@/features/spaces/removal";
 import { ResourceFilterInput } from "@/features/spaces/resource-filter-input";
 import { matchesSearch } from "@/lib/search";
-import type { InfoBlob } from "./knowledge";
+import { infoBlobQueryOptions, type InfoBlob } from "./knowledge";
 import { TableFrame } from "@/components/composites/table-frame";
 import { saveBlob, saveUrl, toastDownloadError } from "@/features/files/signed-file-url";
 import { signedInfoBlobOriginalUrl } from "./signed-original-url";
@@ -83,11 +83,7 @@ export function BlobPreviewDialog({
 }) {
   const t = useTranslations();
   const content = useQuery({
-    queryKey: ["info-blobs", blob.id],
-    queryFn: ({ signal }) =>
-      unwrap(
-        browserApi.GET("/api/v1/info-blobs/{id}/", { params: { path: { id: blob.id } }, signal })
-      ),
+    ...infoBlobQueryOptions(browserApi, blob.id),
     enabled: open
   });
   const data = content.data;

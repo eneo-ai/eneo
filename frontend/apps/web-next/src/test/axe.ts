@@ -49,7 +49,10 @@ export async function expectNoAxeViolations(
 ): Promise<void> {
   assertDocumented(options.disableRules ?? {}, (rule) => `Skipping the axe rule "${rule}"`);
   const disabled = [...JSDOM_UNSUPPORTED_RULES, ...Object.keys(options.disableRules ?? {})];
+  // jsdom frames have no document axe can message, so the run would throw on
+  // the first <iframe>; embedded pages are checked by their own tests.
   const results = await axe.run(container, {
+    iframes: false,
     runOnly: { type: "tag", values: WCAG_22_AA_TAGS },
     rules: Object.fromEntries(disabled.map((rule) => [rule, { enabled: false }])),
     resultTypes: ["violations"]

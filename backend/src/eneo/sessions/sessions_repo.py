@@ -27,6 +27,7 @@ from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces, SpacesUserGroups, SpacesUsers
 from eneo.database.tables.user_groups_table import UserGroups
 from eneo.database.tables.users_table import Users
+from eneo.database.tables.widgets_table import Widgets
 from eneo.files.file_content_loader import FileContentLoader
 from eneo.files.unused_file_cleanup import delete_unused_root_files
 from eneo.info_blobs.info_blob_repo import InfoBlobRepository
@@ -53,6 +54,17 @@ from eneo.user_groups.user_group import UserGroupState
 
 
 class OwnedChatPartner(NamedTuple):
+    assistant_id: UUID | None
+    group_chat_id: UUID | None
+
+
+class SessionOwnership(NamedTuple):
+    """Who a conversation belongs to and whom it is with, without its turns."""
+
+    user_id: UUID | None
+    api_key_id: UUID | None
+    widget_id: UUID | None
+    visitor_id: UUID | None
     assistant_id: UUID | None
     group_chat_id: UUID | None
 
@@ -179,15 +191,19 @@ class SessionRepository:
     def _filter_by_tenant(query: sa.Select[Any], tenant_id: UUID) -> sa.Select[Any]:
         """Restrict a sessions query to a single tenant.
 
-        Sessions.user_id is NULL for service-key sessions (the principal is on
-        api_key_id instead), so an INNER JOIN on Users would silently drop
-        them. We LEFT JOIN both principal tables and match against whichever
-        tenant_id is present.
+        Service-key and widget-visitor sessions have no user row. Match the
+        tenant of whichever principal owns the session.
         """
         return (
             query.outerjoin(Users, Sessions.user_id == Users.id)
             .outerjoin(ApiKeysV2, Sessions.api_key_id == ApiKeysV2.id)
-            .where(sa.func.coalesce(Users.tenant_id, ApiKeysV2.tenant_id) == tenant_id)
+            .outerjoin(Widgets, Sessions.widget_id == Widgets.id)
+            .where(
+                sa.func.coalesce(
+                    Users.tenant_id, ApiKeysV2.tenant_id, Widgets.tenant_id
+                )
+                == tenant_id
+            )
         )
 
     # IMPORTANT: every method in this repo that returns session or question
@@ -250,10 +266,21 @@ class SessionRepository:
             )
         return state
 
-    async def add_feedback(self, feedback: SessionFeedback, id: UUID) -> SessionInDB:
+    async def add_feedback(
+        self,
+        feedback: SessionFeedback,
+        id: UUID,
+        *,
+        keep_existing_text: bool = False,
+    ) -> SessionInDB:
+        """Store a vote. ``keep_existing_text`` leaves the stored comment in
+        place when the feedback carries none, instead of clearing it."""
+        values: dict[str, object] = {"feedback_value": feedback.value}
+        if feedback.text is not None or not keep_existing_text:
+            values["feedback_text"] = feedback.text
         stmt = (
             sa.Update(Sessions)
-            .values(feedback_value=feedback.value, feedback_text=feedback.text)
+            .values(values)
             .where(Sessions.id == id)
             .returning(Sessions)
         )
@@ -278,6 +305,8 @@ class SessionRepository:
                 Sessions.id,
                 Sessions.user_id,
                 Sessions.api_key_id,
+                Sessions.widget_id,
+                Sessions.visitor_id,
                 Sessions.assistant_id,
                 Sessions.group_chat_id,
                 sa.func.coalesce(Assistants.space_id, GroupChatsTable.space_id).label(
@@ -294,6 +323,21 @@ class SessionRepository:
         )
         row = (await self.session.execute(query)).mappings().one_or_none()
         return SessionContext.model_validate(row) if row is not None else None
+
+    async def get_ownership(self, id: UUID) -> SessionOwnership | None:
+        """``get`` reduced to the principal and chat partner columns."""
+        query = self._exclude_helper_run_sessions(
+            sa.select(
+                Sessions.user_id,
+                Sessions.api_key_id,
+                Sessions.widget_id,
+                Sessions.visitor_id,
+                Sessions.assistant_id,
+                Sessions.group_chat_id,
+            ).where(Sessions.id == id)
+        )
+        row = (await self.session.execute(query)).one_or_none()
+        return None if row is None else SessionOwnership(*row)
 
     async def get_owned_chat_partner(
         self,
@@ -671,6 +715,8 @@ class SessionRepository:
         assistant_id: UUID | None = None,
         user_id: UUID | None = None,
         api_key_id: UUID | None = None,
+        widget_id: UUID | None = None,
+        visitor_id: UUID | None = None,
         group_chat_id: UUID | None = None,
         name_filter: str | None = None,
         start_date: datetime | None = None,
@@ -694,6 +740,10 @@ class SessionRepository:
             query = query.where(Sessions.user_id == user_id)
         if api_key_id is not None:
             query = query.where(Sessions.api_key_id == api_key_id)
+        if widget_id is not None:
+            query = query.where(
+                Sessions.widget_id == widget_id, Sessions.visitor_id == visitor_id
+            )
 
         if name_filter is not None:
             query = query.where(Sessions.name.ilike(f"%{name_filter}%"))
@@ -706,79 +756,6 @@ class SessionRepository:
 
         count = await self.session.scalar(query)
         return count if count is not None else 0
-
-    async def get_by_assistant(
-        self,
-        assistant_id: UUID,
-        user_id: UUID | None = None,
-        api_key_id: UUID | None = None,
-        limit: int | None = None,
-        cursor: datetime | None = None,
-        previous: bool = False,
-        name_filter: str | None = None,
-        start_date: datetime | None = None,
-        end_date: datetime | None = None,
-        tenant_id: UUID | None = None,
-    ) -> tuple[list[SessionInDB], int]:
-        normalized_name_filter = name_filter.strip() if name_filter else None
-        query = sa.select(Sessions).where(Sessions.assistant_id == assistant_id)
-
-        if tenant_id is not None:
-            query = self._filter_by_tenant(query, tenant_id)
-        query = self._exclude_helper_run_sessions(query)
-
-        if user_id is not None:
-            query = query.where(Sessions.user_id == user_id)
-        if api_key_id is not None:
-            query = query.where(Sessions.api_key_id == api_key_id)
-
-        if normalized_name_filter is not None:
-            query = query.where(Sessions.name.ilike(f"%{normalized_name_filter}%"))
-
-        if start_date is not None:
-            query = query.where(Sessions.created_at >= start_date)
-
-        if end_date is not None:
-            query = query.where(Sessions.created_at <= end_date)
-
-        total_count = await self._get_total_count(
-            assistant_id=assistant_id,
-            user_id=user_id,
-            api_key_id=api_key_id,
-            name_filter=normalized_name_filter,
-            start_date=start_date,
-            end_date=end_date,
-            tenant_id=tenant_id,
-        )
-
-        if cursor is not None:
-            if previous:
-                query = query.where(Sessions.created_at > cursor).order_by(
-                    Sessions.created_at.asc(),
-                    Sessions.id.asc(),
-                )
-                if limit is not None:
-                    query = query.limit(limit + 1)
-                items = await self._hydrate_sessions(
-                    await self.delegate.get_models_from_query(query)
-                )
-                items.reverse()
-                return (items, total_count)
-            else:
-                query = query.where(Sessions.created_at <= cursor).order_by(
-                    Sessions.created_at.desc(),
-                    Sessions.id.desc(),
-                )
-        else:
-            query = query.order_by(Sessions.created_at.desc(), Sessions.id.desc())
-
-        if limit is not None:
-            query = query.limit(limit + 1)
-
-        sessions = await self._hydrate_sessions(
-            await self.delegate.get_models_from_query(query)
-        )
-        return sessions, total_count
 
     @staticmethod
     def _to_session_metadata(
@@ -799,6 +776,8 @@ class SessionRepository:
         assistant_id: UUID,
         user_id: UUID | None = None,
         api_key_id: UUID | None = None,
+        widget_id: UUID | None = None,
+        visitor_id: UUID | None = None,
         limit: int | None = None,
         cursor: datetime | None = None,
         previous: bool = False,
@@ -820,6 +799,10 @@ class SessionRepository:
             query = query.where(Sessions.user_id == user_id)
         if api_key_id is not None:
             query = query.where(Sessions.api_key_id == api_key_id)
+        if widget_id is not None:
+            query = query.where(
+                Sessions.widget_id == widget_id, Sessions.visitor_id == visitor_id
+            )
 
         if normalized_name_filter is not None:
             query = query.where(Sessions.name.ilike(f"%{normalized_name_filter}%"))
@@ -834,6 +817,8 @@ class SessionRepository:
             assistant_id=assistant_id,
             user_id=user_id,
             api_key_id=api_key_id,
+            widget_id=widget_id,
+            visitor_id=visitor_id,
             name_filter=normalized_name_filter,
             start_date=start_date,
             end_date=end_date,
@@ -867,84 +852,13 @@ class SessionRepository:
         items = list(result.tuples())
         return self._to_session_metadata(items), total_count
 
-    async def get_by_group_chat(
-        self,
-        group_chat_id: UUID,
-        user_id: UUID | None = None,
-        api_key_id: UUID | None = None,
-        limit: int | None = None,
-        cursor: datetime | None = None,
-        previous: bool = False,
-        name_filter: str | None = None,
-        start_date: datetime | None = None,
-        end_date: datetime | None = None,
-        tenant_id: UUID | None = None,
-    ) -> tuple[list[SessionInDB], int]:
-        normalized_name_filter = name_filter.strip() if name_filter else None
-        query = sa.select(Sessions).where(Sessions.group_chat_id == group_chat_id)
-
-        if tenant_id is not None:
-            query = self._filter_by_tenant(query, tenant_id)
-        query = self._exclude_helper_run_sessions(query)
-
-        if user_id is not None:
-            query = query.where(Sessions.user_id == user_id)
-        if api_key_id is not None:
-            query = query.where(Sessions.api_key_id == api_key_id)
-
-        if normalized_name_filter is not None:
-            query = query.where(Sessions.name.ilike(f"%{normalized_name_filter}%"))
-
-        if start_date is not None:
-            query = query.where(Sessions.created_at >= start_date)
-
-        if end_date is not None:
-            query = query.where(Sessions.created_at <= end_date)
-
-        total_count = await self._get_total_count(
-            group_chat_id=group_chat_id,
-            user_id=user_id,
-            api_key_id=api_key_id,
-            name_filter=normalized_name_filter,
-            start_date=start_date,
-            end_date=end_date,
-            tenant_id=tenant_id,
-        )
-
-        if cursor is not None:
-            if previous:
-                query = query.where(Sessions.created_at > cursor).order_by(
-                    Sessions.created_at.asc(),
-                    Sessions.id.asc(),
-                )
-                if limit is not None:
-                    query = query.limit(limit + 1)
-                items = await self._hydrate_sessions(
-                    await self.delegate.get_models_from_query(query)
-                )
-                items.reverse()
-                return (items, total_count)
-            else:
-                query = query.where(Sessions.created_at <= cursor).order_by(
-                    Sessions.created_at.desc(),
-                    Sessions.id.desc(),
-                )
-        else:
-            query = query.order_by(Sessions.created_at.desc(), Sessions.id.desc())
-
-        if limit is not None:
-            query = query.limit(limit + 1)
-
-        sessions = await self._hydrate_sessions(
-            await self.delegate.get_models_from_query(query)
-        )
-        return sessions, total_count
-
     async def get_metadata_by_group_chat(
         self,
         group_chat_id: UUID,
         user_id: UUID | None = None,
         api_key_id: UUID | None = None,
+        widget_id: UUID | None = None,
+        visitor_id: UUID | None = None,
         limit: int | None = None,
         cursor: datetime | None = None,
         previous: bool = False,
@@ -966,6 +880,10 @@ class SessionRepository:
             query = query.where(Sessions.user_id == user_id)
         if api_key_id is not None:
             query = query.where(Sessions.api_key_id == api_key_id)
+        if widget_id is not None:
+            query = query.where(
+                Sessions.widget_id == widget_id, Sessions.visitor_id == visitor_id
+            )
 
         if normalized_name_filter is not None:
             query = query.where(Sessions.name.ilike(f"%{normalized_name_filter}%"))
@@ -980,6 +898,8 @@ class SessionRepository:
             group_chat_id=group_chat_id,
             user_id=user_id,
             api_key_id=api_key_id,
+            widget_id=widget_id,
+            visitor_id=visitor_id,
             name_filter=normalized_name_filter,
             start_date=start_date,
             end_date=end_date,

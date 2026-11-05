@@ -250,6 +250,8 @@ export const eneoTheme = defineTheme({
     // track in dark mode, so it looked pressed in: the shared raised plate.
     // An inset edge adds no size.
     "segmented-control-item": {
+      // The small size would sit 20 px high in its track; a target is at least 24 (2.5.8).
+      base: { minHeight: "24px" },
       selected: {
         backgroundColor: "var(--eneo-color-segment-selected)",
         boxShadow: "inset 0 0 0 1px var(--eneo-color-segment-selected-edge)"
@@ -296,7 +298,7 @@ export const eneoTheme = defineTheme({
             "--text-supporting-size": "0.8125rem"
           },
           components: {
-            "segmented-control-item": { base: { minHeight: "44px" } },
+            "segmented-control-item": { base: { minHeight: "44px", minWidth: "44px" } },
             "checkbox-input": { base: { minHeight: "44px" } },
             "radio-list-item": { base: { minHeight: "44px" } },
             "switch-field": { base: { minHeight: "44px" } },

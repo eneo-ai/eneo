@@ -546,3 +546,40 @@ it("shows and clears the same delayed deletion hint from space settings", async 
     vi.useRealTimers();
   }
 });
+
+it("refreshes the list after a delete and never reads the deleted space again", async () => {
+  api.DELETE.mockResolvedValue({ data: null, response: new Response(null, { status: 204 }) });
+  const { queryClient } = showSettings();
+  const space = ["spaces", "space-1"];
+  const applications = ["spaces", "space-1", "applications"];
+  queryClient.setQueryData(["spaces"], []);
+  queryClient.setQueryData(applications, {});
+  const reads = queryClient.getQueryState(space)!.dataUpdateCount;
+  // A read of the space that started before the delete answers after it.
+  let answerLate!: (space: Space) => void;
+  const lateRead = queryClient
+    .query({
+      queryKey: space,
+      queryFn: () => new Promise<Space>((resolve) => (answerLate = resolve)),
+      staleTime: 0
+    })
+    .catch(() => undefined);
+
+  fireEvent.click(screen.getByRole("button", { name: messages.delete_this_space }));
+  const dialog = await screen.findByRole("alertdialog", { name: messages.delete_space });
+  fireEvent.change(
+    within(dialog).getByRole("textbox", { name: messages.enter_space_name_to_confirm }),
+    { target: { value: state.space.name } }
+  );
+  fireEvent.click(within(dialog).getByRole("button", { name: messages.confirm_deletion }));
+
+  await waitFor(() => expect(router.push).toHaveBeenCalledWith("/spaces/list"));
+  answerLate(state.space);
+  await act(() => lateRead);
+  expect(queryClient.getQueryState(["spaces"])?.isInvalidated).toBe(true);
+  // Coming back to it reads it again; nothing reads it now.
+  expect(queryClient.getQueryState(space)?.isInvalidated).toBe(true);
+  expect(queryClient.getQueryState(applications)?.isInvalidated).toBe(true);
+  expect(queryClient.getQueryState(space)?.dataUpdateCount).toBe(reads);
+  expect(queryClient.getQueryState(space)?.fetchStatus).toBe("idle");
+});

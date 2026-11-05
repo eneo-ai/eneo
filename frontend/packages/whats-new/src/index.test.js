@@ -113,3 +113,8 @@ test("final, local and unrelated builds keep the authored release identities", (
   }
   expect(releasesForVersion("9.0.0-rc.1")).toEqual(releases);
 });
+
+test("published 2.3 notes do not announce the unreleased widget feature", () => {
+  const published = releases.find((release) => release.version === "2.3.0");
+  expect(published.entries.map((entry) => entry.id)).not.toContain("web-widgets");
+});

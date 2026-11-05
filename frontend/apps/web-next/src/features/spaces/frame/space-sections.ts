@@ -80,13 +80,14 @@ export type SpaceRoute =
       isSectionRoot: boolean;
     };
 
-/** `/spaces/x/assistants/<id>/edit`, `/apps/<id>/edit`, `/group-chats/<id>/edit`. */
+/**
+ * `/spaces/x/assistants/<id>/edit`, `/apps/<id>/edit`, `/group-chats/<id>/edit`,
+ * and an assistant's `/widget` page, which owns its surface the same way.
+ */
 function isEditorRoute(first: string | undefined, rest: readonly string[]): boolean {
-  return (
-    (first === "assistants" || first === "apps" || first === "group-chats") &&
-    rest.length === 2 &&
-    rest[1] === "edit"
-  );
+  if (rest.length !== 2) return false;
+  if (first === "assistants") return rest[1] === "edit" || rest[1] === "widget";
+  return (first === "apps" || first === "group-chats") && rest[1] === "edit";
 }
 
 /**
@@ -102,6 +103,30 @@ export function spaceRoute(segments: readonly string[]): SpaceRoute {
   if (first === "group-chats") return { kind: "page", section: "assistants", isSectionRoot: false };
   if (!isSectionId(first)) return { kind: "page", section: null, isSectionRoot: false };
   return { kind: "page", section: first, isSectionRoot: rest.length === 0 };
+}
+
+/** A row of the space's sidebar: a section, or the personal space's chat. */
+export type SpaceNavItem = { id: SpaceSectionId | "chat"; href: string };
+
+/**
+ * The space's sidebar in groups, each set apart by a divider, as Svelte's
+ * `SpaceMenu.svelte` draws it: the personal space's Chatt on its own, the
+ * sections, then Medlemmar with what follows it. Gating stays with
+ * `spaceSections`; empty groups are dropped.
+ */
+export function spaceNavGroups(space: Space, can: Can, routeId: SpaceRouteId): SpaceNavItem[][] {
+  const sections = spaceSections(space, can, routeId);
+  const members = sections.findIndex((section) => section.id === "members");
+  const groups: SpaceNavItem[][] = [
+    space.personal && !space.organization
+      ? [{ id: "chat", href: `/spaces/${routeId}/chat?tab=chat` }]
+      : [],
+    members === -1 ? sections : sections.slice(0, members),
+    members === -1 ? [] : sections.slice(members)
+  ];
+  return groups
+    .map((group) => group.map(({ id, href }) => ({ id, href })))
+    .filter((group) => group.length > 0);
 }
 
 /** Where the space crumb in the breadcrumbs points: the overview, or the first tab. */

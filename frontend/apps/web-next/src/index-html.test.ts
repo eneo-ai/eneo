@@ -15,6 +15,7 @@ afterEach(() => {
   localStorage.clear();
   document.documentElement.className = "";
   document.documentElement.removeAttribute("data-theme");
+  document.documentElement.removeAttribute("data-eneo-embed-scheme");
   document.documentElement.removeAttribute("style");
 });
 
@@ -80,7 +81,7 @@ it.each([
   document.documentElement.className = "antialiased light dark";
   const source = template.querySelector("script:not([src])")?.textContent;
   expect(source).toBeTruthy();
-  runInNewContext(source!, { document, localStorage, matchMedia });
+  runInNewContext(source!, { document, localStorage, matchMedia, location });
   expect(document.documentElement.classList.contains(expected)).toBe(true);
   expect(document.documentElement.classList.contains(expected === "dark" ? "light" : "dark")).toBe(
     false
@@ -89,3 +90,26 @@ it.each([
   expect(document.documentElement.dataset.theme).toBe(expected);
   expect(document.documentElement.style.colorScheme).toBe(expected);
 });
+
+it.each([
+  ["/embed/widget", "light", true, "light"],
+  ["/embed/widget", "dark", false, "dark"],
+  ["/en/embed/widget", "system", true, "dark"],
+  ["/en/embed/widget", "system", false, "light"],
+  ["/embed/widget", undefined, true, "dark"]
+])(
+  "paints embed %s in scheme %s without reading app preferences",
+  (pathname, scheme, dark, expected) => {
+    if (scheme) document.documentElement.dataset.eneoEmbedScheme = scheme;
+    localStorage.setItem("theme", expected === "light" ? "dark" : "light");
+    const readStorage = vi.spyOn(Storage.prototype, "getItem");
+    vi.stubGlobal("matchMedia", vi.fn().mockReturnValue({ matches: dark }));
+    const source = template.querySelector("script:not([src])")?.textContent;
+
+    runInNewContext(source!, { document, localStorage, matchMedia, location: { pathname } });
+
+    expect(document.documentElement.dataset.theme).toBe(expected);
+    expect(document.documentElement.style.colorScheme).toBe(expected);
+    expect(readStorage).not.toHaveBeenCalled();
+  }
+);

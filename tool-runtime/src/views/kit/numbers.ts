@@ -3,7 +3,9 @@
 // script kept it exact: Decimal results and toFixed give "120924.67", a whole number too large
 // for a JSON number arrives as its digits. A decimal string is shown as the number it is, with
 // the decimals the script chose; a string of digits is left alone, since it is as often an
-// identifier (a personnummer, a postcode) as a count.
+// identifier (a personnummer, a postcode) as a count. A JSON number is cleaned of double noise
+// first (src/precision.ts), so a result stored before the tools did that still reads well.
+import { cleanNumber } from "../../precision";
 
 /** A decimal number with a fraction, as Decimal and toFixed write it. */
 const DECIMAL = /^-?\d+\.\d+$/;
@@ -29,7 +31,7 @@ export function numberFormatter(locale: string | undefined): (value: number | st
   const plain = new Intl.NumberFormat(tag, { ...options, maximumFractionDigits: 10 });
   const fixed = new Map<number, Intl.NumberFormat>();
   return (value) => {
-    if (typeof value === "number") return plain.format(value);
+    if (typeof value === "number") return plain.format(cleanNumber(value));
     if (!DECIMAL.test(value)) return value;
     const [whole = "", fraction = ""] = value.replace("-", "").split(".");
     const significant = (whole + fraction).replace(/^0+/, "").length;

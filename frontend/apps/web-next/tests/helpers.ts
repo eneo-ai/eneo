@@ -243,9 +243,19 @@ export async function apiPost(page: Page, path: string, data: object): Promise<s
 
 /** The same browser-session write for endpoints returning a result rather than a resource id. */
 export async function apiPostJson<T>(page: Page, path: string, data: object): Promise<T> {
+  return apiWriteJson<T>(page, "POST", path, data);
+}
+
+/** Browser-session fixture writes share the same generation and fetch-metadata contract. */
+export async function apiWriteJson<T>(
+  page: Page,
+  method: "POST" | "PATCH",
+  path: string,
+  data: object
+): Promise<T> {
   // Cookie-authenticated writes require the browser's same-origin fetch metadata.
   const response = await page.evaluate(
-    async ({ url, data }) => {
+    async ({ url, method, data }) => {
       const headers = new Headers({ "content-type": "application/json" });
       {
         const session = await fetch("/api/v1/auth/session/");
@@ -255,13 +265,13 @@ export async function apiPostJson<T>(page: Page, path: string, data: object): Pr
         headers.set("Eneo-Session-Generation", generation);
       }
       const response = await fetch(url, {
-        method: "POST",
+        method,
         headers,
         body: JSON.stringify(data)
       });
       return { ok: response.ok, body: await response.text() };
     },
-    { url: apiPath(path), data }
+    { url: apiPath(path), method, data }
   );
   expect(response.ok, response.body).toBe(true);
   return JSON.parse(response.body) as T;
@@ -316,4 +326,129 @@ export async function auditLogs(page: Page) {
   }
   await expect(table).toBeVisible();
   return { table, region: page.getByRole("group", { name: "Granskningsloggar" }) };
+}
+
+/**
+ * Resolves once every finite animation on the page has finished. A disclosure fades
+ * what it reveals in and glides what follows; a check that reads colours or positions
+ * (axe's contrast, a bounding box) mid-way reads a frame that is not the page at rest.
+ * Endless ones (a loading spinner) are left out, and so are those cancelled meanwhile.
+ */
+export async function animationsSettled(page: Page): Promise<void> {
+  await page.evaluate(() =>
+    Promise.all(
+      document
+        .getAnimations()
+        .filter((animation) => animation.effect?.getComputedTiming().endTime !== Infinity)
+        .map((animation) => animation.finished.catch(() => undefined))
+    )
+  );
+}
+
+const NOT_TEXT = ["checkbox", "radio", "range", "file", "hidden", "color", "button", "submit"];
+
+/**
+ * Visible text fields below 16 px, and visible controls that still take double-tap zoom
+ * (globals.css 14c, a touch screen's platform layer).
+ */
+export async function platformFaults(page: Page, screen: string) {
+  return page.evaluate(
+    ({ notText, screen }) => {
+      const shown = (element: Element) => element.getClientRects().length > 0;
+      const faults: string[] = [];
+      for (const field of document.querySelectorAll(
+        "input, textarea, select, [contenteditable='true']"
+      )) {
+        if (!shown(field) || notText.includes((field as HTMLInputElement).type)) continue;
+        const size = parseFloat(getComputedStyle(field).fontSize);
+        if (size < 16)
+          faults.push(
+            `${screen}: ${field.tagName} ${size}px ${field.id || field.getAttribute("name") || field.getAttribute("aria-label") || ""}`
+          );
+      }
+      const controls =
+        "a[href], button, input, select, textarea, [role=tab], [role=menuitem], [role=option]";
+      for (const control of document.querySelectorAll(controls)) {
+        if (!shown(control)) continue;
+        if (getComputedStyle(control).touchAction === "auto") {
+          faults.push(
+            `${screen}: ${control.tagName} touch-action auto ${(control.textContent ?? "").trim().slice(0, 30)}`
+          );
+        }
+      }
+      return faults;
+    },
+    { notText: NOT_TEXT, screen }
+  );
+}
+
+// Narrowest content box a table column may have. A collapsed one has none:
+// its header cell is only padding wide.
+const MIN_COLUMN_CONTENT_PX = 16;
+
+/**
+ * Fails on a table column that collapsed (axe has no rule for it). Astryx
+ * header cells truncate with `max-width: 0`, which cancels a plain `w-*`
+ * width, so the column shrinks until its text wraps a letter per line or a
+ * control is clipped (AGENTS.md → Tables). A data table may scroll sideways
+ * instead of reflowing (1.4.10); it may not squeeze its columns.
+ */
+export async function expectNoCollapsedTableColumns(page: Page) {
+  const collapsed = await page.locator("table th").evaluateAll(
+    (cells, minContent) =>
+      cells.flatMap((cell) => {
+        // A table in a hidden tab panel has no boxes to measure.
+        if (cell.getClientRects().length === 0) return [];
+        const style = getComputedStyle(cell);
+        const content =
+          cell.getBoundingClientRect().width -
+          parseFloat(style.paddingInlineStart) -
+          parseFloat(style.paddingInlineEnd);
+        return content < minContent
+          ? [`"${cell.textContent?.trim()}": ${Math.round(content)} px`]
+          : [];
+      }),
+    MIN_COLUMN_CONTENT_PX
+  );
+  expect(collapsed, `Collapsed table columns on ${page.url()}`).toEqual([]);
+}
+
+/**
+ * The shell is locked to the viewport: pages scroll inside the page panel
+ * (main#main-content), never the document, or the whole shell slides up. An
+ * absolutely positioned box (visually hidden text) whose containing block is
+ * the document, not a region that scrolls, makes the document taller.
+ */
+export async function expectShellHoldsStill(page: Page) {
+  const overflow = await page.evaluate(() => {
+    const main = document.getElementById("main-content");
+    if (!main || getComputedStyle(main).overflowY === "visible") return null;
+    const escaped = [...document.body.querySelectorAll("*")]
+      .filter(
+        (el) =>
+          el instanceof HTMLElement &&
+          getComputedStyle(el).position === "absolute" &&
+          el.offsetParent === document.body &&
+          el.getBoundingClientRect().bottom > window.innerHeight + 1
+      )
+      .slice(0, 5)
+      .map((el) => `${el.tagName.toLowerCase()}.${(el.getAttribute("class") ?? "").slice(0, 60)}`);
+    return {
+      scrolls: document.documentElement.scrollHeight > window.innerHeight + 1,
+      escaped
+    };
+  });
+  if (!overflow) return;
+  expect(
+    overflow.scrolls,
+    `The document scrolls under the shell on ${page.url()}: ${overflow.escaped.join(", ")}`
+  ).toBe(false);
+}
+
+/**
+ * Fails on a region that says it is still loading. A queued run keeps a decorative
+ * skeleton under aria-hidden after its page has loaded; that state passes.
+ */
+export async function expectNothingBusy(page: Page) {
+  await expect(page.locator('[aria-busy="true"]:not([aria-hidden="true"] *)')).toHaveCount(0);
 }

@@ -393,6 +393,9 @@ export const eneoTheme = {
       "selected": {
         "boxShadow": "inset 0 0 0 1px var(--eneo-color-segment-selected-edge)",
         "backgroundColor": "var(--eneo-color-segment-selected)"
+      },
+      "base": {
+        "minHeight": "24px"
       }
     },
     "switch": {
@@ -574,7 +577,8 @@ export const eneoTheme = {
           "components": {
             "segmented-control-item": {
               "base": {
-                "minHeight": "44px"
+                "minHeight": "44px",
+                "minWidth": "44px"
               }
             },
             "checkbox-input": {

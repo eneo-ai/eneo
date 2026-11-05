@@ -2,8 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { browserApi } from "./browser";
 import {
   ALL_CONVERSATIONS_LIMIT,
-  dropFromRecentConversations,
   invalidateConversationLists,
+  patchRecentConversations,
   RECENT_CONVERSATIONS_LIMIT,
   recentConversationsQueryOptions,
   type RecentConversation
@@ -56,17 +56,35 @@ describe("invalidateConversationLists", () => {
   });
 });
 
-describe("dropFromRecentConversations", () => {
-  it("drops a deleted conversation from every recent list, the SideNav's and Alla", () => {
+describe("patchRecentConversations", () => {
+  const nav = recentConversationsQueryOptions(browserApi).queryKey;
+  const all = recentConversationsQueryOptions(browserApi, ALL_CONVERSATIONS_LIMIT).queryKey;
+  const rows = [
+    { id: "c1", name: "Avtal" },
+    { id: "c2", name: "Budget" }
+  ] as RecentConversation[];
+
+  it("renames a conversation in every recent list, the SideNav's and Alla", () => {
     const queryClient = makeQueryClient();
-    const nav = recentConversationsQueryOptions(browserApi).queryKey;
-    const all = recentConversationsQueryOptions(browserApi, ALL_CONVERSATIONS_LIMIT).queryKey;
-    const rows = [{ id: "c1" }, { id: "c2" }] as RecentConversation[];
     for (const key of [nav, all]) queryClient.setQueryData(key, rows);
 
-    dropFromRecentConversations(queryClient, "c1");
+    patchRecentConversations(queryClient, "c1", "Ramavtal");
 
-    expect(queryClient.getQueryData(nav)).toEqual([{ id: "c2" }]);
-    expect(queryClient.getQueryData(all)).toEqual([{ id: "c2" }]);
+    for (const key of [nav, all]) {
+      expect(queryClient.getQueryData(key)).toEqual([
+        { id: "c1", name: "Ramavtal" },
+        { id: "c2", name: "Budget" }
+      ]);
+    }
+  });
+
+  it("drops a deleted conversation from every recent list and loads none that is not loaded", () => {
+    const queryClient = makeQueryClient();
+    queryClient.setQueryData(nav, rows);
+
+    patchRecentConversations(queryClient, "c1", null);
+
+    expect(queryClient.getQueryData(nav)).toEqual([{ id: "c2", name: "Budget" }]);
+    expect(queryClient.getQueryData(all)).toBeUndefined();
   });
 });

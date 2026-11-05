@@ -126,6 +126,7 @@ class _SearchResultChunk(NamedTuple):
     info_blob_title: str | None
     score: float | None
     context_for_chunk: int | None
+    info_blob_url: str | None = None
     info_blob_source_metadata: list[SourceMetadataEntry] = []
 
 
@@ -328,6 +329,7 @@ def _merge_adjacent_chunks(
                 info_blob_title=anchor.info_blob_title,
                 score=anchor.score,
                 context_for_chunk=None,
+                info_blob_url=getattr(anchor, "info_blob_url", None),
                 info_blob_source_metadata=getattr(
                     anchor, "info_blob_source_metadata", []
                 ),
@@ -349,6 +351,7 @@ def _merge_adjacent_chunks(
                 info_blob_title=best_anchor.info_blob_title,
                 score=None,
                 context_for_chunk=best_anchor.chunk_no,
+                info_blob_url=getattr(best_anchor, "info_blob_url", None),
                 info_blob_source_metadata=getattr(
                     best_anchor, "info_blob_source_metadata", []
                 ),
@@ -390,6 +393,7 @@ def _document_page_content(
                 _meta={
                     "title": title,
                     "info_blob_id": str(blob.id),
+                    **_url_meta(getattr(blob, "url", None)),
                     "offset": offset,
                 },
             ),
@@ -428,12 +432,18 @@ def _blob_in_scope(blob, assistant) -> bool:
     )
 
 
+def _url_meta(url: str | None) -> dict[str, str]:
+    # A crawled page's address, so a reader can open the source itself.
+    return {"url": url} if url else {}
+
+
 def _chunk_resource(
     *,
     info_blob_id: UUID,
     chunk_no: int,
     title: str,
     text: str,
+    url: str | None = None,
     meta: dict | None = None,
     source_metadata: Sequence[SourceMetadataEntry] = (),
 ) -> EmbeddedResource:
@@ -450,6 +460,7 @@ def _chunk_resource(
     resource_meta: dict[str, Any] = {
         "title": title,
         "info_blob_id": str(info_blob_id),
+        **_url_meta(url),
         **(meta or {}),
     }
     if source_metadata:
@@ -566,6 +577,7 @@ def _search_result_content(query: str, chunks) -> list[TextContent | EmbeddedRes
                 chunk_no=chunk.chunk_no,
                 title=chunk.info_blob_title or "Untitled source",
                 text=chunk.text,
+                url=getattr(chunk, "info_blob_url", None),
                 meta=meta,
                 source_metadata=getattr(chunk, "info_blob_source_metadata", ()) or (),
             )
@@ -581,6 +593,7 @@ def _overview_content(
     title_lines: Sequence[str],
     excerpts,
     excerpt_titles: dict[UUID, str],
+    excerpt_urls: dict[UUID, str] | None = None,
 ) -> list[TextContent | EmbeddedResource]:
     """One page describing a source: what is in it, plus a taste of the content.
 
@@ -646,6 +659,7 @@ def _overview_content(
                     chunk_no=excerpt.chunk_no,
                     title=excerpt_titles.get(excerpt.info_blob_id, "Untitled source"),
                     text=excerpt.text[:OVERVIEW_EXCERPT_CHARS],
+                    url=(excerpt_urls or {}).get(excerpt.info_blob_id),
                 )
             )
 
@@ -705,7 +719,11 @@ async def search_knowledge(
     """
     fetch, autocut_cutoff, cap = _resolve_search_params(mode, max_results)
     logger.debug("[RAG] search_knowledge query=%r within=%r", query[:120], within)
-    async with internal_tool_context(ctx) as (container, _user, assistant_id):
+    async with internal_tool_context(ctx, visitors=True) as (
+        container,
+        _user,
+        assistant_id,
+    ):
         assistant, _ = await container.assistant_service().get_assistant(assistant_id)
         # The embedding model comes from the assistant, not the scope: a
         # document scope carries no source to read it from.
@@ -814,7 +832,11 @@ async def read_source(
         return [TextContent(type="text", text="Invalid document_id.")]
     offset = max(0, offset)
 
-    async with internal_tool_context(ctx) as (container, _user, assistant_id):
+    async with internal_tool_context(ctx, visitors=True) as (
+        container,
+        _user,
+        assistant_id,
+    ):
         assistant, _ = await container.assistant_service().get_assistant(assistant_id)
         try:
             blob = await container.info_blob_repo().get(blob_id)
@@ -871,7 +893,11 @@ async def describe_source(
     within=<document_id>.
     """
     offset = max(0, offset)
-    async with internal_tool_context(ctx) as (container, _user, assistant_id):
+    async with internal_tool_context(ctx, visitors=True) as (
+        container,
+        _user,
+        assistant_id,
+    ):
         assistant, _ = await container.assistant_service().get_assistant(assistant_id)
         sources = _source_scopes(assistant)
         if not sources:
@@ -951,6 +977,7 @@ async def describe_source(
         title_lines=title_lines,
         excerpts=excerpts,
         excerpt_titles={listing.id: listing.label for listing in targets},
+        excerpt_urls={listing.id: listing.url for listing in targets if listing.url},
     )
 
 
@@ -966,7 +993,11 @@ async def list_knowledge_sources(ctx: Context) -> str:
     what that source contains, or as search_knowledge's "within" to search
     only that source.
     """
-    async with internal_tool_context(ctx) as (container, _user, assistant_id):
+    async with internal_tool_context(ctx, visitors=True) as (
+        container,
+        _user,
+        assistant_id,
+    ):
         assistant, _ = await container.assistant_service().get_assistant(assistant_id)
 
         lines: list[str] = []

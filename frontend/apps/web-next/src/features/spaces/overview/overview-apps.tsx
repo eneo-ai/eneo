@@ -6,27 +6,24 @@ import { AREA_HUES } from "@/components/composites/icon-tile";
 import { ResourceCollection } from "@/components/composites/resource-tile";
 import { CreateAppButton } from "@/features/apps/create-app";
 import { AppTile } from "@/features/apps/tile";
-import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { useSpace } from "../use-space";
 import { recentApps } from "./overview-data";
-import { OverviewCreateCard, OverviewLink, OverviewSection } from "./overview-section";
+import { OverviewLink, OverviewSection } from "./overview-section";
 
 /**
- * The newest apps as cards (one row), plus the create card for users who may
- * create; on a phone the create button sits in the heading instead of a card.
- * Both are small and secondary: the tab's docked button is the primary action.
- * Nothing for someone who has no apps to open and none to create. "Visa alla"
- * leads to the apps tab.
+ * The newest apps as cards (three, one row on a tablet), with a small
+ * secondary create button in the heading for users who may create: the tab's
+ * docked button is the primary action. One button at every width, so a dialog
+ * it opened stays open when the screen turns. Nothing for someone who has no
+ * apps to open and none to create. "Visa alla" leads to the apps tab.
  */
 export function OverviewApps() {
   const t = useTranslations();
   const { space, routeId, can } = useSpace();
   const collator = useCollator();
-  const phone = usePhoneScreen();
   const items = recentApps(space, collator.compare);
   const canCreate = can("create", "app");
-  const createCard = canCreate && !phone;
-  const shown = items.slice(0, createCard ? 2 : 3);
+  const shown = items.slice(0, 3);
   const showStatus = !space.personal;
   if (items.length === 0 && !canCreate) return null;
 
@@ -37,7 +34,7 @@ export function OverviewApps() {
       end={
         items.length > 0 ? (
           <>
-            {canCreate && phone ? <CreateAppButton secondary /> : null}
+            {canCreate ? <CreateAppButton secondary /> : null}
             <OverviewLink href={`/spaces/${routeId}/apps`} label={t("space_view_all_apps")}>
               {t("space_view_all")}
             </OverviewLink>
@@ -57,17 +54,7 @@ export function OverviewApps() {
           actions={<CreateAppButton />}
         />
       ) : (
-        <ResourceCollection
-          gridClassName="grid gap-3 @lg:grid-cols-2 @xl:grid-cols-3"
-          trailing={
-            createCard ? (
-              <OverviewCreateCard
-                hint={t("space_new_app_hint")}
-                action={<CreateAppButton secondary />}
-              />
-            ) : undefined
-          }
-        >
+        <ResourceCollection gridClassName="grid gap-3 @lg:grid-cols-2 @xl:grid-cols-3">
           {shown.map((app) => (
             <AppTile key={app.id} app={app} showStatus={showStatus} showActions={false} />
           ))}

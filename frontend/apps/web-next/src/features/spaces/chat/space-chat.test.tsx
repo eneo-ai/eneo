@@ -254,7 +254,7 @@ describe("SpaceChat", () => {
       route: `/spaces/space-1/chat?type=${type}&id=partner-9`,
       queryClient
     });
-    expect(await screen.findByRole("radio", { name: "Insikter" })).toBeTruthy();
+    expect(await screen.findByRole("tab", { name: "Insikter" })).toBeTruthy();
   });
 
   it("refreshes the empty-draft baseline after a saved Skill change and a model switch", async () => {

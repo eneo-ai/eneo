@@ -114,8 +114,8 @@ from eneo.sessions.session import (
     ViewToolCallText,
 )
 from eneo.sessions.session_protocol import (
+    to_session_metadata_paginated_response,
     to_session_public,
-    to_sessions_paginated_response,
 )
 
 _CONVERSATION_SERVICE_ACCESS_REASON = (
@@ -664,7 +664,7 @@ async def list_conversations(
             previous=previous,
         )
 
-    return to_sessions_paginated_response(
+    return to_session_metadata_paginated_response(
         sessions=sessions,
         limit=limit,
         cursor=cursor,  # pyright: ignore[reportArgumentType]  # session_protocol cursor param has wrong annotation (datetime instead of Optional[datetime])
@@ -1319,16 +1319,17 @@ async def delete_conversation(
     """Deletes a specific conversation"""
     session_service = container.session_service()
     # Note: We'll need to determine if this is an assistant or group chat session
-    session = await session_service.get_session_by_uuid(session_id)
-    assert session is not None
+    owner = await session_service.get_session_ownership(session_id)
 
-    await _authorize_session_access(container, session)
+    await _authorize_partner_access(
+        container, assistant_id=owner.assistant_id, group_chat_id=owner.group_chat_id
+    )
 
-    if session.group_chat_id:
-        await session_service.delete(session_id, group_chat_id=session.group_chat_id)
+    if owner.group_chat_id:
+        await session_service.delete(session_id, group_chat_id=owner.group_chat_id)
     else:
-        assert session.assistant is not None
-        await session_service.delete(session_id, assistant_id=session.assistant.id)
+        assert owner.assistant_id is not None
+        await session_service.delete(session_id, assistant_id=owner.assistant_id)
 
     # Return None to produce 204 No Content response
     return None
@@ -1357,21 +1358,22 @@ async def leave_feedback(
     session_service = container.session_service()
 
     # Determine if this is a group chat or assistant session
-    session = await session_service.get_session_by_uuid(session_id)
-    assert session is not None
+    owner = await session_service.get_session_ownership(session_id)
 
-    await _authorize_session_access(container, session)
+    await _authorize_partner_access(
+        container, assistant_id=owner.assistant_id, group_chat_id=owner.group_chat_id
+    )
 
-    if session.group_chat_id:
+    if owner.group_chat_id:
         updated_session = await session_service.leave_feedback(
             session_id=session_id,
-            group_chat_id=session.group_chat_id,
+            group_chat_id=owner.group_chat_id,
             feedback=feedback,
         )
     else:
-        assert session.assistant is not None
+        assert owner.assistant_id is not None
         updated_session = await session_service.leave_feedback(
-            session_id=session_id, assistant_id=session.assistant.id, feedback=feedback
+            session_id=session_id, assistant_id=owner.assistant_id, feedback=feedback
         )
 
     return to_session_public(updated_session)
@@ -1688,9 +1690,10 @@ async def rename_conversation(
 ):
     """Rename a conversation (session)"""
     session_service = container.session_service()
-    session = await session_service.get_session_by_uuid(session_id)
-    assert session is not None
-    await _authorize_session_access(container, session)
+    owner = await session_service.get_session_ownership(session_id)
+    await _authorize_partner_access(
+        container, assistant_id=owner.assistant_id, group_chat_id=owner.group_chat_id
+    )
 
     updated_session = await session_service.update_session(
         SessionUpdate(id=session_id, name=payload.name)

@@ -30,8 +30,12 @@ def _make_service(
         # Preflight resolves the model and file-inlining mode through the
         # governance-aware path (mirrors ask()); no policy unless a test sets
         # one via `effective_config`.
-        assistant_service.get_assistant_with_effective_config = AsyncMock(
-            return_value=(assistant, [], effective_config)
+        assistant_service.get_preflight_target = AsyncMock(
+            return_value=SimpleNamespace(
+                assistant=assistant,
+                effective_config=effective_config,
+                space=SimpleNamespace(is_personal=lambda: False),
+            )
         )
         # Default: no persistent prompt/attachments. Baseline-specific tests
         # override this. Without it the AsyncMock returns a non-iterable.
@@ -77,11 +81,6 @@ def _make_service(
         group_chat_service=group_chat_service,
         session_service=session_service,
         completion_service=MagicMock(),
-        space_service=SimpleNamespace(
-            get_space_by_assistant=AsyncMock(
-                return_value=SimpleNamespace(is_personal=lambda: False)
-            )
-        ),
         file_service=file_service,
     )
 
@@ -93,8 +92,13 @@ async def test_mention_preflight_uses_the_mentioned_assistants_model_and_baselin
     mentioned = _make_assistant(model_name="claude-3-5-sonnet")
     parent.tool_assistants = [SimpleNamespace(id=mentioned_id)]
     service = _make_service(assistant=parent)
-    service.assistant_service.get_assistant_with_effective_config.side_effect = (
-        lambda id: (parent if id == parent_id else mentioned, [], None)
+    parent.id, mentioned.id = parent_id, mentioned_id
+    service.assistant_service.get_preflight_target.side_effect = (
+        lambda id: SimpleNamespace(
+            assistant=parent if id == parent_id else mentioned,
+            effective_config=None,
+            space=SimpleNamespace(is_personal=lambda: False),
+        )
     )
     result = await service.preflight_tokens(
         question="hello",
@@ -104,9 +108,10 @@ async def test_mention_preflight_uses_the_mentioned_assistants_model_and_baselin
         settings=ConversationSettings(completion_model_id=uuid4()),
     )
     assert result.model_name == "claude-3-5-sonnet"
-    assert service.assistant_service.get_preflight_baseline.await_args.args == (
-        mentioned_id,
-    )
+    baseline_target = service.assistant_service.get_preflight_baseline.await_args.args[
+        0
+    ]
+    assert baseline_target.assistant is mentioned
 
 
 def test_preflight_schema_documents_skill_tokens_as_a_subset():
@@ -691,10 +696,9 @@ async def test_preflight_resolves_session_assistant_model():
     session.assistant = MagicMock()
     session.assistant.id = assistant_id
 
-    service = _make_service(
-        session=session,
-        assistant=_make_assistant(model_name="gpt-4o"),
-    )
+    assistant = _make_assistant(model_name="gpt-4o")
+    assistant.id = assistant_id
+    service = _make_service(session=session, assistant=assistant)
 
     result = await service.preflight_tokens(
         question="hello",
@@ -705,7 +709,7 @@ async def test_preflight_resolves_session_assistant_model():
     assert result.input_tokens > 0
     assert result.model_name == "gpt-4o"
     service.session_service.get_context.assert_awaited_once_with(session_id)
-    service.assistant_service.get_assistant_with_effective_config.assert_awaited_with(
+    service.assistant_service.get_preflight_target.assert_awaited_once_with(
         assistant_id
     )
 

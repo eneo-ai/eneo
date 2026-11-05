@@ -7,8 +7,9 @@ import pytest
 
 from eneo.mcp_servers.application import capability_resolver
 from eneo.mcp_servers.application.capability_resolver import (
+    active_capability_providers,
+    availability_from_providers,
     general_servers_for_space,
-    get_active_capability_servers,
     meets_security_classification,
     resolve_capability_servers,
     select_provider_for_user,
@@ -108,19 +109,21 @@ def _scalars(records):
     return result
 
 
-class TestGetActiveCapabilityServers:
+class TestActiveCapabilityProviders:
     @pytest.mark.parametrize("purpose", CAPABILITY_PURPOSES)
     async def test_query_is_scoped_to_tenant_and_purpose(self, purpose):
         session = AsyncMock()
         session.scalars.return_value = _scalars([])
         tenant_id = uuid4()
 
-        result = await get_active_capability_servers(session, tenant_id, purpose)
+        result = await active_capability_providers(
+            session, tenant_id, purposes=(purpose,)
+        )
 
         assert result == []
         statement = session.scalars.await_args.args[0]
         compiled = str(statement.compile(compile_kwargs={"literal_binds": True}))
-        assert f"mcp_servers.purpose = '{purpose}'" in compiled
+        assert f"mcp_servers.purpose IN ('{purpose}')" in compiled
         assert "mcp_servers.is_enabled = true" in compiled
         assert tenant_id.hex in compiled
 
@@ -137,8 +140,8 @@ class TestGetActiveCapabilityServers:
             capability_resolver.MCPServerMapper, "to_entity", lambda record: server
         )
 
-        resolved = await get_active_capability_servers(
-            session, server.tenant_id, "web_search"
+        resolved = await active_capability_providers(
+            session, server.tenant_id, purposes=("web_search",)
         )
 
         assert resolved == [server]
@@ -259,9 +262,7 @@ class TestCapabilityPermissions:
 class TestResolveCapabilityServers:
     async def test_general_servers_pass_through_without_lookups(self, monkeypatch):
         lookup = AsyncMock()
-        monkeypatch.setattr(
-            capability_resolver, "get_active_capability_servers", lookup
-        )
+        monkeypatch.setattr(capability_resolver, "active_capability_providers", lookup)
         general = _server("general")
 
         resolution = await resolve_capability_servers(
@@ -282,7 +283,7 @@ class TestResolveCapabilityServers:
         self, monkeypatch
     ):
         monkeypatch.setattr(
-            capability_resolver, "get_active_capability_servers", AsyncMock()
+            capability_resolver, "active_capability_providers", AsyncMock()
         )
         kept = _server("general", security_level=2, name="kept")
         below = _server("general", security_level=1, name="below")
@@ -303,12 +304,11 @@ class TestResolveCapabilityServers:
     ):
         active = {purpose: _server(purpose) for purpose in CAPABILITY_PURPOSES}
 
-        async def lookup(session, tenant_id, purpose):
-            return [active[purpose]]
+        async def lookup(session, tenant_id, purposes):
+            # Every purpose's provider in one list, unrelated purposes too.
+            return list(active.values())
 
-        monkeypatch.setattr(
-            capability_resolver, "get_active_capability_servers", lookup
-        )
+        monkeypatch.setattr(capability_resolver, "active_capability_providers", lookup)
         general = _server("general")
         # Attach stale markers in reverse order; resolution follows the
         # canonical CAPABILITY_PURPOSES order regardless.
@@ -333,9 +333,7 @@ class TestResolveCapabilityServers:
         self, monkeypatch
     ):
         lookup = AsyncMock()
-        monkeypatch.setattr(
-            capability_resolver, "get_active_capability_servers", lookup
-        )
+        monkeypatch.setattr(capability_resolver, "active_capability_providers", lookup)
         markers = [_server(purpose) for purpose in CAPABILITY_PURPOSES]
 
         resolution = await resolve_capability_servers(
@@ -358,13 +356,10 @@ class TestResolveCapabilityServers:
         web_search = _server("web_search")
         toolless = _server("image_generation", tools=[_tool(approved=False)])
 
-        async def lookup(session, tenant_id, purpose):
-            providers = {"web_search": web_search, "image_generation": toolless}
-            return [providers[purpose]] if purpose in providers else []
+        async def lookup(session, tenant_id, purposes):
+            return [web_search, toolless]
 
-        monkeypatch.setattr(
-            capability_resolver, "get_active_capability_servers", lookup
-        )
+        monkeypatch.setattr(capability_resolver, "active_capability_providers", lookup)
         markers = [_server(purpose) for purpose in CAPABILITY_PURPOSES]
 
         resolution = await resolve_capability_servers(
@@ -382,13 +377,11 @@ class TestResolveCapabilityServers:
     async def test_only_requested_purposes_are_looked_up(self, monkeypatch):
         looked_up: list[str] = []
 
-        async def lookup(session, tenant_id, purpose):
-            looked_up.append(purpose)
+        async def lookup(session, tenant_id, purposes):
+            looked_up.append(purposes)
             return []
 
-        monkeypatch.setattr(
-            capability_resolver, "get_active_capability_servers", lookup
-        )
+        monkeypatch.setattr(capability_resolver, "active_capability_providers", lookup)
 
         await resolve_capability_servers(
             AsyncMock(),
@@ -402,15 +395,13 @@ class TestResolveCapabilityServers:
             supports_tool_calling=True,
         )
 
-        assert looked_up == ["image_generation"]
+        assert looked_up == [("image_generation",)]
 
     async def test_purposes_outside_the_users_permissions_are_not_looked_up(
         self, monkeypatch
     ):
         lookup = AsyncMock(return_value=[_server("web_search")])
-        monkeypatch.setattr(
-            capability_resolver, "get_active_capability_servers", lookup
-        )
+        monkeypatch.setattr(capability_resolver, "active_capability_providers", lookup)
         markers = [_server(purpose) for purpose in CAPABILITY_PURPOSES]
 
         resolution = await resolve_capability_servers(
@@ -425,7 +416,7 @@ class TestResolveCapabilityServers:
         )
 
         assert [s.purpose for s in resolution.capability_servers] == ["web_search"]
-        assert lookup.await_args_list[0].args[2] == "web_search"
+        assert lookup.await_args_list[0].args[2] == ("web_search",)
         assert lookup.await_count == 1
 
     async def test_user_group_selects_the_provider(self, monkeypatch):
@@ -436,7 +427,7 @@ class TestResolveCapabilityServers:
         )
         monkeypatch.setattr(
             capability_resolver,
-            "get_active_capability_servers",
+            "active_capability_providers",
             AsyncMock(return_value=[default, targeted]),
         )
 
@@ -469,7 +460,7 @@ class TestResolveCapabilityServers:
     ):
         monkeypatch.setattr(
             capability_resolver,
-            "get_active_capability_servers",
+            "active_capability_providers",
             AsyncMock(return_value=[_server("web_search", security_level=0)]),
         )
 
@@ -504,7 +495,9 @@ class TestBackingModel:
         session = AsyncMock()
         session.scalars.return_value = MagicMock(all=lambda: [])
 
-        await get_active_capability_servers(session, uuid4(), "image_generation")
+        await active_capability_providers(
+            session, uuid4(), purposes=("image_generation",)
+        )
 
         query = session.scalars.await_args.args[0]
         loaded = [str(getattr(opt, "path", "")) for opt in query._with_options]
@@ -522,7 +515,7 @@ class TestBackingModel:
         provider = _server(purpose, backing_model=_backing_model(enabled=False))
         monkeypatch.setattr(
             capability_resolver,
-            "get_active_capability_servers",
+            "active_capability_providers",
             AsyncMock(return_value=[provider]),
         )
 
@@ -544,7 +537,7 @@ class TestBackingModel:
         provider = _server(purpose, backing_model=_backing_model())
         monkeypatch.setattr(
             capability_resolver,
-            "get_active_capability_servers",
+            "active_capability_providers",
             AsyncMock(return_value=[provider]),
         )
 
@@ -565,7 +558,7 @@ async def test_provider_attachment_without_purpose_grant_does_not_enable_capabil
     monkeypatch,
 ):
     lookup = AsyncMock()
-    monkeypatch.setattr(capability_resolver, "get_active_capability_servers", lookup)
+    monkeypatch.setattr(capability_resolver, "active_capability_providers", lookup)
     result = await resolve_capability_servers(
         AsyncMock(), uuid4(), [_server("image_generation")], supports_tool_calling=True
     )
@@ -578,7 +571,7 @@ async def test_retaining_or_removing_unavailable_capability_does_not_require_pro
     monkeypatch,
 ):
     lookup = AsyncMock()
-    monkeypatch.setattr(capability_resolver, "get_active_capability_servers", lookup)
+    monkeypatch.setattr(capability_resolver, "active_capability_providers", lookup)
     await capability_resolver.validate_capability_additions(
         AsyncMock(), uuid4(), ["image_generation"], ["image_generation"]
     )
@@ -586,3 +579,74 @@ async def test_retaining_or_removing_unavailable_capability_does_not_require_pro
         AsyncMock(), uuid4(), [], ["image_generation"]
     )
     lookup.assert_not_awaited()
+
+
+_GROUP_G, _GROUP_H = uuid4(), uuid4()
+
+
+def _mixed_purpose_providers():
+    # web_search has only a group-targeted provider; image_generation has a
+    # default plus a toolless group-targeted one for the same group, and a
+    # stricter one. No purpose may ever pick another purpose's provider.
+    return [
+        _server("image_generation", name="Images", security_level=2),
+        _server(
+            "web_search",
+            name="Legal search",
+            audience=AUDIENCE_GROUPS,
+            group_ids=[_GROUP_G],
+            security_level=0,
+        ),
+        _server(
+            "image_generation",
+            name="Legal images",
+            audience=AUDIENCE_GROUPS,
+            group_ids=[_GROUP_G],
+            tools=[_tool(approved=False)],
+        ),
+    ]
+
+
+@pytest.mark.parametrize(
+    "scope",
+    [
+        {},
+        {"user_group_ids": set()},
+        {"user_group_ids": {_GROUP_G}},
+        {"user_group_ids": {_GROUP_H}, "allowed_purposes": {"web_search"}},
+    ],
+)
+@pytest.mark.parametrize("level", [None, 1])
+def test_one_load_describes_each_purpose_as_its_own_load_did(scope, level):
+    providers = _mixed_purpose_providers()
+    classification = _classification(level) if level is not None else None
+
+    assert availability_from_providers(providers, classification, **scope) == [
+        capability_resolver.describe_capability_availability(
+            [p for p in providers if p.purpose == purpose],
+            purpose,
+            classification,
+            **scope,
+        )
+        for purpose in CAPABILITY_PURPOSES
+    ]
+
+
+async def test_resolution_picks_each_purpose_from_its_own_providers(monkeypatch):
+    images, legal_search, legal_images = _mixed_purpose_providers()
+    lookup = AsyncMock(return_value=[images, legal_search, legal_images])
+    monkeypatch.setattr(capability_resolver, "active_capability_providers", lookup)
+
+    async def resolve(user_group_ids):
+        return await resolve_capability_servers(
+            AsyncMock(),
+            uuid4(),
+            [],
+            requested_capabilities=["web_search", "image_generation", "charts"],
+            supports_tool_calling=True,
+            user_group_ids=user_group_ids,
+        )
+
+    assert (await resolve({_GROUP_H})).capability_servers == [images]
+    assert (await resolve({_GROUP_G})).capability_servers == [legal_search]
+    assert lookup.await_count == 2

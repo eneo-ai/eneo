@@ -1,4 +1,4 @@
-import { Collapsible } from "@astryxdesign/core/Collapsible";
+import { Collapsible } from "@/components/astryx/collapsible";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { Copy } from "lucide-react";
 import { useTranslations } from "use-intl";

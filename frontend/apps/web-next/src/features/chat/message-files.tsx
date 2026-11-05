@@ -61,7 +61,7 @@ const BUNDLE_SHOWN_CLASS = "border-ax-accent";
 
 /** Opens a message attachment in the shared preview dialog (signs the URL on open). */
 function MessageFilePreview({ file, onClose }: { file: MessageFile; onClose: () => void }) {
-  const { url, error } = useSignedUrl(file.id);
+  const { url, error, resign } = useSignedUrl(file.id);
   return (
     <AttachmentPreviewDialog
       open
@@ -70,6 +70,7 @@ function MessageFilePreview({ file, onClose }: { file: MessageFile; onClose: () 
       mimetype={file.mimetype}
       url={url}
       error={error}
+      onImageError={resign}
     />
   );
 }

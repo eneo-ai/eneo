@@ -194,6 +194,11 @@ says "Radix" it means the legacy shadcn primitives in `src/components/ui`.
 
 - `prefers-reduced-motion` is honoured app-wide (`globals.css`); don't defeat it
   with `!important` animations. Motion is decoration, never the message.
+- With reduced motion nothing moves or changes size. The one thing allowed is
+  an opacity-only fade of at most 200 ms: Astryx plays one on touch for its
+  layers, the SideNav rail and what a disclosure moves as it opens or closes,
+  and with a mouse changes at once.
+  `tests/motion.spec.ts` measures both.
 - Anything that moves, blinks or auto-updates for more than 5 seconds can be
   paused. Nothing flashes more than three times per second.
 

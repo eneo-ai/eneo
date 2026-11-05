@@ -12,7 +12,6 @@ import {
   Wrench
 } from "lucide-react";
 import Link from "@/lib/link";
-import { useRouter } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
 import { useMemo, useState } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
@@ -109,7 +108,6 @@ function McpServerCard({
   securityEnabled: boolean;
 }) {
   const t = useTranslations();
-  const router = useRouter();
   const queryClient = useQueryClient();
   const [showDelete, setShowDelete] = useState(false);
   const [activationError, setActivationError] = useState<unknown>(null);
@@ -250,12 +248,12 @@ function McpServerCard({
             {
               label: t("mcp_manage"),
               icon: <Settings2 aria-hidden="true" />,
-              onClick: () => router.push(detailHref)
+              href: detailHref
             },
             {
               label: t("mcp_server_tools"),
               icon: <Wrench aria-hidden="true" />,
-              onClick: () => router.push(`${detailHref}?tab=tools`)
+              href: `${detailHref}?tab=tools`
             },
             {
               label: t("delete"),

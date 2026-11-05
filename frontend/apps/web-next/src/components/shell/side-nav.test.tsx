@@ -2,6 +2,8 @@
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { browserApi } from "@/lib/api/browser";
+import { spaceQueryOptions } from "@/features/spaces/space";
+import { makeSpace } from "@/features/spaces/testing/space-fixture";
 import { recentConversationsQueryOptions, type RecentConversation } from "@/lib/api/conversations";
 import type { Permission } from "@/lib/auth/permissions";
 import { expectNoAxeViolations } from "@/test/axe";
@@ -9,7 +11,11 @@ import { setRoute } from "@/test/navigation";
 import { noopShell, renderInApp, testAppContext, testQueryClient } from "@/test/render";
 import { PHONE_VIEWPORT, setViewport } from "@/test/setup-dom";
 import type { NavVariant } from "./routes";
-import { DesktopSideNav } from "./side-nav";
+import { SideNav } from "@astryxdesign/core/SideNav";
+import { MainSections, MainTopContent } from "./main-nav";
+import { NavFooter } from "./nav-footer";
+import { NavHeader } from "./nav-header";
+import { DesktopSideNav, useSideNavRail } from "./side-nav";
 import { SIDE_NAV_COLLAPSED_COOKIE } from "./side-nav-preference";
 
 vi.mock("@/lib/navigation", () => import("@/test/navigation"));
@@ -20,6 +26,45 @@ vi.mock("@/features/api-keys/expiring-keys-notification", () => ({
 vi.mock("@/features/whats-new/whats-new-provider", () => ({
   useWhatsNew: () => ({ enabled: false, hasUnseen: false })
 }));
+
+/**
+ * The SideNav as the app shell renders it (the shell owns its rail state).
+ * Beside the top bar the admin pages have the admin nav; the main navigation
+ * (Ny konversation, the spaces, Senaste) is the phone drawer's, rendered here
+ * in a SideNav of the same make so its content and the rail can be tested.
+ */
+function SpaceSideNav() {
+  return <DesktopSideNav kind="space" navId="side-nav" rail={useSideNavRail(undefined)} />;
+}
+
+function RailedSideNav({
+  variant,
+  navId,
+  defaultCollapsed
+}: {
+  variant: NavVariant;
+  navId: string;
+  defaultCollapsed?: boolean;
+}) {
+  const rail = useSideNavRail(defaultCollapsed);
+  if (variant === "admin") return <DesktopSideNav kind="admin" navId={navId} rail={rail} />;
+  return (
+    <SideNav
+      id={navId}
+      aria-label="Huvudmeny"
+      collapsible={{
+        isCollapsed: rail.collapsed,
+        onCollapsedChange: rail.change,
+        hasButton: false
+      }}
+      header={<NavHeader navId={navId} />}
+      topContent={<MainTopContent />}
+      footer={<NavFooter variant="main" />}
+    >
+      <MainSections />
+    </SideNav>
+  );
+}
 
 const SPACES = [
   { id: "s1", name: "Upphandling", description: null, personal: false, organization: false },
@@ -79,7 +124,7 @@ function renderNav({
   conversations = CONVERSATIONS,
   shell = { ...noopShell, openPalette: vi.fn(), openCreateSpace: vi.fn() }
 } = {}) {
-  const utils = renderInApp(<DesktopSideNav variant={variant} navId="side-nav" />, {
+  const utils = renderInApp(<RailedSideNav variant={variant} navId="side-nav" />, {
     queryClient: seededClient({ conversations }),
     appContext: testAppContext({ permissions }),
     shell
@@ -116,21 +161,25 @@ describe("DesktopSideNav (main)", () => {
     expect(
       within(navigation).getByRole("link", { name: "Ny konversation" }).getAttribute("href")
     ).toBe("/spaces/personal/chat");
-    expect(within(navigation).getByRole("button", { name: "Sök" })).toBeTruthy();
+    // Sök is the top bar's beside the SideNav (top-bar.tsx).
+    expect(within(navigation).queryByRole("button", { name: "Sök" })).toBeNull();
     expect(within(navigation).getByRole("link", { name: "Assistenter" }).getAttribute("href")).toBe(
       "/dashboard"
     );
 
-    // Personligt first, the shared spaces (not the organisation space), Alla ytor last.
-    const spaces = within(navigation).getByRole("group", { name: "Ytor" });
+    // The areas in the top bar's order: Personligt, then Delat with the
+    // shared spaces (not the organisation space) and Dina ytor last.
+    expect(within(navigation).getByRole("link", { name: "Personligt" }).getAttribute("href")).toBe(
+      "/spaces/personal/overview"
+    );
+    const spaces = within(navigation).getByRole("group", { name: "Delat" });
     const spaceLinks = within(spaces).getAllByRole("link");
     expect(spaceLinks.map((link) => link.getAttribute("href"))).toEqual([
-      "/spaces/personal/overview",
       "/spaces/s1/overview",
       "/spaces/s2/overview",
       "/spaces/list"
     ]);
-    for (const name of ["Personligt", "Upphandling", "Socialtjänst", "Alla ytor"]) {
+    for (const name of ["Upphandling", "Socialtjänst", "Dina ytor"]) {
       expect(within(spaces).getByRole("link", { name })).toBeTruthy();
     }
 
@@ -192,19 +241,19 @@ describe("DesktopSideNav (main)", () => {
     expect(within(recent).getByRole("link", { name: "Upphandlingsanalys mot LOU" })).toBeTruthy();
   });
 
-  it("shows Organisation and Administration to admins only", () => {
+  it("lists Organisation after Delat for admins, and leaves Administration and the profile to the top bar", () => {
     renderNav();
-    expect(screen.queryByRole("link", { name: "Administration" })).toBeNull();
     expect(screen.queryByRole("link", { name: "Organisation" })).toBeNull();
     cleanup();
-
     renderNav({ permissions: ["admin"] });
-    expect(screen.getByRole("link", { name: "Administration" }).getAttribute("href")).toBe(
-      "/admin"
-    );
-    expect(screen.getByRole("link", { name: "Organisation" }).getAttribute("href")).toBe(
-      "/spaces/organization/knowledge"
-    );
+    const organisation = screen.getByRole("link", { name: "Organisation" });
+    expect(
+      screen.getByRole("group", { name: "Delat" }).compareDocumentPosition(organisation) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    // With a mouse the top bar (top-bar.tsx) carries them beside the SideNav.
+    expect(screen.queryByRole("link", { name: "Administration" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /konto och inställningar/ })).toBeNull();
   });
 
   it("marks the current page, one destination at a time", () => {
@@ -260,14 +309,6 @@ describe("DesktopSideNav (main)", () => {
     expect(shell.openCreateSpace).toHaveBeenCalledTimes(1);
   });
 
-  it("opens the command palette from Sök and advertises the shortcut", () => {
-    const { shell } = renderNav();
-    const search = screen.getByRole("button", { name: "Sök" });
-    expect(search.getAttribute("aria-keyshortcuts")).toBe("Meta+K Control+K");
-    fireEvent.click(search);
-    expect(shell.openPalette).toHaveBeenCalledTimes(1);
-  });
-
   it("hides Senaste when there are no conversations", () => {
     renderNav({ conversations: [] });
     expect(screen.queryByRole("group", { name: "Senaste" })).toBeNull();
@@ -299,16 +340,16 @@ describe("DesktopSideNav (main)", () => {
         return retryResponse;
       }) as unknown as typeof browserApi.GET);
 
-      const { container } = renderInApp(<DesktopSideNav variant="main" navId="side-nav" />, {
+      const { container } = renderInApp(<RailedSideNav variant="main" navId="side-nav" />, {
         queryClient
       });
       const spaces = within(screen.getByRole("navigation", { name: "Huvudmeny" })).getByRole(
         "group",
-        { name: "Ytor" }
+        { name: "Delat" }
       );
       expect(await within(spaces).findByText("Ytorna kunde inte laddas.")).toBeTruthy();
-      expect(within(spaces).getByRole("link", { name: "Personligt" })).toBeTruthy();
-      expect(within(spaces).getByRole("link", { name: "Alla ytor" })).toBeTruthy();
+      expect(screen.getByRole("link", { name: "Personligt" })).toBeTruthy();
+      expect(within(spaces).getByRole("link", { name: "Dina ytor" })).toBeTruthy();
       expect(Boolean(within(spaces).queryByRole("link", { name: "Upphandling" }))).toBe(cached);
 
       const retry = within(spaces).getByRole("button", { name: "Försök ladda ytorna igen" });
@@ -368,7 +409,7 @@ describe("DesktopSideNav (main)", () => {
   it("renders the stored preference on first mount", () => {
     // The route reads the stored cookie before mounting the nav.
     const { container } = renderInApp(
-      <DesktopSideNav variant="main" navId="side-nav" defaultCollapsed />,
+      <RailedSideNav variant="main" navId="side-nav" defaultCollapsed />,
       {
         queryClient: seededClient()
       }
@@ -382,7 +423,7 @@ describe("DesktopSideNav on a tablet or a small laptop", () => {
   const expanded = () => screen.queryByRole("button", { name: "Fäll ihop sidomenyn" }) !== null;
   const renderStored = (defaultCollapsed?: boolean) =>
     renderInApp(
-      <DesktopSideNav variant="main" navId="side-nav" defaultCollapsed={defaultCollapsed} />,
+      <RailedSideNav variant="main" navId="side-nav" defaultCollapsed={defaultCollapsed} />,
       { queryClient: seededClient() }
     );
 
@@ -418,17 +459,21 @@ describe("DesktopSideNav on a tablet or a small laptop", () => {
     expect(expanded()).toBe(true);
   });
 
-  it("moves focus to the toggle when narrowing below 1280 px removes the focused link", async () => {
+  it("moves focus to the toggle when narrowing below 1280 px replaces the focused control", async () => {
     setViewport({ width: 1280, height: 800, pointer: "fine" });
-    renderStored();
-    const link = within(screen.getByRole("group", { name: "Senaste" })).getByRole("link", {
-      name: "Veckomöte"
-    });
-    link.focus();
+    setRoute("/spaces/s1/overview");
+    const queryClient = seededClient();
+    queryClient.setQueryData(
+      spaceQueryOptions(browserApi, "s1").queryKey,
+      makeSpace({ overrides: { id: "s1", name: "Upphandling" } })
+    );
+    renderInApp(<SpaceSideNav />, { queryClient, appContext: testAppContext() });
+    // The space switcher's trigger is another element in the icon rail.
+    const trigger = screen.getByRole("button", { name: "Öppna meny" });
+    trigger.focus();
 
     act(() => setViewport({ width: 1279, height: 800, pointer: "fine" }));
 
-    expect(screen.queryByRole("group", { name: "Senaste" })).toBeNull();
     const toggle = screen.getByRole("button", { name: "Fäll ut sidomenyn" });
     await waitFor(() => expect(document.activeElement).toBe(toggle));
   });
@@ -493,6 +538,7 @@ describe("DesktopSideNav (admin)", () => {
       "/admin/prompt-library",
       "/admin/skills",
       "/admin/security-classifications",
+      "/admin/widgets",
       "/admin/audit-logs"
     ]);
     expect(hrefsIn("Anslutningar")).toEqual([
@@ -527,7 +573,7 @@ describe("DesktopSideNav (admin)", () => {
 
   it("keeps the gated pages in their groups and no group above seven items", () => {
     setRoute("/admin");
-    renderInApp(<DesktopSideNav variant="admin" navId="side-nav" />, {
+    renderInApp(<RailedSideNav variant="admin" navId="side-nav" />, {
       queryClient: seededClient(),
       appContext: testAppContext({
         permissions: ["admin", "modules"],
@@ -552,7 +598,7 @@ describe("help centre link", () => {
   const HELP_CENTER = "https://support.example.se/eneo";
 
   function renderWithHelpCenter(variant: NavVariant, helpCenter: string | null) {
-    return renderInApp(<DesktopSideNav variant={variant} navId="side-nav" />, {
+    return renderInApp(<RailedSideNav variant={variant} navId="side-nav" />, {
       queryClient: seededClient(),
       appContext: testAppContext({ permissions: ["admin"], links: { helpCenter } })
     });
@@ -573,20 +619,13 @@ describe("help centre link", () => {
       // The visible text is in the name (WCAG 2.5.3), and it is never the current page.
       expect(link.textContent).toContain("Har du en fråga?");
       expect(link.getAttribute("aria-current")).toBeNull();
-      // Below Administration (main) and above the profile button.
-      const profile = screen.getByRole("button", { name: /Anna Lind/ });
-      expect(link.compareDocumentPosition(profile) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-      if (variant === "main") {
-        const admin = screen.getByRole("link", { name: "Administration" });
-        expect(admin.compareDocumentPosition(link) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-      }
       await expectNoAxeViolations(container);
     }
   );
 
   it("keeps the name in the icon rail", async () => {
     document.cookie = `${SIDE_NAV_COLLAPSED_COOKIE}=1; path=/`;
-    renderInApp(<DesktopSideNav variant="main" navId="side-nav" defaultCollapsed />, {
+    renderInApp(<RailedSideNav variant="main" navId="side-nav" defaultCollapsed />, {
       queryClient: seededClient(),
       appContext: testAppContext({ links: { helpCenter: HELP_CENTER } })
     });

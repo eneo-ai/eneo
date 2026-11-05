@@ -21,7 +21,7 @@ import { TemplateGalleryDialog } from "@/features/templates/template-gallery-dia
  * opens its editor, which focuses the name: no name dialog in between. With
  * templates enabled, a split-button menu also offers the template gallery.
  * `secondary` makes it small and unfilled where it is not the screen's primary
- * action (the space overview; the tabs' docked button is).
+ * action (a phone's space overview; the tab's docked button is).
  * An app cannot run without both a completion and a transcription model, so
  * until the space has them, either way says what is missing instead.
  */

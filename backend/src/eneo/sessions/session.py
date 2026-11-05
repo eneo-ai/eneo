@@ -42,6 +42,9 @@ class SessionAdd(SessionBase):
     # is set per session. The session_service write paths enforce this invariant.
     user_id: Optional[UUID] = None
     api_key_id: Optional[UUID] = None
+    # Widget visitors own sessions by widget + pseudonymous visitor id.
+    widget_id: Optional[UUID] = None
+    visitor_id: Optional[UUID] = None
     assistant_id: Optional[UUID] = None
     group_chat_id: Optional[UUID] = None
 
@@ -54,6 +57,8 @@ class SessionInDB(SessionBase, InDB):
     settings: ConversationSettingsState | None = None
     user_id: Optional[UUID] = None
     api_key_id: Optional[UUID] = None
+    widget_id: Optional[UUID] = None
+    visitor_id: Optional[UUID] = None
     feedback_value: Optional[Literal[-1, 1]] = None
     feedback_text: Optional[str] = None
 
@@ -68,6 +73,8 @@ class SessionContext(BaseModel):
     id: UUID
     user_id: UUID | None
     api_key_id: UUID | None
+    widget_id: UUID | None = None
+    visitor_id: UUID | None = None
     assistant_id: UUID | None
     group_chat_id: UUID | None
     space_id: UUID | None

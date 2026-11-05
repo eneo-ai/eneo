@@ -9,9 +9,11 @@ echo "\nBuilding dependencies..."
 if [ -n "${GITHUB}" ]; then
   echo "Setup for Github actions..."
   bun run --filter @eneo/ui build
+  bun run --filter @eneo/widget-loader build
   echo "Github setup done."
 else
   echo "Build all"
   bun run --filter @eneo/ui build
+  bun run --filter @eneo/widget-loader build
   echo "\nDone.\n\nStart developing by running 'bun run dev'"
 fi

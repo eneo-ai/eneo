@@ -139,6 +139,10 @@ ships must be release-ready: correct, accessible, tested and without dead ends.
   - `Typeahead` and `Tokenizer` set no `aria-invalid` for an error status and
     leave the `KEYBOARD` attributes out of their types: use the wrappers in
     `@/components/astryx/`.
+  - A `Collapsible` jumps open and shut unless it is given a
+    `useAnimatedLayout` handle: the wrapper in `@/components/astryx/collapsible`
+    takes the one the page panel provides (`AnimatedLayoutScope`). The chat
+    transcript opts out (`StillLayoutScope`): only its follow logic moves it.
   - The Swedish catalog lacks some strings: `astryx-sv-supplement.ts` (next to
     the provider) adds them, and its test fails when a component we use has an
     untranslated string.
@@ -256,9 +260,10 @@ open), so the index has no bar of its own and names itself with a heading.
   user as server-sent events; `job-events.ts` receives them through the
   `/api/v1/jobs/events/` endpoint (one EventSource per tab, browser reconnect, a
   30 s retry after a refusal) and writes each update into the `["jobs"]`
-  cache. `JobsProvider` still polls `GET /jobs` as the safety net (30 s while
-  the feed is open; 2 s while it is down and something runs or was just
-  started; paused in hidden tabs) and compares snapshots with
+  cache. `JobsProvider` still polls `GET /jobs` as the safety net (120 s while
+  the feed is open, a reconnect refetches anyway; 2 s while it is down and
+  something runs or was just started, 30 s otherwise; paused in hidden tabs)
+  and compares snapshots with
   `job-transitions.ts`. Every job
   the client starts goes through `trackJob(job)` (`trackJob(jobs)` for calls
   made together) so its completion counts even when the first poll already
@@ -678,7 +683,8 @@ source could break (no orientation lock, no autoplay, no password paste block, n
 | A filled control with no boundary, or a legacy switch with no visible state, in Windows high contrast (forced colours), on every route                                                      | `tests/forced-colors.spec.ts` (`FORCED_ROUTES`)                                                  |
 | A screen that shifts by more than 0.1 while it loads on a slow phone (CPU x4, Fast 4G, cold cache): a card shown before the editor that pushes it, a spinner that widens a button           | `tests/layout-shift.spec.ts` (`LAYOUT_ROUTES`)                                                   |
 | A whole screen scrolling sideways with the text at 200% (a bar whose rem-sized controls no longer fit in a row)                                                                             | `tests/responsive-text-size.spec.ts`                                                             |
-| Menus open in 165 ms (and close at once), drawers, sheets and dialogs open in 225, and nothing runs with reduced motion (2.3.3)                                                             | `tests/motion.spec.ts` (measured with `document.getAnimations()`)                                |
+| Menus open in 165 ms (and close at once), drawers, sheets and dialogs open in 225; with reduced motion nothing moves or resizes, only an opacity fade of at most 200 ms runs (2.3.3)        | `tests/motion.spec.ts` (measured with `document.getAnimations()`)                                |
+| A disclosure (`Collapsible`) glides what follows it as it opens and closes; with reduced motion only an opacity fade of at most 200 ms on touch, and nothing with a mouse (2.3.3)           | `tests/motion.spec.ts`                                                                           |
 | The skip link first, and a visible focus on each of the first 30 Tab stops, on every route (2.4.1, 2.4.7)                                                                                   | `tests/keyboard-focus.spec.ts`                                                                   |
 | Keyboard, safe areas, short screens, header and focus across a breakpoint                                                                                                                   | `tests/touch-platform.spec.ts`, `tests/header-continuity.spec.ts`                                |
 | A raw `<select>` without 16 px text and a 44 px touch height, in the dialogs the contract never opens                                                                                       | `src/test/raw-select.test.ts`                                                                    |

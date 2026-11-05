@@ -1,6 +1,6 @@
 import { Button } from "@astryxdesign/core/Button";
 import { ChatMessage as AxChatMessage, ChatMessageBubble } from "@astryxdesign/core/Chat";
-import { useAnnounce, useClipboard } from "@astryxdesign/core/hooks";
+import { useAnnounce, useClipboard, useMediaQuery } from "@astryxdesign/core/hooks";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { List, ListItem } from "@astryxdesign/core/List";
 import { MoreMenu } from "@astryxdesign/core/MoreMenu";
@@ -26,7 +26,6 @@ import { tableLocationLabel } from "@/features/workspace/preview/table-reference
 import type { PreviewFile } from "@/features/workspace/preview/preview-kind";
 import { resolveInrefs, trimPartialInref } from "@/lib/chat/inref";
 import type { AnswerRating, EneoUIMessage, KnowledgeOrigin } from "@/lib/chat/types";
-import { useMediaMatch } from "@/lib/hooks/use-media-match";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 
@@ -51,7 +50,7 @@ import {
 } from "./side-panel/document-versions";
 import { messageGeneratedFiles, messageToolCalls } from "./side-panel/message-tool-calls";
 import { isTableQuote, parseQuotedQuestion, quotedFileMatches } from "./side-panel/question-quote";
-import { useSidePanel } from "./side-panel/use-side-panel";
+import { useSidePanel, useSidePanelStore } from "./side-panel/use-side-panel";
 import {
   assistantClipboardContent,
   canCopyRichText,
@@ -400,7 +399,7 @@ function AnswerActions({
   // Decision 7: on touch the actions say what they do ("Kopiera", "Bra
   // svar", "Dåligt svar"), 44 px targets 8 px apart; a mouse keeps the icons
   // with tooltips. Known once hydrated; answers render after that.
-  const labelled = useMediaMatch("(pointer: coarse)") === true;
+  const labelled = useMediaQuery("(pointer: coarse)");
   const iconClass = "pointer-coarse:size-11";
   // The panel returns focus to the menu button that opened it.
   const openPanel = (open: (trigger: HTMLElement) => void) => {
@@ -598,7 +597,8 @@ function AssistantMessage({
   documents: ConversationDocument[];
   draft: DocumentDraft | null;
 }) {
-  const panel = useSidePanel();
+  // Only a document link's click reads the panel; its document lines follow it themselves.
+  const panel = useSidePanelStore();
   const text = messageText(message);
   // The names an answer can mention a document by: each is a link to it.
   const names = useMemo(
