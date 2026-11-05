@@ -150,12 +150,16 @@ links no issue, it gets a `needs:task-link` label until you add `Fixes #123`.
 
 A Core Maintainer reviews the pull request. Answer the comments and push new
 commits to the same branch instead of force-pushing, so reviewers can see what
-changed. A new commit dismisses an earlier approval, and every conversation
-must be resolved before the merge.
+changed. Every conversation must be resolved before the merge.
 
-When the pull request is approved, a Core Maintainer adds it to the merge queue,
-which tests it against the latest `develop` and squash-merges it. You do not
-need to keep your branch up to date yourself unless GitHub reports a conflict.
+When the change is ready, the Core Maintainer approves it and chooses **Merge
+when ready**. The pull request enters the merge queue as soon as the checks are
+green, and the queue tests it against the latest `develop` and squash-merges
+it. You do not need to keep your branch up to date yourself unless GitHub
+reports a conflict.
+
+If you push new commits after that, GitHub cancels **Merge when ready**, and a
+Core Maintainer looks at the change again before queueing it.
 
 </Steps>
 
