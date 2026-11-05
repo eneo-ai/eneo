@@ -280,6 +280,18 @@ describe("SectionedSettings on a phone (decision 21)", () => {
     await expectNoAxeViolations(container);
   });
 
+  it("names the index in the page, and keeps the bar to the back link until it scrolls away", () => {
+    setRoute(EDIT);
+    const { container } = renderEditor();
+    const title = screen
+      .getAllByRole("heading", { level: 1 })
+      .find((h) => h.textContent === "Min assistent")!;
+    expect(title.classList.contains("sr-only")).toBe(false);
+    expect(container.querySelector("[data-phone-page-bar] .page-bar-title")?.textContent).toBe(
+      "Min assistent"
+    );
+  });
+
   it("opens a section in place and goes back to the index with what was typed still there", () => {
     setRoute(EDIT);
     const push = vi.spyOn(window.history, "pushState");

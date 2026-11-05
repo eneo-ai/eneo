@@ -173,7 +173,7 @@ it("opens on a phone with an index of the sections, as the assistant editor does
   expect(rows[1]!.textContent).toMatch(/^Säkerhet och integritet, .*30/);
   // The index names itself (the frame's bar shows its title only after a scroll), under the
   // frame's h1, not beside it.
-  const names = [...container.querySelectorAll("h2.wide\\:hidden")].map(
+  const names = [...container.querySelectorAll(".wide\\:hidden > h2")].map(
     (heading) => heading.textContent
   );
   expect(names).toEqual(["Inställningar"]);

@@ -11,11 +11,14 @@ import { useShell } from "./shell-context";
 
 /**
  * Phones, held either way (below 768 px, or turned sideways; otherwise the
- * SideNav carries all of it): menu, Eneo, search (the ⌘K palette), the
- * notification bells and "Ny konversation", 56 px high with 44 px targets.
- * With text enlarged to about 125% or more (the bar is then narrower than
- * 22 rem) the bells and "Ny konversation" leave it: their rem-sized buttons
- * no longer fit and pushed the page sideways. Both stay in the drawer.
+ * SideNav carries all of it): menu, Eneo, the notification bells, search (the
+ * ⌘K palette) and "Ny konversation", 56 px high with 44 px targets.
+ * The job bell shows here only while a job runs; the drawer always has it.
+ * What the bar holds follows its width in rem, so enlarged text counts: below
+ * 21 rem the word mark gives way to the mark, and below 18 rem (text at about
+ * 150% on most phones) the bells and "Ny konversation" leave it, for their
+ * rem-sized buttons no longer fit and pushed the page sideways. Both stay in
+ * the drawer.
  * It gives way to a page's own header (`OWN_MOBILE_HEADER`: the chat's, a
  * PageBar) in CSS, in the frame's `group/shell`.
  */
@@ -34,14 +37,19 @@ export function MobileTopBar() {
         aria-label={t("shell_home_link")}
         className="rounded-ax-inner focus-visible:outline-ring flex h-11 min-w-11 shrink-0 items-center justify-center px-1 focus-visible:outline-2 focus-visible:outline-offset-2"
       >
-        {/* Below 360px the mark alone, so search, both bells and "Ny
-            konversation" still fit at 320px; it is 24 px wide, so the link
-            is centred in a 44 px box to stay a full touch target (the word
-            mark is wider, so min-w-11 changes nothing above 360px). */}
-        <EneoIcon className="h-6 w-auto min-[22.5rem]:hidden" />
-        <EneoWordMark className="hidden h-5 w-auto min-[22.5rem]:block" />
+        {/* The mark alone keeps search, both bells and "Ny konversation" in
+            the bar at 320px; it is 24 px wide, so the link is centred in a
+            44 px box to stay a full touch target (the word mark is wider, so
+            min-w-11 changes nothing beside it). */}
+        <EneoIcon className="h-6 w-auto @min-[21rem]/topbar:hidden" />
+        <EneoWordMark className="hidden h-5 w-auto @min-[21rem]/topbar:block" />
       </Link>
       <div className="flex-1" />
+      {/* Before Search: the job bell comes and goes (a job, keyboard focus), and what stands
+          after it stays where it is, under a press too. */}
+      <div className="flex items-center @max-[18rem]/topbar:hidden">
+        <NotificationBells isJobBellHiddenWhenIdle />
+      </div>
       <Button
         variant="ghost"
         size="lg"
@@ -51,9 +59,6 @@ export function MobileTopBar() {
         onClick={() => openPalette()}
         className="size-11"
       />
-      <div className="flex items-center @max-[22rem]/topbar:hidden">
-        <NotificationBells />
-      </div>
       <Button
         href={NEW_CONVERSATION_HREF}
         variant="ghost"
@@ -61,7 +66,7 @@ export function MobileTopBar() {
         isIconOnly
         icon={<Icon icon={SquarePen} />}
         label={t("new_conversation")}
-        className="size-11 @max-[22rem]/topbar:hidden"
+        className="size-11 @max-[18rem]/topbar:hidden"
       />
     </header>
   );

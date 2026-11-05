@@ -151,6 +151,22 @@ test("a long space name in the back link never makes a 320 px page scroll sidewa
   expect(box.x + box.width).toBeLessThanOrEqual(320);
 });
 
+test("the top bar keeps Ny konversation at 360 and 320 px, and gives it up only at large text", async ({
+  page
+}) => {
+  await page.goto("/dashboard");
+  const bar = page.getByRole("banner");
+  const pen = bar.getByRole("link", { name: "Ny konversation" });
+  for (const width of [360, 320]) {
+    await page.setViewportSize({ width, height: 640 });
+    await expect(pen).toBeVisible();
+  }
+  await page.evaluate(() =>
+    document.documentElement.style.setProperty("font-size", "150%", "important")
+  );
+  await expect(pen).toBeHidden();
+});
+
 test("every admin area's back link shows Administration, whatever the area's title", async ({
   page
 }) => {
@@ -308,4 +324,54 @@ test("the organisation space's tab strip gives way while a settings section is o
   await expect(tabs).toBeHidden();
   // The page keeps its heading for a screen reader.
   await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
+});
+
+test("the idle job bell stays out of the way until focus shows it, and focus can come back to it", async ({
+  page
+}) => {
+  await page.route(/\/api\/v1\/jobs\/$/, (route) => route.fulfill({ json: { items: [] } }));
+  await page.goto("/dashboard");
+  const slot = page.getByRole("banner").locator("[data-job-bell]");
+  const bell = slot.getByRole("button", { name: "Aviseringar" });
+  await expect(bell).toBeAttached();
+  expect((await slot.boundingBox())!.width).toBeLessThanOrEqual(1);
+
+  await bell.focus();
+  expect((await slot.boundingBox())!.width).toBeGreaterThanOrEqual(32);
+  // A dialog over it, then back: the bell is still there to come back to.
+  await page.keyboard.press("Control+k");
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(bell).toBeFocused();
+
+  await bell.blur();
+  expect((await slot.boundingBox())!.width).toBeLessThanOrEqual(1);
+
+  // Focus that is not the keyboard's does not show it: a press on Search would hide it again
+  // and move Search out from under that press.
+  await page.locator("main#main-content").click({ position: { x: 2, y: 2 } });
+  await bell.focus();
+  await expect(bell).toBeFocused();
+  expect((await slot.boundingBox())!.width).toBeLessThanOrEqual(1);
+});
+
+test("the job bell comes and goes without moving Search, under a press too", async ({ page }) => {
+  await page.route(/\/api\/v1\/jobs\/$/, (route) => route.fulfill({ json: { items: [] } }));
+  await page.goto("/dashboard");
+  const banner = page.getByRole("banner");
+  const bell = banner.locator("[data-job-bell]").getByRole("button", { name: "Aviseringar" });
+  const search = banner.getByRole("button", { name: "Sök" });
+  await expect(search).toBeVisible();
+  const idle = (await search.boundingBox())!;
+
+  await bell.focus();
+  await expect(bell).toBeFocused();
+  expect((await search.boundingBox())!.x).toBe(idle.x);
+
+  await page.mouse.move(idle.x + idle.width / 2, idle.y + idle.height / 2);
+  await page.mouse.down();
+  // Within a pixel: a pressed button dips.
+  expect(Math.abs((await search.boundingBox())!.x - idle.x)).toBeLessThan(1);
+  await page.mouse.up();
+  await expect(page.getByRole("dialog", { name: /^(Sök i Eneo|Search Eneo)$/ })).toBeVisible();
 });

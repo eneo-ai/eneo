@@ -74,7 +74,7 @@ function Konto() {
 
   return (
     // From 768 px a readable column (42 rem) on the pages' edge, not a phone's rows stretched wide.
-    <div className="flex flex-col gap-6 md:max-w-2xl lg:hidden">
+    <div className="wide:max-w-2xl flex flex-col gap-6 lg:hidden">
       <div className="flex flex-col gap-4">
         <PageHeader title={t("account")} />
         <div className="flex items-start gap-3">
@@ -98,8 +98,8 @@ function Konto() {
       </div>
 
       {/* Edge to edge on a phone, out of the page's gutter; the rows' text keeps
-          to it. From 768 px the groups are cards inside the column. */}
-      <div className="-mx-4 flex flex-col gap-6 md:mx-0">
+          to it. Elsewhere the groups are cards inside the column. */}
+      <div className="wide:mx-0 -mx-4 flex flex-col gap-6">
         <IndexGroup title={t("settings")}>
           <IndexRow
             href="/account/appearance"

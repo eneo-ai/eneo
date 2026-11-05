@@ -4,6 +4,7 @@ import { EyeOff, Info, TriangleAlert } from "lucide-react";
 import { useFormatter, useTranslations } from "use-intl";
 import { useMemo, useState, useSyncExternalStore } from "react";
 import type { ContextUsage } from "@/lib/chat/use-preflight";
+import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { cn } from "@/lib/utils";
 
 const PINNED_STORAGE_KEY = "contextUsageBarPinned";
@@ -91,6 +92,7 @@ export function ContextUsageBar({
   const { number: fmt } = useFormatter();
 
   const pinned = useContextUsagePinned();
+  const phone = usePhoneScreen();
   const [open, setOpen] = useState(false);
 
   const {
@@ -157,10 +159,13 @@ export function ContextUsageBar({
     return SEGMENT_CLASS[key] ?? "bg-ax-text-secondary";
   }
 
-  // Show the assistant's fixed context before the first question; later,
-  // surface the meter as the window fills or when it is pinned.
+  // Show the assistant's fixed context before the first question, except on a
+  // phone, where the composer's row is the room there is; later, surface the
+  // meter as the window fills or when it is pinned.
   const warranted =
-    projectedPercent >= SHOW_FROM_PERCENT || willExceed || (turnCount === 0 && baselineTotal > 0);
+    projectedPercent >= SHOW_FROM_PERCENT ||
+    willExceed ||
+    (turnCount === 0 && baselineTotal > 0 && !phone);
   if (!hasUsage || (!warranted && !pinned)) return null;
 
   const percentLabel = projectedPercent.toFixed(projectedPercent >= 10 ? 0 : 1);

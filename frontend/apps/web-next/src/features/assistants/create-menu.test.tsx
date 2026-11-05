@@ -51,6 +51,15 @@ describe("CreateChatAppMenu", () => {
     }
   });
 
+  it("hides only its buttons on a phone: a dialog they opened is not inside the hidden part", () => {
+    renderInApp(<CreateChatAppMenu isHiddenOnPhone />);
+    const hidden = screen
+      .getByRole("button", { name: "Skapa assistent" })
+      .closest(".phone\\:hidden");
+    expect(hidden).toBeTruthy();
+    expect(hidden?.parentElement?.querySelector(":scope > dialog")).toBeTruthy();
+  });
+
   it("wraps a long Skapa assistent onto a second line instead of cutting it off (1.4.4)", () => {
     // Astryx buttons keep their label on one line at a fixed height and cut it
     // with an ellipsis; at 320 px with large text this label would lose its end.

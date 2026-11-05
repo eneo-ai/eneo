@@ -13,7 +13,8 @@ import {
   useTableSortable,
   useTableSortableState,
   type TableColumn,
-  type TableSortComparator
+  type TableSortComparator,
+  type TableSortState
 } from "@astryxdesign/core/Table";
 import { ResourceGroup } from "@/components/composites/resource-group";
 import { StatusLabel } from "@/components/composites/status-label";
@@ -33,6 +34,10 @@ import { ChatAppActions } from "./actions";
 import { ChatAppTile } from "./tile";
 import { useSectionHeadingLevels } from "@/features/spaces/frame/space-frame";
 
+const DEFAULT_SORT: TableSortState<"name" | "published"> = [
+  { sortKey: "name", direction: "ascending" }
+];
+
 export function AssistantsPage() {
   const t = useTranslations();
   const levels = useSectionHeadingLevels();
@@ -48,6 +53,7 @@ export function AssistantsPage() {
 
   const items = useMemo(() => spaceChatItems(space, collator.compare), [space, collator]);
   const filterShown = useFilterShown(items.length);
+  const [sort, setSort] = useState(DEFAULT_SORT);
   const matchedItems = useMemo(
     () => filterSpaceResources(items, filterShown ? filter : ""),
     [items, filter, filterShown]
@@ -71,7 +77,9 @@ export function AssistantsPage() {
   >({
     data: matchedItems,
     comparators,
-    defaultSort: [{ sortKey: "name", direction: "ascending" }],
+    // As the filter: a list too short for the control keeps no order it cannot change.
+    sort: filterShown ? sort : DEFAULT_SORT,
+    onSortChange: setSort,
     allowUnsortedState: false
   });
   const sortPlugin = useTableSortable<ChatAppItem, "name" | "published">(sortConfig);
@@ -175,26 +183,27 @@ export function AssistantsPage() {
             />
           ) : (
             <>
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                {filterShown ? (
+              {filterShown ? (
+                <div className="phone:flex-nowrap flex flex-wrap items-center justify-between gap-3">
                   <ResourceFilterInput
+                    className="phone:flex-1"
                     value={filter}
                     onChange={setFilter}
                     label={t("space_filter_assistants_label")}
                     placeholder={t("filter_assistants_placeholder")}
                     resultCount={filteredItems.length}
                   />
-                ) : null}
-                <ResourceViewControls
-                  view={view}
-                  onViewChange={chooseView}
-                  sortConfig={sortConfig}
-                  options={[
-                    { key: "name", label: t("name") },
-                    ...(showStatus ? [{ key: "published" as const, label: t("status") }] : [])
-                  ]}
-                />
-              </div>
+                  <ResourceViewControls
+                    view={view}
+                    onViewChange={chooseView}
+                    sortConfig={sortConfig}
+                    options={[
+                      { key: "name", label: t("name") },
+                      ...(showStatus ? [{ key: "published" as const, label: t("status") }] : [])
+                    ]}
+                  />
+                </div>
+              ) : null}
               {filteredItems.length === 0 ? (
                 <EmptyState
                   isAnnounced={false}

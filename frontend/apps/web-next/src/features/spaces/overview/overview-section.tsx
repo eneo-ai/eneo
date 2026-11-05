@@ -46,7 +46,10 @@ export function OverviewSection({
   const headingRef = useRef<HTMLHeadingElement>(null);
   return (
     <RemovalFocusScope target={headingRef}>
-      <section aria-labelledby={id} className={cn("flex min-w-0 flex-col gap-3", className)}>
+      <section
+        aria-labelledby={id}
+        className={cn("phone:gap-1 flex min-w-0 flex-col gap-3", className)}
+      >
         <div className="flex min-h-8 flex-wrap items-center justify-between gap-x-3 gap-y-2">
           <Heading
             ref={headingRef}

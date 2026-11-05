@@ -96,10 +96,10 @@ export function RunView({ app, resultHref }: { app: App; resultHref: (runId: str
   }
 
   return (
-    // From 768 px the card starts on the page's left line, under the heading and the tabs,
+    // On a tablet and up the card starts on the page's left line, under the heading and the tabs,
     // rather than floating centred like a dialog.
     <div
-      className="flex w-full flex-1 flex-col items-center justify-center p-4 max-md:p-0 md:items-start md:px-0"
+      className="phone:p-0 wide:items-start wide:px-0 flex w-full flex-1 flex-col items-center justify-center p-4"
       {...handlers}
     >
       {dragging && (
@@ -110,12 +110,12 @@ export function RunView({ app, resultHref }: { app: App; resultHref: (runId: str
           </p>
         </div>
       )}
-      <div className="border-border bg-card flex w-full max-w-[64ch] flex-col gap-4 rounded-xl border p-4 shadow-lg max-md:rounded-none max-md:border-0 max-md:bg-transparent max-md:p-0 max-md:shadow-none">
-        <div className="flex flex-col items-center gap-3 pt-2 max-md:pt-0">
+      <div className="border-border bg-card phone:max-w-none phone:rounded-none phone:border-0 phone:bg-transparent phone:p-0 phone:shadow-none flex w-full max-w-[64ch] flex-col gap-4 rounded-xl border p-4 shadow-lg">
+        <div className="phone:pt-0 flex flex-col items-center gap-3 pt-2">
           {/* The page's own heading names the app at every width (both pages that show this
               have it as their h1), so the card does not repeat it; on a phone the icon gives
               the field its width back too. */}
-          <span className="bg-muted text-muted-foreground flex size-16 items-center justify-center overflow-hidden rounded-2xl max-md:hidden">
+          <span className="bg-muted text-muted-foreground phone:hidden flex size-16 items-center justify-center overflow-hidden rounded-2xl">
             {icon ? (
               <img src={icon} alt="" className="size-full object-cover" />
             ) : (
@@ -135,7 +135,7 @@ export function RunView({ app, resultHref }: { app: App; resultHref: (runId: str
               id="app-run-inputs"
               role="group"
               aria-label={t("input")}
-              className="bg-muted/40 flex min-h-[12rem] w-full flex-col items-center justify-center gap-4 rounded-lg border p-6 max-md:min-h-0 max-md:border-0 max-md:bg-transparent max-md:p-0"
+              className="bg-muted/40 phone:min-h-0 phone:border-0 phone:bg-transparent phone:p-0 flex min-h-[12rem] w-full flex-col items-center justify-center gap-4 rounded-lg border p-6"
               {...fieldProblemProps("app-run-inputs", inputProblem)}
             >
               <AppInputs app={app} inputs={inputs} />
