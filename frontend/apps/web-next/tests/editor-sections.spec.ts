@@ -135,6 +135,40 @@ test.describe("an editor on a phone (decision 21)", () => {
     expect((await row.boundingBox())!.y).toBe(before);
   });
 
+  test("a section's failed save stays in reach at every text size", async ({ page }) => {
+    const { editor } = await assistantEditor(page);
+    await page.goto(`${editor}?section=instructions`);
+    await page.route(/\/api\/v1\/assistants\/[^/]+\/$/, async (route) => {
+      if (route.request().method() === "POST") await route.fulfill({ status: 500, json: {} });
+      else await route.fallback();
+    });
+    await page.locator("#assistant-prompt").fill("Svara kort.");
+    await page.locator("#assistant-prompt").blur();
+
+    const failed = page
+      .getByRole("main")
+      .getByRole("link", { name: "Kunde inte spara" })
+      .filter({ visible: true });
+    await expect(failed).toHaveCount(1);
+    const main = page.locator("main#main-content");
+    for (const width of [390, 320]) {
+      await page.setViewportSize({ width, height: 844 });
+      for (const size of [100, 125, 150, 175, 200]) {
+        await page.evaluate(
+          (percent) =>
+            document.documentElement.style.setProperty("font-size", `${percent}%`, "important"),
+          size
+        );
+        await expect(failed).toHaveCount(1);
+        expect(await main.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0);
+      }
+    }
+
+    const field = await failed.getAttribute("href");
+    await failed.click();
+    await expect(page.locator(field!)).toBeFocused();
+  });
+
   test("opens a section from its address, after a reload too", async ({ page }) => {
     const { editor } = await assistantEditor(page);
     await page.goto(`${editor}?section=ai`);

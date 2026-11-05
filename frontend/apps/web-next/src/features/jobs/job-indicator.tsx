@@ -172,7 +172,7 @@ export function JobIndicator({
   return (
     // Hidden, not removed: a job that settles takes away neither the open panel nor the bell
     // that focus is on or comes back to, and the keyboard can still reach it. Keyboard focus
-    // shows it, not a press: a press elsewhere would hide it and move Search under that press.
+    // shows it, not a press: a tap that lands on focus must not make the bar change.
     <span
       data-job-bell=""
       className={cn(

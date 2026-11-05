@@ -354,3 +354,24 @@ test("the idle job bell stays out of the way until focus shows it, and focus can
   await expect(bell).toBeFocused();
   expect((await slot.boundingBox())!.width).toBeLessThanOrEqual(1);
 });
+
+test("the job bell comes and goes without moving Search, under a press too", async ({ page }) => {
+  await page.route(/\/api\/v1\/jobs\/$/, (route) => route.fulfill({ json: { items: [] } }));
+  await page.goto("/dashboard");
+  const banner = page.getByRole("banner");
+  const bell = banner.locator("[data-job-bell]").getByRole("button", { name: "Aviseringar" });
+  const search = banner.getByRole("button", { name: "Sök" });
+  await expect(search).toBeVisible();
+  const idle = (await search.boundingBox())!;
+
+  await bell.focus();
+  await expect(bell).toBeFocused();
+  expect((await search.boundingBox())!.x).toBe(idle.x);
+
+  await page.mouse.move(idle.x + idle.width / 2, idle.y + idle.height / 2);
+  await page.mouse.down();
+  // Within a pixel: a pressed button dips.
+  expect(Math.abs((await search.boundingBox())!.x - idle.x)).toBeLessThan(1);
+  await page.mouse.up();
+  await expect(page.getByRole("dialog", { name: /^(Sök i Eneo|Search Eneo)$/ })).toBeVisible();
+});

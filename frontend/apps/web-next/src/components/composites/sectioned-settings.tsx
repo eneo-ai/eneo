@@ -403,7 +403,9 @@ function SettingsLayout({
                 ...inPlaceLink(views.href(null), views.back)
               }}
               actions={
-                <span className="pe-2.5">
+                // At large text (under 13 rem) the words no longer fit beside the back link:
+                // the state takes a line under the bar, as on the index.
+                <span data-editor-strip className="pe-2.5 @max-[12.25rem]/page-bar:hidden">
                   <SaveStatusIndicator isQuiet isCompact />
                 </span>
               }
@@ -448,7 +450,7 @@ function SettingsLayout({
               className={cn(
                 "flex min-h-11 items-center",
                 shown
-                  ? "hidden"
+                  ? "px-4 @min-[13rem]/editor-title:hidden"
                   : views.phone.parent
                     ? "px-4 @min-[19rem]/editor-title:hidden"
                     : "absolute end-4 top-2 @max-[19rem]/editor-title:static @max-[19rem]/editor-title:px-4"

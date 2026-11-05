@@ -11,8 +11,8 @@ import { useShell } from "./shell-context";
 
 /**
  * Phones, held either way (below 768 px, or turned sideways; otherwise the
- * SideNav carries all of it): menu, Eneo, search (the ⌘K palette), the
- * notification bells and "Ny konversation", 56 px high with 44 px targets.
+ * SideNav carries all of it): menu, Eneo, the notification bells, search (the
+ * ⌘K palette) and "Ny konversation", 56 px high with 44 px targets.
  * The job bell shows here only while a job runs; the drawer always has it.
  * What the bar holds follows its width in rem, so enlarged text counts: below
  * 21 rem the word mark gives way to the mark, and below 18 rem (text at about
@@ -45,6 +45,11 @@ export function MobileTopBar() {
         <EneoWordMark className="hidden h-5 w-auto @min-[21rem]/topbar:block" />
       </Link>
       <div className="flex-1" />
+      {/* Before Search: the job bell comes and goes (a job, keyboard focus), and what stands
+          after it stays where it is, under a press too. */}
+      <div className="flex items-center @max-[18rem]/topbar:hidden">
+        <NotificationBells isJobBellHiddenWhenIdle />
+      </div>
       <Button
         variant="ghost"
         size="lg"
@@ -54,9 +59,6 @@ export function MobileTopBar() {
         onClick={() => openPalette()}
         className="size-11"
       />
-      <div className="flex items-center @max-[18rem]/topbar:hidden">
-        <NotificationBells isJobBellHiddenWhenIdle />
-      </div>
       <Button
         href={NEW_CONVERSATION_HREF}
         variant="ghost"
