@@ -506,6 +506,62 @@ describe("WidgetChat", () => {
     expect(shownAlerts()).toEqual([]);
   });
 
+  it("a vote's token retry does not clear the error of a question that failed meanwhile", async () => {
+    const { ask } = fakeClient();
+    let rejectFirst!: (error: unknown) => void;
+    const leaveFeedback = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise((_resolve, reject) => {
+            rejectFirst = reject;
+          })
+      )
+      .mockResolvedValue({});
+    const { client } = clientWith({ ask, leaveFeedback });
+    renderChat(config(), client);
+    fireEvent.click(screen.getByRole("button", { name: "Hur brygger jag pour over?" }));
+    await screen.findByText("Pour over: 15 g kaffe på 250 g vatten.");
+    const helpful = await screen.findByRole("button", { name: "Hjälpsam konversation" });
+    await waitFor(() => expect((helpful as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(helpful);
+    await waitFor(() => expect(leaveFeedback).toHaveBeenCalledTimes(1));
+
+    // The vote is still on its way when the next question fails.
+    const { EneoError } = await import("@eneo/eneo-js");
+    ask.mockRejectedValueOnce(
+      new EneoError(
+        "busy",
+        "SERVER",
+        429,
+        0,
+        { detail: { code: "rate_limited_ip" } },
+        { endpoint: "/ask" }
+      )
+    );
+    typeQuestion("Och nu?");
+    await waitFor(() => expect(shownAlerts()).toHaveLength(1));
+    const [questionAlert] = shownAlerts();
+
+    // The vote's token expired; its retry succeeds in the background.
+    await act(async () =>
+      rejectFirst(
+        new EneoError(
+          "expired",
+          "SERVER",
+          401,
+          0,
+          { detail: { code: "token_expired" } },
+          { endpoint: "/feedback" }
+        )
+      )
+    );
+    await waitFor(() => expect(leaveFeedback).toHaveBeenCalledTimes(2));
+    await flushAnnouncements();
+    // The visitor still sees why the question failed.
+    expect(shownAlerts()).toEqual([questionAlert]);
+  });
+
   it("puts a refused question back in the field and says what happened", async () => {
     const { client, ask } = fakeClient();
     const { EneoError } = await import("@eneo/eneo-js");

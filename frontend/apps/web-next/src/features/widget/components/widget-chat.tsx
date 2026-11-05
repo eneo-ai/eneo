@@ -443,8 +443,10 @@ export function WidgetChat({
   ): Promise<string | null> {
     if (!sessionId) return t("widget_error_generic");
     // Feedback owns the next error location, just as sending a question
-    // clears an older feedback error. Never keep two attempts' alerts.
-    setErrorMessage(null);
+    // clears an older feedback error. Never keep two attempts' alerts. Only
+    // the visitor's own submission clears it: a token retry runs later, when
+    // the alert may already belong to a question that failed meanwhile.
+    if (!retried) setErrorMessage(null);
     try {
       await session.ensureToken();
       await client.conversations.leaveFeedback({ conversation: { id: sessionId }, feedback });
