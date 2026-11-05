@@ -102,7 +102,7 @@ export function SpacePhoneHeader({
             <Heading
               level={1}
               weight="bold"
-              className="text-xl leading-tight font-semibold text-balance break-words"
+              className="max-w-full text-xl leading-tight font-semibold text-balance break-words"
             >
               {name}
             </Heading>

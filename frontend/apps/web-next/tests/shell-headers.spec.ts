@@ -151,6 +151,22 @@ test("a long space name in the back link never makes a 320 px page scroll sidewa
   expect(box.x + box.width).toBeLessThanOrEqual(320);
 });
 
+test("the top bar keeps Ny konversation at 360 and 320 px, and gives it up only at large text", async ({
+  page
+}) => {
+  await page.goto("/dashboard");
+  const bar = page.getByRole("banner");
+  const pen = bar.getByRole("link", { name: "Ny konversation" });
+  for (const width of [360, 320]) {
+    await page.setViewportSize({ width, height: 640 });
+    await expect(pen).toBeVisible();
+  }
+  await page.evaluate(() =>
+    document.documentElement.style.setProperty("font-size", "150%", "important")
+  );
+  await expect(pen).toBeHidden();
+});
+
 test("every admin area's back link shows Administration, whatever the area's title", async ({
   page
 }) => {

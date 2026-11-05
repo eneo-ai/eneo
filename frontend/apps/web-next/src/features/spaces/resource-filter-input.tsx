@@ -61,7 +61,7 @@ export function ResourceFilterInput({
   }, [announce, query, resultCount, t]);
 
   return (
-    <div className={cn("w-full max-w-sm", className)}>
+    <div className={cn("phone:max-w-none w-full max-w-sm", className)}>
       <TextInput
         ref={inputRef}
         label={label}
