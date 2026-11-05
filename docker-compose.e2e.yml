@@ -135,7 +135,12 @@ services:
     volumes: *e2e-backend-volumes
     networks: [e2e]
     healthcheck:
-      test: ["CMD", "bash", "-lc", "echo > /dev/tcp/127.0.0.1/8000"]
+      # Gunicorn opens its socket before the worker finishes importing.
+      test:
+        - CMD
+        - python3
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/livez', timeout=2).close()"
       interval: 3s
       timeout: 3s
       retries: 40

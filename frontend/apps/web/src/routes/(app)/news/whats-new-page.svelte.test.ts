@@ -99,9 +99,8 @@ vi.mock("$lib/features/whats-new/tour", async (importOriginal) => {
 import WhatsNewPage from "./+page.svelte";
 import WhatsNewAnnouncement from "$lib/features/whats-new/WhatsNewAnnouncement.svelte";
 
-// These tests pin the 2.3 notes. On develop they sit in the unreleased block
-// until the final 2.3 release is ported, so find them by content and bundle
-// them the way a 2.3 image does: under the installed identity, above history.
+// These tests pin the published 2.3 notes and bundle them under the installed
+// identity above older history. Upcoming features must not enter this release.
 const pinned = releases.find((release) =>
   release.entries.some((entry) => entry.id === "assistant-attachment-modes")
 )!;

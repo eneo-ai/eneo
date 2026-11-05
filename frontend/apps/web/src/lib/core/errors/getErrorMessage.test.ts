@@ -13,13 +13,15 @@ vi.mock("$lib/paraglide/messages", () => ({
     eneo_error_9050: () => "An App run needs it.",
     eneo_error_9051: () => "Still attached.",
     eneo_error_9052: () => "The execution block changed.",
-    eneo_error_9059: () => "Original unavailable.",
-    eneo_error_9061: () => "Choose a different password.",
-    eneo_error_9062: () => "Password policy violation.",
-    eneo_error_9065: () => "Skill removal busy.",
-    eneo_error_9066: () => "Active website sync.",
-    eneo_error_9067: () => "Crawler cleanup pending.",
+    eneo_error_9057: () => "Original unavailable.",
+    eneo_error_9058: () => "Choose a different password.",
+    eneo_error_9059: () => "Password policy violation.",
+    eneo_error_9062: () => "Skill removal busy.",
+    eneo_error_9063: () => "Active website sync.",
+    eneo_error_9064: () => "Crawler cleanup pending.",
     eneo_error_9069: () => "Deactivate it in the governance first.",
+    eneo_error_9070: () => "Choose a new password before continuing.",
+    eneo_error_9071: () => "Archive the widget before moving the assistant.",
     chat_answer_failed_internal: () => "An error in Eneo interrupted the answer.",
     provider_failure_unavailable: () => "The provider is having problems.",
     provider_failure_timeout: () => "The model did not respond in time.",
@@ -46,6 +48,19 @@ const SKILL_CONFLICT_CODES = [9048, 9049, 9050, 9051, 9052] as const;
 const NAME_COLLISION = 9017;
 
 describe("getErrorMessage", () => {
+  it("distinguishes a published widget from a required password change", () => {
+    expect(getErrorMessage(new EneoError("Fallback", "RESPONSE", 409, 9071))).toBe(
+      "Archive the widget before moving the assistant."
+    );
+    expect(getErrorMessage(new EneoError("Fallback", "RESPONSE", 403, 9070))).toBe(
+      "Choose a new password before continuing."
+    );
+    for (const catalogue of [en, sv]) {
+      expect(catalogue.eneo_error_9071).toBeTruthy();
+      expect(catalogue.eneo_error_9071).not.toBe(catalogue.eneo_error_9070);
+    }
+  });
+
   it("localizes missing credential encryption configuration", () => {
     const error = new EneoError(
       "Backend fallback",
@@ -234,7 +249,7 @@ describe("getErrorMessage", () => {
   });
 
   it("keeps original-download, password, skill removal and crawler lifecycle errors distinct", () => {
-    const messages = ([9059, 9061, 9062, 9065, 9066, 9067] as const).map((code) =>
+    const messages = ([9057, 9058, 9059, 9062, 9063, 9064] as const).map((code) =>
       getErrorMessage(
         new EneoError("Backend fallback", "RESPONSE", 409, code, {}, { endpoint: "" })
       )

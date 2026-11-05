@@ -42,9 +42,10 @@ diff.
   that a navigation or an applied update made stale (develop).
 - Release notes are develop's: entries for 2.3 are curated on develop, so the
   reference's flow upload-limit note is not carried into 2.3.0.
-- Password lifecycle (2026-10-23 merge): the branch keeps its own error codes
-  for the password errors (9061-9064, where develop uses 9058-9061), and
-  develop's `PASSWORD_CHANGE_REQUIRED` keeps 9070. The e2e stacks set
+- Error codes: develop's published numbers hold. The branch's own codes are
+  `RESOURCE_GONE` 9072, `CONFLICT` 9073 and `UNKNOWN_MODEL_CAPACITY` 9074.
+- Password lifecycle (2026-10-23 merge): develop's `PASSWORD_CHANGE_REQUIRED`
+  keeps 9070. The e2e stacks set
   develop's `DEFAULT_USER_PASSWORD_CHANGE_REQUIRED: "false"` in their shared
   backend environment. eneo-js keeps running its tests with `bun test`, so
   develop's two new tests count calls with plain spies instead of

@@ -8,6 +8,7 @@ from eneo.audit.domain.category_mappings import (
     CATEGORY_MAPPINGS,
     get_category_for_action,
 )
+from tests.audit_category_counts import EXPECTED_CATEGORY_COUNTS
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 FRONTEND_MESSAGES_DIR = REPO_ROOT / "frontend" / "apps" / "web" / "messages"
@@ -51,6 +52,18 @@ class TestCategoryMappings:
             assert category in valid_categories, (
                 f"Invalid category '{category}' found in mappings"
             )
+
+    def test_admin_actions_count(self):
+        """Verify that admin_actions category has correct number of action types."""
+        admin_actions = [
+            action
+            for action, cat in CATEGORY_MAPPINGS.items()
+            if cat == "admin_actions"
+        ]
+        expected = EXPECTED_CATEGORY_COUNTS["admin_actions"]
+        assert len(admin_actions) == expected, (
+            f"Expected {expected} admin actions, got {len(admin_actions)}"
+        )
 
     def test_admin_actions_mapping(self):
         """Verify specific admin action types are correctly mapped."""
@@ -271,6 +284,17 @@ class TestCategoryDistribution:
         for category in categories:
             count = sum(1 for cat in CATEGORY_MAPPINGS.values() if cat == category)
             assert count > 0, f"Category '{category}' has no action types mapped to it"
+
+    def test_category_counts_match_expected(self):
+        """Verify exact counts for each category."""
+        for category, expected_count in EXPECTED_CATEGORY_COUNTS.items():
+            actual_count = sum(
+                1 for cat in CATEGORY_MAPPINGS.values() if cat == category
+            )
+            assert actual_count == expected_count, (
+                f"Category '{category}' should have {expected_count} actions, "
+                f"but has {actual_count}"
+            )
 
 
 class TestActionMessageCatalog:

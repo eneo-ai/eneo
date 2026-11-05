@@ -72,14 +72,25 @@ export type EneoFetchFunction = <
   Method extends keyof EneoEndpoints[Endpoint]
 >(
   endpoint: Endpoint,
-  args: (EneoParams<Endpoint, Method> extends never
-    ? { params?: never }
-    : { params: EneoParams<Endpoint, Method> }) &
-    EneoRequestBodyOption<Endpoint, Method> & {
-      method: Method;
-      signal?: AbortSignal;
-      headers?: Record<string, string>;
-    }
+  args: { signal?: AbortSignal; headers?: Record<string, string> } & (EneoParams<Endpoint, Method> extends never
+    ? EneoRequestBody<Endpoint, Method> extends never
+      ? { method: Method; params?: never; requestBody?: never }
+      : {
+          method: Method;
+          params?: never;
+          requestBody: EneoRequestBody<Endpoint, Method>;
+        }
+    : EneoRequestBody<Endpoint, Method> extends never
+      ? {
+          method: Method;
+          params: EneoParams<Endpoint, Method>;
+          requestBody?: never;
+        }
+      : {
+          method: Method;
+          params: EneoParams<Endpoint, Method>;
+          requestBody: EneoRequestBody<Endpoint, Method>;
+        })
 ) => Promise<SuccessResponse<Responses<Endpoint, Method>>>;
 
 export type EneoBinaryResponse = {
@@ -109,6 +120,7 @@ type EneoStreamingEndpoints =
   | "/api/v1/assistants/{id}/sessions/"
   | "/api/v1/analysis/assistants/{assistant_id}/"
   | "/api/v1/conversations/"
+  | "/api/v1/widgets/{public_id}/ask/"
   | "/api/v1/analysis/conversation-insights/";
 
 export type EneoStreamFunction = <Endpoint extends EneoStreamingEndpoints>(

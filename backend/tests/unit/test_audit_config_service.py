@@ -25,12 +25,7 @@ ALL_CATEGORIES = [
     "audit_access",
 ]
 
-# Expected action counts are derived from the canonical mapping so this test
-# catches service drift without baking branch-specific totals into the suite.
-EXPECTED_CATEGORY_COUNTS = {
-    category: sum(1 for mapped in CATEGORY_MAPPINGS.values() if mapped == category)
-    for category in ALL_CATEGORIES
-}
+from tests.audit_category_counts import EXPECTED_CATEGORY_COUNTS
 
 
 @pytest.fixture
@@ -632,9 +627,44 @@ class TestUpdateActionConfig:
 class TestAllCategoriesHaveMappedActions:
     """Verify each configured category is represented in the action mapping."""
 
-    def test_every_category_has_at_least_one_action(self):
-        for category in ALL_CATEGORIES:
-            assert EXPECTED_CATEGORY_COUNTS[category] > 0
+    def test_admin_actions_count(self):
+        count = sum(1 for cat in CATEGORY_MAPPINGS.values() if cat == "admin_actions")
+        assert count == EXPECTED_CATEGORY_COUNTS["admin_actions"]
+
+    def test_user_actions_count(self):
+        """Verify user_actions matches the shared expectation."""
+        count = sum(1 for cat in CATEGORY_MAPPINGS.values() if cat == "user_actions")
+        assert count == EXPECTED_CATEGORY_COUNTS["user_actions"]
+
+    def test_security_events_has_13_actions(self):
+        """Verify security_events has 13 action types."""
+        count = sum(1 for cat in CATEGORY_MAPPINGS.values() if cat == "security_events")
+        assert count == 13
+
+    def test_file_operations_has_8_actions(self):
+        """Verify file_operations has 8 action types."""
+        count = sum(1 for cat in CATEGORY_MAPPINGS.values() if cat == "file_operations")
+        assert count == 8
+
+    def test_integration_events_has_24_actions(self):
+        """Verify integration_events has 24 action types."""
+        count = sum(
+            1 for cat in CATEGORY_MAPPINGS.values() if cat == "integration_events"
+        )
+        assert count == 24
+
+    def test_system_actions_count(self):
+        """Verify system_actions has 3 action types."""
+        count = sum(1 for cat in CATEGORY_MAPPINGS.values() if cat == "system_actions")
+        assert count == EXPECTED_CATEGORY_COUNTS["system_actions"]
+
+    def test_audit_access_count(self):
+        """Verify audit_access has 3 action types (including AUDIT_SESSION_CREATED)."""
+        count = sum(1 for cat in CATEGORY_MAPPINGS.values() if cat == "audit_access")
+        assert count == EXPECTED_CATEGORY_COUNTS["audit_access"], (
+            "audit_access should have 3 actions: "
+            "AUDIT_SESSION_CREATED, AUDIT_LOG_VIEWED, AUDIT_LOG_EXPORTED"
+        )
 
     def test_total_actions_equals_action_type_count(self):
         """Verify total mapped actions equals ActionType enum count."""

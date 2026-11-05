@@ -84,11 +84,11 @@ export function ChangePasswordForm({
       const code = error instanceof EneoApiError ? error.code : undefined;
       const status = error instanceof EneoApiError ? error.status : undefined;
       const atField: ServerErrors | null =
-        code === 9064
+        code === 9061
           ? { current: t("current_password_incorrect") }
-          : code === 9061
+          : code === 9058
             ? { next: t("password_must_be_different") }
-            : code === 9062
+            : code === 9059
               ? { next: t("password_policy_rejected") }
               : null;
       if (atField) {
@@ -100,7 +100,7 @@ export function ChangePasswordForm({
         // The rate limit answers without a code of its own.
         toast.error(t("password_change_rate_limited"));
       } else {
-        // 9063 (no local password to change) is mapped like any other code.
+        // 9060 (no local password to change) is mapped like any other code.
         toastApiError(error, t);
       }
     }

@@ -37,6 +37,15 @@ export function formatWebsiteName(website: { url: string; name?: string | null }
   return website.url.split("//")[1] ?? website.url;
 }
 
+/** The same document content serves knowledge previews and copied source references. */
+export function infoBlobQueryOptions(api: EneoClient, blobId: string) {
+  return queryOptions({
+    queryKey: ["info-blobs", blobId],
+    queryFn: ({ signal }) =>
+      unwrap(api.GET("/api/v1/info-blobs/{id}/", { params: { path: { id: blobId } }, signal }))
+  });
+}
+
 export function collectionQueryOptions(api: EneoClient, collectionId: string) {
   return queryOptions({
     queryKey: ["collections", collectionId],

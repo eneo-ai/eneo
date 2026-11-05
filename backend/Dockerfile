@@ -60,11 +60,14 @@ COPY --from=web apps/web-next ./apps/web-next
 WORKDIR /repo/apps/web-next
 ARG APP_VERSION
 ARG APP_REVISION
+RUN bun run --cwd /repo/packages/widget-loader build
+RUN mkdir -p /repo/packages/widget-loader/releases
 RUN npm run build:vite
 
 FROM python:3.11-slim-bookworm AS no-web-app
 RUN mkdir -p /repo/apps/web-next/dist /repo/apps/web-next/node_modules/.cache \
     && echo '{}' > /repo/apps/web-next/node_modules/.cache/vite-bundle-report.json
+RUN mkdir -p /repo/packages/widget-loader/dist /repo/packages/widget-loader/releases
 
 FROM ${WEB_APP_STAGE} AS web-app
 
@@ -84,6 +87,8 @@ COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /tiktoken /tiktoken
 COPY --from=builder /app /app
 COPY --from=web-app /repo/apps/web-next/dist /app/web-dist
+COPY --from=web-app /repo/packages/widget-loader/dist /app/widget-loader/dist
+COPY --from=web-app /repo/packages/widget-loader/releases /app/widget-loader/releases
 # Browser tests resolve chunks from this exact build. Keep the map outside
 # web-dist so module metadata is not served by the web app.
 COPY --from=web-app /repo/apps/web-next/node_modules/.cache/vite-bundle-report.json /app/web-bundle-report.json

@@ -69,7 +69,9 @@ export default defineConfig({
       // cookie-signing secret so the session cookie validates.
       ENEO_BACKEND_URL: BACKEND_URL,
       PUBLIC_ENEO_BACKEND_URL: BACKEND_URL,
-      JWT_SECRET: process.env.E2E_JWT_SECRET ?? "1234"
+      JWT_SECRET: process.env.E2E_JWT_SECRET ?? "1234",
+      // Respect the resource supervisor's inherited heap ceiling locally.
+      NODE_OPTIONS: process.env.NODE_OPTIONS ?? "--max-old-space-size=4096"
     }
   }
 });

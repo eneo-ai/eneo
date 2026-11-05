@@ -54,6 +54,9 @@ class Tenants(BasePublic):
     flow_runtime_upload_abandonment_days: Mapped[Optional[int]] = mapped_column(
         nullable=True
     )
+    widget_policy: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=sa.text("'{}'::jsonb")
+    )
     api_key_policy: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
         nullable=False,

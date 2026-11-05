@@ -43,6 +43,7 @@ class Permission(str, Enum):
     RETENTION_HOLDS = "retention_holds"
     STORAGE = "storage"
     MODULES = "modules"
+    WIDGETS = "widgets"
     ASSISTANT_DEBUG = "assistant_debug"
     # Capability use permissions. Each value equals the MCP capability purpose
     # it governs (see CAPABILITY_PURPOSES) so the purpose -> permission mapping

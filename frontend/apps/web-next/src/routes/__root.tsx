@@ -1,4 +1,5 @@
 import { createRootRouteWithContext, HeadContent, Outlet } from "@tanstack/react-router";
+import { EmbedProviders } from "@/features/widget/components/embed-providers";
 import { ThemeProvider } from "next-themes";
 import { AppIntlProvider } from "@/components/providers/intl-provider";
 import { useBoot } from "@/boot-context";
@@ -15,9 +16,22 @@ export const Route = createRootRouteWithContext<RouterContext>()({
   component: Root
 });
 
-/** Shared providers for every route. */
+/** The embedded visitor document has its own theme and no app session. */
 function Root() {
   const { locale, messages, nonce } = useBoot();
+  const embed = /^(?:\/en)?\/embed\/[^/]+\/?$/.test(location.pathname);
+  const requestedScheme = document.documentElement.dataset.eneoEmbedScheme;
+  const scheme =
+    requestedScheme === "light" || requestedScheme === "dark" ? requestedScheme : "system";
+  if (embed)
+    return (
+      <AppIntlProvider locale={locale} messages={messages}>
+        <EmbedProviders nonce={nonce} scheme={scheme}>
+          <HeadContent />
+          <Outlet />
+        </EmbedProviders>
+      </AppIntlProvider>
+    );
   return (
     <AppIntlProvider locale={locale} messages={messages}>
       {/* .light/.dark drive the legacy `dark:` variant and color-scheme

@@ -329,11 +329,12 @@ async def test_sk_ip_guardrail(client, default_user_token):
         assert create_response.status_code == 201, create_response.text
         secret = create_response.json()["secret"]
 
+        # The one trusted proxy appends the client's address.
         ok_response = await client.get(
             _AUTH_ENDPOINT,
             headers={
                 "X-API-Key": secret,
-                "X-Forwarded-For": "203.0.113.10, 10.0.0.1",
+                "X-Forwarded-For": "203.0.113.10",
             },
         )
         assert ok_response.status_code == 200
@@ -342,11 +343,23 @@ async def test_sk_ip_guardrail(client, default_user_token):
             _AUTH_ENDPOINT,
             headers={
                 "X-API-Key": secret,
-                "X-Forwarded-For": "198.51.100.10, 10.0.0.1",
+                "X-Forwarded-For": "198.51.100.10",
             },
         )
         assert deny_response.status_code == 403
         assert deny_response.json()["code"] == "ip_not_allowed"
+
+        # A caller outside the allow-list cannot prepend an allowed address:
+        # the proxy's own entry is the one that counts.
+        forged_response = await client.get(
+            _AUTH_ENDPOINT,
+            headers={
+                "X-API-Key": secret,
+                "X-Forwarded-For": "203.0.113.10, 198.51.100.10",
+            },
+        )
+        assert forged_response.status_code == 403
+        assert forged_response.json()["code"] == "ip_not_allowed"
     finally:
         set_settings(settings)
 
@@ -1472,7 +1485,7 @@ async def test_sk_guardrail_rejects_malformed_forwarded_ip(client, default_user_
             _AUTH_ENDPOINT,
             headers={
                 "X-API-Key": secret,
-                "X-Forwarded-For": "not_an_ip, 10.0.0.1",
+                "X-Forwarded-For": "not_an_ip",
             },
         )
         assert response.status_code == 403

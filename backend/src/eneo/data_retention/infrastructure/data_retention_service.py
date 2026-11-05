@@ -97,6 +97,15 @@ class FlowDebugRedactionCounts:
     debug_resolved_input_edges: int = 0
 
 
+def _not_a_widget_conversation() -> Any:
+    """Widget conversations follow their widget's retention, held to the
+    tenant's widget policy, and only the widget retention job deletes them.
+    The assistant/space/tenant schedule would otherwise cut them short."""
+    return ~sa.exists().where(
+        Sessions.id == Questions.session_id, Sessions.widget_id.is_not(None)
+    )
+
+
 class DataRetentionService:
     """Service for managing data retention and deletion based on hierarchical policies."""
 
@@ -211,6 +220,7 @@ class DataRetentionService:
         link_record_col: Any,
         link_file_col: Any,
         record_type: str,
+        only_where: Any = None,
         commit_each_batch: bool = False,
     ) -> int:
         """
@@ -230,6 +240,7 @@ class DataRetentionService:
             link_record_col: Record column in the record's file link table
             link_file_col: File column in the record's file link table
             record_type: Human-readable record type for logging
+            only_where: Optional further condition a record must meet to be deleted
             commit_each_batch: Commit every batch in its own transaction
 
         Returns:
@@ -263,6 +274,9 @@ class DataRetentionService:
                 )
             ),
         )
+
+        if only_where is not None:
+            base_subquery = base_subquery.where(only_where)
 
         # Batch deletion to prevent transaction timeouts on large datasets
         total_deleted = 0
@@ -328,6 +342,8 @@ class DataRetentionService:
         token_usage). Preview counts and the delete both include helper rows,
         so they stay consistent with each other.
 
+        Widget conversations are excluded: the widget retention job owns them.
+
         Returns:
             Number of questions deleted
         """
@@ -340,6 +356,7 @@ class DataRetentionService:
             link_record_col=QuestionsFiles.question_id,
             link_file_col=QuestionsFiles.file_id,
             record_type="questions",
+            only_where=_not_a_widget_conversation(),
             commit_each_batch=commit_each_batch,
         )
 
@@ -371,6 +388,7 @@ class DataRetentionService:
         Delete orphaned sessions that have no questions.
 
         Sessions without questions are deleted after ORPHANED_SESSION_CLEANUP_DAYS.
+        Widget sessions are left to the widget retention job.
         Uses batch deletion to prevent transaction timeouts on large datasets.
         See ``_batch_transaction`` for ``commit_each_batch``.
 
@@ -391,7 +409,13 @@ class DataRetentionService:
         base_subquery = (
             sa.select(Sessions.id)
             .outerjoin(Questions, Sessions.id == Questions.session_id)
-            .where(sa.and_(Sessions.created_at < cutoff_expr, Questions.id.is_(None)))
+            .where(
+                sa.and_(
+                    Sessions.created_at < cutoff_expr,
+                    Questions.id.is_(None),
+                    Sessions.widget_id.is_(None),
+                )
+            )
         )
 
         # Batch deletion to prevent transaction timeouts on large datasets
@@ -433,6 +457,7 @@ class DataRetentionService:
             sa.and_(
                 Questions.assistant_id == assistant_id,
                 Questions.created_at < cutoff_expr,
+                _not_a_widget_conversation(),
             )
         )
 
@@ -956,6 +981,7 @@ class DataRetentionService:
                     # Only count questions that don't have assistant-level retention
                     # (those would use their own retention policy)
                     Assistants.data_retention_days.is_(None),
+                    _not_a_widget_conversation(),
                 )
             )
         )
@@ -1006,6 +1032,7 @@ class DataRetentionService:
                     Questions.created_at < cutoff_expr,
                     Assistants.data_retention_days.is_(None),
                     Spaces.data_retention_days.is_(None),
+                    _not_a_widget_conversation(),
                 )
             )
         )

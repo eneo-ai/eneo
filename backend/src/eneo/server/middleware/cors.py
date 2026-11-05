@@ -20,6 +20,7 @@ from eneo.allowed_origins.get_origin_callback import get_origin
 from eneo.flow_packages.headers import (
     FLOW_PACKAGE_OMITTED_MCP_ASSISTANT_COUNT_HEADER,
 )
+from eneo.main.config import get_settings
 from eneo.main.exceptions import ErrorCodes
 from eneo.main.logging import get_logger
 from eneo.main.models import GeneralError
@@ -61,6 +62,23 @@ CORS_OPTIONS: CORSOptions = {
     ),
     "callback": get_origin,
 }
+
+
+# The loader is embedded by arbitrary websites. Its public, read-only web
+# endpoints own wildcard CORS without credentials, independently of the
+# tenant allowlist used by the API. Match only their concrete route shapes:
+# no API, embed document, mutation or preflight gets this exception.
+_PUBLIC_WIDGET_WEB_PATH = re.compile(
+    r"^/widget/(?:manifest\.json|[^/]+/eneo\.(?:js|css)|settings/[^/]+)$"
+)
+
+
+def _has_public_widget_web_cors(scope: Scope) -> bool:
+    return (
+        scope["method"] in ("GET", "HEAD")
+        and bool(_PUBLIC_WIDGET_WEB_PATH.fullmatch(scope["path"]))
+        and (get_settings().web_app_enabled or get_settings().is_development)
+    )
 
 
 class CORSMiddleware:
@@ -139,6 +157,12 @@ class CORSMiddleware:
         origin = headers.get("origin")
 
         if origin is None:
+            await self.app(scope, receive, send)
+            return
+
+        if _has_public_widget_web_cors(scope):
+            # Keep the endpoint's Access-Control-Allow-Origin: * as is and
+            # never add credentialed CORS or consult a tenant's database rows.
             await self.app(scope, receive, send)
             return
 
@@ -333,6 +357,11 @@ async def add_cors_headers(request: Request, response: Response) -> None:
     """
     origin = request.headers.get("origin")
     if origin is None:
+        return
+    if _has_public_widget_web_cors(request.scope):
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        if "Access-Control-Allow-Credentials" in response.headers:
+            del response.headers["Access-Control-Allow-Credentials"]
         return
     cors = CORSMiddleware(request.app, **CORS_OPTIONS)
     try:

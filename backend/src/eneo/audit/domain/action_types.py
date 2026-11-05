@@ -245,6 +245,19 @@ class ActionType(str, Enum):
     AUDIT_LOG_VIEWED = "audit_log_viewed"
     AUDIT_LOG_EXPORTED = "audit_log_exported"
 
+    # Widget Actions
+    WIDGET_CREATED = "widget_created"
+    WIDGET_UPDATED = "widget_updated"
+    WIDGET_ACTIVATED = "widget_activated"
+    WIDGET_PAUSED = "widget_paused"
+    WIDGET_ARCHIVED = "widget_archived"
+    WIDGET_POLICY_UPDATED = "widget_policy_updated"
+    WIDGET_BUDGET_EXHAUSTED = "widget_budget_exhausted"
+    WIDGET_TEMPLATE_CREATED = "widget_template_created"
+    WIDGET_TEMPLATE_UPDATED = "widget_template_updated"
+    WIDGET_TEMPLATE_DELETED = "widget_template_deleted"
+    WIDGET_TEMPLATE_PUBLISHED = "widget_template_published"
+
 
 # Logged whatever the tenant's audit configuration says: a tenant admin can
 # switch off categories, actions and the whole audit log, and none of those may

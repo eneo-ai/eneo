@@ -31,7 +31,8 @@ const NOT_CLASSES = new Set([
   "text-upload",
   "text-snippet",
   "text-completion-codestral",
-  "text-completion-openai"
+  "text-completion-openai",
+  "placeholder-help"
 ]);
 
 const design = await __unstable__loadDesignSystem(readFileSync(cssPath, "utf8"), {
@@ -59,6 +60,8 @@ for (const file of files) {
     extension
   })) {
     if (NOT_CLASSES.has(candidate) || !COLOUR_UTILITY.test(candidate)) continue;
+    // A Svelte `style:` directive (`style:border-radius={r}`) sets a CSS property, not a utility.
+    if (candidate.startsWith("style:")) continue;
     // An inline CSS declaration (`text-align: left`) is followed by a colon.
     if (/^\s*:/.test(content.slice(position + candidate.length))) continue;
     if (design.candidatesToCss([candidate])[0]) continue;

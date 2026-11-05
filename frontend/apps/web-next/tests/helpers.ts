@@ -237,17 +237,27 @@ export function apiPath(path: string): string {
   return `/api/v1${path}`;
 }
 
-/** JSON fixtures use the browser session owner; load an app page first. */
-export async function apiRequest<T>(
+/** A same-origin write returning the created resource's id; load an app page first. */
+export async function apiPost(page: Page, path: string, data: object): Promise<string> {
+  return (await apiPostJson<{ id: string }>(page, path, data)).id;
+}
+
+/** The same browser-session write for endpoints returning a result rather than a resource id. */
+export async function apiPostJson<T>(page: Page, path: string, data: object): Promise<T> {
+  return apiWriteJson<T>(page, "POST", path, data);
+}
+
+/** Browser-session fixture writes share the same generation and fetch-metadata contract. */
+export async function apiWriteJson<T>(
   page: Page,
+  method: "POST" | "PATCH",
   path: string,
-  options: { method?: "GET" | "POST" | "PATCH"; body?: object } = {}
+  data: object
 ): Promise<T> {
   // Cookie-authenticated writes require the browser's same-origin fetch metadata.
   const response = await page.evaluate(
-    async ({ url, options }) => {
-      const headers = new Headers();
-      if (options.body !== undefined) headers.set("content-type", "application/json");
+    async ({ url, method, data }) => {
+      const headers = new Headers({ "content-type": "application/json" });
       {
         const session = await fetch("/api/v1/auth/session/");
         const generation = session.headers.get("Eneo-Session-Generation");
@@ -256,36 +266,16 @@ export async function apiRequest<T>(
         headers.set("Eneo-Session-Generation", generation);
       }
       const response = await fetch(url, {
-        method: options.method ?? "GET",
+        method,
         headers,
-        body: options.body === undefined ? undefined : JSON.stringify(options.body)
+        body: JSON.stringify(data)
       });
       return { ok: response.ok, body: await response.text() };
     },
-    { url: apiPath(path), options }
+    { url: apiPath(path), method, data }
   );
   expect(response.ok, response.body).toBe(true);
-  return JSON.parse(response.body);
-}
-
-/**
- * Whether the signed-in user sees flows (flowsAvailable in src/features/flows/flows-api.ts):
- * the tenant has them switched on and the user may view them. A space then has a Flöden tab.
- */
-export async function flowsShown(page: Page): Promise<boolean> {
-  const settings = await apiRequest<components["schemas"]["SettingsPublic"]>(page, "/settings/");
-  const me = await apiRequest<Parameters<typeof hasPermission>[0]>(page, "/users/me/");
-  return settings.flows_enabled === true && hasPermission(me)("flows_view");
-}
-
-/** A same-origin write returning the created resource's id. */
-export async function apiPost(page: Page, path: string, data: object): Promise<string> {
-  return (await apiPostJson<{ id: string }>(page, path, data)).id;
-}
-
-/** The same browser-session write for endpoints returning a result rather than a resource id. */
-export async function apiPostJson<T>(page: Page, path: string, data: object): Promise<T> {
-  return apiRequest<T>(page, path, { method: "POST", body: data });
+  return JSON.parse(response.body) as T;
 }
 
 /**
@@ -462,4 +452,45 @@ export async function expectShellHoldsStill(page: Page) {
  */
 export async function expectNothingBusy(page: Page) {
   await expect(page.locator('[aria-busy="true"]:not([aria-hidden="true"] *)')).toHaveCount(0);
+}
+
+/** JSON fixtures use the browser session owner; load an app page first. */
+export async function apiRequest<T>(
+  page: Page,
+  path: string,
+  options: { method?: "GET" | "POST" | "PATCH"; body?: object } = {}
+): Promise<T> {
+  // Cookie-authenticated writes require the browser's same-origin fetch metadata.
+  const response = await page.evaluate(
+    async ({ url, options }) => {
+      const headers = new Headers();
+      if (options.body !== undefined) headers.set("content-type", "application/json");
+      {
+        const session = await fetch("/api/v1/auth/session/");
+        const generation = session.headers.get("Eneo-Session-Generation");
+        if (session.status !== 204 || !generation)
+          throw new Error(`Fixture session probe failed (${session.status})`);
+        headers.set("Eneo-Session-Generation", generation);
+      }
+      const response = await fetch(url, {
+        method: options.method ?? "GET",
+        headers,
+        body: options.body === undefined ? undefined : JSON.stringify(options.body)
+      });
+      return { ok: response.ok, body: await response.text() };
+    },
+    { url: apiPath(path), options }
+  );
+  expect(response.ok, response.body).toBe(true);
+  return JSON.parse(response.body);
+}
+
+/**
+ * Whether the signed-in user sees flows (flowsAvailable in src/features/flows/flows-api.ts):
+ * the tenant has them switched on and the user may view them. A space then has a Flöden tab.
+ */
+export async function flowsShown(page: Page): Promise<boolean> {
+  const settings = await apiRequest<components["schemas"]["SettingsPublic"]>(page, "/settings/");
+  const me = await apiRequest<Parameters<typeof hasPermission>[0]>(page, "/users/me/");
+  return settings.flows_enabled === true && hasPermission(me)("flows_view");
 }

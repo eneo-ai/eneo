@@ -8,7 +8,6 @@
   import ThemeToggle from "$lib/components/ThemeToggle.svelte";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
-  import { goto } from "$app/navigation";
   import { browser } from "$app/environment";
   import { getAppContext } from "$lib/core/AppContext";
   import { getWhatsNewStore } from "$lib/features/whats-new/whatsNewStore";
@@ -24,6 +23,8 @@
     state: { userInfo }
   } = getAppContext();
   const { hasUnseen, enabled: whatsNewEnabled } = getWhatsNewStore();
+  let logoutForm: HTMLFormElement;
+  let switchOrganisationForm: HTMLFormElement;
 
   const displayName = $derived(
     $userInfo.displayName?.trim() || `${$userInfo.firstName} ${$userInfo.lastName}`.trim()
@@ -44,11 +45,18 @@
       localStorage.removeItem("eneo:last-tenant");
     }
 
-    // Navigate to endpoint (not a SvelteKit route — server endpoint)
-    // eslint-disable-next-line svelte/no-navigation-without-resolve -- server endpoint, not a typed route
-    goto("/login/switch-organisation");
+    switchOrganisationForm.requestSubmit();
   }
 </script>
+
+<!-- Keep the forms mounted when selecting an item closes the menu. -->
+<form bind:this={logoutForm} method="POST" action={localizeHref("/logout?/logout")} hidden></form>
+<form
+  bind:this={switchOrganisationForm}
+  method="POST"
+  action={localizeHref("/logout?/switchOrganisation")}
+  hidden
+></form>
 
 <DropdownMenu.Root>
   <DropdownMenu.Trigger>
@@ -117,7 +125,7 @@
     <!-- eslint-enable svelte/no-navigation-without-resolve -->
 
     {#if tenantFederationEnabled}
-      <DropdownMenu.Item onclick={handleSwitchOrganisation}>
+      <DropdownMenu.Item onSelect={handleSwitchOrganisation}>
         <Building2 />
         {m.oidc_choose_another_org()}
       </DropdownMenu.Item>
@@ -132,17 +140,9 @@
 
     <DropdownMenu.Separator />
 
-    <!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing -->
-    <DropdownMenu.Item variant="destructive">
-      {#snippet child({ props })}
-        <!-- The logout load clears the session cookies, so hover preloading
-             must not run it (hover is enabled on the (app) layout wrapper). -->
-        <a {...props} href={localizeHref("/logout")} data-sveltekit-preload-data="false">
-          <LogOut />
-          {m.logout()}
-        </a>
-      {/snippet}
+    <DropdownMenu.Item variant="destructive" onSelect={() => logoutForm.requestSubmit()}>
+      <LogOut />
+      {m.logout()}
     </DropdownMenu.Item>
-    <!-- eslint-enable svelte/no-navigation-without-resolve -->
   </DropdownMenu.Content>
 </DropdownMenu.Root>

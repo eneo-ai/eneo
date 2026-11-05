@@ -510,7 +510,9 @@ describe("ChatView tool approval on a phone (decision 26)", () => {
     expect(screen.queryByRole("textbox", { name: /^Fråga / })).toBeNull();
     expect(within(bar).getByText("arendenummer: BN 2026-0412")).toBeTruthy();
     // Asked once: the card in the conversation shows the call, the bar decides.
-    const card = screen.getByRole("region", { name: "Väntar på godkännande" });
+    // The bar is docked as soon as the call is known; the card follows with
+    // the streamed message, so it is awaited rather than assumed.
+    const card = await screen.findByRole("region", { name: "Väntar på godkännande" });
     expect(within(card).queryByRole("button", { name: /^Godkänn/ })).toBeNull();
 
     fireEvent.click(within(bar).getByRole("button", { name: "Granska Sök ärende i diariet" }));

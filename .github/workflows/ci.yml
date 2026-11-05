@@ -395,8 +395,11 @@ jobs:
       - name: Set up frontend dependencies
         uses: ./.github/actions/setup-frontend
 
+      # The web app's server tests read the loader's dist like the app does.
       - name: Build workspace dependencies
-        run: bun run --filter @eneo/ui build
+        run: |
+          bun run --filter @eneo/ui build
+          bun run --filter @eneo/widget-loader build
 
       - name: Run type checks
         run: FORCE_COLOR=1 bun run --filter '@eneo/*' --filter '!@eneo/web-next' check
@@ -420,7 +423,16 @@ jobs:
         run: FORCE_COLOR=1 bun run test:dev-lifecycle
 
       - name: Run web unit & component tests
+        # Usually ~2 min. Vitest browser mode has no per-file timeout: a test
+        # that unloads the tester iframe (e.g. a real navigation) stalls the
+        # run silently, so the step bounds it.
+        timeout-minutes: 10
         run: FORCE_COLOR=1 bun run --filter '@eneo/web' test
+
+      # Reuse the loader built above; that build enforces size and pinned bytes.
+      # Its browser and release contracts still run here.
+      - name: Run widget loader tests
+        run: FORCE_COLOR=1 bun run --filter '@eneo/widget-loader' test:built
 
   frontend-web-next:
     name: Frontend (web-next)
@@ -492,7 +504,9 @@ jobs:
 
       - name: Build workspace dependencies
         working-directory: frontend
-        run: bun run --filter @eneo/ui build
+        run: |
+          bun run --filter @eneo/ui build
+          bun run --filter @eneo/widget-loader build
 
       - name: Install Playwright Chromium
         uses: ./.github/actions/setup-playwright

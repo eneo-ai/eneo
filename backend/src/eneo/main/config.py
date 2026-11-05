@@ -677,6 +677,20 @@ class Settings(BaseSettings):
         return None if isinstance(value, str) and not value.strip() else value
 
     @model_validator(mode="after")
+    def validate_widget_token_grace(self):
+        # The grace window extends a token's usefulness past its expiry; longer
+        # than the lifetime itself, a leaked token would outlive its purpose.
+        if (
+            self.widget_visitor_token_grace_seconds
+            > self.widget_visitor_token_ttl_seconds
+        ):
+            raise ValueError(
+                "WIDGET_VISITOR_TOKEN_GRACE_SECONDS must not exceed "
+                "WIDGET_VISITOR_TOKEN_TTL_SECONDS"
+            )
+        return self
+
+    @model_validator(mode="after")
     def validate_browser_session_host(self):
         # A development cookie (eneo_web, not Secure) only on a local host: the
         # hosts validate_public_origin accepts over http.
@@ -782,6 +796,42 @@ class Settings(BaseSettings):
     api_key_rate_limit_assistant_default: int = 1000
     api_key_rate_limit_app_default: int = 1000
     api_key_enforce_resource_permissions: bool = True
+    # Embeddable widgets: anonymous visitor access.
+    # The image supplies these assets; native Vite development points this
+    # explicitly at frontend/packages/widget-loader after building the package.
+    widget_loader_dir: Path = Path("/app/widget-loader")
+    # Tokens are short-lived and re-minted silently; the grace window lets an
+    # expired token prove the visitor's identity without a new proof of work.
+    # It never exceeds the lifetime: a token is usable for at most twice its
+    # TTL, after which the visitor's stored key re-mints with a fresh proof.
+    widget_visitor_token_ttl_seconds: int = Field(default=900, gt=0)
+    widget_visitor_token_grace_seconds: int = Field(default=900, ge=0)
+    widget_preview_token_ttl_seconds: int = Field(default=3600, gt=0)
+    # ALTCHA v2 proof of work: each attempt derives a key with `cost` hash
+    # iterations and must land on `key_prefix`, so the expected work is
+    # 16**len(key_prefix) * cost iterations and the attempt count is
+    # geometric. Measured: one attempt at cost 1000 took ~0.24 s in headless
+    # Chromium on a GitHub runner, far less on a laptop. The defaults keep a
+    # first message under a few seconds on a phone while still charging a
+    # script one solve per visitor identity; raise them for abused widgets.
+    widget_altcha_cost: int = Field(default=1_000, ge=1_000)
+    widget_altcha_key_prefix: str = Field(default="0", pattern=r"^[0-9a-f]{1,4}$")
+    widget_altcha_challenge_ttl_seconds: int = Field(default=300, gt=0)
+    widget_challenge_rate_limit_per_minute: int = Field(default=60, gt=0)
+    # Fail closed by default: an unmetered public LLM endpoint is a cost
+    # incident, so Redis loss blocks widget traffic unless overridden. Open
+    # also skips the ALTCHA replay check, so one solved proof of work can be
+    # reused while Redis is down.
+    widget_rate_limit_fail_open: bool = False
+    widget_budget_timezone: str = "Europe/Stockholm"
+    # Tokens reserved against the daily budget before a widget answer starts;
+    # settled to the real usage afterwards. Sized for a RAG prompt plus a
+    # full answer. This admission estimate does not bound actual model usage.
+    widget_budget_reservation_tokens: int = Field(default=8_000, gt=0)
+    # Knowledge chunks retrieved per widget question. Widgets use the citing
+    # protocol (version 2), whose default retrieval fills half the context
+    # window; a fixed count keeps visitor questions inside the budget.
+    widget_retrieval_chunks: int = Field(default=30, gt=0)
     trusted_proxy_count: int = 0
     trusted_proxy_headers: list[str] = ["x-forwarded-for", "x-real-ip"]
     jwt_audience: str

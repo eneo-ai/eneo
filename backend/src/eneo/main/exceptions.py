@@ -55,12 +55,12 @@ class ErrorCodes(int, Enum):
     MCP_UPSTREAM_AUTH_ERROR = 9037
     # Resource readiness
     RESOURCE_NOT_READY = 9038
-    RESOURCE_GONE = 9056
+    RESOURCE_GONE = 9072
     # Model lifecycle — soft-delete blocked because the model is still
     # referenced by an active resource (assistants, apps, services,
     # assistant/app templates). Space membership alone does not block.
     MODEL_IN_USE = 9039
-    CONFLICT = 9057
+    CONFLICT = 9073
     # System user protection
     SYSTEM_USER_PROTECTED = 9040
     # AI provider deterministically rejected the request (4xx upstream)
@@ -85,16 +85,17 @@ class ErrorCodes(int, Enum):
     SKILL_NOT_PUBLISHED_FOR_BINDING = 9053
     SKILL_BLOCKED_FOR_BINDING = 9054
     SKILL_RUNTIME_POLICY_CHANGED = 9055
-    INVALID_FILENAME = 9058
-    INFO_BLOB_ORIGINAL_UNAVAILABLE = 9059
-    UNKNOWN_MODEL_CAPACITY = 9060
-    PASSWORD_REUSE = 9061
-    PASSWORD_POLICY_VIOLATION = 9062
-    LOCAL_PASSWORD_CHANGE_UNAVAILABLE = 9063
-    CURRENT_PASSWORD_INCORRECT = 9064
-    SKILL_REMOVAL_BUSY = 9065
-    WEBSITE_CRAWL_ACTIVE = 9066
-    WEBSITE_CRAWL_CLEANUP_PENDING = 9067
+    INVALID_FILENAME = 9056
+    INFO_BLOB_ORIGINAL_UNAVAILABLE = 9057
+    PASSWORD_REUSE = 9058
+    PASSWORD_POLICY_VIOLATION = 9059
+    LOCAL_PASSWORD_CHANGE_UNAVAILABLE = 9060
+    CURRENT_PASSWORD_INCORRECT = 9061
+    SKILL_REMOVAL_BUSY = 9062
+    WEBSITE_CRAWL_ACTIVE = 9063
+    WEBSITE_CRAWL_CLEANUP_PENDING = 9064
+    ASSISTANT_PUBLISHED_AS_WIDGET = 9071
+    UNKNOWN_MODEL_CAPACITY = 9074
     # A prompt library entry the personal assistant governance policy uses
     # cannot be deleted until the policy stops using it.
     PROMPT_IN_USE_BY_GOVERNANCE = 9069

@@ -8,3 +8,5 @@ apps/web-next/src/theme/eneo.variants.d.ts
 apps/web-next/src/lib/i18n/messages
 apps/web-next/src/routeTree.gen.ts
 apps/web-next/eslint-suppressions.json
+apps/web-next/tests/responsive-contract.baseline.json
+apps/web-next/tests/contrast-incomplete.baseline.json

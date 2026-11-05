@@ -46,3 +46,5 @@ class EntityType(str, Enum):
     AI_BUILDER_CLIENT_ERROR = "ai_builder_client_error"
     DOCUMENT_TEMPLATE = "document_template"
     USER_GROUP = "user_group"
+    WIDGET = "widget"
+    WIDGET_TEMPLATE = "widget_template"

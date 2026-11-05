@@ -8,7 +8,8 @@ import "@/styles/globals.css";
 installChunkRecovery();
 const locale = resolveLocale(document);
 const messages = loadMessages(locale);
-const config = loadRuntimeConfig();
+const embed = /^(?:\/en)?\/embed\/[^/]+\/?$/.test(location.pathname);
+const config = embed ? Promise.resolve(undefined) : loadRuntimeConfig();
 document.documentElement.lang = locale;
 const nonce = readCspNonce();
 globalThis.__webpack_nonce__ = nonce;
@@ -16,9 +17,9 @@ globalThis.__webpack_nonce__ = nonce;
 configureZod({ jitless: true });
 
 const root = document.getElementById("root")!;
-void Promise.all([messages, config, initializeBrowserSession()])
+void Promise.all([messages, config, embed ? undefined : initializeBrowserSession()])
   .then(async ([messages, config]) => {
-    setRuntimeConfig(config);
+    if (config) setRuntimeConfig(config);
     // UI modules may inject styles or parse schemas as soon as they evaluate.
     const { renderApp } = await import("./render-app");
     renderApp(root, { locale, messages, nonce });

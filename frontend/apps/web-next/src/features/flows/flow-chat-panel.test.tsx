@@ -42,7 +42,7 @@ describe("FlowChatPanel when the chat cannot open", () => {
     refuseChat({
       message: "Unknown model capacity: max_input_tokens",
       code: "unknown_model_capacity",
-      eneo_error_code: 9060
+      eneo_error_code: 9074
     });
     renderPanel();
 

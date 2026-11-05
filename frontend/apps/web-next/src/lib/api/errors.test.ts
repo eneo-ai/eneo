@@ -171,7 +171,7 @@ describe("getErrorMessage", () => {
   });
 
   it.each([
-    9042, 9043, 9053, 9054, 9055, 9058, 9059, 9060, 9061, 9062, 9063, 9064, 9065, 9066, 9067
+    9042, 9043, 9053, 9054, 9055, 9056, 9057, 9058, 9059, 9060, 9061, 9062, 9063, 9064, 9071, 9074
   ])("localizes backend refusal %i in both supported languages", (code) => {
     const error = apiErrorFromResponse(errorResponse(409), {
       message: "Backend English refusal",
@@ -260,7 +260,7 @@ describe("getErrorMessage", () => {
     }
   });
 
-  it.each([9056, 9057])("keeps resource refusals (%i) distinct from file errors", (code) => {
+  it.each([9072, 9073])("keeps resource refusals (%i) distinct from file errors", (code) => {
     const error = new EneoApiError("Resource refusal", { status: 409, code });
     expect(getErrorMessage(error, t)).toBe("Resource refusal");
   });
@@ -317,12 +317,12 @@ describe("getErrorMessage", () => {
     const refused = (code: number) =>
       getErrorMessage(new EneoApiError("Refused", { status: 400, code }), translator("sv", sv));
 
-    expect(refused(9061)).toBe(
+    expect(refused(9058)).toBe(
       "Det nya lösenordet måste skilja sig från det nuvarande lösenordet."
     );
-    expect(refused(9062)).toBe("Det nya lösenordet uppfyller inte lösenordspolicyn.");
-    expect(refused(9063)).toBe("Lösenordsbyte är inte tillgängligt för det här kontot.");
-    expect(refused(9064)).toBe("Det nuvarande lösenordet är felaktigt.");
+    expect(refused(9059)).toBe("Det nya lösenordet uppfyller inte lösenordspolicyn.");
+    expect(refused(9060)).toBe("Lösenordsbyte är inte tillgängligt för det här kontot.");
+    expect(refused(9061)).toBe("Det nuvarande lösenordet är felaktigt.");
   });
 
   it.each([undefined, 9024])("localizes an unexpected failure with category %s", (code) => {

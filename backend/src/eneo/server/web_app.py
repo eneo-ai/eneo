@@ -42,6 +42,7 @@ from eneo.authentication.endpoint_access import (
 from eneo.main.config import get_settings, serialize_origin
 from eneo.mcp_apps.presentation.mcp_apps_router import on_content_origin
 from eneo.server.web_app_legacy import legacy_page_target
+from eneo.widgets.presentation.widget_web import EmbedPolicy, install_widget_web
 
 # Where the backend image puts `vite build` output (P4-build-pipeline-1).
 WEB_APP_DIST = Path("/app/web-dist")
@@ -61,6 +62,7 @@ _RESERVED = (
     "/openapi.json",
     "/version",
     "/admin/audit-logs/export",
+    "/widget",
 )
 
 # Module hand-off URLs carry state and redirect_uri: no Referer, no indexing.
@@ -91,7 +93,7 @@ def build_content_security_policy(nonce: str, frame_origins: Sequence[str]) -> s
             "media-src 'self' blob: data:",
             # File previews are framed from in-memory blobs; MCP app views
             # come from their own content origin.
-            " ".join(("frame-src blob:", *frame_origins)),
+            " ".join(("frame-src 'self' blob:", *frame_origins)),
             "connect-src 'self'",
             "object-src 'none'",
             "base-uri 'self'",
@@ -185,6 +187,10 @@ def _alias_healthz(app: FastAPI) -> None:
 def install_web_app(app: FastAPI) -> None:
     settings = get_settings()
     if not settings.web_app_enabled:
+        if settings.is_development:
+            # Vite serves the development document; FastAPI still owns the
+            # public loader assets and settings proxied from that origin.
+            install_widget_web(app)
         return
 
     # Read once, at startup: a missing or wrong build fails loud here.
@@ -291,6 +297,42 @@ def install_web_app(app: FastAPI) -> None:
                 _RETIRED_LOCALE_COOKIE, secure=not settings.is_development
             )
         await response(scope, receive, send)
+
+    def render_embed(policy: EmbedPolicy) -> HTMLResponse:
+        nonce = secrets.token_urlsafe(16)
+        values = {_NONCE: nonce, _LANG: policy.locale}
+        html = _PLACEHOLDER.sub(lambda match: values[match.group(0)], template)
+        html = html.replace(
+            "<html ",
+            f'<html data-eneo-embed-scheme="{policy.scheme}" data-eneo-embed-state="{policy.state}" ',
+            1,
+        )
+        overrides = {
+            "frame-ancestors": policy.frame_ancestors,
+            "frame-src": "'none'",
+            "worker-src": "'self'",
+            "base-uri": "'none'",
+        }
+        directives = build_content_security_policy(nonce, ()).split("; ")
+        csp = "; ".join(
+            [
+                directive
+                for directive in directives
+                if directive.split(" ", 1)[0] not in overrides
+            ]
+            + [f"{name} {value}" for name, value in overrides.items()]
+        )
+        return HTMLResponse(
+            html,
+            headers={
+                "Content-Security-Policy": csp,
+                "Cache-Control": "no-store",
+                "Referrer-Policy": "strict-origin-when-cross-origin",
+                "X-Robots-Tag": "noindex, nofollow, noarchive",
+            },
+        )
+
+    install_widget_web(app, render_embed)
 
     app.router.default = web_app_fallback
     _alias_healthz(app)

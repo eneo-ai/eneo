@@ -21,6 +21,15 @@ export async function createFixtures(
   const spaceName = uniqueName(prefix);
   const work = await spaceWithWork(page, spaceName);
   const spaceId = work.space.split("/").pop()!;
+  const assistant = work.editor.split("/assistants/")[1]!.split("/")[0]!;
+  // A real draft and house-style template, so both widget editors show their fields.
+  await apiPost(page, `/spaces/${spaceId}/widgets/`, {
+    name: uniqueName("Widget"),
+    target_id: assistant
+  });
+  const widgetTemplate = await apiPost(page, "/admin/widget-templates/", {
+    name: uniqueName("Widgetmall")
+  });
   const groupChatName = uniqueName("Grupp");
   const groupChat = await apiPost(page, `${work.space}/applications/group-chats/`, {
     name: groupChatName
@@ -71,7 +80,7 @@ export async function createFixtures(
   return {
     space: work.space,
     spaceName,
-    assistant: work.editor.split("/assistants/")[1]!.split("/")[0]!,
+    assistant,
     app: work.app.split("/apps/")[1]!,
     run: work.result.split("/results/")[1]!,
     groupChat,
@@ -80,7 +89,8 @@ export async function createFixtures(
     collection,
     flow: flow.flowId,
     flowRun: flow.runId,
-    userId
+    userId,
+    widgetTemplate
   };
 }
 

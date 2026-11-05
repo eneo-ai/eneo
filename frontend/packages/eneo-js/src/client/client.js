@@ -89,6 +89,7 @@ export function createClient(args) {
 
   return {
     fetch: async (endpoint, { method, params, requestBody, signal, headers }) => {
+      const url = parseUrl(baseUrl, endpoint, params);
       const payload = parsePayload(requestBody);
       const httpMethod = String(method).toUpperCase();
       let requestEndpoint = `${httpMethod}@${baseUrl}${endpoint}`;
@@ -105,7 +106,7 @@ export function createClient(args) {
             ...headers
           },
           body: payload.body,
-          signal,
+          ...(signal ? { signal } : {}),
           credentials: "include" // Required for cookies (audit sessions, etc.)
         });
         /** @type {any} The generated fetch type owns the response shape; runtime validation belongs at the API boundary. */

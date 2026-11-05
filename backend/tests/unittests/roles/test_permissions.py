@@ -279,6 +279,7 @@ class TestPermissionSemantics:
             "storage",
             "assistant_debug",
             "modules",
+            "widgets",
             "web_search",
             "image_generation",
             "file_analysis",

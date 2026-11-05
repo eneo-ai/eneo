@@ -20,7 +20,9 @@
     <div class="h-16"></div>
 
     <div class="flex w-full justify-between">
-      <Button href={localizeHref("/logout")} variant="outline">{m.logout()}</Button>
+      <form method="POST" action={localizeHref("/logout?/logout")}>
+        <Button type="submit" variant="outline">{m.logout()}</Button>
+      </form>
       <Button href={localizeHref("/")}>{m.retry()}</Button>
     </div>
   </div>
