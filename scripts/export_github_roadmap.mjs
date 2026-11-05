@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 
@@ -66,12 +68,17 @@ function renderOutput(epics, context) {
 }
 
 function readProjectItems({ owner, project, limit }) {
+  // A roadmap item is never a pull request, and a pull request's team reviewers
+  // are the one project field the token cannot read. item-list asks for every
+  // field, so the size of its output is bounded by --limit, not by Node's default.
   const result = spawnSync("gh", [
     "project",
     "item-list",
     project,
     "--owner",
     owner,
+    "--query",
+    "-is:pr",
     "--limit",
     limit,
     "--format",
@@ -79,6 +86,7 @@ function readProjectItems({ owner, project, limit }) {
   ], {
     encoding: "utf8",
     env: process.env,
+    maxBuffer: Infinity,
   });
 
   if (result.status !== 0) {
@@ -1009,6 +1017,26 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function assertProjectReadSurvivesRealProjectSize() {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "roadmap-gh-"));
+  const originalPath = process.env.PATH;
+
+  fs.writeFileSync(path.join(directory, "gh"), [
+    "#!/usr/bin/env node",
+    "const args = process.argv.slice(2);",
+    "process.stdout.write(JSON.stringify({ args, padding: 'x'.repeat(2 * 1024 * 1024) }));",
+  ].join("\n"), { mode: 0o755 });
+  process.env.PATH = `${directory}${path.delimiter}${originalPath}`;
+
+  try {
+    const { args: ghArguments } = readProjectItems({ owner: "eneo-ai", project: "5", limit: "1000" });
+    assert.ok(ghArguments.includes("-is:pr"), "the export must not read pull request items");
+  } finally {
+    process.env.PATH = originalPath;
+    fs.rmSync(directory, { recursive: true });
+  }
+}
+
 function runSelfTest() {
   const items = [
     {
@@ -1308,6 +1336,8 @@ function runSelfTest() {
   assert.match(svg, /fill="#00879C"/, "SVG should embed the real Eneo logo asset");
   assert.doesNotMatch(svg, /fill="#c7ded1"/, "first dynamic column must not be styled as done");
   assert.doesNotMatch(svg, />!<\/text>/, "SVG without decisions should not show an attention icon");
+
+  assertProjectReadSurvivesRealProjectSize();
 
   console.log("roadmap export self-test passed");
 }
