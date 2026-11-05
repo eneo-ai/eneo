@@ -112,6 +112,39 @@ it("surfaces dirty drafts and guards unload", async () => {
   });
 });
 
+function RetryProbe({ saves }: { saves: Array<() => Promise<void>> }) {
+  const autosave = useAutosave("retried-field");
+  return (
+    <button type="button" onClick={() => void autosave(saves.shift()!)}>
+      Run
+    </button>
+  );
+}
+
+it("keeps the failed-save link in place while the save runs again", async () => {
+  const retry = deferred();
+  const { status } = renderWithStatus(
+    <RetryProbe saves={[() => Promise.reject(new Error("offline")), () => retry.promise]} />
+  );
+
+  fireEvent.click(status.getByRole("button", { name: "Run" }));
+  const link = await status.findByRole("link", { name: "Couldn't save changes" });
+
+  fireEvent.click(status.getByRole("button", { name: "Run" }));
+  await waitFor(() => expect(link.querySelector(".animate-spin")).not.toBeNull());
+  expect(status.getByRole("link", { name: "Couldn't save changes" })).toBe(link);
+
+  await act(async () => retry.resolve());
+  // The landing is announced after the failure, in the shared live region.
+  await waitFor(() =>
+    expect(document.querySelector("[data-astryx-live-region='polite']")?.textContent).toMatch(
+      /Couldn't save changes\s+All changes saved!$/
+    )
+  );
+  expect(status.getByText("All changes saved!")).toBeDefined();
+  expect(status.queryByRole("link")).toBeNull();
+});
+
 it("keeps saving visible until every save for the key has settled", async () => {
   const first = deferred();
   const second = deferred();

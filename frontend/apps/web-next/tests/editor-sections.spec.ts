@@ -169,6 +169,49 @@ test.describe("an editor on a phone (decision 21)", () => {
     await expect(page.locator(field!)).toBeFocused();
   });
 
+  test("a press on a failed save reaches the field while it saves again", async ({ page }) => {
+    const { editor } = await assistantEditor(page);
+    await page.goto(`${editor}?section=instructions`);
+    const saves = /\/api\/v1\/assistants\/[^/]+\/$/;
+    let held: Promise<void> = Promise.resolve();
+    let release = () => {};
+    const holdNextSave = () => {
+      held = new Promise((resolve) => (release = resolve));
+    };
+    await page.route(saves, async (route) => {
+      if (route.request().method() !== "POST") return route.fallback();
+      await held;
+      await route.fulfill({ status: 500, json: {} });
+    });
+    const field = page.locator("#assistant-prompt");
+    await field.fill("Svara kort.");
+    await field.blur();
+    const failed = page
+      .getByRole("main")
+      .getByRole("link", { name: "Kunde inte spara" })
+      .filter({ visible: true });
+    await expect(failed).toHaveCount(1);
+
+    // The press takes focus from the field, which saves again under the finger.
+    await field.focus();
+    holdNextSave();
+    const retry = page.waitForRequest((r) => saves.test(r.url()) && r.method() === "POST");
+    const box = (await failed.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await retry;
+    await page.mouse.up();
+    await expect(field).toBeFocused();
+    release();
+    await expect(failed).toHaveCount(1);
+
+    await field.focus();
+    holdNextSave();
+    await failed.tap();
+    await expect(field).toBeFocused();
+    release();
+  });
+
   test("opens a section from its address, after a reload too", async ({ page }) => {
     const { editor } = await assistantEditor(page);
     await page.goto(`${editor}?section=ai`);
