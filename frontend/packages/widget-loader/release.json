@@ -1,0 +1,9 @@
+{
+  "releases": [
+    {
+      "version": "1.0.0",
+      "integrity": "sha384-oWyj2LvZRMMKzmPemlWGhgOYLpin8fqMV9qy98athYUGszs6Tfkf4nicijt0poqc",
+      "css_integrity": "sha384-Bh+CBtbv36spMq42bSu8QSUakymnYCkWs+K3f3v8xsz6J7fQBWvSjNO/78m9n5AY"
+    }
+  ]
+}

@@ -12,6 +12,13 @@ export { readCspNonce } from "./lib/csp-nonce";
 export { loadMessages } from "./lib/i18n/locales";
 
 export function resolveLocale(doc: Document): Locale {
+  if (/^(?:\/en)?\/embed\/[^/]+\/?$/.test(doc.defaultView?.location.pathname ?? "")) {
+    return isLocale(doc.documentElement.lang)
+      ? doc.documentElement.lang
+      : doc.defaultView?.location.pathname.startsWith("/en/")
+        ? "en"
+        : defaultLocale;
+  }
   const cookies = doc.cookie.split(";").map((part) => part.trim());
   const read = (name: string) =>
     cookies.find((part) => part.startsWith(`${name}=`))?.slice(name.length + 1);

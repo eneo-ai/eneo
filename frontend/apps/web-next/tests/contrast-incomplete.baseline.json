@@ -28,6 +28,14 @@
   "pseudoContent": 4,
   "shortTextContent": 2
  },
+ "ipad-dark|/admin/widgets": {
+  "bgOverlap": 3,
+  "shortTextContent": 2
+ },
+ "ipad-dark|/admin/widgets/templates/$": {
+  "bgOverlap": 2,
+  "nonBmp": 2
+ },
  "ipad-dark|/dashboard/$/*": {
   "bgOverlap": 2
  },
@@ -59,7 +67,11 @@
   "shortTextContent": 4
  },
  "ipad-dark|/spaces/$/assistants/$/edit": {
-  "bgOverlap": 16
+  "bgOverlap": 17
+ },
+ "ipad-dark|/spaces/$/assistants/$/widget": {
+  "bgOverlap": 5,
+  "nonBmp": 2
  },
  "ipad-dark|/spaces/$/chat": {
   "bgOverlap": 2
@@ -144,6 +156,13 @@
   "pseudoContent": 4,
   "shortTextContent": 2
  },
+ "ipad-landscape-dark|/admin/widgets": {
+  "bgOverlap": 5
+ },
+ "ipad-landscape-dark|/admin/widgets/templates/$": {
+  "bgOverlap": 2,
+  "nonBmp": 2
+ },
  "ipad-landscape-dark|/dashboard/$/*": {
   "bgOverlap": 2
  },
@@ -176,6 +195,10 @@
  },
  "ipad-landscape-dark|/spaces/$/assistants/$/edit": {
   "bgOverlap": 5
+ },
+ "ipad-landscape-dark|/spaces/$/assistants/$/widget": {
+  "bgOverlap": 5,
+  "nonBmp": 2
  },
  "ipad-landscape-dark|/spaces/$/chat": {
   "bgOverlap": 2
@@ -257,6 +280,13 @@
   "pseudoContent": 4,
   "shortTextContent": 2
  },
+ "ipad-landscape-light|/admin/widgets": {
+  "bgOverlap": 5
+ },
+ "ipad-landscape-light|/admin/widgets/templates/$": {
+  "bgOverlap": 2,
+  "nonBmp": 2
+ },
  "ipad-landscape-light|/dashboard/$/*": {
   "bgOverlap": 2
  },
@@ -289,6 +319,10 @@
  },
  "ipad-landscape-light|/spaces/$/assistants/$/edit": {
   "bgOverlap": 5
+ },
+ "ipad-landscape-light|/spaces/$/assistants/$/widget": {
+  "bgOverlap": 5,
+  "nonBmp": 2
  },
  "ipad-landscape-light|/spaces/$/chat": {
   "bgOverlap": 2
@@ -360,6 +394,14 @@
   "pseudoContent": 4,
   "shortTextContent": 2
  },
+ "ipad-light|/admin/widgets": {
+  "bgOverlap": 3,
+  "shortTextContent": 2
+ },
+ "ipad-light|/admin/widgets/templates/$": {
+  "bgOverlap": 2,
+  "nonBmp": 2
+ },
  "ipad-light|/dashboard/$/*": {
   "bgOverlap": 2
  },
@@ -391,7 +433,11 @@
   "shortTextContent": 4
  },
  "ipad-light|/spaces/$/assistants/$/edit": {
-  "bgOverlap": 16
+  "bgOverlap": 17
+ },
+ "ipad-light|/spaces/$/assistants/$/widget": {
+  "bgOverlap": 5,
+  "nonBmp": 2
  },
  "ipad-light|/spaces/$/chat": {
   "bgOverlap": 2
@@ -464,6 +510,14 @@
   "bgOverlap": 2,
   "shortTextContent": 2
  },
+ "ipad-mini-light|/admin/widgets": {
+  "bgOverlap": 3,
+  "shortTextContent": 2
+ },
+ "ipad-mini-light|/admin/widgets/templates/$": {
+  "bgOverlap": 2,
+  "nonBmp": 2
+ },
  "ipad-mini-light|/spaces/$": {
   "bgOverlap": 4
  },
@@ -472,6 +526,10 @@
  },
  "ipad-mini-light|/spaces/$/assistants": {
   "bgOverlap": 4
+ },
+ "ipad-mini-light|/spaces/$/assistants/$/widget": {
+  "bgOverlap": 5,
+  "nonBmp": 2
  },
  "ipad-mini-light|/spaces/$/knowledge": {
   "bgOverlap": 4
@@ -521,6 +579,14 @@
   "bgOverlap": 2,
   "shortTextContent": 2
  },
+ "phone-dark|/admin/widgets": {
+  "bgOverlap": 3,
+  "shortTextContent": 2
+ },
+ "phone-dark|/admin/widgets/templates/$": {
+  "bgOverlap": 2,
+  "nonBmp": 2
+ },
  "phone-dark|/spaces/$": {
   "bgOverlap": 4
  },
@@ -529,6 +595,10 @@
  },
  "phone-dark|/spaces/$/assistants": {
   "bgOverlap": 4
+ },
+ "phone-dark|/spaces/$/assistants/$/widget": {
+  "bgOverlap": 5,
+  "nonBmp": 2
  },
  "phone-dark|/spaces/$/knowledge": {
   "bgOverlap": 4
@@ -578,6 +648,14 @@
   "bgOverlap": 2,
   "shortTextContent": 2
  },
+ "phone-light|/admin/widgets": {
+  "bgOverlap": 3,
+  "shortTextContent": 2
+ },
+ "phone-light|/admin/widgets/templates/$": {
+  "bgOverlap": 2,
+  "nonBmp": 2
+ },
  "phone-light|/spaces/$": {
   "bgOverlap": 4
  },
@@ -586,6 +664,10 @@
  },
  "phone-light|/spaces/$/assistants": {
   "bgOverlap": 4
+ },
+ "phone-light|/spaces/$/assistants/$/widget": {
+  "bgOverlap": 5,
+  "nonBmp": 2
  },
  "phone-light|/spaces/$/knowledge": {
   "bgOverlap": 4

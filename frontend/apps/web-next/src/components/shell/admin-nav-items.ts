@@ -13,6 +13,7 @@ import {
   LayoutTemplate,
   Library,
   LifeBuoy,
+  MessageSquareCode,
   Plug,
   Settings,
   Shield,
@@ -84,6 +85,9 @@ export function adminNavGroups({
           icon: Shield,
           labelKey: "security_classifications"
         },
+        // What the organisation allows its widgets, and the templates they
+        // start from, so they sit with the other rules.
+        { href: "/admin/widgets", icon: MessageSquareCode, labelKey: "widget_admin_nav" },
         { href: "/admin/audit-logs", icon: History, labelKey: "audit_logs" }
       ]
     },

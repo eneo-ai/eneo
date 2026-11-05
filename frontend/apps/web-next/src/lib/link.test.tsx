@@ -167,3 +167,21 @@ it("renders an Astryx link through it, without Astryx's router prop `to`", async
   await act(async () => fireEvent.click(link));
   expect(router.state.location.pathname).toBe("/spaces/list");
 });
+
+it.each(["/embed/widget-id?mode=full", "/en/embed/widget-id?preview=1#preview=token"])(
+  "loads a fresh document for the widget policy at %s",
+  async (href) => {
+    const { router } = await renderWithRouter(<Link href={href}>Widget</Link>);
+    const navigate = vi.spyOn(router, "navigate");
+    let intercepted = false;
+    const stop = (event: Event) => {
+      intercepted = event.defaultPrevented;
+      event.preventDefault();
+    };
+    document.addEventListener("click", stop);
+    fireEvent.click(screen.getByRole("link", { name: "Widget" }));
+    document.removeEventListener("click", stop);
+    expect(intercepted).toBe(false);
+    expect(navigate).not.toHaveBeenCalled();
+  }
+);

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { userEvent } from "vitest/browser";
 import { createInstructionEditor, type InstructionEditor } from "@eneo/skill-instructions/editor";
 import { serializeReference } from "@eneo/skill-instructions";
 
@@ -33,18 +34,15 @@ function setup(value: string) {
   });
   return { onChange, onReference };
 }
-function key(key: string, options: KeyboardEventInit = {}) {
-  mount
-    .querySelector("[contenteditable]")!
-    .dispatchEvent(
-      new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...options })
-    );
+async function modKey(key: "z" | "y") {
+  editor.focus();
+  await userEvent.keyboard(`{ControlOrMeta>}${key}{/ControlOrMeta}`);
 }
 
 describe("literal instruction editor", () => {
   it.each([false, true])(
     "preserves a reference when dragging within the editor (copy=%s)",
-    (copy) => {
+    async (copy) => {
       const original = "Before " + token + " after.";
       setup(original);
       editor.focus();
@@ -83,7 +81,7 @@ describe("literal instruction editor", () => {
       input.dispatchEvent(new DragEvent("dragend", { bubbles: true, dataTransfer }));
       expect(editor.getValue()).toBe((copy ? original : "Before  after.") + token);
       expect(mount.querySelectorAll("button")).toHaveLength(copy ? 2 : 1);
-      key("z", { ctrlKey: true });
+      await modKey("z");
       expect(editor.getValue()).toBe(original);
     }
   );
@@ -114,24 +112,24 @@ describe("literal instruction editor", () => {
     expect(editor.getValue()).toBe(text);
     expect(onChange.mock.calls.every(([value]) => value === text)).toBe(true);
   });
-  it("inserts, replaces and removes each reference as one undo step", () => {
+  it("inserts, replaces and removes each reference as one undo step", async () => {
     setup("Skriv .");
     editor.replace({ ...editor.getSelection(), from: 6, to: 6 }, "Sök", target);
     expect(editor.getValue()).toBe("Skriv " + token + ".");
-    key("z", { ctrlKey: true });
+    await modKey("z");
     expect(editor.getValue()).toBe("Skriv .");
-    key("y", { ctrlKey: true });
+    await modKey("y");
     expect(editor.getValue()).toBe("Skriv " + token + ".");
     editor.replace({ ...editor.getSelection(), from: 6, to: 6 + token.length }, "Beräkna", {
       kind: "function",
       purpose: "compute"
     });
     expect(editor.getValue()).toContain("eneo-function:compute");
-    key("z", { ctrlKey: true });
+    await modKey("z");
     expect(editor.getValue()).toBe("Skriv " + token + ".");
     editor.remove({ ...editor.getSelection(), from: 6, to: 6 + token.length });
     expect(editor.getValue()).toBe("Skriv .");
-    key("z", { ctrlKey: true });
+    await modKey("z");
     expect(editor.getValue()).toBe("Skriv " + token + ".");
   });
   it.each(["replace", "remove"] as const)(
@@ -149,12 +147,12 @@ describe("literal instruction editor", () => {
       expect(editor.getValue()).toBe(changed);
     }
   );
-  it("keeps undo after changing presentation and editing source", () => {
+  it("keeps undo after changing presentation and editing source", async () => {
     setup("Skriv ");
     editor.replace({ ...editor.getSelection(), from: 6, to: 6 }, "Sök", target);
     editor.setSource(true);
     editor.setSource(false);
-    key("z", { ctrlKey: true });
+    await modKey("z");
     expect(editor.getValue()).toBe("Skriv ");
   });
   it("keeps malformed reserved links visible and editable", () => {
@@ -162,7 +160,7 @@ describe("literal instruction editor", () => {
     expect(editor.getValue()).toBe("[Name](eneo-skill:invalid)");
     expect(mount.textContent).toContain("eneo-skill:invalid");
   });
-  it("pastes literal text and references as one undo step without importing HTML", () => {
+  it("pastes literal text and references as one undo step without importing HTML", async () => {
     setup("");
     editor.focus();
     const clipboard = new DataTransfer();
@@ -178,7 +176,7 @@ describe("literal instruction editor", () => {
     expect(editor.getValue()).toBe("  ✨ " + token + "\n");
     expect(mount.querySelectorAll("button")).toHaveLength(1);
     expect(mount.querySelectorAll("img:not(.ProseMirror-separator), b")).toHaveLength(0);
-    key("z", { ctrlKey: true });
+    await modKey("z");
     expect(editor.getValue()).toBe("");
   });
   it("does not open a reference picker during IME composition", () => {

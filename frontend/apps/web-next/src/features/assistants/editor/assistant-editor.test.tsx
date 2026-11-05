@@ -62,6 +62,6 @@ it("lists its sections on a phone's index under the same groups as the app edito
   expect(groups).toEqual([
     ["Innehåll", ["general", "instructions", "knowledge", "mcp", "attachments"]],
     ["Modell och funktioner", ["ai", "capabilities"]],
-    ["Åtkomst", ["security", "api-keys", "publishing"]]
+    ["Åtkomst", ["security", "api-keys", "widget", "publishing"]]
   ]);
 });

@@ -7,6 +7,7 @@
 /** @typedef {import('../types/resources').PromptSparse} PromptSparse */
 
 import { EneoError } from "../client/client.js";
+import { readConversationStream } from "./conversation-stream.js";
 
 /**
  * @param {import('../client/client').Client} client Provide a client with which to call the endpoints
@@ -255,11 +256,8 @@ export function initConversations(client) {
         );
       }
 
-      /** @type {import("../types/resources").ConversationMessage} */
-      // @ts-expect-error We rely on the fact that the first_chunk event will initialise the response
-      let response = {};
-
-      await client.stream(
+      const response = await readConversationStream(
+        client,
         "/api/v1/conversations/",
         {
           params: { query: { version: 2 } },
@@ -280,82 +278,7 @@ export function initConversations(client) {
             }
           }
         },
-        {
-          onOpen: async (response) => {
-            callbacks?.onOpen?.(response);
-          },
-          onMessage: (ev) => {
-            if (ev.data == "") return;
-            let data;
-            try {
-              data = JSON.parse(ev.data);
-            } catch (e) {
-              return;
-            }
-            switch (ev.event) {
-              case "first_chunk":
-                response = data;
-                callbacks?.onFirstChunk?.(data);
-                break;
-
-              case "text":
-                response.answer += data.answer;
-                response.references = data.references;
-                callbacks?.onText?.(data);
-                break;
-
-              case "reasoning":
-                callbacks?.onReasoning?.(data);
-                break;
-
-              case "image":
-                // One event per saved file; an answer may create several.
-                response.generated_files = [
-                  ...(response.generated_files ?? []),
-                  ...data.generated_files
-                ];
-                callbacks?.onImage?.(data);
-                break;
-
-              case "token_usage":
-                callbacks?.onEneoEvent?.(data);
-                break;
-
-              case "tool_call":
-                callbacks?.onToolCall?.(data);
-                break;
-
-              case "tool_call_delta":
-                callbacks?.onToolCallDelta?.(data);
-                break;
-
-              case "tool_approval_required":
-                callbacks?.onToolApprovalRequired?.(data);
-                break;
-
-              case "tool_approval_timeout":
-                callbacks?.onToolApprovalTimeout?.(data);
-                break;
-
-              case "error":
-                // The backend reports a failed answer as its own event and
-                // then ends the stream normally; surface it so the caller
-                // does not treat a truncated answer as a completed one.
-                // `code` is the reason an HTTP error carries in its body,
-                // e.g. provider_unreachable.
-                throw new EneoError(
-                  typeof data.error === "string" && data.error ? data.error : "The answer failed.",
-                  "SERVER",
-                  200,
-                  0,
-                  {
-                    code: typeof data.code === "string" && data.code ? data.code : "stream_error",
-                    message: data.error
-                  }
-                );
-            }
-          }
-        },
+        callbacks,
         abortController
       );
 

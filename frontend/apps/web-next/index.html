@@ -30,14 +30,17 @@
     </style>
     <script nonce="__ENEO_CSP_NONCE__">
       (() => {
-        let theme = "system";
+        const root = document.documentElement;
+        const embed =
+          root.dataset.eneoEmbedScheme ||
+          (/^(?:\/en)?\/embed\/[^/]+\/?$/.test(location.pathname) ? "system" : undefined);
+        let theme = embed || "system";
         try {
-          const stored = localStorage.getItem("theme");
+          const stored = embed ? null : localStorage.getItem("theme");
           if (stored === "light" || stored === "dark") theme = stored;
         } catch {}
         if (theme === "system")
           theme = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-        const root = document.documentElement;
         root.classList.remove("light", "dark");
         root.classList.add(theme);
         root.dataset.theme = theme;

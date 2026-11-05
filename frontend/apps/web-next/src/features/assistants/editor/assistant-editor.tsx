@@ -5,6 +5,7 @@ import {
   Globe,
   KeyRound,
   MessageSquare,
+  MessageSquareCode,
   Paperclip,
   Play,
   Plug,
@@ -32,6 +33,7 @@ import {
 } from "@/features/spaces/editor-header";
 import { useJustCreated } from "@/features/spaces/just-created";
 import { useSpace } from "@/features/spaces/use-space";
+import { AssistantWidgetSection } from "@/features/widget/admin/assistant-widget-section";
 import { SkillBindingsSection } from "@/features/skills/skill-bindings-section";
 import { useCanAttachSkills } from "@/features/skills/use-can-attach-skills";
 import { chatPartnerHref } from "../assistants";
@@ -193,6 +195,17 @@ function AssistantEditorContent({ assistantId }: { assistantId: string }) {
         />
       )
     },
+    ...(permissions.includes("edit")
+      ? [
+          {
+            id: "widget",
+            label: t("widget_admin_title"),
+            icon: MessageSquareCode,
+            group: access,
+            node: <AssistantWidgetSection assistantId={assistant.id} />
+          }
+        ]
+      : []),
     ...(hasPublishing
       ? [
           {

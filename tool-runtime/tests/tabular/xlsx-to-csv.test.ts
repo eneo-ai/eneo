@@ -126,3 +126,18 @@ it("reports ordinary/shared formulas and distinguishes missing results from zero
   expect(sheets[1]!.calculation?.missing_cached_results).toBe(1);
   expect(sheets[1]!.csv.length).toBe(0);
 });
+
+it("writes numbers with the fifteen significant digits Excel shows", async () => {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("Utfall");
+  ws.addRow(["post", "utfall", "avvikelse"]);
+  ws.addRow(["A", 1607240.9700000002, { formula: "B2-1678000", result: -70759.03000000003 }]);
+  ws.addRow(["B", 2024, 0.5]);
+  const bytes = Buffer.from(await wb.xlsx.writeBuffer());
+
+  const sheets = await convertXlsxToCsvSheets(bytes);
+
+  const lines = sheets[0]!.csv.toString("utf8").trim().split(/\r?\n/);
+  expect(lines[1]).toBe("A,1607240.97,-70759.03");
+  expect(lines[2]).toBe("B,2024,0.5");
+});

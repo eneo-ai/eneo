@@ -14,6 +14,7 @@ import variant from "@jitl/quickjs-ng-wasmfile-release-sync";
 import { writeFile } from "node:fs/promises";
 import { toCsv } from "../../files/csv";
 import { MAX_LOG_LINE_CHARS, PREVIEW_ROWS, type ComputeConfig } from "../config";
+import { cleanNumbers } from "../../../precision";
 import type { ComputeExport, ComputeJob, ComputeOutcome, ScriptErrorCode } from "../ports";
 import { asTabular, describeShape, previewRows } from "../shape";
 import { loadPrelude } from "./prelude";
@@ -146,7 +147,9 @@ function serialize(
             : `The returned value exceeds ${maxBytes} bytes as JSON. Return a summary or a smaller slice, or set export=true to deliver a tabular value as a CSV file.`,
         },
       };
-    return { result: JSON.parse(text) };
+    // A script's doubles leave as a spreadsheet would show them: 0.1 + 0.2 is 0.3. A Decimal
+    // or toFixed result is a string and is kept as written.
+    return { result: cleanNumbers(JSON.parse(text)) };
   } finally {
     fn.dispose();
   }

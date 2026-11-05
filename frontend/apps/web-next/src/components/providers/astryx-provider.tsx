@@ -10,7 +10,7 @@ import { astryxSvSupplement } from "./astryx-sv-supplement";
 // Astryx's own component strings (aria labels, pagination, close buttons…).
 // English ships built in; Swedish comes from Astryx's catalog, keyed by our
 // use-intl locale code, with our Swedish for the strings it still lacks.
-const ASTRYX_MESSAGES: MessagesByLocale = { sv: { ...astryxSvSupplement, ...astryxSv } };
+export const ASTRYX_MESSAGES: MessagesByLocale = { sv: { ...astryxSvSupplement, ...astryxSv } };
 
 /**
  * Astryx passes both `href` and `to`; the app's Link accepts `href`.
