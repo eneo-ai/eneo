@@ -777,9 +777,6 @@
  "WCAG 2.2 AA, dark mode|Skills: create, saved detail and a long reference preview #3": {
   "bgGradient": 1
  },
- "WCAG 2.2 AA, dark mode|Skills: create, saved detail and a long reference preview #4": {
-  "unknown": 1
- },
  "WCAG 2.2 AA, dark mode|Skills: create, saved detail and a long reference preview #5": {
   "elmPartiallyObscuring": 1
  },
@@ -909,9 +906,6 @@
  },
  "WCAG 2.2 AA, light mode|Skills: create, saved detail and a long reference preview #3": {
   "bgGradient": 1
- },
- "WCAG 2.2 AA, light mode|Skills: create, saved detail and a long reference preview #4": {
-  "unknown": 1
  },
  "WCAG 2.2 AA, light mode|Skills: create, saved detail and a long reference preview #5": {
   "elmPartiallyObscuring": 1

@@ -76,6 +76,12 @@ download policy or an engine's limits.
   other fonts fall back to the nearest of these. Text headers and footers, one logo and
   the template's own body text, tables and pictures around the content are reproduced;
   table-based or multi-column headers are not.
+- Numbers leave every tool cleaned of double noise (`src/precision.ts`): a fraction
+  becomes the shortest decimal within one part in 10^13 of it, at most 15 significant
+  digits, so arithmetic reads as 70 759,03 and never as 70759.03000000003 or
+  70759.0299999998. Integers and decimal strings (a Decimal result, a DuckDB
+  DECIMAL) are kept as written. The result views apply the same rule when they
+  render, so results stored before this read the same way.
 - `GET /health/live` and `GET /health/ready` are the health endpoints.
 
 ## Layout

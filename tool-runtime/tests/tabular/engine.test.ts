@@ -32,6 +32,17 @@ describe("extracted DuckDB engine", () => {
     expect(capped.returnedRows).toBe(1);
     expect(capped.truncated).toBe(true);
   });
+  test("returns figures as a spreadsheet shows them, without double noise", async () => {
+    const path = join(directory, "amounts.csv");
+    await writeFile(path, "post,utfall,budget,andel\nA,1607240.97,1678000,0.30000000000000004\n");
+    const data = await runQuery({
+      csvPath: path,
+      sql: "SELECT utfall - budget AS avvikelse, utfall / 3 AS tredjedel, andel FROM t",
+    });
+    expect(data.rows[0]).toEqual([-70759.03, 535746.99, 0.3]);
+    const described = await describeCsv(path);
+    expect(described.sampleRows[0]?.andel).toBe(0.3);
+  });
   test("explains SELECT statements", async () => {
     const data = await runQuery({
       csvPath,

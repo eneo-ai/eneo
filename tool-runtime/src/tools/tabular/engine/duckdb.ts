@@ -13,6 +13,7 @@ import {
   type DuckDBConnection,
   type DuckDBExtractedStatements,
 } from "@duckdb/node-api";
+import { cleanNumbers } from "../../../precision";
 import { defaultQueryLimits as tabularQueryLimits } from "../config";
 import type { TabularColumn } from "./types";
 
@@ -152,8 +153,8 @@ export async function describeCsv(
     const rejectedRows = toFiniteNumber(rejectReader.getRowsJS()[0]?.[0]);
 
     const sampleReader = await conn.runAndReadAll(`SELECT * FROM src LIMIT 5`);
-    const sampleRows = (
-      sampleReader.getRowObjectsJson() as Array<Record<string, unknown>>
+    const sampleRows = cleanNumbers(
+      sampleReader.getRowObjectsJson() as Array<Record<string, unknown>>,
     ).map((row) =>
       Object.fromEntries(
         Object.entries(row).map(([name, value]) => [name, clipped(value)]),
@@ -617,7 +618,11 @@ export async function runQuery(input: RunQueryInput): Promise<RunQueryResult> {
       const columns = reader.columnNames();
       const allRows = reader.getRowsJson() as unknown[][];
       const truncated = allRows.length > rowLimit;
-      const rows = truncated ? allRows.slice(0, rowLimit) : allRows;
+      // Doubles leave the engine as a spreadsheet would show them: 1607240.97 - 1678000
+      // is -70759.03, not -70759.03000000003. The export file and the view get these rows.
+      const rows = cleanNumbers(
+        truncated ? allRows.slice(0, rowLimit) : allRows,
+      );
       return {
         columns,
         rows,
