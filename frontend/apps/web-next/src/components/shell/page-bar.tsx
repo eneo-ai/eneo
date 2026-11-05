@@ -63,7 +63,7 @@ export function PageBar({
         className={cn(
           // The back side keeps at least 44 px (2.75rem) and grows to its whole name; the
           // title column truncates and gives way, and the actions keep their size.
-          "bg-ax-surface border-ax-border sticky top-0 z-10 grid h-14 shrink-0 grid-cols-[minmax(2.75rem,max-content)_minmax(0,1fr)_max-content] items-center gap-1 border-b px-1.5",
+          "bg-ax-surface border-ax-border @container/page-bar sticky top-0 z-10 grid h-14 shrink-0 grid-cols-[minmax(2.75rem,max-content)_minmax(0,1fr)_max-content] items-center gap-1 border-b px-1.5",
           phone ? "wide:hidden" : "lg:hidden"
         )}
       >

@@ -105,13 +105,13 @@ export type ResourceCardProps = {
  * bubbles through the React tree, so inside ClickableCard a click on a
  * dialog's text would open the card's link.
  *
- * As a row (a phone): the tile, the name, then the status and description
- * on one line (the description wraps under a status it cannot fit beside,
- * at large text) and the tokens on the next, or beside the status when there
- * is no description; the menu at the end, or a
- * chevron where there is none (a menu with nothing the user may do renders
- * nothing). The whole row is the link (globals.css, section 12b), the menu
- * above it.
+ * As a row (a phone): the tile, the name, then the status with the description
+ * beside it, or the tokens where there is no description: two lines to a row.
+ * What cannot fit beside the status at large text wraps under it. The tokens
+ * of a row with a description take a line of their own. The menu at the end,
+ * or a chevron where there is none (a menu with nothing the user may do
+ * renders nothing). The whole row is the link (globals.css, section 12b), the
+ * menu above it.
  */
 export function ResourceCard({
   href,
@@ -126,40 +126,36 @@ export function ResourceCard({
   const layout = useResourceLayout();
 
   if (layout === "rows") {
-    const hasMeta = meta !== undefined && meta.length > 0;
+    const metaLine = meta?.length ? meta.join(" · ") : null;
+    const beside = description || metaLine;
     return (
       <ListItem
         href={href}
         className={className}
         label={<span className="block truncate font-semibold">{name}</span>}
         description={
-          status || description || hasMeta ? (
-            <span
-              // Without a description the status and the meta share a line: two lines to a row.
-              className={cn(
-                "flex min-w-0",
-                description ? "flex-col" : "items-center gap-x-1.5 [&>*:last-child]:min-w-0"
-              )}
-            >
-              {status || description ? (
-                <span
-                  // Beside the meta, which gives way first: a status stays whole.
-                  className={cn(
-                    "flex min-w-0 flex-wrap items-center gap-x-1.5",
-                    !description && "shrink-0"
-                  )}
-                >
-                  {status ? (
-                    <span className="flex max-w-full min-w-0 [&>span]:min-w-0 [&>span]:font-normal [&>span>span:last-child]:truncate">
-                      {status}
-                    </span>
-                  ) : null}
-                  {description ? (
-                    <span className="min-w-[min(100%,8rem)] flex-1 truncate">{description}</span>
-                  ) : null}
-                </span>
+          status || beside ? (
+            <span className="flex min-w-0 flex-col">
+              <span className="flex min-w-0 flex-wrap items-center gap-x-2">
+                {status ? (
+                  <span className="flex max-w-full min-w-0 [&>span]:min-w-0 [&>span]:font-normal [&>span>span:last-child]:truncate">
+                    {status}
+                  </span>
+                ) : null}
+                {beside ? (
+                  <span
+                    className={cn(
+                      "min-w-[min(100%,8rem)] flex-1 truncate",
+                      !description && "tabular-nums"
+                    )}
+                  >
+                    {beside}
+                  </span>
+                ) : null}
+              </span>
+              {description && metaLine ? (
+                <span className="truncate tabular-nums">{metaLine}</span>
               ) : null}
-              {hasMeta ? <span className="truncate tabular-nums">{meta.join(" · ")}</span> : null}
             </span>
           ) : undefined
         }

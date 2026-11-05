@@ -415,9 +415,12 @@ function SettingsLayout({
               title={views.phone.title}
               // A filled button needs more room from the edge than the bar's ghost back link.
               // The save state is here, not above the rows: they stay still when it lands.
+              // In words it no longer fits beside the action at large text (under 19 rem):
+              // it then takes the line under the title. The bar's container is its content
+              // box, 0.75rem short of the title's, so 18.25rem here is that same 19 rem.
               actions={
                 <span className="flex items-center gap-2 pe-2.5">
-                  <span data-editor-strip className="contents">
+                  <span data-editor-strip className="contents @max-[18.25rem]/page-bar:hidden">
                     <SaveStatusIndicator isQuiet isCompact isHiddenWhenSaved />
                   </span>
                   {views.phone.actions}
@@ -431,24 +434,28 @@ function SettingsLayout({
               for assistive technology; the page's frame has the h1 of a page
               inside a space. Such a page has no bar of its own, and its title
               is one word: the save state rests on the title's line, out of
-              the flow. */}
-          <div className="relative">
+              the flow. Below 19 rem (large text) that line has no room for
+              it, so it takes a line of its own, kept empty while nothing is
+              happening: the rows stay still here too. */}
+          <div className="wide:hidden @container/editor-title relative">
             {views.phone.parent || !shown ? (
-              <PhoneTitle className={cn("wide:hidden", shown ? "sr-only" : PHONE_TITLE_CLASSES)}>
+              <PhoneTitle className={shown ? "sr-only" : PHONE_TITLE_CLASSES}>
                 {views.phone.title}
               </PhoneTitle>
             ) : null}
-            {views.phone.parent ? null : (
-              <div
-                data-editor-strip
-                className={cn(
-                  "wide:hidden absolute end-4 top-2 flex min-h-11 items-center empty:hidden",
-                  shown && "hidden"
-                )}
-              >
-                <SaveStatusIndicator isQuiet isCompact isHiddenWhenSaved />
-              </div>
-            )}
+            <div
+              data-editor-strip
+              className={cn(
+                "flex min-h-11 items-center",
+                shown
+                  ? "hidden"
+                  : views.phone.parent
+                    ? "px-4 @min-[19rem]/editor-title:hidden"
+                    : "absolute end-4 top-2 @max-[19rem]/editor-title:static @max-[19rem]/editor-title:px-4"
+              )}
+            >
+              <SaveStatusIndicator isQuiet isCompact isHiddenWhenSaved />
+            </div>
           </div>
         </>
       ) : null}

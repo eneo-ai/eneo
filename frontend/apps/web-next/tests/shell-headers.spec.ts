@@ -330,4 +330,11 @@ test("the idle job bell stays out of the way until focus shows it, and focus can
 
   await bell.blur();
   expect((await slot.boundingBox())!.width).toBeLessThanOrEqual(1);
+
+  // Focus that is not the keyboard's does not show it: a press on Search would hide it again
+  // and move Search out from under that press.
+  await page.locator("main#main-content").click({ position: { x: 2, y: 2 } });
+  await bell.focus();
+  await expect(bell).toBeFocused();
+  expect((await slot.boundingBox())!.width).toBeLessThanOrEqual(1);
 });

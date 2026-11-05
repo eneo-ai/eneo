@@ -171,12 +171,15 @@ export function JobIndicator({
 
   return (
     // Hidden, not removed: a job that settles takes away neither the open panel nor the bell
-    // that focus is on or comes back to, and the keyboard can still reach it.
+    // that focus is on or comes back to, and the keyboard can still reach it. Keyboard focus
+    // shows it, not a press: a press elsewhere would hide it and move Search under that press.
     <span
       data-job-bell=""
       className={cn(
         "flex",
-        isHiddenWhenIdle && runningCount === 0 && "not-has-[:focus,[aria-expanded=true]]:sr-only"
+        isHiddenWhenIdle &&
+          runningCount === 0 &&
+          "not-has-[:focus-visible,[aria-expanded=true]]:sr-only"
       )}
     >
       <Popover

@@ -70,11 +70,68 @@ test.describe("an editor on a phone (decision 21)", () => {
       name: /^Instruktioner/
     });
     await expect(row).toBeVisible();
-    const strip = page.locator("[data-editor-strip]");
+    const strip = page.locator("[data-editor-strip]").first();
     await expect(strip).not.toBeEmpty();
     const before = (await row.boundingBox())!.y;
     land();
     await expect(strip).toBeEmpty();
+    expect((await row.boundingBox())!.y).toBe(before);
+  });
+
+  test("the save state shows once on each side of the width where it moves", async ({ page }) => {
+    const { editor } = await assistantEditor(page);
+    await page.goto(`${editor}?section=instructions`);
+    await page.route(/\/api\/v1\/assistants\/[^/]+\/$/, async (route) => {
+      if (route.request().method() !== "POST") await route.fallback();
+    });
+    await page.locator("#assistant-prompt").fill("Svara kort.");
+    await page
+      .locator("[data-phone-page-bar]")
+      .getByRole("link", { name: /^Tillbaka till / })
+      .click();
+    const status = page.getByRole("main").getByText("Sparar…").filter({ visible: true });
+    // 390 px is 19.5 rem at 125% and 19.3 at 126%, then 18.8 at 133%, under the 19 rem it moves at.
+    for (const size of [100, 125, 126, 133, 150]) {
+      await page.evaluate(
+        (percent) =>
+          document.documentElement.style.setProperty("font-size", `${percent}%`, "important"),
+        size
+      );
+      await expect(status).toHaveCount(1);
+    }
+  });
+
+  test("at large text the save state leaves the bar, and the rows stay still", async ({ page }) => {
+    const { editor } = await assistantEditor(page);
+    await page.goto(`${editor}?section=instructions`);
+    let land = () => {};
+    const held = new Promise<void>((resolve) => (land = resolve));
+    await page.route(/\/api\/v1\/assistants\/[^/]+\/$/, async (route) => {
+      if (route.request().method() === "POST") await held;
+      await route.fallback();
+    });
+    await page.locator("#assistant-prompt").fill("Svara kort.");
+    await page
+      .locator("[data-phone-page-bar]")
+      .getByRole("link", { name: /^Tillbaka till / })
+      .click();
+    await page.evaluate(() =>
+      document.documentElement.style.setProperty("font-size", "200%", "important")
+    );
+
+    const row = page.getByRole("navigation", { name: "Avsnitt" }).getByRole("link", {
+      name: /^Instruktioner/
+    });
+    const status = page.getByRole("main").getByText("Sparar…").filter({ visible: true });
+    await expect(status).toBeVisible();
+    expect(
+      await page
+        .locator("main#main-content")
+        .evaluate((main) => main.scrollWidth - main.clientWidth)
+    ).toBeLessThanOrEqual(0);
+    const before = (await row.boundingBox())!.y;
+    land();
+    await expect(status).toBeHidden();
     expect((await row.boundingBox())!.y).toBe(before);
   });
 
