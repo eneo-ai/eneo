@@ -71,8 +71,9 @@ FROM ${WEB_APP_STAGE} AS web-app
 # Production stage
 FROM python:3.11-slim-bookworm
 
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y ffmpeg libmagic1 && rm -rf /var/lib/apt/lists/*
+# Install runtime dependencies. The runtime installs nothing, so apt goes once they are in.
+RUN apt-get update && apt-get install -y ffmpeg libmagic1 && rm -rf /var/lib/apt/lists/* \
+    && apt-get purge -y --allow-remove-essential --auto-remove apt
 
 # Copy venv and tiktoken from builder
 COPY --from=builder /app/.venv /app/.venv
