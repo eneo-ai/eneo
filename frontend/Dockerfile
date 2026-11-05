@@ -37,10 +37,12 @@ RUN bun run --filter @eneo/ui build && bun run --filter @eneo/web build
 # Required ENV vars, see README.md
 # ORIGIN, JWT_SECRET, PUBLIC_API_URL
 FROM node:22.23.4-bookworm-slim AS runner
-# The runtime only executes node. Drop the bundled package managers: their vendored
-# dependencies lag behind advisories and would fail the release image vulnerability gate.
+# The runtime only executes node. Drop the package managers, npm's and Debian's, with what only
+# they need: their fixes reach Debian before this base image, and would fail the release image
+# vulnerability gate. An upgrade here would run the outdated apt over the network instead.
 RUN rm -rf /usr/local/lib/node_modules /usr/local/bin/npm /usr/local/bin/npx \
-    /usr/local/bin/corepack /usr/local/bin/yarn /usr/local/bin/yarnpkg /opt/yarn-v*
+    /usr/local/bin/corepack /usr/local/bin/yarn /usr/local/bin/yarnpkg /opt/yarn-v* \
+    && apt-get purge -y --allow-remove-essential --auto-remove apt
 
 WORKDIR /app
 # No node_modules in this image: adapter-node bundles apps/web devDependencies into build/,
