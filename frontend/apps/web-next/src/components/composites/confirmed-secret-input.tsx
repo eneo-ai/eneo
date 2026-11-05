@@ -42,6 +42,9 @@ export type ConfirmedSecretInputProps = {
   allowReveal?: boolean;
   /** Password managers read it: "new-password" (default), "off" for API keys. */
   autoComplete?: string;
+  /** Stable field names for password managers, as on the login form. */
+  htmlName?: string;
+  confirmationHtmlName?: string;
   placeholder?: string;
   /** At the first field when a required secret is empty and `showErrors` is set. */
   requiredMessage?: string;
@@ -99,6 +102,8 @@ export function ConfirmedSecretInput({
   isDisabled = false,
   allowReveal = false,
   autoComplete = "new-password",
+  htmlName,
+  confirmationHtmlName,
   placeholder,
   requiredMessage,
   valueError,
@@ -127,6 +132,7 @@ export function ConfirmedSecretInput({
         isRequired={isRequired}
         isDisabled={isDisabled}
         autoComplete={autoComplete}
+        htmlName={htmlName}
         placeholder={placeholder}
         status={valueMessage ? { type: "error", message: valueMessage } : undefined}
       />
@@ -141,6 +147,7 @@ export function ConfirmedSecretInput({
         isRequired={isRequired || value !== ""}
         isDisabled={isDisabled}
         autoComplete={autoComplete}
+        htmlName={confirmationHtmlName}
         onBlur={() => {
           if (confirmation !== "") setConfirmationLeft(true);
         }}

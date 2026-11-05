@@ -121,6 +121,8 @@ export function ChangePasswordForm({
   return (
     <form
       className="max-w-sm"
+      // Always handled below; POST keeps the named fields out of the URL regardless.
+      method="post"
       noValidate
       onSubmit={(event) => {
         event.preventDefault();
@@ -150,6 +152,7 @@ export function ChangePasswordForm({
         />
         <PasswordInput
           ref={currentRef}
+          htmlName="currentPassword"
           label={t("current_password")}
           value={current}
           onChange={(value) => {
@@ -181,6 +184,8 @@ export function ChangePasswordForm({
           onConfirmationChange={setConfirm}
           // Password managers offer a generated password and fill both.
           autoComplete="new-password"
+          htmlName="newPassword"
+          confirmationHtmlName="confirmPassword"
           isRequired
           valueError={shown("next")}
           mismatchMessage={errors.confirm ?? t("change_password_mismatch")}

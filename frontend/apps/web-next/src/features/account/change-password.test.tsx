@@ -107,6 +107,12 @@ describe("ChangePasswordCard", () => {
     for (const input of [field(/^Nytt lösenord/), field(/^Bekräfta lösenord/)]) {
       expect(input.getAttribute("autocomplete")).toBe("new-password");
     }
+    // Stable names, as in Svelte and on the login form.
+    expect(field(/^Nuvarande lösenord/).name).toBe("currentPassword");
+    expect(field(/^Nytt lösenord/).name).toBe("newPassword");
+    expect(field(/^Bekräfta lösenord/).name).toBe("confirmPassword");
+    // Named fields would land in the URL if a GET ever submitted natively.
+    expect(container.querySelector("form")?.method).toBe("post");
     // The policy's rules, not a length of its own (WCAG 3.3.2), before the
     // fields and read with them.
     const checklist = within(container).getByText(
