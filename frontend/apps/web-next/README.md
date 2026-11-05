@@ -58,7 +58,7 @@ gate.
 ### Vite dev server
 
 The browser talks only to `http://localhost:3101`. The dev server forwards
-`/api` (WebSockets too), `/version`, `/login/callback` and `/auth/callback` to
+`/api` (WebSockets too), `/widget`, `/version`, `/login/callback` and `/auth/callback` to
 the backend at `ENEO_BACKEND_URL` without changing the Host header, so the
 session cookie and the backend's same-origin checks work as in production. It
 refuses to start without `ENEO_BACKEND_URL` (set it in `.env.local`). It sends no
@@ -70,7 +70,15 @@ Run the backend in development mode with these in its `.env`:
 ENVIRONMENT=development          # session cookie eneo_web, without Secure, works on http
 BROWSER_SESSION_ENABLED=true
 PUBLIC_ORIGIN=http://localhost:3101
+WIDGET_LOADER_DIR=../frontend/packages/widget-loader
 ```
+
+Build the widget loader from `frontend` with
+`bun run --filter @eneo/widget-loader build`. The backend serves its public
+loader files, manifest and launcher settings in development even with
+`WEB_APP_ENABLED=false`, so the Vite preview and “Test in Eneo” need no built
+SPA on the backend. The development path above is relative to `backend`;
+the production image supplies `/app/widget-loader` by default.
 
 The backend refuses to start with the browser session in development mode
 unless `PUBLIC_ORIGIN` is a localhost origin. The SSO `redirect_uri` follows the
@@ -84,6 +92,31 @@ Configure deployment links and browser sessions on the backend. The SPA reads
 validated public settings from `GET /api/v1/runtime-config`; it contains no
 deployment credentials. `ENEO_BACKEND_URL` configures the development proxy
 only. Production API requests use the document's origin.
+
+## Embeddable widget
+
+The chat a visitor of another site sees (`/embed/<public id>`, `/en/embed/…`)
+lives in `src/features/widget` and its public TanStack routes. It uses FastAPI's
+visitor API directly under the document's origin, without browser-session
+cookies. FastAPI serves the embed shell with the widget's frame policy,
+language and colour scheme before the browser starts; the root route renders
+the widget's own providers without the app's session or theme preferences.
+
+FastAPI also serves the loader script, stylesheet, settings and release metadata
+under `/widget/`. The backend image builds `packages/widget-loader` and includes
+both its current bundle and immutable release archives. `/widget/manifest.json`
+supplies the release version and SRI hash to the install-snippet editor.
+
+The widget's admin page lives under its assistant
+(`/spaces/<space>/assistants/<assistant>/widget`, `src/features/widget/admin`):
+the editor with its autosave store, the live preview (the embed page framed
+with a preview token, so the app's CSP allows same-origin frames), "Test in
+Eneo" with the real loader, the install snippet (pointing at this installation’s origin)
+and the usage table. The organisation's side is under `/admin/widgets`
+(`src/features/widget/admin/org`): the overview of every widget with its
+usage and the pause/activate actions, the policy every widget stays within,
+and the templates with their editor (`/admin/widgets/templates/<id>`), whose
+preview is a static mock since a template has no widget behind it.
 
 ## Auth
 

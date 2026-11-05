@@ -100,9 +100,11 @@ def test_middleware_resolves_client_ip_with_trusted_proxy(monkeypatch):
     )
 
     with TestClient(app) as client:
+        # The proxy appends the client it accepted the connection from; an
+        # earlier entry came with the request and is ignored.
         response = client.get(
             "/probe",
-            headers={"X-Forwarded-For": "203.0.113.45, 10.0.0.1"},
+            headers={"X-Forwarded-For": "198.51.100.7, 203.0.113.45"},
         )
 
     assert response.status_code == 200
@@ -143,7 +145,7 @@ def test_middleware_drops_non_ip_in_forwarded_for(monkeypatch):
     with TestClient(app) as client:
         response = client.get(
             "/probe",
-            headers={"X-Forwarded-For": "not-an-ip, 10.0.0.1"},
+            headers={"X-Forwarded-For": "not-an-ip"},
         )
 
     assert response.status_code == 200

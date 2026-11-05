@@ -94,6 +94,7 @@ from eneo.mcp_servers.domain.capabilities import (
     CapabilityPurpose,
 )
 from eneo.mcp_servers.domain.entities.mcp_server import (
+    CAPABILITY_PURPOSES,
     GENERAL_PURPOSE,
     allowed_capability_purposes,
     duplicate_capability_purposes,
@@ -155,6 +156,17 @@ from eneo.users.user import UserInDB
 from eneo.workflows.step_repo import StepRepository
 
 logger = get_logger(__name__)
+
+# What a widget visitor can run. A visitor is a synthetic principal with no
+# users row. Loopback servers accept its widget-scoped token, but a generated
+# file is owned by a user, so a visitor gets no image generation, no file
+# creation, no charts and no built-in provider, and files other MCP tools
+# return are dropped; file analysis has nothing to read, since visitors
+# cannot attach files. The assistant's knowledge, its own MCP servers and an
+# external web search provider serve visitors as configured. An allowlist, so
+# a new purpose is kept from anonymous visitors until it is admitted here.
+VISITOR_CAPABILITY_PURPOSES: frozenset[str] = frozenset({"web_search"})
+assert VISITOR_CAPABILITY_PURPOSES <= frozenset(CAPABILITY_PURPOSES)
 
 _IMAGE_EXTENSIONS = {
     "image/jpeg": "jpeg",
@@ -505,6 +517,13 @@ class AssistantService:
         authenticated.tools = await with_live_builtin_tools(server)
         return authenticated
 
+    def _allowed_capability_purposes(self) -> set[str]:
+        # A widget visitor holds no permissions: the assistant's own
+        # configuration decides, less what a visitor cannot run.
+        if self.user.active_widget is not None:
+            return set(VISITOR_CAPABILITY_PURPOSES)
+        return allowed_capability_purposes(self.user.permissions)
+
     @staticmethod
     def _requested_capabilities(
         *,
@@ -617,6 +636,17 @@ class AssistantService:
         Returns None for a document the file store refuses (wrong format,
         active content, too large): the answer continues without it.
         """
+        if self.user.active_widget is not None:
+            # A widget visitor owns no files: the file is dropped (the model
+            # only ever saw its placeholder).
+            logger.info(
+                "Dropped a tool-generated image for a widget visitor",
+                extra={
+                    "widget_id": str(self.user.active_widget.widget_id),
+                    "mcp_tool_name": image.mcp_tool_name,
+                },
+            )
+            return None
         if image.filename is not None:
             # A document or spreadsheet the proxy admitted from a provider of
             # that purpose; the file store checks its format before keeping it.
@@ -1266,7 +1296,7 @@ class AssistantService:
                 requested_capabilities=sorted(requested_capabilities),
                 supports_tool_calling=model.supports_tool_calling,
                 user_group_ids=self.user.user_groups_ids,
-                allowed_purposes=allowed_capability_purposes(self.user.permissions),
+                allowed_purposes=self._allowed_capability_purposes(),
                 space_security_classification=space.security_classification,
             )
             effective_mcp_servers = [
@@ -1696,6 +1726,42 @@ class AssistantService:
             prompt_text=prompt_text,
             files=persistent_files + message_files,
         )
+
+    async def _inline_attachments_for_visitor(
+        self,
+        assistant: "Assistant",
+        model: "CompletionModel",
+        prompt_text: str,
+    ) -> None:
+        """A visitor never gets the files tool, so an "open with tool"
+        attachment would reach the model as a link nothing can open: every
+        attachment inlines for the visitor instead. The baseline is then
+        checked against the window here, before any conversation row exists;
+        a link is no fallback (without tools the completion layer inlines it
+        anyway, and with only knowledge tools it stays unreadable), so a turn
+        that cannot fit is refused and logged for the administrator. The
+        choice is made on the turn's assistant copy and read by every later
+        step (fit guard, derived pages, completion input)."""
+        if not assistant.url_only_attachment_ids(model):
+            return
+        assistant.withhold_file_reader()
+        files = await self._completion_prompt_files_for_model(
+            persistent_attachments=assistant.attachments, completion_model=model
+        )
+        try:
+            assert_prompt_and_files_fit_context(
+                max_input_tokens=model.max_input_tokens,
+                model_name=model.name,
+                prompt_text=prompt_text,
+                files=files,
+            )
+        except BadRequestException:
+            logger.warning(
+                "Widget visitor turn refused: the assistant's attachments marked "
+                "'open with tool' do not fit the model's window once inlined",
+                extra={"assistant_id": str(assistant.id)},
+            )
+            raise
 
     async def get_completion_model(self, space: "Space") -> Optional["CompletionModel"]:
         """Get a completion model for the space. Returns None if no model is available."""
@@ -2652,6 +2718,16 @@ class AssistantService:
                 )
 
         icon_id = await self.repo.delete(assistant_id, space.id)
+
+        # After the delete: a widget created meanwhile holds the assistant row
+        # until it commits, so it is archived here too.
+        from eneo.widgets.application.widget_target_lifecycle import (
+            archive_widgets_of_deleted_assistant,
+        )
+
+        await archive_widgets_of_deleted_assistant(
+            self.space_repo.session, assistant_id=assistant_id, user=self.user
+        )
 
         if icon_id:
             await self.icon_repo.delete_if_unreferenced(icon_id)
@@ -3649,7 +3725,7 @@ class AssistantService:
                 requested_capabilities=sorted(requested_capabilities),
                 supports_tool_calling=effective_completion_model.supports_tool_calling,
                 user_group_ids=self.user.user_groups_ids,
-                allowed_purposes=allowed_capability_purposes(self.user.permissions),
+                allowed_purposes=self._allowed_capability_purposes(),
                 space_security_classification=space.security_classification,
             )
             mcp_servers_override = resolution.general_servers
@@ -3658,7 +3734,14 @@ class AssistantService:
                     server, assistant_id=assistant_to_ask.id
                 )
                 for server in resolution.capability_servers
+                if self.user.active_widget is None
+                or not is_builtin_provider(server.http_auth_type)
             ]
+
+        if self.user.active_widget is not None:
+            await self._inline_attachments_for_visitor(
+                assistant_to_ask, effective_completion_model, skill_composition.prompt
+            )
 
         # This message's own uploads have no save-time fit gate and are inlined
         # whole, so reject an upload that can't fit before any session/question
@@ -3707,6 +3790,8 @@ class AssistantService:
         stream: bool,
         version: int,
         require_tool_approval: bool,
+        num_chunks_override: int | None = None,
+        prompt_addendum: str | None = None,
     ) -> tuple["CompletionModelResponse", "DatastoreResult"]:
         """Run the existing assistant engine; the caller owns response persistence."""
         mcp_servers_override = prepared.mcp_servers_override
@@ -3759,6 +3844,7 @@ class AssistantService:
         # calling never get a server and fall back to legacy
         # retrieve-and-inject inside Assistant.ask.
         knowledge_mcp_server = None
+        # Preserve the authenticated principal, including a visitor's widget scope.
         if internal_mcp.knowledge:
             knowledge_mcp_server = await build_knowledge_mcp_server(
                 token=mint_scoped_token(),
@@ -3772,7 +3858,8 @@ class AssistantService:
         # inlined files it still pages into text the window truncated).
         # External servers coexist; tool descriptions steer the choice.
         files_mcp_server = None
-        if internal_mcp.files:
+        # Visitors own no files, so they never get the files tool.
+        if internal_mcp.files and self.user.active_widget is None:
             seen_labels: set[str] = set()
             attachment_labels: list[str] = []
             for file in referenceable_files:
@@ -3864,6 +3951,7 @@ class AssistantService:
             files=completion_file_inputs.completion_message_files,
             stream=stream,
             version=version,
+            num_chunks_override=num_chunks_override,
             capability_mcp_servers=capability_mcp_servers,
             document_template=document_template,
             require_tool_approval=require_tool_approval,
@@ -3871,6 +3959,7 @@ class AssistantService:
             model_kwargs_override=prepared.model_kwargs_override,
             mcp_servers_override=mcp_servers_override,
             prompt_override=prepared.prompt_override,
+            prompt_addendum=prompt_addendum,
             completion_prompt_files=completion_file_inputs.completion_prompt_files,
             skill_runtime=prepared.skill_runtime,
             knowledge_mcp_server=knowledge_mcp_server,
@@ -3891,6 +3980,8 @@ class AssistantService:
         stream: bool = False,
         tool_assistant_id: Optional["UUID"] = None,
         version: int = 1,
+        num_chunks_override: int | None = None,
+        prompt_addendum: str | None = None,
         assistant_selector_tokens: int = 0,
         require_tool_approval: bool = False,
         disabled_mcp_server_ids: list["UUID"] | None = None,
@@ -4006,6 +4097,8 @@ class AssistantService:
                 stream=stream,
                 version=version,
                 require_tool_approval=require_tool_approval,
+                num_chunks_override=num_chunks_override,
+                prompt_addendum=prompt_addendum,
             )
         except Exception:
             failed_snapshot = skill_runtime.snapshot()

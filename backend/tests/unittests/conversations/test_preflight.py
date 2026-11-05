@@ -605,7 +605,12 @@ async def test_preflight_baseline_zero_for_session_target():
     """An existing session already carries the prompt + attachments in its
     history, so the baseline fields stay 0 and the baseline is not fetched."""
     session = SessionOwnership(
-        user_id=uuid4(), api_key_id=None, assistant_id=uuid4(), group_chat_id=None
+        user_id=uuid4(),
+        api_key_id=None,
+        widget_id=None,
+        visitor_id=None,
+        assistant_id=uuid4(),
+        group_chat_id=None,
     )
 
     service = _make_service(session=session, assistant=_make_assistant())
@@ -648,7 +653,12 @@ async def test_preflight_resolves_session_assistant_model():
     assistant_id = uuid4()
 
     session = SessionOwnership(
-        user_id=uuid4(), api_key_id=None, assistant_id=assistant_id, group_chat_id=None
+        user_id=uuid4(),
+        api_key_id=None,
+        widget_id=None,
+        visitor_id=None,
+        assistant_id=assistant_id,
+        group_chat_id=None,
     )
 
     service = _make_service(
@@ -678,7 +688,12 @@ async def test_preflight_resolves_session_to_group_chat_model():
     group_chat_id = uuid4()
 
     session = SessionOwnership(
-        user_id=uuid4(), api_key_id=None, assistant_id=None, group_chat_id=group_chat_id
+        user_id=uuid4(),
+        api_key_id=None,
+        widget_id=None,
+        visitor_id=None,
+        assistant_id=None,
+        group_chat_id=group_chat_id,
     )
 
     member = MagicMock()

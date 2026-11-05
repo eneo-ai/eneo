@@ -123,7 +123,12 @@ async def test_delete_error_when_session_does_not_exist(service: SessionService)
 
 async def test_delete_error_when_user_not_owner_of_session(service: SessionService):
     service.session_repo.get_ownership.return_value = SessionOwnership(
-        user_id=uuid4(), api_key_id=None, assistant_id=None, group_chat_id=None
+        user_id=uuid4(),
+        api_key_id=None,
+        widget_id=None,
+        visitor_id=None,
+        assistant_id=None,
+        group_chat_id=None,
     )
 
     with pytest.raises(UnauthorizedException, match="belongs to other principal"):
@@ -142,7 +147,12 @@ async def test_a_service_key_owns_only_its_own_conversations(
         }
     )
     own = SessionOwnership(
-        user_id=None, api_key_id=key_id, assistant_id=TEST_UUID, group_chat_id=None
+        user_id=None,
+        api_key_id=key_id,
+        widget_id=None,
+        visitor_id=None,
+        assistant_id=TEST_UUID,
+        group_chat_id=None,
     )
     service.session_repo.get_ownership.return_value = own
 
@@ -161,6 +171,8 @@ async def test_the_ownership_read_refuses_as_the_full_read(service: SessionServi
     owned = SessionOwnership(
         user_id=TEST_USER.id,
         api_key_id=None,
+        widget_id=None,
+        visitor_id=None,
         assistant_id=TEST_UUID,
         group_chat_id=None,
     )

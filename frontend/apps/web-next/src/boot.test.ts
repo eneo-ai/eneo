@@ -129,3 +129,20 @@ it("replaces a failed boot with static text in both languages and a reload link"
   expect(root.textContent).not.toContain("Stale content");
   expect(root.querySelector("script")).toBeNull();
 });
+
+it.each(["/embed/widget-id", "/en/embed/widget-id"])(
+  "uses the embed document's language without reading or migrating preferences at %s",
+  (path) => {
+    window.history.replaceState({}, "", path);
+    document.documentElement.lang = "sv";
+    document.cookie = "NEXT_LOCALE=en; Path=/";
+    const readCookie = vi.spyOn(document, "cookie", "get");
+    const writeCookie = vi.spyOn(document, "cookie", "set");
+    const storage = vi.spyOn(Storage.prototype, "getItem");
+    expect(resolveLocale(document)).toBe("sv");
+    expect(readCookie).not.toHaveBeenCalled();
+    expect(writeCookie).not.toHaveBeenCalled();
+    expect(storage).not.toHaveBeenCalled();
+    window.history.replaceState({}, "", "/");
+  }
+);

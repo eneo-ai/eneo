@@ -89,6 +89,13 @@ E2E_MANAGE_STACK=0 bun run test:e2e
 docker compose -f docker-compose.e2e.yml down
 ```
 
+The reused Linux `backend_venv` must match this checkout's `backend/uv.lock`.
+Synchronize it through the usual devcontainer setup after a branch adds a Python
+dependency. A host Python environment does not update that mounted environment.
+The backend healthcheck requires an HTTP response from `/api/livez`, since a
+listening Gunicorn socket can precede a worker import failure. For startup
+failures, inspect the `e2e-backend` logs before running browser tests.
+
 The suite authenticates once (`auth.setup.ts` logs in the seeded user and saves a
 session to `playwright/.auth/`), then every spec reuses that session — login is
 exercised for real, but each test starts authenticated.
@@ -322,6 +329,67 @@ test("authenticated user lands in the personal chat workspace", async ({ page })
 Prefer stable, language-agnostic locators (`input[name="email"]`,
 `button[type="submit"]`, `getByRole`) over text — the UI is localized via
 Paraglide `m.*`.
+
+## Accessibility (WCAG)
+
+The embeddable widget runs on other organisations' websites, which are bound by
+the accessibility law (EN 301 549 / WCAG), so its accessibility is tested in
+layers that each fail CI. Automated checks find roughly half of WCAG problems;
+the rest needs a person with a screen reader.
+
+| Layer | What it catches | Where |
+| --- | --- | --- |
+| Svelte a11y warnings | Missing `alt`, click handlers without keyboard support, invalid ARIA; `svelte-check --fail-on-warnings` turns every warning into an error | `bun run check` (`apps/web`, `packages/ui`) |
+| axe in component tests | Every WCAG 2.0–2.2 A/AA rule, contrast included, in light and dark: the chat, its error and single-turn states, the paused notice | `WidgetChat.svelte.test.ts`, `WidgetUnavailable.svelte.test.ts` |
+| Virtual screen reader | What a screen reader user hears: reading order of landmarks, headings and labels, and what live regions announce (each answer once, never the stream, the vote acknowledgement, the paused notice) | The same files, with `@guidepup/virtual-screen-reader` |
+| Layout | Reflow at 320 px (1.4.10), WCAG text spacing (1.4.12) and a short, zoomed panel, without clipped content or sideways scrolling | `WidgetChat.svelte.test.ts` |
+| Loader | Dialog semantics, modal full screen with the host page inert, Escape on the host page, focus return | `packages/widget-loader/src/element.test.ts` |
+| E2E | axe on the host page and the frame together (closed, open, full-screen notice), ARIA snapshots of the launcher, dialog and chat, the keyboard flow | `tests/widget-embed.spec.ts` |
+
+When writing these tests:
+
+- Run axe with the WCAG tags (`wcag2a` … `wcag22aa`) and fail on any violation;
+  axe's impact rating says nothing about conformance.
+- Assert announcements through the virtual screen reader, not a live region's
+  text: `virtual.start({ container: document.body })`, act, then read the
+  `polite:`/`assertive:` entries of `virtual.spokenPhraseLog()`. Stop it in a
+  `finally`.
+- A live region must exist before its text changes; one rendered together with
+  its text is not announced (real screen readers make an exception for
+  `role="alert"`). The same text twice is only announced when the region is
+  emptied in between, see `lib/features/widget/announcer.svelte.ts`.
+- Prove the negative: break the markup a test guards and watch it fail.
+
+Not automated yet: real screen readers (NVDA, JAWS, VoiceOver, TalkBack).
+Guidepup can drive NVDA and VoiceOver in CI; until that is set up, test the
+widget with them by hand before a release.
+
+## Widget test ownership
+
+Framework-neutral widget contracts live in `packages/eneo-js/src/widgets/`:
+visitor identity/rotation/storage, install snippets, origin validation,
+colour calculations, template locks/publication summaries and the iframe bridge.
+Their Node tests run once for both apps through the existing SDK test command.
+The Python policy test owns the cross-language budget-ceiling contract; there is no mirrored frontend source-reading test.
+
+Keep component tests for each UI's rendering, focus, announcements, feedback
+and editor state. Markdown announcements use different parsers in the apps,
+and autosave uses different reactive integrations: their app-specific tests
+remain useful. Keep backend unit, HTTP, real-PostgreSQL/Redis concurrency,
+retention and migration tests; these protect different boundaries.
+
+The worker lifecycle has fast SDK tests (deadline, cancellation, failure,
+retry and cookie omission). `proofOfWork.svelte.test.ts` exercises the actual
+vendor worker and verifies its signed solution in Chromium. The cross-origin
+`widget-embed.spec.ts` flows in both apps run with ALTCHA enabled against the
+real backend and the deterministic model. They must not replace the worker
+or its solution with a test bypass. The loader's immutable-byte and frozen
+bridge contracts remain independent of the current apps.
+
+For a test removal, identify the surviving test and the same failure it
+catches. Similar names across layers are not evidence of duplication. Change
+shared owners before removing app copies. Use one worker locally, the global
+resource supervisor and the repository's local execution rules.
 
 ## AI-assisted workflow
 

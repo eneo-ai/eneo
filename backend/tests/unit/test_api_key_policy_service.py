@@ -868,12 +868,27 @@ async def test_rate_limit_at_cap_boundary_valid():
 # ---------------------------------------------------------------------------
 
 
-def test_reverse_proxy_ip_resolution_extracts_leftmost_untrusted():
-    """X-Forwarded-For with trusted_proxy_count=1 extracts the leftmost untrusted hop."""
+def test_reverse_proxy_ip_resolution_takes_the_entry_the_proxy_wrote():
+    """One trusted proxy appends the client's address: X-Forwarded-For holds
+    exactly that entry for an honest request."""
     request = SimpleNamespace(
-        headers={
-            "x-forwarded-for": "203.0.113.50, 10.0.0.1",
-        },
+        headers={"x-forwarded-for": "203.0.113.50"},
+        client=SimpleNamespace(host="10.0.0.1"),
+    )
+
+    ip = resolve_client_ip(
+        request,
+        trusted_proxy_count=1,
+        trusted_proxy_headers=[],
+    )
+    assert ip == "203.0.113.50"
+
+
+def test_reverse_proxy_ip_resolution_ignores_a_forged_prefix():
+    """A client sending its own X-Forwarded-For only prepends to what the
+    trusted proxy appends; the proxy's entry wins."""
+    request = SimpleNamespace(
+        headers={"x-forwarded-for": "198.51.100.7, 203.0.113.50"},
         client=SimpleNamespace(host="10.0.0.1"),
     )
 
@@ -886,10 +901,10 @@ def test_reverse_proxy_ip_resolution_extracts_leftmost_untrusted():
 
 
 def test_reverse_proxy_ip_resolution_with_multiple_proxies():
-    """X-Forwarded-For with trusted_proxy_count=2 skips 2 rightmost hops."""
+    """Two trusted hops write two entries; the first of them is the client."""
     request = SimpleNamespace(
         headers={
-            "x-forwarded-for": "203.0.113.50, 10.0.0.2, 10.0.0.1",
+            "x-forwarded-for": "198.51.100.7, 203.0.113.50, 10.0.0.2",
         },
         client=SimpleNamespace(host="10.0.0.1"),
     )
@@ -900,6 +915,22 @@ def test_reverse_proxy_ip_resolution_with_multiple_proxies():
         trusted_proxy_headers=[],
     )
     assert ip == "203.0.113.50"
+
+
+def test_reverse_proxy_ip_resolution_with_too_few_hops_uses_the_peer():
+    """A header shorter than the trusted chain was not written by it, so the
+    socket peer is the only address that is known to be real."""
+    request = SimpleNamespace(
+        headers={"x-forwarded-for": "203.0.113.50", "x-real-ip": "203.0.113.51"},
+        client=SimpleNamespace(host="192.0.2.9"),
+    )
+
+    ip = resolve_client_ip(
+        request,
+        trusted_proxy_count=2,
+        trusted_proxy_headers=["x-forwarded-for", "x-real-ip"],
+    )
+    assert ip == "192.0.2.9"
 
 
 def test_reverse_proxy_ip_resolution_falls_back_to_client_host():
@@ -938,7 +969,7 @@ def test_resolve_client_ip_returns_none_for_non_ip_in_forwarded_for():
     """A proxy that injects garbage in X-Forwarded-For must not bypass
     validation — extracted hop is validated before being returned."""
     request = SimpleNamespace(
-        headers={"x-forwarded-for": "not-an-ip, 10.0.0.1"},
+        headers={"x-forwarded-for": "not-an-ip"},
         client=SimpleNamespace(host="10.0.0.1"),
     )
 

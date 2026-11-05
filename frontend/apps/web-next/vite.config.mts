@@ -63,6 +63,7 @@ function devServer(mode: string): ServerOptions {
     proxy: {
       "^/api(?:[/?]|$)": { ...backend, ws: true },
       "^/version(?:[/?]|$)": backend,
+      "^/widget(?:[/?]|$)": backend,
       "^/(?:login|auth)/callback(?:[/?]|$)": backend
     }
   };

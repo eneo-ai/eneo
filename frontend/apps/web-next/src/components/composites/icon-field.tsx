@@ -11,7 +11,8 @@ import { browserApi } from "@/lib/api/browser";
 import { toast } from "@/lib/toast";
 import { iconUrl } from "./icon-url";
 
-async function uploadIcon(file: File): Promise<{ id: string }> {
+/** Uploads an image to the icons endpoint; the caller stores the id on its resource. */
+export async function uploadIcon(file: File): Promise<{ id: string }> {
   const form = new FormData();
   form.append("file", file);
   const url = `${API_BASE}/api/v1/icons/`;
@@ -20,6 +21,14 @@ async function uploadIcon(file: File): Promise<{ id: string }> {
     throw new Error(`icon upload failed: ${response.status}`);
   }
   return (await response.json()) as { id: string };
+}
+
+/** Deletes an upload nothing shows (an id that could not be saved); failures are ignored. */
+export function releaseIcon(iconId: string): Promise<void> {
+  return browserApi
+    .DELETE("/api/v1/icons/{id}/", { params: { path: { id: iconId } } })
+    .then(() => undefined)
+    .catch(() => {});
 }
 
 export { iconUrl } from "./icon-url";
@@ -91,11 +100,7 @@ export function IconField({
       await onSave(uploaded);
     } catch {
       // Nothing shows an upload whose id could not be saved, and nothing else would delete it.
-      if (uploaded) {
-        await browserApi
-          .DELETE("/api/v1/icons/{id}/", { params: { path: { id: uploaded } } })
-          .catch(() => {});
-      }
+      if (uploaded) await releaseIcon(uploaded);
       toast.error(t("avatar_upload_failed"));
     } finally {
       setBusy(null);

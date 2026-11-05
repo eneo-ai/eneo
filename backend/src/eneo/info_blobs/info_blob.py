@@ -230,6 +230,7 @@ class InfoBlobChunkInDB(InDB, InfoBlobChunkWithEmbedding):
 
 class InfoBlobChunkInDBWithScore(InDB, InfoBlobChunk):
     info_blob_title: Optional[str]
+    info_blob_url: Optional[str] = None
     info_blob_source_metadata: list[SourceMetadataEntry] = []
     score: float
 

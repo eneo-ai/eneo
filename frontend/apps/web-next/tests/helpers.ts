@@ -243,9 +243,19 @@ export async function apiPost(page: Page, path: string, data: object): Promise<s
 
 /** The same browser-session write for endpoints returning a result rather than a resource id. */
 export async function apiPostJson<T>(page: Page, path: string, data: object): Promise<T> {
+  return apiWriteJson<T>(page, "POST", path, data);
+}
+
+/** Browser-session fixture writes share the same generation and fetch-metadata contract. */
+export async function apiWriteJson<T>(
+  page: Page,
+  method: "POST" | "PATCH",
+  path: string,
+  data: object
+): Promise<T> {
   // Cookie-authenticated writes require the browser's same-origin fetch metadata.
   const response = await page.evaluate(
-    async ({ url, data }) => {
+    async ({ url, method, data }) => {
       const headers = new Headers({ "content-type": "application/json" });
       {
         const session = await fetch("/api/v1/auth/session/");
@@ -255,13 +265,13 @@ export async function apiPostJson<T>(page: Page, path: string, data: object): Pr
         headers.set("Eneo-Session-Generation", generation);
       }
       const response = await fetch(url, {
-        method: "POST",
+        method,
         headers,
         body: JSON.stringify(data)
       });
       return { ok: response.ok, body: await response.text() };
     },
-    { url: apiPath(path), data }
+    { url: apiPath(path), method, data }
   );
   expect(response.ok, response.body).toBe(true);
   return JSON.parse(response.body) as T;

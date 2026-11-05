@@ -46,6 +46,9 @@ GET /api/v1/admin/users/
 GET /api/v1/admin/users/deleted
 GET /api/v1/admin/users/inactive
 GET /api/v1/admin/users/{username}/
+GET /api/v1/admin/widget-policy/
+GET /api/v1/admin/widget-templates/{id}/
+GET /api/v1/admin/widgets/
 GET /api/v1/ai-models/
 GET /api/v1/allowed-origins/
 GET /api/v1/analysis/assistant-activity/
@@ -76,6 +79,7 @@ GET /api/v1/assistants/{id}/mcp-servers/
 GET /api/v1/assistants/{id}/prompts/
 GET /api/v1/assistants/{id}/sessions/
 GET /api/v1/assistants/{id}/sessions/{session_id}/
+GET /api/v1/assistants/{id}/widget-status/
 GET /api/v1/audit/config
 GET /api/v1/audit/config/actions
 GET /api/v1/audit/logs/export/{job_id}/download
@@ -168,6 +172,7 @@ GET /api/v1/spaces/{space_id}/skills/
 GET /api/v1/spaces/{space_id}/skills/{skill_id}/
 GET /api/v1/spaces/{space_id}/skills/{skill_id}/revisions/
 GET /api/v1/spaces/{space_id}/skills/{skill_id}/revisions/{revision_id}/
+GET /api/v1/spaces/{space_id}/widgets/
 GET /api/v1/storage/
 GET /api/v1/storage/spaces/
 GET /api/v1/templates/
@@ -199,3 +204,6 @@ GET /api/v1/websites/{id}/info-blobs/page/
 GET /api/v1/websites/{id}/runs/
 GET /api/v1/websites/{id}/runs/latest/
 GET /api/v1/whats-new/state/
+GET /api/v1/widget-templates/
+GET /api/v1/widgets/{id}/
+GET /api/v1/widgets/{id}/usage/

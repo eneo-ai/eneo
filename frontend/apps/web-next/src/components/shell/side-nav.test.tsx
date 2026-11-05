@@ -538,6 +538,7 @@ describe("DesktopSideNav (admin)", () => {
       "/admin/prompt-library",
       "/admin/skills",
       "/admin/security-classifications",
+      "/admin/widgets",
       "/admin/audit-logs"
     ]);
     expect(hrefsIn("Anslutningar")).toEqual([

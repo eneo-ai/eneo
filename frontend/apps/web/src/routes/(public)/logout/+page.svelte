@@ -15,9 +15,22 @@
 </svelte:head>
 
 <AuthPageShell
-  tone={expired ? "warning" : "success"}
-  title={expired ? m.session_expired() : m.logout_success()}
-  description={expired ? m.session_expired_description() : m.logout_description()}
+  tone={expired ? "warning" : data.signedIn ? undefined : "success"}
+  title={expired ? m.session_expired() : data.signedIn ? m.logout() : m.logout_success()}
+  description={expired
+    ? m.session_expired_description()
+    : data.signedIn
+      ? m.logout_confirmation_description()
+      : m.logout_description()}
 >
-  <Button href={localizeHref("/login")} size="lg" class="w-full">{m.login_again()}</Button>
+  {#if data.signedIn}
+    <form method="POST" action={localizeHref("/logout?/logout")}>
+      <input type="hidden" name="message" value={expired ? "expired" : "logout"} />
+      <Button type="submit" size="lg" class="w-full">
+        {expired ? m.login_again() : m.logout()}
+      </Button>
+    </form>
+  {:else}
+    <Button href={localizeHref("/login")} size="lg" class="w-full">{m.login_again()}</Button>
+  {/if}
 </AuthPageShell>

@@ -61,7 +61,11 @@ const Link: (props: LinkProps) => ReactNode = ({
   ...anchor
 }) =>
   // The browser handles another site, a #hash and a download.
-  OTHER_SITE.test(href) || href.startsWith("#") || (anchor.download ?? false) !== false ? (
+  // Embed policies depend on the widget: FastAPI must issue a fresh document.
+  OTHER_SITE.test(href) ||
+  /^(?:\/en)?\/embed\//.test(href) ||
+  href.startsWith("#") ||
+  (anchor.download ?? false) !== false ? (
     <a {...anchor} href={href} ref={ref}>
       {children}
     </a>
