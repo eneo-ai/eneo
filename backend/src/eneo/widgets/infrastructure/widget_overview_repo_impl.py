@@ -23,9 +23,6 @@ from eneo.widgets.infrastructure.widget_repo_impl import to_entity
 @dataclass(frozen=True)
 class WidgetOverviewRow:
     widget: Widget
-    # Whether the assistant behind the widget is published; None when it no
-    # longer exists.
-    target_published: Optional[bool]
     id: UUID
     public_id: str
     name: str
@@ -99,7 +96,6 @@ class WidgetOverviewRepoImpl:
                 Widgets,
                 Spaces.name.label("space_name"),
                 Assistants.name.label("assistant_name"),
-                Assistants.published.label("assistant_published"),
                 aggregates.c.questions_7d,
                 aggregates.c.questions_30d,
                 aggregates.c.input_tokens_30d,
@@ -127,7 +123,6 @@ class WidgetOverviewRepoImpl:
             result.append(
                 WidgetOverviewRow(
                     widget=entity,
-                    target_published=row.assistant_published,
                     id=widget.id,
                     public_id=widget.public_id,
                     name=widget.name,

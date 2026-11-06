@@ -324,7 +324,9 @@ describe("a job that leaves the list twice", () => {
 it("reads a started job by id once lists begun after it never show it", async () => {
   // It ran and finished while nothing watched, and has left the list. A list
   // already under way when the job was started cannot show it: that one waits.
-  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  // The clock moves too: this stand-in API answers within a millisecond, and a
+  // second empty list in the same one changes nothing the provider can see.
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
   api.items = [];
   const started = { ...job, id: "job-new", task: "crawl", name: "Devize", status: "queued" } as Job;
   let listArrives = () => {};

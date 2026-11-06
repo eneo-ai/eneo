@@ -56,6 +56,7 @@ describe("widget errors", () => {
       "widget_error_budget"
     );
     expect(describeWidgetError(error(404, "widget_not_active"))).toBe("widget_error_unavailable");
+    expect(describeWidgetError(error(503, "answer_unavailable"))).toBe("widget_error_unavailable");
     expect(describeWidgetError(error(400, "challenge_expired"))).toBe("widget_error_verification");
     // Retrying the same conversation can never succeed; the visitor must start a new one.
     expect(describeWidgetError(error(400, "session_turns_exceeded"))).toBe(

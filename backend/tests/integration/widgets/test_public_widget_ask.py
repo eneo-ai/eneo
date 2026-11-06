@@ -18,6 +18,7 @@ from eneo.assistants.assistant_service import AssistantService
 from eneo.database.database import sessionmanager
 from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
+from eneo.database.tables.spaces_table import SpacesCompletionModels
 from eneo.database.tables.tenant_table import Tenants
 from eneo.main import stream_lifecycle
 from eneo.main.exceptions import BadRequestException
@@ -387,7 +388,7 @@ def failing_assistant_ask(monkeypatch):
             session_assistant_id=assistant_id,
             question_assistant_id=assistant_id,
         )
-        raise BadRequestException("Model preparation failed")
+        raise BadRequestException("gpt-internal at Azure Sweden failed")
 
     monkeypatch.setattr(AssistantService, "ask", fake_ask)
 
@@ -518,7 +519,7 @@ async def test_zero_retention_commits_nothing_when_model_preparation_fails(
         json={"question": "Mitt personnummer är 19XX..."},
         headers=_auth(token),
     )
-    assert resp.status_code == 400, resp.text
+    assert resp.status_code == 503, resp.text
     assert await _stored_conversations(widget_id) == (0, 0)
 
 
@@ -536,8 +537,47 @@ async def test_retained_widget_keeps_the_question_when_model_preparation_fails(
         json={"question": "Hej"},
         headers=_auth(token),
     )
-    assert resp.status_code == 400, resp.text
+    assert resp.status_code == 503, resp.text
+    assert resp.json()["detail"]["code"] == "answer_unavailable"
+    assert "gpt-internal" not in resp.text and "Azure" not in resp.text
     assert await _stored_conversations(active_widget["id"]) == (1, 1)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_widget_whose_assistant_lost_its_model_tells_the_admin_not_the_visitor(
+    client, admin_token, active_widget
+):
+    public_id = active_widget["public_id"]
+    token = await _mint(client, public_id)
+    async with sessionmanager.session() as session, session.begin():
+        await session.execute(
+            sa.delete(SpacesCompletionModels).where(
+                SpacesCompletionModels.space_id == active_widget["space_id"]
+            )
+        )
+
+    resp = await client.get("/api/v1/admin/widgets/", headers=_auth(admin_token))
+    assert resp.status_code == 200, resp.text
+    [item] = [i for i in resp.json()["items"] if i["id"] == active_widget["id"]]
+    assert item["activation_blockers"] == ["target_cannot_answer"]
+    resp = await client.get(
+        f"/api/v1/widgets/{active_widget['id']}/", headers=_auth(admin_token)
+    )
+    assert resp.json()["activation_blockers"] == ["target_cannot_answer"]
+
+    # The launcher stays: the public surface does not load the space. The
+    # visitor who asks is told no more than that there is no answer.
+    resp = await client.get(f"/api/v1/widgets/{public_id}/config/")
+    assert resp.status_code == 200, resp.text
+    resp = await client.post(
+        f"/api/v1/widgets/{public_id}/ask/",
+        json={"question": "Hej"},
+        headers=_auth(token),
+    )
+    assert resp.status_code == 503, resp.text
+    assert resp.json()["detail"]["code"] == "answer_unavailable"
+    assert "model" not in resp.text.lower()
 
 
 @pytest.mark.integration

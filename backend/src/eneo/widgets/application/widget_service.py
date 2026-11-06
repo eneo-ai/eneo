@@ -3,6 +3,7 @@
 # Licensed under the MIT License.
 
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID, uuid4
@@ -12,7 +13,11 @@ from pydantic import ValidationError
 from eneo.icons.icon_repo import IconRepository
 from eneo.main.exceptions import (
     BadRequestException,
+    KnowledgeModelUnavailableException,
+    ModelNotAvailableException,
+    NoModelSelectedException,
     NotFoundException,
+    SecurityClassificationMismatchException,
     UnauthorizedException,
 )
 from eneo.roles.permissions import Permission, validate_permission
@@ -42,6 +47,7 @@ from eneo.widgets.domain.widget_template_repo import WidgetTemplateRepo
 
 if TYPE_CHECKING:
     from eneo.actors.actor_manager import ActorManager
+    from eneo.assistants.assistant import Assistant
     from eneo.spaces.space import Space
     from eneo.spaces.space_repo import SpaceRepository
     from eneo.spaces.space_service import SpaceService
@@ -169,18 +175,35 @@ class WidgetService:
         return template
 
     @staticmethod
-    def _target_published(space: "Space", widget: Widget) -> bool:
+    def _target(space: "Space", widget: Widget) -> Optional["Assistant"]:
         if widget.target_type != WidgetTargetType.ASSISTANT:
-            return False
+            return None
         try:
-            return bool(space.get_assistant(widget.target_id).published)
+            return space.get_assistant(widget.target_id)
         except NotFoundException:
+            return None
+
+    @staticmethod
+    def _can_answer(space: "Space", target: "Assistant") -> bool:
+        """The check every question to the assistant has to pass."""
+        try:
+            space.can_ask_assistant(assistant=target)
+        except (
+            KnowledgeModelUnavailableException,
+            ModelNotAvailableException,
+            NoModelSelectedException,
+            SecurityClassificationMismatchException,
+        ):
             return False
+        return True
 
     def _activation_blockers(self, space: "Space", widget: Widget) -> list[str]:
+        target = self._target(space, widget)
         blockers = widget.activation_blockers(
-            target_published=self._target_published(space, widget)
+            target_published=target is not None and bool(target.published)
         )
+        if target is not None and not self._can_answer(space, target):
+            blockers.append("target_cannot_answer")
         # Widget visitors are viewers. Organization spaces grant viewers no
         # assistant read permission, so a widget there could never answer.
         if space.is_organization():
@@ -234,6 +257,21 @@ class WidgetService:
         widget = await self._owned_widget(widget_id)
         space = await self._space_for_read(widget.space_id)
         return await self._view_with_template(space, widget)
+
+    async def activation_blockers_of(
+        self, widgets: Sequence[Widget]
+    ) -> dict[Optional[UUID], list[str]]:
+        """The blockers of widgets from any space, for the tenant admin's
+        overview. What the assistant can do is read from its space, so each
+        space is loaded once."""
+        spaces: dict[UUID, "Space"] = {}
+        blockers: dict[Optional[UUID], list[str]] = {}
+        for widget in widgets:
+            if widget.space_id not in spaces:
+                spaces[widget.space_id] = await self._space_as_admin(widget.space_id)
+            view = self._view(spaces[widget.space_id], widget)
+            blockers[widget.id] = view.activation_blockers
+        return blockers
 
     # --- commands ---------------------------------------------------------
 
