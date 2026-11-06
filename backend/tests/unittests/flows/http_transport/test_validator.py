@@ -308,6 +308,45 @@ def test_valid_json_template_no_body_json_errors() -> None:
     assert HttpTransportError.INVALID_BODY_JSON not in errors
 
 
+@pytest.mark.parametrize(
+    "template",
+    [
+        '{"text": "{{a}}", "count": {{b}}}',
+        '{"canvas": {{a}}, "files": [{"content": "{{b}}"}]}',
+        "{{a}}",
+        '"{{a}}"',
+        '{"text": "\\u000a{{a}}", "n": 1e3}',
+    ],
+)
+def test_a_reference_may_stand_where_a_value_can(template: str) -> None:
+    cfg = _config(body=HttpBody(mode=HttpBodyMode.JSON_TEMPLATE, template=template))
+
+    assert HttpTransportError.INVALID_BODY_JSON not in _validate(cfg, method="POST")
+
+
+@pytest.mark.parametrize(
+    "template",
+    [
+        "null",
+        '{"text": "{{a}}"',
+        "prefix {{a}}",
+        '{"text": {{a}} {{b}}}',
+        '{{{a}}: "b"}',
+        '{"text": "\\{{a}}"}',
+        '{"n": 1{{a}}}',
+        '{"n": -{{a}}}',
+        '{"n": {{a}}{{b}}}',
+        '{"text": "\\u000{{a}}"}',
+        '{"n": NaN, "text": "{{a}}"}',
+        '{"n": 1e999, "text": "{{a}}"}',
+    ],
+)
+def test_a_template_no_filling_can_make_json_is_refused(template: str) -> None:
+    cfg = _config(body=HttpBody(mode=HttpBodyMode.JSON_TEMPLATE, template=template))
+
+    assert HttpTransportError.INVALID_BODY_JSON in _validate(cfg, method="POST")
+
+
 def test_template_expressions_in_json_body_are_allowed() -> None:
     cfg = _config(
         body=HttpBody(

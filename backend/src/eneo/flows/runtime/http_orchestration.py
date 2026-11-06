@@ -149,6 +149,7 @@ def _compile_authored_http_request(
             if direction == "input"
             else None
         ),
+        resolve_value=deps.variable_resolver.resolve_value,
     )
     timeout_seconds = deps.resolve_timeout_seconds(
         decrypted.timeout_seconds,

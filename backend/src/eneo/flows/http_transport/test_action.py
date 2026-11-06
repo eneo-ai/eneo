@@ -20,6 +20,7 @@ from eneo.flows.http_transport.compiler import (
 from eneo.flows.http_transport.errors import (
     AuthoredSecretEncryptionUnavailableError,
     HttpCredentialTransportError,
+    HttpRenderedBodyNotJsonError,
     HttpTemplateInterpolationError,
     HttpTransportError,
 )
@@ -71,6 +72,7 @@ async def execute_http_test(
     interpolate: Callable[[str, dict[str, Any]], str],
     send_http_request: Callable[..., Awaitable[httpx.Response]],
     max_timeout: float,
+    resolve_value: Callable[[str, dict[str, Any]], object] | None = None,
 ) -> HttpTestResult:
     """Execute a draft-safe HTTP test without persisting authored config."""
 
@@ -117,6 +119,7 @@ async def execute_http_test(
             method=method,
             variables=test_variables,
             interpolate=interpolate,
+            resolve_value=resolve_value,
         )
     except HttpCredentialTransportError:
         return HttpTestResult(
@@ -130,6 +133,12 @@ async def execute_http_test(
             error_code=HttpTransportError.VARIABLE_RESOLUTION_FAILED,
             error_message=_error_message(HttpTransportError.VARIABLE_RESOLUTION_FAILED),
             request_preview=None,
+        )
+    except HttpRenderedBodyNotJsonError:
+        return HttpTestResult(
+            success=False,
+            error_code=HttpTransportError.INVALID_BODY_JSON,
+            error_message=_error_message(HttpTransportError.INVALID_BODY_JSON),
         )
     except TypedIOValidationException as exc:
         error_code = _TYPED_TRANSPORT_ERRORS.get(exc.code or "")
