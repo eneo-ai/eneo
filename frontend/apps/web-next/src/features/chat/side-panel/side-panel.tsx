@@ -100,6 +100,8 @@ const WIDTH_STORAGE_KEY = "eneo:chat-side-panel-width";
 
 /** Decision 14: what the conversation keeps beside a panel or the history. */
 export const CONVERSATION_MIN_WIDTH = 480;
+/** From here the button that opens the panel fits beside the 712 px column of messages. */
+const LAUNCHER_FLOATS_FROM = 1040;
 const PANEL_MIN_WIDTH = 360;
 /** The resize handle between the conversation and the panel. */
 const HANDLE_WIDTH = 4;
@@ -480,8 +482,14 @@ export function SidePanel({
 
   // The panel's own way in: a button above the conversation while it is closed.
   const launcher = hasContents && !shown && (
-    // The conversation's scrollbar runs along this edge; the button keeps clear of it.
-    <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex justify-end pt-2 pr-7 pl-4">
+    // The conversation's scrollbar runs along this edge; the button keeps clear of it. Where the
+    // messages' column reaches it, it takes a row of its own, so it never lies over their controls.
+    <div
+      className={cn(
+        "phone:keyboard:hidden pointer-events-none flex justify-end pt-2 pr-7 pl-4",
+        row !== null && row >= LAUNCHER_FLOATS_FROM ? "absolute inset-x-0 top-0 z-10" : "shrink-0"
+      )}
+    >
       <button
         ref={trigger}
         type="button"

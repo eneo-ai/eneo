@@ -8,6 +8,7 @@ import { useTranslations } from "use-intl";
 import { AnimatedLayoutScope } from "@/components/astryx/collapsible";
 import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { CreateSpaceDialog } from "@/features/spaces/create-space-dialog";
+import { useKeyboardHeight } from "@/lib/hooks/use-keyboard-height";
 import { PHONE_SCREEN_QUERY, useTouchTablet } from "@/lib/hooks/use-media-match";
 import { cn } from "@/lib/utils";
 import { ConnectionAnnouncer, ConnectionBanner } from "./connection-banner";
@@ -119,6 +120,8 @@ export function AppShellFrame({
     { keys: "ctrl+k", onPress: closePalette, isDisabled: !paletteOpen, allowInInputs: true }
   ]);
 
+  useKeyboardHeight();
+
   const openCreateSpace = useCallback(() => setCreateSpaceOpen(true), []);
   const closeNav = useCallback(() => setNavOpen(false), []);
   const shell = useMemo<ShellContextValue>(
@@ -150,7 +153,7 @@ export function AppShellFrame({
           frame, so the strip under the status bar continues the top bar;
           otherwise (wide:) the page panel floats on the body colour. group/shell: the
           top bar hides while the page has its own header. */}
-      <div className="group/shell bg-ax-surface wide:bg-ax-body wide:pt-[max(0.5rem,env(safe-area-inset-top,0px))] wide:pr-[max(0.5rem,env(safe-area-inset-right,0px))] wide:pb-[max(0.5rem,env(safe-area-inset-bottom,0px))] wide:pl-[max(0.5rem,env(safe-area-inset-left,0px))] flex h-svh flex-col pt-[env(safe-area-inset-top,0px)] pr-[env(safe-area-inset-right,0px)] pl-[env(safe-area-inset-left,0px)]">
+      <div className="group/shell bg-ax-surface wide:bg-ax-body wide:pt-[max(0.5rem,env(safe-area-inset-top,0px))] wide:pr-[max(0.5rem,env(safe-area-inset-right,0px))] wide:pb-[max(0.5rem,env(safe-area-inset-bottom,0px))] wide:pl-[max(0.5rem,env(safe-area-inset-left,0px))] flex h-[var(--keyboard-height,100svh)] flex-col pt-[env(safe-area-inset-top,0px)] pr-[env(safe-area-inset-right,0px)] pl-[env(safe-area-inset-left,0px)]">
         <a
           href="#main-content"
           className="focus:bg-ax-surface focus:text-ax-text focus:rounded-ax-element focus:border-ax-border-strong focus:shadow-ax-med focus-visible:outline-ring sr-only focus:not-sr-only focus:absolute focus:top-3 focus:left-3 focus:z-50 focus:border focus:px-3 focus:py-2 focus-visible:outline-2 focus-visible:outline-offset-2"
