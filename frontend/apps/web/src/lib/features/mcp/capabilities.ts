@@ -1,7 +1,7 @@
 /**
  * Capability purposes: MCP servers that act as the tenant's provider for one
  * capability (web search, image generation, file analysis, file creation, charts,
- * compute). The backend resolves an attached
+ * compute, forecast). The backend resolves an attached
  * capability marker to the active provider at ask time, so every surface here
  * treats them as on/off capabilities rather than as servers.
  *
@@ -14,12 +14,19 @@ import FilePlus from "@lucide/svelte/icons/file-plus";
 import FileSearch from "@lucide/svelte/icons/file-search";
 import Globe from "@lucide/svelte/icons/globe";
 import Image from "@lucide/svelte/icons/image";
+import TrendingUp from "@lucide/svelte/icons/trending-up";
 import { m } from "$lib/paraglide/messages";
 
 export const GENERAL_PURPOSE = "general";
 
 export type CapabilityPurpose =
-  "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts" | "compute";
+  | "web_search"
+  | "image_generation"
+  | "file_analysis"
+  | "file_creation"
+  | "charts"
+  | "compute"
+  | "forecast";
 
 export type CapabilityDescriptor = {
   purpose: CapabilityPurpose;
@@ -140,6 +147,21 @@ export const CAPABILITIES: readonly CapabilityDescriptor[] = [
     classificationHint: m.compute_classification_hint,
     bundledDescription: m.tools_builtin_compute_description,
     bundledSummary: m.tools_builtin_compute_summary
+  },
+  {
+    purpose: "forecast",
+    icon: TrendingUp,
+    label: m.forecast,
+    providerNamePlaceholder: m.forecast_provider_name_placeholder,
+    providerManagedNote: m.forecast_provider_managed_note,
+    forwardIdentityHint: m.forecast_forward_identity_hint,
+    capabilityHint: m.forecast_capability_hint,
+    spaceHint: m.forecast_space_group_hint,
+    noActiveProviderHint: m.forecast_no_active_provider_hint,
+    notAvailableHereHint: m.forecast_not_available_here_hint,
+    classificationHint: m.forecast_classification_hint,
+    bundledDescription: m.tools_builtin_forecast_description,
+    bundledSummary: m.tools_builtin_forecast_summary
   }
 ];
 

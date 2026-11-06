@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { useState } from "react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testQueryClient } from "@/test/render";
@@ -13,6 +14,7 @@ vi.mock("@/lib/toast", () => ({
 import { CAPABILITIES_KEY, type ModelProvider, PROVIDERS_KEY } from "./model-providers";
 import type { ModelsPresentation } from "./models";
 import { ProviderOverview } from "./provider-overview";
+import { kindFilterOf, type KindFilter } from "./provider-sections";
 
 const model = (id: string, nickname: string, providerId: string) => ({
   id,
@@ -85,20 +87,47 @@ const capabilities = {
   default_fields: [{ name: "api_key", required: true, secret: true, in: "credentials" }]
 };
 
-function renderOverview(items: ModelProvider[] = providers) {
-  const queryClient = testQueryClient();
-  queryClient.setQueryData(PROVIDERS_KEY, items);
-  queryClient.setQueryData(CAPABILITIES_KEY, capabilities);
-  renderInApp(
+/** The route's part: the type filter lives in the address. */
+function Addressed({ initial }: { initial: KindFilter }) {
+  const [kind, setKind] = useState(initial);
+  return (
     <ProviderOverview
       models={presentation}
       classifications={[]}
       securityEnabled={false}
+      kind={kind}
+      onKindChange={setKind}
       onAddModel={vi.fn()}
       onAddProvider={vi.fn()}
-    />,
-    { queryClient }
+    />
   );
+}
+
+/** As in the app: the filter changes after the address, a render after the search clears. */
+function SlowAddress({ initial }: { initial: KindFilter }) {
+  const [kind, setKind] = useState(initial);
+  return (
+    <ProviderOverview
+      models={presentation}
+      classifications={[]}
+      securityEnabled={false}
+      kind={kind}
+      onKindChange={(next) => void Promise.resolve().then(() => setKind(next))}
+      onAddModel={vi.fn()}
+      onAddProvider={vi.fn()}
+    />
+  );
+}
+
+function renderOverview(
+  items: ModelProvider[] = providers,
+  initial: KindFilter = "all",
+  Page = Addressed
+) {
+  const queryClient = testQueryClient();
+  queryClient.setQueryData(PROVIDERS_KEY, items);
+  queryClient.setQueryData(CAPABILITIES_KEY, capabilities);
+  renderInApp(<Page initial={initial} />, { queryClient });
 }
 
 function banner(title: string) {
@@ -194,6 +223,22 @@ describe("the models page's attention banner", () => {
     expect(document.activeElement).toBe(screen.getByRole("region", { name: "Anthropic" }));
   });
 
+  it("still moves focus when the type filter clears after the search", async () => {
+    renderOverview(providers, "embedding", SlowAddress);
+    fireEvent.change(screen.getByRole("textbox", { name: "Sök modeller och leverantörer" }), {
+      target: { value: "E5" }
+    });
+    expect(screen.queryByRole("region", { name: "Anthropic" })).toBeNull();
+
+    fireEvent.click(
+      within(banner("4 leverantörer behöver åtgärdas")).getByRole("link", { name: "Anthropic" })
+    );
+
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole("region", { name: "Anthropic" }))
+    );
+  });
+
   it("warns without error when nothing has failed or expired", () => {
     renderOverview([
       provider("p-openai", "OpenAI", { key_expires_on: "2026-10-26" }),
@@ -214,5 +259,19 @@ describe("the models page's attention banner", () => {
     renderOverview([provider("p-openai", "OpenAI"), provider("p-groq", "Groq")]);
 
     expect(screen.queryByText(/behöver åtgärdas/)).toBeNull();
+  });
+});
+
+describe("the models page's type filter", () => {
+  it("opens on the type the address names, so a link can show one type's models", () => {
+    renderOverview(providers, kindFilterOf("embedding"));
+
+    expect(screen.getByRole("region", { name: "vLLM" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Anthropic" })).toBeNull();
+  });
+
+  it("shows every type for an address without a type it knows", () => {
+    expect(kindFilterOf(undefined)).toBe("all");
+    expect(kindFilterOf("chat")).toBe("all");
   });
 });

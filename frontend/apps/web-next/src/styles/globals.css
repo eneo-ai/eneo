@@ -285,6 +285,8 @@
 /* A short viewport: a phone turned sideways (a browser's own bars leave about
    280 px) or its keyboard open. */
 @custom-variant short (@media (height < 30rem));
+/* A software keyboard lies over the page (useKeyboardHeight), where iOS leaves `short:` unmet. */
+@custom-variant keyboard (:root[data-keyboard] &);
 /* A phone's layout: narrower than 768 px, or a touch screen under 500 px tall and under 1024 px
    wide (a phone turned sideways). Keep in step with PHONE_SCREEN_QUERY (use-media-match.ts; a test
    compares them). Block form: a one-line media list would split at its comma. */

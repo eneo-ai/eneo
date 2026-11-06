@@ -496,7 +496,7 @@ export function Composer({
         {t(coarse ? "chat_composer_hint_touch" : "chat_composer_hint")}
       </span>
       {contextBar}
-      <p className="text-ax-text-secondary flex items-center justify-center gap-1.5 text-center text-xs">
+      <p className="text-ax-text-secondary phone:keyboard:hidden flex items-center justify-center gap-1.5 text-center text-xs">
         <ShieldCheck aria-hidden="true" className="size-3.5 shrink-0" />
         {variant === "start" || beforeAnswer
           ? t("chat_sovereignty_hint")

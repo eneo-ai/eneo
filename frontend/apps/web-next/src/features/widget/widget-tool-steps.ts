@@ -53,7 +53,8 @@ const CAPABILITY_PURPOSES = new Set([
   "file_analysis",
   "charts",
   "file_creation",
-  "compute"
+  "compute",
+  "forecast"
 ]);
 const OWN_SERVERS = new Set(["knowledge", "files", "image_generation", "skills"]);
 

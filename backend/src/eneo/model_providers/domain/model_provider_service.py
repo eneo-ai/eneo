@@ -19,7 +19,11 @@ from eneo.model_providers.domain.connection_check import (
     ConnectionCheckError,
 )
 from eneo.model_providers.domain.model_defaults_lookup import resolve_model_defaults
-from eneo.model_providers.domain.model_provider import ModelProvider
+from eneo.model_providers.domain.model_provider import (
+    ENEO_TOOL_SERVICE_PROVIDER_TYPE,
+    MANAGED_PROVIDER_MESSAGE,
+    ModelProvider,
+)
 from eneo.model_providers.domain.outbound_header_destinations import (
     DestinationProblem,
     destination_problem,
@@ -543,6 +547,8 @@ class ModelProviderService:
         outbound_headers: Sequence[OutboundHeaderWrite] = (),
     ) -> ModelProvider:
         """Create a new provider."""
+        if provider_type == ENEO_TOOL_SERVICE_PROVIDER_TYPE:
+            raise BadRequestException(MANAGED_PROVIDER_MESSAGE)
         problem = provider_type_problem(provider_type)
         if problem is not None:
             raise BadRequestException(
@@ -608,6 +614,8 @@ class ModelProviderService:
         """
         # Get existing provider
         provider = await self.repository.get_by_id(provider_id, for_update=True)
+        if provider.is_managed:
+            raise BadRequestException(MANAGED_PROVIDER_MESSAGE)
         connection_settings_changed = False
         # Captured before the edit: kept secrets were entered for this destination.
         kept_secrets = retained_secret_headers(
@@ -778,6 +786,8 @@ class ModelProviderService:
         Raises:
             BadRequestException: If the provider has models attached to it
         """
+        if (await self.repository.get_by_id(provider_id)).is_managed:
+            raise BadRequestException(MANAGED_PROVIDER_MESSAGE)
         # Check if provider has any models
         model_count = await self.repository.count_models_for_provider(provider_id)
         if model_count > 0:
@@ -805,6 +815,9 @@ class ModelProviderService:
         slow; a wrong name surfaces on first use through the provider error).
         For rerank models: sends one short query with two documents.
         """
+        provider = await self.repository.get_by_id(provider_id)
+        if provider.is_managed:
+            raise BadRequestException(MANAGED_PROVIDER_MESSAGE)
         if model_type in ("transcription", "image"):
             return {
                 "success": True,
@@ -813,7 +826,6 @@ class ModelProviderService:
 
         import litellm
 
-        provider = await self.repository.get_by_id(provider_id)
         decrypted_creds = self._decrypt_credentials(provider.credentials)
         api_key = str(decrypted_creds.get("api_key") or "").strip()
         provider_type = provider.provider_type.lower()

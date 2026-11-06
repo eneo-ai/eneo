@@ -48,6 +48,7 @@ from eneo.main.exceptions import (
     NotFoundException,
     UnauthorizedException,
 )
+from eneo.model_providers.domain.model_provider import MANAGED_PROVIDER_MESSAGE
 from eneo.model_providers.domain.model_route import resolve_model_route
 from eneo.model_providers.infrastructure.litellm_transport import (
     get_model_info,
@@ -110,10 +111,13 @@ async def _validate_active_provider(
     """Confirm the provider exists in this tenant and is currently active.
 
     Raises `NotFoundException` (cross-tenant or unknown ID) or
-    `BadRequestException` (provider exists but disabled).
+    `BadRequestException` (provider exists but disabled, or comes with the
+    deployment: Eneo alone creates the models of its tool service).
     """
     repo = ModelProviderRepository(session=session, tenant_id=tenant_id)
     provider = await repo.get_by_id(provider_id)
+    if provider.is_managed:
+        raise BadRequestException(MANAGED_PROVIDER_MESSAGE)
     if not provider.is_active:
         raise BadRequestException("Model provider is not active")
     return provider

@@ -20,6 +20,7 @@ from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import IntegrityError
 
 from eneo.main.exceptions import (
@@ -36,10 +37,12 @@ from eneo.mcp_servers.application.mcp_server_service import (
 from eneo.mcp_servers.domain.entities.mcp_server import (
     AUDIENCE_EVERYONE,
     AUDIENCE_GROUPS,
+    BUNDLED_AUTH_TYPE,
     CAPABILITY_PURPOSES,
     DEFAULT_AUDIENCE_PRIORITY,
     MCPServer,
     MCPServerAudienceGroup,
+    MCPServerBackingModel,
     MCPServerTool,
 )
 from eneo.mcp_servers.presentation.models import (
@@ -225,6 +228,88 @@ class TestActivation:
 
         with pytest.raises(BadRequestException):
             await service.activate_capability_server(server.id)
+
+    async def test_forecast_model_turned_off_during_the_check_keeps_the_default(
+        self, monkeypatch
+    ):
+        service, mock_repo, _, user = _make_service()
+        server = MCPServer(
+            id=uuid4(),
+            tenant_id=user.tenant_id,
+            name="Forecast",
+            http_url="http://tool-runtime:3010/mcp/forecast",
+            http_auth_type=BUNDLED_AUTH_TYPE,
+            purpose="forecast",
+            forecast_model_id=uuid4(),
+            forecast_model=MCPServerBackingModel(
+                id=uuid4(),
+                name="default",
+                nickname="Timestral",
+                provider_name="Eneo tool service",
+                security_classification=None,
+                is_enabled=True,
+                is_deleted=False,
+            ),
+        )
+        server.tools = [_make_tool()]
+        mock_repo.one.return_value = server
+        # What the row says once the runtime has answered: another admin's update.
+        mock_repo.session.scalar = AsyncMock(return_value=False)
+        monkeypatch.setattr(
+            service,
+            "_test_connection_and_discover_tools",
+            AsyncMock(return_value=([], ConnectionResult(success=True))),
+        )
+
+        with pytest.raises(BadRequestException, match="disabled"):
+            await service.activate_capability_server(server.id)
+
+        mock_repo.session.execute.assert_not_awaited()
+        mock_repo.update.assert_not_awaited()
+        # The same row lock a model update takes, so the two cannot interleave.
+        lock = mock_repo.session.scalar.await_args.args[0]
+        assert "FOR UPDATE" in str(lock.compile(dialect=postgresql.dialect()))
+
+    @pytest.mark.parametrize(
+        "model_state,words",
+        [
+            ({"is_enabled": False}, "disabled"),
+            ({"is_deleted": True}, "missing"),
+            ({"is_deprecated": True}, "deprecated"),
+            ({"provider_is_active": False}, "provider is inactive"),
+        ],
+    )
+    async def test_forecast_source_on_an_unusable_model_keeps_the_current_default(
+        self, monkeypatch, model_state, words
+    ):
+        service, mock_repo, _, user = _make_service()
+        model = {"is_enabled": True, "is_deleted": False, **model_state}
+        server = MCPServer(
+            id=uuid4(),
+            tenant_id=user.tenant_id,
+            name="Forecast",
+            http_url="http://tool-runtime:3010/mcp/forecast",
+            http_auth_type=BUNDLED_AUTH_TYPE,
+            purpose="forecast",
+            forecast_model=MCPServerBackingModel(
+                id=uuid4(),
+                name="default",
+                nickname="Timestral",
+                provider_name="Eneo tool service",
+                security_classification=None,
+                **model,
+            ),
+        )
+        server.tools = [_make_tool()]
+        mock_repo.one.return_value = server
+        connection = AsyncMock(return_value=([], ConnectionResult(success=True)))
+        monkeypatch.setattr(service, "_test_connection_and_discover_tools", connection)
+
+        with pytest.raises(BadRequestException, match=words):
+            await service.activate_capability_server(server.id)
+
+        mock_repo.session.execute.assert_not_awaited()
+        mock_repo.update.assert_not_awaited()
 
     @pytest.mark.parametrize("purpose", CAPABILITY_PURPOSES)
     async def test_activation_deactivates_previous_provider(self, monkeypatch, purpose):

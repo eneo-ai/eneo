@@ -1,0 +1,240 @@
+import { describe, expect, mock, test } from "bun:test";
+import { createHandler } from "../../src/server";
+import { chartConfigSchema } from "../../src/tools/charts/config";
+import { forecastConfigSchema } from "../../src/tools/forecast/config";
+import type { ForecastJob, ForecastResult } from "../../src/tools/forecast/ports";
+import { forecastTools } from "../../src/tools/forecast/tool";
+import { RichResult, type CallContext } from "../../src/tools/types";
+
+const ORIGIN = "https://eneo.example";
+const url = `${ORIGIN}/api/v1/files/00000000-0000-4000-8000-000000000001/original/download/?token=t`;
+const ctx: CallContext = { tenantId: "", userId: "", fileOrigin: ORIGIN };
+const config = forecastConfigSchema.parse({ model_path: "/models/forecast", model_name: "Timestral 28M" });
+const source = { url, filename: "el.xlsx", sheet: "Data" };
+const columns = { date_column: "Datum", value_column: "kWh" };
+
+function outcome(horizon: number, recentDays = 3): ForecastResult {
+  const days = (n: number, value: number) => Array.from({ length: n }, (_, i) => value + i + 0.123456789);
+  return {
+    history: { from: "2026-01-01", to: "2026-03-31", days: 90, missing: 1 },
+    forecast: { from: "2026-04-01", days: horizon, p10: days(horizon, 1600), p50: days(horizon, 1834), p90: days(horizon, 2100) },
+    recent: { from: "2026-03-29", values: [...days(recentDays - 1, 1700), null] },
+    holdout: { from: "2026-03-25", to: "2026-03-31", scored: 7, inside: 6, mae: 96.4567, baseline_mae: 138.0123 },
+    parameters: 28_000_000,
+  };
+}
+
+/** What the model reads, whether or not a picture came with it. */
+const structured = (result: unknown) =>
+  (result instanceof RichResult ? result.structured : result) as Record<string, any>;
+
+const PNG = { png_base64: Buffer.from("png").toString("base64"), width: 1200, height: 675 };
+const view = { uri: "ui://forecast/forecast.html", html: "<html></html>", ui: { prefersBorder: true } };
+
+function setup(result: ForecastResult, withView = false) {
+  // The runner draws an image when the job asks for one, as the child does.
+  const run = mock(async (job: ForecastJob) => (job.image ? { ...result, image: PNG } : result));
+  const download = mock(async () => ({ bytes: Buffer.from("Datum,kWh\n"), contentType: "text/csv", name: "el" }));
+  const access = { allowedFileOrigins: [], maxBytes: 1_000_000, timeoutMs: 1000, download: download as never };
+  const tool = forecastTools(config, chartConfigSchema.parse({}), run, access, withView ? view : undefined)[0]!;
+  return { tool, run, download };
+}
+
+describe("create_forecast", () => {
+  function rpc(tool: ReturnType<typeof setup>["tool"], method: string, params: unknown, headers: Record<string, string> = {}) {
+    const handler = createHandler({ token: "forecast-test", maxConcurrency: 1, endpoints: [{ slug: "forecast", tools: [tool], toolTimeoutMs: 1000 }] });
+    return handler(
+      new Request("http://runtime/mcp/forecast", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer forecast-test",
+          "content-type": "application/json",
+          accept: "application/json, text/event-stream",
+          "x-eneo-file-origin": ORIGIN,
+          ...headers,
+        },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+      }),
+    ).then((response) => response.json() as Promise<{ result: any }>);
+  }
+
+  test("advertises one daily date column, one value column and the horizon limit", async () => {
+    const { tool } = setup(outcome(3));
+    const { result } = await rpc(tool, "tools/list", {});
+    const listed = result.tools[0]! as { name: string; description: string; inputSchema: any };
+    expect(listed.name).toBe("create_forecast");
+    // The columns sit beside the horizon, where a model writes them; the source is only the file.
+    expect(listed.inputSchema.required).toEqual(expect.arrayContaining(["source", "date_column", "value_column", "horizon"]));
+    expect(Object.keys(listed.inputSchema.properties.source.properties)).toEqual(["url", "filename", "sheet"]);
+    expect(listed.inputSchema.properties.horizon.maximum).toBe(180);
+    expect(listed.description).toContain("one row per day");
+    expect(listed.description).toContain("query_table");
+    expect(listed.description).toContain("Never add P10 or P90");
+    // The forecast starts after the last value, not after the file's last date.
+    expect(listed.description).toContain("the day after the last day with a value");
+    expect(listed.inputSchema.properties.horizon.description).toContain("after the last day with a value");
+    expect(listed.description).toContain("display=none rather than drawing P10, P50 and P90 with create_chart");
+    // Optional: an older call, and a caller that leaves it out, gets Swedish.
+    expect(listed.inputSchema.properties.language.enum).toEqual(["sv", "en"]);
+    expect(listed.inputSchema.required).not.toContain("language");
+  });
+
+  test("runs a call that also repeats the columns in the source", async () => {
+    const { tool, run } = setup(outcome(3));
+    const { result } = await rpc(tool, "tools/call", {
+      name: "create_forecast",
+      arguments: { source: { ...source, ...columns }, ...columns, horizon: 3 },
+    });
+    expect(result.isError).toBeFalsy();
+    expect(run.mock.calls[0]![0].source).toMatchObject({ dateColumn: "Datum", valueColumn: "kWh" });
+  });
+
+  test("shows hosts with views the interactive forecast and tells the model what they see", async () => {
+    const { tool, run } = setup(outcome(3), true);
+    expect(tool.view).toEqual(view);
+    const result = (await tool.execute({ source, ...columns, horizon: 3 }, { ...ctx, showsViews: true })) as Record<string, any>;
+    expect(run.mock.calls[0]![0].image).toBeUndefined();
+    expect(result.presentation).toBe("interactive");
+    expect(result.shown).toContain("interactive chart");
+    expect(result.source).toEqual({ filename: "el.xlsx", sheet: "Data", date_column: "Datum", value_column: "kWh" });
+    // A report gets this chart as an image, not a redrawing of its numbers.
+    expect(result.shown).toContain("display=none");
+  });
+
+  test("names no sheet for a CSV, whatever name a table tool gave it", async () => {
+    const { tool } = setup(outcome(3), true);
+    const csv = { ...source, filename: "el.csv", sheet: "Sheet1" };
+    const result = (await tool.execute({ source: csv, ...columns, horizon: 3 }, { ...ctx, showsViews: true })) as Record<string, any>;
+    expect(result.source).toEqual({ filename: "el.csv", date_column: "Datum", value_column: "kWh" });
+  });
+
+  test.each([
+    ["a host without views", { showsViews: false }, {}],
+    ["an explicit image", { showsViews: true }, { format: "png" }],
+  ])("gives %s a picture of the same chart", async (_case, host, args) => {
+    const { tool, run } = setup(outcome(3), true);
+    const result = await tool.execute({ source, ...columns, horizon: 3, ...args }, { ...ctx, ...host });
+    // Drawn as Charts draws, in Swedish unless the call says otherwise.
+    expect(run.mock.calls[0]![0].image).toMatchObject({ language: "sv", chart: { width: 1200, number_locale: "sv-SE" } });
+    expect(result).toBeInstanceOf(RichResult);
+    const rich = result as RichResult;
+    expect(rich.images).toEqual([{ data: PNG.png_base64, mimeType: "image/png" }]);
+    expect(rich.structured).toMatchObject({ presentation: "image", shown_to_user: true });
+  });
+
+  test("draws the picture in the language the call names", async () => {
+    const { tool, run } = setup(outcome(3));
+    await tool.execute({ source, ...columns, horizon: 3, language: "en" }, ctx);
+    expect(run.mock.calls[0]![0].image).toMatchObject({ language: "en", chart: { width: 1200, number_locale: "en-GB" } });
+    await expect(tool.execute({ source, ...columns, horizon: 3, language: "de" }, ctx)).rejects.toThrow();
+  });
+
+  test("keeps an image made for a document out of the chat", async () => {
+    const { tool } = setup(outcome(3), true);
+    const result = (await tool.execute({ source, ...columns, horizon: 3, display: "none" }, { ...ctx, showsViews: true })) as RichResult;
+    expect(result.structured).toMatchObject({ presentation: "image", shown_to_user: false });
+    expect(String(result.structured.use)).toContain("create_document");
+  });
+
+  test("returns the model's forecast and the file's history unrounded, with the model that made it", async () => {
+    const { tool, run } = setup(outcome(3));
+    const result = structured(await tool.execute({ source, ...columns, horizon: 3, title: "El, 3 dagar" }, ctx));
+    expect(run.mock.calls[0]![0]).toMatchObject({
+      kind: "forecast",
+      horizon: 3,
+      source: { isXlsx: true, sheet: "Data", dateColumn: "Datum", valueColumn: "kWh" },
+    });
+    // Single precision is all the model has: its digits, without the noise of the double.
+    expect(result.forecast).toEqual({
+      from: "2026-04-01",
+      days: 3,
+      p10: [1600.12346, 1601.12346, 1602.12346],
+      p50: [1834.12346, 1835.12346, 1836.12346],
+      p90: [2100.1235, 2101.1235, 2102.1235],
+    });
+    expect(result.recent).toEqual({ from: "2026-03-29", values: [1700.123456789, 1701.123456789, null] });
+    expect(result.holdout).toEqual({ from: "2026-03-25", to: "2026-03-31", scored: 7, inside: 6, mae: 96.46, baseline_mae: 138 });
+    expect(result.model).toEqual({ name: "Timestral 28M", parameters: 28_000_000 });
+    expect(result.title).toBe("El, 3 dagar");
+    expect(result.interval).toContain("each day on its own");
+  });
+
+  test("keeps an interval and a history apart however large the numbers are", async () => {
+    const result = outcome(3);
+    result.recent = { from: "2026-03-29", values: [12345, 1000123, 999.5] };
+    result.forecast = { ...result.forecast, p10: [1000123, 1, 2], p50: [1000456, 1, 2], p90: [1000789, 1, 2] };
+    const { tool } = setup(result, true);
+    const shown = (await tool.execute({ source, ...columns, horizon: 3 }, { ...ctx, showsViews: true })) as Record<string, any>;
+    expect(shown.recent.values).toEqual([12345, 1000123, 999.5]);
+    expect(shown.forecast.p10[0]).toBe(1000123);
+    expect(shown.forecast.p50[0]).toBe(1000456);
+    expect(shown.forecast.p90[0]).toBe(1000789);
+  });
+
+  test("says in words why the check against the last days is unavailable", async () => {
+    const { tool } = setup({ ...outcome(3), holdout: { unavailable: "NO_OUTCOME" } });
+    const result = structured(await tool.execute({ source, ...columns, horizon: 3 }, ctx));
+    expect(result.holdout).toEqual({
+      unavailable: "NO_OUTCOME",
+      reason: "None of the last days has a value to compare with.",
+    });
+  });
+
+  test("exports the history as the file holds it and the forecast at the model's precision", async () => {
+    const f32 = Math.fround;
+    const result = outcome(2);
+    result.recent = { from: "2026-03-30", values: [123456789, null] };
+    result.forecast = { ...result.forecast, p10: [f32(1.2345678806304932), f32(1020.89496)], p50: [f32(1834.567), f32(1835)], p90: [f32(2100.25), f32(2101)] };
+    const { tool } = setup(result);
+    const exported = await tool.execute({ source, ...columns, horizon: 2, export: true }, ctx);
+    expect(exported).toBeInstanceOf(RichResult);
+    const file = (exported as RichResult).files[0]!;
+    expect(file.mimeType).toBe("text/csv");
+    expect(file.uri).toEndWith("/prognos.csv");
+    expect(Buffer.from(file.blob, "base64").toString()).toBe(
+      "date,actual,p10,p50,p90\r\n" +
+        "2026-03-30,123456789,,,\r\n" +
+        "2026-03-31,,,,\r\n" +
+        "2026-04-01,,1.2345679,1834.567,2100.25\r\n" +
+        // Some single-precision values need nine digits to read back.
+        "2026-04-02,,1020.89496,1835,2101\r\n",
+    );
+    // Each forecast value reads back as the same single-precision number the model returned.
+    expect(f32(1.2345679)).toBe(f32(1.2345678806304932));
+  });
+
+  test("runs the model Eneo selected, and refuses one this runtime does not have", async () => {
+    const { tool, run, download } = setup(outcome(3));
+    await tool.execute({ source, ...columns, horizon: 3 }, { ...ctx, model: "default" });
+    expect(run).toHaveBeenCalledTimes(1);
+    await expect(tool.execute({ source, ...columns, horizon: 3 }, { ...ctx, model: "timestral-200m" })).rejects.toMatchObject({
+      code: "MODEL_UNAVAILABLE",
+    });
+    // Refused before the file is fetched, and never served by another model.
+    expect(download).toHaveBeenCalledTimes(1);
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  test("reads the selected model from Eneo's x-eneo-model header", async () => {
+    const { tool, run } = setup(outcome(3));
+    const call = { name: "create_forecast", arguments: { source, ...columns, horizon: 3 } };
+    expect((await rpc(tool, "tools/call", call, { "x-eneo-model": "default" })).result.isError).toBeFalsy();
+    const refused = await rpc(tool, "tools/call", call, { "x-eneo-model": "../../models/other" });
+    expect(refused.result.isError).toBe(true);
+    expect(JSON.stringify(refused.result)).toContain("MODEL_UNAVAILABLE");
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  test("refuses a horizon beyond the limit before downloading anything", async () => {
+    const { tool, download, run } = setup(outcome(3));
+    await expect(tool.execute({ source, ...columns, horizon: 181 }, ctx)).rejects.toThrow();
+    expect(download).not.toHaveBeenCalled();
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  test("keeps the longest result well inside the model's text budget", async () => {
+    const { tool } = setup(outcome(180, 180));
+    const result = await tool.execute({ source, ...columns, horizon: 180 }, ctx);
+    expect(JSON.stringify(result).length).toBeLessThan(16_000);
+  });
+});

@@ -123,6 +123,9 @@
   );
   let documentation_url = $state("");
   let security_classification = $state<SecurityClassification | null>(null);
+  // The class the form opened with. For a Forecast source without its own
+  // class that is its model's, so an edit sends the class only when changed.
+  let openedClassificationId: string | null = null;
   let forward_identity = $state(false);
   let tool_catalog_max_count = $state(DEFAULT_TOOL_CATALOG_MAX_COUNT);
   let tool_catalog_max_mib = $state(DEFAULT_TOOL_CATALOG_MAX_MIB);
@@ -286,6 +289,7 @@
       imageModelId = mcpServer.image_model_id ?? "";
       documentation_url = mcpServer.documentation_url || "";
       security_classification = mcpServer.security_classification ?? null;
+      openedClassificationId = mcpServer.security_classification?.id ?? null;
       audience = (mcpServer.audience as "everyone" | "groups") ?? "everyone";
       audiencePriority = mcpServer.audience_priority ?? 100;
       selectedGroupIds = (mcpServer.user_groups ?? []).map((group) => group.id);
@@ -364,8 +368,12 @@
       data.tool_definition_max_bytes = tool_definition_max_kib * 1024;
 
       // Security classification — send id or null. A built-in provider takes
-      // its classification from the image model and never carries its own.
-      if (!isBuiltin) {
+      // its classification from the image model and never carries its own; an
+      // edit that leaves the class as it opened does not make it the source's own.
+      if (
+        !isBuiltin &&
+        (!isEditMode || (security_classification?.id ?? null) !== openedClassificationId)
+      ) {
         data.security_classification = security_classification
           ? { id: security_classification.id }
           : null;

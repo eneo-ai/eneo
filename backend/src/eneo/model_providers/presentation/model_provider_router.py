@@ -888,7 +888,7 @@ async def test_provider(
     description=(
         "Validate that a model works with this provider by making a minimal API call."
     ),
-    responses=responses.get_responses([403, 404, 503]),
+    responses=responses.get_responses([400, 403, 404, 503]),
 )
 @endpoint_access(
     authentication=Authentication.USER,

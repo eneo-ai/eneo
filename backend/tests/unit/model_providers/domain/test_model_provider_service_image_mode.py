@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from eneo.main.exceptions import BadRequestException
 from eneo.model_providers.domain import model_provider_service
 from eneo.model_providers.domain.model_provider_service import (
     LITELLM_MODE_TO_OUR_MODE,
@@ -72,9 +73,17 @@ class TestPerImageCost:
 class TestValidateModel:
     async def test_image_validation_is_skipped(self):
         service = ModelProviderService(repository=AsyncMock(), encryption=MagicMock())
+        service.repository.get_by_id.return_value = MagicMock(is_managed=False)
 
         result = await service.validate_model(MagicMock(), "gpt-image-1", "image")
 
         assert result["success"] is True
         assert "image" in result["message"]
-        service.repository.get_by_id.assert_not_awaited()
+
+    @pytest.mark.parametrize("model_type", ["image", "transcription", "completion"])
+    async def test_a_managed_provider_takes_no_models(self, model_type):
+        service = ModelProviderService(repository=AsyncMock(), encryption=MagicMock())
+        service.repository.get_by_id.return_value = MagicMock(is_managed=True)
+
+        with pytest.raises(BadRequestException, match="comes with the deployment"):
+            await service.validate_model(MagicMock(), "default", model_type)

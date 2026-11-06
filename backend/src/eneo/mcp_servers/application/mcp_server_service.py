@@ -6,6 +6,9 @@ from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError
 
+from eneo.forecast_models.application.forecast_model_provisioning import (
+    ensure_default_forecast_model,
+)
 from eneo.main.config import get_settings
 from eneo.main.exceptions import (
     BadRequestException,
@@ -37,6 +40,7 @@ from eneo.mcp_servers.domain.entities.mcp_server import (
     MCP_TOOL_CATALOG_DEFAULT_MAX_BYTES,
     MCP_TOOL_CATALOG_DEFAULT_MAX_COUNT,
     MCP_TOOL_DEFINITION_DEFAULT_MAX_BYTES,
+    BundledUnavailableReason,
     MCPServer,
     MCPServerAudienceGroup,
     MCPServerTool,
@@ -44,6 +48,7 @@ from eneo.mcp_servers.domain.entities.mcp_server import (
     is_builtin_provider,
     is_bundled_server,
     is_capability_purpose,
+    runs_forecast_model,
 )
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
     MCPClient,
@@ -107,6 +112,7 @@ if TYPE_CHECKING:
     from eneo.mcp_apps.infrastructure.repo_impl.mcp_app_view_repo_impl import (
         McpAppViewRepo,
     )
+    from eneo.mcp_servers.application.runtime_status import RuntimeStatus
     from eneo.mcp_servers.domain.repositories.mcp_server_repo import (
         MCPServerRepository,
     )
@@ -182,10 +188,14 @@ class BundledTool:
     tool: str
     # The purpose the added server serves ("general" or a capability).
     purpose: str
-    # The deployment configures the runtime (URL and token are both set).
+    # Whether it can be added and run: see ``unavailable_reason`` when not.
     available: bool
     # The tenant's row for it, once an admin has added it.
     mcp_server_id: UUID | None = None
+    # "runtime_not_configured" when the deployment has no runtime (URL and
+    # token); "model_missing" when the runtime lacks the model the tool runs
+    # on, such as the forecast checkpoint the operator mounts.
+    unavailable_reason: BundledUnavailableReason | None = None
 
 
 # Initial name and description of a bundled server when an admin adds it;
@@ -193,9 +203,27 @@ class BundledTool:
 BUNDLED_TOOL_NAMES: dict[str, str] = {
     "compute": "Compute",
     "charts": "Charts",
+    "forecast": "Forecast",
     "file-analysis": "Ask a file",
     "file-creation": "Create a file",
 }
+# Why a server that runs on a catalog model cannot be activated, by the
+# readiness reason ``MCPServer.backing_model_blocker`` gives.
+BACKING_MODEL_BLOCKER_MESSAGES: dict[str, str] = {
+    "model_missing": "its model is missing",
+    "model_disabled": "its model is disabled",
+    "model_deprecated": "its model is deprecated",
+    "model_provider_inactive": "its model's provider is inactive",
+}
+
+
+def _activation_blocked(reason: str) -> BadRequestException:
+    return BadRequestException(
+        f"Provider cannot be activated: {BACKING_MODEL_BLOCKER_MESSAGES[reason]}. "
+        "Nothing was changed; resolve this under Models, then activate it again."
+    )
+
+
 BUNDLED_TOOL_DESCRIPTIONS: dict[str, str] = {
     "charts": (
         "Creates interactive bar, line, pie and scatter charts, with PNG image "
@@ -215,6 +243,12 @@ BUNDLED_TOOL_DESCRIPTIONS: dict[str, str] = {
         "Runs JavaScript over JSON in an isolated sandbox for exact "
         "calculations, and can export a tabular result as a CSV file for "
         "charts, spreadsheets and documents. No network or state between calls."
+    ),
+    "forecast": (
+        "Forecasts the coming days of a daily series in a CSV/XLSX file in the "
+        "conversation, with a P10-P90 interval and a check against the last "
+        "days, using a model installed with the runtime. Runs in an isolated "
+        "sandbox; the data never leaves the deployment."
     ),
 }
 
@@ -560,6 +594,7 @@ class MCPServerService:
         audience_priority: int = DEFAULT_AUDIENCE_PRIORITY,
         user_group_ids: list[UUID] | None = None,
         image_model_id: UUID | None = None,
+        forecast_model_id: UUID | None = None,
         activate: bool = False,
     ) -> MCPServerCreateResult:
         """Create a new MCP server for the tenant (admin only, uses Streamable HTTP transport).
@@ -621,6 +656,7 @@ class MCPServerService:
             audience_priority=audience_priority,
             user_groups=user_groups,
             image_model_id=image_model_id,
+            forecast_model_id=forecast_model_id,
             description=description,
             http_auth_config_schema=http_auth_config_schema,
             forward_identity=forward_identity,
@@ -692,8 +728,15 @@ class MCPServerService:
         )
 
     @validate_permissions(Permission.ADMIN)
-    async def list_bundled_tools(self) -> list[BundledTool]:
-        """The bundled runtime's tools and whether this tenant has added them."""
+    async def list_bundled_tools(
+        self, runtime: "RuntimeStatus | None" = None
+    ) -> list[BundledTool]:
+        """The bundled runtime's tools and whether this tenant has added them.
+
+        ``runtime`` is the runtime's advisory diagnostic: a tool whose endpoint
+        it says cannot run (no model mounted) is offered as unavailable, with
+        that reason, instead of warning on every deployment.
+        """
         added = {
             tool: server
             for server in await self.repo.query(
@@ -702,19 +745,31 @@ class MCPServerService:
             if (tool := self._bundled_tool_of(server)) is not None
             and server.purpose == BUNDLED_TOOLS[tool].purpose
         }
+
+        def reason(tool: str) -> BundledUnavailableReason | None:
+            if self.bundled_tool_url(tool) is None:
+                return "runtime_not_configured"
+            if runtime is not None and runtime.cannot_run(tool):
+                return "model_missing"
+            return None
+
         return [
             BundledTool(
                 tool=tool,
                 purpose=spec.purpose,
-                available=self.bundled_tool_url(tool) is not None,
+                available=reason(tool) is None,
                 mcp_server_id=added[tool].id if tool in added else None,
+                unavailable_reason=reason(tool),
             )
             for tool, spec in BUNDLED_TOOLS.items()
         ]
 
     @validate_permissions(Permission.ADMIN)
     async def create_bundled_mcp_server(
-        self, tool: str, activate: bool = False
+        self,
+        tool: str,
+        activate: bool = False,
+        runtime: "RuntimeStatus | None" = None,
     ) -> MCPServerCreateResult:
         """Add one of the bundled tool runtime's servers to this tenant.
 
@@ -723,6 +778,14 @@ class MCPServerService:
         per space like any other; a capability provider is saved inactive
         unless ``activate`` switches it in as the tenant's default. Only its
         URL and credential come from the deployment instead of the admin.
+
+        The Forecast source runs on the tenant's default forecast model,
+        provisioned in this same transaction (with the tool service as its
+        provider) the first time: governed in the model catalog from then on.
+
+        ``runtime`` is the runtime's advisory diagnostic: a tool it says cannot
+        run (no model mounted) is refused, as ``list_bundled_tools`` offers it.
+        A status without that answer (unknown, unreachable) refuses nothing.
         """
         if tool not in BUNDLED_TOOLS:
             raise NotFoundException(f"Unknown bundled tool '{tool}'")
@@ -739,12 +802,24 @@ class MCPServerService:
             )
         ):
             raise NameCollisionException(f"The bundled '{tool}' server already exists")
+        if runtime is not None and runtime.cannot_run(tool):
+            raise BadRequestException(
+                f"{BUNDLED_TOOL_NAMES[tool]} needs a model that your operator "
+                "adds to the tool runtime"
+            )
+        purpose = BUNDLED_TOOLS[tool].purpose
+        forecast_model_id = (
+            await ensure_default_forecast_model(self.repo.session, self.user.tenant_id)
+            if runs_forecast_model(BUNDLED_AUTH_TYPE, purpose)
+            else None
+        )
         return await self.create_mcp_server(
             name=BUNDLED_TOOL_NAMES[tool],
             http_url=url,
             http_auth_type=BUNDLED_AUTH_TYPE,
-            purpose=BUNDLED_TOOLS[tool].purpose,
+            purpose=purpose,
             description=BUNDLED_TOOL_DESCRIPTIONS[tool],
+            forecast_model_id=forecast_model_id,
             activate=activate,
         )
 
@@ -1572,6 +1647,7 @@ class MCPServerService:
         """
         import sqlalchemy as sa
 
+        from eneo.database.tables.ai_models_table import ForecastModels
         from eneo.database.tables.mcp_server_table import (
             MCPServers as MCPServersTable,
         )
@@ -1586,6 +1662,8 @@ class MCPServerService:
             await self._resolve_builtin_image_model(
                 server.purpose, server.image_model_id
             )
+        elif server.backing_model_blocker:
+            raise _activation_blocked(server.backing_model_blocker)
         if not server.usable_tools:
             raise BadRequestException(
                 "Provider has no enabled tools. Sync and approve its tools "
@@ -1601,6 +1679,21 @@ class MCPServerService:
                 connection.error_message
                 or "Provider is unreachable and cannot be activated"
             )
+
+        # The runtime's answer can take seconds, and a model turned off in the
+        # meantime must not replace the working default. The row lock is the one
+        # a model update takes, and it holds until the switch commits.
+        if server.forecast_model_id is not None:
+            enabled = await self.repo.session.scalar(
+                sa.select(ForecastModels.is_enabled)
+                .where(
+                    ForecastModels.id == server.forecast_model_id,
+                    ForecastModels.tenant_id == self.user.tenant_id,
+                )
+                .with_for_update()
+            )
+            if not enabled:
+                raise _activation_blocked("model_disabled")
 
         # Deactivate the current default first so the partial unique index
         # never sees two enabled default providers for this purpose. Both

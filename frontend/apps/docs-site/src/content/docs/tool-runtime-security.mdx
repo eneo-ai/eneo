@@ -138,12 +138,12 @@ default) and wiped when the runtime starts.
 
 ### Layer 3: one confined process per job
 
-Every job (a script, a query, a sheet ingest, a render, a chart) runs in a
+Every job (a script, a query, a sheet ingest, a render, a chart, a forecast) runs in a
 fresh child process (`src/sandbox.ts`, `src/child.ts`):
 
 - The child's environment is only `TMPDIR` (its private directory), `PATH`
-  and, when set, `PDF_PYTHON`. The bearer token and the server's settings are
-  not in it.
+  and, when set, `PDF_PYTHON` and `FORECAST_PYTHON`. The bearer token and the
+  server's settings are not in it.
 - The private directory is created with mode 0700 and deleted when the job
   ends. Child stderr is discarded; stdout is capped at 600 KiB.
 - A deadline per job kind (10 s for compute with the default script timeout,
@@ -225,6 +225,19 @@ header and dimension checks as document images before entering the render
 directory: at most 16 megapixels and 12,000 pixels per side. A file extension
 alone does not admit a resource. Unsupported or oversized bitmap data fails
 the render; recognized PNG/JPEG bytes retain their printed template size.
+
+**Forecasts** read their source as text and accept only one ISO date per row,
+in order, with no missing days, and numbers or empty cells as values, so a
+reader's guess at a date format, a formula error or a formula without a saved
+result never reaches the model.
+The numbers go to Timestral in a Python sidecar the child spawns, under the
+same Landlock domain as the forecast job: what every child may read, the
+sidecar's venv, the mounted checkpoint, and the job's own source directory.
+The interpreter starts in isolated mode with a minimal environment, its
+thread count fixed and the Hugging Face Hub switched to offline, and is
+killed after 25 s. It is handed only the validated numbers, never the file
+or its column names, and it loads the checkpoint only from its directory: a
+missing or foreign checkpoint is refused, never downloaded.
 
 **Charts** are drawn from a validated specification, never from ECharts
 options or HTML written by the model: at most 8 series, 12 pie slices, 2,000
@@ -363,6 +376,8 @@ Runtime settings are read by the container; the reference stack maps them from
 | `MAX_CONCURRENCY`, `MAX_QUEUE`, `MAX_QUEUE_PER_GROUP` | 16, 32, 8                   | Active calls, waiting calls, waiting calls per tenant         |
 | `TABULAR_CONCURRENCY`                                 | 2                           | Native-engine jobs at once                                    |
 | `DOCUMENT_PDF_CONCURRENCY`                            | 2                           | PDF sidecars at once                                          |
+| `FORECAST_CONCURRENCY`, `FORECAST_THREADS`            | 1, 2                        | Forecast sidecars at once, CPU threads each                   |
+| `FORECAST_MODEL_PATH`                                 | `/models/forecast`          | The only checkpoint a forecast may read                       |
 | `COMPUTE_TIMEOUT_MS`, `COMPUTE_MEMORY_MB`             | 5000, 64                    | Script deadline and memory                                    |
 | `TABULAR_MAX_UPLOAD_MB`                               | 20                          | Largest file downloaded                                       |
 | `TABULAR_CACHE_MB`, `TABULAR_CACHE_TTL_SECONDS`       | 256, 1800                   | Cache budget and idle lifetime                                |

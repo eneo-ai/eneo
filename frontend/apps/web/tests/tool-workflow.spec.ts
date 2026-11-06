@@ -77,7 +77,9 @@ test("workbook tools produce a report, preserve revisions, and recheck export su
   // run only folds (and keeps its expanded state) once nothing is running.
   // The composer offers to send again when the turn is over.
   await expect(page.locator('button[name="ask"][type="submit"]')).toBeVisible();
-  await conversation.getByRole("button", { name: /Skills.*6/ }).click();
+  // The views reveal themselves as the turn ends and the page follows them
+  // down, so a press and release of the mouse can land on different elements.
+  await conversation.getByRole("button", { name: /Skills.*6/ }).press("Enter");
   await expect(conversation.getByRole("button", { name: /Workflow analysis/ })).toBeVisible();
 
   // The formula notice is rendered by the table itself, independently of model prose.

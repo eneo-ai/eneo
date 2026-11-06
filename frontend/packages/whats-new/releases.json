@@ -21,6 +21,22 @@
           }
         },
         {
+          "id": "forecast-daily-figures",
+          "permissions": {
+            "allOf": ["forecast"]
+          },
+          "type": "new",
+          "area": "assistants",
+          "title": {
+            "en": "Forecast daily figures from your own files",
+            "sv": "Gör prognoser av dagliga siffror från dina filer"
+          },
+          "body": {
+            "en": "Assistants with the Forecast function enabled can forecast daily figures, such as visits, cases or energy use, from an attached CSV or Excel file. You get a chart and a table with a median and a likely range for each day, and see how the same forecast would have done on the last days. The forecast runs in your organisation's own Eneo and knows only the history, not weather, holidays or planned changes.",
+            "sv": "Assistenter med funktionen Prognos kan göra prognoser av dagliga siffror, till exempel besök, ärenden eller energianvändning, från en bifogad CSV- eller Excel-fil. Du får ett diagram och en tabell med en median och ett troligt spann för varje dag, och ser hur samma prognos hade träffat de senaste dagarna. Prognosen körs i organisationens egen Eneo och bygger bara på historiken, inte på väder, lov eller planerade förändringar."
+          }
+        },
+        {
           "id": "sharepoint-sync-status",
           "type": "improved",
           "area": "knowledge",
@@ -57,6 +73,23 @@
           "body": {
             "en": "PDF, Word, Excel and PowerPoint files from SharePoint are now read with the same parsers as files you upload, so tables and spreadsheets come through correctly. Older formats such as .doc and .ppt, scanned PDFs without text and empty pages are skipped with a clear reason instead of producing unreadable text, and a failed download never removes a document Eneo already has.",
             "sv": "PDF-, Word-, Excel- och PowerPoint-filer från SharePoint läses nu med samma tolkar som filer du laddar upp, så tabeller och kalkylblad kommer med korrekt. Äldre format som .doc och .ppt, skannade PDF:er utan text och tomma sidor hoppas över med en tydlig orsak i stället för att ge oläslig text, och en misslyckad nedladdning tar aldrig bort ett dokument som Eneo redan har."
+          }
+        },
+        {
+          "id": "forecast-model-in-admin",
+          "permissions": {
+            "allOf": ["admin"]
+          },
+          "audience": "admin",
+          "type": "new",
+          "area": "admin",
+          "title": {
+            "en": "Find the forecast model under Models",
+            "sv": "Hitta prognosmodellen under Modeller"
+          },
+          "body": {
+            "en": "The forecast model now sits in Admin > Models like every other model: switch it on or off, set its security classification, rename it and see that Forecast uses it. Under Functions, the Forecast source links to the model and says when it is switched off.",
+            "sv": "Prognosmodellen ligger nu i Admin > Modeller som alla andra modeller: slå på eller av den, sätt säkerhetsklass, byt namn och se att Prognos använder den. Under Funktioner länkar källan Prognos till modellen och säger till när den är avstängd."
           }
         },
         {

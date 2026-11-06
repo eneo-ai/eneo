@@ -292,6 +292,8 @@ class TestAssemblerHasCredentials:
 
         server = MagicMock()
         server.image_model = None
+        server.forecast_model = None
+        server.forecast_model_id = None
         server.effective_security_classification = None
         server.image_model_id = None
         server.readiness_reason = None
@@ -322,6 +324,8 @@ class TestAssemblerHasCredentials:
 
         server = MagicMock()
         server.image_model = None
+        server.forecast_model = None
+        server.forecast_model_id = None
         server.effective_security_classification = None
         server.image_model_id = None
         server.readiness_reason = None
@@ -353,6 +357,8 @@ class TestAssemblerHasCredentials:
 
         server = MagicMock()
         server.image_model = None
+        server.forecast_model = None
+        server.forecast_model_id = None
         server.effective_security_classification = None
         server.image_model_id = None
         server.readiness_reason = None
@@ -405,6 +411,8 @@ class TestAssemblerHasCredentials:
 
         server = MagicMock()
         server.image_model = None
+        server.forecast_model = None
+        server.forecast_model_id = None
         server.effective_security_classification = None
         server.image_model_id = None
         server.readiness_reason = None
@@ -446,6 +454,8 @@ class TestAssemblerHasCredentials:
 
         server = MagicMock()
         server.image_model = None
+        server.forecast_model = None
+        server.forecast_model_id = None
         server.effective_security_classification = None
         server.image_model_id = None
         server.readiness_reason = None
@@ -482,6 +492,8 @@ class TestAssemblerHasCredentials:
 
         server = MagicMock()
         server.image_model = None
+        server.forecast_model = None
+        server.forecast_model_id = None
         server.effective_security_classification = None
         server.image_model_id = None
         server.readiness_reason = None

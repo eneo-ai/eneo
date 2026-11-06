@@ -103,7 +103,8 @@ describe("capability governance", () => {
       "capability:file_analysis",
       "capability:file_creation",
       "capability:charts",
-      "capability:compute"
+      "capability:compute",
+      "capability:forecast"
     ]);
     expect(prepared.find((server) => server.id === "capability:web_search")?.is_available).toBe(
       true

@@ -16,6 +16,7 @@
   import type {
     CompletionModel,
     EmbeddingModel,
+    ForecastModel,
     ImageModel,
     RerankModel,
     TranscriptionModel
@@ -29,7 +30,13 @@
   } from "../formatModelStats";
   import { m } from "$lib/paraglide/messages";
 
-  type AnyModel = CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel | RerankModel;
+  type AnyModel =
+    | CompletionModel
+    | EmbeddingModel
+    | TranscriptionModel
+    | ImageModel
+    | RerankModel
+    | ForecastModel;
 
   export let model: AnyModel;
   /** Tighter padding for table cells; default is comfortable for detail panes. */

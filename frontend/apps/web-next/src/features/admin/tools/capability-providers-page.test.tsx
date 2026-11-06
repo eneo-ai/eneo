@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { PROVIDERS_KEY } from "@/features/admin/models/model-providers";
+import { MODELS_KEY } from "@/features/admin/models/models";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import { FILLED_BUTTONS, isOutline } from "@/test/buttons";
 import type { McpServer } from "../mcp/mcp";
 
@@ -47,9 +49,16 @@ const bundled = {
     { tool: "file-analysis", purpose: "file_analysis", available: true, mcp_server_id: null },
     { tool: "file-creation", purpose: "file_creation", available: true, mcp_server_id: null },
     { tool: "charts", purpose: "charts", available: true, mcp_server_id: null },
-    { tool: "compute", purpose: "compute", available: false, mcp_server_id: null }
+    { tool: "compute", purpose: "compute", available: false, mcp_server_id: null },
+    {
+      tool: "forecast",
+      purpose: "forecast",
+      available: false,
+      mcp_server_id: null,
+      unavailable_reason: "model_missing"
+    }
   ],
-  count: 4,
+  count: 5,
   runtime: {
     configured: true,
     state: "ready",
@@ -77,8 +86,11 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+let invalidated: MockInstance<QueryClient["invalidateQueries"]>;
+
 function show() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  invalidated = vi.spyOn(client, "invalidateQueries");
   render(
     <QueryClientProvider client={client}>
       <CapabilityProvidersPage />
@@ -203,16 +215,20 @@ describe("admin function sources", () => {
     show();
     expect(await screen.findByRole("heading", { name: "file_analysis" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "compute" })).toBeTruthy();
-    // The runtime's state and its one warning, said once each.
+    // The runtime's state and its warnings, said once each.
     const status = await screen.findByRole("region", { name: "tools_runtime_title" });
     expect(status.textContent).toContain("tools_runtime_ready");
     expect(status.textContent).toContain("tools_runtime_confinement");
     expect(status.textContent).toContain("tools_runtime_versions");
-    // Four offers: a deployment without the runtime cannot turn compute on.
+    // Five offers: a deployment without the runtime cannot turn compute on, and a runtime
+    // without the forecast model cannot turn forecast on; each says why.
     const turnOn = screen.getAllByRole("button", { name: "tools_builtin_turn_on" });
-    expect(turnOn).toHaveLength(4);
+    expect(turnOn).toHaveLength(5);
     expect((turnOn[3] as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getAllByText("tools_builtin_unavailable")).toHaveLength(1);
+    expect((turnOn[4] as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getAllByText("tools_builtin_unavailable")).toHaveLength(2);
+    expect(screen.getByText(/tools_builtin_unavailable_hint/)).toBeTruthy();
+    expect(screen.getByText(/tools_builtin_model_missing_hint/)).toBeTruthy();
     fireEvent.click(turnOn[0]!);
     await waitFor(() =>
       expect(post).toHaveBeenCalledWith("/api/v1/mcp-servers/bundled/{tool}/", {
@@ -294,6 +310,131 @@ describe("admin function sources", () => {
     expect(screen.getByRole("button", { name: "deactivate" })).toBeTruthy();
   });
 
+  it("says on an added forecast source when the runtime has lost its model, and only there", async () => {
+    const added = (id: string, purpose: string) => ({
+      ...source,
+      id,
+      mcp_server_id: id,
+      name: `${id} (bundled)`,
+      http_url: `http://runtime:8765/${id}`,
+      http_auth_type: "bundled",
+      purpose,
+      is_enabled: true
+    });
+    const diagnose = (missing: boolean) =>
+      get.mockImplementation((path?: string) => {
+        if (path === "/api/v1/mcp-servers/settings/")
+          return ok({ items: [added("forecast", "forecast"), added("charts", "charts")] });
+        if (path === "/api/v1/mcp-servers/bundled/")
+          return ok({
+            ...bundled,
+            items: bundled.items.map((item) =>
+              item.tool === "forecast"
+                ? {
+                    ...item,
+                    mcp_server_id: "forecast",
+                    ...(missing ? {} : { available: true, unavailable_reason: null })
+                  }
+                : item.tool === "charts"
+                  ? { ...item, mcp_server_id: "charts" }
+                  : item
+            )
+          });
+        return ok({ items: [] });
+      });
+    // The runtime card shows once the runtime's diagnostic has loaded.
+    const loaded = () => screen.findByRole("region", { name: "tools_runtime_title" });
+    diagnose(true);
+    show();
+    await loaded();
+    const [hint] = await screen.findAllByText("tools_builtin_model_missing_hint");
+    expect(hint!.querySelector("a")?.textContent).toBe("tools_builtin_deployment_guide");
+    cleanup();
+
+    // Once the model is back, the hint goes.
+    diagnose(false);
+    show();
+    await loaded();
+    expect(await screen.findByRole("heading", { level: 3, name: "forecast" })).toBeTruthy();
+    expect(screen.queryByText("tools_builtin_model_missing_hint")).toBeNull();
+  });
+
+  it("names the model a forecast source runs and where, and why it is blocked while it is off", async () => {
+    const forecastSource = (readiness: string | null) => ({
+      ...source,
+      id: "forecast",
+      mcp_server_id: "forecast",
+      name: "Forecast",
+      http_url: "http://runtime:8765/forecast",
+      http_auth_type: "bundled",
+      purpose: "forecast",
+      is_enabled: true,
+      readiness_reason: readiness,
+      forecast_model_id: "f1",
+      forecast_model: {
+        id: "f1",
+        name: "default",
+        nickname: "Timestral",
+        // The stored name; the line says where it runs in the reader's language.
+        provider_name: "Eneo tool service",
+        is_enabled: readiness === null
+      }
+    });
+    const serve = (readiness: string | null) =>
+      get.mockImplementation((path?: string) => {
+        if (path === "/api/v1/mcp-servers/settings/")
+          return ok({ items: [forecastSource(readiness)] });
+        if (path === "/api/v1/mcp-servers/bundled/")
+          return ok({
+            ...bundled,
+            items: bundled.items.map((item) =>
+              item.tool === "forecast"
+                ? { ...item, mcp_server_id: "forecast", available: true, unavailable_reason: null }
+                : item
+            )
+          });
+        return ok({ items: [] });
+      });
+
+    serve(null);
+    show();
+    expect(await screen.findByRole("heading", { level: 3, name: "forecast" })).toBeTruthy();
+    expect(screen.getByText("tools_builtin_forecast_summary")).toBeTruthy();
+    // The name opens Admin > Models on the forecast models, where it is governed.
+    const modelLink = screen.getByRole("link", { name: "Timestral" });
+    expect(modelLink.getAttribute("href")).toBe("/admin/models?type=forecast");
+    expect(modelLink.closest("p")?.textContent).toBe("model · Timestral · mcp_auth_bundled");
+    expect(screen.queryByText("tools_readiness_model_disabled")).toBeNull();
+    cleanup();
+
+    // Switched off in Admin > Models: the source says why, like an image source.
+    serve("model_disabled");
+    show();
+    expect(await screen.findByText("tools_readiness_model_disabled")).toBeTruthy();
+    expect(screen.getByText("tools_blocked")).toBeTruthy();
+  });
+
+  it("links an image source's model to the image models under Admin > Models", async () => {
+    const imageSource = {
+      ...source,
+      id: "images",
+      name: "Images",
+      http_auth_type: "internal",
+      purpose: "image_generation",
+      image_model_id: "m1",
+      image_model: { id: "m1", name: "gpt-image", nickname: "Studio", provider_name: "OpenAI" }
+    };
+    get.mockImplementation((path?: string) => {
+      if (path === "/api/v1/mcp-servers/settings/") return ok({ items: [imageSource] });
+      if (path === "/api/v1/mcp-servers/bundled/") return ok(bundled);
+      return ok({ items: [] });
+    });
+    show();
+    const modelLink = await screen.findByRole("link", { name: "Studio" });
+    expect(modelLink.getAttribute("href")).toBe("/admin/models?type=image");
+    expect(modelLink.closest("p")?.textContent).toBe("tools_source_model · Studio · OpenAI");
+  });
+
   it("activates an existing source through the capability endpoint", async () => {
     get.mockImplementation((path?: string) =>
       path === "/api/v1/mcp-servers/settings/" ? ok({ items: [source] }) : ok({ items: [] })
@@ -305,6 +446,9 @@ describe("admin function sources", () => {
         params: { path: { id: "source" } }
       })
     );
+    // Turning a function on can add a model and its provider to Admin > Models.
+    await waitFor(() => expect(invalidated).toHaveBeenCalledWith({ queryKey: MODELS_KEY }));
+    expect(invalidated).toHaveBeenCalledWith({ queryKey: PROVIDERS_KEY });
   });
 
   it("keeps focus on a busy activate and activates once", async () => {

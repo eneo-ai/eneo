@@ -1,4 +1,54 @@
+import type { Page } from "@playwright/test";
 import { expect, test } from "./csp";
+
+/** The seed has no forecast model: the tool service's checkpoint is not in the stack. */
+async function withForecastModel(page: Page) {
+  await page.route(/\/api\/v1\/admin\/model-providers\/$/, async (route) => {
+    const response = await route.fetch();
+    const providers = await response.json();
+    await route.fulfill({
+      response,
+      json: [
+        ...providers,
+        {
+          ...providers[0],
+          id: "22222222-2222-4222-8222-222222222222",
+          name: "Eneo tool service",
+          provider_type: "eneo_tool_service",
+          is_managed: true,
+          connection_check_supported: false
+        }
+      ]
+    });
+  });
+  await page.route(/\/api\/v1\/ai-models\/$/, async (route) => {
+    const response = await route.fetch();
+    await route.fulfill({
+      response,
+      json: {
+        ...(await response.json()),
+        forecast_models: [
+          {
+            id: "11111111-1111-4111-8111-111111111111",
+            name: "default",
+            nickname: "Timestral",
+            org: "Mistral AI",
+            open_source: true,
+            is_deprecated: false,
+            is_org_enabled: true,
+            provider_id: "22222222-2222-4222-8222-222222222222",
+            provider_name: "Eneo tool service",
+            provider_type: "eneo_tool_service",
+            security_classification: null,
+            used_by_mcp_servers: [
+              { id: "33333333-3333-4333-8333-333333333333", name: "Forecast", purpose: "forecast" }
+            ]
+          }
+        ]
+      }
+    });
+  });
+}
 
 test.describe("the models on a phone (decision 31)", () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
@@ -36,8 +86,45 @@ test.describe("the models on a phone (decision 31)", () => {
   });
 });
 
+test.describe("the forecast model on a phone", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+  test("is a row under the provider that comes with the installation", async ({ page }) => {
+    await withForecastModel(page);
+    await page.goto("/admin/models?type=forecast");
+    const list = page.getByRole("main").getByRole("list", { name: "Eneos verktygstjänst" });
+    await expect(list.getByRole("button", { name: "Timestral", exact: true })).toBeVisible();
+    await expect(page.getByRole("main").getByText("E2E Mock Provider")).toHaveCount(0);
+    await expect(list.getByRole("switch", { name: "Aktivera Timestral" })).toBeVisible();
+    // The provider has nothing to manage, and the key is no reader's concern.
+    await expect(page.getByRole("main").getByText("default", { exact: true })).toHaveCount(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      390
+    );
+  });
+});
+
 test.describe("the models on a tablet", () => {
   test.use({ viewport: { width: 820, height: 1180 }, hasTouch: true });
+
+  test("keep the type filter in the address", async ({ page }) => {
+    await withForecastModel(page);
+    await page.goto("/admin/models?type=forecast");
+    const types = page.getByRole("radiogroup", { name: "Modelltyp" });
+    await expect(types.getByRole("radio", { name: /^Prognos/, checked: true })).toBeVisible();
+    await expect(page.getByRole("main").getByRole("table")).toHaveCount(1);
+
+    await types.getByRole("radio", { name: /^Alla/ }).click();
+    await expect(page).toHaveURL(/\/admin\/models$/);
+    await page.reload();
+    await expect(types.getByRole("radio", { name: /^Alla/, checked: true })).toBeVisible();
+    await expect(page.getByRole("main").getByText("E2E Mock Provider")).not.toHaveCount(0);
+
+    await page.goto("/admin/models?type=forecast");
+    await expect(types.getByRole("radio", { name: /^Prognos/, checked: true })).toBeVisible();
+    await page.getByRole("link", { name: "Modeller", exact: true }).first().click();
+    await expect(types.getByRole("radio", { name: /^Alla/, checked: true })).toBeVisible();
+  });
 
   test("keep their table and the type segments", async ({ page }) => {
     await page.goto("/admin/models");

@@ -42,7 +42,7 @@ import {
   providerOptions,
   setFavoriteProviders
 } from "./model-providers";
-import type { ModelKind } from "./models";
+import type { TenantModelKind } from "./models";
 import { ProviderField, providerFieldProblem, useFieldFocus } from "./provider-form-fields";
 import { ProviderPicker } from "./provider-picker";
 
@@ -57,13 +57,19 @@ const STEP_FOCUS = [
 
 type Step = "provider" | "credentials" | "models";
 
-function supportedModelKinds(modes: string[] | undefined): ModelKind[] {
-  const ordered: ModelKind[] = ["completion", "embedding", "transcription", "image", "rerank"];
+function supportedModelKinds(modes: string[] | undefined): TenantModelKind[] {
+  const ordered: TenantModelKind[] = [
+    "completion",
+    "embedding",
+    "transcription",
+    "image",
+    "rerank"
+  ];
   const modeSet = new Set(modes ?? []);
   const supported = ordered.filter((mode) => modeSet.has(mode));
   return supported.length > 0 ? supported : ["completion"];
 }
-function defaultModelKind(modes: string[] | undefined): ModelKind {
+function defaultModelKind(modes: string[] | undefined): TenantModelKind {
   return supportedModelKinds(modes)[0] ?? "completion";
 }
 
@@ -85,7 +91,7 @@ export function AddModelWizard({
   onOpenChange: (open: boolean) => void;
   initialProviderId?: string;
   /** Limit a contextual creation flow to one model kind. */
-  fixedKind?: ModelKind;
+  fixedKind?: TenantModelKind;
   onCreated?: (ids: string[]) => void;
 }) {
   const t = useTranslations();
@@ -94,8 +100,11 @@ export function AddModelWizard({
   const capsQuery = useQuery({ ...providerCapabilitiesQueryOptions(browserApi), enabled: open });
   const caps: ProviderCapabilities | undefined = capsQuery.data;
 
+  // The provider that comes with the installation takes no models from an admin.
   const eligibleProviders = (providers.data ?? []).filter(
-    (provider) => !fixedKind || caps?.providers[provider.provider_type]?.modes.includes(fixedKind)
+    (provider) =>
+      !provider.is_managed &&
+      (!fixedKind || caps?.providers[provider.provider_type]?.modes.includes(fixedKind))
   );
   const hasProviders = eligibleProviders.length > 0;
 
@@ -153,7 +162,7 @@ export function AddModelWizard({
   const [fieldConfirmations, setFieldConfirmations] = useState<Record<string, string>>({});
   const [keyExpiresOn, setKeyExpiresOn] = useState<string | null>(null);
   const [providerId, setProviderId] = useState<string | null>(null);
-  const [modelKind, setModelKind] = useState<ModelKind>("completion");
+  const [modelKind, setModelKind] = useState<TenantModelKind>("completion");
   const [catalogBusy, setCatalogBusy] = useState(false);
   const [credentialsSubmitted, setCredentialsSubmitted] = useState(false);
   const [existingSubmitted, setExistingSubmitted] = useState(false);

@@ -23,6 +23,7 @@ export const FUNCTION_PURPOSES = [
   "file_creation",
   "charts",
   "compute",
+  "forecast",
 ] as const satisfies readonly Schema["FunctionInstructionReference"]["purpose"][];
 const link =
   /\[((?:\\[^\n]|[^\[\]\\\n])*)\]\((eneo-(?:skill|function|mcp|tool):[^)\n]*)\)/y;
