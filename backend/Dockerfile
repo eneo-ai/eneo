@@ -75,12 +75,14 @@ FROM ${WEB_APP_STAGE} AS web-app
 FROM python:3.11-slim-bookworm
 
 # Runtime dependencies: ffmpeg/libsndfile1 support audio; libmagic1 supports
-# file type detection. Documents are rendered by the tool runtime image.
+# file type detection. Documents are rendered by the tool runtime image. The
+# runtime installs nothing, so apt goes once they are in.
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     libmagic1 \
     libsndfile1 \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get purge -y --allow-remove-essential --auto-remove apt
 
 # Copy venv and tiktoken from builder
 COPY --from=builder /app/.venv /app/.venv
