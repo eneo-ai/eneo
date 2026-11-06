@@ -11623,7 +11623,13 @@ export interface components {
     AskAssistant: {
       /** Disabled Capabilities */
       disabled_capabilities?: (
-        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts" | "compute"
+        | "web_search"
+        | "image_generation"
+        | "file_analysis"
+        | "file_creation"
+        | "charts"
+        | "compute"
+        | "forecast"
       )[];
       /** Disabled Mcp Server Ids */
       disabled_mcp_server_ids?: string[];
@@ -11791,6 +11797,7 @@ export interface components {
             | "file_creation"
             | "charts"
             | "compute"
+            | "forecast"
           )[]
         | null;
       /**
@@ -11978,7 +11985,13 @@ export interface components {
       id: string;
       /** Enabled Capabilities */
       enabled_capabilities?: (
-        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts" | "compute"
+        | "web_search"
+        | "image_generation"
+        | "file_analysis"
+        | "file_creation"
+        | "charts"
+        | "compute"
+        | "forecast"
       )[];
       document_template?: components["schemas"]["DocumentTemplateChoicePublic"];
       /** Available Capabilities */
@@ -12776,6 +12789,8 @@ export interface components {
       available: boolean;
       /** Mcp Server Id */
       mcp_server_id?: string | null;
+      /** Unavailable Reason */
+      unavailable_reason?: ("runtime_not_configured" | "model_missing") | null;
     };
     /**
      * CallbackRequest
@@ -12817,7 +12832,8 @@ export interface components {
         | "file_analysis"
         | "file_creation"
         | "charts"
-        | "compute";
+        | "compute"
+        | "forecast";
       /** Available */
       available: boolean;
       /** Reason */
@@ -13597,7 +13613,13 @@ export interface components {
       disabled_mcp_server_ids?: string[];
       /** Disabled Capabilities */
       disabled_capabilities?: (
-        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts" | "compute"
+        | "web_search"
+        | "image_generation"
+        | "file_analysis"
+        | "file_creation"
+        | "charts"
+        | "compute"
+        | "forecast"
       )[];
     };
     /** Counts */
@@ -14022,6 +14044,7 @@ export interface components {
             | "file_creation"
             | "charts"
             | "compute"
+            | "forecast"
           )[]
         | null;
       from_template?: components["schemas"]["TemplateCreate"] | null;
@@ -14347,7 +14370,13 @@ export interface components {
       id: string;
       /** Enabled Capabilities */
       enabled_capabilities?: (
-        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts" | "compute"
+        | "web_search"
+        | "image_generation"
+        | "file_analysis"
+        | "file_creation"
+        | "charts"
+        | "compute"
+        | "forecast"
       )[];
       document_template?: components["schemas"]["DocumentTemplateChoicePublic"];
       /** Available Capabilities */
@@ -14752,11 +14781,23 @@ export interface components {
       available_capabilities?: components["schemas"]["CapabilityAvailability"][];
       /** Enabled Capabilities */
       enabled_capabilities?: (
-        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts" | "compute"
+        | "web_search"
+        | "image_generation"
+        | "file_analysis"
+        | "file_creation"
+        | "charts"
+        | "compute"
+        | "forecast"
       )[];
       /** Default Disabled Capabilities */
       default_disabled_capabilities?: (
-        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts" | "compute"
+        | "web_search"
+        | "image_generation"
+        | "file_analysis"
+        | "file_creation"
+        | "charts"
+        | "compute"
+        | "forecast"
       )[];
       /** Models Enforced */
       models_enforced: boolean;
@@ -15608,7 +15649,8 @@ export interface components {
         | "file_analysis"
         | "file_creation"
         | "charts"
-        | "compute";
+        | "compute"
+        | "forecast";
     };
     /** GeneralError */
     GeneralError: {
@@ -17003,7 +17045,8 @@ export interface components {
         | "file_analysis"
         | "file_creation"
         | "charts"
-        | "compute";
+        | "compute"
+        | "forecast";
       /** Description */
       description?: string | null;
       /** Http Auth Config Schema */
@@ -17094,7 +17137,8 @@ export interface components {
         | "file_analysis"
         | "file_creation"
         | "charts"
-        | "compute";
+        | "compute"
+        | "forecast";
       /** Image Model Id */
       image_model_id?: string | null;
       image_model?: components["schemas"]["MCPServerBackingModelPublic"] | null;
@@ -17224,7 +17268,8 @@ export interface components {
         | "file_analysis"
         | "file_creation"
         | "charts"
-        | "compute";
+        | "compute"
+        | "forecast";
       /** Image Model Id */
       image_model_id?: string | null;
       image_model?: components["schemas"]["MCPServerBackingModelPublic"] | null;
@@ -17456,6 +17501,7 @@ export interface components {
             | "file_creation"
             | "charts"
             | "compute"
+            | "forecast"
           )
         | null;
       /** Description */
@@ -19798,6 +19844,7 @@ export interface components {
             | "file_creation"
             | "charts"
             | "compute"
+            | "forecast"
           )[]
         | null;
       /** Space Id */
@@ -19982,6 +20029,7 @@ export interface components {
             | "file_creation"
             | "charts"
             | "compute"
+            | "forecast"
           )[]
         | null;
       /** Name */
@@ -20180,7 +20228,8 @@ export interface components {
       | "file_analysis"
       | "file_creation"
       | "charts"
-      | "compute";
+      | "compute"
+      | "forecast";
     /** PermissionPublic */
     PermissionPublic: {
       name: components["schemas"]["Permission"];
@@ -20281,7 +20330,8 @@ export interface components {
         | "file_analysis"
         | "file_creation"
         | "charts"
-        | "compute";
+        | "compute"
+        | "forecast";
       /**
        * Is Default Enabled
        * @default true
@@ -23169,7 +23219,13 @@ export interface components {
       organization_space_id: string | null;
       /** Enabled Capabilities */
       enabled_capabilities?: (
-        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts" | "compute"
+        | "web_search"
+        | "image_generation"
+        | "file_analysis"
+        | "file_creation"
+        | "charts"
+        | "compute"
+        | "forecast"
       )[];
       /** Available Capabilities */
       available_capabilities?: components["schemas"]["CapabilityAvailability"][];
@@ -25060,7 +25116,13 @@ export interface components {
     UpdateSpaceDryRunResponse: {
       /** Capabilities */
       capabilities?: (
-        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts" | "compute"
+        | "web_search"
+        | "image_generation"
+        | "file_analysis"
+        | "file_creation"
+        | "charts"
+        | "compute"
+        | "forecast"
       )[];
       /** Assistants */
       assistants: components["schemas"]["AssistantSparse"][];
@@ -51473,6 +51535,7 @@ export interface operations {
               | "file_creation"
               | "charts"
               | "compute"
+              | "forecast"
             )
           | null;
       };
@@ -51583,6 +51646,7 @@ export interface operations {
               | "file_creation"
               | "charts"
               | "compute"
+              | "forecast"
             )
           | null;
       };

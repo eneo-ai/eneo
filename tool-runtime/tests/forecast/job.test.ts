@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readdir, rm, symlink, writeFile } from "node:fs/promise
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { confinement, jobPaths, runIsolated } from "../../src/sandbox";
-import { forecastConfigSchema } from "../../src/tools/forecast/config";
+import { forecastConfigSchema, forecastPython } from "../../src/tools/forecast/config";
 import { FORECAST_PYTHON, forecastAvailable } from "../../src/tools/forecast/engine/timestral";
 import type { ForecastJob } from "../../src/tools/forecast/ports";
 import { tinyCheckpoint } from "./checkpoint";
@@ -67,7 +67,7 @@ describe("forecast job in a sandbox child", () => {
     const paths = jobPaths(forecast);
     expect(paths).toMatchObject({ read: ["/models/forecast"], write: [dirname(forecast.source.path!)] });
     // Only a forecast job may run the sidecar's Python; a compute job may not.
-    expect(paths.execute).toContain(dirname(dirname(process.env.FORECAST_PYTHON ?? "/opt/forecast/bin/python3")));
+    expect(paths.execute).toContain(dirname(dirname(forecastPython())));
     expect(jobPaths({ kind: "compute", code: "1", input: null } as never).execute).toBeUndefined();
   });
 

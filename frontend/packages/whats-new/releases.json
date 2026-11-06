@@ -21,6 +21,22 @@
           }
         },
         {
+          "id": "forecast-daily-figures",
+          "permissions": {
+            "allOf": ["forecast"]
+          },
+          "type": "new",
+          "area": "assistants",
+          "title": {
+            "en": "Forecast daily figures from your own files",
+            "sv": "Gör prognoser av dagliga siffror från dina filer"
+          },
+          "body": {
+            "en": "Assistants with the Forecast function enabled can forecast daily figures, such as visits, cases or energy use, from an attached CSV or Excel file. You get a chart and a table with a median and a likely range for each day, and see how the same forecast would have done on the last days. The forecast runs in your organisation's own Eneo and knows only the history, not weather, holidays or planned changes.",
+            "sv": "Assistenter med funktionen Prognos kan göra prognoser av dagliga siffror, till exempel besök, ärenden eller energianvändning, från en bifogad CSV- eller Excel-fil. Du får ett diagram och en tabell med en median och ett troligt spann för varje dag, och ser hur samma prognos hade träffat de senaste dagarna. Prognosen körs i organisationens egen Eneo och bygger bara på historiken, inte på väder, lov eller planerade förändringar."
+          }
+        },
+        {
           "id": "sharepoint-sync-status",
           "type": "improved",
           "area": "knowledge",

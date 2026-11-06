@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { ToolError } from "./errors";
 import { REQUIRE_CONFINEMENT, type SandboxJob } from "./child";
+import { forecastPython } from "./tools/forecast/config";
 
 const ROOT = join(tmpdir(), "eneo-tool-runtime-jobs");
 const MAX_STDOUT_BYTES = 600 * 1024;
@@ -65,8 +66,8 @@ const BASE_RULES = [
  * The forecast sidecar's Python (tools/forecast/engine/timestral.ts) with torch's native
  * libraries inside its venv, as the environment names it when a child is started.
  */
-function forecastPython(): string[] {
-  const python = process.env.FORECAST_PYTHON ?? "/opt/forecast/bin/python3";
+function forecastExecutables(): string[] {
+  const python = forecastPython();
   return [dirname(dirname(python)), realBinary(python)];
 }
 
@@ -109,7 +110,7 @@ export function jobPaths(job: SandboxJob["job"]): JobPaths {
       return {
         read: [job.config.model_path],
         write: job.source.path ? [dirname(job.source.path)] : [],
-        execute: forecastPython(),
+        execute: forecastExecutables(),
       };
   }
 }

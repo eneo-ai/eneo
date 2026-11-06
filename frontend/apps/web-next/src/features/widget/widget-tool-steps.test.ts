@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { ConversationMessage } from "@eneo/eneo-js";
+import { CAPABILITIES } from "@/features/capabilities/capabilities";
 import {
   argumentDetail,
   groupToolSteps,
   creditedServers,
   humanizeToolName,
+  isBuiltinCall,
   widgetToolSteps
 } from "./widget-tool-steps";
 
@@ -98,6 +100,11 @@ describe("widgetToolSteps", () => {
       detail: null,
       via: null
     });
+  });
+
+  it("treats every function as Eneo's own step, however its source is named", () => {
+    for (const { purpose } of CAPABILITIES)
+      expect(isBuiltinCall({ server_name: "Some source", purpose, is_internal: false })).toBe(true);
   });
 
   it("labels capability calls by purpose, query included, without a detail chip", () => {

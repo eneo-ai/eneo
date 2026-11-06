@@ -1,8 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { parseInstructionReferences, serializeReference } from "@eneo/skill-instructions";
+import {
+  FUNCTION_PURPOSES,
+  parseInstructionReferences,
+  serializeReference
+} from "@eneo/skill-instructions";
+import { CAPABILITIES } from "@/features/capabilities/capabilities";
 import fixtures from "../../../../../packages/skill-instructions/fixtures.json";
 
 describe("instruction reference text contract", () => {
+  it("can reference every function the Skill picker offers", () => {
+    expect([...FUNCTION_PURPOSES].sort()).toEqual(CAPABILITIES.map((c) => c.purpose).sort());
+  });
+
   for (const fixture of fixtures)
     it(fixture.name, () => {
       if (fixture.error) {

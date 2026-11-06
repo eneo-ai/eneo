@@ -65,7 +65,8 @@ function StatusBadge({ source }: { source: McpServer }) {
 /**
  * The provider built into Eneo, offered as a function's first source ahead
  * of the external form: one button turns it on as the tenant default. A
- * deployment without the tool runtime shows why it cannot be turned on.
+ * deployment without the tool runtime, or a runtime without the model the
+ * function runs on, shows why it cannot be turned on.
  */
 function BundledOffer({
   capability,
@@ -107,7 +108,11 @@ function BundledOffer({
               t(capability.bundledDescription ?? "tools_builtin_menu_description")
             ) : (
               <>
-                {t("tools_builtin_unavailable_hint")}{" "}
+                {t(
+                  bundled.unavailable_reason === "model_missing"
+                    ? "tools_builtin_model_missing_hint"
+                    : "tools_builtin_unavailable_hint"
+                )}{" "}
                 <a
                   href={DEPLOYMENT_GUIDE_URL}
                   target="_blank"
@@ -249,6 +254,10 @@ export function CapabilityProvidersPage({ embedded = false }: { embedded?: boole
   const bundledToAdd = (bundledTools.data?.items ?? []).filter((tool) => !tool.mcp_server_id);
   const bundledProviderFor = (purpose: Capability) =>
     bundledToAdd.find((tool) => tool.purpose === purpose);
+  // What the runtime says now about a bundled source already added, such as a model it lacks.
+  const modelMissing = (sourceId: string) =>
+    bundledTools.data?.items?.find((tool) => tool.mcp_server_id === sourceId)
+      ?.unavailable_reason === "model_missing";
 
   return (
     <div className={cn("flex w-full flex-col gap-6", !embedded && "pb-16")}>
@@ -398,6 +407,11 @@ export function CapabilityProvidersPage({ embedded = false }: { embedded?: boole
                       {blocked && (
                         <p className="text-warning text-sm">
                           {t(readinessKey(source.readiness_reason))}
+                        </p>
+                      )}
+                      {modelMissing(source.id) && (
+                        <p className="text-warning text-sm">
+                          {t("tools_builtin_model_missing_hint")}
                         </p>
                       )}
                       {!active && activeDefault && source.audience !== "groups" && (

@@ -26,6 +26,7 @@ import type { ChartResult } from "./tools/charts/ports";
 import { chartTools } from "./tools/charts/tool";
 import { chartView } from "./tools/charts/view";
 import type { ForecastResult } from "./tools/forecast/ports";
+import { forecastReady } from "./tools/forecast/engine/timestral";
 import { forecastTools } from "./tools/forecast/tool";
 import { forecastView } from "./tools/forecast/view";
 
@@ -177,6 +178,7 @@ const forecastJobTimeoutMs = 40_000;
 endpoints.push({
   slug: "forecast",
   toolTimeoutMs: forecastJobTimeoutMs + 5_000,
+  ready: () => forecastReady(config.forecast.model_path),
   tools: forecastTools(
     config.forecast,
     charts,
