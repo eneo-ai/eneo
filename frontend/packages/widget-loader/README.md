@@ -74,20 +74,28 @@ properties on the element or `:root` override it: `--eneo-widget-size`, `--eneo-
 ## JavaScript API
 
 `window.Eneo` is a command queue, so calls made before the script has
-loaded are replayed:
+loaded are replayed. Keep this in a script file of the host site, which also
+works under a strict Content Security Policy:
 
 ```html
-<script>
-  window.Eneo =
-    window.Eneo ||
-    function () {
-      (window.Eneo.q = window.Eneo.q || []).push(arguments);
-    };
-  Eneo("on", "conversation_started", function (detail) {
-    /* analytics */
-  });
-</script>
-<button onclick="Eneo('open')">Ask us</button>
+<button type="button" data-eneo-open>Ask us</button>
+<script defer src="/assets/eneo-chat.js"></script>
+```
+
+```js
+window.Eneo =
+  window.Eneo ||
+  function () {
+    (window.Eneo.q = window.Eneo.q || []).push(arguments);
+  };
+
+document.querySelectorAll("[data-eneo-open]").forEach((button) => {
+  button.addEventListener("click", () => window.Eneo("open"));
+});
+
+window.Eneo("on", "conversation_started", (detail) => {
+  /* analytics */
+});
 ```
 
 Commands: `open`, `close`, `toggle`, `on(event, listener)`, `off(event, listener)`,
