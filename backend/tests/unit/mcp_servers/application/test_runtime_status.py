@@ -142,3 +142,52 @@ async def test_file_origin_and_confinement_warnings_are_additive(monkeypatch, or
         "confinement_unavailable",
         f"file_origin_{origin}",
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "unavailable,forecast",
+    [
+        (None, False),  # A runtime from before readiness was reported.
+        ([], False),
+        (["forecast"], True),
+        (["something-new"], False),
+    ],
+)
+async def test_an_endpoint_that_cannot_run_is_known_without_a_warning(
+    monkeypatch, unavailable, forecast
+):
+    settings = SimpleNamespace(
+        tool_runtime_url="http://tools:3010",
+        tool_runtime_token="secret",
+        app_version="2.3.0",
+        app_revision="a" * 40,
+    )
+    monkeypatch.setattr(module, "get_settings", lambda: settings)
+    monkeypatch.setattr(
+        module, "file_reference_base_url", lambda _: "http://backend:8000"
+    )
+    monkeypatch.setattr(module, "_cache", None)
+    diagnostic = {
+        "version": "2.3.0",
+        "revision": "a" * 40,
+        "confinement": {"files": True, "tcp": True},
+        "execution": {"active": 0, "queued": 0},
+        "file_origin": "reachable",
+    }
+    if unavailable is not None:
+        diagnostic["unavailable"] = unavailable
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(200, json=diagnostic)
+        )
+    )
+    monkeypatch.setattr(module.httpx, "AsyncClient", lambda **_: client)
+    result = await module.runtime_status()
+    assert result.state == "ready"
+    # Said on the tool's offer, not as a warning on every deployment.
+    assert result.warnings == []
+    assert result.cannot_run("forecast") is forecast
+    assert "unavailable" not in result.model_dump()
+    # The cached copy keeps it.
+    assert (await module.runtime_status()).cannot_run("forecast") is forecast

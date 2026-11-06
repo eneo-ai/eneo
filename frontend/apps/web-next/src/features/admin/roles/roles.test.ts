@@ -12,7 +12,8 @@ import {
 const catalogue: PermissionEntry[] = [
   { name: "admin", description: "Administer users" },
   { name: "personal_chat", description: "Use chat" },
-  { name: "skills", description: "Use skills" }
+  { name: "skills", description: "Use skills" },
+  { name: "forecast", description: "Make forecasts" }
 ];
 const role = (id: string, name: string, permissions: Role["permissions"]): Role => ({
   id,
@@ -29,6 +30,7 @@ describe("role catalogue", () => {
       ])
     ).toEqual([
       ["chat", ["personal_chat"]],
+      ["functions", ["forecast"]],
       ["build", ["skills"]],
       ["admin", ["admin"]]
     ]);

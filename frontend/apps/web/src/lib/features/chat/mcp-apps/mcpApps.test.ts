@@ -19,6 +19,13 @@ describe("chart result presentation", () => {
     expect(isChartDocumentAsset(chart)).toBe(false);
     expect(appViewCalls([{ ...asset, is_bundled: false }])).toHaveLength(1);
   });
+  it("treats a forecast's report image and explicit image like a chart's", () => {
+    const forecast = { ...chart, tool_call_id: "forecast-call", tool_name: "create_forecast" };
+    expect(isChartDocumentAsset({ ...forecast, arguments: { display: "none" } })).toBe(true);
+    expect(appViewCalls([{ ...forecast, arguments: { display: "none" } }])).toEqual([]);
+    expect(appViewCalls([{ ...forecast, arguments: { format: "png" } }])).toEqual([]);
+    expect(appViewCalls([forecast])).toHaveLength(1);
+  });
   it("shows the interactive app by default and hides it for explicit image exports", () => {
     expect(appViewCalls([chart])).toHaveLength(1);
     expect(appViewCalls([{ ...chart, arguments: { format: "auto" } }])).toHaveLength(1);

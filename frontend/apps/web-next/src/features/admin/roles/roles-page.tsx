@@ -62,6 +62,7 @@ import {
 
 const GROUP_KEYS = {
   chat: { label: "permission_group_chat", short: "permission_group_chat_short" },
+  functions: { label: "permission_group_functions", short: "permission_group_functions_short" },
   build: { label: "permission_group_build", short: "permission_group_build_short" },
   knowledge: { label: "permission_group_knowledge", short: "permission_group_knowledge_short" },
   insight: { label: "permission_group_insight", short: "permission_group_insight_short" },
@@ -89,7 +90,12 @@ const PERMISSION_KEYS: Partial<Record<Permission, string>> = {
   storage: "permission_storage",
   assistant_debug: "permission_assistant_debug",
   web_search: "permission_web_search",
-  image_generation: "permission_image_generation"
+  image_generation: "permission_image_generation",
+  file_analysis: "permission_file_analysis",
+  file_creation: "permission_file_creation",
+  charts: "permission_charts",
+  compute: "permission_compute",
+  forecast: "permission_forecast"
 };
 
 type Editor = { kind: "create" } | { kind: "update"; role: Role };
