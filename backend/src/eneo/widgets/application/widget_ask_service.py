@@ -88,6 +88,8 @@ class WidgetAnswer(AsyncIterator[Completion]):
             async for chunk in self._answer:
                 for visible in self._view.events(chunk):
                     yield visible
+            for visible in self._view.finish():
+                yield visible
             completed = True
         finally:
             await self._settle(completed)

@@ -613,6 +613,25 @@ async def test_a_public_widget_error_from_the_turn_stays_as_it_is(monkeypatch):
     logger.exception.assert_not_called()
 
 
+async def test_text_held_back_at_the_end_of_the_answer_reaches_the_visitor():
+    async def chunks():
+        yield Completion(text="Öppet 9–17 ", response_type=ResponseType.TEXT)
+
+    session = _stored_session()
+    service, _ = _service(ask_result=_ask_result(session, chunks()))
+
+    response = await service.ask(
+        _principal(_widget(show_sources=False)),
+        question="q",
+        session_id=None,
+        client_ip=None,
+    )
+
+    assert "".join([chunk.text or "" async for chunk in response.answer]) == (
+        "Öppet 9–17 "
+    )
+
+
 async def test_retention_runs_even_when_settlement_fails():
     service, deps = _service()
     deps.budget.settle.side_effect = RuntimeError("Database unavailable")

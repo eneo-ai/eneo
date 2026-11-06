@@ -3,6 +3,7 @@
 import json
 from dataclasses import replace
 from datetime import datetime, timezone
+from time import perf_counter
 from uuid import uuid4
 
 import pytest
@@ -16,6 +17,7 @@ from eneo.ai_models.completion_models.completion_model import (
 )
 from eneo.assistants.api import assistant_protocol
 from eneo.assistants.api.assistant_models import AssistantResponse
+from eneo.assistants.reference_tags import strip_inline_references
 from eneo.completion_models.domain.skill_activation import SKILL_ACTIVATION_TOOL_NAME
 from eneo.info_blobs.info_blob import InfoBlobInDB, InfoBlobInDBWithScore
 from eneo.questions.question import (
@@ -610,6 +612,206 @@ def test_restored_session_with_tool_activity_hidden():
     assert ref["uri"] == "https://casefiles.kommun.se/2026-123"
     assert ref["tool_call_id"] is None and ref["mcp_tool_name"] is None
     assert message["references"]
+
+
+# --- hidden sources ---------------------------------------------------------
+
+
+def _knowledge_call(**overrides) -> ToolCallMetadata:
+    return replace(
+        _tool_call(),
+        **{
+            "server_name": "knowledge",
+            "tool_name": "search_knowledge",
+            "is_internal": True,
+            "arguments": {"query": "bygglov", "within": "Interna rutiner"},
+            **overrides,
+        },
+    )
+
+
+@pytest.mark.parametrize(
+    ("call", "shown"),
+    [
+        (_knowledge_call(), {"query": "bygglov"}),
+        (_knowledge_call(arguments={"query": " ", "within": "Interna"}), {}),
+        (
+            _knowledge_call(
+                tool_name="read_source",
+                arguments={"document_id": "Intern rutin", "offset": 0},
+            ),
+            {},
+        ),
+        (
+            _knowledge_call(
+                tool_name="describe_source", arguments={"source_id": "Intern"}
+            ),
+            {},
+        ),
+        # A row stored before the flag existed counts as Eneo's own.
+        (_knowledge_call(is_internal=None), {"query": "bygglov"}),
+        # An external server may be named "knowledge" too.
+        (
+            _knowledge_call(
+                is_internal=False, arguments={"document_id": "Offentlig sida"}
+            ),
+            {"document_id": "Offentlig sida"},
+        ),
+    ],
+)
+def test_hidden_sources_show_a_knowledge_call_only_its_search_terms(call, shown):
+    widget = _widget(show_sources=False)
+    chunk = replace(_tool_chunk(), tool_calls_metadata=[call])
+
+    [visible] = VisitorView(widget).events(chunk)
+    assert _sse(visible)["tools"][0]["arguments"] == shown
+
+    session = _stored_session()
+    session.questions[0].tool_calls = [
+        ToolCallInfo(
+            server_name=call.server_name,
+            tool_name=call.tool_name,
+            arguments=call.arguments,
+            is_internal=call.is_internal,
+        )
+    ]
+    payload = to_session_public(VisitorView(widget).session(session))
+    [message] = payload.model_dump(mode="json")["messages"]
+    assert message["tool_calls"][0]["arguments"] == shown
+
+
+def test_shown_sources_keep_the_argument_a_knowledge_call_displays():
+    call = _knowledge_call(
+        tool_name="read_source", arguments={"document_id": "Rutin", "offset": 0}
+    )
+    chunk = replace(_tool_chunk(), tool_calls_metadata=[call])
+
+    [visible] = VisitorView(_widget()).events(chunk)
+
+    assert _sse(visible)["tools"][0]["arguments"] == {"document_id": "Rutin"}
+
+
+CITED_ANSWER = (
+    'Vi har öppet 9–17 <inref id="a5477f85"/>.\n\n'
+    'Avgiften är 5 < 10 kr<inref id="b3291cc0"/><inref id="c0ffee00"></inref>.'
+)
+UNCITED_ANSWER = "Vi har öppet 9–17.\n\nAvgiften är 5 < 10 kr."
+
+
+def _visible_text(view: VisitorView, pieces: list[str]) -> str:
+    events = [
+        event
+        for piece in pieces
+        for event in view.events(
+            Completion(text=piece, response_type=ResponseType.TEXT)
+        )
+    ]
+    return "".join(event.text or "" for event in [*events, *view.finish()])
+
+
+@pytest.mark.parametrize("cut", range(len(CITED_ANSWER) + 1))
+def test_hidden_sources_strip_citations_wherever_a_chunk_ends(cut):
+    view = VisitorView(_widget(show_sources=False))
+
+    text = _visible_text(view, [CITED_ANSWER[:cut], CITED_ANSWER[cut:]])
+
+    assert text == UNCITED_ANSWER
+
+
+def test_hidden_sources_strip_citations_streamed_one_character_at_a_time():
+    view = VisitorView(_widget(show_sources=False))
+
+    assert _visible_text(view, list(CITED_ANSWER)) == UNCITED_ANSWER
+
+
+def test_hidden_sources_drop_a_citation_the_answer_was_cut_off_in():
+    view = VisitorView(_widget(show_sources=False))
+
+    assert _visible_text(view, ["Öppet 9–17 ", '<inref id="a5477']) == "Öppet 9–17"
+
+
+def test_held_text_comes_before_the_error_that_ends_the_answer():
+    view = VisitorView(_widget(show_sources=False))
+    assert (
+        view.events(Completion(text="Öppet ", response_type=ResponseType.TEXT))[0].text
+        == "Öppet"
+    )
+
+    held, failure = view.events(
+        Completion(text="", error="x", response_type=ResponseType.ERROR, stop=True)
+    )
+
+    assert (held.response_type, held.text) == (ResponseType.TEXT, " ")
+    assert failure.response_type == ResponseType.ERROR
+    assert view.finish() == []
+
+
+def test_a_citation_split_around_a_tool_event_stays_hidden():
+    view = VisitorView(_widget(show_sources=False))
+
+    first = view.events(_text('Öppet <inref id="1234'))
+    tool = view.events(_tool_chunk())
+    second = view.events(_text('5678"/>.'))
+
+    assert [event.response_type for event in tool] == [ResponseType.TOOL_CALL]
+    text = "".join(e.text or "" for e in [*first, *second, *view.finish()])
+    assert text == "Öppet."
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "Svar <inref" + " " * 40 + 'id="12345678"/>.',
+        'Svar <inref id="00000000-0000-4000-8000-000000000000" />.',
+        'Svar <inref\n id="a5477f85"\n/>.',
+        "Ett <inreference> och <b>fet</b> text, 1 < 2 > 0.",
+        "Slutar på <inre",
+        "Slutar på <",
+        'Bruten <inref id="1234',
+    ],
+)
+def test_the_stream_gives_what_a_restore_gives_wherever_a_chunk_ends(answer):
+    expected = strip_inline_references(answer)
+    assert "<inref " not in expected
+    for cut in range(len(answer) + 1):
+        view = VisitorView(_widget(show_sources=False))
+        assert _visible_text(view, [answer[:cut], answer[cut:]]) == expected
+
+
+def test_a_long_run_of_spaces_costs_a_stream_no_more_than_a_scan_per_chunk():
+    view = VisitorView(_widget(show_sources=False))
+    pieces = ["Svar <inref", *[" " * 32] * 500, 'id="12345678"/>.']
+
+    started = perf_counter()
+    text = _visible_text(view, pieces)
+
+    assert text == "Svar."
+    assert perf_counter() - started < 2
+
+
+def test_a_held_end_of_text_reaches_the_visitor_when_the_answer_ends():
+    view = VisitorView(_widget(show_sources=False))
+
+    assert _visible_text(view, ["5 <"]) == "5 <"
+
+
+def test_shown_sources_keep_citations_in_the_text():
+    view = VisitorView(_widget())
+
+    assert _visible_text(view, [CITED_ANSWER]) == CITED_ANSWER
+
+
+def test_hidden_sources_strip_citations_on_restore():
+    session = _stored_session()
+    session.questions[0].answer = CITED_ANSWER
+
+    hidden = to_session_public(
+        VisitorView(_widget(show_sources=False)).session(session)
+    )
+    shown = to_session_public(VisitorView(_widget()).session(session))
+
+    assert hidden.model_dump(mode="json")["messages"][0]["answer"] == UNCITED_ANSWER
+    assert shown.model_dump(mode="json")["messages"][0]["answer"] == CITED_ANSWER
 
 
 # --- errors -----------------------------------------------------------------

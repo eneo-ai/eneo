@@ -13,8 +13,13 @@ from eneo.ai_models.completion_models.completion_model import (
     ToolCallMetadata,
 )
 from eneo.assistants.api.assistant_models import AssistantResponse
-from eneo.assistants.reference_tags import INLINE_REFERENCE_PATTERN
+from eneo.assistants.reference_tags import (
+    INLINE_REFERENCE_PATTERN,
+    InlineReferenceStripper,
+    strip_inline_references,
+)
 from eneo.completion_models.domain.skill_activation import SKILL_ACTIVATION_TOOL_NAME
+from eneo.internal_mcp.constants import KNOWLEDGE_SERVER_NAME
 from eneo.questions.question import (
     McpToolReferencePublic,
     Question,
@@ -86,18 +91,22 @@ class VisitorView:
     Tool calls carry only ``SHOWN_CALL_FIELDS`` and resource ``_meta`` only its
     display keys: an allowlist, so a new field is hidden until it is added.
     An error says only that the assistant cannot answer.
-    With ``show_sources`` off no reference of any kind leaves the server. With
-    ``show_tool_activity`` off no tool call does. A resource a tool returned
+    With ``show_sources`` off no reference of any kind leaves the server: no
+    citation in the answer text and no knowledge-call argument but its search
+    terms. With ``show_tool_activity`` off no tool call does. A resource a tool returned
     reaches the visitor only once the answer cites it, on a tool event with an
     empty tool list, so the stream carries what a restore does.
 
-    One instance filters one answer stream: it holds the uncited resources.
+    One instance filters one answer stream: it holds the uncited resources and
+    the end of a text chunk that may be the start of a citation, which
+    ``finish`` releases once the stream has ended.
     """
 
     def __init__(self, widget: Widget) -> None:
         self.widget = widget
         self._uncited: dict[str, McpToolReference] = {}
         self._tail = ""
+        self._citations = InlineReferenceStripper()
 
     # --- ask ----------------------------------------------------------------
 
@@ -131,25 +140,39 @@ class VisitorView:
             ResponseType.TOKEN_USAGE,
         ):
             return []
-        if chunk.response_type == ResponseType.TOOL_CALL:
-            return self._tool_events(chunk)
         if chunk.response_type == ResponseType.TEXT:
             cited = self._newly_cited(chunk.text or "")
-            if not self.widget.show_sources and chunk.reference_chunks is not None:
-                chunk = replace(chunk, reference_chunks=None)
+            if not self.widget.show_sources:
+                chunk = replace(
+                    chunk,
+                    text=self._citations.strip(chunk.text or ""),
+                    reference_chunks=None,
+                )
             return [*cited, chunk]
+        if chunk.response_type == ResponseType.TOOL_CALL:
+            return self._tool_events(chunk)
         if chunk.response_type == ResponseType.ERROR:
             # The adapter has logged what failed. A cut-off answer still needs
             # its error event, but not the provider's reason for it.
             return [
+                *self.finish(),
                 replace(
                     chunk,
                     error=WidgetAnswerUnavailableError.public_message,
                     error_code=WidgetAnswerUnavailableError.status_code,
                     error_reason=WidgetAnswerUnavailableError.code,
-                )
+                ),
             ]
         return [chunk]
+
+    def finish(self) -> list[Completion]:
+        """Text held back for a citation that never came, in its own event.
+
+        Only for the end of the answer: a tool event can fall inside a citation
+        split across two chunks.
+        """
+        held = self._citations.flush()
+        return [Completion(text=held, response_type=ResponseType.TEXT)] if held else []
 
     def _tool_events(self, chunk: Completion) -> list[Completion]:
         calls: list[ToolCallMetadata] = (
@@ -227,6 +250,11 @@ class VisitorView:
                 # Without them the message's tools name no assistant.
                 "assistant_id": None,
                 "assistant_name": None,
+                "answer": (
+                    question.answer
+                    if show_sources
+                    else strip_inline_references(question.answer)
+                ),
                 "info_blobs": question.info_blobs if show_sources else [],
                 "mcp_tool_references": (
                     [
@@ -262,16 +290,25 @@ class VisitorView:
     def _shown_call(self, call: ToolCallMetadata | ToolCallInfo) -> dict[str, Any]:
         return {
             **{name: getattr(call, name) for name in SHOWN_CALL_FIELDS},
-            "arguments": self._shown_argument(call.arguments),
+            "arguments": self._shown_argument(call),
         }
 
-    @staticmethod
     def _shown_argument(
-        arguments: Optional[dict[str, object]],
+        self, call: ToolCallMetadata | ToolCallInfo
     ) -> Optional[dict[str, object]]:
+        arguments = call.arguments
         if not arguments:
             return arguments
-        for key in (*DISPLAY_ARGUMENT_KEYS, *arguments):
+        # With sources hidden, the document or source a knowledge call names
+        # is a source too; its search terms are the visitor's own subject.
+        keys = (
+            ("query",)
+            if not self.widget.show_sources
+            and call.server_name == KNOWLEDGE_SERVER_NAME
+            and call.is_internal is not False
+            else (*DISPLAY_ARGUMENT_KEYS, *arguments)
+        )
+        for key in keys:
             value = arguments.get(key)
             if isinstance(value, str) and value.strip():
                 return {key: value}
