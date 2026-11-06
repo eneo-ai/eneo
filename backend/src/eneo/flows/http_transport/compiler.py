@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import base64
-import json
 from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
 
@@ -26,11 +25,13 @@ from eneo.flows.http_transport.effective_url import (
     parse_effective_http_url,
 )
 from eneo.flows.http_transport.errors import HttpCredentialTransportError
+from eneo.flows.http_transport.json_template import render_json_template
 from eneo.flows.variable_resolver import (
     FlowVariableContext,
     FlowVariableInterpolation,
     iter_template_expressions,
 )
+from eneo.json_types import JsonValue
 from eneo.main.exceptions import TypedIOValidationException
 
 
@@ -52,7 +53,7 @@ class EffectiveHttpRequest:
     url: str
     headers: dict[str, str] = field(repr=False)
     body: bytes | None
-    json_body: dict[str, Any] | list[Any] | None
+    json_body: JsonValue | None
     timeout: float
     secret_header_names: frozenset[str]
     secret_values: frozenset[str] = field(repr=False)
@@ -67,6 +68,7 @@ def compile_http_config(
     variables: dict[str, Any] | None = None,
     interpolate: Callable[[str, dict[str, Any]], str] | None = None,
     interpolate_with_evidence: InterpolateWithEvidenceFn | None = None,
+    resolve_value: Callable[[str, dict[str, Any]], object] | None = None,
 ) -> EffectiveHttpRequest:
     """Pure function. Compiles authored config into an effective request.
 
@@ -76,6 +78,8 @@ def compile_http_config(
         method: "GET" or "POST".
         variables: Variable context for template interpolation.
         interpolate: Function to interpolate ``{{ }}`` expressions in strings.
+        resolve_value: Function giving the value an expression names, for a
+            reference that stands outside quotes in a JSON body template.
 
     Returns:
         An ``EffectiveHttpRequest`` ready for the HTTP client.
@@ -186,6 +190,11 @@ def compile_http_config(
         authored,
         direction,
         _interpolate_evidenced,
+        (
+            None
+            if resolve_value is None
+            else lambda expression: resolve_value(expression, ctx)
+        ),
     )
 
     return EffectiveHttpRequest(
@@ -229,9 +238,10 @@ def _compile_body(
     authored: HttpAuthoredConfig,
     direction: str,
     interpolate_fn: Callable[..., FlowVariableInterpolation],
+    resolve_value: Callable[[str], object] | None,
 ) -> tuple[
     bytes | None,
-    dict[str, Any] | list[Any] | None,
+    JsonValue | None,
     tuple[FlowResolvedInputEdge, ...],
 ]:
     """Compile body mode into (raw_bytes, json_body)."""
@@ -248,13 +258,15 @@ def _compile_body(
         template = authored.body.template
         if template is None:
             return None, None, ()
-        interpolation = interpolate_fn(template, binding_ref="http.body")
-        rendered = interpolation.text
-        try:
-            parsed = json.loads(rendered)
-        except (json.JSONDecodeError, ValueError):
-            return rendered.encode("utf-8"), None, interpolation.edges
-        return None, parsed, interpolation.edges
+        read_edges: list[tuple[FlowResolvedInputEdge, ...]] = []
+
+        def text_of(reference: str) -> str:
+            interpolation = interpolate_fn(reference, binding_ref="http.body")
+            read_edges.append(interpolation.edges)
+            return interpolation.text
+
+        body = render_json_template(template, text_of=text_of, value_of=resolve_value)
+        return None, body, merge_resolved_input_edges(*read_edges)
 
     if mode == HttpBodyMode.TEXT_TEMPLATE:
         template = authored.body.template

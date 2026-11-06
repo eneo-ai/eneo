@@ -36,6 +36,18 @@ class HttpCredentialTransportError(TypedIOValidationException):
         )
 
 
+class HttpRenderedBodyNotJsonError(TypedIOValidationException):
+    """A JSON body that is no JSON value once filled. It says nothing of what
+    was filled in: that is run data."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "The HTTP step's JSON body is not valid JSON once filled. "
+            "Write a reference to text inside quotes.",
+            code=FlowApiErrorCode.TYPED_IO_HTTP_INVALID_CONFIG.value,
+        )
+
+
 @dataclass(eq=False)
 class AuthoredSecretEncryptionUnavailableError(Exception):
     """Raised when a plaintext authored secret cannot be encrypted before storage.

@@ -511,6 +511,72 @@ async def test_deliver_webhook_does_not_start_a_send_past_the_job_deadline() -> 
     deps.audit_http_outbound.assert_not_awaited()
 
 
+def _json_body_step(template: str) -> _Step:
+    return _Step(
+        step_order=4,
+        step_id="step-4",
+        input_type="text",
+        input_source="flow_input",
+        output_config={
+            "url": "https://example.org/webhook",
+            "auth": {"mode": "none"},
+            "body": {"mode": "json_template", "template": template},
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_deliver_webhook_sends_many_lines_and_a_whole_object_as_written() -> None:
+    """Kills: a delivery context that reaches a reference by text only, which
+    turns the object into lines of text or breaks the JSON on a newline."""
+    transcript = 'Anna: "Vi väljer A."\nErik: Ja.\n'
+    send_http_request = AsyncMock(
+        return_value=httpx.Response(
+            200, request=httpx.Request("POST", "https://example.org/webhook")
+        )
+    )
+    deps = _make_deps(send_http_request=send_http_request)
+
+    await deliver_webhook(
+        step=_json_body_step(
+            '{"files": [{"content": "{{ text }}"}], "canvas": {{ structured }}}'
+        ),
+        text_payload=transcript,
+        run=_Run(id="run-4", flow_id="flow-1", tenant_id="tenant-1"),
+        context={"text": transcript, "structured": {"title": "Skiss"}},
+        deps=deps,
+        idempotency_key="run-4:step-4:1:webhook",
+        sends_end_at=_NO_JOB_DEADLINE,
+    )
+
+    assert send_http_request.await_args is not None
+    assert send_http_request.await_args.kwargs["json_body"] == {
+        "files": [{"content": transcript}],
+        "canvas": {"title": "Skiss"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_deliver_webhook_sends_nothing_when_the_body_is_not_json() -> None:
+    send_http_request = AsyncMock()
+    deps = _make_deps(send_http_request=send_http_request)
+
+    with pytest.raises(BadRequestException) as caught:
+        await deliver_webhook(
+            step=_json_body_step('{"note": {{ text }}}'),
+            text_payload="inte json",
+            run=_Run(id="run-4", flow_id="flow-1", tenant_id="tenant-1"),
+            context={"text": "inte json"},
+            deps=deps,
+            idempotency_key="run-4:step-4:1:webhook",
+            sends_end_at=_NO_JOB_DEADLINE,
+        )
+
+    assert caught.value.code == "typed_io_http_invalid_config"
+    assert "inte json" not in str(caught.value)
+    send_http_request.assert_not_awaited()
+
+
 @pytest.mark.asyncio
 async def test_deliver_webhook_timeout_maps_to_delivery_error_and_audits() -> None:
     step = _Step(

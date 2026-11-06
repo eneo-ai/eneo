@@ -380,6 +380,10 @@ class FlowVariableResolver:
             edges=merge_resolved_input_edges(edges),
         )
 
+    def resolve_value(self, expression: str, context: dict[str, Any]) -> Any:
+        """The value one reference names, as it is: a list stays a list."""
+        return self._resolve_path(context, expression)
+
     def resolve_reference_with_evidence(
         self,
         expression: str,
