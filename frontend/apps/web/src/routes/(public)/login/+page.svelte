@@ -12,6 +12,7 @@
   import * as Field from "$lib/components/ui/field";
   import { Input } from "$lib/components/ui/input";
   import { LoadingScreen } from "$lib/components/layout";
+  import { assignLocation } from "$lib/core/navigation";
   import AuthAlert from "$lib/features/auth/components/AuthAlert.svelte";
   import AuthPageShell from "$lib/features/auth/components/AuthPageShell.svelte";
   import CorrelationReference from "$lib/features/auth/components/CorrelationReference.svelte";
@@ -512,7 +513,7 @@
             return async ({ result }) => {
               if (result.type === "redirect") {
                 // The validated destination may be a server-only authentication handoff.
-                window.location.assign(result.location);
+                assignLocation(result.location);
                 return;
               }
 
