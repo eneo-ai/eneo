@@ -441,7 +441,14 @@ export function ChatPage({
                 modelSelector={modelSelector}
                 skills={skills}
                 partnerToken={partnerToken}
-                onNewConversation={newConversation}
+                // Its controls (the context meter, the model dialog) go with
+                // the view, so the fresh composer takes focus if it was lost.
+                onNewConversation={(prepare) =>
+                  confirmConversationChange(() => {
+                    prepare?.();
+                    startConversation(true);
+                  })
+                }
                 onStartedChange={(value) =>
                   setActive((current) =>
                     current && current.started !== value ? { ...current, started: value } : current

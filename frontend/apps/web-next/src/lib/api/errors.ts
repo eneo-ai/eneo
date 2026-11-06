@@ -241,6 +241,8 @@ const ERROR_MESSAGE_KEYS: Record<number, string> = {
   9076: "eneo_error_9076", // ICON_NOT_ATTACHABLE
   // Governance
   9069: "eneo_error_9069", // PROMPT_IN_USE_BY_GOVERNANCE
+  // Conversation settings
+  9065: "eneo_error_9065", // CONVERSATION_SETTINGS_CONFLICT
   // Skill lifecycle
   9081: "eneo_error_9081", // SKILL_REFERENCED_BY_REVISION
   9043: "eneo_error_9043", // SKILL_REVISION_CONFLICT

@@ -30,6 +30,7 @@
     type PersonalSkillMode
   } from "$lib/features/skills/personalChatSkills";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
+  import { getChatService } from "../../ChatService.svelte";
   import { m } from "$lib/paraglide/messages";
   import Ban from "@lucide/svelte/icons/ban";
   import BookOpenCheck from "@lucide/svelte/icons/book-open-check";
@@ -48,6 +49,8 @@
 
   const eneo = getEneo();
   const { user } = getAppContext();
+  // Undefined without a conversation around it; the assistant's model then decides.
+  const chat = getChatService();
   const {
     state: { currentSpace },
     updateDefaultAssistantSkills,
@@ -64,26 +67,52 @@
     spaceId && assistantId ? untrack(() => personalChatSkills(spaceId, assistantId)) : null
   );
 
+  // A conversation's turns run the Skills on its own model, so they are read
+  // and judged against it rather than the assistant's.
+  const conversationModelId = () => chat?.settingsResolution?.effective_model?.id;
+  // A model switch still being saved decides which model that is.
+  const settledConversationModelId = chat
+    ? async () => {
+        await chat.settingsSettled();
+        return conversationModelId();
+      }
+    : undefined;
+
   function personalChatSkills(spaceId: string, assistantId: string) {
     const assistant = { id: assistantId };
     return new PersonalChatSkills(
       {
-        readConfiguration: () => eneo.skills.getAssistantConfiguration({ spaceId, assistantId }),
+        readConfiguration: () =>
+          eneo.skills.getAssistantConfiguration({
+            spaceId,
+            assistantId,
+            conversationModelId: conversationModelId()
+          }),
         listLibrary: (params) => eneo.skills.list({ spaceId, ...params }),
-        save: (bindings) => updateDefaultAssistantSkills(assistant, bindings),
-        settled: awaitDefaultAssistantUpdates
+        save: (bindings) =>
+          updateDefaultAssistantSkills(assistant, bindings, settledConversationModelId),
+        settled: async () => {
+          await Promise.all([awaitDefaultAssistantUpdates(), chat?.settingsSettled()]);
+        }
       },
       // Saving the personal chat's own Skills takes both.
       user.hasPermission({ allOf: ["personal_chat", "personal_skills"] })
     );
   }
 
-  // A model change can pause the person's own Skills or resume them.
-  const modelId = $derived($currentSpace.default_assistant?.completion_model?.id);
+  // A model change can pause the person's own Skills or resume them. Null
+  // while the conversation's model is not known yet.
+  const modelKey = $derived(
+    chat
+      ? chat.settingsResolution
+        ? (chat.settingsResolution.effective_model?.id ?? "")
+        : null
+      : $currentSpace.default_assistant?.completion_model?.id
+  );
   $effect(() => {
-    track(modelId);
+    track(modelKey);
     const owner = skills;
-    if (owner) untrack(() => void owner.load());
+    if (owner && modelKey !== null) untrack(() => void owner.load());
   });
   $effect(() => {
     const owner = skills;

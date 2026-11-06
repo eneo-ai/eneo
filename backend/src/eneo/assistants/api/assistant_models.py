@@ -338,6 +338,16 @@ class AssistantUpdatePublic(AssistantCreatePublic):
     skill_bindings: Optional[list[AssistantSkillBindingInput]] = Field(
         default=None, max_length=MAX_SKILL_ATTACHMENT_LIMIT
     )
+    conversation_model_id: Optional[UUID] = Field(
+        default=None,
+        description=(
+            "Personal chat only: the model of the conversation own Skills are "
+            "changed from. The change is judged against it, as that "
+            "conversation's turns run them, instead of the assistant's model, "
+            "which stays as it is. A model the personal chat can no longer use "
+            "is ignored. Only with skill_bindings and no other field."
+        ),
+    )
 
 
 class AssistantCreate(AssistantBase):

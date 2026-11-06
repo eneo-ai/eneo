@@ -1,179 +1,83 @@
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { useAppContext } from "@/components/providers/app-context";
-import { modelSupportsToolCalling, type Capability } from "@/features/capabilities/capabilities";
-import type { ChatPartner } from "@/lib/chat/types";
-import {
-  chatCapabilities,
-  defaultDisabledCapabilities,
-  withoutToolCalling
-} from "./chat-capabilities";
-import {
-  chatPartnerMcpServers,
-  defaultDisabledMcpServerIds,
-  pruneDisabledMcpServerIds
-} from "./mcp-controls";
-import {
-  initialDisabledMcpServerIds,
-  parseMcpPreferences,
-  readMcpPreferencesRaw,
-  saveMcpServerPreferences,
-  subscribeMcpPreferences
-} from "./mcp-preferences";
+import { useAppContext, type AppContextValue } from "@/components/providers/app-context";
+import type { Capability } from "@/features/capabilities/capabilities";
+import type { Schema } from "@/lib/api/models";
+import { useConversationSettings } from "./conversation-settings";
 
-const AUTO_ACCEPT_TOOLS_STORAGE_KEY = "autoAcceptToolsEnabled";
-
-/**
- * Whether tools run without asking first, as the user last chose in the
- * composer's tool menu. Eneo's own interactive views follow it for the calls
- * they make; external views ask for each call regardless.
- */
-export function autoAcceptToolsPreference(): boolean {
-  try {
-    return window.localStorage.getItem(AUTO_ACCEPT_TOOLS_STORAGE_KEY) !== "false";
-  } catch {
-    return true;
-  }
+/** The capabilities the user may use, as this conversation's settings choose them. */
+function permittedCapabilities(
+  resolution: Schema<"ConversationSettingsResolution"> | null,
+  can: AppContextValue["can"]
+) {
+  return (resolution?.capabilities ?? []).filter((capability) => can(capability.purpose));
 }
 
-/**
- * The composer's tool choices for a partner: which capabilities (web search,
- * image generation) and MCP servers are on, and whether tools run without
- * approval. Governance defaults apply first; the personal assistant remembers
- * the user's choices per tenant, user and assistant (mcp-preferences.ts).
- */
-export function useToolChoices(partner: ChatPartner) {
-  const { tenant, user, can } = useAppContext();
-  // A model without tool calling never receives any tool: the backend drops
-  // MCP servers, capabilities and loopback tools alike. Every tool row then
-  // reads as unavailable for that reason, unless a more specific one applies.
-  // A partner without a model cannot answer at all, so it is not gated here.
-  const modelSupportsTools =
-    partner.completionModel == null || modelSupportsToolCalling(partner.completionModel);
-  const allCapabilities = useMemo(() => chatCapabilities(partner, can), [partner, can]);
-  const capabilities = allCapabilities.map((capability) =>
-    modelSupportsTools ? capability : withoutToolCalling(capability)
+/** The capabilities the user may use that this conversation has switched off. */
+export function disabledCapabilitiesOf(
+  resolution: Schema<"ConversationSettingsResolution"> | null,
+  can: AppContextValue["can"]
+) {
+  return new Set(
+    permittedCapabilities(resolution, can)
+      .filter(({ selected }) => !selected)
+      .map(({ purpose }) => purpose)
   );
-  const mcpServers = useMemo(() => chatPartnerMcpServers(partner), [partner]);
-  const preferenceIds = useMemo(
-    () => [
-      ...mcpServers.map((server) => server.id),
-      ...allCapabilities.map((capability) => `capability:${capability.purpose}`)
-    ],
-    [mcpServers, allCapabilities]
-  );
-  const preferenceContext = useMemo(
-    () =>
-      partner.type === "default-assistant"
-        ? { tenantId: tenant.id, userId: user.id, assistantId: partner.id }
-        : null,
-    [partner.type, partner.id, tenant.id, user.id]
-  );
-  const readPreferenceSnapshot = useCallback(
-    () => (preferenceContext ? readMcpPreferencesRaw(preferenceContext) : null),
-    [preferenceContext]
-  );
-  const rawPreferences = useSyncExternalStore(subscribeMcpPreferences, readPreferenceSnapshot);
-  const savedPreferences = useMemo(() => parseMcpPreferences(rawPreferences), [rawPreferences]);
-  const defaultDisabledPreferenceIds = useMemo(
-    () => [
-      ...defaultDisabledMcpServerIds(partner),
-      ...defaultDisabledCapabilities(partner).map((purpose) => `capability:${purpose}`)
-    ],
-    [partner]
-  );
-  const resolvedDisabledIds = useMemo(
-    () =>
-      initialDisabledMcpServerIds({
-        availableServerIds: preferenceIds,
-        defaultDisabledServerIds: defaultDisabledPreferenceIds,
-        preferences: savedPreferences
-      }),
-    [preferenceIds, defaultDisabledPreferenceIds, savedPreferences]
+}
+
+export function useToolChoices() {
+  const { can } = useAppContext();
+  const { resolution, update } = useConversationSettings();
+  const settings = resolution?.settings;
+  const modelSupportsTools = resolution?.supports_tool_calling ?? false;
+  const allCapabilities = permittedCapabilities(resolution, can);
+  const capabilities = allCapabilities.map((capability) => ({
+    ...capability,
+    reason: capability.reason ?? null
+  }));
+  const mcpServers = (resolution?.mcp_servers ?? []).map((server) => ({
+    ...server,
+    description: server.description ?? null,
+    icon_url: server.icon_url ?? null
+  }));
+  const disabledCapabilities = disabledCapabilitiesOf(resolution, can);
+  const disabledMcpServerIds = new Set(
+    mcpServers.filter(({ selected }) => !selected).map(({ id }) => id)
   );
 
-  const [autoAcceptTools, setAutoAcceptTools] = useState(autoAcceptToolsPreference);
-  const [locallyEditedPreferences, setLocallyEditedPreferences] = useState(false);
-  const [localDisabledCapabilities, setLocalDisabledCapabilities] = useState<Set<Capability>>(
-    () => new Set(defaultDisabledCapabilities(partner))
-  );
-  const [localDisabledMcpServerIds, setLocalDisabledMcpServerIds] = useState<Set<string>>(
-    () => new Set(defaultDisabledMcpServerIds(partner))
-  );
-  const disabledMcpServerIds = useMemo(
-    () =>
-      locallyEditedPreferences
-        ? localDisabledMcpServerIds
-        : new Set(resolvedDisabledIds.filter((id) => !id.startsWith("capability:"))),
-    [locallyEditedPreferences, localDisabledMcpServerIds, resolvedDisabledIds]
-  );
-  const disabledCapabilities = locallyEditedPreferences
-    ? localDisabledCapabilities
-    : new Set(
-        allCapabilities
-          .filter((capability) => resolvedDisabledIds.includes(`capability:${capability.purpose}`))
-          .map((capability) => capability.purpose)
-      );
-
-  function persistToolChoices(mcpDisabled: Set<string>, capabilityDisabled: Set<Capability>) {
-    if (!preferenceContext) return;
-    saveMcpServerPreferences(
-      preferenceContext,
-      preferenceIds,
-      new Set([
-        ...mcpDisabled,
-        ...[...capabilityDisabled].map((purpose) => `capability:${purpose}`)
-      ])
-    );
-  }
-
-  function setCapabilitiesDisabled(next: Set<Capability>) {
-    setLocalDisabledCapabilities(next);
-    setLocalDisabledMcpServerIds(disabledMcpServerIds);
-    setLocallyEditedPreferences(true);
-    persistToolChoices(disabledMcpServerIds, next);
-  }
-
-  function toggleCapability(purpose: Capability) {
-    const next = new Set(disabledCapabilities);
-    if (next.has(purpose)) next.delete(purpose);
-    else next.add(purpose);
-    setCapabilitiesDisabled(next);
-  }
-
-  function setMcpDisabled(next: Set<string>) {
-    setLocalDisabledMcpServerIds(next);
-    setLocalDisabledCapabilities(disabledCapabilities);
-    setLocallyEditedPreferences(true);
-    persistToolChoices(next, disabledCapabilities);
-  }
-  const activeDisabledMcpServerIds = useMemo(
-    () => pruneDisabledMcpServerIds(disabledMcpServerIds, mcpServers),
-    [disabledMcpServerIds, mcpServers]
-  );
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(
-        AUTO_ACCEPT_TOOLS_STORAGE_KEY,
-        autoAcceptTools ? "true" : "false"
-      );
-    } catch {
-      // Ignore preference persistence failures.
+  function setTools(mcpDisabled: Set<string>, capabilityDisabled: Set<Capability>) {
+    // Only what the user changed is sent, and the provider merges it into the
+    // latest maps: a tool never touched stays out of them and keeps following
+    // the administrator's default, dormant choices for removed tools stay, and
+    // a change queued behind another save cannot undo it.
+    const mcp_server_states: Record<string, boolean> = {};
+    const capability_states: Record<string, boolean> = {};
+    for (const server of mcpServers) {
+      const selected = !mcpDisabled.has(server.id);
+      if (selected !== server.selected) mcp_server_states[server.id] = selected;
     }
-  }, [autoAcceptTools]);
-
+    for (const capability of allCapabilities) {
+      const selected = !capabilityDisabled.has(capability.purpose);
+      if (selected !== capability.selected) capability_states[capability.purpose] = selected;
+    }
+    void update({ mcp_server_states, capability_states });
+  }
   return {
-    /** False when the partner's model cannot call tools: every tool is unavailable. */
     modelSupportsTools,
-    /** Capabilities offered in the composer. */
     capabilities,
     disabledCapabilities,
-    setDisabledCapabilities: setCapabilitiesDisabled,
-    toggleCapability,
     mcpServers,
-    /** Disabled MCP servers among those the partner offers. */
-    disabledMcpServerIds: activeDisabledMcpServerIds,
-    setDisabledMcpServerIds: setMcpDisabled,
-    autoAcceptTools,
-    setAutoAcceptTools
+    disabledMcpServerIds,
+    setDisabledCapabilities: (next: Set<Capability>) => setTools(disabledMcpServerIds, next),
+    setDisabledMcpServerIds: (next: Set<string>) => setTools(next, disabledCapabilities),
+    setTools,
+    toggleCapability: (purpose: Capability) => {
+      const next = new Set(disabledCapabilities);
+      if (next.has(purpose)) next.delete(purpose);
+      else next.add(purpose);
+      setTools(disabledMcpServerIds, next);
+    },
+    autoAcceptTools: settings?.require_tool_approval === false,
+    setAutoAcceptTools: (enabled: boolean) => {
+      void update({ require_tool_approval: !enabled });
+    }
   };
 }

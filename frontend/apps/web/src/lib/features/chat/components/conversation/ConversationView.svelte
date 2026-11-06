@@ -2,6 +2,8 @@
   import { conversationUploadGroups } from "../../conversationUploads";
   import { opensFilePanel } from "../../toolFileInputs";
   import { getEneo } from "$lib/core/Eneo";
+  import { getAppContext } from "$lib/core/AppContext";
+  import { canUseCapability } from "$lib/features/mcp/capabilities";
   import {
     initAttachmentManager,
     matchesUpload
@@ -26,7 +28,6 @@
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { getChatService } from "../../ChatService.svelte";
   import { editedPassage } from "../../documentVersions";
-  import { chatCapabilityAvailable } from "../../chatCapabilities";
   import { initMcpAppPane } from "../../mcp-apps/McpAppPane.svelte";
   import McpAppPanel from "../../mcp-apps/McpAppPanel.svelte";
   import {
@@ -37,7 +38,6 @@
     toolCallsOf
   } from "../../mcp-apps/mcpApps";
   import type { PanelContents } from "$lib/features/file-preview/panelContents";
-  import { getAppContext } from "$lib/core/AppContext";
   import { onDestroy, untrack, type Snippet } from "svelte";
   import { beforeNavigate } from "$app/navigation";
   import { followConversationScroll } from "../../followConversationScroll";
@@ -51,27 +51,35 @@
   let { children, onNewConversation }: Props = $props();
 
   const chat = getChatService();
+  const { user } = getAppContext();
   const uploadGroups = $derived(conversationUploadGroups(chat.currentConversation.messages ?? []));
   const uploads = $derived(uploadGroups.flatMap((group) => group.files));
-  const { user } = getAppContext();
 
   // Validate uploads client-side against the backend's per-format size limits
   // (and the partner model's vision support) so oversized or unsupported files
   // are rejected instantly with a clear message instead of silently failing the
   // server-side request. Group-chat partners have no completion_model, so vision
   // formats are simply omitted from the accepted set. Images are also accepted
-  // when image generation is available: the model can hand them to the image
-  // tool as reference images even without seeing them itself.
+  // when image generation is available to this user: the model can hand them
+  // to the image tool as reference images even without seeing them itself.
   const attachmentRules = getAttachmentRulesStore(
     toStore(() => {
       const partner = chat.partner;
-      const completion_model =
-        partner && "completion_model" in partner ? partner.completion_model : null;
+      const completion_model = chat.settingsResolution
+        ? chat.settingsResolution.effective_model
+        : (chat.selectedPersonalModel ??
+          (partner && "completion_model" in partner ? partner.completion_model : null));
       return {
         completion_model,
         acceptsImageAttachments:
           completion_model?.vision === true ||
-          chatCapabilityAvailable(partner, user, "image_generation")
+          (canUseCapability(user, "image_generation") &&
+            chat.settingsResolution?.capabilities?.some(
+              (capability) =>
+                capability.purpose === "image_generation" &&
+                capability.available &&
+                capability.selected
+            ) === true)
       };
     })
   );

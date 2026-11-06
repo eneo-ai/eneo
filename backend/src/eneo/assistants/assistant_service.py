@@ -113,6 +113,7 @@ from eneo.roles.permissions import (
 )
 from eneo.services.service import DatastoreResult
 from eneo.services.service_repo import ServiceRepository
+from eneo.sessions.conversation_settings import TOOL_APPROVAL_REQUIRES_STREAMING
 from eneo.skills.domain.personal_chat_skill_layers import (
     PersonalSkillLayerSave,
     assert_personal_skill_layer_save,
@@ -274,6 +275,7 @@ if TYPE_CHECKING:
     )
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
     from eneo.rerank_models.application.rerank_service import RerankService
+    from eneo.sessions.conversation_settings import ConversationSettingsState
     from eneo.sessions.session import SessionInDB
     from eneo.sessions.session_service import SessionService
     from eneo.skills.application.skill_service import SkillService
@@ -525,7 +527,7 @@ class AssistantService:
         return allowed_capability_purposes(self.user.permissions)
 
     @staticmethod
-    def _requested_capabilities(
+    def requested_capabilities(
         *,
         assistant: Assistant,
         space: "Space",
@@ -572,7 +574,7 @@ class AssistantService:
             else assistant.mcp_servers
         )
         servers = general_servers_for_space(attached, space.security_classification)
-        requested_capabilities = self._requested_capabilities(
+        requested_capabilities = self.requested_capabilities(
             assistant=assistant, space=space, effective_config=effective_config
         )
         if requested_capabilities:
@@ -710,6 +712,93 @@ class AssistantService:
         )
 
     @staticmethod
+    def personal_chat_model_rejection(
+        *,
+        space: "Space",
+        assistant: Assistant,
+        effective_config: "EffectiveConfig | None",
+        completion_model_id: UUID,
+    ) -> str | None:
+        """Why a conversation cannot select this model now, or None when it can.
+
+        The single owner of the personal-chat model rules: the override and the
+        settings resolution's list of selectable models both read it.
+        """
+        if (
+            not space.is_personal()
+            or space.default_assistant is None
+            or assistant.id != space.default_assistant.id
+        ):
+            return "A model can only be selected for personal chat."
+        if not space.is_completion_model_available(completion_model_id):
+            return "The selected model is no longer available."
+        if effective_config is not None and effective_config.models_enforced:
+            allowed_ids = {model.id for model in effective_config.available_models}
+            if completion_model_id not in allowed_ids:
+                return "The selected model is no longer allowed by the personal chat policy."
+        try:
+            space.validate_model_security_compatibility(
+                space.get_completion_model(completion_model_id)
+            )
+        except BadRequestException as error:
+            return str(error)
+        return None
+
+    @classmethod
+    def resolve_personal_chat_model_override(
+        cls,
+        *,
+        space: "Space",
+        assistant: Assistant,
+        effective_config: "EffectiveConfig | None",
+        completion_model_id: UUID,
+    ) -> "CompletionModel":
+        """Validate a conversation's model against current space and policy rules."""
+        rejection = cls.personal_chat_model_rejection(
+            space=space,
+            assistant=assistant,
+            effective_config=effective_config,
+            completion_model_id=completion_model_id,
+        )
+        if rejection is not None:
+            raise BadRequestException(rejection)
+        return space.get_completion_model(completion_model_id)
+
+    @classmethod
+    def _conversation_skills_model(
+        cls,
+        *,
+        space: "Space",
+        assistant: Assistant,
+        effective_config: "EffectiveConfig | None",
+        completion_model_id: UUID,
+    ) -> "CompletionModel | None":
+        """The conversation's model own Skills are judged against.
+
+        None when the personal chat can no longer use it (disabled or no
+        longer allowed since the client read it): that conversation runs no
+        turn, so the assistant's model judges them, as outside a conversation,
+        and turning a Skill off still goes through.
+        """
+        if (
+            not space.is_personal()
+            or space.default_assistant is None
+            or assistant.id != space.default_assistant.id
+        ):
+            raise BadRequestException("A model can only be selected for personal chat.")
+        if (
+            cls.personal_chat_model_rejection(
+                space=space,
+                assistant=assistant,
+                effective_config=effective_config,
+                completion_model_id=completion_model_id,
+            )
+            is not None
+        ):
+            return None
+        return space.get_completion_model(completion_model_id)
+
+    @staticmethod
     def _governed_base_instructions(
         assistant: Assistant, effective_config: "EffectiveConfig | None"
     ) -> str:
@@ -801,13 +890,22 @@ class AssistantService:
         )
 
     async def _personal_layer_decision(
-        self, *, space: "Space", assistant: Assistant
+        self,
+        *,
+        space: "Space",
+        assistant: Assistant,
+        conversation_model: "CompletionModel | None" = None,
     ) -> PersonalSkillLayerDecision | None:
-        """The personal chat's own-Skill decision for its stored state."""
+        """The personal chat's own-Skill decision for its stored state, under
+        the conversation's model when one is given."""
         effective_config = await self._resolve_effective_config(
             space=space, assistant=assistant
         )
-        model = self._context_model(assistant, effective_config=effective_config)
+        model = (
+            conversation_model
+            if conversation_model is not None
+            else self._context_model(assistant, effective_config=effective_config)
+        )
         if model is None:
             return None
         plan = await self._create_skill_turn_plan(
@@ -817,6 +915,43 @@ class AssistantService:
             model=model,
         )
         return plan.personal_layer
+
+    async def assert_model_switch_keeps_own_skills(
+        self,
+        *,
+        space: "Space",
+        assistant: Assistant,
+        effective_config: "EffectiveConfig | None",
+        before: "CompletionModel | None",
+        after: "CompletionModel",
+    ) -> None:
+        """Refuse a conversation's model switch that would pause own Skills
+        that run in it now (9080).
+
+        The personal chat's save rule: a layer already paused, or paused for a
+        missing permission, never blocks the switch.
+        """
+        if not (space.is_personal() and assistant.is_default):
+            return
+        if before is None or before.id == after.id:
+            return
+        decisions = [
+            (
+                await self._create_skill_turn_plan(
+                    assistant=assistant,
+                    effective_config=effective_config,
+                    space_is_personal=True,
+                    model=model,
+                )
+            ).personal_layer
+            for model in (before, after)
+        ]
+        assert_personal_skill_layer_save(
+            PersonalSkillLayerSave(
+                before=decisions[0], bindings_changed=False, removal_only=False
+            ),
+            decisions[1],
+        )
 
     async def _persistent_prompt_files(
         self, assistant: Assistant, model: "CompletionModel"
@@ -1206,6 +1341,7 @@ class AssistantService:
         validate_all_on_demand_candidates: bool = False,
         mcp_servers_override: list["MCPServer"] | None = None,
         personal_layer_save: PersonalSkillLayerSave | None = None,
+        conversation_model: "CompletionModel | None" = None,
     ) -> None:
         """Reject saving when the system prompt + persistent attachments don't
         fit the model's context window with room left to ask a question.
@@ -1217,6 +1353,8 @@ class AssistantService:
           own — mirroring the resolution in ask().
         - Vision: the persistent attachments expanded with their
           document-derived images.
+        - Personal chat: a change made from a conversation is measured with
+          that conversation's model (``conversation_model``), as its turns are.
 
         Attachments are sent whole (never truncated), so a set that doesn't fit
         can't run — a clear rejection beats silently sending part of a document.
@@ -1230,7 +1368,11 @@ class AssistantService:
         effective_config = await self._resolve_effective_config(
             space=space, assistant=assistant
         )
-        model = self._context_model(assistant, effective_config=effective_config)
+        model = (
+            conversation_model
+            if conversation_model is not None
+            else self._context_model(assistant, effective_config=effective_config)
+        )
         completion_prompt_files = (
             await self._persistent_prompt_files(assistant, model)
             if model is not None
@@ -1285,7 +1427,7 @@ class AssistantService:
             effective_mcp_servers = assistant.mcp_servers
         if assistant.has_knowledge():
             effective_mcp_servers = []
-        requested_capabilities = self._requested_capabilities(
+        requested_capabilities = self.requested_capabilities(
             assistant=assistant, space=space, effective_config=effective_config
         )
         if requested_capabilities:
@@ -1693,8 +1835,9 @@ class AssistantService:
         sends them) against the same ceiling, so an upload that can't fit is
         rejected up front instead of failing at the provider. A zero-Skill turn
         with no uploads keeps the existing fast path because its baseline was
-        validated on save. Skill turns recheck the baseline because bindings can
-        change independently of the Assistant. History is budget-evicted
+        validated on save. Skill turns and conversation-level model choices
+        recheck the baseline because bindings and the window can change
+        independently of the Assistant. History is budget-evicted
         downstream."""
         if not files and not validate_persistent_baseline:
             return
@@ -1821,6 +1964,7 @@ class AssistantService:
         skill_binding_intents: list[SkillBindingIntent] | None = None,
         document_template: "DocumentTemplateChoice | None" = None,
         rerank_model_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
+        conversation_model_id: UUID | None = None,
     ) -> tuple[Assistant, list[ResourcePermission]]:
         if logging_enabled:
             validate_permission(self.user, Permission.ADMIN)
@@ -1956,9 +2100,38 @@ class AssistantService:
                     "auth_layer": "domain_policy",
                 },
             )
+        # Own Skills changed from a conversation are judged against the model
+        # its turns run them with; the assistant's own model stays as it is.
+        # Any other field would be measured against a model the assistant
+        # does not have, as attachments are in the context fit.
+        conversation_model: "CompletionModel | None" = None
+        if conversation_model_id is not None:
+            if (
+                skill_binding_intents is None
+                or completion_model_id is not None
+                or completion_model_kwargs is not None
+                or document_template is not None
+                or extended_update_requested
+            ):
+                raise BadRequestException(
+                    "A conversation's model can only be given with a change of "
+                    "own Skills and nothing else."
+                )
+            conversation_model = self._conversation_skills_model(
+                space=space,
+                assistant=assistant,
+                effective_config=await self._resolve_effective_config(
+                    space=space, assistant=assistant
+                ),
+                completion_model_id=conversation_model_id,
+            )
         # The save transition rule compares against the stored personal layer.
         personal_layer_before = (
-            await self._personal_layer_decision(space=space, assistant=assistant)
+            await self._personal_layer_decision(
+                space=space,
+                assistant=assistant,
+                conversation_model=conversation_model,
+            )
             if is_personal_default
             else None
         )
@@ -2331,6 +2504,7 @@ class AssistantService:
                     if is_personal_default
                     else None
                 ),
+                conversation_model=conversation_model,
             )
 
         await self.repo.apply_update(
@@ -2474,6 +2648,7 @@ class AssistantService:
         target: AssistantPreflightTarget,
         *,
         prompt_override: str | None = None,
+        completion_model_id: UUID | None = None,
     ) -> AssistantPreflightBaseline:
         """The always-present cost of an assistant: its system prompt text and
         its persistent attachments, which ride along on every question.
@@ -2487,6 +2662,13 @@ class AssistantService:
             target.effective_config,
         )
         model = self._context_model(assistant, effective_config=effective_config)
+        if completion_model_id is not None:
+            model = self.resolve_personal_chat_model_override(
+                space=space,
+                assistant=assistant,
+                effective_config=effective_config,
+                completion_model_id=completion_model_id,
+            )
         skill_plan = await self._create_skill_turn_plan(
             assistant=assistant,
             effective_config=effective_config,
@@ -2539,12 +2721,15 @@ class AssistantService:
         *,
         space_id: UUID,
         assistant_id: UUID,
+        conversation_model_id: UUID | None = None,
     ) -> AssistantSkillConfigurationProjection:
         """Return saved Assistant bindings and their exact initial runtime state.
 
         The binding projection intentionally runs first because it owns both
         Assistant and Skill-read authorization. Runtime resolution then follows
-        the same turn-plan path as ask and save validation.
+        the same turn-plan path as ask and save validation, with the
+        conversation's model when one is given (personal chat only) and the
+        personal chat can still use it.
         """
         bindings = await self.skill_service.list_assistant_binding_projections(
             space_id=space_id,
@@ -2563,7 +2748,19 @@ class AssistantService:
         organisation_bindings = (
             _organisation_binding_projections(effective_config) if personal_chat else ()
         )
-        model = self._context_model(assistant, effective_config=effective_config)
+        conversation_model = (
+            self._conversation_skills_model(
+                space=space,
+                assistant=assistant,
+                effective_config=effective_config,
+                completion_model_id=conversation_model_id,
+            )
+            if conversation_model_id is not None
+            else None
+        )
+        model = conversation_model or self._context_model(
+            assistant, effective_config=effective_config
+        )
         if model is None:
             return AssistantSkillConfigurationProjection(
                 bindings=tuple(bindings),
@@ -3502,25 +3699,10 @@ class AssistantService:
         tool_assistant_id: UUID | None = None,
         disabled_mcp_server_ids: list[UUID] | None = None,
         disabled_capabilities: list[CapabilityPurpose] | None = None,
+        conversation_settings: "ConversationSettingsState | None" = None,
+        group_chat_id: UUID | None = None,
     ) -> _PreparedAssistantTurn:
         """Resolve the ordinary ask policy without creating conversation rows."""
-        # PRD §6 "Critical tests #2": defense-in-depth — never run a Help
-        # Assistant via the normal ask path. Both ``POST /assistants/{id}/sessions/``
-        # and ``POST /assistants/{id}/sessions/{session_id}/`` flow through
-        # here, so guarding this method covers both router entry points and
-        # short-circuits before any session row is created.
-        await assert_not_helper_assistant(
-            assistant_id=assistant_id,
-            role_repo=self.org_space_assistant_role_repo,
-            history_repo=self.help_assistant_assignment_history_repo,
-        )
-        if tool_assistant_id is not None:
-            await assert_not_helper_assistant(
-                assistant_id=tool_assistant_id,
-                role_repo=self.org_space_assistant_role_repo,
-                history_repo=self.help_assistant_assignment_history_repo,
-            )
-
         space = await self.space_repo.get_space_by_assistant(
             assistant_id=assistant_id, tool_assistant_id=tool_assistant_id
         )
@@ -3576,8 +3758,60 @@ class AssistantService:
         effective_config = await self._resolve_effective_config(
             space=space, assistant=assistant_to_ask
         )
+        if conversation_settings is not None:
+            conversation_settings.require_supported()
+        choices = conversation_settings.settings if conversation_settings else None
+        completion_model_id = (
+            choices.completion_model_id
+            if choices
+            and assistant_to_ask is active_assistant
+            and group_chat_id is None
+            else None
+        )
+        if choices:
+            disabled_mcp_server_ids = list(
+                set(disabled_mcp_server_ids or [])
+                | set(
+                    choices.disabled_servers(
+                        effective_config.default_disabled_mcp_server_ids
+                        if effective_config
+                        else []
+                    )
+                )
+            )
+            disabled_capabilities = list(
+                set(disabled_capabilities or [])
+                | set(
+                    choices.disabled_capabilities(
+                        effective_config.default_disabled_capabilities
+                        if effective_config
+                        else []
+                    )
+                )
+            )
+        if completion_model_id is not None:
+            completion_model_override = self.resolve_personal_chat_model_override(
+                space=space,
+                assistant=active_assistant,
+                effective_config=effective_config,
+                completion_model_id=completion_model_id,
+            )
+            if (
+                assistant_to_ask.completion_model is None
+                or completion_model_id != assistant_to_ask.completion_model.id
+            ) and (
+                effective_config is None
+                or not effective_config.reasoning_policy_configured
+            ):
+                # A reasoning preference stored on the assistant's default
+                # model must not silently carry into a conversation-only model.
+                model_kwargs_override = (
+                    assistant_to_ask.completion_model_kwargs.model_copy(
+                        update={"reasoning_effort": None}
+                    )
+                )
         if effective_config is not None:
-            if effective_config.models_enforced:
+            if effective_config.models_enforced and completion_model_override is None:
                 # Same resolution preflight uses, so the projected and actual
                 # models can't diverge. None here means the whitelist is empty.
                 resolved_model = select_effective_completion_model(
@@ -3625,7 +3859,11 @@ class AssistantService:
                     effective_reasoning_effort = select_effective_reasoning_effort(
                         selected_model=selected_model,
                         stored_effort=(
-                            assistant_to_ask.completion_model_kwargs.reasoning_effort
+                            choices.reasoning_effort
+                            if choices
+                            and assistant_to_ask is active_assistant
+                            and group_chat_id is None
+                            else assistant_to_ask.completion_model_kwargs.reasoning_effort
                         ),
                         effective_config=effective_config,
                     )
@@ -3713,7 +3951,7 @@ class AssistantService:
             capability_base, space.security_classification
         )
         capability_mcp_servers: list["MCPServer"] = []
-        requested_capabilities = self._requested_capabilities(
+        requested_capabilities = self.requested_capabilities(
             assistant=assistant_to_ask, space=space, effective_config=effective_config
         )
         requested_capabilities -= set(disabled_capabilities or [])
@@ -3751,7 +3989,11 @@ class AssistantService:
             model=effective_completion_model,
             prompt_text=skill_composition.prompt,
             files=files,
+            # The baseline was validated against the assistant's own model on
+            # save; a conversation-level model has its own, possibly smaller,
+            # window, so the baseline is counted again.
             validate_persistent_baseline=bool(skill_composition.provenance)
+            or completion_model_override is not None
             or bool(
                 effective_config is not None
                 and (
@@ -3986,7 +4228,38 @@ class AssistantService:
         require_tool_approval: bool = False,
         disabled_mcp_server_ids: list["UUID"] | None = None,
         disabled_capabilities: list[CapabilityPurpose] | None = None,
+        conversation_settings: "ConversationSettingsState | None" = None,
     ):
+        # Reject active/former helpers before reading saved settings or history.
+        # Both ordinary ask routes enter here; helper runs use their own service.
+        await assert_not_helper_assistant(
+            assistant_id=assistant_id,
+            role_repo=self.org_space_assistant_role_repo,
+            history_repo=self.help_assistant_assignment_history_repo,
+        )
+        if tool_assistant_id is not None:
+            await assert_not_helper_assistant(
+                assistant_id=tool_assistant_id,
+                role_repo=self.org_space_assistant_role_repo,
+                history_repo=self.help_assistant_assignment_history_repo,
+            )
+
+        if conversation_settings is None and session_id is not None:
+            # Metadata only; the turn itself loads the history later.
+            existing = await self.session_service.get_context(
+                session_id,
+                assistant_id=assistant_id if group_chat_id is None else None,
+                group_chat_id=group_chat_id,
+            )
+            conversation_settings = existing.settings
+        if conversation_settings is not None:
+            conversation_settings.require_supported()
+            require_tool_approval = (
+                require_tool_approval
+                or conversation_settings.settings.require_tool_approval
+            )
+        if require_tool_approval and not stream:
+            raise BadRequestException(TOOL_APPROVAL_REQUIRES_STREAMING)
         prepared = await self._prepare_turn(
             question=question,
             assistant_id=assistant_id,
@@ -3994,6 +4267,8 @@ class AssistantService:
             tool_assistant_id=tool_assistant_id,
             disabled_mcp_server_ids=disabled_mcp_server_ids,
             disabled_capabilities=disabled_capabilities,
+            conversation_settings=conversation_settings,
+            group_chat_id=group_chat_id,
         )
         active_assistant = prepared.active_assistant
         assistant_to_ask = prepared.assistant_to_ask
@@ -4030,6 +4305,7 @@ class AssistantService:
                     question_created_at,
                 ) = await self.session_service.create_session_with_question_placeholder(
                     name=name,
+                    settings=conversation_settings,
                     question=question,
                     files=files,
                     question_assistant_id=assistant_to_ask.id,
@@ -4047,6 +4323,7 @@ class AssistantService:
                     question_created_at,
                 ) = await self.session_service.create_session_with_question_placeholder(
                     name=name,
+                    settings=conversation_settings,
                     question=question,
                     files=files,
                     session_assistant_id=active_assistant.id,
@@ -4059,6 +4336,10 @@ class AssistantService:
                 )
 
         assert session is not None
+        if conversation_settings is not None:
+            # Return the snapshot used by this turn, even if another tab saved
+            # a newer revision while context was being prepared.
+            session.settings = conversation_settings
         for _question in session.questions:
             _question.question = clean_eneo_tag(_question.question)
 

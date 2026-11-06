@@ -1,6 +1,70 @@
 import { EneoError } from "@eneo/eneo-js";
 import { describe, expect, it } from "vitest";
-import { getContextErrorInfo, isConversationSubmitDisabled } from "./conversationInputState";
+import {
+  getContextErrorInfo,
+  isConversationSubmitDisabled,
+  settingsControlsDisabled,
+  toolSelectionUpdate
+} from "./conversationInputState";
+
+describe("settingsControlsDisabled", () => {
+  const ready = {
+    hasSettings: true,
+    isLoading: false,
+    settingsCompatible: true,
+    modelUnavailable: false
+  };
+
+  it("keeps every control usable once the choices are loaded", () => {
+    expect(settingsControlsDisabled(ready)).toEqual({ model: false, modelDependent: false });
+  });
+
+  it("keeps only the model picker usable while the saved model is unavailable", () => {
+    expect(settingsControlsDisabled({ ...ready, modelUnavailable: true })).toEqual({
+      model: false,
+      modelDependent: true
+    });
+  });
+
+  it("disables everything without loaded choices, during a turn, or for unsupported choices", () => {
+    for (const state of [
+      { ...ready, hasSettings: false },
+      { ...ready, isLoading: true },
+      { ...ready, settingsCompatible: false }
+    ]) {
+      expect(settingsControlsDisabled(state)).toEqual({ model: true, modelDependent: true });
+    }
+  });
+});
+
+describe("toolSelectionUpdate", () => {
+  const tools = [
+    { id: "server-a", selected: true },
+    { id: "server-b", selected: false },
+    { id: "capability:web_search", selected: true }
+  ];
+
+  it("writes only the tools whose state changed and keeps earlier explicit choices", () => {
+    expect(
+      toolSelectionUpdate(
+        { mcp_server_states: { "server-c": false }, capability_states: { charts: true } },
+        tools,
+        new Set(["server-a", "server-b", "capability:web_search"])
+      )
+    ).toEqual({
+      mcp_server_states: { "server-c": false, "server-a": false },
+      capability_states: { charts: true, web_search: false }
+    });
+  });
+
+  it("leaves an untouched tool absent so it keeps following the admin default", () => {
+    expect(toolSelectionUpdate(undefined, tools, new Set(["server-b"]))).toBeNull();
+    expect(toolSelectionUpdate({}, tools, new Set())).toEqual({
+      mcp_server_states: { "server-b": true },
+      capability_states: {}
+    });
+  });
+});
 
 describe("isConversationSubmitDisabled", () => {
   it("does not block sending when only the preflight estimate exceeds context", () => {

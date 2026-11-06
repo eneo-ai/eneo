@@ -14,7 +14,7 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from eneo.questions.question import MessageFeedback
-from eneo.sessions.session import SessionInDB, SessionUpdate
+from eneo.sessions.session import SessionContext, SessionInDB, SessionUpdate
 from eneo.sessions.session_service import SessionService
 from eneo.sessions.sessions_repo import OwnedChatPartner, SessionOwnership
 from eneo.skills.domain.skill import (
@@ -22,7 +22,9 @@ from eneo.skills.domain.skill import (
     SkillExecutionReference,
     SkillTurnEffectiveMode,
 )
-from tests.fixtures import TEST_USER, TEST_UUID
+from eneo.widgets.application.visitor_user import build_visitor_user
+from eneo.widgets.domain.widget import Widget
+from tests.fixtures import TEST_TENANT, TEST_USER, TEST_UUID
 
 TEST_ASSISTANT = AssistantSparse(
     name="test_assistant",
@@ -336,3 +338,71 @@ async def test_clear_message_feedback_is_scoped_to_the_principal(
         user_id=TEST_USER.id,
         api_key_id=None,
     )
+
+
+async def test_get_context_applies_the_chat_partner_checks(service: SessionService):
+    def context(**overrides):
+        fields = dict(
+            id=TEST_UUID,
+            user_id=TEST_USER.id,
+            api_key_id=None,
+            assistant_id=TEST_ASSISTANT.id,
+            group_chat_id=None,
+            space_id=None,
+            settings=None,
+        )
+        return SessionContext(**{**fields, **overrides})
+
+    service.session_repo.get_context.return_value = context()
+    assert (
+        await service.get_context(TEST_UUID, assistant_id=TEST_ASSISTANT.id)
+    ).id == TEST_UUID
+    with pytest.raises(NotFoundException, match="belongs to another assistant"):
+        await service.get_context(TEST_UUID, assistant_id=uuid4())
+
+    group_chat_id = uuid4()
+    service.session_repo.get_context.return_value = context(
+        assistant_id=None, group_chat_id=group_chat_id
+    )
+    with pytest.raises(BadRequestException, match="through the assistant endpoint"):
+        await service.get_context(TEST_UUID, assistant_id=TEST_ASSISTANT.id)
+    with pytest.raises(NotFoundException, match="belongs to another group chat"):
+        await service.get_context(TEST_UUID, group_chat_id=uuid4())
+    assert (
+        await service.get_context(TEST_UUID, group_chat_id=group_chat_id)
+    ).id == TEST_UUID
+
+
+async def test_settings_context_belongs_to_the_widget_and_visitor_pair(
+    service: SessionService,
+):
+    widget = Widget.create(
+        tenant_id=TEST_TENANT.id,
+        space_id=uuid4(),
+        target_id=TEST_ASSISTANT.id,
+        name="Visitor chat",
+    ).model_copy(update={"id": uuid4()})
+    visitor_id = uuid4()
+    service.user = build_visitor_user(widget, visitor_id, TEST_TENANT)
+    own = SessionContext(
+        id=TEST_UUID,
+        user_id=None,
+        api_key_id=None,
+        widget_id=widget.id,
+        visitor_id=visitor_id,
+        assistant_id=TEST_ASSISTANT.id,
+        group_chat_id=None,
+        space_id=widget.space_id,
+        settings=None,
+    )
+    service.session_repo.get_context.return_value = own
+    assert await service.get_context(TEST_UUID, assistant_id=TEST_ASSISTANT.id) == own
+    for changes in (
+        {"visitor_id": uuid4()},
+        {"widget_id": uuid4()},
+        {"widget_id": None, "visitor_id": None, "user_id": TEST_USER.id},
+    ):
+        service.session_repo.get_context.return_value = own.model_copy(update=changes)
+        with pytest.raises(UnauthorizedException, match="belongs to other principal"):
+            await service.get_context(TEST_UUID)
+    service.session_repo.get.assert_not_awaited()

@@ -17,25 +17,32 @@ export function usePreflight(request: {
   sessionId?: string | null;
   assistantId?: string | null;
   groupChatId?: string | null;
+  /** Client-side key for the partner's saved context configuration; not sent. */
   revision?: string | null;
+  settings?: Schema<"ConversationSettings">;
+  settingsRevision?: number;
+  disabled?: boolean;
 }): PreflightState {
-  const [preflight, setPreflight] = useState<{ key: string; response: PreflightState } | null>(
-    null
-  );
+  const [result, setResult] = useState<{ context: string; value: PreflightState } | null>(null);
   const generation = useRef(0);
 
-  const { question, sessionId, assistantId, groupChatId } = request;
+  const { question, sessionId, assistantId, groupChatId, settings, settingsRevision, disabled } =
+    request;
+  const revision = request.revision ?? null;
+  const settingsKey = JSON.stringify(settings);
   const fileKey = request.fileIds.join(",");
-
-  const key = JSON.stringify([
-    question,
-    fileKey,
+  // An estimate stays valid while the same conversation context is typed
+  // into; a model, revision or partner change invalidates it at once.
+  const contextKey = JSON.stringify([
     sessionId ?? null,
     assistantId ?? null,
     groupChatId ?? null,
-    request.revision ?? null
+    revision,
+    settingsKey,
+    settingsRevision
   ]);
-  const shouldRequest = Boolean(question || fileKey || (assistantId && !sessionId && !groupChatId));
+  const shouldRequest =
+    !disabled && Boolean(question || fileKey || (assistantId && !sessionId && !groupChatId));
 
   useEffect(() => {
     const current = ++generation.current;
@@ -52,12 +59,14 @@ export function usePreflight(request: {
               file_ids: fileKey ? fileKey.split(",") : [],
               session_id: sessionId ?? null,
               assistant_id: assistantId ?? null,
-              group_chat_id: groupChatId ?? null
+              group_chat_id: groupChatId ?? null,
+              settings,
+              settings_revision: settingsRevision
             }
           })
         );
         if (!controller.signal.aborted && generation.current === current) {
-          setPreflight({ key, response });
+          setResult({ context: contextKey, value: response });
         }
       } catch {
         // Preflight is best-effort UX; stay silent on errors (incl. 429).
@@ -68,10 +77,21 @@ export function usePreflight(request: {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [question, fileKey, sessionId, assistantId, groupChatId, key, shouldRequest]);
+    // Compare settings by value (settingsKey), not an incidental object identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    question,
+    fileKey,
+    sessionId,
+    assistantId,
+    groupChatId,
+    settingsKey,
+    settingsRevision,
+    contextKey,
+    shouldRequest
+  ]);
 
-  // A new draft/partner/session must not expose the old estimate while waiting.
-  return shouldRequest && preflight?.key === key ? preflight.response : null;
+  return shouldRequest && result?.context === contextKey ? result.value : null;
 }
 
 /**
