@@ -142,6 +142,7 @@ async def test_flow_http(
         stored_config=stored_config,
         encryption_service=encryption_service,
         interpolate=_interpolate_http_test_template,
+        resolve_value=variable_resolver.resolve_value,
         send_http_request=http_runtime.send_request,
         max_timeout=float(settings.flow_http_max_timeout_seconds),
     )

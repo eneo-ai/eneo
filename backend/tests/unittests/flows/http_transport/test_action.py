@@ -109,6 +109,62 @@ async def test_execute_http_test_interpolates_raw_context_before_send(
 
 
 @pytest.mark.asyncio
+async def test_execute_http_test_sends_what_a_run_would_send() -> None:
+    sent: dict[str, Any] = {}
+
+    async def _send_http_request(**kwargs: Any) -> httpx.Response:
+        sent.update(kwargs)
+        request = httpx.Request(method=kwargs["method"], url=kwargs["url"])
+        return httpx.Response(status_code=200, text="ok", request=request)
+
+    result = await execute_http_test(
+        config=_config(
+            body=HttpBody(
+                mode=HttpBodyMode.JSON_TEMPLATE,
+                template='{"content": "{{text}}", "canvas": {{canvas}}}',
+            ),
+        ),
+        direction="output",
+        method="POST",
+        test_variables={"text": 'rad "1"\nrad 2', "canvas": {"title": "Skiss"}},
+        interpolate=_transport_interpolate,
+        resolve_value=FlowVariableResolver().resolve_value,
+        send_http_request=_send_http_request,
+        max_timeout=120,
+    )
+
+    assert result.success is True
+    assert sent["json_body"] == {
+        "content": 'rad "1"\nrad 2',
+        "canvas": {"title": "Skiss"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_execute_http_test_says_when_the_filled_body_is_not_json() -> None:
+    async def _send_http_request(**_kwargs: Any) -> httpx.Response:
+        raise AssertionError("a body that is not JSON is never sent")
+
+    result = await execute_http_test(
+        config=_config(
+            body=HttpBody(
+                mode=HttpBodyMode.JSON_TEMPLATE, template='{"note": {{text}}}'
+            ),
+        ),
+        direction="output",
+        method="POST",
+        test_variables={"text": "inte json"},
+        interpolate=_transport_interpolate,
+        resolve_value=FlowVariableResolver().resolve_value,
+        send_http_request=_send_http_request,
+        max_timeout=120,
+    )
+
+    assert result.success is False
+    assert result.error_code == HttpTransportError.INVALID_BODY_JSON
+
+
+@pytest.mark.asyncio
 async def test_execute_http_test_returns_typed_variable_failure() -> None:
     async def _send_http_request(**_kwargs: Any) -> httpx.Response:
         raise AssertionError("request should not be sent when interpolation fails")

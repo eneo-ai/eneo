@@ -15,6 +15,7 @@ from eneo.flows.runtime.egress.policy import (
     DestinationUnresolvable,
     FlowDestinationPolicy,
 )
+from eneo.json_types import JsonValue
 from eneo.main.config import get_settings
 from eneo.main.exceptions import TypedIOValidationException
 
@@ -96,7 +97,7 @@ class FlowHttpRuntimeHelper:
         headers: dict[str, str],
         timeout_seconds: float,
         body_bytes: bytes | None = None,
-        json_body: dict[str, Any] | list[Any] | None = None,
+        json_body: JsonValue | None = None,
         read_response_body: bool = True,
     ) -> httpx.Response:
         try:

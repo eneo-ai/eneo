@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-
 from eneo.flows.http_transport.authored_config import (
     HttpAuth,
     HttpAuthApiKey,
@@ -18,6 +16,7 @@ from eneo.flows.http_transport.effective_url import (
     parse_effective_http_url,
 )
 from eneo.flows.http_transport.errors import HttpTransportError
+from eneo.flows.http_transport.json_template import is_json_template
 
 
 def credential_missing(auth: HttpAuth) -> bool:
@@ -69,13 +68,12 @@ def validate_authored_config(
     ):
         errors.append(HttpTransportError.BODY_NOT_ALLOWED_FOR_GET)
 
-    if config.body.mode == HttpBodyMode.JSON_TEMPLATE and config.body.template:
-        try:
-            json.loads(config.body.template)
-        except (json.JSONDecodeError, ValueError):
-            # Allow template expressions — they won't parse as JSON
-            if "{{" not in config.body.template:
-                errors.append(HttpTransportError.INVALID_BODY_JSON)
+    if (
+        config.body.mode == HttpBodyMode.JSON_TEMPLATE
+        and config.body.template
+        and not is_json_template(config.body.template)
+    ):
+        errors.append(HttpTransportError.INVALID_BODY_JSON)
 
     # Timeout validation
     if config.timeout_seconds < 1 or config.timeout_seconds > max_timeout:
