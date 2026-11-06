@@ -30,6 +30,7 @@ from eneo.widgets.application.widget_limits import (
     WidgetLimiter,
 )
 from eneo.widgets.domain.exceptions import (
+    WidgetAnswerUnavailableError,
     WidgetBudgetExhaustedError,
     WidgetPublicError,
     WidgetRateLimitedError,
@@ -300,23 +301,10 @@ class WidgetAskService:
             raise
 
         try:
-            # The assistant as configured, MCP servers and capabilities
-            # included, less what a visitor cannot run (AssistantService,
-            # VISITOR_CAPABILITY_PURPOSES). Approval is never requested.
-            response = await self.assistant_service.ask(
-                question=cleaned,
-                assistant_id=widget.target_id,
-                session_id=session_id,
-                stream=True,
-                # The citing protocol: the model tags claims with <inref/> and
-                # only cited documents come back as references.
-                version=2,
-                num_chunks_override=self.settings.widget_retrieval_chunks,
-                prompt_addendum=widget_prompt_addendum(widget),
-            )
+            response = await self._start_turn(widget, cleaned, session_id)
         except BaseException:
             # No stream owns the reservation yet. Cleanup must also run on a
-            # disconnected client, without hiding the original provider error.
+            # disconnected client, without hiding the error being raised.
             with finalizing("widget reservation release"):
                 try:
                     await self.budget.release(reservation)
@@ -339,6 +327,35 @@ class WidgetAskService:
             ),
         )
         return visible
+
+    async def _start_turn(
+        self, widget: Widget, cleaned: str, session_id: Optional[UUID]
+    ) -> AssistantResponse:
+        try:
+            # The assistant as configured, MCP servers and capabilities
+            # included, less what a visitor cannot run (AssistantService,
+            # VISITOR_CAPABILITY_PURPOSES). Approval is never requested.
+            return await self.assistant_service.ask(
+                question=cleaned,
+                assistant_id=widget.target_id,
+                session_id=session_id,
+                stream=True,
+                # The citing protocol: the model tags claims with <inref/> and
+                # only cited documents come back as references.
+                version=2,
+                num_chunks_override=self.settings.widget_retrieval_chunks,
+                prompt_addendum=widget_prompt_addendum(widget),
+            )
+        except WidgetPublicError:
+            raise
+        except Exception as exc:
+            # Every other failure carries text written for the people running
+            # the assistant, with its model, provider or configuration.
+            logger.exception(
+                "Widget turn failed before the answer started",
+                extra={"widget_id": str(widget.id)},
+            )
+            raise WidgetAnswerUnavailableError() from exc
 
     async def _finish(
         self,

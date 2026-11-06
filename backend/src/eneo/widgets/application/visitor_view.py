@@ -22,6 +22,7 @@ from eneo.questions.question import (
     UseTools,
 )
 from eneo.sessions.session import SessionInDB
+from eneo.widgets.domain.exceptions import WidgetAnswerUnavailableError
 from eneo.widgets.domain.widget import Widget
 
 # The keys of a resource's `_meta` that clients render: a title, the kind of
@@ -84,6 +85,7 @@ class VisitorView:
     of tool resources, and any tool argument beyond the one the widget shows.
     Tool calls carry only ``SHOWN_CALL_FIELDS`` and resource ``_meta`` only its
     display keys: an allowlist, so a new field is hidden until it is added.
+    An error says only that the assistant cannot answer.
     With ``show_sources`` off no reference of any kind leaves the server. With
     ``show_tool_activity`` off no tool call does. A resource a tool returned
     reaches the visitor only once the answer cites it, on a tool event with an
@@ -136,6 +138,17 @@ class VisitorView:
             if not self.widget.show_sources and chunk.reference_chunks is not None:
                 chunk = replace(chunk, reference_chunks=None)
             return [*cited, chunk]
+        if chunk.response_type == ResponseType.ERROR:
+            # The adapter has logged what failed. A cut-off answer still needs
+            # its error event, but not the provider's reason for it.
+            return [
+                replace(
+                    chunk,
+                    error=WidgetAnswerUnavailableError.public_message,
+                    error_code=WidgetAnswerUnavailableError.status_code,
+                    error_reason=WidgetAnswerUnavailableError.code,
+                )
+            ]
         return [chunk]
 
     def _tool_events(self, chunk: Completion) -> list[Completion]:

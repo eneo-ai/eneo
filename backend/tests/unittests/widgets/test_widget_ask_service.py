@@ -16,7 +16,15 @@ from eneo.ai_models.completion_models.completion_model import (
 from eneo.assistants.api import assistant_protocol
 from eneo.assistants.api.assistant_models import AssistantResponse
 from eneo.info_blobs.info_blob import InfoBlobInDB, InfoBlobInDBWithScore
-from eneo.main.exceptions import NotFoundException, UnauthorizedException
+from eneo.main.exceptions import (
+    BadRequestException,
+    ModelNotAvailableException,
+    NotFoundException,
+    OpenAIException,
+    ProviderInactiveException,
+    ProviderRejectedRequestException,
+    UnauthorizedException,
+)
 from eneo.questions.question import (
     McpToolReferencePublic,
     Question,
@@ -33,6 +41,7 @@ from eneo.widgets.application.widget_ask_service import (
 )
 from eneo.widgets.application.widget_limits import BudgetReservation
 from eneo.widgets.domain.exceptions import (
+    WidgetAnswerUnavailableError,
     WidgetBudgetExhaustedError,
     WidgetPublicError,
     WidgetRateLimitedError,
@@ -537,17 +546,71 @@ async def test_retention_zero_deletes_when_client_leaves_after_first_sse_event()
     deps.usage.delete_session.assert_awaited_once()
 
 
-async def test_start_failure_releases_reservation_and_preserves_original_error():
+async def test_start_failure_releases_reservation_and_keeps_the_original_as_cause():
     service, deps = _service()
     error = NotFoundException("Assistant deleted")
     deps.assistant_service.ask.side_effect = error
-    with pytest.raises(NotFoundException) as caught:
+    with pytest.raises(WidgetAnswerUnavailableError) as caught:
         await service.ask(
             _principal(_widget()), question="q", session_id=None, client_ip=None
         )
-    assert caught.value is error
+    assert caught.value.__cause__ is error
     deps.budget.release.assert_awaited_once_with(deps.budget.reserve.return_value)
     deps.budget.settle.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        BadRequestException("Completion model gpt-internal is not in space."),
+        ModelNotAvailableException("The selected AI model gpt-internal is gone."),
+        ProviderInactiveException("Provider Azure Sweden is inactive."),
+        OpenAIException(
+            "Azure Sweden refused gpt-internal",
+            code="provider_error",
+            details={"model": "gpt-internal"},
+        ),
+        ProviderRejectedRequestException("gpt-internal rejected the prompt"),
+        RuntimeError("gpt-internal"),
+    ],
+    ids=lambda failure: type(failure).__name__,
+)
+async def test_a_failed_turn_tells_the_visitor_nothing_and_logs_the_original(
+    failure, monkeypatch
+):
+    logger = MagicMock()
+    monkeypatch.setattr(module, "logger", logger)
+    service, deps = _service()
+    deps.assistant_service.ask.side_effect = failure
+
+    with pytest.raises(WidgetAnswerUnavailableError) as caught:
+        await service.ask(
+            _principal(_widget()), question="q", session_id=None, client_ip=None
+        )
+
+    error = caught.value
+    assert (error.status_code, error.code) == (503, "answer_unavailable")
+    body = json.dumps({**error.details(), "code": error.code, "message": error.message})
+    assert "gpt-internal" not in body and "Azure" not in body
+    assert error.__cause__ is failure
+    logger.exception.assert_called_once()
+    deps.budget.release.assert_awaited_once()
+
+
+async def test_a_public_widget_error_from_the_turn_stays_as_it_is(monkeypatch):
+    logger = MagicMock()
+    monkeypatch.setattr(module, "logger", logger)
+    service, deps = _service()
+    error = WidgetPublicError("Stopped.", code="stopped")
+    deps.assistant_service.ask.side_effect = error
+
+    with pytest.raises(WidgetPublicError) as caught:
+        await service.ask(
+            _principal(_widget()), question="q", session_id=None, client_ip=None
+        )
+
+    assert caught.value is error
+    logger.exception.assert_not_called()
 
 
 async def test_retention_runs_even_when_settlement_fails():

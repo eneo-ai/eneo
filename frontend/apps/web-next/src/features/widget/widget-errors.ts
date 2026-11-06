@@ -36,6 +36,7 @@ export function describeWidgetError(error: unknown, t: Translate): string {
       return t("widget_error_budget");
     case "widget_not_active":
     case "rate_limit_unavailable":
+    case "answer_unavailable":
       return t("widget_error_unavailable");
     case "session_turns_exceeded":
       return t("widget_error_session_limit");

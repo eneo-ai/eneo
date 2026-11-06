@@ -387,7 +387,7 @@ def failing_assistant_ask(monkeypatch):
             session_assistant_id=assistant_id,
             question_assistant_id=assistant_id,
         )
-        raise BadRequestException("Model preparation failed")
+        raise BadRequestException("gpt-internal at Azure Sweden failed")
 
     monkeypatch.setattr(AssistantService, "ask", fake_ask)
 
@@ -518,7 +518,7 @@ async def test_zero_retention_commits_nothing_when_model_preparation_fails(
         json={"question": "Mitt personnummer är 19XX..."},
         headers=_auth(token),
     )
-    assert resp.status_code == 400, resp.text
+    assert resp.status_code == 503, resp.text
     assert await _stored_conversations(widget_id) == (0, 0)
 
 
@@ -536,7 +536,9 @@ async def test_retained_widget_keeps_the_question_when_model_preparation_fails(
         json={"question": "Hej"},
         headers=_auth(token),
     )
-    assert resp.status_code == 400, resp.text
+    assert resp.status_code == 503, resp.text
+    assert resp.json()["detail"]["code"] == "answer_unavailable"
+    assert "gpt-internal" not in resp.text and "Azure" not in resp.text
     assert await _stored_conversations(active_widget["id"]) == (1, 1)
 
 

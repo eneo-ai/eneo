@@ -612,6 +612,28 @@ def test_restored_session_with_tool_activity_hidden():
     assert message["references"]
 
 
+# --- errors -----------------------------------------------------------------
+
+
+def test_a_stream_error_says_nothing_about_the_model_or_the_provider():
+    failure = Completion(
+        text="",
+        error="The AI provider does not offer the configured model.",
+        error_code=404,
+        error_reason="provider_model_not_found",
+        response_type=ResponseType.ERROR,
+        stop=True,
+    )
+
+    [visible] = VisitorView(_widget()).events(failure)
+
+    event = _sse(visible)
+    assert event["code"] == "answer_unavailable"
+    assert event["error_code"] == 503
+    assert "provider" not in json.dumps(event).lower()
+    assert failure.error_reason == "provider_model_not_found"
+
+
 # --- Skills -----------------------------------------------------------------
 
 
