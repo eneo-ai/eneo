@@ -142,9 +142,9 @@ describe("Konto on a phone (decision 22)", () => {
     expect(screen.queryByRole("navigation", { name: "Kontoinställningar" })).toBeNull();
     // From 768 px a readable column, its groups inset cards as in iPad Settings
     // (CSS, which jsdom does not apply; tests/account.spec.ts measures it).
-    expect(konto().className).toMatch(/\bmd:max-w-2xl\b/);
+    expect(konto().className).toMatch(/\bwide:max-w-2xl\b/);
     for (const list of konto().querySelectorAll("ul"))
-      expect(list.className).toMatch(/\bmd:rounded-xl\b/);
+      expect(list.className).toMatch(/\bwide:rounded-xl\b/);
   });
 
   it("docks no Spara below 1024 px, where the password form is hidden", () => {

@@ -452,7 +452,10 @@ function AnswerActions({
     <div
       className={cn(
         "text-ax-text-secondary -ms-1.5 flex w-full items-center",
-        labelled ? "flex-wrap gap-2 [&_.astryx-toggle-button-group]:gap-2" : "gap-0.5"
+        // On a phone the label starts on the answer's left edge, its button in the gutter.
+        labelled
+          ? "phone:-ms-2.75 flex-wrap gap-2 [&_.astryx-toggle-button-group]:gap-2"
+          : "gap-0.5"
       )}
     >
       {labelled ? (
@@ -526,7 +529,11 @@ function AnswerActions({
         />
       </div>
       <span className="flex-1" />
-      {timestamp && <Timestamp value={timestamp} format="date_time" />}
+      {timestamp && (
+        <span className={labelled ? "phone:ps-2.75" : undefined}>
+          <Timestamp value={timestamp} format="date_time" />
+        </span>
+      )}
     </div>
   );
 }

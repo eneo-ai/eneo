@@ -113,6 +113,22 @@ describe("useReturnFocus", () => {
     expect(notifyFocusLost).not.toHaveBeenCalled();
   });
 
+  it("moves focus to the page when the layout hides an opener that is still there", () => {
+    const { hook, dialog } = openFromEdit();
+    const opener = byId("edit") as HTMLButtonElement;
+    const main = document.createElement("main");
+    main.id = "main-content";
+    main.tabIndex = -1;
+    document.body.append(main);
+    // jsdom lays nothing out and focuses a display: none element; a disabled one it does not.
+    opener.disabled = true;
+    dialog.close();
+
+    hook.rerender({ open: false });
+
+    expect(document.activeElement).toBe(main);
+  });
+
   it("reports once when the opener is gone and focus stays lost", () => {
     const { hook, dialog } = openFromEdit();
     byId("edit").remove();

@@ -2,18 +2,20 @@ import { useId } from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * Where a page bar names the section, the card does not repeat the title (it
- * stays the section's heading for assistive technology, and where focus
- * lands), and the card's frame and inset give way to the page's gutter: an
- * editor's section on a phone (SectionedSettings' phone index, `phone:`),
- * and a page pushed from Konto (`data-pushed-section`, below 1024 px, as long
- * as its PageBar shows). A description or header actions stay, above the rows.
+ * The card's frame and inset give way to the page's gutter in an editor's
+ * section on a phone (SectionedSettings' phone index, `phone:`), whose title is
+ * the page's own: its bar holds only the back link and the save state. A page
+ * pushed from Konto (`data-pushed-section`, below 1024 px, as long as its
+ * PageBar shows) is named by the bar, so there the title stays for assistive
+ * technology and as where focus lands. A description or header actions stay,
+ * above the rows.
  */
 const IN_PHONE_SECTION = {
   card: "phone:in-[[data-editor-section]]:rounded-none phone:in-[[data-editor-section]]:border-0 phone:in-[[data-editor-section]]:bg-transparent max-lg:in-[[data-pushed-section]]:rounded-none max-lg:in-[[data-pushed-section]]:border-0 max-lg:in-[[data-pushed-section]]:bg-transparent",
   header:
-    "phone:in-[[data-editor-section]]:border-b-0 phone:in-[[data-editor-section]]:p-0 phone:in-[[data-editor-section]]:has-[p,[data-settings-group-end]]:pb-4 max-lg:in-[[data-pushed-section]]:border-b-0 max-lg:in-[[data-pushed-section]]:p-0 max-lg:in-[[data-pushed-section]]:has-[p,[data-settings-group-end]]:pb-4",
-  title: "phone:in-[[data-editor-section]]:sr-only max-lg:in-[[data-pushed-section]]:sr-only",
+    "phone:in-[[data-editor-section]]:border-b-0 phone:in-[[data-editor-section]]:p-0 phone:in-[[data-editor-section]]:pb-4 max-lg:in-[[data-pushed-section]]:border-b-0 max-lg:in-[[data-pushed-section]]:p-0 max-lg:in-[[data-pushed-section]]:has-[p,[data-settings-group-end]]:pb-4",
+  title:
+    "phone:in-[[data-editor-section]]:text-2xl phone:in-[[data-editor-section]]:leading-tight max-lg:in-[[data-pushed-section]]:sr-only",
   body: "phone:in-[[data-editor-section]]:p-0 max-lg:in-[[data-pushed-section]]:p-0"
 };
 

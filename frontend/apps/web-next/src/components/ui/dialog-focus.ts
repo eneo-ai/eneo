@@ -141,4 +141,8 @@ function returnFocusTo(target: HTMLElement | null) {
   if (!isFocusLost()) return;
   if (target?.isConnected) target.focus();
   if (isFocusLost()) notifyFocusLost();
+  // An opener the layout now hides (the screen became a phone's) takes no focus: the page does.
+  if (isFocusLost() && target?.isConnected && target.getClientRects().length === 0) {
+    document.getElementById("main-content")?.focus();
+  }
 }

@@ -45,6 +45,34 @@ describe("ResourceCollection (decision 9)", () => {
     await expectNoAxeViolations(container);
   });
 
+  it("puts the tokens beside the status only where no description has that place", () => {
+    setViewport("phone");
+    const row = (description?: string) => (
+      <ResourceCard
+        href="/spaces/s1/apps/a1"
+        name="Bygglov"
+        tile={<span aria-hidden="true">B</span>}
+        status={<span>Publicerad</span>}
+        description={description}
+        meta={["GPT-5"]}
+      />
+    );
+    const line = (text: string) => screen.getByText(text).parentElement;
+
+    renderInApp(<ResourceCollection>{row()}</ResourceCollection>);
+    expect(line("GPT-5")).toBe(line("Publicerad")?.parentElement);
+    cleanup();
+
+    // A description left empty has no place to take: the tokens keep theirs.
+    renderInApp(<ResourceCollection>{row("")}</ResourceCollection>);
+    expect(line("GPT-5")).toBe(line("Publicerad")?.parentElement);
+    cleanup();
+
+    renderInApp(<ResourceCollection>{row("Svarar på frågor.")}</ResourceCollection>);
+    expect(line("Svarar på frågor.")).toBe(line("Publicerad")?.parentElement);
+    expect(line("GPT-5")).not.toBe(line("Publicerad")?.parentElement);
+  });
+
   it("keeps the rows on a phone turned sideways, without a grid of cards", () => {
     setViewport("phone-landscape");
     renderInApp(<Collection />);

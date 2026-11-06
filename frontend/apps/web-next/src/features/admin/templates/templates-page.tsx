@@ -425,6 +425,7 @@ function TemplateListView({
       <div className="flex flex-wrap items-center justify-between gap-3">
         {rows.length > 0 ? (
           <ResourceFilterInput
+            className="phone:min-w-[min(100%,12rem)] phone:flex-1"
             inputRef={searchRef}
             value={search}
             onChange={setSearch}

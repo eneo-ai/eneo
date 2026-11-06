@@ -326,7 +326,8 @@ export default function ShellCommandPalette({
       input={
         <CommandPaletteInput
           label={t("shell_palette_input_label")}
-          placeholder={t("shell_palette_placeholder")}
+          // Beside Avbryt a phone has room for a word: the sections below say what it finds.
+          placeholder={t(phone ? "shell_palette_placeholder_phone" : "shell_palette_placeholder")}
           endContent={<CancelButton />}
           {...KEYBOARD.search}
         />

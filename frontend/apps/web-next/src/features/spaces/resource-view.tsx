@@ -5,7 +5,7 @@ import {
   DropdownMenuRadioItem
 } from "@astryxdesign/core/DropdownMenu";
 import type { UseTableSortableConfig } from "@astryxdesign/core/Table";
-import { ArrowDown, ArrowUp, LayoutGrid, List } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, LayoutGrid, List } from "lucide-react";
 import { useState } from "react";
 import { useTranslations } from "use-intl";
 import { usePhoneScreen } from "@/lib/hooks/use-media-match";
@@ -66,13 +66,18 @@ export function ResourceViewControls<Key extends string>({
       <DropdownMenu
         button={{
           label: `${t("resource_sort")}: ${current?.label ?? options[0]?.label ?? ""}`,
-          icon:
-            selected?.direction === "descending" ? (
-              <ArrowDown aria-hidden="true" />
-            ) : (
-              <ArrowUp aria-hidden="true" />
-            )
+          // Beside the filter on a phone; the menu says what is chosen.
+          isIconOnly: phone,
+          // Alone, an arrow reads as a direction; both arrows read as sorting.
+          icon: phone ? (
+            <ArrowUpDown aria-hidden="true" />
+          ) : selected?.direction === "descending" ? (
+            <ArrowDown aria-hidden="true" />
+          ) : (
+            <ArrowUp aria-hidden="true" />
+          )
         }}
+        hasChevron={!phone}
       >
         <DropdownMenuRadioGroup
           label={t("resource_sort")}

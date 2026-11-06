@@ -313,6 +313,9 @@ function usePhoneView(ids: readonly string[], openFirst: string | undefined) {
   return { view, href, open, back, reveal, rootRef };
 }
 
+const PHONE_TITLE_CLASSES =
+  "text-ax-text m-0 px-4 pt-4 text-2xl leading-tight font-semibold break-words";
+
 function SettingsLayout({
   header,
   navigationLabel,
@@ -380,6 +383,8 @@ function SettingsLayout({
     else views.open(section, field);
   };
 
+  const PhoneTitle = views?.phone.parent ? "h1" : "h2";
+
   return (
     <div
       ref={views?.rootRef}
@@ -397,10 +402,10 @@ function SettingsLayout({
                 label: views.phone.title,
                 ...inPlaceLink(views.href(null), views.back)
               }}
-              title={shown.label}
-              isTitleShown
               actions={
-                <span className="pe-2.5">
+                // At large text (under 13 rem) the words no longer fit beside the back link:
+                // the state takes a line under the bar, as on the index.
+                <span data-editor-strip className="pe-2.5 @max-[12.25rem]/page-bar:hidden">
                   <SaveStatusIndicator isQuiet isCompact />
                 </span>
               }
@@ -410,30 +415,49 @@ function SettingsLayout({
               until="phone"
               parent={views.phone.parent}
               title={views.phone.title}
-              isTitleShown
               // A filled button needs more room from the edge than the bar's ghost back link.
+              // The save state is here, not above the rows: they stay still when it lands.
+              // In words it no longer fits beside the action at large text (under 19 rem):
+              // it then takes the line under the title. The bar's container is its content
+              // box, 0.75rem short of the title's, so 18.25rem here is that same 19 rem.
               actions={
-                views.phone.actions ? <span className="pe-2.5">{views.phone.actions}</span> : null
+                <span className="flex items-center gap-2 pe-2.5">
+                  <span data-editor-strip className="contents @max-[18.25rem]/page-bar:hidden">
+                    <SaveStatusIndicator isQuiet isCompact isHiddenWhenSaved />
+                  </span>
+                  {views.phone.actions}
+                </span>
               }
             />
           ) : null}
-          {/* The header is the tablet's. A phone shows the name in the bar,
-              the h1 for assistive technology, and the save state: here on
-              the index, in the bar on a section, where it stays in view. */}
-          {views.phone.parent ? (
-            <h1 className="wide:hidden sr-only">{views.phone.title}</h1>
-          ) : shown ? null : (
-            // The page's frame has the h1 (the space) and a bar whose title shows only once
-            // the page has scrolled: the index names itself.
-            <h2 className="text-ax-text wide:hidden m-0 px-4 pt-4 text-2xl leading-tight font-semibold">
-              {views.phone.title}
-            </h2>
-          )}
-          <div
-            data-editor-strip
-            className={cn("wide:hidden flex min-h-11 items-center px-4 pt-2", shown && "hidden")}
-          >
-            <SaveStatusIndicator isQuiet />
+          {/* The header is the tablet's. On a phone the index names itself, and
+              the bar takes the name over once it has scrolled away. On a
+              section the section's own heading is the title, so the h1 stays
+              for assistive technology; the page's frame has the h1 of a page
+              inside a space. Such a page has no bar of its own, and its title
+              is one word: the save state rests on the title's line, out of
+              the flow. Below 19 rem (large text) that line has no room for
+              it, so it takes a line of its own, kept empty while nothing is
+              happening: the rows stay still here too. */}
+          <div className="wide:hidden @container/editor-title relative">
+            {views.phone.parent || !shown ? (
+              <PhoneTitle className={shown ? "sr-only" : PHONE_TITLE_CLASSES}>
+                {views.phone.title}
+              </PhoneTitle>
+            ) : null}
+            <div
+              data-editor-strip
+              className={cn(
+                "flex min-h-11 items-center",
+                shown
+                  ? "px-4 @min-[13rem]/editor-title:hidden"
+                  : views.phone.parent
+                    ? "px-4 @min-[19rem]/editor-title:hidden"
+                    : "absolute end-4 top-2 @max-[19rem]/editor-title:static @max-[19rem]/editor-title:px-4"
+              )}
+            >
+              <SaveStatusIndicator isQuiet isCompact isHiddenWhenSaved />
+            </div>
           </div>
         </>
       ) : null}
@@ -555,7 +579,7 @@ function PhoneIndex({
     <nav
       data-editor-index
       aria-label={label}
-      className={cn("flex flex-col gap-6 pt-2 pb-8", className)}
+      className={cn("flex flex-col gap-6 pt-4 pb-8", className)}
     >
       {groupSections(sections).map((group, index) => (
         <IndexGroup key={group.label ?? index} title={group.label}>

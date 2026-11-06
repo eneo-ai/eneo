@@ -199,6 +199,6 @@ it("starts the card on the page's left line from 768 px, under the heading and t
   renderInApp(<RunView app={app([{ type: "text-field" }])} resultHref={(id) => `/runs/${id}`} />);
   // Not a centred card floating in bands of its own: the page's line, no inset.
   const surface = screen.getByRole("group", { name: "Indata" }).closest(".flex-1")!;
-  expect(surface.className).toContain("md:items-start");
-  expect(surface.className).toContain("md:px-0");
+  expect(surface.className).toContain("wide:items-start");
+  expect(surface.className).toContain("wide:px-0");
 });
