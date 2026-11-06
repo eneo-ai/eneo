@@ -606,7 +606,10 @@ def test_restored_session_with_sources_hidden():
 
     assert message["references"] == []
     assert message["mcp_tool_references"] == []
-    assert [call["tool_name"] for call in message["tool_calls"]] == ["search_casefiles"]
+    assert [call["tool_name"] for call in message["tool_calls"]] == [
+        "search_casefiles",
+        "read_source",
+    ]
 
 
 def test_restored_session_with_tool_activity_hidden():
