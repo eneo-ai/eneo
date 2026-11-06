@@ -1,6 +1,6 @@
 ---
 title: Bädda in en chattwidget på webbplatsen
-translationSource: guides/embed-widget.mdx@fd6af2643254
+translationSource: guides/embed-widget.mdx@018d24133d42
 ---
 
 # Bädda in en chattwidget på webbplatsen
@@ -185,7 +185,10 @@ konfigurerad, till exempel för att assistenten inte längre är publicerad, vis
 statusraden, fliken **Publicera** och organisationens översikt vad som behöver
 åtgärdas. På nyligen inlästa sidor döljs chattknappen. Besökare med en redan
 öppen chatt ser ett kort meddelande om att den inte är tillgänglig när de försöker
-använda den.
+använda den. Samma uppgifter visas när assistenten inte längre kan svara, till
+exempel för att dess modell togs bort från ytan, men då ligger chattknappen kvar:
+besökare som frågar ser samma meddelande. Meddelandet säger aldrig vad som gick
+fel; orsaken finns i serverloggen.
 
 Om någon annan ändrar widgeten medan du redigerar stannar det automatiska
 sparandet, och dina osparade värden ligger kvar. Kopiera det du vill behålla
