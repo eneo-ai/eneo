@@ -5,7 +5,7 @@ import { renderChart, renderPng, renderSvg } from "../../src/tools/charts/engine
 import { executeChart } from "../../src/tools/charts/execute";
 import type { ChartRendering } from "../../src/tools/charts/ports";
 import { chartSpecSchema, validateChartSpec } from "../../src/tools/charts/spec";
-import { PALETTE, chartOptions, imageStyle } from "../../src/tools/charts/options";
+import { PALETTE, chartOptions, imageOptions, imageStyle } from "../../src/tools/charts/options";
 import { chartView } from "../../src/tools/charts/view";
 import { chartTools } from "../../src/tools/charts/tool";
 import { RichResult, type CallContext } from "../../src/tools/types";
@@ -148,6 +148,43 @@ describe("PNG rendering", () => {
     expect(
       renderPng("<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10'/>", 10).length,
     ).toBeGreaterThan(0);
+  });
+});
+describe("the numbers of a chart image", () => {
+  const line = (values: number[]) =>
+    chartSpecSchema.parse({ type: "line", labels: values.map((_, i) => `d${i}`), series: [{ name: "s", values }] });
+  const svg = (values: number[], type = "line") =>
+    renderSvg({ ...line(values), type } as never, { width: 1200, height: 675, locale: "sv-SE" });
+  const ticks = (values: number[]) => {
+    const { formatter } = (imageOptions(line(values), imageStyle(1200, "sv-SE"), { width: 1200, height: 675 }) as any).yAxis.axisLabel;
+    return formatter as (value: number) => string;
+  };
+
+  test("keep the digits a small series needs to tell its ticks apart", () => {
+    expect(svg([0.002, 0.005, 0.008])).toContain("0,002");
+    expect(svg([0.002, 0.005, 0.008])).toContain("0,008");
+    expect(ticks([0.002, 0.008])(0.004)).toBe("0,004");
+    expect(ticks([-0.03, 0.02])(0.015)).toBe("0,015");
+    // A bar's own label too, which would read 0 for every bar.
+    expect(svg([0.0042, 0.0071], "bar")).toContain("0,0042");
+  });
+
+  test("look at an interval as well as the lines", () => {
+    const spec = { ...line([0, 0, 0]), bands: [{ name: "b", series: 0, lower: [0, 0, 0], upper: [0, 0.003, 0.006] }] };
+    const options = imageOptions(spec, imageStyle(1200, "sv-SE"), { width: 1200, height: 675 }) as any;
+    expect(options.yAxis.axisLabel.formatter(0.002)).toBe("0,002");
+  });
+
+  test("keep two decimals for values of ordinary size", () => {
+    for (const values of [[0.2, 0.9], [1.5, 2.25], [120, 4800], [-3.5, 1250.125]])
+      expect(ticks(values)(1234.5678)).toBe("1\u00a0234,57");
+    expect(ticks([0.2, 0.9])(0.123)).toBe("0,12");
+    expect(ticks([12.5, 13.5])(12.345)).toBe("12,35");
+  });
+
+  test("survive all zeros and a value too small to write", () => {
+    expect(ticks([0, 0])(0)).toBe("0");
+    expect(ticks([1e-300, 2e-300])(0)).toBe("0");
   });
 });
 describe("create_chart", () => {
