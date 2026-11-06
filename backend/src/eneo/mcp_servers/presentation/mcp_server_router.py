@@ -345,7 +345,9 @@ async def create_bundled_mcp_server(
     assembler = container.mcp_server_assembler()
     activate = data.activate
 
-    result = await service.create_bundled_mcp_server(tool, activate=activate)
+    result = await service.create_bundled_mcp_server(
+        tool, activate=activate, runtime=await runtime_status()
+    )
     if not result.connection.success:
         raise BadRequestException(
             result.connection.error_message
@@ -354,6 +356,14 @@ async def create_bundled_mcp_server(
 
     user = container.user()
     audit_service = container.audit_service()
+    extra: dict[str, object] = {"bundled_tool": tool}
+    model = result.server.forecast_model
+    if model is not None:
+        # The forecast model Eneo bound the source to and the tool service
+        # provider it runs under, both created the first time.
+        extra["forecast_model_id"] = str(model.id)
+        extra["forecast_model_nickname"] = model.nickname
+        extra["provider_id"] = str(model.provider_id)
     await audit_service.log_async(
         tenant_id=user.tenant_id,
         user=user,
@@ -361,9 +371,7 @@ async def create_bundled_mcp_server(
         entity_type=EntityType.MCP_SERVER,
         entity_id=result.server.id,
         description=f"Added bundled MCP server '{result.server.name}'",
-        metadata=AuditMetadata.standard(
-            actor=user, target=result.server, extra={"bundled_tool": tool}
-        ),
+        metadata=AuditMetadata.standard(actor=user, target=result.server, extra=extra),
     )
     if activate:
         await audit_service.log_async(

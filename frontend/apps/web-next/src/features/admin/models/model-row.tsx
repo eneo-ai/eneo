@@ -31,7 +31,14 @@ import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { modelDisplayName, modelTechnicalId } from "@/lib/models/model-display-name";
 import { useModelTypeLabel } from "./model-type-label";
-import { type AdminModel, imageModelUsedBy, MODELS_KEY, type ModelKind } from "./models";
+import {
+  type AdminModel,
+  invalidateModels,
+  type ModelKind,
+  modelUsedBy,
+  updateForecastModel,
+  usedByLabel
+} from "./models";
 import type { ModelAction } from "./model-dialogs";
 import { modelLifecycle, modelPrice } from "./provider-sections";
 
@@ -64,6 +71,8 @@ async function updateModelFlags(kind: ModelKind, id: string, flags: ModelFlags):
     await unwrap(
       browserApi.POST("/api/v1/rerank-models/{id}/", { params: { path: { id } }, body: flags })
     );
+  } else if (kind === "forecast") {
+    await updateForecastModel(browserApi, id, flags);
   } else {
     await unwrap(
       browserApi.POST("/api/v1/embedding-models/{id}/", {
@@ -133,14 +142,14 @@ function Price({
   const t = useTranslations();
   const price = modelPrice(model, kind);
 
-  if (price.kind === "unknown") {
+  if (price.kind === "unknown" || price.kind === "none") {
     if (isEmptyHidden) return null;
     return (
       <>
         <span aria-hidden="true" className="text-ax-text-secondary">
           –
         </span>
-        <span className="sr-only">{t("model_cost_unknown")}</span>
+        <span className="sr-only">{t(price.kind === "none" ? "none" : "model_cost_unknown")}</span>
       </>
     );
   }
@@ -204,7 +213,7 @@ export function ModelRow({
   // Each returns the refetch, so a mutation stays pending until the list has
   // the new state. One mutation per control, so a pending write on one never
   // resets another's optimistic state.
-  const refetchModels = () => queryClient.invalidateQueries({ queryKey: MODELS_KEY });
+  const refetchModels = () => invalidateModels(queryClient, kind);
   const enable = useMutation({
     mutationFn: (next: boolean) => updateModelFlags(kind, model.id, { is_org_enabled: next }),
     // Presses during a write queue behind it instead of being dropped.
@@ -240,25 +249,29 @@ export function ModelRow({
   });
 
   // The technical id under the display name, unless the name already is the id.
-  const technicalId = modelTechnicalId(model);
+  // A forecast model's key ("default") is Eneo's own mapping, not a name an admin uses.
+  const technicalId = kind === "forecast" ? null : modelTechnicalId(model);
   const migrated = "migrated_to_model_id" in model && Boolean(model.migrated_to_model_id);
-  const locked = model.is_locked ?? false;
+  const locked = (model as { is_locked?: boolean | null }).is_locked ?? false;
   const readonly = "readonly" in model && model.readonly === true;
   const isDefault = hasDefault(model) && model.is_org_default === true;
   const currentClassification =
     (model as { security_classification?: SecurityClassification | null })
       .security_classification ?? null;
-  const supportsDefault = kind !== "embedding";
+  // A forecast model comes with the installation: it is renamed, classified
+  // and switched on or off, never made a default or deleted.
+  const supportsDefault = kind !== "embedding" && kind !== "forecast";
   const supportsClassification = securityEnabled;
   const canEdit = !readonly;
   const canMigrate =
     (kind === "completion" || kind === "transcription") &&
     !("migrated_to_model_id" in model && model.migrated_to_model_id);
-  const canDelete = !readonly;
-  // Capability sources (the built-in image generation) that run on this
-  // image model: the backend refuses to delete it while any exists, so the
-  // menu says so and choosing it explains instead of failing.
-  const usedBy = imageModelUsedBy(model);
+  const canDelete = !readonly && kind !== "forecast";
+  // Function sources (the built-in image generation, the bundled Prognos
+  // source) that run on this model: the backend refuses to delete an image
+  // model while any exists, so the menu says so and choosing it explains
+  // instead of failing.
+  const usedBy = modelUsedBy(model);
   const usedByNames = usedBy.map((source) => source.name).join(", ");
   const deleteBlocked = usedBy.length > 0;
   const lifecycle = modelLifecycle(model);
@@ -311,7 +324,8 @@ export function ModelRow({
       {lifecycle.kind === "retiring" && (
         <Badge variant="warning" label={t("model_label_retiring", { date: lifecycle.date })} />
       )}
-      {deleteBlocked && <Badge variant="warning" label={t("model_used_by_image_generation")} />}
+      {/* Information, not a warning: why it cannot be deleted is said at Delete. */}
+      {deleteBlocked && <Badge label={usedByLabel(t, usedBy)} />}
     </>
   );
   const menu = (

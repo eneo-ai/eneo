@@ -7,7 +7,7 @@ from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 from typing_extensions import override
 
-from eneo.database.tables.ai_models_table import ImageModels
+from eneo.database.tables.ai_models_table import ForecastModels, ImageModels
 from eneo.database.tables.assistant_table import (
     AssistantMCPServers,
     AssistantMCPServerTools,
@@ -33,9 +33,10 @@ if TYPE_CHECKING:
 
 
 def backing_model_options() -> list[Any]:
-    """Loader options for the image model a built-in provider runs on.
+    """Loader options for the catalog model a server runs on: a built-in
+    provider's image model, the Forecast source's forecast model.
 
-    The model's classification and provider ride along so the mapper can
+    Each model's classification and provider ride along so the mapper can
     project them without lazy loads.
     """
     return [
@@ -44,7 +45,13 @@ def backing_model_options() -> list[Any]:
             selectinload(ImageModels.security_classification).selectinload(
                 SecurityClassificationDBModel.tenant
             ),
-        )
+        ),
+        selectinload(MCPServersTable.forecast_model).options(
+            selectinload(ForecastModels.provider),
+            selectinload(ForecastModels.security_classification).selectinload(
+                SecurityClassificationDBModel.tenant
+            ),
+        ),
     ]
 
 
@@ -81,8 +88,10 @@ class MCPServerRepoImpl(
 ):
     def __init__(self, session: "AsyncSession", mapper: MCPServerMapper):
         super().__init__(session=session, model=MCPServersTable, mapper=mapper)
-        # Repository reads provide the tools required by readiness and the
-        # classifications required by provider selection and API responses.
+        # Repository reads provide the tools required by readiness, the
+        # classifications required by provider selection and API responses, and
+        # the backing model. An update writes the classification back, so a read
+        # without it would clear it.
         self._options = [
             selectinload(self._db_model.tools),
             selectinload(self._db_model.user_groups),
@@ -124,7 +133,11 @@ class MCPServerRepoImpl(
         if obj.user_groups:
             created.user_groups = list(obj.user_groups)
             await self._sync_user_groups(created)
-        if obj.user_groups or obj.image_model_id is not None:
+        if (
+            obj.user_groups
+            or obj.image_model_id is not None
+            or obj.forecast_model_id is not None
+        ):
             # Re-read so the response carries the audience and the backing
             # model projection, neither of which the insert returns.
             return await self.one(id=created.id)

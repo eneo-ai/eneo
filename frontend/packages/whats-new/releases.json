@@ -76,6 +76,23 @@
           }
         },
         {
+          "id": "forecast-model-in-admin",
+          "permissions": {
+            "allOf": ["admin"]
+          },
+          "audience": "admin",
+          "type": "new",
+          "area": "admin",
+          "title": {
+            "en": "Find the forecast model under Models",
+            "sv": "Hitta prognosmodellen under Modeller"
+          },
+          "body": {
+            "en": "The forecast model now sits in Admin > Models like every other model: switch it on or off, set its security classification, rename it and see that Forecast uses it. Under Functions, the Forecast source links to the model and says when it is switched off.",
+            "sv": "Prognosmodellen ligger nu i Admin > Modeller som alla andra modeller: slå på eller av den, sätt säkerhetsklass, byt namn och se att Prognos använder den. Under Funktioner länkar källan Prognos till modellen och säger till när den är avstängd."
+          }
+        },
+        {
           "id": "sharepoint-credential-health",
           "type": "new",
           "area": "admin",

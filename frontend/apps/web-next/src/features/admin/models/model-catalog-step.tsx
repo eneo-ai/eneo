@@ -39,8 +39,8 @@ import {
   adminModelsQueryOptions,
   createTenantModel,
   MODELS_KEY,
-  type ModelKind,
   type ModelsPresentation,
+  type TenantModelKind,
   validateProviderModel
 } from "./models";
 import { useFieldFocus } from "./provider-form-fields";
@@ -64,7 +64,7 @@ const MODEL_LISTS = {
   transcription: "transcription_models",
   image: "image_models",
   rerank: "rerank_models"
-} as const satisfies Record<ModelKind, keyof ModelsPresentation>;
+} as const satisfies Record<TenantModelKind, keyof ModelsPresentation>;
 
 type ExistingModel = Pick<AdminModel, "name" | "nickname" | "provider_id" | "is_deprecated">;
 
@@ -88,7 +88,7 @@ function capabilityLabels(t: ReturnType<typeof useTranslations>, model: CatalogM
 function catalogPrice(
   t: ReturnType<typeof useTranslations>,
   model: CatalogModel,
-  mode: ModelKind
+  mode: TenantModelKind
 ): string | null {
   if (mode === "image") {
     const value = formatCostPerImage(model.cost_per_image);
@@ -108,7 +108,7 @@ function createdName(model: CatalogModel): string {
 }
 
 /** A completion model needs both token limits before it can be created. */
-function missingTokenLimits(model: CatalogModel, mode: ModelKind): boolean {
+function missingTokenLimits(model: CatalogModel, mode: TenantModelKind): boolean {
   return (
     mode === "completion" && (!(model.max_input_tokens ?? 0) || !(model.max_output_tokens ?? 0))
   );
@@ -136,9 +136,9 @@ export function ModelCatalogStep({
 }: {
   providerId: string;
   providerType: string;
-  mode?: ModelKind;
-  supportedModes?: ModelKind[];
-  onModeChange?: (mode: ModelKind) => void;
+  mode?: TenantModelKind;
+  supportedModes?: TenantModelKind[];
+  onModeChange?: (mode: TenantModelKind) => void;
   onCreated: (ids: string[]) => void;
   onBusyChange?: (busy: boolean) => void;
   onBack: () => void;
@@ -471,7 +471,7 @@ export function ModelCatalogStep({
           options={modes.map((value) => ({ value, label: typeLabel(value) }))}
           value={mode}
           onChange={(value) => {
-            onModeChange(value as ModelKind);
+            onModeChange(value as TenantModelKind);
             setSelected(new Map());
             setSubmitted(false);
             resetOutcome();

@@ -6,6 +6,9 @@ from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError
 
+from eneo.forecast_models.application.forecast_model_provisioning import (
+    ensure_default_forecast_model,
+)
 from eneo.main.config import get_settings
 from eneo.main.exceptions import (
     BadRequestException,
@@ -45,6 +48,7 @@ from eneo.mcp_servers.domain.entities.mcp_server import (
     is_builtin_provider,
     is_bundled_server,
     is_capability_purpose,
+    runs_forecast_model,
 )
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
     MCPClient,
@@ -203,6 +207,23 @@ BUNDLED_TOOL_NAMES: dict[str, str] = {
     "file-analysis": "Ask a file",
     "file-creation": "Create a file",
 }
+# Why a server that runs on a catalog model cannot be activated, by the
+# readiness reason ``MCPServer.backing_model_blocker`` gives.
+BACKING_MODEL_BLOCKER_MESSAGES: dict[str, str] = {
+    "model_missing": "its model is missing",
+    "model_disabled": "its model is disabled",
+    "model_deprecated": "its model is deprecated",
+    "model_provider_inactive": "its model's provider is inactive",
+}
+
+
+def _activation_blocked(reason: str) -> BadRequestException:
+    return BadRequestException(
+        f"Provider cannot be activated: {BACKING_MODEL_BLOCKER_MESSAGES[reason]}. "
+        "Nothing was changed; resolve this under Models, then activate it again."
+    )
+
+
 BUNDLED_TOOL_DESCRIPTIONS: dict[str, str] = {
     "charts": (
         "Creates interactive bar, line, pie and scatter charts, with PNG image "
@@ -573,6 +594,7 @@ class MCPServerService:
         audience_priority: int = DEFAULT_AUDIENCE_PRIORITY,
         user_group_ids: list[UUID] | None = None,
         image_model_id: UUID | None = None,
+        forecast_model_id: UUID | None = None,
         activate: bool = False,
     ) -> MCPServerCreateResult:
         """Create a new MCP server for the tenant (admin only, uses Streamable HTTP transport).
@@ -634,6 +656,7 @@ class MCPServerService:
             audience_priority=audience_priority,
             user_groups=user_groups,
             image_model_id=image_model_id,
+            forecast_model_id=forecast_model_id,
             description=description,
             http_auth_config_schema=http_auth_config_schema,
             forward_identity=forward_identity,
@@ -743,7 +766,10 @@ class MCPServerService:
 
     @validate_permissions(Permission.ADMIN)
     async def create_bundled_mcp_server(
-        self, tool: str, activate: bool = False
+        self,
+        tool: str,
+        activate: bool = False,
+        runtime: "RuntimeStatus | None" = None,
     ) -> MCPServerCreateResult:
         """Add one of the bundled tool runtime's servers to this tenant.
 
@@ -752,6 +778,14 @@ class MCPServerService:
         per space like any other; a capability provider is saved inactive
         unless ``activate`` switches it in as the tenant's default. Only its
         URL and credential come from the deployment instead of the admin.
+
+        The Forecast source runs on the tenant's default forecast model,
+        provisioned in this same transaction (with the tool service as its
+        provider) the first time: governed in the model catalog from then on.
+
+        ``runtime`` is the runtime's advisory diagnostic: a tool it says cannot
+        run (no model mounted) is refused, as ``list_bundled_tools`` offers it.
+        A status without that answer (unknown, unreachable) refuses nothing.
         """
         if tool not in BUNDLED_TOOLS:
             raise NotFoundException(f"Unknown bundled tool '{tool}'")
@@ -768,12 +802,24 @@ class MCPServerService:
             )
         ):
             raise NameCollisionException(f"The bundled '{tool}' server already exists")
+        if runtime is not None and runtime.cannot_run(tool):
+            raise BadRequestException(
+                f"{BUNDLED_TOOL_NAMES[tool]} needs a model that your operator "
+                "adds to the tool runtime"
+            )
+        purpose = BUNDLED_TOOLS[tool].purpose
+        forecast_model_id = (
+            await ensure_default_forecast_model(self.repo.session, self.user.tenant_id)
+            if runs_forecast_model(BUNDLED_AUTH_TYPE, purpose)
+            else None
+        )
         return await self.create_mcp_server(
             name=BUNDLED_TOOL_NAMES[tool],
             http_url=url,
             http_auth_type=BUNDLED_AUTH_TYPE,
-            purpose=BUNDLED_TOOLS[tool].purpose,
+            purpose=purpose,
             description=BUNDLED_TOOL_DESCRIPTIONS[tool],
+            forecast_model_id=forecast_model_id,
             activate=activate,
         )
 
@@ -1601,6 +1647,7 @@ class MCPServerService:
         """
         import sqlalchemy as sa
 
+        from eneo.database.tables.ai_models_table import ForecastModels
         from eneo.database.tables.mcp_server_table import (
             MCPServers as MCPServersTable,
         )
@@ -1615,6 +1662,8 @@ class MCPServerService:
             await self._resolve_builtin_image_model(
                 server.purpose, server.image_model_id
             )
+        elif server.backing_model_blocker:
+            raise _activation_blocked(server.backing_model_blocker)
         if not server.usable_tools:
             raise BadRequestException(
                 "Provider has no enabled tools. Sync and approve its tools "
@@ -1630,6 +1679,21 @@ class MCPServerService:
                 connection.error_message
                 or "Provider is unreachable and cannot be activated"
             )
+
+        # The runtime's answer can take seconds, and a model turned off in the
+        # meantime must not replace the working default. The row lock is the one
+        # a model update takes, and it holds until the switch commits.
+        if server.forecast_model_id is not None:
+            enabled = await self.repo.session.scalar(
+                sa.select(ForecastModels.is_enabled)
+                .where(
+                    ForecastModels.id == server.forecast_model_id,
+                    ForecastModels.tenant_id == self.user.tenant_id,
+                )
+                .with_for_update()
+            )
+            if not enabled:
+                raise _activation_blocked("model_disabled")
 
         # Deactivate the current default first so the partial unique index
         # never sees two enabled default providers for this purpose. Both

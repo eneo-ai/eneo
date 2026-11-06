@@ -45,7 +45,13 @@ import {
   isEmbeddingFamily,
   isHostingRegion
 } from "./model-metadata-options";
-import { type AdminModel, MODELS_KEY, type ModelKind, updateTenantModel } from "./models";
+import {
+  type AdminModel,
+  invalidateModels,
+  type ModelKind,
+  updateForecastModel,
+  updateTenantModel
+} from "./models";
 import {
   isCandidateSetting,
   RERANK_CANDIDATE_FACTOR,
@@ -82,7 +88,9 @@ const TOKEN_PRICED: ReadonlySet<ModelKind> = new Set(["completion", "embedding"]
  * Full metadata edit for a tenant (custom) model: the fields of its kind
  * (token limits and prices, per-minute price, an image model's per-image
  * price and request defaults, or a rerank model's candidate settings) plus
- * hosting, stability and classification.
+ * hosting, stability and classification. A forecast model comes with the
+ * installation: Eneo sets its metadata, so only its display name and
+ * classification are edited.
  */
 type EditModelDialogProps = {
   model: AdminModel;
@@ -109,12 +117,18 @@ function EditModelForm({
   const queryClient = useQueryClient();
   const imageLabels = useImageOptionLabels();
 
+  // A forecast model carries none of these; its form does not show them.
+  const metadata = model as {
+    family?: string | null;
+    hosting?: string | null;
+    stability?: string | null;
+  };
   const [displayName, setDisplayName] = useState(model.nickname ?? model.name);
   const [litellmName, setLitellmName] = useState(model.name);
   const [description, setDescription] = useState(model.description ?? "");
-  const [family, setFamily] = useState(model.family ?? "");
-  const [hosting, setHosting] = useState(model.hosting ?? "");
-  const [stability, setStability] = useState(model.stability ?? "");
+  const [family, setFamily] = useState(metadata.family ?? "");
+  const [hosting, setHosting] = useState(metadata.hosting ?? "");
+  const [stability, setStability] = useState(metadata.stability ?? "");
   const hasDefaultToggle = "is_org_default" in model;
   const [isDefault, setIsDefault] = useState(
     "is_org_default" in model && model.is_org_default === true
@@ -183,12 +197,28 @@ function EditModelForm({
   const [classificationId, setClassificationId] = useState(
     model.security_classification?.id ?? "__none__"
   );
+  // What the form opened with, kept while it stays open: the model prop follows
+  // refetches, so comparing with it would count a newer value as the admin's edit.
+  const [opened] = useState(() => ({ displayName, classificationId }));
 
   const save = useMutation({
     mutationFn: () => {
       const defaultPatch = hasDefaultToggle ? { is_default: isDefault } : {};
       const security_classification =
         securityEnabled && classificationId !== "__none__" ? { id: classificationId } : null;
+      if (kind === "forecast") {
+        // Only the fields the admin changed: a field left out keeps its value, so
+        // a rename never undoes a class another admin set while this dialog was
+        // open, and the reverse.
+        return updateForecastModel(browserApi, model.id, {
+          ...(displayName.trim() !== opened.displayName.trim()
+            ? { display_name: displayName.trim() }
+            : {}),
+          ...(securityEnabled && classificationId !== opened.classificationId
+            ? { security_classification }
+            : {})
+        });
+      }
       if (kind === "embedding") {
         return updateTenantModel(browserApi, "embedding", model.id, {
           display_name: displayName.trim(),
@@ -263,7 +293,7 @@ function EditModelForm({
       });
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: MODELS_KEY });
+      void invalidateModels(queryClient, kind);
       toast.success(t("model_updated_success"));
       onOpenChange(false);
     },
@@ -275,7 +305,7 @@ function EditModelForm({
       <DialogContent className="overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{t("edit_model")}</DialogTitle>
-          <DialogDescription>{model.name}</DialogDescription>
+          <DialogDescription>{kind === "forecast" ? model.nickname : model.name}</DialogDescription>
         </DialogHeader>
         <form
           className="flex flex-col gap-4"
@@ -304,16 +334,19 @@ function EditModelForm({
             if (!save.isPending) save.mutate();
           }}
         >
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="model-litellm-name">{t("model_identifier")}</Label>
-            <Input
-              id="model-litellm-name"
-              value={litellmName}
-              onChange={(event) => setLitellmName(event.target.value)}
-              readOnly={kind !== "completion"}
-              required
-            />
-          </div>
+          {/* A forecast model's stored name is an internal key, as on its row. */}
+          {kind !== "forecast" && (
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="model-litellm-name">{t("model_identifier")}</Label>
+              <Input
+                id="model-litellm-name"
+                value={litellmName}
+                onChange={(event) => setLitellmName(event.target.value)}
+                readOnly={kind !== "completion"}
+                required
+              />
+            </div>
+          )}
 
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="model-display-name">{t("display_name")}</Label>
@@ -325,97 +358,101 @@ function EditModelForm({
             />
           </div>
 
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="model-description">{t("description")}</Label>
-            <Textarea
-              id="model-description"
-              value={description}
-              rows={3}
-              maxLength={500}
-              onChange={(event) => setDescription(event.target.value)}
-            />
-          </div>
+          {kind !== "forecast" && (
+            <>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="model-description">{t("description")}</Label>
+                <Textarea
+                  id="model-description"
+                  value={description}
+                  rows={3}
+                  maxLength={500}
+                  onChange={(event) => setDescription(event.target.value)}
+                />
+              </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="model-family">{t("model_family")}</Label>
-              {kind === "embedding" ? (
-                <>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="model-family">{t("model_family")}</Label>
+                  {kind === "embedding" ? (
+                    <>
+                      <Select
+                        value={family || "__none__"}
+                        onValueChange={(value) => isEmbeddingFamily(value) && setFamily(value)}
+                      >
+                        <SelectTrigger
+                          id="model-family"
+                          className="w-full"
+                          aria-describedby="model-family-help"
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {!isEmbeddingFamily(family) && (
+                            <SelectItem value={family || "__none__"} disabled>
+                              {family || t("none")}
+                            </SelectItem>
+                          )}
+                          {EMBEDDING_FAMILIES.map((value) => (
+                            <SelectItem key={value} value={value}>
+                              {t(`model_family_${value}`)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p id="model-family-help" className="text-muted-foreground text-xs">
+                        {t("model_family_help")}
+                      </p>
+                    </>
+                  ) : (
+                    <Input id="model-family" value={family} readOnly />
+                  )}
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="model-hosting">{t("hosting_region")}</Label>
                   <Select
-                    value={family || "__none__"}
-                    onValueChange={(value) => isEmbeddingFamily(value) && setFamily(value)}
+                    value={hosting || "__none__"}
+                    onValueChange={(value) => {
+                      if (value === "__none__") setHosting("");
+                      else if (isHostingRegion(value)) setHosting(value);
+                    }}
                   >
-                    <SelectTrigger
-                      id="model-family"
-                      className="w-full"
-                      aria-describedby="model-family-help"
-                    >
+                    <SelectTrigger id="model-hosting" className="w-full">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {!isEmbeddingFamily(family) && (
-                        <SelectItem value={family || "__none__"} disabled>
-                          {family || t("none")}
+                      <SelectItem value="__none__">{t("none")}</SelectItem>
+                      {hosting && !isHostingRegion(hosting) && (
+                        <SelectItem value={hosting} disabled>
+                          {hosting}
                         </SelectItem>
                       )}
-                      {EMBEDDING_FAMILIES.map((value) => (
+                      {HOSTING_REGIONS.map((value) => (
                         <SelectItem key={value} value={value}>
-                          {t(`model_family_${value}`)}
+                          {t(`hosting_${value}`)}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
-                  <p id="model-family-help" className="text-muted-foreground text-xs">
-                    {t("model_family_help")}
-                  </p>
-                </>
-              ) : (
-                <Input id="model-family" value={family} readOnly />
-              )}
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="model-hosting">{t("hosting_region")}</Label>
-              <Select
-                value={hosting || "__none__"}
-                onValueChange={(value) => {
-                  if (value === "__none__") setHosting("");
-                  else if (isHostingRegion(value)) setHosting(value);
-                }}
-              >
-                <SelectTrigger id="model-hosting" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">{t("none")}</SelectItem>
-                  {hosting && !isHostingRegion(hosting) && (
-                    <SelectItem value={hosting} disabled>
-                      {hosting}
-                    </SelectItem>
-                  )}
-                  {HOSTING_REGIONS.map((value) => (
-                    <SelectItem key={value} value={value}>
-                      {t(`hosting_${value}`)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
+                </div>
+              </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="model-stability">{t("stability")}</Label>
-              <Input
-                id="model-stability"
-                value={stability}
-                onChange={(event) => setStability(event.target.value)}
-              />
-            </div>
-            <Label className="flex items-center justify-between gap-2 self-end font-normal">
-              {t("open_source")}
-              <Switch checked={openSource} onCheckedChange={setOpenSource} />
-            </Label>
-          </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="model-stability">{t("stability")}</Label>
+                  <Input
+                    id="model-stability"
+                    value={stability}
+                    onChange={(event) => setStability(event.target.value)}
+                  />
+                </div>
+                <Label className="flex items-center justify-between gap-2 self-end font-normal">
+                  {t("open_source")}
+                  <Switch checked={openSource} onCheckedChange={setOpenSource} />
+                </Label>
+              </div>
+            </>
+          )}
 
           {TOKEN_PRICED.has(kind) && (
             <div className="grid grid-cols-2 gap-4">

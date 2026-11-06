@@ -22,10 +22,11 @@ import { modelDisplayName } from "@/lib/models/model-display-name";
 import { useImageOptionLabels } from "./image-model-options";
 import {
   type AdminModel,
-  imageModelUsedBy,
   type MigratableModelKind,
   type ModelKind,
-  modelUsageDetailsQueryOptions
+  modelUsageDetailsQueryOptions,
+  modelUsedBy,
+  usedByLabel
 } from "./models";
 
 /**
@@ -120,8 +121,10 @@ function InfoTab({
         ? model.max_input
         : null;
   const outputTokens = "max_output_tokens" in model ? model.max_output_tokens : null;
-  const usedBy = imageModelUsedBy(model);
+  const usedBy = modelUsedBy(model);
   const hfLink = sanitizeWebHref("hf_link" in model ? model.hf_link : null);
+  // Only the fields a forecast model carries are shown for one.
+  const { family, hosting } = model as { family?: string | null; hosting?: string | null };
   const price = modelPrice(model, kind);
   const priceLabel =
     price.kind === "tokens"
@@ -141,21 +144,20 @@ function InfoTab({
 
   return (
     <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
-      <Field label={t("model_identifier")} value={model.name} />
-      {model.family && (
+      {/* A forecast model's key ("default") is Eneo's own mapping. */}
+      {kind !== "forecast" && <Field label={t("model_identifier")} value={model.name} />}
+      {family && (
         <Field
           label={t("model_family")}
           value={
-            kind === "embedding" && isEmbeddingFamily(model.family)
-              ? t(`model_family_${model.family}`)
-              : model.family
+            kind === "embedding" && isEmbeddingFamily(family) ? t(`model_family_${family}`) : family
           }
         />
       )}
-      {model.hosting && (
+      {hosting && (
         <Field
           label={t("hosting_region")}
-          value={t.has(`hosting_${model.hosting}`) ? t(`hosting_${model.hosting}`) : model.hosting}
+          value={t.has(`hosting_${hosting}`) ? t(`hosting_${hosting}`) : hosting}
         />
       )}
       {typeof contextWindow === "number" && (
@@ -205,7 +207,7 @@ function InfoTab({
       {"max_candidates" in model && (
         <Field label={t("rerank_max_candidates")} value={String(model.max_candidates)} />
       )}
-      <Field label={t("model_pricing_label")} value={priceLabel} />
+      {price.kind !== "none" && <Field label={t("model_pricing_label")} value={priceLabel} />}
       <Field
         label={t("security_classification")}
         value={model.security_classification?.name ?? t("no_classification")}
@@ -213,7 +215,7 @@ function InfoTab({
       {typeof model.open_source === "boolean" && (
         <Field label={t("open_source")} value={t(model.open_source ? "yes" : "no")} />
       )}
-      {model.org && <Field label={t("provider")} value={model.org} />}
+      {model.org && <Field label={t("model_developed_by")} value={model.org} />}
       {model.description && <Field label={t("description")} value={model.description} />}
       {hfLink && (
         <div className="sm:col-span-2">
@@ -232,16 +234,19 @@ function InfoTab({
       )}
       {usedBy.length > 0 && (
         <div className="sm:col-span-2">
-          <dt className="text-muted-foreground text-xs">{t("model_used_by_image_generation")}</dt>
-          <dd>
-            <ul className="flex flex-wrap gap-1 pt-0.5">
-              {usedBy.map((source) => (
-                <li key={source.id} className="flex">
-                  <Badge variant="outline">{source.name}</Badge>
-                </li>
-              ))}
-            </ul>
-          </dd>
+          <dt className="text-muted-foreground text-xs">{usedByLabel(t, usedBy)}</dt>
+          {/* A forecast source is named after its Function, which the label has just said. */}
+          {kind !== "forecast" && (
+            <dd>
+              <ul className="flex flex-wrap gap-1 pt-0.5">
+                {usedBy.map((source) => (
+                  <li key={source.id} className="flex">
+                    <Badge variant="outline">{source.name}</Badge>
+                  </li>
+                ))}
+              </ul>
+            </dd>
+          )}
         </div>
       )}
     </dl>

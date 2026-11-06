@@ -7,6 +7,7 @@
     - embedding    → family + dimensions + max input
     - transcription → name + display name + hosting + classification
     - image        → cost per image + default size/quality
+    - forecast     → name + display name + classification (Eneo sets the rest)
 -->
 
 <script lang="ts">
@@ -38,8 +39,8 @@
     perMillionFromTokenCost,
     RERANK_CANDIDATE_FACTOR,
     RERANK_MAX_CANDIDATES,
-    type ModelDraftState,
-    type ModelType
+    type DraftModelType,
+    type ModelDraftState
   } from "./draft";
 
   let {
@@ -64,7 +65,7 @@
     nameReadOnly = false
   }: {
     draft: ModelDraftState;
-    modelType: ModelType;
+    modelType: DraftModelType;
     isSelfHosted?: boolean;
     providerType?: string;
     showAddAnotherButton?: boolean;
@@ -156,39 +157,42 @@
 </script>
 
 <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-  <Field.Field>
-    <Field.Label for="model-name" class="flex items-center gap-1.5">
-      {m.model_identifier()}
-      <HelpTooltip text={m.model_identifier_help()} />
-    </Field.Label>
-    <Input
-      id="model-name"
-      bind:value={draft.name}
-      readonly={nameReadOnly}
-      placeholder={modelType === "completion"
-        ? m.model_identifier_placeholder_completion()
-        : modelType === "embedding"
-          ? m.model_identifier_placeholder_embedding()
-          : modelType === "image"
-            ? m.model_identifier_placeholder_image()
-            : modelType === "rerank"
-              ? m.model_identifier_placeholder_rerank()
-              : m.model_identifier_placeholder_transcription()}
-    />
-    {#if draft.name.trim() && !isSelfHosted}
-      <button
-        type="button"
-        class="text-accent-default hover:text-accent-stronger flex items-center gap-1 self-start text-xs underline underline-offset-2 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
-        disabled={isLookingUpDefaults}
-        onclick={lookupDefaults}
-      >
-        {#if isLookingUpDefaults}
-          <LoaderCircle class="size-3 animate-spin" aria-hidden="true" />
-        {/if}
-        {m.lookup_defaults()}
-      </button>
-    {/if}
-  </Field.Field>
+  <!-- A forecast model's stored name is an internal key, not something to read -->
+  {#if modelType !== "forecast"}
+    <Field.Field>
+      <Field.Label for="model-name" class="flex items-center gap-1.5">
+        {m.model_identifier()}
+        <HelpTooltip text={m.model_identifier_help()} />
+      </Field.Label>
+      <Input
+        id="model-name"
+        bind:value={draft.name}
+        readonly={nameReadOnly}
+        placeholder={modelType === "completion"
+          ? m.model_identifier_placeholder_completion()
+          : modelType === "embedding"
+            ? m.model_identifier_placeholder_embedding()
+            : modelType === "image"
+              ? m.model_identifier_placeholder_image()
+              : modelType === "rerank"
+                ? m.model_identifier_placeholder_rerank()
+                : m.model_identifier_placeholder_transcription()}
+      />
+      {#if draft.name.trim() && !isSelfHosted}
+        <button
+          type="button"
+          class="text-accent-default hover:text-accent-stronger flex items-center gap-1 self-start text-xs underline underline-offset-2 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={isLookingUpDefaults}
+          onclick={lookupDefaults}
+        >
+          {#if isLookingUpDefaults}
+            <LoaderCircle class="size-3 animate-spin" aria-hidden="true" />
+          {/if}
+          {m.lookup_defaults()}
+        </button>
+      {/if}
+    </Field.Field>
+  {/if}
 
   <Field.Field>
     <Field.Label for="display-name">{m.display_name()}</Field.Label>
@@ -332,10 +336,12 @@
   </div>
 {/if}
 
-<Field.Field>
-  <Field.Label for="hosting">{m.hosting_region()}</Field.Label>
-  <HostingSelect id="hosting" bind:value={draft.hosting} />
-</Field.Field>
+{#if modelType !== "forecast"}
+  <Field.Field>
+    <Field.Label for="hosting">{m.hosting_region()}</Field.Label>
+    <HostingSelect id="hosting" bind:value={draft.hosting} />
+  </Field.Field>
+{/if}
 
 <!--
   Cost. Stored in USD; left empty when LiteLLM has no data and the admin
@@ -415,7 +421,7 @@
       </Select.Root>
     </Field.Field>
   </div>
-{:else if modelType !== "rerank"}
+{:else if modelType !== "rerank" && modelType !== "forecast"}
   <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
     <Field.Field>
       <Field.Label for="input-cost" class="flex items-center gap-1.5">
@@ -452,18 +458,20 @@
 {/if}
 
 <!-- Free-text description so admins can guide end-users on when to pick this model. -->
-<Field.Field>
-  <Field.Label for="model-description">{m.model_description()}</Field.Label>
-  <textarea
-    id="model-description"
-    bind:value={draft.description}
-    placeholder={m.model_description_placeholder()}
-    rows="3"
-    maxlength="500"
-    class="border-input focus-visible:border-ring focus-visible:ring-ring/50 placeholder:text-muted-foreground w-full rounded-lg border bg-transparent px-2.5 py-1.5 text-sm transition-colors outline-none focus-visible:ring-3"
-  ></textarea>
-  <Field.Description>{m.model_description_hint()}</Field.Description>
-</Field.Field>
+{#if modelType !== "forecast"}
+  <Field.Field>
+    <Field.Label for="model-description">{m.model_description()}</Field.Label>
+    <textarea
+      id="model-description"
+      bind:value={draft.description}
+      placeholder={m.model_description_placeholder()}
+      rows="3"
+      maxlength="500"
+      class="border-input focus-visible:border-ring focus-visible:ring-ring/50 placeholder:text-muted-foreground w-full rounded-lg border bg-transparent px-2.5 py-1.5 text-sm transition-colors outline-none focus-visible:ring-3"
+    ></textarea>
+    <Field.Description>{m.model_description_hint()}</Field.Description>
+  </Field.Field>
+{/if}
 
 {#if classifications.length > 0}
   <Field.Field>

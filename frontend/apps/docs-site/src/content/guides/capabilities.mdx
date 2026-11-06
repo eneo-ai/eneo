@@ -250,8 +250,21 @@ says "This function needs a model that your operator adds to the tool
 runtime." and the provider built into Eneo cannot be turned on. Every other
 tool keeps working.
 
+The forecast model is governed like every other model. Turning Forecast on adds
+it under **Admin > Models** as a model of the type **Forecast** (_Prognos_),
+under the provider **Eneo tool service** (_Eneos verktygstjänst_), which comes
+with the installation and cannot be edited or removed. There you switch the
+model on or off, set the security classification it is approved for and
+change its display name; the row also shows which Function source uses it.
+While the model is off, the Forecast source shows "The model is disabled.",
+is not offered to assistants and cannot be activated, so a default source
+already in use stays on. A model switched off during a turn stops at the next
+turn: tool calls later in the same turn, including one waiting for approval,
+still run. The source's line on the Forecast card names the model it runs.
+
 A bundled source is an ordinary source in other respects: audiences,
-permissions and classification apply unchanged, and an external MCP server can
+permissions and classification apply unchanged, except that the Forecast
+source's class never exceeds its model's, and an external MCP server can
 replace it at any time. Its tools and views are Eneo's own code, so they follow
 the deployed runtime without a sync or an approval. Its address and credential
 come from the deployment, so they cannot be edited in the connection form.
@@ -880,10 +893,14 @@ when all of these hold:
 2. a source serves the user: a group source covering one of their groups, else
    the tenant default;
 3. the source has at least one enabled, approved tool;
-4. for a built-in image model source, its image model is enabled, not
-   deprecated or deleted, and its model provider is active;
-5. the source's security classification (the image model's, for a built-in
-   image model source) meets the space's classification;
+4. for a built-in image model source or the Forecast source built into Eneo,
+   the model it runs on is enabled, not deprecated or deleted, and its model
+   provider is active;
+5. the source's security classification meets the space's classification. For
+   a built-in image model source that is the image model's. For the Forecast
+   source built into Eneo it is the model's, or the source's own when that is
+   lower: a source can narrow what the model is approved for, never widen it,
+   and a model without a classification leaves the source without one;
 6. the completion model supports tool calling.
 
 Otherwise the function is silently unavailable for that turn. For a

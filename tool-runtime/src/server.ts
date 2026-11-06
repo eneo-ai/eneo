@@ -31,6 +31,8 @@ export type Endpoint = {
    * forecast model). Diagnostics name the endpoints that cannot; calls are not refused here.
    */
   ready?: () => Promise<boolean>;
+  /** The models the endpoint can run, by the identifier Eneo selects them with (x-eneo-model). */
+  models?: { id: string; name: string }[];
 };
 export type ServerOptions = {
   token: string;
@@ -70,9 +72,12 @@ function callContext(request: Request, endpoint: Endpoint): CallContext {
   const tenantId = request.headers.get("x-eneo-tenant-id") ?? "";
   const userId = request.headers.get("x-eneo-user-id") ?? "";
   const fileOrigin = parseOrigin(request.headers.get("x-eneo-file-origin"));
+  // A catalog key the tool compares with the models it has; never a path, never echoed.
+  const model = request.headers.get("x-eneo-model") || undefined;
   const origin = {
     ...(fileOrigin ? { fileOrigin } : {}),
     ...(request.headers.get("x-eneo-tool-views") === "shown" ? { showsViews: true } : {}),
+    ...(model ? { model } : {}),
   };
   if (UUID.test(tenantId) && UUID.test(userId)) return { tenantId, userId, ...origin };
   if (endpoint.requiresIdentity)
@@ -200,6 +205,9 @@ export function createHandler(options: ServerOptions) {
             native: options.nativeStatus?.() ?? { active: 0, queued: 0 },
             file_origin: fileOrigin,
             unavailable: await unavailable,
+            models: Object.fromEntries(
+              [...endpoints.values()].flatMap((endpoint) => (endpoint.models ? [[endpoint.slug, endpoint.models]] : [])),
+            ),
           },
           { headers: { "cache-control": "no-store" } },
         );

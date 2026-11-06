@@ -202,6 +202,73 @@ class TestCreateBundledTabular:
             )
 
 
+class TestCreateBundledForecast:
+    """The Forecast source runs on the tenant's default forecast model, which
+    Eneo provisions in the same transaction as the source."""
+
+    async def test_runs_on_the_tenants_default_forecast_model(
+        self, monkeypatch, runtime_configured
+    ):
+        service, repo, user = _make_service(monkeypatch)
+        model_id = uuid4()
+        provision = AsyncMock(return_value=model_id)
+        monkeypatch.setattr(service_module, "ensure_default_forecast_model", provision)
+
+        result = await service.create_bundled_mcp_server("forecast")
+
+        provision.assert_awaited_once_with(repo.session, user.tenant_id)
+        assert result.server.purpose == "forecast"
+        assert result.server.forecast_model_id == model_id
+
+    async def test_other_tools_run_on_no_forecast_model(
+        self, monkeypatch, runtime_configured
+    ):
+        service, _, _ = _make_service(monkeypatch)
+        provision = AsyncMock()
+        monkeypatch.setattr(service_module, "ensure_default_forecast_model", provision)
+
+        result = await service.create_bundled_mcp_server("compute")
+
+        provision.assert_not_awaited()
+        assert result.server.forecast_model_id is None
+
+    async def test_is_refused_while_the_runtime_says_it_cannot_run(
+        self, monkeypatch, runtime_configured
+    ):
+        service, repo, _ = _make_service(monkeypatch)
+        provision = AsyncMock()
+        monkeypatch.setattr(service_module, "ensure_default_forecast_model", provision)
+        runtime = RuntimeStatus(expected_version="2.3.0", configured=True)
+        runtime.note_unavailable(["forecast"])
+
+        with pytest.raises(BadRequestException, match="needs a model"):
+            await service.create_bundled_mcp_server(
+                "forecast", activate=True, runtime=runtime
+            )
+
+        provision.assert_not_awaited()
+        repo.add.assert_not_awaited()
+
+    @pytest.mark.parametrize(
+        "state", ["not_configured", "unreachable", "unauthorized", "unverified"]
+    )
+    async def test_an_unknown_runtime_status_does_not_block_it(
+        self, monkeypatch, runtime_configured, state
+    ):
+        service, repo, _ = _make_service(monkeypatch)
+        monkeypatch.setattr(
+            service_module,
+            "ensure_default_forecast_model",
+            AsyncMock(return_value=uuid4()),
+        )
+
+        await service.create_bundled_mcp_server(
+            "forecast", runtime=RuntimeStatus(expected_version="test", state=state)
+        )
+
+        repo.add.assert_awaited_once()
+
+
 class TestListBundled:
     async def test_reports_purpose_availability_and_the_added_server(
         self, monkeypatch, runtime_configured

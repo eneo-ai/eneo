@@ -11,6 +11,7 @@ from sqlalchemy import (
     Numeric,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -223,6 +224,59 @@ class ImageModels(BasePublic):
         CheckConstraint(
             "(tenant_id IS NULL AND provider_id IS NULL) OR (tenant_id IS NOT NULL AND provider_id IS NOT NULL)",
             name="ck_image_models_tenant_provider",
+        ),
+    )
+
+
+class ForecastModels(BasePublic):
+    """Forecast models: what the Forecast source runs in a tool service.
+
+    Governed like the other model types (enablement, classification, display
+    name, soft delete), but created by Eneo, never by hand: one row per
+    checkpoint a tool service runs, under that service's provider. `name` is
+    the key the runtime knows the checkpoint by (sent as X-Eneo-Model;
+    "default" is the checkpoint the deployment mounts), `nickname` the display
+    name. Always a tenant's own. The only consumer is the Forecast source row
+    on `mcp_servers`.
+    """
+
+    name: Mapped[str] = mapped_column()
+    nickname: Mapped[str] = mapped_column()
+    org: Mapped[Optional[str]] = mapped_column()
+    open_source: Mapped[Optional[bool]] = mapped_column()
+    description: Mapped[Optional[str]] = mapped_column()
+    is_deprecated: Mapped[bool] = mapped_column(server_default="False")
+
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"), index=True
+    )
+    # RESTRICT: a provider is never deleted from under a model it runs.
+    provider_id: Mapped[UUID] = mapped_column(
+        ForeignKey("model_providers.id", ondelete="RESTRICT"), index=True
+    )
+    provider: Mapped[ModelProviders] = relationship()
+
+    is_enabled: Mapped[bool] = mapped_column(server_default="True")
+    security_classification_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(SecurityClassificationsTable.id, ondelete="SET NULL"), nullable=True
+    )
+    security_classification: Mapped[Optional["SecurityClassificationsTable"]] = (
+        relationship(back_populates="forecast_models")
+    )
+
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        # One live row per checkpoint, so provisioning is idempotent.
+        Index(
+            "uq_forecast_models_tenant_provider_name",
+            "tenant_id",
+            "provider_id",
+            "name",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
         ),
     )
 

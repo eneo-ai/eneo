@@ -52,6 +52,7 @@ def _service(provider_type: str, endpoint: str = "") -> ModelProviderService:
     provider = MagicMock()
     provider.id = uuid4()
     provider.provider_type = provider_type
+    provider.is_managed = False
     provider.credentials = {"api_key": "ciphertext"}
     provider.config = {"endpoint": endpoint}
     repository = MagicMock()

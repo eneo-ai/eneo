@@ -25,6 +25,7 @@ import { chartConfigSchema } from "./tools/charts/config";
 import type { ChartResult } from "./tools/charts/ports";
 import { chartTools } from "./tools/charts/tool";
 import { chartView } from "./tools/charts/view";
+import { DEFAULT_FORECAST_MODEL, forecastScheduler } from "./tools/forecast/config";
 import type { ForecastResult } from "./tools/forecast/ports";
 import { forecastReady } from "./tools/forecast/engine/timestral";
 import { forecastTools } from "./tools/forecast/tool";
@@ -167,23 +168,20 @@ endpoints.push(
   },
 );
 
-// Forecasts run a Python sidecar with torch each, so they queue on their own, one at a time by
-// default. A waiting forecast holds one of the server's slots, so the queue is short: more
-// callers are told the runtime is busy instead of crowding out every other tool.
+const forecasts = forecastScheduler(config.forecastConcurrency, config.maxConcurrency);
 // The whole-job deadline covers reading the file, the sidecar (at most 25 s with its torch
 // import and model load) and drawing the picture.
-const forecastQueue = Math.min(config.maxConcurrency, 2 * config.forecastConcurrency);
-const forecastScheduler = new Scheduler(config.forecastConcurrency, forecastQueue, forecastQueue);
 const forecastJobTimeoutMs = 40_000;
 endpoints.push({
   slug: "forecast",
   toolTimeoutMs: forecastJobTimeoutMs + 5_000,
   ready: () => forecastReady(config.forecast.model_path),
+  models: [{ id: DEFAULT_FORECAST_MODEL, name: config.forecast.model_name }],
   tools: forecastTools(
     config.forecast,
     charts,
     (job) =>
-      forecastScheduler.run(
+      forecasts.run(
         async () => (await isolate({ job }, forecastJobTimeoutMs)) as ForecastResult,
       ),
     fileAccess,

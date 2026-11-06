@@ -43,7 +43,7 @@ const imageModel = {
   hosting: "usa",
   default_size: "1024x1024",
   default_quality: "high",
-  used_by_mcp_servers: [{ id: "cap-1", name: "Bildgenerering", purpose: "image_generation" }]
+  used_by_mcp_servers: [{ id: "cap-1", name: "Egen bildkälla", purpose: "image_generation" }]
 } as AdminModel;
 const rerankModel = {
   id: "rerank-1",
@@ -91,7 +91,7 @@ describe("ModelDetailDialog", () => {
       "Hög"
     );
     const sources = within(dialog).getByText("Används av Bildgenerering").nextElementSibling;
-    expect(within(sources as HTMLElement).getByRole("listitem").textContent).toBe("Bildgenerering");
+    expect(within(sources as HTMLElement).getByRole("listitem").textContent).toBe("Egen bildkälla");
     await expectNoAxeViolations(dialog);
   });
 
@@ -176,7 +176,7 @@ it("shows completion metadata and offers edit and migration from a deprecated mo
     "4\u00a0096"
   );
   expect(within(dialog).getByText("Hosting-region").nextElementSibling?.textContent).toBe("USA");
-  expect(within(dialog).getByText("Leverantör").nextElementSibling?.textContent).toBe("OpenAI");
+  expect(within(dialog).getByText("Utvecklad av").nextElementSibling?.textContent).toBe("OpenAI");
   expect(within(dialog).getByText("Öppen källkod").nextElementSibling?.textContent).toBe("Nej");
   expect(within(dialog).getByText("Säkerhetsklassificering").nextElementSibling?.textContent).toBe(
     "Intern"

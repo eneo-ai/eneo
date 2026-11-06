@@ -3,6 +3,7 @@
 /** @typedef {import('../types/resources').TranscriptionModel} TranscriptionModel */
 /** @typedef {import('../types/resources').ImageModel} ImageModel */
 /** @typedef {import('../types/resources').RerankModel} RerankModel */
+/** @typedef {import('../types/resources').ForecastModel} ForecastModel */
 /** @typedef {import('../client/client').EneoError} EneoError */
 
 /**
@@ -29,15 +30,16 @@ export function initModels(client) {
         embeddingModels: res.embedding_models,
         transcriptionModels: res.transcription_models,
         imageModels: res.image_models,
-        rerankModels: res.rerank_models
+        rerankModels: res.rerank_models,
+        forecastModels: res.forecast_models
       };
     },
 
     /**
-     * Update either an existing Completion, Embedding, Transcription, Image or Rerank Model, only one can be processed at any time
-     * @template {{completionModel: {id:string}, embeddingModel?: never, transcriptionModel?: never, imageModel?: never, rerankModel?: never, update:import('../types/fetch').JSONRequestBody<"post", "/api/v1/completion-models/{id}/">} | {completionModel?: never, embeddingModel: {id:string}, transcriptionModel?: never, imageModel?: never, rerankModel?: never, update:import('../types/fetch').JSONRequestBody<"post", "/api/v1/embedding-models/{id}/">} | {completionModel?: never, embeddingModel?: never, transcriptionModel: {id:string}, imageModel?: never, rerankModel?: never, update:import('../types/fetch').JSONRequestBody<"post", "/api/v1/transcription-models/{id}/">} | {completionModel?: never, embeddingModel?: never, transcriptionModel?: never, imageModel: {id:string}, rerankModel?: never, update:import('../types/fetch').JSONRequestBody<"post", "/api/v1/image-models/{id}/">} | {completionModel?: never, embeddingModel?: never, transcriptionModel?: never, imageModel?: never, rerankModel: {id:string}, update:import('../types/fetch').JSONRequestBody<"post", "/api/v1/rerank-models/{id}/">}} T
+     * Update either an existing Completion, Embedding, Transcription, Image, Rerank or Forecast Model, only one can be processed at any time
+     * @template {{completionModel: {id:string}, embeddingModel?: never, transcriptionModel?: never, imageModel?: never, rerankModel?: never, forecastModel?: never, update:import('../types/fetch').JSONRequestBody<"post", "/api/v1/completion-models/{id}/">} | {completionModel?: never, embeddingModel: {id:string}, transcriptionModel?: never, imageModel?: never, rerankModel?: never, forecastModel?: never, update:import('../types/fetch').JSONRequestBody<"post", "/api/v1/embedding-models/{id}/">} | {completionModel?: never, embeddingModel?: never, transcriptionModel: {id:string}, imageModel?: never, rerankModel?: never, forecastModel?: never, update:import('../types/fetch').JSONRequestBody<"post", "/api/v1/transcription-models/{id}/">} | {completionModel?: never, embeddingModel?: never, transcriptionModel?: never, imageModel: {id:string}, rerankModel?: never, forecastModel?: never, update:import('../types/fetch').JSONRequestBody<"post", "/api/v1/image-models/{id}/">} | {completionModel?: never, embeddingModel?: never, transcriptionModel?: never, imageModel?: never, rerankModel: {id:string}, forecastModel?: never, update:import('../types/fetch').JSONRequestBody<"post", "/api/v1/rerank-models/{id}/">} | {completionModel?: never, embeddingModel?: never, transcriptionModel?: never, imageModel?: never, rerankModel?: never, forecastModel: {id:string}, update:import('../types/fetch').JSONRequestBody<"post", "/api/v1/forecast-models/{id}/">}} T
      * @param {T} params
-     * @returns {Promise<T extends { completionModel: { id: string } } ? CompletionModel : T extends { embeddingModel: { id: string } } ? EmbeddingModel : T extends { transcriptionModel: { id: string } } ? TranscriptionModel : T extends { imageModel: { id: string } } ? ImageModel : RerankModel>}
+     * @returns {Promise<T extends { completionModel: { id: string } } ? CompletionModel : T extends { embeddingModel: { id: string } } ? EmbeddingModel : T extends { transcriptionModel: { id: string } } ? TranscriptionModel : T extends { imageModel: { id: string } } ? ImageModel : T extends { rerankModel: { id: string } } ? RerankModel : ForecastModel>}
      * @throws {EneoError}
      * */
     update: async ({
@@ -46,6 +48,7 @@ export function initModels(client) {
       transcriptionModel,
       imageModel,
       rerankModel,
+      forecastModel,
       update
     }) => {
       if (completionModel) {
@@ -84,9 +87,19 @@ export function initModels(client) {
         });
         /** @ts-expect-error Jsdoc can't properly infer return type */
         return res;
-      } else {
+      } else if (rerankModel) {
         const { id } = rerankModel;
         const res = await client.fetch("/api/v1/rerank-models/{id}/", {
+          method: "post",
+          params: { path: { id } },
+          requestBody: { "application/json": update }
+        });
+        /** @ts-expect-error Jsdoc can't properly infer return type */
+        return res;
+      } else {
+        // One endpoint turns a forecast model on or off, classifies and renames it.
+        const { id } = forecastModel;
+        const res = await client.fetch("/api/v1/forecast-models/{id}/", {
           method: "post",
           params: { path: { id } },
           requestBody: { "application/json": update }

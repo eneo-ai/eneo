@@ -6,6 +6,7 @@
   import type {
     CompletionModel,
     EmbeddingModel,
+    ForecastModel,
     ImageModel,
     RerankModel,
     TranscriptionModel
@@ -16,10 +17,15 @@
   import { toastError } from "$lib/core/errors";
 
   type ModelTypeKey =
-    "completionModel" | "embeddingModel" | "transcriptionModel" | "imageModel" | "rerankModel";
+    | "completionModel"
+    | "embeddingModel"
+    | "transcriptionModel"
+    | "imageModel"
+    | "rerankModel"
+    | "forecastModel";
 
   type LockableModel = (
-    CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel | RerankModel
+    CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel | RerankModel | ForecastModel
   ) & {
     is_locked?: boolean | null | undefined;
     lock_reason?: string | null | undefined;
@@ -45,6 +51,9 @@
     }
     if (type === "rerankModel") {
       return eneo.models.update({ rerankModel: { id: model.id }, update });
+    }
+    if (type === "forecastModel") {
+      return eneo.models.update({ forecastModel: { id: model.id }, update });
     }
     return eneo.models.update({ transcriptionModel: { id: model.id }, update });
   }

@@ -111,8 +111,26 @@ runtime. While it is missing, the runtime's `GET /diagnostics` lists `forecast`
 under `unavailable`, and `GET /mcp-servers/bundled/` offers the forecast tool
 with `available: false` and `unavailable_reason: "model_missing"`: **Admin →
 Verktyg** says on the Forecast card that the function needs a model, and it
-cannot be turned on there. Other deployments see no warning. Calls are not
-refused; a forecast without its model fails with `MODEL_UNAVAILABLE`.
+cannot be turned on there; `POST /mcp-servers/bundled/forecast/` refuses it with
+a 400 as well. An unknown or unreachable runtime status does not block the add.
+Other deployments see no warning. Calls are not refused; a forecast without its
+model fails with `MODEL_UNAVAILABLE`.
+
+The checkpoint is also a catalog model (`forecast_models`): turning the bundled
+Forecast source on provisions, per tenant, a provider of type
+`eneo_tool_service` (`is_managed`; its URL and token stay in the deployment
+settings) and a forecast model keyed `default`, the checkpoint at
+`FORECAST_MODEL_PATH`. The source references it (`mcp_servers.forecast_model_id`),
+so the model's on/off switch, deprecation, provider state and classification
+feed the source's `readiness_reason` and effective classification like an
+image model's do. Activating the source is refused while its model is blocked,
+before the current default is deactivated. A source's own classification can
+only tighten the model's: the effective class is the lower of the two, and none
+when the model has none, so the source fails closed in a classified space. A
+model switched off during a turn stops at the next turn; tool calls later in
+the same turn, including one waiting for approval, still run. The backend sends
+the key as `X-Eneo-Model`; the runtime refuses any key it does not have instead
+of falling back.
 
 ## 3. Ask-time resolution
 
@@ -121,8 +139,8 @@ For each capability an assistant requests, the provider is attached only when al
 - the user's role grants the capability permission (the purpose name, for example `web_search` or `file_analysis`; roles can be edited under **Admin → Roles**);
 - a provider serves the user: a group-targeted provider covering one of their groups, else the tenant default;
 - the provider has at least one enabled, approved tool;
-- for a built-in provider, its image model is enabled, not deprecated or deleted, and its model provider is active;
-- the provider's security classification (for a built-in provider, its image model's) meets the space's classification;
+- for a built-in provider or the bundled Forecast source, the model it runs on is enabled, not deprecated or deleted, and its model provider is active;
+- the provider's security classification (for a built-in provider, its image model's; for the bundled Forecast source, the lower of its own and its model's, none when the model has none) meets the space's classification;
 - the completion model supports tool calling.
 
 Otherwise the capability is silently unavailable for that turn. Service API keys can use web search only: generated images and files are stored as files owned by a user, a service key has no user, and file analysis is not in the service-key permission set.
@@ -197,11 +215,11 @@ Adding a capability requires:
 
 - backend: the `CapabilityPurpose` type and `CAPABILITY_PURPOSES` list, `MCPServerPurpose`, the matching `Permission` and its description in `permissions_mapper.py`, the predefined roles in `predefined_roles.yml` (web search, image generation and file analysis go to User, AI Configurator and Owner; a function that writes files or runs code, such as file creation, charts, compute and forecast, goes to Owner only and an administrator opts other roles in), and the purpose CHECK constraints in `capabilities_table.py`;
 - a migration that replaces the three purpose constraints and decides which existing roles get the permission (`202610081000` grants `file_analysis` and `file_creation` to the predefined User, AI Configurator and Owner roles; `202610081100` grants `charts` to no existing role and `202610091100` adds it to Owner; `202610131300` grants `compute` and `202611061000` grants `forecast` to Owner only);
-- frontend: the `capabilities.ts` descriptor, `CAPABILITY_STEPS` in `internalToolLabels.ts`, `permission-labels.ts`, `permission-groups.ts` and the Paraglide messages; the JSDoc unions in `packages/eneo-js/src/endpoints/*.js`, and a regenerated `schema.d.ts`;
+- frontend: the `capabilities.ts` descriptor in both apps, `CAPABILITY_STEPS` in `internalToolLabels.ts`, `permission-labels.ts`, `permission-groups.ts` and the Paraglide messages; in `web-next`, `roles.ts`, `PERMISSION_KEYS` in `roles-page.tsx` and `CAPABILITY_PURPOSES` in `widget-tool-steps.ts`; `FUNCTION_PURPOSES` in `packages/skill-instructions`; the JSDoc unions in `packages/eneo-js/src/endpoints/*.js`, and a regenerated `schema.d.ts`;
 - for a capability that delivers files, its types in `GENERATED_FILE_TYPES_BY_PURPOSE`;
 - for a bundled provider, an entry in `BUNDLED_TOOLS` naming its purpose and whether it needs forwarded identity.
 
-All admin, space, assistant and chat surfaces render from those lists.
+The admin, space, assistant and chat surfaces render from those lists.
 
 Whether a capability should be served by a built-in loopback server at all, and which attachment pattern it should use, is covered in the docs site page **Built-in Tool Servers** (`frontend/apps/docs-site/src/content/docs/builtin-tool-servers.mdx`); the reasoning behind the split between loopback, bundled and external providers is in **Tools and MCP Architecture** (`frontend/apps/docs-site/src/content/docs/tool-architecture.mdx`). The rule in short: a loopback tool is a pure function of the request, the tenant database and at most one outbound provider call, finishing inside a tool-call timeout; anything with a runtime footprint (engine, process, storage, heavy dependency) runs outside the backend, as an Eneo-bundled isolated provider in the tool runtime or an independently operated MCP server, and receives the signed reference URL.
 
@@ -210,7 +228,7 @@ Whether a capability should be served by a built-in loopback server at all, and 
 
 Ship migrations **202609041000** and **202610081000** (`file_analysis`,
 `file_creation`), **202610081100** (`charts`), **202610131300** (`compute`)
-and **202611061000** (`forecast`), backend,
+and **202611061000** and **202611061010** (`forecast` and its model), backend,
 frontend and the bundled JavaScript client together. The migration backfills active and inactive capability
 attachments, collapses duplicate purposes, preserves a policy default as on
 when any duplicate was on, and removes obsolete provider attachments and

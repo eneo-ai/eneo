@@ -9,8 +9,7 @@ import { TextInput } from "@/components/astryx/text-input";
 import { useQuery } from "@tanstack/react-query";
 import { Plus, Search } from "lucide-react";
 import { useFormatter, useTranslations } from "use-intl";
-import { useMemo, useState } from "react";
-import { flushSync } from "react-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
 import { QueryStateBoundary } from "@/components/composites/query-state";
 import { StatusLabel } from "@/components/composites/status-label";
@@ -38,6 +37,7 @@ import {
   UNCLASSIFIED
 } from "./provider-sections";
 import { KEYBOARD } from "@/components/astryx/keyboard-hints";
+import { TOOLS_TAB_HREF } from "../tools/tools-tabs";
 
 /**
  * One banner for everything the data says needs an admin: active providers
@@ -144,12 +144,17 @@ export function ProviderOverview({
   models,
   classifications,
   securityEnabled,
+  kind,
+  onKindChange,
   onAddModel,
   onAddProvider
 }: {
   models: ModelsPresentation;
   classifications: SecurityClassification[];
   securityEnabled: boolean;
+  /** The type filter, which lives in the address so a link can open one type. */
+  kind: KindFilter;
+  onKindChange: (kind: KindFilter) => void;
   onAddModel: (providerId: string) => void;
   onAddProvider: () => void;
 }) {
@@ -162,17 +167,18 @@ export function ProviderOverview({
   const capabilities = useQuery(providerCapabilitiesQueryOptions(browserApi));
 
   const [search, setSearch] = useState("");
-  const [kind, setKind] = useState<KindFilter>("all");
   const [securityFilter, setSecurityFilter] = useState("all");
   const security = securityEnabled ? securityFilter : "all";
   const filters: ModelFilters = { search, kind, security };
+  // The provider that comes with the installation, as the Functions page names it.
+  const managedName = t("mcp_auth_bundled");
 
   const sections = useMemo(
     () =>
       capabilities.data
-        ? buildProviderSections(models, providers.data ?? [], capabilities.data)
+        ? buildProviderSections(models, providers.data ?? [], capabilities.data, managedName)
         : [],
-    [models, providers.data, capabilities.data]
+    [models, providers.data, capabilities.data, managedName]
   );
   const rendered = useMemo(
     () => filterSections(sections, { search, kind, security }),
@@ -188,17 +194,26 @@ export function ProviderOverview({
     [sections, viewerToday]
   );
 
-  // The banner's links move focus to a provider's card. When the filters
-  // hide the card, they are cleared first so it is there to receive focus.
+  // The banner's links move focus to a provider's card. When the filters hide
+  // the card they are cleared first, and focus follows once it is rendered: the
+  // type filter clears through the address, after the search has rendered.
+  const cardToFocus = useRef<string | null>(null);
+  useEffect(() => {
+    if (cardToFocus.current === null) return;
+    const card = document.getElementById(providerCardId(cardToFocus.current));
+    if (!card) return;
+    card.focus();
+    cardToFocus.current = null;
+  }, [rendered]);
   function showProvider(providerId: string) {
-    if (!rendered.some(({ section }) => section.providerId === providerId)) {
-      flushSync(() => {
-        setSearch("");
-        setKind("all");
-        setSecurityFilter("all");
-      });
+    if (rendered.some(({ section }) => section.providerId === providerId)) {
+      document.getElementById(providerCardId(providerId))?.focus();
+      return;
     }
-    document.getElementById(providerCardId(providerId))?.focus();
+    cardToFocus.current = providerId;
+    setSearch("");
+    setSecurityFilter("all");
+    onKindChange("all");
   }
 
   // The number of models a filter change leaves is announced politely,
@@ -235,22 +250,40 @@ export function ProviderOverview({
 
   let content: React.ReactNode;
   if (rendered.length === 0) {
-    content =
-      sections.length === 0 ? (
-        <EmptyState
-          title={t("no_providers_yet")}
-          actions={
-            <Button
-              variant="primary"
-              label={t("add_provider")}
-              icon={<Plus className="size-4" aria-hidden="true" />}
-              onClick={onAddProvider}
-            />
-          }
-        />
-      ) : (
-        <EmptyState isAnnounced={false} title={t("no_providers_match")} />
-      );
+    // No forecast model at all: it comes with the installation, once Prognos is on.
+    const noForecastModel =
+      kind === "forecast" &&
+      !sections.some((section) => section.models.some((entry) => entry.kind === "forecast"));
+    // A forecast model is never added through a provider, so the Prognos filter
+    // points to the Function even before any provider exists.
+    content = noForecastModel ? (
+      <EmptyState
+        isAnnounced={false}
+        title={t("forecast_models_empty_title")}
+        description={t("forecast_models_empty_description")}
+        actions={
+          <Button
+            variant="secondary"
+            label={t("forecast_models_empty_action")}
+            href={TOOLS_TAB_HREF.functions}
+          />
+        }
+      />
+    ) : sections.length === 0 ? (
+      <EmptyState
+        title={t("no_providers_yet")}
+        actions={
+          <Button
+            variant="primary"
+            label={t("add_provider")}
+            icon={<Plus className="size-4" aria-hidden="true" />}
+            onClick={onAddProvider}
+          />
+        }
+      />
+    ) : (
+      <EmptyState isAnnounced={false} title={t("no_providers_match")} />
+    );
   } else {
     content = rendered.map(({ section, models: sectionModels }) => (
       <ProviderCard
@@ -295,7 +328,7 @@ export function ProviderOverview({
               options={kindOptions}
               value={kind}
               onChange={(value) => {
-                setKind(value as KindFilter);
+                onKindChange(value as KindFilter);
                 announceResults({ kind: value as KindFilter });
               }}
               renderValue={(option) =>
@@ -314,7 +347,7 @@ export function ProviderOverview({
             label={t("model_type")}
             value={kind}
             onChange={(value) => {
-              setKind(value as KindFilter);
+              onKindChange(value as KindFilter);
               announceResults({ kind: value as KindFilter });
             }}
             className="max-w-full flex-wrap max-md:hidden"

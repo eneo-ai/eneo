@@ -186,7 +186,7 @@ describe("image function source configuration", () => {
       expect((screen.getByLabelText("Bildmodell") as HTMLSelectElement).value).toBe("new-image")
     );
     expect((screen.getByLabelText("Namn") as HTMLInputElement).value).toBe("Utkast kvar");
-    expect(screen.queryByText("Bildmodellen är inaktiverad.")).toBeNull();
+    expect(screen.queryByText("Modellen är inaktiverad.")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Spara" }));
     await waitFor(() =>
       expect(api.POST).toHaveBeenCalledWith("/api/v1/mcp-servers/{id}/", {
@@ -223,7 +223,7 @@ describe("image function source configuration", () => {
     expect(screen.getByText(/Hög/)).toBeTruthy();
     expect(screen.getByText("Ärvs från den valda bildmodellen.")).toBeTruthy();
     expect(screen.getByText("Intern")).toBeTruthy();
-    expect(screen.getByText("Bildmodellen är inaktiverad.")).toBeTruthy();
+    expect(screen.getByText("Modellen är inaktiverad.")).toBeTruthy();
     await expectNoAxeViolations(document.body);
   });
 

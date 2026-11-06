@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { Scheduler } from "../../scheduler";
 
 /**
  * Limits of one forecast. They keep one call inside Eneo's tool-call timeout and its result
@@ -23,9 +24,25 @@ export const forecastConfigSchema = z
 export type ForecastConfig = z.infer<typeof forecastConfigSchema>;
 
 /**
+ * The identifier Eneo's catalog uses for the checkpoint at `model_path`: the one model a runtime
+ * has today. A call that names another model is refused, never served by this one.
+ */
+export const DEFAULT_FORECAST_MODEL = "default";
+
+/**
  * The Python with torch and timestral; the image installs it here, a developer may point
  * elsewhere. Read when asked, so a sandbox started later sees the environment of that moment.
  */
 export function forecastPython(): string {
   return process.env.FORECAST_PYTHON ?? "/opt/forecast/bin/python3";
+}
+
+/**
+ * Forecasts run a Python sidecar with torch each, so they queue on their own, one at a time by
+ * default. A waiting forecast holds one of the server's slots, so the queue is short: more
+ * callers are told the runtime is busy instead of crowding out every other tool.
+ */
+export function forecastScheduler(concurrency: number, maxConcurrency: number): Scheduler {
+  const queue = Math.min(maxConcurrency, 2 * concurrency);
+  return new Scheduler(concurrency, queue, queue);
 }

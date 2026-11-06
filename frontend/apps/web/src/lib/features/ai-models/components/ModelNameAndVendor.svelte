@@ -33,6 +33,7 @@
   import type {
     CompletionModel,
     EmbeddingModel,
+    ForecastModel,
     ImageModel,
     RerankModel,
     TranscriptionModel
@@ -47,6 +48,7 @@
     | TranscriptionModel
     | ImageModel
     | RerankModel
+    | ForecastModel
     | { org: string; nickname: string; name: string; description: string };
   export let size: "card" | "table" = "table";
   /** Controls the description info-button next to the model name.

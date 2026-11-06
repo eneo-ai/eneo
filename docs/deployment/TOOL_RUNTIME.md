@@ -134,7 +134,7 @@ new provider; retire it once the Function is configured.
 ### After upgrading to a release that adds Forecast
 
 Mount a checkpoint as described in [The forecast model](#the-forecast-model)
-and apply migration `202611061000`, then add **Built into Eneo** under
+and apply migrations `202611061000` and `202611061010`, then add **Built into Eneo** under
 **Admin > Tools > Functions > Forecast** and activate it. Enable **Forecast**
 on the space and assistant, or allow it for the personal assistant under
 **Admin > Personal assistant > Tools**. The migration grants the `forecast` permission to the predefined Owner role only,

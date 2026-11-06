@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { Scheduler } from "../src/scheduler";
 import { ToolError } from "../src/errors";
+import { forecastScheduler } from "../src/tools/forecast/config";
 
 function gate() {
   let resolve!: () => void;
@@ -56,4 +57,14 @@ test("queue limits and queued cancellation do not leak slots", async () => {
     }, "b"),
   ).rejects.toThrow("failure");
   expect(scheduler.status).toEqual({ active: 0, queued: 0 });
+});
+test("three forecasts asked for at once all run, and the next caller is told to wait", async () => {
+  const scheduler = forecastScheduler(1, 8);
+  const first = gate();
+  const jobs = [first.promise, Promise.resolve(), Promise.resolve()].map((job) =>
+    scheduler.run(() => job, "legacy"),
+  );
+  await expect(scheduler.run(async () => {}, "legacy")).rejects.toMatchObject({ code: "BUSY" });
+  first.resolve();
+  await Promise.all(jobs);
 });
