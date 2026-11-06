@@ -14,6 +14,7 @@ from eneo.ai_models.completion_models.completion_model import (
 )
 from eneo.assistants.api.assistant_models import AssistantResponse
 from eneo.assistants.reference_tags import INLINE_REFERENCE_PATTERN
+from eneo.completion_models.domain.skill_activation import SKILL_ACTIVATION_TOOL_NAME
 from eneo.questions.question import (
     McpToolReferencePublic,
     Question,
@@ -50,6 +51,21 @@ DISPLAY_ARGUMENT_KEYS = (
     "id",
 )
 
+# What the widget renders of a tool call. A call is rebuilt from these alone, so
+# a field added to tool calls later stays on the server until the widget needs
+# it.
+SHOWN_CALL_FIELDS = (
+    "server_name",
+    "tool_name",
+    "title",
+    "tool_call_id",
+    "approved",
+    "result_status",
+    "purpose",
+    "is_internal",
+    "is_bundled",
+)
+
 # A citation marker split across two text chunks is found in the tail of the
 # previous chunk plus the next one.
 _MARKER_TAIL = len('<inref id="00000000"/>') - 1
@@ -66,6 +82,8 @@ class VisitorView:
     Never shown: the model record, reasoning, token counts, the assistant and
     Skills behind the answer, tool results and tool ``_meta``, the raw content
     of tool resources, and any tool argument beyond the one the widget shows.
+    Tool calls carry only ``SHOWN_CALL_FIELDS`` and resource ``_meta`` only its
+    display keys: an allowlist, so a new field is hidden until it is added.
     With ``show_sources`` off no reference of any kind leaves the server. With
     ``show_tool_activity`` off no tool call does. A resource a tool returned
     reaches the visitor only once the answer cites it, on a tool event with an
@@ -123,17 +141,9 @@ class VisitorView:
     def _tool_events(self, chunk: Completion) -> list[Completion]:
         calls: list[ToolCallMetadata] = (
             [
-                replace(
-                    call,
-                    result=None,
-                    # A structured result and an MCP App view are tool output
-                    # too; the widget renders neither.
-                    structured_content=None,
-                    app_view=None,
-                    meta=None,
-                    arguments=self._shown_argument(call.arguments),
-                )
+                ToolCallMetadata(**self._shown_call(call))
                 for call in chunk.tool_calls_metadata or []
+                if self._is_shown(call)
             ]
             if self.widget.show_tool_activity
             else []
@@ -214,21 +224,14 @@ class VisitorView:
                     else []
                 ),
                 "tool_calls": (
-                    [self._stored_call(call) for call in question.tool_calls or []]
+                    [
+                        ToolCallInfo(**self._shown_call(call))
+                        for call in question.tool_calls or []
+                        if self._is_shown(call)
+                    ]
                     if self.widget.show_tool_activity
                     else None
                 ),
-            }
-        )
-
-    def _stored_call(self, call: ToolCallInfo) -> ToolCallInfo:
-        return call.model_copy(
-            update={
-                "result": None,
-                "meta": None,
-                "app_view": None,
-                "generated_file_ids": None,
-                "arguments": self._shown_argument(call.arguments),
             }
         )
 
@@ -236,6 +239,18 @@ class VisitorView:
         return ref.model_copy(update=self._reference_changes(ref.uri, ref.meta))
 
     # --- shared -------------------------------------------------------------
+
+    @staticmethod
+    def _is_shown(call: ToolCallMetadata | ToolCallInfo) -> bool:
+        # Activating a Skill is a step of the assistant's own instructions, and
+        # its key and name would say which Skills the assistant has.
+        return call.mcp_tool_name != SKILL_ACTIVATION_TOOL_NAME
+
+    def _shown_call(self, call: ToolCallMetadata | ToolCallInfo) -> dict[str, Any]:
+        return {
+            **{name: getattr(call, name) for name in SHOWN_CALL_FIELDS},
+            "arguments": self._shown_argument(call.arguments),
+        }
 
     @staticmethod
     def _shown_argument(
@@ -261,8 +276,8 @@ class VisitorView:
         changes: dict[str, Any] = {
             "content": None,
             "meta": {key: meta[key] for key in meta if key in shown},
+            "mcp_tool_name": None,
         }
         if not self.widget.show_tool_activity:
             changes["tool_call_id"] = None
-            changes["mcp_tool_name"] = None
         return changes

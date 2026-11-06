@@ -16,6 +16,7 @@ from eneo.ai_models.completion_models.completion_model import (
 )
 from eneo.assistants.api import assistant_protocol
 from eneo.assistants.api.assistant_models import AssistantResponse
+from eneo.completion_models.domain.skill_activation import SKILL_ACTIVATION_TOOL_NAME
 from eneo.info_blobs.info_blob import InfoBlobInDB, InfoBlobInDBWithScore
 from eneo.questions.question import (
     McpToolReferencePublic,
@@ -215,7 +216,7 @@ def test_tool_event_keeps_the_call_and_the_argument_the_widget_shows():
             "approved": None,
             "result_status": "success",
             "result": None,
-            "mcp_tool_name": "casefiles__search_casefiles",
+            "mcp_tool_name": None,
             "purpose": None,
             "is_internal": None,
             "is_bundled": None,
@@ -609,3 +610,62 @@ def test_restored_session_with_tool_activity_hidden():
     assert ref["uri"] == "https://casefiles.kommun.se/2026-123"
     assert ref["tool_call_id"] is None and ref["mcp_tool_name"] is None
     assert message["references"]
+
+
+# --- Skills -----------------------------------------------------------------
+
+
+def _skill_activation() -> ToolCallMetadata:
+    return ToolCallMetadata(
+        server_name="skills",
+        tool_name="rutin-for-arenden",
+        title="Rutin för ärenden",
+        arguments={"skill_key": "rutin-for-arenden", "reason": "ärende"},
+        tool_call_id="skill-call",
+        approved=True,
+        result_status="completed",
+        result='{"activated": true}',
+        mcp_tool_name=SKILL_ACTIVATION_TOOL_NAME,
+        is_internal=True,
+    )
+
+
+def test_a_skill_activation_never_reaches_the_stream():
+    only_skill = Completion(
+        text="",
+        response_type=ResponseType.TOOL_CALL,
+        tool_calls_metadata=[_skill_activation()],
+    )
+    assert VisitorView(_widget()).events(only_skill) == []
+
+    both = replace(only_skill, tool_calls_metadata=[_skill_activation(), _tool_call()])
+    [visible] = VisitorView(_widget()).events(both)
+    event = json.dumps(_sse(visible))
+    assert [tool["tool_name"] for tool in _sse(visible)["tools"]] == [
+        "search_casefiles"
+    ]
+    assert "rutin-for-arenden" not in event
+    assert "Rutin för ärenden" not in event
+
+
+def test_a_skill_activation_never_reaches_a_restored_session():
+    session = _stored_session()
+    question = session.questions[0]
+    question.tool_calls = [
+        ToolCallInfo(
+            server_name="skills",
+            tool_name="rutin-for-arenden",
+            title="Rutin för ärenden",
+            arguments={"skill_key": "rutin-for-arenden"},
+            tool_call_id="skill-call",
+            mcp_tool_name=SKILL_ACTIVATION_TOOL_NAME,
+            is_internal=True,
+        ),
+        *(question.tool_calls or []),
+    ]
+
+    payload = to_session_public(VisitorView(_widget()).session(session))
+
+    [message] = payload.model_dump(mode="json")["messages"]
+    assert [call["tool_name"] for call in message["tool_calls"]] == ["search_casefiles"]
+    assert "rutin-for-arenden" not in json.dumps(message)
