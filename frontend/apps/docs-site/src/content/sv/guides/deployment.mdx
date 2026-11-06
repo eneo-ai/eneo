@@ -1,6 +1,6 @@
 ---
 title: Driftsätt Eneo
-translationSource: guides/deployment.mdx@260561bf99f4
+translationSource: guides/deployment.mdx@cfa2279c207a
 ---
 
 import { Callout } from "nextra/components";
@@ -71,6 +71,30 @@ upprepa dem kan du köra `export COMPOSE_ENV_FILES=.env,release.env` en gång i
 skalet (Docker Compose 2.24 eller senare). Eneos image-taggar har inget
 `v`-prefix.
 
+### Ange digest för tredjepartsavbildningar
+
+<Callout type="warning">
+  Produktionsfilen för Compose kräver oföränderliga digest-värden för Traefik,
+  pgvector och Redis. Saknas ett värde, eller är det tomt, stoppar Compose före
+  driftsättningen.
+</Callout>
+
+Sätt de tre digest-suffixen i `.env` innan du kör några Compose-kommandon. Ange
+bara det hexadecimala värdet med 64 tecken efter `sha256:`:
+
+```dotenv
+TRAEFIK_IMAGE_DIGEST=
+PGVECTOR_IMAGE_DIGEST=
+REDIS_IMAGE_DIGEST=
+```
+
+Compose bygger varje avbildning som `repository@sha256:<digest-suffix>`.
+Använd digest-värden för Traefik, pgvector och Redis som din organisation har
+godkänt. Eneos egna avbildningar kommer från `release.env` i releasepaketet, som
+låser dem med digest. Spara båda med driftsättningens backup och behåll den
+tidigare uppsättningen digest-värden tillsammans med motsvarande backup, så att
+du kan återställa.
+
 ### Skapa hemligheter
 
 Generera separata värden och spara dem i miljöfilerna:
@@ -127,8 +151,9 @@ adress, precis som för webbläsaren.
 Byt alla fyra förekomster av `your-domain.com` i Compose-filen och ersätt
 `your-email@domain.com` med adressen för Let's Encrypt.
 
-Lämna det valfria objektlagringsblocket i `.env` utkommenterat om du använder
-PostgreSQL. För inbyggd objektlagring krävs både profil och overlay enligt
+När digest-värdena är satta behöver standardfilen `.env` inga värden för
+objektlagring. Lämna det valfria objektlagringsblocket utkommenterat om du
+använder PostgreSQL. För inbyggd objektlagring krävs både profil och overlay enligt
 [lagringsguiden](/guides/object-content-storage); använd samma Compose-val vid
 start, stopp, uppgradering och återställning.
 
@@ -137,7 +162,8 @@ start, stopp, uppgradering och återställning.
 ```bash
 docker compose --env-file .env --env-file release.env up -d
 docker compose ps
-docker compose logs --tail=100 backend worker db-init
+docker compose logs --tail=100 backend worker crawler-worker \
+  task-execution-worker task-maintenance-worker db-init
 curl -fsS https://eneo.example.se/api/livez
 curl -fsS https://eneo.example.se/api/healthz
 curl -fsS https://eneo.example.se/version
@@ -175,7 +201,10 @@ webbcrawlning kräver både den allmänna workern och crawler-workern.
 En egen reverse proxy skickar normalt all publik webbtrafik till backend på
 port 8000: React-sidor, byggda resurser, autentiseringscallbacks, `/api/*`,
 `/scim/*`, `/version` och `/openapi.json`. Undanta `/internal-mcp` och dess
-undersökvägar från alla publika routrar. När webbläsarsessioner är aktiverade
+undersökvägar från alla publika routrar. Proxyn måste stödja WebSocket på
+`/api/*`: backend serverar socketen `/api/v1/ws` och, för live-transkribering,
+`/api/v1/live-transcription`. En proxy som bara uppgraderar `/api/v1/ws` behöver
+samma regel för `/api/v1/live-transcription`. När webbläsarsessioner är aktiverade
 svarar `/docs` och `/redoc` med 404; använd `/openapi.json` för API-verktyg.
 
 Referenskonfigurationen ger API-routningen prioritet 10, React-appen 5 och
@@ -203,13 +232,17 @@ docker compose exec -T db pg_dump -U postgres eneo | gzip > eneo-backup.sql.gz
 
 En uppgradering som inför varaktiga kunskapsoriginal och äldre fil-/ikonlagring
 kräver en kontrollerad dränering av jobb och stopp av gamla skrivare före
-migrering. Kör inte en rullande uppdatering för den övergången. Följ
+migrering. Kör inte en rullande uppdatering för den övergången. Håll `backend`,
+`worker`, `crawler-worker`, `task-execution-worker` och
+`task-maintenance-worker` stoppade genom återställningspunkten och `db-init`. Följ
 [uppgraderingsguiden för filer och ikoner](/guides/file-icon-storage-upgrade)
 och [backup- och återställningsrutinen](/guides/object-content-storage#back-up-and-restore).
 
 Vid uppgradering byter du ut hela releasepaketet (`release.env` och
 `release.json`) på en gång och behåller det gamla för återställning. Uppdatera
-inte verktygsavbildningen för sig. Från 2.2 vägrar `db-init`, backend, worker
+inte verktygsavbildningen för sig. Uppdatera de tre digest-suffixen för
+tredjepartsavbildningar i `.env` först när du tar in granskade artefakter för
+Traefik, pgvector eller Redis. Från 2.2 vägrar `db-init`, backend, worker
 och webbappen att starta medan en omdöpt miljövariabel är satt utan sin
 ersättare; följ [Uppgradera till 2.2.0](/guides/upgrade-2-2-0) innan du
 uppgraderar dit.
@@ -217,6 +250,8 @@ uppgraderar dit.
 Behåll en kopia av miljöfiler, krypteringsnyckel, releasepaket och exakt
 Compose-kommando. Vid återställning ska databasen och objektlagringen höra
 till samma återställningspunkt, och avbildningarna ska matcha databasschemat.
+Återställ den tidigare uppsättningen digest-värden i `.env` och stoppa
+skrivningar innan du återställer backupen.
 
 Vid uppgradering från 2.2 eller från 2.3.0-rc.3 eller tidigare: de utgåvorna
 behöll sökdata (textbitar och inbäddningar) för varje ersatt dokumentversion.
@@ -235,9 +270,13 @@ Har du en egen Compose-fil, ge även tjänsten `db` `shm_size: 1gb` och
   callback-adress. Se [OIDC-guiderna](/guides/oidc-federation).
 - **Modell saknas eller kan inte sparas:** kontrollera leverantörens uppgifter,
   att modellen är aktiverad och att `ENCRYPTION_KEY` är satt.
-- **Jobb fastnar:** läs loggarna för båda workrarna och `/api/healthz/crawler`,
+- **Jobb fastnar:** läs loggarna för alla workers och `/api/healthz/crawler`,
   som kräver installationens super-API-nyckel i `X-API-Key`. Kontrollera
   kapacitet och anslutning till databas och Redis.
+- **Ett flöde står kvar i kö:** kontrollera att `task-execution-worker` körs. Dess
+  kö är skild från den allmänna workerns.
+- **Flödesåterställning eller outboxar är försenade:** kontrollera att
+  `task-maintenance-worker` körs, och `/api/healthz/flows`.
 - **Delat minne i databasen tar slut:** vissa anrop ger HTTP 500 och
   databasloggen visar `could not resize shared memory segment ... No space left
 on device`. Disken är inte full: PostgreSQL har slut på `/dev/shm`, ett litet
@@ -406,6 +445,10 @@ Flaggan är `false` som standard. Både en aktiverad flagga och en giltig
 HTTP(S)-adress krävs. Inbjudan visas för inloggade användare och öppnar en ny
 flik. `false` döljer inbjudan, men betan är fortfarande nåbar via sin adress:
 bannern styr upptäckbarhet, inte åtkomst.
+
+Flöden byggs, körs och administreras bara i den nya appen. Enbart `NEW_APP_URL`,
+utan bannerflaggan, gör att posten **Flöden** i Svelte-appens ytmeny öppnar ytans
+flödessida i den nya appen. Utan den visar Svelte-appen ingen post för Flöden.
 
 För att dra tillbaka betan döljer du inbjudan, tar bort beta-overlay-filen
 från Compose-kommandot och skapar om backend så att dess betaroutning tas

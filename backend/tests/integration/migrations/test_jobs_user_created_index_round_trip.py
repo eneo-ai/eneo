@@ -2,7 +2,7 @@
 
 On the Flows branch it also proves the merge that replaced the branch's own
 copy of this index (202610261000): one head, and a Flows database keeps one
-index through 202611031100.
+index through to the head.
 
     pytest -m migration_isolation \
         tests/integration/migrations/test_jobs_user_created_index_round_trip.py
@@ -30,9 +30,11 @@ REVISION = "202611030830"
 INDEX = "ix_jobs_user_created"
 DEFINITION = f"CREATE INDEX {INDEX} ON public.jobs USING btree (user_id, created_at)"
 FLOWS_HEAD = "202611021200"  # origin/feat/flows-core-integration before the merge
-HEAD = "202611031100"
-# Develop's two migrations after 202611021100, which the Flows head never had.
-DEVELOP_BRANCH_DOWN = "202611031000@202611021100"
+HEAD = "202611051000"
+# Develop's two migrations after 202611021100 and the widget tables, which the
+# Flows head never had.
+DEVELOP_BRANCH_DOWN = "202611031206@202611021100"
+WIDGET_BRANCH_DOWN = "202610291001@202610261300"
 # What the branch's 202610261000 ran.
 BRANCH_DDL = (
     f"CREATE INDEX CONCURRENTLY IF NOT EXISTS {INDEX} ON jobs (user_id, created_at)"
@@ -206,9 +208,10 @@ def test_a_fresh_database_migrates_to_head_with_the_index(migrated_db):
 
 
 def _down_to_the_flows_head(config) -> None:
-    """The merge goes, then develop's statistics and index migrations."""
+    """The merges go, then develop's statistics and index migrations and widgets."""
     command.downgrade(config, FLOWS_HEAD)
     command.downgrade(config, DEVELOP_BRANCH_DOWN)
+    command.downgrade(config, WIDGET_BRANCH_DOWN)
 
 
 def test_the_merge_revisions_round_trip(migrated_db):

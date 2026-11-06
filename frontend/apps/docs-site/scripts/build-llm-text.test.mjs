@@ -183,6 +183,19 @@ test("content without Flows pages builds without the Flows bundle", async () => 
   expect(index).not.toContain("Flows");
 });
 
+test("Swedish pages keep their Markdown but stay out of the English index", async () => {
+  const app = await appWithPages(["", "guides/deployment", "sv", "sv/guides/deployment"]);
+
+  await buildLlmText(app);
+
+  expect(existsSync(join(app, "out", "sv", "guides", "deployment.md"))).toBe(true);
+  for (const file of ["llms.txt", "llms-full.txt"]) {
+    const text = await readFile(join(app, "out", file), "utf8");
+    expect(text).toContain("guides/deployment");
+    expect(text).not.toContain("sv/guides/deployment");
+  }
+});
+
 test("content with every Flows page gets the bundle in reading order", async () => {
   const app = await appWithPages(["", ...FLOWS_BUNDLE_ROUTES]);
 

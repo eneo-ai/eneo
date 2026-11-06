@@ -394,7 +394,7 @@ async def test_widget_ask_preserves_retrieval_limit_and_adds_instructions_per_tu
         id=uuid4(),
         created_at=None,
         updated_at=None,
-        user=turn.user,
+        tenant=turn.user.tenant,
         nickname="Policy search",
         name="text-embedding-3-small",
         family="openai",

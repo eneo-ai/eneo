@@ -7,10 +7,9 @@
   "types": "index.d.ts",
   "scripts": {
     "check": "bun x --package typescript@5.9.3 tsc --noEmit -p tsconfig.type-smoke.json",
-    "test": "node --test --test-concurrency=1 src/auth/*.test.js src/endpoints/*.test.js src/integrations/*.test.js src/widgets/*.test.js",
     "lint": "prettier --check . && eslint .",
     "format": "prettier --write .",
-    "test": "bun test update.test.js src/auth/*.test.js src/endpoints/*.test.js src/integrations/*.test.js",
+    "test": "bun test update.test.js src/auth/*.test.js src/endpoints/*.test.js src/integrations/*.test.js src/widgets/*.test.js",
     "update": "node update.js"
   },
   "devDependencies": {

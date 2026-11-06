@@ -47,9 +47,9 @@ diff.
 - Password lifecycle (2026-10-23 merge): develop's `PASSWORD_CHANGE_REQUIRED`
   keeps 9070. The e2e stacks set
   develop's `DEFAULT_USER_PASSWORD_CHANGE_REQUIRED: "false"` in their shared
-  backend environment. eneo-js keeps running its tests with `bun test`, so
-  develop's two new tests count calls with plain spies instead of
-  `node:test`'s `mock`, which bun does not provide.
+  backend environment. eneo-js keeps running its tests with `bun test`, whose
+  `Request` ignores `credentials`, so tests read that value from the fetch
+  arguments.
 
 ### Migrations
 

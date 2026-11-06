@@ -622,6 +622,7 @@ describe("DesktopSideNav (admin)", () => {
       "/admin/flow-settings",
       "/admin/flow-data-retention",
       "/admin/security-classifications",
+      "/admin/widgets",
       "/admin/audit-logs"
     ]);
     cleanup();

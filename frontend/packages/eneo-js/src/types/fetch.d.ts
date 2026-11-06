@@ -72,25 +72,14 @@ export type EneoFetchFunction = <
   Method extends keyof EneoEndpoints[Endpoint]
 >(
   endpoint: Endpoint,
-  args: { signal?: AbortSignal; headers?: Record<string, string> } & (EneoParams<Endpoint, Method> extends never
-    ? EneoRequestBody<Endpoint, Method> extends never
-      ? { method: Method; params?: never; requestBody?: never }
-      : {
-          method: Method;
-          params?: never;
-          requestBody: EneoRequestBody<Endpoint, Method>;
-        }
-    : EneoRequestBody<Endpoint, Method> extends never
-      ? {
-          method: Method;
-          params: EneoParams<Endpoint, Method>;
-          requestBody?: never;
-        }
-      : {
-          method: Method;
-          params: EneoParams<Endpoint, Method>;
-          requestBody: EneoRequestBody<Endpoint, Method>;
-        })
+  args: (EneoParams<Endpoint, Method> extends never
+    ? { params?: never }
+    : { params: EneoParams<Endpoint, Method> }) &
+    EneoRequestBodyOption<Endpoint, Method> & {
+      method: Method;
+      signal?: AbortSignal;
+      headers?: Record<string, string>;
+    }
 ) => Promise<SuccessResponse<Responses<Endpoint, Method>>>;
 
 export type EneoBinaryResponse = {
@@ -115,7 +104,7 @@ export type EneoBinaryFetchFunction = <
     }
 ) => Promise<EneoBinaryResponse>;
 
-type EneoStreamingEndpoints =
+export type EneoStreamingEndpoints =
   | "/api/v1/assistants/{id}/sessions/{session_id}/"
   | "/api/v1/assistants/{id}/sessions/"
   | "/api/v1/analysis/assistants/{assistant_id}/"
@@ -123,12 +112,14 @@ type EneoStreamingEndpoints =
   | "/api/v1/widgets/{public_id}/ask/"
   | "/api/v1/analysis/conversation-insights/";
 
+export type EneoStreamArgs<Endpoint extends EneoStreamingEndpoints> = {
+  params: EneoParams<Endpoint, "post">;
+  requestBody: EneoClientRequestBody<Endpoint, "post">;
+};
+
 export type EneoStreamFunction = <Endpoint extends EneoStreamingEndpoints>(
   endpoint: Endpoint,
-  args: {
-    params: EneoParams<Endpoint, "post">;
-    requestBody: EneoClientRequestBody<Endpoint, "post">;
-  },
+  args: EneoStreamArgs<Endpoint>,
   callbacks: {
     onOpen?: (response: Response) => Promise<void>;
     onClose?: () => void;

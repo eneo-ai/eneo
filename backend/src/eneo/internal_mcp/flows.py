@@ -12,6 +12,7 @@ from uuid import UUID
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import CallToolResult, TextContent
 from pydantic import ValidationError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.internal_mcp.constants import FLOWS_SERVER_NAME
 from eneo.internal_mcp.foundation import (
@@ -192,8 +193,6 @@ async def _draft_suggestions(container, flow_id: UUID):
     the change's transaction, without those the flow's editors dismissed;
     None when they cannot be computed. A failure is logged by its kind only
     and never fails the change."""
-    from sqlalchemy.ext.asyncio import AsyncSession
-
     from eneo.flows.application.flow_suggestion_dismissals import (
         shown_flow_suggestions,
     )
@@ -271,7 +270,7 @@ async def _call_runtime(
         ) as scope:
             if scope.session_id is None:
                 raise NotFoundException("Flow authoring chat not found.")
-            async with scope.container.session().begin():
+            async with cast(AsyncSession, scope.container.session()).begin():
                 chat = await load_authoring_chat(
                     scope.container,
                     session_id=scope.session_id,

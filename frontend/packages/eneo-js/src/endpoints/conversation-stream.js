@@ -23,9 +23,10 @@ import { EneoError } from "../client/client.js";
 
 /**
  * Consume one conversation stream and return the assembled message.
+ * @template {import('../types/fetch').EneoStreamingEndpoints} Endpoint
  * @param {import('../client/client').Client} client
- * @param {Parameters<import('../client/client').Client["stream"]>[0]} endpoint
- * @param {Parameters<import('../client/client').Client["stream"]>[1]} args
+ * @param {Endpoint} endpoint
+ * @param {import('../types/fetch').EneoStreamArgs<Endpoint>} args
  * @param {ConversationStreamCallbacks | undefined} callbacks
  * @param {AbortController} [abortController]
  * @returns {Promise<import("../types/resources").ConversationMessage>}

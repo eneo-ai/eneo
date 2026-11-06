@@ -4,6 +4,7 @@ import { createWidgetClient } from "../widget.js";
 
 test("challenge bootstrap omits stale tokens and cookies and forwards cancellation", async () => {
   let request;
+  let credentials;
   const controller = new AbortController();
   const widget = createWidgetClient({
     baseUrl: "https://eneo.example",
@@ -11,13 +12,14 @@ test("challenge bootstrap omits stale tokens and cookies and forwards cancellati
     getToken: () => "expired-visitor-token",
     fetch: async (input, init) => {
       request = new Request(input, init);
+      credentials = init.credentials;
       return Response.json({ parameters: { algorithm: "SHA-256" }, signature: "signed" });
     }
   });
   const challenge = await widget.challenge({ signal: controller.signal });
   assert.equal(challenge.signature, "signed");
   assert.equal(request.url, "https://eneo.example/api/v1/widgets/wgt_x/challenge/");
-  assert.equal(request.credentials, "omit");
+  assert.equal(credentials, "omit");
   assert.equal(request.headers.get("Authorization"), null);
   controller.abort();
   assert.equal(request.signal.aborted, true);
@@ -26,10 +28,12 @@ test("challenge bootstrap omits stale tokens and cookies and forwards cancellati
 for (const injectedFetch of [true, false]) {
   test(`widget requests omit cookies with ${injectedFetch ? "injected" : "native"} fetch`, async (t) => {
     const requests = [];
+    const credentials = [];
     let minted = 0;
     const transport = async (input, init) => {
       const request = new Request(input, init);
       requests.push(request);
+      credentials.push(init.credentials);
       const path = new URL(request.url).pathname;
       if (path.endsWith("/ask/")) {
         return new Response(
@@ -81,7 +85,7 @@ for (const injectedFetch of [true, false]) {
         ["POST", "/api/v1/widgets/wgt_x/ask/"]
       ]
     );
-    for (const request of requests) assert.equal(request.credentials, "omit", request.url);
+    for (const sent of credentials) assert.equal(sent, "omit");
     assert.deepEqual(
       requests.map((request) => request.headers.get("Authorization")),
       [
@@ -103,7 +107,7 @@ for (const injectedFetch of [true, false]) {
     token = null;
     await widget.config();
     assert.equal(requests.at(-1).headers.get("Authorization"), null);
-    assert.equal(requests.at(-1).credentials, "omit");
+    assert.equal(credentials.at(-1), "omit");
   });
 }
 
@@ -114,7 +118,7 @@ test("draft preview configuration uses its bearer token without cookies", async 
     getToken: () => "preview-token",
     fetch: async (input, init) => {
       const request = new Request(input, { ...init, cache: "no-store" });
-      assert.equal(request.credentials, "omit");
+      assert.equal(init.credentials, "omit");
       assert.equal(request.headers.get("Authorization"), "Bearer preview-token");
       assert.equal(request.cache, "no-store");
       return Response.json({ public_id: "wgt_draft" });

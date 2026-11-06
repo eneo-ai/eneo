@@ -89,7 +89,6 @@ export function createClient(args) {
 
   return {
     fetch: async (endpoint, { method, params, requestBody, signal, headers }) => {
-      const url = parseUrl(baseUrl, endpoint, params);
       const payload = parsePayload(requestBody);
       const httpMethod = String(method).toUpperCase();
       let requestEndpoint = `${httpMethod}@${baseUrl}${endpoint}`;

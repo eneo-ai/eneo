@@ -150,6 +150,8 @@ export async function buildLlmText(app = appDir) {
     const mdPath = join(outDir, `${route || "index"}.md`);
     await mkdir(dirname(mdPath), { recursive: true });
     await writeFile(mdPath, `${body}\n`, "utf8");
+    // The index and bundles are the English site; a translation keeps its .md.
+    if (route === "sv" || route.startsWith("sv/")) continue;
     pages.push({
       route,
       title,

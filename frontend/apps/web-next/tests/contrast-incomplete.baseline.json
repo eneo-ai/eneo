@@ -595,12 +595,12 @@
  "ipad-mini-light|/spaces/$/assistants": {
   "bgOverlap": 5
  },
- "ipad-mini-light|/spaces/$/flows": {
-  "bgOverlap": 5
- },
  "ipad-mini-light|/spaces/$/assistants/$/widget": {
   "bgOverlap": 5,
   "nonBmp": 2
+ },
+ "ipad-mini-light|/spaces/$/flows": {
+  "bgOverlap": 5
  },
  "ipad-mini-light|/spaces/$/knowledge": {
   "bgOverlap": 5
@@ -669,12 +669,12 @@
  "phone-dark|/spaces/$/assistants": {
   "bgOverlap": 5
  },
- "phone-dark|/spaces/$/flows": {
-  "bgOverlap": 5
- },
  "phone-dark|/spaces/$/assistants/$/widget": {
   "bgOverlap": 5,
   "nonBmp": 2
+ },
+ "phone-dark|/spaces/$/flows": {
+  "bgOverlap": 5
  },
  "phone-dark|/spaces/$/knowledge": {
   "bgOverlap": 5
@@ -743,12 +743,12 @@
  "phone-light|/spaces/$/assistants": {
   "bgOverlap": 5
  },
- "phone-light|/spaces/$/flows": {
-  "bgOverlap": 5
- },
  "phone-light|/spaces/$/assistants/$/widget": {
   "bgOverlap": 5,
   "nonBmp": 2
+ },
+ "phone-light|/spaces/$/flows": {
+  "bgOverlap": 5
  },
  "phone-light|/spaces/$/knowledge": {
   "bgOverlap": 5
