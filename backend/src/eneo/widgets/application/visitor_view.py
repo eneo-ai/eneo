@@ -225,6 +225,9 @@ class VisitorView:
         return call.model_copy(
             update={
                 "result": None,
+                # Signed-in clients keep this on an internal call; a knowledge
+                # tool's holds the whole passage it read.
+                "structured_content": None,
                 "meta": None,
                 "app_view": None,
                 "generated_file_ids": None,

@@ -510,7 +510,14 @@ def _stored_session() -> SessionInDB:
                 },
                 meta={"gen_ai.request.model": "internal-model"},
                 generated_file_ids=[uuid4()],
-            )
+            ),
+            ToolCallInfo(
+                server_name="eneo",
+                tool_name="read_source",
+                tool_call_id="call_2",
+                is_internal=True,
+                structured_content={"result": [{"text": SECRET_CONTENT}]},
+            ),
         ],
     )
     question.assistant_name = "Intern assistent"
@@ -559,11 +566,12 @@ def test_restored_session_with_everything_shown():
     [ref] = message["mcp_tool_references"]
     assert ref["meta"] == {"title": "Ärende 2026-123"}
     assert ref["tool_call_id"] == "call_1"
-    [call] = message["tool_calls"]
+    call, internal_call = message["tool_calls"]
     assert call["arguments"] == {"query": "bibliotek"}
     assert call["result"] is None and call["meta"] is None
     assert call["app_view"] is None
     assert call["generated_file_ids"] is None
+    assert internal_call["structured_content"] is None
 
 
 def test_a_restored_knowledge_passage_names_its_document_but_not_its_text():
