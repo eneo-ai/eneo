@@ -16,6 +16,8 @@ const HOST_PORT = 4174;
 const DENIED_PORT = 4175;
 const HOST_ORIGIN = `http://127.0.0.1:${HOST_PORT}`;
 const DENIED_ORIGIN = `http://127.0.0.1:${DENIED_PORT}`;
+// Another origin on the app's own site, as when www.kommun.se frames eneo.kommun.se.
+const SAME_SITE_ORIGIN = `http://localhost:${HOST_PORT}`;
 
 type Widget = { id: string; public_id: string; status: string; revision: number };
 
@@ -449,6 +451,69 @@ test.describe("embeddable widget", () => {
     await expect(page.locator("eneo-widget button.launcher")).toBeHidden();
     await expect(page.locator("eneo-widget iframe")).toHaveCount(0);
     await expect(page.locator("main")).not.toHaveAttribute("inert", "");
+  });
+
+  // The guide and the sample visitor notice promise this.
+  test("sets no cookies and keeps only the visitor's identity in local storage", async ({
+    browser,
+    page,
+    request,
+    baseURL
+  }) => {
+    test.setTimeout(90_000);
+    const widget = await createActiveWidget(page, request);
+    const visitor = await browser.newContext({ storageState: { cookies: [], origins: [] } });
+    try {
+      const chat = await visitor.newPage();
+      await chat.goto(`${baseURL}/embed/${widget.public_id}?mode=full`);
+      const question = "Vilka öppettider gäller?";
+      await chat.getByRole("textbox", { name: "Din fråga" }).fill(question);
+      // Enabled only once the page has hydrated and its messages have rendered.
+      const send = chat.getByRole("button", { name: "Skicka", exact: true });
+      await expect(send).toBeEnabled();
+      expect(await visitor.cookies()).toEqual([]);
+      expect(await chat.evaluate(() => Object.keys(localStorage))).toEqual([]);
+
+      await send.click();
+      await expect(chat.getByRole("log").getByText(MOCK_REPLY)).toBeVisible({ timeout: 45_000 });
+
+      expect(await visitor.cookies()).toEqual([]);
+      expect(await chat.evaluate(() => Object.keys(localStorage))).toEqual([
+        `eneo-widget:${widget.public_id}`
+      ]);
+      expect(await chat.evaluate(() => JSON.stringify(localStorage))).not.toContain(question);
+    } finally {
+      await visitor.close();
+    }
+  });
+
+  // Browsers refuse a cookie from a frame on another site, but not from this one.
+  test("a frame on the same site as the app sets no cookies either", async ({
+    browser,
+    page,
+    request,
+    baseURL
+  }) => {
+    const widget = await createActiveWidget(page, request, {
+      allowed_origins: [SAME_SITE_ORIGIN]
+    });
+    const visitor = await browser.newContext({ storageState: { cookies: [], origins: [] } });
+    try {
+      hostHtml = hostPage(baseURL!.replace(/\/$/, ""), widget.public_id);
+      const site = await visitor.newPage();
+      await site.goto(`${SAME_SITE_ORIGIN}/index.html`);
+      await site.locator("eneo-widget button.launcher").click();
+
+      const frame = site.frameLocator("eneo-widget iframe");
+      await frame.getByRole("textbox", { name: "Din fråga" }).fill("Vilka öppettider gäller?");
+      // Enabled only once the page has hydrated and its messages have rendered.
+      await expect(frame.getByRole("button", { name: "Skicka", exact: true })).toBeEnabled({
+        timeout: 20_000
+      });
+      expect(await visitor.cookies()).toEqual([]);
+    } finally {
+      await visitor.close();
+    }
   });
 
   test("a site that is not on the allowed list cannot frame the widget", async ({
