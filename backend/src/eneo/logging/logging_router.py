@@ -37,7 +37,9 @@ async def get_logging_details(
         message_id=message_id
     )
 
-    if question.logging_details is None:
+    # An Assistant that does not log still gets a logging row with no request
+    # body; only a stored request body means the question was logged.
+    if question.logging_details is None or question.logging_details.json_body is None:
         raise BadRequestException("Question was not logged.")
 
     return to_question_logging(question)
