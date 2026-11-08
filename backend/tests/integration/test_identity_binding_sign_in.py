@@ -10,6 +10,7 @@ tests/fake_oidc_provider.py, so every token is really signed and verified.
 import json
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 from uuid import UUID, uuid4
@@ -317,6 +318,61 @@ async def test_a_bound_account_takes_no_new_pair_by_email(
 
     assert await _bindings() == {(account, "retired-client", "person-old")}
     assert [c["error_message"] for c in _conflicts(enqueued)] == ["account_bound"]
+
+
+@pytest.mark.parametrize("change", ["pairwise", "pairwise-with-window", "one-subject"])
+async def test_a_client_id_change_by_an_admin_needs_a_window_for_pairwise_subjects(
+    client, sign_in, provider, enqueued, db_container, admin_user, change
+):
+    """The organisation admin's PATCH gives everyone a new pair. A provider
+    that issues a subject per client presents a new subject there, so only a
+    window from the old pair admits it; one subject for every client joins
+    the account as the same subject."""
+    provider.pairwise_subjects = change.startswith("pairwise")
+    async with db_container() as container:
+        token = container.auth_service().create_access_token_for_user(admin_user)
+    admin = {"Authorization": f"Bearer {token}"}
+    account = await _account()
+    assert await sign_in("generic") == SIGNED_IN
+    if change == "pairwise-with-window":
+        opened = await client.post(
+            "/api/v1/admin/identity-migration-windows",
+            json={
+                "from_issuer": provider.issuer,
+                "from_audience": CLIENT,
+                "to_issuer": provider.issuer,
+                "to_audience": "client-b",
+                "closes_at": (
+                    datetime.now(timezone.utc) + timedelta(days=1)
+                ).isoformat(),
+            },
+            headers=admin,
+        )
+        assert opened.status_code == 201, opened.text
+
+    view = await client.get("/api/v1/admin/federation", headers=admin)
+    patched = await client.patch(
+        "/api/v1/admin/federation",
+        json={"revision": view.json()["revision"], "client_id": "client-b"},
+        headers=admin,
+    )
+    assert patched.status_code == 200, patched.text
+    before = await _rows()
+
+    outcome = await sign_in("generic")
+
+    old, new = provider.subject_for(CLIENT), provider.subject_for("client-b")
+    if change == "pairwise":
+        assert outcome == "identity_conflict"
+        assert [c["error_message"] for c in _conflicts(enqueued)] == ["account_bound"]
+        assert await _rows() == before
+        assert await _bindings() == {(account, CLIENT, old)}
+    else:
+        assert outcome == SIGNED_IN
+        assert await _bindings() == {(account, CLIENT, old), (account, "client-b", new)}
+        assert (await _bound_methods(account))[-1] == (
+            "migration_window" if change == "pairwise-with-window" else "same_subject"
+        )
 
 
 @pytest.mark.parametrize("queue", ["up", "down"])

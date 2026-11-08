@@ -221,6 +221,10 @@ Set it with `subject_claim` in the federation `PUT` or `PATCH` (`/api/v1/sysadmi
 
 Changing the subject claim once people are bound changes every subject under the issuer, for every audience. A binding names the claim it was made under and never matches a sign-in under another claim, even with the same value, since the new claim's values may belong to other people. After the change, a person's sign-in finds the account by its email, and the old binding under the pair refuses it unless a window replaces it. Before you change it, open a migration window from each issuer and audience people use to itself, for example one for the browser client and one for the API audience: a pair without its own window is refused `subject_mismatch`.
 
+### Changing the client ID
+
+A new client ID, set by the operator or by an administrator with `PATCH /api/v1/admin/federation`, gives everyone a new issuer and audience pair. With a provider that issues a subject per client, people present a new subject there: open a migration window from the old pair to the new one first, otherwise every bound account is refused `account_bound`. With a provider that gives one subject for every client, the new pair binds by the same subject and needs no window.
+
 ### Sign-in conflicts
 
 When the identity cannot be bound, the sign-in is refused. The login page says the account is already linked to another sign-in and asks the person to contact an administrator; the API answers `403` with `code` `identity_conflict` (`eneo_error_code` 9082).
@@ -263,7 +267,7 @@ The endpoints, under `/api/v1/admin`:
 ### Upgrading to account binding
 
 - Existing accounts have no binding; each one is bound by its email on its next sign-in.
-- Open a migration window before you change the client ID (from the old pair to the new one) or the subject claim (from each pair to itself).
+- Before you change the client ID with a provider that issues a subject per client, open a migration window from the old pair to the new one; before you change the subject claim, one from each pair to itself.
 - There is no administration screen for bindings yet: use the API above.
 
 ---

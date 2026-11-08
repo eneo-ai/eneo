@@ -9653,7 +9653,7 @@ export interface paths {
     head?: never;
     /**
      * Change the organisation's sign-in settings
-     * @description Change the label, client ID, client secret or allowed email domains of the registered identity provider. Send the revision from GET; a save against an older revision is refused with 409. Operator-owned fields are refused with 422. Every change is audited.
+     * @description Change the label, client ID, client secret, subject claim or allowed email domains of the registered identity provider. Send the revision from GET; a save against an older revision is refused with 409. Operator-owned fields are refused with 422. Every change is audited. A new client ID gives every person a new issuer and audience pair: with a provider that issues a subject per client, open an identity migration window from the old pair to the new one first, or bound accounts are refused `account_bound`; with one subject for every client, the new pair binds by the same subject.
      */
     patch: operations["patch_federation_api_v1_admin_federation_patch"];
     trace?: never;
