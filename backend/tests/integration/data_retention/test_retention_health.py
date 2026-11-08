@@ -26,6 +26,7 @@ from eneo.database.tables.retention_tables import RetentionJobRuns
 from eneo.main.config import Settings, get_settings
 from eneo.main.retention_tasks import (
     EXISTING_WITHOUT_CHOICE,
+    FOLLOWS_A_REMOVAL,
     _read_retention_health,
     retention_task_registrations,
 )
@@ -38,6 +39,7 @@ HEALTHY = RetentionHealthStatus.HEALTHY
 # Every registered task with the setting that switches it off.
 SWITCHES = {
     CONVERSATION_HISTORY_TASK: "retention_conversations_history_enabled",
+    **FOLLOWS_A_REMOVAL,
     **EXISTING_WITHOUT_CHOICE,
 }
 

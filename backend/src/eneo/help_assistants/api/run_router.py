@@ -233,7 +233,9 @@ async def start_helper_run(
     "/runs/{run_id}/turns/",
     response_model=HelperRunResponsePublic,
     description="Follow-up turn on an existing helper run (JSON or SSE).",
-    responses=responses.streaming_response(HelperRunResponsePublic, [400, 403, 404]),
+    responses=responses.streaming_response(
+        HelperRunResponsePublic, [400, 403, 404, 410]
+    ),
 )
 @endpoint_access(
     authentication=Authentication.USER,

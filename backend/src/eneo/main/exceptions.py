@@ -111,6 +111,9 @@ class ErrorCodes(int, Enum):
     # details carry the layer reason so clients can explain it in their language.
     PERSONAL_SKILLS_REJECTED = 9080
     SKILL_REFERENCED_BY_REVISION = 9081
+    # A conversation that holds content copied from a conversation that was
+    # removed: the copy is no longer readable and is removed in turn.
+    DERIVED_SOURCE_REMOVED = 9085
     # Browser-session protocol for the Vite app. Keep distinct from Skill errors
     # so a refused configuration save never triggers session recovery.
     SESSION_GENERATION_MISMATCH = 9090

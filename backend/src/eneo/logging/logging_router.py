@@ -22,7 +22,7 @@ router = APIRouter()
     "/{message_id}/",
     response_model=MessageLogging,
     description="Get the logging details for a single message by id.",
-    responses=responses.get_responses([400, 403, 404]),
+    responses=responses.get_responses([400, 403, 404, 410]),
 )
 @endpoint_access(
     authentication=Authentication.SESSION,

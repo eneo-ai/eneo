@@ -245,6 +245,8 @@ const ERROR_MESSAGE_KEYS: Record<number, string> = {
   9079: "eneo_error_9079", // OIDC_RESPONSE_NOT_VERIFIED
   // Governance
   9069: "eneo_error_9069", // PROMPT_IN_USE_BY_GOVERNANCE
+  // Removed content
+  9085: "eneo_error_9085", // DERIVED_SOURCE_REMOVED
   // Skill lifecycle
   9081: "eneo_error_9081", // SKILL_REFERENCED_BY_REVISION
   9043: "eneo_error_9043", // SKILL_REVISION_CONFLICT

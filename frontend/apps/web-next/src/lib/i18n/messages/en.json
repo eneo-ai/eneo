@@ -5778,6 +5778,7 @@
   "skills_reference_back": "Back to results",
   "skills_reference_placeholder": "Describe how this Skill should help. Type @ to use other Skills or tools.",
   "eneo_error_9081": "A saved version of another Skill refers to this Skill, so it cannot be deleted. Deactivate it if it should no longer be available for selection.",
+  "eneo_error_9085": "This conversation holds content from a conversation that has been removed, so it can no longer be opened.",
   "organization_skills_rollout_attachment_limit": "Too many Skills including helpers",
   "organization_skills_rollout_conflicting_revisions": "Conflicting versions of the same Skill",
   "activation_failed": "Activation failed — your account could not be created yet. Ask your administrator to create an invitation for your email address, then try again.",

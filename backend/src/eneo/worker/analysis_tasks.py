@@ -18,12 +18,17 @@ async def analyze_conversation_insights_task(
     parsed_job_id = job_id
     user = container.user()
     manager = AnalysisJobManager(container.redis_client())
-    await manager.mark_processing(tenant_id=user.tenant_id, job_id=parsed_job_id)
+    job = await manager.mark_processing(tenant_id=user.tenant_id, job_id=parsed_job_id)
 
     try:
+        # The question is read from the job record, never from the queued
+        # payload, so the job queue holds no copy of it. Without a record
+        # there is nothing to answer.
+        if job is None or not job.question:
+            raise ValueError("Analysis job record has no question")
         service = container.analysis_service()
         answer = await service.generate_unified_analysis_answer(
-            question=params.question,
+            question=job.question,
             assistant_id=params.assistant_id,
             group_chat_id=params.group_chat_id,
             from_date=datetime.fromisoformat(params.from_date),

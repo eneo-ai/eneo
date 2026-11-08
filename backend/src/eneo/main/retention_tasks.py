@@ -14,7 +14,12 @@ from eneo.data_retention.application.conversation_history_retention_task import 
     ConversationHistoryRetentionTask,
 )
 from eneo.data_retention.application.conversation_retention import (
+    ConversationPageAllocation,
     conversation_page_allocation,
+)
+from eneo.data_retention.application.derived_copy_retention_task import (
+    DERIVED_COPIES_TASK,
+    DerivedCopyRetentionTask,
 )
 from eneo.data_retention.application.empty_session_retention_task import (
     EMPTY_SESSIONS_TASK,
@@ -51,6 +56,13 @@ EXISTING_WITHOUT_CHOICE: Mapping[str, str] = MappingProxyType(
     }
 )
 
+# Removals that follow one already made, each with the setting that switches it
+# off: a copy of a removed conversation is unreadable from that removal on, and
+# this removes what is left of it.
+FOLLOWS_A_REMOVAL: Mapping[str, str] = MappingProxyType(
+    {DERIVED_COPIES_TASK: "retention_derived_copies_enabled"}
+)
+
 
 def retention_task_registrations(
     settings: Settings, *, now: datetime | None = None
@@ -66,6 +78,18 @@ def retention_task_registrations(
         files=budget.files,
         seconds=budget.seconds,
     )
+
+    # Built with each task, so a misconfigured budget fails that execution,
+    # not the health read that lists the registrations.
+    def allocation() -> ConversationPageAllocation:
+        return conversation_page_allocation(
+            unit_rows=settings.retention_conversations_max_unit_rows,
+            chunk_rows=settings.retention_chunk_rows,
+            execution_rows=chat_budget.rows,
+            execution_files=chat_budget.files,
+            family_rows=settings.retention_max_family_rows,
+        )
+
     return (
         RetentionTaskRegistration(
             name=CONVERSATION_HISTORY_TASK,
@@ -73,13 +97,7 @@ def retention_task_registrations(
             budget=chat_budget,
             build=lambda session: ConversationHistoryRetentionTask(
                 session,
-                allocation=conversation_page_allocation(
-                    unit_rows=settings.retention_conversations_max_unit_rows,
-                    chunk_rows=settings.retention_chunk_rows,
-                    execution_rows=chat_budget.rows,
-                    execution_files=chat_budget.files,
-                    family_rows=settings.retention_max_family_rows,
-                ),
+                allocation=allocation(),
                 now=observed_at,
                 overdue_window=timedelta(days=settings.retention_overdue_window_days),
                 overdue_rows=settings.retention_overdue_max_rows,
@@ -87,6 +105,17 @@ def retention_task_registrations(
                 # per stream: bounded like the deletion it reports on, with no
                 # setting of its own.
                 overdue_owner_rows=chat_budget.rows,
+                gather_seconds=settings.retention_chunk_gather_seconds,
+            ),
+        ),
+        RetentionTaskRegistration(
+            name=DERIVED_COPIES_TASK,
+            enabled=settings.retention_derived_copies_enabled,
+            budget=chat_budget,
+            build=lambda session: DerivedCopyRetentionTask(
+                session,
+                allocation=allocation(),
+                now=observed_at,
                 gather_seconds=settings.retention_chunk_gather_seconds,
             ),
         ),

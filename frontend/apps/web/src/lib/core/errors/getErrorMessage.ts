@@ -90,6 +90,9 @@ const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
   9052: () => m.eneo_error_9052(), // SKILL_EXECUTION_BLOCK_CONFLICT
   9055: () => m.eneo_error_9055(), // SKILL_RUNTIME_POLICY_CHANGED
 
+  // --- Removed content ---
+  9085: () => m.eneo_error_9085(), // DERIVED_SOURCE_REMOVED
+
   // --- Skill lifecycle ---
   9081: () => m.eneo_error_9081(), // SKILL_REFERENCED_BY_REVISION
   9048: () => m.eneo_error_9048(), // SKILL_SLUG_TAKEN

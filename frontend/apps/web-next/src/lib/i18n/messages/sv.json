@@ -5778,6 +5778,7 @@
   "skills_reference_back": "Tillbaka till listan",
   "skills_reference_placeholder": "Beskriv hur Skillen ska hjälpa till. Skriv @ för att använda andra Skills eller verktyg.",
   "eneo_error_9081": "Skillen används av en sparad version av en annan Skill och kan inte tas bort. Avaktivera den om den inte längre ska kunna väljas.",
+  "eneo_error_9085": "Den här konversationen bygger på innehåll från en konversation som har tagits bort och kan därför inte längre öppnas.",
   "organization_skills_rollout_attachment_limit": "För många Skills inklusive hjälpskills",
   "organization_skills_rollout_conflicting_revisions": "Olika versioner av samma Skill",
   "activation_failed": "Aktiveringen misslyckades – ditt konto kunde inte skapas ännu. Be din administratör skapa en inbjudan för din e-postadress och försök sedan igen.",

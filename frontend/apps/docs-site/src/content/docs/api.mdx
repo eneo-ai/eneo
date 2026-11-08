@@ -315,6 +315,8 @@ Handle errors by `code` or `eneo_error_code`, never by parsing the English `mess
 
 A failed call to the AI provider returns `eneo_error_code` `9010` (`503`) or `9041` (`400`) with `code` naming the cause, for example `provider_unreachable` or `provider_rate_limited`, and `details.retryable` saying whether retrying can succeed. See [When a provider fails](/guides/ai-providers#when-a-provider-fails) for the full list.
 
+A conversation that holds content copied from a conversation that was removed answers `410` with `code` `derived_source_removed` and `eneo_error_code` `9085` on its detail, tool result, title, rename, conversation feedback, document, Assistant session, helper run, insight and message logging routes, once the caller passed the usual access checks, including an API key scoped to its Assistant or space; a caller without access gets the usual `403` or `404`. Conversation lists and their `total_count`, recent conversations, exports and insights leave such a conversation out, while aggregate insight statistics count it until it is removed. A follow-up question to it answers `404`. Deleting it works as for any conversation; the Assistant session delete returns it without its name and feedback. See [Copies of removed conversations](/audit-logging#copies-of-removed-conversations).
+
 | Status | Typical meaning |
 |--------|-----------------|
 | 400 | Invalid request, including bad target combinations and policy violations |
@@ -322,6 +324,7 @@ A failed call to the AI provider returns `eneo_error_code` `9010` (`503`) or `90
 | 403 | Authenticated but not permitted: scope, permission, ownership, or guard failures |
 | 404 | Resource not found or not visible to the caller |
 | 409 | Conflict, for example a file still referenced by a conversation |
+| 410 | The resource exists but can no longer be read, for example a conversation copied from one that was removed |
 | 422 | Request body or query parameters failed validation |
 | 429 | Rate limit exceeded |
 | 503 | A dependency such as Redis or the worker is unavailable |

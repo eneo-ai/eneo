@@ -9,9 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from eneo.data_retention.application.conversation_retention import (
     ConversationRootKind,
 )
-from eneo.data_retention.infrastructure.conversation_retention_repo import (
+from eneo.data_retention.infrastructure.conversation_unit_repo import (
     ConversationCascadeError,
-    ConversationRetentionRepository,
+    ConversationUnitRepository,
     collect_conversation_children,
 )
 
@@ -35,7 +35,7 @@ def test_each_root_proves_every_relation_that_references_it(
     kind: ConversationRootKind, expected: set[tuple[str, str]]
 ) -> None:
     """Mutant: the repository keeps its own list instead of the metadata scan."""
-    repository = ConversationRetentionRepository(
+    repository = ConversationUnitRepository(
         AsyncSession(), kind=kind, now=datetime.now(timezone.utc)
     )
 

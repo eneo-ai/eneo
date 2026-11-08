@@ -399,6 +399,8 @@ class Worker:
         self,
         with_user: bool = True,
         channel_type: ChannelType | None = None,
+        *,
+        keep_result: int | None = None,
     ):
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             @wraps(func)
@@ -441,7 +443,12 @@ class Worker:
 
                 return success
 
-            self.functions.append(_traced_job("job", wrapper))
+            traced = _traced_job("job", wrapper)
+            self.functions.append(
+                arq_func(traced, keep_result=keep_result)
+                if keep_result is not None
+                else traced
+            )
             return wrapper
 
         return decorator
