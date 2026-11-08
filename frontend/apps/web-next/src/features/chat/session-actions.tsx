@@ -1,16 +1,19 @@
-"use client";
-
 import { Button } from "@astryxdesign/core/Button";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
+import { FormLayout } from "@astryxdesign/core/FormLayout";
 import { HStack, Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
+import { revealProblems } from "@/components/composites/field-problem";
 import { TextInput } from "@/components/astryx/text-input";
 import { useMutation, useQueryClient, type InfiniteData } from "@tanstack/react-query";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useRef, useState } from "react";
-import { flushSync } from "react-dom";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { browserApi } from "@/lib/api/browser";
-import { invalidateConversationLists } from "@/lib/api/conversations";
+import {
+  invalidateRecentConversations,
+  patchConversations,
+  patchRecentConversations
+} from "@/lib/api/conversations";
 import { unwrap } from "@/lib/api/errors";
 import type { CursorPage } from "@/lib/api/pagination";
 import { toastApiError } from "@/lib/api/toast";
@@ -21,7 +24,16 @@ export function historyQueryKey(partner: Pick<ChatPartner, "type" | "id">) {
   return ["conversations", "assistant", partner.id];
 }
 
-/** Rename and delete for conversations of one partner. */
+/** Every partner's history list a conversation may be in (`historyQueryKey`). */
+const historyLists = {
+  predicate: ({ queryKey }: { queryKey: readonly unknown[] }) =>
+    queryKey[0] === "conversations" && queryKey[1] === "assistant"
+};
+
+/**
+ * Rename and delete for conversations: of one partner, or under "Alla" of
+ * any, so every history list and recent list hears of it.
+ */
 export function useSessionMutations(
   partner: Pick<ChatPartner, "type" | "id">,
   {
@@ -34,8 +46,29 @@ export function useSessionMutations(
 ) {
   const t = useTranslations();
   const queryClient = useQueryClient();
-  const historyKey = historyQueryKey(partner);
-  const invalidate = () => invalidateConversationLists(queryClient, historyKey);
+  // Each list once: invalidating this partner's history twice would read its
+  // first page twice (the second call cancels the first).
+  const invalidate = () =>
+    Promise.all([
+      invalidateRecentConversations(queryClient),
+      queryClient.invalidateQueries(historyLists)
+    ]);
+  // A rename (the new name) or a delete (null) shows at once in every loaded
+  // list, every page of each history included; the refetch follows.
+  const patchLists = (id: string, name: string | null) => {
+    patchRecentConversations(queryClient, id, name);
+    queryClient.setQueriesData<InfiniteData<CursorPage<{ id: string; name: string }>>>(
+      historyLists,
+      (data) =>
+        data && {
+          ...data,
+          pages: data.pages.map((page) => ({
+            ...page,
+            items: patchConversations(page.items, id, name)
+          }))
+        }
+    );
+  };
 
   const rename = useMutation({
     mutationFn: ({ id, name }: { id: string; name: string }) =>
@@ -46,6 +79,7 @@ export function useSessionMutations(
         })
       ),
     onSuccess: (_, { id, name }) => {
+      patchLists(id, name);
       invalidate();
       onRenamed?.(id, name);
     },
@@ -60,19 +94,9 @@ export function useSessionMutations(
         })
       ),
     onSuccess: (_, id) => {
-      // Drop the row at once (the refetch follows), so the history never shows
-      // a deleted conversation and focus can move on from its row.
-      queryClient.setQueryData<InfiniteData<CursorPage<{ id: string }>>>(historyKey, (data) =>
-        data
-          ? {
-              ...data,
-              pages: data.pages.map((page) => ({
-                ...page,
-                items: page.items.filter((item) => item.id !== id)
-              }))
-            }
-          : data
-      );
+      // The history never shows a deleted conversation, and focus can move on
+      // from its row.
+      patchLists(id, null);
       invalidate();
       onDeleted?.(id);
     },
@@ -113,9 +137,7 @@ export function RenameSessionDialog({
   const save = () => {
     if (pending || !session) return;
     if (!value.trim()) {
-      // Rendered before focus moves, so the field is read with its error.
-      flushSync(() => setSubmittedFor(session));
-      inputRef.current?.focus();
+      revealProblems(() => setSubmittedFor(session), inputRef.current);
       return;
     }
     onSave(value.trim());
@@ -138,15 +160,18 @@ export function RenameSessionDialog({
         }
         content={
           <LayoutContent>
-            <TextInput
-              ref={inputRef}
-              label={t("chat_history_name_label")}
-              value={value}
-              onChange={(next) => session && setDraft({ session, name: next })}
-              onEnter={save}
-              isRequired
-              status={problem ? { type: "error", message: problem } : undefined}
-            />
+            {/* Required is the default and unmarked (decision 40). */}
+            <FormLayout defaultOptionality="required">
+              <TextInput
+                ref={inputRef}
+                label={t("chat_history_name_label")}
+                value={value}
+                onChange={(next) => session && setDraft({ session, name: next })}
+                onEnter={save}
+                isRequired
+                status={problem ? { type: "error", message: problem } : undefined}
+              />
+            </FormLayout>
           </LayoutContent>
         }
         footer={

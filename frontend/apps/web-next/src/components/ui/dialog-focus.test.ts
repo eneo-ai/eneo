@@ -39,17 +39,6 @@ describe("returnTarget", () => {
     expect(returnTarget()).toBe(byId("more"));
   });
 
-  it("is the menu button when the focused Radix menu item is already gone (aria-labelledby)", () => {
-    html(`
-      <button id="actions" aria-haspopup="menu">Åtgärder</button>
-      <div role="menu" aria-labelledby="actions"><div id="item" role="menuitem" tabindex="-1">Byt namn</div></div>
-    `);
-    byId("item").focus();
-    byId("item").closest('[role="menu"]')!.remove();
-    expect(document.activeElement).toBe(document.body);
-    expect(returnTarget()).toBe(byId("actions"));
-  });
-
   it("is the pressed button when the browser never focused it (Safari, iOS)", () => {
     html(`<button id="edit">Redigera</button>`);
     // Safari fires the pointer events and the click but leaves focus on <body>.
@@ -122,6 +111,22 @@ describe("useReturnFocus", () => {
 
     expect(document.activeElement).toBe(byId("edit"));
     expect(notifyFocusLost).not.toHaveBeenCalled();
+  });
+
+  it("moves focus to the page when the layout hides an opener that is still there", () => {
+    const { hook, dialog } = openFromEdit();
+    const opener = byId("edit") as HTMLButtonElement;
+    const main = document.createElement("main");
+    main.id = "main-content";
+    main.tabIndex = -1;
+    document.body.append(main);
+    // jsdom lays nothing out and focuses a display: none element; a disabled one it does not.
+    opener.disabled = true;
+    dialog.close();
+
+    hook.rerender({ open: false });
+
+    expect(document.activeElement).toBe(main);
   });
 
   it("reports once when the opener is gone and focus stays lost", () => {

@@ -69,6 +69,26 @@ function openRowMenu(name: string) {
 }
 
 describe("PromptLibraryPage", () => {
+  it("offers one create button when the library is empty", async () => {
+    api.GET.mockImplementation(() => ok({ items: [] }));
+    renderInApp(<PromptLibraryPage />);
+
+    expect(await screen.findByRole("button", { name: "Skapa första prompten" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Ny prompt" })).toBeNull();
+  });
+
+  it("keeps the create button when the list cannot be loaded", async () => {
+    api.GET.mockImplementation(() =>
+      Promise.resolve({ error: { message: "Down" }, response: new Response("{}", { status: 503 }) })
+    );
+    renderInApp(<PromptLibraryPage />);
+
+    // The failure has to be on screen before the button is judged: it is there while loading.
+    await screen.findByRole("button", { name: "Försök igen" });
+    fireEvent.click(screen.getByRole("button", { name: "Ny prompt" }));
+    expect(await screen.findByRole("dialog", { name: "Ny prompt" })).toBeTruthy();
+  });
+
   it("names the prompt table by the page title, newest change first", async () => {
     const { container } = renderInApp(<PromptLibraryPage />);
 

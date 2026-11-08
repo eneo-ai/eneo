@@ -9,7 +9,7 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
-  import { Wrench } from "@lucide/svelte";
+  import Wrench from "@lucide/svelte/icons/wrench";
   import type { ToolStepStatus as Status } from "../../toolStepStatus";
 
   let {

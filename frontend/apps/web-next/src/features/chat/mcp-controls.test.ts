@@ -118,6 +118,7 @@ describe("MCP chat controls", () => {
     expect(
       mcpConversationOptions({
         servers,
+        capabilities: [],
         disabledServerIds: new Set(["a", "missing"]),
         autoAcceptTools: false
       })
@@ -129,6 +130,7 @@ describe("MCP chat controls", () => {
     expect(
       mcpConversationOptions({
         servers,
+        capabilities: [],
         disabledServerIds: new Set(),
         autoAcceptTools: true
       })
@@ -136,5 +138,18 @@ describe("MCP chat controls", () => {
       require_tool_approval: undefined,
       disabled_mcp_server_ids: undefined
     });
+  });
+
+  it("asks before a capability runs, as before a server, when tools do not run automatically", () => {
+    // Web search and image generation are external tools: the backend asks for them too.
+    const options = (autoAcceptTools: boolean) =>
+      mcpConversationOptions({
+        servers: [],
+        capabilities: [{ purpose: "web_search", available: true, reason: null }],
+        disabledServerIds: new Set(),
+        autoAcceptTools
+      }).require_tool_approval;
+    expect(options(false)).toBe(true);
+    expect(options(true)).toBeUndefined();
   });
 });

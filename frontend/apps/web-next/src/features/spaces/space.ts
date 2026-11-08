@@ -1,4 +1,4 @@
-import { queryOptions } from "@tanstack/react-query";
+import { queryOptions, type QueryClient } from "@tanstack/react-query";
 import type { EneoClient } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
@@ -88,4 +88,29 @@ export function spacesListQueryOptions(api: EneoClient) {
       return page.items;
     }
   });
+}
+
+/** Refresh the list without invalidating space details or their resources. */
+export function invalidateSpacesList(queryClient: QueryClient) {
+  return queryClient.invalidateQueries({ queryKey: ["spaces"], exact: true });
+}
+
+/**
+ * After a space is deleted: the list refreshes, and the space's own queries
+ * are only marked stale, so nothing reads the deleted space (a 404) while the
+ * page leaves it, and coming back to it reads it again. A read of it from
+ * before the delete is cancelled first: answering after the delete, it would
+ * make the space fresh again.
+ */
+export async function invalidateDeletedSpace(queryClient: QueryClient, routeId: SpaceRouteId) {
+  await queryClient.cancelQueries({ queryKey: ["spaces", routeId] });
+  await Promise.all([
+    invalidateSpacesList(queryClient),
+    queryClient.invalidateQueries({ queryKey: ["spaces", routeId], refetchType: "none" })
+  ]);
+}
+
+/** Refresh every space query, including the list and nested resources. */
+export function invalidateSpaces(queryClient: QueryClient) {
+  return queryClient.invalidateQueries({ queryKey: ["spaces"] });
 }

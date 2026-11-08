@@ -19,12 +19,6 @@ from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.domain.outcome import Outcome
-from eneo.audit.infrastructure.rate_limiting import (
-    RateLimitConfig,
-    RateLimitExceededError,
-    RateLimitServiceUnavailableError,
-    enforce_rate_limit,
-)
 from eneo.authentication.auth_dependencies import (
     require_resource_permission_for_method,
     require_user_for_creation,
@@ -77,8 +71,16 @@ from eneo.mcp_servers.infrastructure.tool_approval import (
     get_approval_manager,
 )
 from eneo.questions.question import MessageFeedback
+from eneo.redis.rate_limit import (
+    RateLimitConfig,
+    RateLimitExceededError,
+    RateLimitServiceUnavailableError,
+    enforce_rate_limit,
+    raise_rate_limited,
+)
 from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
+from eneo.server.exception_handlers import extract_request_id
 from eneo.server.protocol import responses
 from eneo.server.protocol.downloads import content_disposition_header
 from eneo.sessions.session import (
@@ -107,8 +109,8 @@ from eneo.sessions.session import (
     ViewToolCallText,
 )
 from eneo.sessions.session_protocol import (
+    to_session_metadata_paginated_response,
     to_session_public,
-    to_sessions_paginated_response,
 )
 
 _CONVERSATION_SERVICE_ACCESS_REASON = (
@@ -118,6 +120,12 @@ _CHAT_ACCESS_REASON = "Chat access is checked against the selected assistant, gr
 
 logger = get_logger(__name__)
 
+_BUNDLED_CATALOG_ON_GET = (
+    "Resolving the file-creation provider stores the bundled runtime's live tool "
+    "catalog when the stored rows differ (once per catalog and process, audited as "
+    "the system). The catalog comes from the runtime, not from the request."
+)
+
 router = APIRouter()
 
 RECENT_CONVERSATIONS_DEFAULT_LIMIT = 20
@@ -125,9 +133,7 @@ RECENT_CONVERSATIONS_MAX_LIMIT = 50
 
 
 def _raise_conversation_scope_denied(http_request: Request, message: str) -> NoReturn:
-    request_id = http_request.headers.get(
-        "x-correlation-id"
-    ) or http_request.headers.get("x-request-id")
+    request_id = extract_request_id(http_request)
     detail: dict[str, object] = {
         "code": "insufficient_scope",
         "message": message,
@@ -500,15 +506,8 @@ async def preflight_tokens(
             ),
         )
     except RateLimitExceededError as exc:
-        retry_after = exc.result.window_seconds
-        raise HTTPException(
-            status_code=429,
-            detail={
-                "code": "rate_limit_exceeded",
-                "message": "Too many preflight requests. Please retry shortly.",
-                "retry_after_seconds": retry_after,
-            },
-            headers={"Retry-After": str(retry_after)},
+        raise_rate_limited(
+            exc.result, "Too many preflight requests. Please retry shortly."
         )
     except RateLimitServiceUnavailableError:
         # Fail-open: preflight is best-effort UX, not a security-critical path.
@@ -611,7 +610,7 @@ async def list_conversations(
         previous=previous,
     )
 
-    return to_sessions_paginated_response(
+    return to_session_metadata_paginated_response(
         sessions=sessions,
         limit=limit,
         cursor=cursor,  # pyright: ignore[reportArgumentType]  # session_protocol cursor param has wrong annotation (datetime instead of Optional[datetime])
@@ -767,15 +766,8 @@ async def call_tool_from_app_view(
             ),
         )
     except RateLimitExceededError as exc:
-        retry_after = exc.result.window_seconds
-        raise HTTPException(
-            status_code=429,
-            detail={
-                "code": "rate_limit_exceeded",
-                "message": "Too many tool calls from views. Please retry shortly.",
-                "retry_after_seconds": retry_after,
-            },
-            headers={"Retry-After": str(retry_after)},
+        raise_rate_limited(
+            exc.result, "Too many tool calls from views. Please retry shortly."
         )
     except RateLimitServiceUnavailableError:
         # Fail-closed: a view runs a server's code, and nothing else bounds
@@ -915,6 +907,7 @@ async def call_tool_from_app_view(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
     reason=_CONVERSATION_SERVICE_ACCESS_REASON,
+    effect_on_get=_BUNDLED_CATALOG_ON_GET,
 )
 async def get_document_export_availability(
     session_id: UUID,
@@ -1187,13 +1180,12 @@ async def delete_conversation(
 ):
     """Deletes a specific conversation"""
     session_service = container.session_service()
-    session = await session_service.get_session_by_uuid(session_id)
-    assert session is not None
+    owner = await session_service.get_session_ownership(session_id)
 
-    await _authorize_session_access(container, session)
+    await _authorize_partner_access(container, assistant_id=owner.assistant_id)
 
-    assert session.assistant is not None
-    await session_service.delete(session_id, assistant_id=session.assistant.id)
+    assert owner.assistant_id is not None
+    await session_service.delete(session_id, assistant_id=owner.assistant_id)
 
     # Return None to produce 204 No Content response
     return None
@@ -1221,14 +1213,13 @@ async def leave_feedback(
     """Leave feedback for a conversation"""
     session_service = container.session_service()
 
-    session = await session_service.get_session_by_uuid(session_id)
-    assert session is not None
+    owner = await session_service.get_session_ownership(session_id)
 
-    await _authorize_session_access(container, session)
+    await _authorize_partner_access(container, assistant_id=owner.assistant_id)
 
-    assert session.assistant is not None
+    assert owner.assistant_id is not None
     updated_session = await session_service.leave_feedback(
-        session_id=session_id, assistant_id=session.assistant.id, feedback=feedback
+        session_id=session_id, assistant_id=owner.assistant_id, feedback=feedback
     )
 
     return to_session_public(updated_session)
@@ -1384,15 +1375,8 @@ async def approve_tools(
             ),
         )
     except RateLimitExceededError as exc:
-        retry_after = exc.result.window_seconds
-        raise HTTPException(
-            status_code=429,
-            detail={
-                "code": "rate_limit_exceeded",
-                "message": "Too many tool approval submissions. Please retry shortly.",
-                "retry_after_seconds": retry_after,
-            },
-            headers={"Retry-After": str(retry_after)},
+        raise_rate_limited(
+            exc.result, "Too many tool approval submissions. Please retry shortly."
         )
     except RateLimitServiceUnavailableError:
         # Fail-open on limiter outages to avoid breaking approval flows.
@@ -1543,9 +1527,8 @@ async def rename_conversation(
 ):
     """Rename a conversation (session)"""
     session_service = container.session_service()
-    session = await session_service.get_session_by_uuid(session_id)
-    assert session is not None
-    await _authorize_session_access(container, session)
+    owner = await session_service.get_session_ownership(session_id)
+    await _authorize_partner_access(container, assistant_id=owner.assistant_id)
 
     updated_session = await session_service.update_session(
         SessionUpdate(id=session_id, name=payload.name)

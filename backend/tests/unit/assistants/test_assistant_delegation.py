@@ -980,7 +980,10 @@ async def test_specialist_keeps_skill_and_knowledge_in_existing_execution_path(
         consumer.cancel()
         with pytest.raises(asyncio.CancelledError):
             await consumer
-        assert clients[0].disconnect_task is clients[0].connect_task
+        # The proxy closes its connections from any task; the connection the
+        # consultation opened must still be released.
+        assert clients[0].connect_task is not None
+        assert clients[0].disconnect_task is not None
         saved = partial_save.call_args.kwargs["consultations"][0]
         assert saved.status == "cancelled"
         assert (saved.input_tokens, saved.output_tokens) == (40, 14)
@@ -1000,7 +1003,10 @@ async def test_specialist_keeps_skill_and_knowledge_in_existing_execution_path(
         events = [event async for event in reply.answer]
     if stop == "timeout":
         assert events[-1].error_reason == "execution_limit_duration"
-        assert clients[0].disconnect_task is clients[0].connect_task
+        # The proxy closes its connections from any task; the connection the
+        # consultation opened must still be released.
+        assert clients[0].connect_task is not None
+        assert clients[0].disconnect_task is not None
         saved = partial_save.call_args.kwargs["consultations"][0]
         assert saved.status == "timeout"
         assert (saved.input_tokens, saved.output_tokens) == (40, 14)

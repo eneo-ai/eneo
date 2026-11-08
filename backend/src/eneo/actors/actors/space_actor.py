@@ -5,7 +5,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from uuid import UUID
 
-from eneo.authentication.auth_models import is_service_api_key
+from eneo.authentication.auth_models import is_service_api_key, is_widget_visitor
 from eneo.main.models import ResourcePermission
 from eneo.roles.permissions import Permission
 
@@ -485,6 +485,14 @@ class SpaceActor:
         return permission_map.get(resource_type)
 
     def _get_role(self):
+        # Widget visitors have no membership either: the widget is the only
+        # access path, and only into its own space, as a viewer — which lets
+        # them read (ask) published assistants and nothing else.
+        if is_widget_visitor(self.user):
+            widget = self.user.active_widget
+            assert widget is not None  # guaranteed by is_widget_visitor
+            return SpaceRole.VIEWER if widget.space_id == self.space.id else None
+
         # Service keys have no user membership — the key is the only access
         # path into any space.
         if self._is_service_api_key():
@@ -676,6 +684,15 @@ class SpaceActor:
             return base
         return {resource: actions & allowed for resource, actions in base.items()}
 
+    def _personal_skills_permit(self, resource_type: SpaceResourceType) -> bool:
+        """PERSONAL_SKILLS covers Skills in the user's own personal space only."""
+        return (
+            resource_type == SpaceResourceType.SKILL
+            and self.space.is_personal()
+            and self.space.user_id == self.user.id
+            and Permission.PERSONAL_SKILLS in self.user.permissions
+        )
+
     def tenant_permits(
         self, action: SpaceAction, resource_type: SpaceResourceType
     ) -> bool:
@@ -685,12 +702,23 @@ class SpaceActor:
         authorize via scope and permission, not user roles, so the gate does
         not apply to them. Reading websites and integration knowledge needs no
         tenant permission; every other permission-gated resource needs its
-        mapped permission on the user's role.
+        mapped permission on the user's role. Skills in the user's own personal
+        space are also permitted by PERSONAL_SKILLS.
         """
         if resource_type not in PERMISSION_RESOURCES or self._is_service_api_key():
             return True
+        if is_widget_visitor(self.user):
+            # Widget visitors are authorized by the widget (activated by a
+            # tenant admin), not by a role: they may read (ask) an assistant
+            # and nothing else.
+            return (
+                action == SpaceAction.READ
+                and resource_type == SpaceResourceType.ASSISTANT
+            )
         permission = self._to_permisson(resource_type=resource_type)
         if permission is not None and permission in self.user.permissions:
+            return True
+        if self._personal_skills_permit(resource_type):
             return True
         return (
             resource_type
@@ -715,6 +743,7 @@ class SpaceActor:
                 resource_type == SpaceResourceType.SKILL
                 and action in {SpaceAction.CREATE, SpaceAction.EDIT, SpaceAction.DELETE}
                 and Permission.SKILLS_MANAGEMENT not in self.user.permissions
+                and not self._personal_skills_permit(resource_type)
             ):
                 return False
 
@@ -907,6 +936,16 @@ class SpaceActor:
         return self.can_perform_action(
             action=SpaceAction.READ,
             resource_type=SpaceResourceType.SKILL,
+        )
+
+    def can_use_skills(self):
+        """Use Skills: attach Skills to Assistants and Apps in this space.
+
+        PERSONAL_SKILLS opens the personal-space library and the personal chat
+        only, so attaching needs SKILLS as it did before that permission.
+        """
+        return self.can_read_skills() and (
+            self._is_service_api_key() or Permission.SKILLS in self.user.permissions
         )
 
     def can_create_skills(self):

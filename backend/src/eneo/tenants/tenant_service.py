@@ -196,6 +196,20 @@ class TenantService:
         self._validate(tenant, tenant_id)
         return await self.repo.update_api_key_policy(tenant_id, policy_updates)
 
+    async def lock_widget_policy(self, tenant_id: UUID) -> dict[str, Any]:
+        tenant = await self.get_tenant_by_id(tenant_id)
+        self._validate(tenant, tenant_id)
+        return await self.repo.lock_widget_policy(tenant_id)
+
+    async def update_widget_policy(
+        self,
+        tenant_id: UUID,
+        policy: dict[str, Any],
+    ) -> TenantInDB:
+        tenant = await self.get_tenant_by_id(tenant_id)
+        self._validate(tenant, tenant_id)
+        return await self.repo.update_widget_policy(tenant_id, policy)
+
     async def update_password_policy(
         self,
         tenant_id: UUID,

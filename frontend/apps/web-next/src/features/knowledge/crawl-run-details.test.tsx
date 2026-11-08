@@ -3,7 +3,7 @@ import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/re
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
-import { CrawlRunDetailsDialog } from "./crawl-run-details";
+import { CrawlRunDetailsContent, CrawlRunDetailsDialog } from "./crawl-run-details";
 import type { CrawlRun } from "./knowledge";
 
 const RUN: CrawlRun = {
@@ -146,7 +146,11 @@ describe("CrawlRunDetailsDialog", () => {
       await within(dialog).findByText("Kunde inte hämta misslyckade adresser. Försök igen.")
     ).toBeTruthy();
 
-    fireEvent.click(within(dialog).getByRole("button", { name: "Försök igen" }));
+    fireEvent.click(
+      within(dialog).getByRole("button", {
+        name: "Försök igen: Kunde inte hämta misslyckade adresser. Försök igen."
+      })
+    );
     expect(await within(dialog).findByRole("list", { name: "Misslyckade adresser" })).toBeTruthy();
   });
 
@@ -157,4 +161,20 @@ describe("CrawlRunDetailsDialog", () => {
     expect(onOpenChange).toHaveBeenCalledWith(false);
     expect(onRerun).toHaveBeenCalledTimes(1);
   });
+});
+
+it("groups website problems by cause while distinguishing loaded addresses from run totals", async () => {
+  renderInApp(<CrawlRunDetailsContent run={RUN} grouped />);
+  const missing = await screen.findByRole("region", { name: "Adressen hittades inte (404)" });
+  const large = screen.getByRole("region", { name: "Innehållet var för stort" });
+  expect(within(missing).getByText("2 av 3 visas")).toBeTruthy();
+  expect(within(missing).getAllByRole("link")).toHaveLength(2);
+  expect(within(large).getByText("0 av 1 visas")).toBeTruthy();
+  expect(
+    within(large).getByText("Läs in fler adresser nedan för att se återstående detaljer.")
+  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Visa fler adresser (2/4)" }));
+  await waitFor(() => expect(within(missing).getAllByRole("link")).toHaveLength(3));
+  expect(within(large).getAllByRole("link")).toHaveLength(1);
+  expect(within(large).getByText("1 av 1 visas")).toBeTruthy();
 });

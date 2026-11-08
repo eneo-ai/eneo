@@ -54,3 +54,29 @@ describe("createResourceEditor save result", () => {
     expect(get(editor.state.currentChanges).hasUnsavedChanges).toBe(false);
   });
 });
+
+describe("createResourceEditor discarding a staged icon", () => {
+  test.each([
+    ["an upload replacing the saved icon", "saved-1", "upload-1", undefined, ["upload-1"]],
+    ["an upload on a resource without an icon", null, "upload-1", undefined, ["upload-1"]],
+    ["only the icon field", "saved-1", "upload-1", "icon_id" as const, ["upload-1"]],
+    ["a removal of the saved icon", "saved-1", null, undefined, []],
+    ["another field", "saved-1", "upload-1", "name" as const, []]
+  ])("deletes what was uploaded for %s", (_, saved, staged, field, deleted) => {
+    const deleteIcon = vi.fn<(params: { id: string }) => Promise<void>>(async () => {});
+    const editor = createResourceEditor({
+      resource: { id: "space-1", name: "Space", icon_id: saved as string | null },
+      defaults: {},
+      editableFields: { name: true, icon_id: true },
+      updateResource: async (resource) => resource,
+      manageAttachements: false,
+      manageIcon: true,
+      eneo: { icons: { delete: deleteIcon } } as unknown as Eneo
+    });
+    editor.state.update.update((resource) => ({ ...resource, icon_id: staged }));
+
+    editor.discardChanges(field);
+
+    expect(deleteIcon.mock.calls.map(([params]) => params.id)).toEqual(deleted);
+  });
+});

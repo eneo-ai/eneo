@@ -1,4 +1,9 @@
-from eneo.allowed_origins.origin_matching import origin_matches_pattern
+import pytest
+
+from eneo.allowed_origins.origin_matching import (
+    normalize_origin_pattern,
+    origin_matches_pattern,
+)
 
 
 def test_origin_matches_exact_scheme_host_and_port():
@@ -67,3 +72,134 @@ def test_port_wildcard_combines_with_subdomain_wildcard():
 def test_malformed_port_in_origin_fails_closed():
     """If the inbound Origin somehow has a malformed port, deny rather than 500."""
     assert not origin_matches_pattern("http://localhost:abc", "http://localhost:*")
+
+
+# The widget editor mirrors this rule (frontend/apps/web/src/lib/features/
+# widget/admin/origins.test.ts holds the same table), so a value the field
+# accepts is never refused by the save and the other way round.
+_PARITY = [
+    ("https://www.kommun.se", "https://www.kommun.se"),
+    ("https://www.kommun.se/", "https://www.kommun.se"),
+    ("https://www.kommun.se/kontakt", None),
+    ("HTTPS://WWW.Kommun.SE//", "https://www.kommun.se"),
+    ("https://*.kommun.se", "https://*.kommun.se"),
+    ("http://localhost:*", "http://localhost:*"),
+    ("http://localhost:3000", "http://localhost:3000"),
+    ("http://localhost:", None),
+    ("http://localhost:99999", None),
+    ("http://localhost:65535", "http://localhost:65535"),
+    ("https://user@kommun.se", None),
+    ("https://kommun.se?x=1", None),
+    ("https://kommun.se#frag", None),
+    ("ftp://kommun.se", None),
+    ("kommun.se", None),
+    ("https://", None),
+    ("https://[::1]", "https://[::1]"),
+    ("https://[::1]:", None),
+    ("https://[::1]:8080", "https://[::1]:8080"),
+    ("https://[::1]:*", "https://[::1]:*"),
+    ("https://kom mun.se", None),
+    ("https://kommun.se;script", None),
+    ("https://-bad.se", None),
+    ("https://bad-.se", None),
+    ("https://a..se", None),
+    ("https://*.*.se", None),
+    ("https://xn--bcher-kva.example", "https://xn--bcher-kva.example"),
+    ("https://1.2.3.4:443", "https://1.2.3.4:443"),
+    ("http://localhost:08", "http://localhost:08"),
+    ("https://kommun.se:abc", None),
+    ("https://[zz]", None),
+    ("https://example.com?", None),
+    ("https://example.com#", None),
+    ("https://@example.com", None),
+    ("https://example.com:000080", "https://example.com:000080"),
+    ("https://[abc.def]:80", None),
+    ("https://[1.2.3.4]:80", None),
+    ("https://[:::]:80", None),
+    ("https://[::ffff:1.2.3.4]:80", "https://[::ffff:1.2.3.4]:80"),
+]
+
+
+@pytest.mark.parametrize(("pattern", "expected"), _PARITY)
+def test_normalize_origin_pattern_matches_the_editor(pattern, expected):
+    if expected is None:
+        with pytest.raises(ValueError):
+            normalize_origin_pattern(pattern)
+    else:
+        assert normalize_origin_pattern(pattern) == expected
+
+
+def test_ipv6_origin_without_a_port_matches():
+    """The colons of a bracketed IPv6 host are not a port."""
+    assert origin_matches_pattern("http://[::1]", "http://[::1]")
+    assert origin_matches_pattern("http://[::1]", "http://[::1]:*")
+    assert origin_matches_pattern("https://[2001:db8::1]", "https://[2001:db8::1]:443")
+    assert not origin_matches_pattern("http://[::1]", "http://[::1]:8080")
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "http://[::1",  # unclosed IPv6 bracket
+        "http://[::1]x",
+        "http://app]",
+        "http://[app.example]",  # brackets around a name
+        "http://[:::1]",
+        "http://app.example:99999",  # port out of range
+        "http://app.example:abc",
+        "http://app.example:-1",
+        "",
+        "null",
+        "http://",
+    ],
+)
+def test_malformed_origin_matches_nothing_without_raising(origin):
+    """The Origin header is client input: one that does not parse is refused
+    by every pattern, never turned into a 500."""
+    for pattern in (
+        "http://app.example",
+        "http://app.example:*",
+        "app.example",
+        "http://[::1]",
+        "::1",
+    ):
+        assert not origin_matches_pattern(origin, pattern)
+
+
+def test_only_an_http_or_https_origin_matches():
+    """A host-only pattern does not admit another scheme on that host."""
+    assert origin_matches_pattern("http://app.example", "app.example")
+    assert not origin_matches_pattern("chrome-extension://app.example", "app.example")
+    assert not origin_matches_pattern("ws://app.example", "app.example")
+    assert not origin_matches_pattern("file://app.example", "app.example")
+
+
+def test_non_ascii_host_does_not_match_its_punycode_pattern():
+    """A browser sends an international host in punycode; the raw form is no
+    origin a browser sends, and it is not mapped onto one."""
+    assert not origin_matches_pattern("https://é.example", "https://xn--9ca.example")
+    assert not origin_matches_pattern("https://é.example", "xn--9ca.example")
+
+
+def test_malformed_pattern_matches_nothing_without_raising():
+    """One unparsable allowlist row must not fail every cross-origin request."""
+    assert not origin_matches_pattern("http://app.example", "http://[app.example")
+    assert not origin_matches_pattern("http://[::1]", "http://[::1")
+
+
+def test_ipv6_hosts_compare_in_one_form_on_both_sides():
+    """A browser sends an IPv6 origin compressed; a pattern written in another
+    form of the same address still matches, as an origin in that form does."""
+    assert origin_matches_pattern(
+        "http://[0:0:0:0:0:0:0:1]", "http://[0:0:0:0:0:0:0:1]"
+    )
+    assert origin_matches_pattern("http://[::1]", "http://[0:0:0:0:0:0:0:1]")
+    assert origin_matches_pattern(
+        "https://[2001:0db8::1]:8443", "https://[2001:0db8::1]:*"
+    )
+    assert origin_matches_pattern(
+        "https://[2001:db8::1]:8443", "https://[2001:db8::1]:*"
+    )
+    assert origin_matches_pattern("http://[0:0:0:0:0:0:0:1]", "0:0:0:0:0:0:0:1")
+    assert origin_matches_pattern("http://[::1]", "0:0:0:0:0:0:0:1")
+    assert not origin_matches_pattern("http://[::2]", "0:0:0:0:0:0:0:1")

@@ -1,7 +1,6 @@
-"use client";
-
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
+import { useAppContext } from "@/components/providers/app-context";
 import { PageHeader } from "@/components/composites/page-header";
 import { browserApi } from "@/lib/api/browser";
 import { SkillBindingsEditor } from "@/features/skills/skill-bindings-section";
@@ -29,6 +28,7 @@ import { usePolicyDraft } from "./use-policy-draft";
  */
 export function GovernancePolicyPage() {
   const t = useTranslations();
+  const { settings } = useAppContext();
   const { data: policy } = useSuspenseQuery(governancePolicyQueryOptions(browserApi));
   const { data: models } = useSuspenseQuery(adminModelsQueryOptions(browserApi));
   const { data: providers } = useSuspenseQuery(modelProvidersQueryOptions(browserApi));
@@ -47,13 +47,13 @@ export function GovernancePolicyPage() {
 
   return (
     <>
-      <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 pb-32">
+      <div className="flex w-full max-w-4xl flex-col gap-6 [&_*]:scroll-mb-24">
         <PageHeader title={t("governance_title")} tour="admin-personal-assistant" />
         <ModelRestrictionSection draft={draft} />
         <ReasoningPolicySection draft={draft} />
         <McpRestrictionSection draft={draft} />
         <PromptEnforcementSection draft={draft} />
-        <FilePolicySection draft={draft} />
+        {settings.file_references_enabled === true && <FilePolicySection draft={draft} />}
         <SkillBindingsEditor
           resource="personal_chat"
           spaceId="organization"
@@ -65,16 +65,16 @@ export function GovernancePolicyPage() {
           onChange={draft.setSkillBindings}
           selectiveActivationEnabled={skillRuntimePolicy.selective_activation_enabled}
         />
+        <PolicySaveBar
+          dirty={draft.dirty}
+          saveError={draft.saveError}
+          canSave={draft.canSave}
+          saving={draft.saving}
+          onDiscard={draft.discard}
+          onSave={draft.save}
+        />
       </div>
 
-      <PolicySaveBar
-        dirty={draft.dirty}
-        saveError={draft.saveError}
-        canSave={draft.canSave}
-        saving={draft.saving}
-        onDiscard={draft.discard}
-        onSave={draft.save}
-      />
       <PolicyConfirmDialog
         pending={draft.pendingConfirm}
         saving={draft.saving}

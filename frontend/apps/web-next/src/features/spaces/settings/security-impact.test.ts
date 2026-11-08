@@ -16,6 +16,13 @@ function impact(partial: Partial<SpaceSecurityImpact>): SpaceSecurityImpact {
 }
 
 describe("securityImpactRows", () => {
+  it("includes capability names and treats clearing as empty impact", () => {
+    expect(securityImpactRows(impact({ capabilities: ["web_search"] }))).toEqual([
+      { key: "capabilities", count: 1, names: ["web_search"] }
+    ]);
+    expect(securityImpactTotal(impact({ capabilities: ["web_search"] }))).toBe(1);
+    expect(securityImpactRows(null)).toEqual([]);
+  });
   it("keeps only non-empty impact buckets", () => {
     expect(
       securityImpactRows(
@@ -26,9 +33,9 @@ describe("securityImpactRows", () => {
         } as Partial<SpaceSecurityImpact>)
       )
     ).toEqual([
-      { key: "assistants", count: 1 },
-      { key: "completion_models", count: 1 },
-      { key: "mcp_servers", count: 1 }
+      { key: "assistants", count: 1, names: ["Assistant"] },
+      { key: "completion_models", count: 1, names: ["Model"] },
+      { key: "mcp_servers", count: 1, names: ["Server"] }
     ]);
   });
 });

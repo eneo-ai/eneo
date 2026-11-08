@@ -1,9 +1,7 @@
-"use client";
-
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useRouter } from "@/lib/navigation";
+import { useTranslations } from "use-intl";
 import {
   createContext,
   useCallback,
@@ -14,12 +12,16 @@ import {
   useState,
   useSyncExternalStore
 } from "react";
+import { API_BASE, onBrowserApiRequest, onRawRefusal } from "@/lib/api/base";
 import { browserApi } from "@/lib/api/browser";
-import { EneoApiError, getErrorMessage, unwrap } from "@/lib/api/errors";
+import { apiErrorFromResponse, getErrorMessage, orOn404, unwrap } from "@/lib/api/errors";
+import { pollWhile } from "@/lib/api/query";
+import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
 import { toast } from "@/lib/toast";
 import {
   pendingImports,
   reportImports,
+  trackImports,
   type SettledImport
 } from "@/features/knowledge/integrations/import-completion";
 import { pendingSyncs, untrackSyncs } from "@/features/knowledge/integrations/pending-syncs";
@@ -31,7 +33,10 @@ import {
   EMPTY_LEDGER,
   isJobOver,
   rememberActiveJob,
-  type JobLedger
+  isCurrentRead,
+  settleRead,
+  type JobLedger,
+  type LedgerEntry
 } from "./job-transitions";
 import { isJobActive, JOBS_KEY, type Job } from "./jobs";
 import { recordFinishedJob } from "./recent-results";
@@ -49,6 +54,8 @@ export type Upload = {
   errorMessage?: string;
 };
 
+/** The safety net while the live feed is open: a reconnect refetches anyway. */
+const LIVE_POLL_MS = 120_000;
 const SLOW_POLL_MS = 30_000;
 const FAST_POLL_MS = 2_000;
 /** Poll fast for this long after a job is registered, then fall back. */
@@ -63,6 +70,10 @@ type UploadStore = {
 };
 
 const NO_UPLOADS: Upload[] = [];
+
+/** Not on the server yet: a reload would lose it. */
+const isUploadPending = (upload: Upload) =>
+  upload.status === "queued" || upload.status === "uploading";
 
 function createUploadStore(): UploadStore {
   let uploads = NO_UPLOADS;
@@ -81,11 +92,8 @@ function createUploadStore(): UploadStore {
 }
 
 /*
- * Only actions, which hold still: the provider sits above every page, and a
- * context that changes while React is still hydrating a page (the jobs
- * arriving, an upload's progress) makes React throw the page's server HTML
- * away and render it again. The job indicator reads jobs and uploads itself
- * (useJobActivity).
+ * Stable actions keep job and upload progress from rerendering every page.
+ * The job indicator subscribes to those values itself (useJobActivity).
  */
 type JobsContextValue = {
   /**
@@ -105,19 +113,21 @@ type JobsContextValue = {
 
 const JobsContext = createContext<JobsContextValue | null>(null);
 
-function uploadInfoBlob(
+async function uploadInfoBlob(
   collectionId: string,
   file: File,
   onProgress: (progress: number) => void
 ): Promise<Job> {
   // XMLHttpRequest instead of browserApi: fetch cannot observe upload
-  // progress. Same proxy path and error body shapes as openapi-fetch calls.
+  // progress. Request preparation and response checks still use the API seam.
+  const url = `${API_BASE}/api/v1/groups/${encodeURIComponent(collectionId)}/info-blobs/upload/`;
+  const request = await onBrowserApiRequest({
+    request: new Request(new URL(url, window.location.href), { method: "POST" })
+  });
   return new Promise<Job>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open(
-      "POST",
-      `/api/eneo/api/v1/groups/${encodeURIComponent(collectionId)}/info-blobs/upload/`
-    );
+    xhr.open("POST", url);
+    request.headers.forEach((value, name) => xhr.setRequestHeader(name, value));
     xhr.responseType = "json";
     xhr.upload.addEventListener("progress", (event) => {
       if (event.lengthComputable && event.total > 0) {
@@ -125,24 +135,35 @@ function uploadInfoBlob(
       }
     });
     xhr.addEventListener("load", () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        resolve(xhr.response as Job);
-        return;
-      }
-      const body = xhr.response as Record<string, unknown> | null;
-      const message =
-        (typeof body?.message === "string" && body.message) ||
-        (typeof body?.detail === "string" && body.detail) ||
-        `Request failed with status ${xhr.status}`;
-      reject(
-        new EneoApiError(message, {
-          status: xhr.status,
-          code: typeof body?.eneo_error_code === "number" ? body.eneo_error_code : undefined,
-          details: body?.details
+      const response = new Response(JSON.stringify(xhr.response ?? null), {
+        status: xhr.status,
+        headers: new Headers(
+          xhr
+            .getAllResponseHeaders()
+            .trim()
+            .split(/[\r\n]+/)
+            .filter(Boolean)
+            .map((line): [string, string] => {
+              const separator = line.indexOf(":");
+              return [line.slice(0, separator).trim(), line.slice(separator + 1).trim()];
+            })
+        )
+      });
+      void onRawRefusal(response, url)
+        .then(() => {
+          if (response.ok) resolve(xhr.response as Job);
+          else reject(apiErrorFromResponse(response, xhr.response));
         })
-      );
+        .catch(reject);
     });
     xhr.addEventListener("error", () => reject(new Error("Network error")));
+    const abort = () => xhr.abort();
+    xhr.addEventListener("abort", () =>
+      reject(request.signal.reason ?? new DOMException("Upload cancelled", "AbortError"))
+    );
+    xhr.addEventListener("loadend", () => request.signal.removeEventListener("abort", abort));
+    request.signal.throwIfAborted();
+    request.signal.addEventListener("abort", abort, { once: true });
     const body = new FormData();
     body.append("file", file);
     xhr.send(body);
@@ -154,6 +175,16 @@ const NO_JOBS: Job[] = [];
 
 const fetchJobs = async (): Promise<Job[]> => (await unwrap(browserApi.GET("/api/v1/jobs/"))).items;
 
+const readJob = (id: string): Promise<Job | null> =>
+  orOn404(unwrap(browserApi.GET("/api/v1/jobs/{id}/", { params: { path: { id } } })), null);
+
+/** The cached list with these jobs' latest state: replaced in place, or added. */
+function withJobs(current: readonly Job[], jobs: readonly Job[]): Job[] {
+  const latest = new Map(jobs.map((job) => [job.id, job]));
+  const added = jobs.filter((job) => !current.some((item) => item.id === job.id));
+  return [...current.map((item) => latest.get(item.id) ?? item), ...added];
+}
+
 export function JobsProvider({ children }: { children: React.ReactNode }) {
   const t = useTranslations();
   const queryClient = useQueryClient();
@@ -163,24 +194,33 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   const fastPollUntil = useRef(0);
   // Set by the fetcher, not by the cache: a pushed update can fill the cache
   // before the first list arrives, and only a list says which jobs are gone.
-  const listReceived = useRef(false);
+  // Lists are numbered as they start; `listedBy` is the last one received
+  // (0: none yet), so a job the client started is judged only by lists
+  // begun after it (job-transitions.ts).
+  const listsStarted = useRef(0);
+  const listedBy = useRef(0);
   const listJobs = useCallback(async () => {
+    const number = ++listsStarted.current;
     const items = await fetchJobs();
-    listReceived.current = true;
+    listedBy.current = number;
     return items;
   }, []);
 
   // The live feed (job-events.ts) delivers every status change the moment it
-  // is committed. Polling stays as the safety net: slow while the feed is
-  // open, fast while it is down and something is running or was just started.
+  // is committed. Polling stays as the safety net: every two minutes while
+  // the feed is open; while it is down, fast when something is running or
+  // was just started, slow otherwise.
   const live = useJobEventsConnected();
   const { data: jobs, dataUpdatedAt: jobsUpdatedAt } = useQuery({
     queryKey: JOBS_KEY,
     queryFn: listJobs,
-    refetchInterval: (query) =>
-      !live && (Date.now() < fastPollUntil.current || query.state.data?.some(isJobActive))
-        ? FAST_POLL_MS
-        : SLOW_POLL_MS
+    refetchInterval: pollWhile(
+      // Read to schedule the next fetch, never for what renders.
+      // eslint-disable-next-line react-hooks/refs, react-hooks/purity
+      (items) => !live && (Date.now() < fastPollUntil.current || !!items?.some(isJobActive)),
+      FAST_POLL_MS,
+      live ? LIVE_POLL_MS : SLOW_POLL_MS
+    )
   });
   useEffect(
     () =>
@@ -189,9 +229,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
           // A pushed update goes straight into the cached list; the snapshot
           // effect below then treats it like a poll that saw the change.
           queryClient.setQueryData<Job[]>(JOBS_KEY, (current = NO_JOBS) =>
-            current.some((item) => item.id === job.id)
-              ? current.map((item) => (item.id === job.id ? job : item))
-              : [...current, job]
+            withJobs(current, [job])
           );
         },
         () => {
@@ -208,10 +246,45 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   // queued from a menu stops reading as queued once its job is over. The
   // ledger lives in a ref because it is bookkeeping, not render state.
   const ledger = useRef<JobLedger>(EMPTY_LEDGER);
+  /** A job read by id was gone: its data may have changed all the same. */
+  const refreshDue = useRef(false);
+
+  // The list keeps a completed job for five minutes, so one that finished
+  // while the feed was down for longer leaves it unseen. Each such job is
+  // read by id, and what its read says goes into the cached list as a pushed
+  // update would: the snapshot path below reports it. A job that is gone
+  // (404) is dropped and its data refreshed, as before these reads; the
+  // cache write has the list judged again for an import or sync waiting on
+  // it. A job still running, or a failed read, is read again with the next
+  // list that misses it.
+  const readVanished = useCallback(
+    (lookup: LedgerEntry) => {
+      void readJob(lookup.job.id)
+        .catch(() => undefined)
+        .then((job) => {
+          // A list has shown it since, or a newer read speaks for it.
+          if (!isCurrentRead(ledger.current, lookup)) return;
+          const gone = job === null;
+          ledger.current = settleRead(ledger.current, lookup, gone);
+          const found = job && !isJobActive(job) ? [job] : [];
+          // Refreshed by the snapshot this write brings about, once for
+          // every job that ended or went in the same render.
+          if (gone) refreshDue.current = true;
+          if (gone || found.length > 0) {
+            queryClient.setQueryData<Job[]>(JOBS_KEY, (current = NO_JOBS) =>
+              withJobs(current, found)
+            );
+          }
+        });
+    },
+    [queryClient]
+  );
+
   const handleSnapshot = useCallback(
-    (loaded: readonly Job[] | undefined) => {
-      const snapshot = loaded ?? NO_JOBS;
-      const diff = diffJobs(ledger.current, snapshot);
+    (snapshot: readonly Job[] | undefined) => {
+      // Only a list says which jobs are gone.
+      if (!snapshot) return;
+      const diff = diffJobs(ledger.current, snapshot, listedBy.current);
       ledger.current = diff.ledger;
       const imports = pendingImports();
       for (const { job, outcome } of diff.transitions) {
@@ -226,12 +299,12 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
           toast.info(feedback.title);
         }
       }
-      // A vanished job finished (or was cleaned up) without reporting; its
-      // data may still have changed, so refresh as for a reported outcome.
-      const changed = diff.transitions.length > 0 || diff.vanished.length > 0;
-      if (changed) invalidateAfterJobs(queryClient);
-      if (!loaded) return;
-      const over = (jobId: string) => isJobOver(jobId, snapshot, diff.ledger, listReceived.current);
+      if (diff.transitions.length > 0 || refreshDue.current) {
+        refreshDue.current = false;
+        invalidateAfterJobs(queryClient);
+      }
+      for (const { id } of diff.vanished) readVanished(diff.ledger.get(id)!);
+      const over = (jobId: string) => isJobOver(jobId, snapshot, diff.ledger, listedBy.current > 0);
       untrackSyncs(pendingSyncs().flatMap((item) => (over(item.jobId) ? [item.jobId] : [])));
       // Retry pending reports on each successful poll, even when no job changed.
       // reportImports serialises attempts and removes only reported imports.
@@ -240,10 +313,19 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
           ? [
               {
                 ...item,
-                jobStatus: snapshot.find((job) => job.id === item.jobId)?.status ?? null
+                jobStatus:
+                  snapshot.find((job) => job.id === item.jobId)?.status ?? item.jobStatus ?? null
               }
             ]
           : []
+      );
+      // A later list may no longer show the job (one read by id, say): the
+      // pending import keeps how it ended for the reports still to come.
+      const known = (jobId: string) => imports.find((item) => item.jobId === jobId)?.jobStatus;
+      trackImports(
+        settled.flatMap(({ jobStatus, ...item }) =>
+          jobStatus !== null && jobStatus !== known(item.jobId) ? [{ ...item, jobStatus }] : []
+        )
       );
       if (settled.length > 0) {
         void reportImports(settled, {
@@ -253,7 +335,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         });
       }
     },
-    [queryClient, router, t]
+    [queryClient, readVanished, router, t]
   );
   useEffect(() => {
     handleSnapshot(jobs);
@@ -263,7 +345,9 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
     (job?: Job | Job[]) => {
       const jobs = job === undefined ? [] : Array.isArray(job) ? job : [job];
       if (jobs.length > 0) {
-        for (const started of jobs) ledger.current = rememberActiveJob(ledger.current, started);
+        for (const started of jobs) {
+          ledger.current = rememberActiveJob(ledger.current, started, listsStarted.current);
+        }
         // The cached list may already show these jobs finished. Judge it now:
         // a refetch that returns identical data does not re-run the effect.
         handleSnapshot(queryClient.getQueryData<Job[]>(JOBS_KEY));
@@ -280,6 +364,12 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   const waitingRef = useRef<string[]>([]);
   const runningRef = useRef<Set<string>>(new Set());
   const [uploadStore] = useState(createUploadStore);
+  // Re-renders only when the answer flips, not on every progress tick.
+  useBeforeUnloadWarning(
+    useSyncExternalStore(uploadStore.subscribe, () =>
+      uploadStore.getSnapshot().some(isUploadPending)
+    )
+  );
 
   const sync = useCallback(() => {
     uploadStore.set([...uploadsRef.current.values()]);
@@ -385,13 +475,7 @@ export function useJobActivity(): { jobs: Job[]; uploads: Upload[]; runningCount
   const { uploadStore, listJobs } = useJobs();
   // The provider's fetcher: the query runs whichever observer's queryFn rendered last.
   const { data: jobs = NO_JOBS } = useQuery({ queryKey: JOBS_KEY, queryFn: listJobs });
-  const uploads = useSyncExternalStore(
-    uploadStore.subscribe,
-    uploadStore.getSnapshot,
-    uploadStore.getSnapshot
-  );
-  const runningCount =
-    jobs.filter(isJobActive).length +
-    uploads.filter((upload) => upload.status === "queued" || upload.status === "uploading").length;
+  const uploads = useSyncExternalStore(uploadStore.subscribe, uploadStore.getSnapshot);
+  const runningCount = jobs.filter(isJobActive).length + uploads.filter(isUploadPending).length;
   return { jobs, uploads, runningCount };
 }

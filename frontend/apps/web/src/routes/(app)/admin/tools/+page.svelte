@@ -11,20 +11,18 @@
   import { invalidate } from "$app/navigation";
   import { writable } from "svelte/store";
   import { untrack } from "svelte";
-  import {
-    ChevronDown,
-    Plug,
-    Plus,
-    ShieldCheck,
-    CircleCheck,
-    CircleDashed,
-    TriangleAlert,
-    Power,
-    Pause,
-    Pencil,
-    Trash2,
-    ChevronRight
-  } from "@lucide/svelte";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import Plug from "@lucide/svelte/icons/plug";
+  import Plus from "@lucide/svelte/icons/plus";
+  import ShieldCheck from "@lucide/svelte/icons/shield-check";
+  import CircleCheck from "@lucide/svelte/icons/circle-check";
+  import CircleDashed from "@lucide/svelte/icons/circle-dashed";
+  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
+  import Power from "@lucide/svelte/icons/power";
+  import Pause from "@lucide/svelte/icons/pause";
+  import Pencil from "@lucide/svelte/icons/pencil";
+  import Trash2 from "@lucide/svelte/icons/trash-2";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import { m } from "$lib/paraglide/messages";
   import { CAPABILITIES } from "$lib/features/mcp/capabilities";
   import { BUNDLED_SERVERS, bundledIdentity, bundledServerLabel } from "$lib/features/mcp/bundled";

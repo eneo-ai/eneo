@@ -3,7 +3,7 @@
 import logging
 from uuid import UUID
 
-from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.action_types import ALWAYS_AUDITED_ACTIONS, ActionType
 from eneo.audit.domain.category_mappings import (
     CATEGORY_MAPPINGS,
     get_category_for_action,
@@ -36,6 +36,19 @@ Cache TTL Reasoning:
 - Long enough to reduce database load significantly (every audit log checks config)
 - At 1000 req/s, this reduces DB queries from 60,000/min to 7 queries/min per category
 """
+
+
+def settable_action_updates(updates: list[ActionUpdate]) -> list[ActionUpdate]:
+    """The action updates that are stored: none for an always-audited action.
+
+    Refused without an error, since the old UI disables a category by sending
+    every action in it.
+    """
+    return [
+        update
+        for update in updates
+        if ActionType(update.action) not in ALWAYS_AUDITED_ACTIONS
+    ]
 
 
 class AuditConfigService:
@@ -310,7 +323,9 @@ class AuditConfigService:
 
         for action_value, category in CATEGORY_MAPPINGS.items():
             # Determine if action is enabled using local dict (avoids 65 async calls)
-            if category not in config_dict:
+            if ActionType(action_value) in ALWAYS_AUDITED_ACTIONS:
+                enabled = True
+            elif category not in config_dict:
                 # No config = default enabled
                 enabled = True
             else:
@@ -355,7 +370,7 @@ class AuditConfigService:
         # Group updates by category (since we update JSONB per category)
         updates_by_category: dict[str, ActionOverrides] = {}
 
-        for update in updates:
+        for update in settable_action_updates(updates):
             category = get_category_for_action(update.action)
             if category not in updates_by_category:
                 updates_by_category[category] = {}

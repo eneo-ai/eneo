@@ -1,25 +1,29 @@
 /**
  * Settings of the chat partner that are saved while the user chats (the
- * personal assistant's model and reasoning effort, picked in the composer).
- * The backend resolves them from the stored assistant when a question
- * arrives, so a question sent right after a switch must wait for that write
- * to land (the Svelte app's awaitDefaultAssistantUpdates).
+ * personal assistant's model, reasoning effort and own Skills, picked in the
+ * composer). The backend resolves them from the stored assistant when a
+ * question arrives, so a question sent right after a switch must wait for
+ * that write to land. Saves run one at a time, in the order they were made,
+ * so a quick A → B → C never lets an older write land last (the Svelte app's
+ * updateDefaultAssistant chain).
  */
 
-const inFlight = new Set<Promise<unknown>>();
+let queue: Promise<unknown> = Promise.resolve();
+let pending = 0;
 
-/** Registers a save; returns the same promise for the caller's own handling. */
-export function trackPartnerUpdate<T>(update: Promise<T>): Promise<T> {
-  inFlight.add(update);
-  update.finally(() => inFlight.delete(update)).catch(() => {});
+/** Runs a save after every save queued before it; returns its own result. */
+export function queuePartnerUpdate<T>(run: () => Promise<T>): Promise<T> {
+  const update = queue.then(run, run);
+  pending += 1;
+  queue = update.catch(() => {}).finally(() => (pending -= 1));
   return update;
 }
 
 export function hasPendingPartnerUpdates(): boolean {
-  return inFlight.size > 0;
+  return pending > 0;
 }
 
-/** Resolves once every save in flight has settled (failed saves included). */
+/** Resolves once every queued save has settled (failed saves included). */
 export async function awaitPartnerUpdates(): Promise<void> {
-  while (inFlight.size > 0) await Promise.allSettled([...inFlight]);
+  while (pending > 0) await queue;
 }

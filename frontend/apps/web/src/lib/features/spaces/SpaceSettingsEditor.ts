@@ -41,6 +41,7 @@ function createSpaceSettingsEditor(data: SpaceSettingsEditorParams) {
     },
     // Space doesn't have attachments like assistants
     manageAttachements: false,
+    manageIcon: true,
     eneo: data.eneo
   });
 

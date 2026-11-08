@@ -7,7 +7,6 @@ from eneo.sessions.session import SessionInDB, SessionMetadataPublic
 from eneo.sessions.session_protocol import (
     to_session_metadata_paginated_response,
     to_session_public,
-    to_sessions_paginated_response,
 )
 from eneo.skills.domain.skill import (
     SkillActivationEvidenceV1,
@@ -19,15 +18,14 @@ from eneo.skills.domain.skill import (
 def test_no_limit():
     base_datetime = datetime.now()
     test_sessions = [
-        SessionInDB(
+        SessionMetadataPublic(
             id=uuid4(),
             name=f"test-{i}",
-            user_id=uuid4(),
             created_at=base_datetime - timedelta(days=i),
         )
         for i in range(10)
     ]
-    response = to_sessions_paginated_response(
+    response = to_session_metadata_paginated_response(
         sessions=test_sessions, total_count=len(test_sessions)
     )
     assert len(response.items) == len(test_sessions)
@@ -36,16 +34,15 @@ def test_no_limit():
 def test_pagination_forward_limit():
     base_datetime = datetime.now()
     test_sessions = [
-        SessionInDB(
+        SessionMetadataPublic(
             id=uuid4(),
             name=f"test-{i}",
-            user_id=uuid4(),
             created_at=base_datetime - timedelta(days=i),
         )
         for i in range(6)
     ]
     limit = 5
-    response = to_sessions_paginated_response(
+    response = to_session_metadata_paginated_response(
         sessions=test_sessions,
         limit=limit,
         total_count=len(test_sessions),
@@ -58,17 +55,16 @@ def test_pagination_forward_limit():
 def test_pagination_backward_limit():
     base_datetime = datetime.now()
     test_sessions = [
-        SessionInDB(
+        SessionMetadataPublic(
             id=uuid4(),
             name=f"test-{i}",
-            user_id=uuid4(),
             created_at=base_datetime - timedelta(days=i),
         )
         for i in range(6)
     ]
 
     limit = 5
-    response = to_sessions_paginated_response(
+    response = to_session_metadata_paginated_response(
         sessions=test_sessions,
         total_count=len(test_sessions),
         limit=limit,
@@ -84,17 +80,16 @@ def test_pagination_backward_limit():
 def test_limit_matches_session_count():
     base_datetime = datetime.now()
     test_sessions = [
-        SessionInDB(
+        SessionMetadataPublic(
             id=uuid4(),
             name=f"test-{i}",
-            user_id=uuid4(),
             created_at=base_datetime - timedelta(days=i),
         )
         for i in range(10)
     ]
 
     limit = len(test_sessions)
-    response = to_sessions_paginated_response(
+    response = to_session_metadata_paginated_response(
         sessions=test_sessions,
         total_count=len(test_sessions),
         limit=limit,

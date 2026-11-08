@@ -1,10 +1,9 @@
-"use client";
-
 import { useQueryClient } from "@tanstack/react-query";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
-import { useState } from "react";
+import Link from "@/lib/link";
+import { useRouter } from "@/lib/navigation";
+import { useTranslations } from "use-intl";
+import { useEffect, useRef, useState } from "react";
+import { BackLink } from "@/components/composites/back-link";
 import { PageHeader } from "@/components/composites/page-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -12,19 +11,26 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { ORGANIZATION_SKILLS_KEY } from "./organization-skills";
 import { SkillForm } from "./skill-form";
+import { skillReferenceCatalog } from "./skill-reference-catalog";
 
 export function OrganizationSkillNewPage() {
   const t = useTranslations();
   const router = useRouter();
   const queryClient = useQueryClient();
   const [createdHref, setCreatedHref] = useState<string | null>(null);
+  const departureAccepted = useRef(false);
+  // Navigate after the saved state has unmounted the form and its leave guard.
+  // An accepted departure owns navigation even while its destination is loading.
+  useEffect(() => {
+    if (createdHref && !departureAccepted.current) router.push(createdHref);
+  }, [createdHref, router]);
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 pb-16">
+    <div className="flex w-full max-w-5xl flex-col gap-6 pb-16">
       <PageHeader title={t("skills_library_new_heading")} />
-      <Button asChild variant="link" className="w-fit px-0">
-        <Link href="/spaces/organization/skills">{t("skills")}</Link>
-      </Button>
+      <BackLink href="/spaces/organization/skills" hideOnPhone>
+        {t("skills")}
+      </BackLink>
       <p className="text-muted-foreground max-w-2xl text-sm">
         {t("organization_skills_new_intro")}
       </p>
@@ -45,6 +51,10 @@ export function OrganizationSkillNewPage() {
             <AlertDescription>{t("organization_skills_draft_notice_description")}</AlertDescription>
           </Alert>
           <SkillForm
+            onLeave={() => {
+              departureAccepted.current = true;
+            }}
+            referenceCatalog={skillReferenceCatalog({ type: "organization" })}
             mode="create"
             onSubmit={async (value) => {
               const skill = await unwrap(
@@ -53,7 +63,6 @@ export function OrganizationSkillNewPage() {
               const href = `/spaces/organization/skills/${skill.id}`;
               setCreatedHref(href);
               await queryClient.invalidateQueries({ queryKey: ORGANIZATION_SKILLS_KEY });
-              router.push(href);
             }}
           />
         </>

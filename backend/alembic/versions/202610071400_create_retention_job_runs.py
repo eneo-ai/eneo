@@ -1,13 +1,18 @@
 """Create generic retention bookkeeping and complete adopter keysets.
 
 Revision ID: 202610071400
-Revises: 202610161000
+Revises: 202611031206
 Build indexes on existing tables concurrently (the retention keysets, and the
 question index info_blob_references lacks) before removing their shorter
 prefixes, then create the new bookkeeping table transactionally. An interrupted
 online build retries invalid indexes; offline SQL assumes no invalid leftovers.
 No product data or foreign keys change. Downgrade restores the prefix indexes
 and removes execution history and cursors, so later executions start new passes.
+
+This revision first followed 202610161000. A database migrated on that chain
+records it as applied, so `alembic upgrade head` would skip the revisions now
+before it. Downgrade such a database to 202610161000 with the code it was
+migrated with, then upgrade.
 """
 
 from collections.abc import Sequence
@@ -18,7 +23,7 @@ from sqlalchemy.dialects import postgresql
 from alembic import op
 
 revision: str = "202610071400"
-down_revision: str = "202610161000"
+down_revision: str = "202611031206"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

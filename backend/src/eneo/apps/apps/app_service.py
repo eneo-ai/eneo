@@ -35,10 +35,14 @@ from eneo.prompts.prompt_service import PromptService
 from eneo.skills.domain.skill import (
     AppPinAdvanceIncompatibleReason,
     ResolvedSkillBinding,
+    SkillAttachmentLimitError,
     SkillBindingReference,
+    SkillBindingRevisionConflictError,
     SkillComposition,
     SkillExecutionReference,
+    SkillRuntimePolicy,
     compose_skill_instructions,
+    validate_skill_binding_group,
 )
 from eneo.spaces.api.space_models import WizardType
 from eneo.spaces.space import Space
@@ -139,7 +143,7 @@ class AppService:
             base_instructions=base_instructions,
         )
 
-    async def _lock_app_for_context_validation(self, app_id: UUID) -> App:
+    async def _lock_app(self, app_id: UUID) -> App:
         app = await self.repo.get_for_update(app_id)
         if app is None:
             raise NotFoundException()
@@ -197,6 +201,7 @@ class AppService:
         from_revision_id: UUID,
         candidate_binding: ResolvedSkillBinding,
         completion_prompt_files: Sequence[File],
+        runtime_policy: SkillRuntimePolicy,
     ) -> AppPinAdvanceIncompatibleReason | None:
         current_binding = next(
             (
@@ -213,12 +218,21 @@ class AppService:
             position=current_binding.position,
             activation_mode=current_binding.activation_mode,
         )
+        candidate_bindings = [
+            resolved_candidate if binding is current_binding else binding
+            for binding in bindings
+        ]
+        try:
+            validate_skill_binding_group(
+                candidate_bindings,
+                max_attached_skills=runtime_policy.max_attached_skills,
+            )
+        except SkillAttachmentLimitError:
+            return AppPinAdvanceIncompatibleReason.ATTACHMENT_LIMIT
+        except SkillBindingRevisionConflictError:
+            return AppPinAdvanceIncompatibleReason.CONFLICTING_REVISIONS
         composition = compose_skill_instructions(
-            base_instructions=validation_input.prompt_text,
-            bindings=[
-                resolved_candidate if binding is current_binding else binding
-                for binding in bindings
-            ],
+            base_instructions=validation_input.prompt_text, bindings=candidate_bindings
         )
         model = validation_input.completion_model
         if model is None:
@@ -427,8 +441,15 @@ class AppService:
             or prompt_text is not None
             or skill_references is not None
         )
-        if requires_context_validation:
-            app = await self._lock_app_for_context_validation(app_id)
+        if requires_context_validation or is_provided(icon_id):
+            app = await self._lock_app(app_id)
+        previous_icon_id = app.icon_id
+        await self.icon_repo.ensure_attachable(
+            previous_icon_id,
+            icon_id,
+            tenant_id=self.user.tenant_id,
+            user_id=self.user.id,
+        )
 
         completion_model = None
         if completion_model_id is not None:
@@ -513,6 +534,7 @@ class AppService:
             )
 
         app_in_db = await self.repo.update(app)
+        await self.icon_repo.release_replaced(previous_icon_id, icon_id)
 
         # TODO: Review how we get the permissions to the presentation layer
         permissions = actor.get_app_permissions()
@@ -534,9 +556,6 @@ class AppService:
                 },
             )
 
-        app = space.get_app(app_id=app_id)
-        icon_id = app.icon_id
-
         if self.api_key_scope_revoker is not None:
             try:
                 await self.api_key_scope_revoker.revoke_scope(
@@ -551,10 +570,10 @@ class AppService:
                     extra={"app_id": str(app_id)},
                 )
 
-        await self.repo.delete(app_id)
+        icon_id = await self.repo.delete(app_id)
 
         if icon_id:
-            await self.icon_repo.delete(icon_id)
+            await self.icon_repo.delete_if_unreferenced(icon_id)
 
     async def _get_runnable_app(self, app_id: UUID) -> App:
         space = await self.space_repo.get_space_by_app(app_id=app_id)
@@ -679,7 +698,7 @@ class AppService:
             )
 
         if publish:
-            app = await self._lock_app_for_context_validation(app_id)
+            app = await self._lock_app(app_id)
             composition = await self._compose_app_prompt(app)
             await self._validate_configured_context(app=app, composition=composition)
 

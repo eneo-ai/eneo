@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 import { afterEach, expect, it, vi } from "vitest";
 import messages from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
@@ -18,7 +18,7 @@ const options: ProviderOption[] = [
   {
     type: "hosted_vllm",
     name: "vLLM",
-    modes: ["completion", "embedding", "transcription"],
+    modes: ["completion", "embedding", "transcription", "rerank"],
     selfHosted: true
   }
 ];
@@ -29,14 +29,14 @@ function renderPicker(favorites = new Set(["anthropic"])) {
   const onSelect = vi.fn();
   const onToggleFavorite = vi.fn();
   render(
-    <NextIntlClientProvider locale="sv" messages={messages}>
+    <IntlProvider locale="sv" messages={messages}>
       <ProviderPicker
         options={options}
         favorites={favorites}
         onSelect={onSelect}
         onToggleFavorite={onToggleFavorite}
       />
-    </NextIntlClientProvider>
+    </IntlProvider>
   );
   return { onSelect, onToggleFavorite };
 }
@@ -58,6 +58,16 @@ it("lists favourites first and pins with a toggle that keeps its name", async ()
   await expectNoAxeViolations(document.body);
 });
 
+it("tags each provider with the model types it serves, rerank included", () => {
+  renderPicker(new Set());
+  const vllm = screen.getByRole("button", { name: "Lägg till vLLM" }).closest("li")!;
+  expect(
+    within(vllm)
+      .getAllByRole("listitem")
+      .map((item) => item.textContent)
+  ).toEqual(["Chatt", "Embeddings", "Tal-till-text", "Rerankning"]);
+});
+
 it("filters by capability, self-hosting and search", () => {
   renderPicker(new Set());
   const capabilities = screen.getByRole("radiogroup", { name: "Funktioner" });
@@ -69,6 +79,10 @@ it("filters by capability, self-hosting and search", () => {
   fireEvent.click(within(capabilities).getByRole("radio", { name: "Bildgenerering" }));
   expect(screen.getByRole("button", { name: "Lägg till OpenAI" })).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Lägg till vLLM" })).toBeNull();
+
+  fireEvent.click(within(capabilities).getByRole("radio", { name: "Rerankning" }));
+  expect(screen.queryByRole("button", { name: "Lägg till OpenAI" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Lägg till vLLM" })).toBeTruthy();
 
   fireEvent.click(within(capabilities).getByRole("radio", { name: "Alla leverantörer" }));
   const selfHosted = screen.getByRole("button", { name: "Självhostad" });

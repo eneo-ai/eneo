@@ -76,10 +76,12 @@ Object storage and RAG solve different problems:
 | Changing the selected target           | Affects eligible new writes without a restart; existing content stays where it is               |
 | Moving existing content                | Requires a separate explicit, verified migration                                                |
 
-Replacing searchable knowledge keeps the previous complete version as
-recovery history. Retained versions continue to count toward the configured
-knowledge-storage quota until the document family is deleted; that count
-includes each retained version's exact original.
+Replacing searchable knowledge keeps the previous version's text, metadata and
+exact original as history, so citations stay readable. Its chunks and
+embeddings are removed, because only the active version is searched. Retained
+versions continue to count toward the configured knowledge-storage quota until
+the document family is deleted; that count includes each retained version's
+text and exact original.
 
 Enabling an endpoint makes the optional byte plane available; it does not move
 existing content or change producer placement by itself. An administrator must

@@ -234,8 +234,7 @@ class RerankModels(BasePublic):
     Same catalog shape as the other model types (tenant/provider ownership,
     enablement, default, classification, soft delete). `name` is the model
     identifier sent to the provider, `nickname` the display name. Referenced
-    by `assistants.rerank_model_id` (SET NULL); the retrieval step that reads
-    it and the editor that writes it follow in later tasks (#1035).
+    by `assistants.rerank_model_id` (SET NULL).
     """
 
     name: Mapped[str] = mapped_column()
@@ -248,6 +247,8 @@ class RerankModels(BasePublic):
     hosting: Mapped[str] = mapped_column()
     description: Mapped[Optional[str]] = mapped_column()
     org: Mapped[Optional[str]] = mapped_column()
+    candidate_factor: Mapped[int] = mapped_column(server_default="5")
+    max_candidates: Mapped[int] = mapped_column(server_default="100")
 
     # Tenant model support: NULL = global model, NOT NULL = tenant-specific model
     tenant_id: Mapped[Optional[UUID]] = mapped_column(
@@ -275,6 +276,14 @@ class RerankModels(BasePublic):
         CheckConstraint(
             "(tenant_id IS NULL AND provider_id IS NULL) OR (tenant_id IS NOT NULL AND provider_id IS NOT NULL)",
             name="ck_rerank_models_tenant_provider",
+        ),
+        CheckConstraint(
+            "candidate_factor BETWEEN 1 AND 20",
+            name="ck_rerank_models_candidate_factor_range",
+        ),
+        CheckConstraint(
+            "max_candidates BETWEEN 1 AND 1000",
+            name="ck_rerank_models_max_candidates_range",
         ),
     )
 

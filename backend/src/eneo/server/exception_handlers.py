@@ -1,15 +1,21 @@
 import logging
-from typing import Protocol, cast
+import traceback
+import uuid
+from typing import Any, Protocol, cast
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.responses import Response
 
+from eneo.authentication.browser_session import SessionGenerationMismatchError
 from eneo.files.file_models import (
     FileInUseError,
     FileOriginalNotFoundError,
 )
+from eneo.icons.icon import IconInUseError, IconNotAttachableError
 from eneo.info_blobs.info_blob import InfoBlobOriginalUnavailableError
 from eneo.integration.domain.repositories.integration_knowledge_repo import (
     IntegrationKnowledgeSyncingError,
@@ -21,6 +27,7 @@ from eneo.integration.infrastructure.auth_service.base_auth_service import (
 from eneo.integration.infrastructure.auth_service.org_token_provider import (
     SharePointCredentialsInvalidError,
 )
+from eneo.main.config import get_settings
 from eneo.main.exceptions import (
     EXCEPTION_MAP,
     ErrorCodes,
@@ -67,12 +74,16 @@ from eneo.object_content.object_store_connection import (
     ObjectStoreProbeTlsFailed,
     ObjectStoreProbeUnavailable,
 )
+from eneo.server.middleware.cors import add_cors_headers
+from eneo.server.middleware.trace_id import current_trace_id
 from eneo.skills.domain.skill import (
+    PersonalSkillLayerRejectedError,
     PublishedSkillDeletionError,
     SkillBlockedForBindingError,
     SkillExecutionBlockConflictError,
     SkillHasActiveAppRunsError,
     SkillHasBindingsError,
+    SkillHasReferencesError,
     SkillNotPublishedForBindingError,
     SkillRemovalBusyError,
     SkillRuntimePolicyChangedError,
@@ -88,6 +99,10 @@ from eneo.users.password_lifecycle import PasswordChangeRequiredError
 from eneo.websites.domain.crawl_run_repo import (
     WebsiteCrawlActiveError,
     WebsiteCrawlCleanupPendingError,
+)
+from eneo.widgets.domain.exceptions import (
+    AssistantPublishedAsWidgetError,
+    WidgetPublicError,
 )
 
 # Partial unique indexes that guard active model display names, per
@@ -135,8 +150,8 @@ def _default_message_for_status(status_code: int) -> str:
 def default_error_code_for_status(status_code: int) -> ErrorCodes:
     """The coarse numeric category for a status raised without one.
 
-    `GeneralError` requires `eneo_error_code`, but an `HTTPException` raised
-    with a `{"code", "message"}` detail carries only the string code. This
+    An `HTTPException` raised with a `{"code", "message"}` detail carries only
+    the string code, while clients branch on the numeric field. This
     keeps one category per status for those, so a client that branches on the
     numeric field is not left guessing at which layer refused the request.
     Precision lives in the string `code`, which the raiser owns.
@@ -160,13 +175,47 @@ def default_error_code_for_status(status_code: int) -> ErrorCodes:
     return ErrorCodes.BAD_REQUEST
 
 
-def _extract_request_id(request: Request) -> str | None:
-    request_id = request.headers.get("x-correlation-id") or request.headers.get(
-        "x-request-id"
-    )
-    if request_id:
-        return request_id
+def extract_request_id(request: Request | None = None) -> str | None:
+    """The ``request_id`` an error body carries.
+
+    Documented contract: a caller-sent correlation/request header is echoed;
+    otherwise the request context's correlation id, which the logs carry.
+    """
+    if request is not None:
+        request_id = request.headers.get("x-correlation-id") or request.headers.get(
+            "x-request-id"
+        )
+        if request_id:
+            return request_id
     return get_request_context().get("correlation_id")
+
+
+def correlation_headers() -> dict[str, str] | None:
+    """``X-Correlation-ID`` for an error response, or ``None``.
+
+    Carries the request context's id: the trace id when a span is active,
+    otherwise the caller's legacy header. That is the value every log line
+    of the request carries, so support can go from the header to the logs.
+    The trace middleware sets the same header when a span exists; this covers
+    deployments without tracing.
+    """
+    correlation_id = get_request_context().get("correlation_id")
+    if not correlation_id:
+        return None
+    return {"X-Correlation-ID": str(correlation_id)}
+
+
+def has_registered_handler(app: FastAPI, exc: BaseException) -> bool:
+    """Whether ``exc`` gets a canonical response from a handler on ``app``.
+
+    Resolved the way Starlette resolves handlers, by ``isinstance``. The
+    ``Exception`` and status-code catch-alls do not count: they are what an
+    unexpected failure falls into.
+    """
+    return any(
+        isinstance(key, type) and key is not Exception and isinstance(exc, key)
+        for key in app.exception_handlers
+    )
 
 
 def _exception_context(
@@ -219,6 +268,12 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
         ErrorCodes.LOCAL_PASSWORD_CHANGE_UNAVAILABLE,
     ),
     PasswordChangeRequiredError: (403, None, ErrorCodes.PASSWORD_CHANGE_REQUIRED),
+    # --- Browser session ---
+    SessionGenerationMismatchError: (
+        401,
+        None,
+        ErrorCodes.SESSION_GENERATION_MISMATCH,
+    ),
     # --- Integrations: the string ``code`` tells the cases apart ---
     SharePointCredentialsInvalidError: (400, None, ErrorCodes.BAD_REQUEST),
     OAuthCodeRejectedError: (400, None, ErrorCodes.BAD_REQUEST),
@@ -243,6 +298,8 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
     ObjectContentBusyError: (409, None, ErrorCodes.RESOURCE_NOT_READY),
     FileInUseError: (409, None, ErrorCodes.FILE_IN_USE),
     FileOriginalNotFoundError: (404, None, ErrorCodes.FILE_ORIGINAL_NOT_FOUND),
+    IconInUseError: (409, None, ErrorCodes.ICON_IN_USE),
+    IconNotAttachableError: (400, None, ErrorCodes.ICON_NOT_ATTACHABLE),
     InfoBlobOriginalUnavailableError: (
         404,
         None,
@@ -328,6 +385,12 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
         "This Skill is still attached. Remove every binding before deleting it.",
         ErrorCodes.SKILL_STILL_ATTACHED,
     ),
+    SkillHasReferencesError: (
+        409,
+        "Other Skills reference this Skill, including retained revisions. "
+        "Deactivate it to hide it from new selections; existing references will keep working.",
+        ErrorCodes.SKILL_REFERENCED_BY_REVISION,
+    ),
     SkillRemovalBusyError: (
         409,
         "One or more selected Skills are being changed. Nothing was removed. "
@@ -350,16 +413,132 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
         "Reload the Skill before unblocking.",
         ErrorCodes.SKILL_EXECUTION_BLOCK_CONFLICT,
     ),
+    PersonalSkillLayerRejectedError: (
+        400,
+        None,
+        ErrorCodes.PERSONAL_SKILLS_REJECTED,
+    ),
     SkillRuntimePolicyChangedError: (
         409,
         "The organisation's Skill policy changed while this move was being "
         "validated. Run the update again against the current policy.",
         ErrorCodes.SKILL_RUNTIME_POLICY_CHANGED,
     ),
+    AssistantPublishedAsWidgetError: (
+        400,
+        "This Assistant is published as a web widget. An administrator must "
+        "archive the widget before the Assistant can move to another Space.",
+        ErrorCodes.ASSISTANT_PUBLISHED_AS_WIDGET,
+    ),
 }
 
 
+def _http_exception_body(
+    exc: StarletteHTTPException, request_id: str | None
+) -> dict[str, Any]:
+    """The `GeneralError` envelope for a raised `HTTPException`.
+
+    The raised detail stays in `detail` for one release, so a client reading
+    `body.detail.code` keeps working while it moves to the top-level fields.
+    A structured raise whose route answered something else before (a plain
+    string) names that in its own `detail` key, which is kept instead.
+    """
+    detail: object = exc.detail
+    structured = cast(dict[str, Any], detail) if isinstance(detail, dict) else None
+    if structured is not None and "code" in structured and "message" in structured:
+        # Every raiser of this shape means it as the documented error, and its
+        # extra keys (`retry_after_seconds`, `existing_status`) are part of the
+        # route's contract, so the dict becomes the body. Most raisers left the
+        # numeric category out; fill it here so a direct raise cannot bypass it.
+        body = dict(structured)
+        body.setdefault(
+            "eneo_error_code", default_error_code_for_status(exc.status_code).value
+        )
+        if request_id:
+            body.setdefault("request_id", request_id)
+        body.setdefault("detail", detail)
+        return body
+
+    raised_message = structured.get("message") if structured is not None else detail
+    message = (
+        raised_message
+        if isinstance(raised_message, str)
+        else _default_message_for_status(exc.status_code)
+    )
+    # No status-default `eneo_error_code`: both clients prefer a category's
+    # catalog text over the message, which would turn a specific refusal into
+    # a generic "Forbidden". A structured refusal without a code (the healthz
+    # report) moves to `details`, so nothing lives only in the deprecated copy.
+    return GeneralError(
+        message=message, request_id=request_id, details=structured, detail=detail
+    ).model_dump(exclude_none=True)
+
+
+def http_exception_response(request: Request, exc: StarletteHTTPException) -> Response:
+    """The answer to an `HTTPException`, also for a refusal sent outside the
+    exception middleware (an ASGI middleware, a route's own `handle`)."""
+    # The raiser's headers win; otherwise carry the request's correlation
+    # id like the canonical handlers do, so the header matches the logs.
+    headers = {**(correlation_headers() or {}), **(exc.headers or {})}
+    if exc.status_code in {204, 304}:
+        return Response(status_code=exc.status_code, headers=headers)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=_http_exception_body(exc, extract_request_id(request)),
+        headers=headers,
+    )
+
+
 def add_exception_handlers(app: FastAPI):
+    async def http_exception_handler(request: Request, exc: Exception) -> Response:
+        # Registered on Starlette's class, so routing misses (404, 405) answer
+        # in the same envelope as a route's own raise.
+        return http_exception_response(request, cast(StarletteHTTPException, exc))
+
+    app.add_exception_handler(StarletteHTTPException, http_exception_handler)
+
+    async def unhandled_exception_handler(
+        request: Request, exc: Exception
+    ) -> JSONResponse:
+        # FastAPI keeps one server-error handler (the last of 500/Exception).
+        # It runs in ServerErrorMiddleware, outside the CORS and trace
+        # middlewares, so this handler adds their headers itself.
+        error_id = str(uuid.uuid4())[:8]
+        logger.error(
+            f"Unhandled Exception [error_id={error_id}]",
+            extra={
+                "error_id": error_id,
+                "path": request.url.path,
+                "method": request.method,
+                "exception_type": type(exc).__name__,
+                "exception_message": str(exc),
+                "traceback": traceback.format_exc(),
+            },
+        )
+
+        error_content: dict[str, Any] = {
+            "error": "Internal server error",
+            "error_id": error_id,
+            "message": "An unexpected error occurred. Please try again or contact support with the error_id.",
+        }
+        if get_settings().is_development:
+            error_content["detail"] = {
+                "exception_type": type(exc).__name__,
+                "exception_message": str(exc),
+                "path": request.url.path,
+                "method": request.method,
+            }
+
+        response = JSONResponse(status_code=500, content=error_content)
+        trace_id = current_trace_id()
+        if trace_id:
+            response.headers["X-Trace-Id"] = trace_id
+            response.headers["X-Correlation-ID"] = trace_id
+        await add_cors_headers(request, response)
+        return response
+
+    app.add_exception_handler(Exception, unhandled_exception_handler)
+
     async def request_validation_error_handler(
         request: Request, exc: Exception
     ) -> JSONResponse:
@@ -381,7 +560,11 @@ def add_exception_handlers(app: FastAPI):
             }
             for error in validation_exc.errors()
         ]
-        return JSONResponse(status_code=422, content={"detail": details})
+        return JSONResponse(
+            status_code=422,
+            content={"detail": details},
+            headers=correlation_headers(),
+        )
 
     app.add_exception_handler(RequestValidationError, request_validation_error_handler)
 
@@ -401,7 +584,7 @@ def add_exception_handlers(app: FastAPI):
             message = error_message or str(exc)
             if not message or not message.strip():
                 message = _default_message_for_status(status_code)
-            request_id = _extract_request_id(request)
+            request_id = extract_request_id(request)
             context = _exception_context(status_code=status_code, exc=exc)
             raw_details = getattr(exc, "details", None)
             details: dict[str, object] | None
@@ -425,6 +608,7 @@ def add_exception_handlers(app: FastAPI):
 
             return JSONResponse(
                 status_code=status_code,
+                headers=correlation_headers(),
                 content=GeneralError(
                     message=message,
                     eneo_error_code=error_code,
@@ -447,7 +631,7 @@ def add_exception_handlers(app: FastAPI):
         if not is_active_display_name_violation(integrity_exc):
             raise exc
 
-        request_id = _extract_request_id(request)
+        request_id = extract_request_id(request)
         logger.warning(
             "%s %s → 409: display name collision (DB index)",
             request.method,
@@ -464,3 +648,21 @@ def add_exception_handlers(app: FastAPI):
         )
 
     app.add_exception_handler(IntegrityError, integrity_error_handler)
+
+    async def widget_public_error_handler(
+        request: Request, exc: Exception
+    ) -> JSONResponse:
+        error = cast(WidgetPublicError, exc)
+        return JSONResponse(
+            status_code=error.status_code,
+            content={
+                "detail": {
+                    **error.details(),
+                    "code": error.code,
+                    "message": error.message,
+                }
+            },
+            headers=error.headers,
+        )
+
+    app.add_exception_handler(WidgetPublicError, widget_public_error_handler)

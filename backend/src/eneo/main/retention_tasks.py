@@ -3,8 +3,9 @@
 import asyncio
 import logging
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import datetime, timedelta, timezone
+from types import MappingProxyType
 
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -35,6 +36,20 @@ from eneo.files.unused_file_retention_task import (
 from eneo.main.config import Settings
 
 logger = logging.getLogger(__name__)
+
+# Removals that run without an organisation, space or assistant choice, each
+# with the deployment setting that switches it off. They ran before the engine
+# (sessions without a question, files without a reference) or keep the engine's
+# own records (job history, after the audit retention). Every other task removes
+# only what such a choice selects, or is off by default. Widget conversations
+# are not the engine's: each widget's nightly job removes them.
+EXISTING_WITHOUT_CHOICE: Mapping[str, str] = MappingProxyType(
+    {
+        EMPTY_SESSIONS_TASK: "retention_empty_sessions_enabled",
+        UNUSED_FILES_TASK: "retention_unused_files_enabled",
+        JOB_HISTORY_TASK: "retention_job_history_enabled",
+    }
+)
 
 
 def retention_task_registrations(

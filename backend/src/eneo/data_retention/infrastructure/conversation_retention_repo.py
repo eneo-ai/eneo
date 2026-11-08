@@ -39,7 +39,10 @@ from eneo.data_retention.infrastructure.conversation_retention_policy import (
 from eneo.data_retention.infrastructure.empty_session_repo import (
     EmptySessionRepository,
 )
-from eneo.data_retention.infrastructure.retention_sql import uuid_in
+from eneo.data_retention.infrastructure.retention_sql import (
+    question_in_widget,
+    uuid_in,
+)
 from eneo.database.tables.app_table import AppRuns, AppRunsFiles, Apps
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.audit_retention_policy_table import AuditRetentionPolicy
@@ -118,6 +121,11 @@ class ConversationRetentionRepository:
         self.file_owner_id: ColumnElement[UUID]
         # The session a root belongs to, removed with its last question.
         self.root_session: ColumnElement[UUID | None] | None
+        # A widget conversation's root, which only widget retention removes.
+        # The fresh check inside the delete refuses it; discovery and the
+        # overdue walk read it in their bounded window and pass it, so a
+        # widget backlog inside an owner's period is never one unbounded read.
+        self.widget_root: ColumnElement[bool]
         if kind is ConversationRootKind.QUESTION:
             self.records = Questions
             self.owner = Assistants
@@ -126,6 +134,7 @@ class ConversationRetentionRepository:
             self.file_owner_id = QuestionsFiles.question_id.expression
             self.children = QUESTION_CHILDREN
             self.root_session = Questions.session_id.expression
+            self.widget_root = question_in_widget()
         else:
             self.records = AppRuns
             self.owner = Apps
@@ -134,6 +143,8 @@ class ConversationRetentionRepository:
             self.file_owner_id = AppRunsFiles.app_run_id.expression
             self.children = APP_RUN_CHILDREN
             self.root_session = None
+            # App runs have no session, so no widget conversation.
+            self.widget_root = sa.false()
         self.policy = conversation_retention_policy(
             self.owner.data_retention_days.expression
         )
@@ -155,6 +166,7 @@ class ConversationRetentionRepository:
             .where(
                 self.policy.days.is_not(None),
                 self.records.created_at < self.cutoff,
+                ~self.widget_root,
             )
         )
 
@@ -224,6 +236,7 @@ class ConversationRetentionRepository:
             (
                 self.records.created_at + sa.func.make_interval(0, 0, 0, owners.c.days)
             ).label("due_at"),
+            self.widget_root.label("passed"),
         ).where(
             self.owner_fk == owners.c.id,
             self.records.created_at < owners.c.cutoff,
@@ -256,6 +269,7 @@ class ConversationRetentionRepository:
                 roots.c.created_at,
                 owners.c.id.label("owner_id"),
                 roots.c.due_at,
+                roots.c.passed,
             )
             .select_from(owners.join(roots, sa.true()))
             .order_by(owners.c.id, roots.c.created_at, roots.c.id)
@@ -266,18 +280,22 @@ class ConversationRetentionRepository:
 
     def _lock_statement(
         self, owner_ids: Sequence[UUID], cursor: RetentionKeyset | None, limit: int
-    ) -> sa.Select[tuple[UUID, datetime, UUID, UUID | None]]:
+    ) -> sa.Select[tuple[UUID, datetime, UUID, UUID | None, bool]]:
         window = self._window_statement(owner_ids, cursor, limit)
         locked = (
             sa.select(self.records.id.label("locked_id"))
-            .where(self.records.id == window.c.id)
+            .where(self.records.id == window.c.id, ~window.c.passed)
             .with_for_update(of=self.records, skip_locked=True)
             .correlate(window)
             .lateral("locked_conversation")
         )
         return (
             sa.select(
-                window.c.id, window.c.created_at, window.c.owner_id, locked.c.locked_id
+                window.c.id,
+                window.c.created_at,
+                window.c.owner_id,
+                locked.c.locked_id,
+                window.c.passed,
             )
             .select_from(window.outerjoin(locked, sa.true()))
             .order_by(window.c.owner_id, window.c.created_at, window.c.id)
@@ -288,38 +306,57 @@ class ConversationRetentionRepository:
     ) -> RetentionOverdue:
         """Due work past `window` over every owner, up to `limit` rows.
 
-        Pages of `owner_page` owners, each statement bounded, until the owners
-        end or `limit + 1` rows are found. The page does not follow `limit`, so
-        a small remaining cap does not cost two statements per owner. This reads
-        up to `max_pages` owner pages once per execution, in its own transaction
-        outside the budget, and reports the snapshot incomplete when owners are
-        left after them: the walk runs after the execution's deadline, so its
-        time is bounded by statements, not by the budget.
+        Pages of `owner_page` owners and at most `limit + 1` roots, each
+        statement bounded, until the owners end or `limit + 1` rows are found.
+        The page does not follow `limit`, so a small remaining cap does not
+        cost two statements per owner. A page whose roots fill it (widget
+        roots, which are read and passed, included) continues after its last
+        root. This reads up to `max_pages` pages once per execution, in its own
+        transaction outside the budget, and reports the snapshot incomplete
+        when roots or owners are left after them: the walk runs after the
+        execution's deadline, so its time is bounded by statements, not by the
+        budget.
         """
         found: list[datetime] = []
         cursor: RetentionKeyset | None = None
         for _page in range(max_pages):
             owner_ids = await self._owner_page(cursor, owner_page)
+            roots: Sequence[tuple[UUID, datetime, UUID, datetime, bool]] = []
             if owner_ids:
                 candidates = self._window_statement(
-                    owner_ids, None, limit + 1 - len(found), window
+                    owner_ids, cursor, limit + 1, window
                 )
-                deadline = sa.type_coerce(
-                    candidates.c.due_at, sa.DateTime(timezone=True)
-                )
-                found.extend(
-                    await self.session.scalars(
-                        sa.select(deadline).order_by(
-                            candidates.c.owner_id,
-                            candidates.c.created_at,
-                            candidates.c.id,
+                roots = (
+                    (
+                        await self.session.execute(
+                            sa.select(
+                                candidates.c.id,
+                                candidates.c.created_at,
+                                candidates.c.owner_id,
+                                sa.type_coerce(
+                                    candidates.c.due_at, sa.DateTime(timezone=True)
+                                ),
+                                candidates.c.passed,
+                            ).order_by(
+                                candidates.c.owner_id,
+                                candidates.c.created_at,
+                                candidates.c.id,
+                            )
                         )
                     )
+                    .tuples()
+                    .all()
                 )
-            if len(found) > limit or len(owner_ids) < owner_page:
+                found.extend(due_at for *_, due_at, passed in roots if not passed)
+            full = len(roots) > limit
+            if len(found) > limit or (not full and len(owner_ids) < owner_page):
                 complete = len(found) <= limit
                 break
-            cursor = past_owner(owner_ids[-1])
+            if full:
+                identifier, at, owner, *_ = roots[-1]
+                cursor = RetentionKeyset(at=at, id=identifier, group=owner)
+            else:
+                cursor = past_owner(owner_ids[-1])
         else:
             complete = False
         covered = found[:limit]
@@ -345,13 +382,14 @@ class ConversationRetentionRepository:
         return ConversationPage(
             roots=tuple(
                 RetentionKeyset(at=at, id=identifier, group=owner)
-                for identifier, at, owner, _locked in rows
+                for identifier, at, owner, _locked, _passed in rows
             ),
             locked_ids=tuple(
-                locked for _id, _at, _owner, locked in rows if locked is not None
+                locked for *_, locked, _passed in rows if locked is not None
             ),
             owners_probed=len(owner_ids),
             last_owner=owner_ids[-1],
+            passed_ids=tuple(identifier for identifier, *_, passed in rows if passed),
         )
 
     async def cascade_cost(self, identifier: UUID, ceiling: int) -> int:

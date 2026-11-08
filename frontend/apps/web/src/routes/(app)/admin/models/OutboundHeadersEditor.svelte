@@ -13,7 +13,12 @@
 <script lang="ts">
   import type { OutboundHeaderOptions } from "@eneo/eneo-js";
   import { tick } from "svelte";
-  import { Braces, CircleAlert, Info, Plus, Trash2, TriangleAlert } from "@lucide/svelte";
+  import Braces from "@lucide/svelte/icons/braces";
+  import CircleAlert from "@lucide/svelte/icons/circle-alert";
+  import Info from "@lucide/svelte/icons/info";
+  import Plus from "@lucide/svelte/icons/plus";
+  import Trash2 from "@lucide/svelte/icons/trash-2";
+  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
 
   import { m } from "$lib/paraglide/messages";
   import * as Alert from "$lib/components/ui/alert/index.js";

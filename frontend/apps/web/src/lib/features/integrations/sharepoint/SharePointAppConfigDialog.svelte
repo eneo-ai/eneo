@@ -2,13 +2,11 @@
   import { onMount, untrack } from "svelte";
   import type { Writable } from "svelte/store";
   import type { components } from "@eneo/eneo-js";
-  import {
-    TriangleAlert,
-    CircleCheck,
-    FlaskConical,
-    LoaderCircle,
-    RefreshCw
-  } from "@lucide/svelte";
+  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
+  import CircleCheck from "@lucide/svelte/icons/circle-check";
+  import FlaskConical from "@lucide/svelte/icons/flask-conical";
+  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
+  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";

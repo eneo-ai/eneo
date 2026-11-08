@@ -253,7 +253,8 @@ async def test_version_1_keeps_its_fixed_candidate_count(monkeypatch):
     assert (kwargs["num_chunks"], kwargs["autocut_cutoff"]) == (30, 3)
 
 
-async def test_get_references_hands_the_rerank_spec_to_the_datastore():
+@pytest.mark.parametrize("num_chunks", [None, 8])
+async def test_get_references_hands_the_rerank_spec_to_the_datastore(num_chunks):
     datastore = AsyncMock()
     datastore.semantic_search = AsyncMock(return_value=[])
     service = ReferencesService(AsyncMock(), datastore)
@@ -261,10 +262,15 @@ async def test_get_references_hands_the_rerank_spec_to_the_datastore():
     collection = MagicMock()
 
     await service.get_references(
-        question="q", collections=[collection], version=2, rerank=spec
+        question="q",
+        collections=[collection],
+        version=2,
+        rerank=spec,
+        num_chunks_override=num_chunks,
     )
 
     assert datastore.semantic_search.await_args.kwargs["rerank"] is spec
+    assert datastore.semantic_search.await_args.kwargs["num_chunks"] == num_chunks
 
 
 async def test_get_references_passes_no_spec_by_default():

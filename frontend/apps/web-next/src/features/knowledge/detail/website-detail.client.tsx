@@ -1,0 +1,451 @@
+import { Banner } from "@astryxdesign/core/Banner";
+import { Button as AstryxButton } from "@astryxdesign/core/Button";
+import { Selector } from "@astryxdesign/core/Selector";
+import { Tab, TabList } from "@astryxdesign/core/TabList";
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+  useSuspenseInfiniteQuery,
+  useSuspenseQuery
+} from "@tanstack/react-query";
+import { RefreshCw, Square } from "lucide-react";
+import { useTranslations } from "use-intl";
+import { useEffect, useId, useRef, useState } from "react";
+import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
+import { BackLink } from "@/components/composites/back-link";
+import { DockedActions } from "@/components/shell/docked-actions";
+import { PageHeader } from "@/components/composites/page-header";
+import { LoadMore } from "@/components/composites/query-state";
+import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
+import { browserApi } from "@/lib/api/browser";
+import { unwrap } from "@/lib/api/errors";
+import { flattenPages } from "@/lib/api/pagination";
+import { pollWhile } from "@/lib/api/query";
+import { toastApiError } from "@/lib/api/toast";
+import { toast } from "@/lib/toast";
+import { WebsiteContent } from "@/features/knowledge/website-content";
+import {
+  type WebsiteContentSearch,
+  readWebsiteContentSearch,
+  websiteContentHref
+} from "@/features/knowledge/website-content-search";
+import { replaceUrl, usePathname, useSearchParams } from "@/lib/navigation";
+import {
+  CrawlRunDetailsContent,
+  CrawlRunDetailsDialog
+} from "@/features/knowledge/crawl-run-details";
+import {
+  canRequestCrawlStop,
+  crawlRunState,
+  hasCrawlIssues,
+  isActiveCrawlRun,
+  isCompletedWithMissingResources
+} from "@/features/knowledge/crawl-run-state";
+import { CrawlFailureActions } from "@/features/knowledge/crawl-run-ui";
+import { CrawlRunsTable, type RunSelection } from "@/features/knowledge/crawl-runs";
+import {
+  formatWebsiteName,
+  websiteBlobPagesQueryOptions,
+  websiteCrawlRunsQueryOptions,
+  websiteLatestRunQueryOptions,
+  websiteQueryOptions,
+  type CrawlRun
+} from "@/features/knowledge/knowledge";
+import { CrawlLimitationsBanner } from "@/features/knowledge/notices";
+import { useJobs } from "@/features/jobs/use-jobs";
+import { useSpace } from "@/features/spaces/use-space";
+
+const ACTIVE_CRAWL_REFRESH_MS = 2_000;
+const IDLE_RUNS_REFRESH_MS = 30_000;
+
+type WebsiteTab = WebsiteContentSearch["tab"];
+
+/** The latest run first, then the history without it. */
+export function mergeLatestCrawlRun(history: CrawlRun[], latest: CrawlRun | null): CrawlRun[] {
+  if (!latest) return history;
+  return [latest, ...history.filter((run) => run.id !== latest.id)];
+}
+
+/**
+ * Starts or stops the website's crawl: "Stoppa" while a run is active
+ * ("Stoppar" once a stop is requested), otherwise "Kör igen" (or
+ * "Synkronisera nu" before the first run). Both confirm first. The start
+ * dialog is controlled by the page so the run details can open it too.
+ */
+function CrawlRunControls({
+  websiteId,
+  websiteDisplay,
+  activeRun,
+  hasHistory,
+  startOpen,
+  onStartOpenChange
+}: {
+  websiteId: string;
+  websiteDisplay: string;
+  activeRun: CrawlRun | undefined;
+  hasHistory: boolean;
+  startOpen: boolean;
+  onStartOpenChange: (open: boolean) => void;
+}) {
+  const t = useTranslations();
+  const queryClient = useQueryClient();
+  const { trackJob } = useJobs();
+  const [stopOpen, setStopOpen] = useState(false);
+  const refreshRuns = () =>
+    queryClient.invalidateQueries({ queryKey: ["websites", websiteId, "crawl-runs"] });
+
+  const createRun = useMutation({
+    mutationFn: () =>
+      unwrap(
+        browserApi.POST("/api/v1/websites/{id}/run/", { params: { path: { id: websiteId } } })
+      ),
+    onSuccess: () => {
+      trackJob();
+      void refreshRuns();
+      onStartOpenChange(false);
+    },
+    onError: (error) => toastApiError(error, t)
+  });
+
+  const stopRun = useMutation({
+    mutationFn: (runId: string) =>
+      unwrap(
+        browserApi.POST("/api/v1/crawl-runs/{id}/cancel/", { params: { path: { id: runId } } })
+      ),
+    onSuccess: () => {
+      toast.success(t("crawl_stopped"));
+      void refreshRuns();
+      setStopOpen(false);
+    },
+    onError: (error) => toastApiError(error, t)
+  });
+
+  const stopRequested = (activeRun && !canRequestCrawlStop(activeRun)) || stopRun.isPending;
+
+  return (
+    <>
+      {activeRun ? (
+        <AstryxButton
+          variant="destructive"
+          label={stopRequested ? t("stopping_crawl") : t("stop_crawl")}
+          icon={<Square className="size-4" aria-hidden="true" />}
+          isDisabled={stopRequested && !stopRun.isPending}
+          isLoading={stopRun.isPending}
+          isInterruptible
+          onClick={() => setStopOpen(true)}
+        />
+      ) : (
+        <AstryxButton
+          variant="primary"
+          label={
+            createRun.isPending ? t("starting") : hasHistory ? t("run_crawl_again") : t("sync_now")
+          }
+          icon={<RefreshCw className="size-4" aria-hidden="true" />}
+          isLoading={createRun.isPending}
+          isInterruptible
+          onClick={() => onStartOpenChange(true)}
+        />
+      )}
+      <ConfirmDialogControlled
+        open={startOpen}
+        onOpenChange={onStartOpenChange}
+        title={t("sync_website")}
+        description={t("confirm_sync_website", { websiteName: websiteDisplay })}
+        confirmLabel={createRun.isPending ? t("starting") : t("start_crawl")}
+        variant="default"
+        pending={createRun.isPending}
+        onConfirm={() => createRun.mutate()}
+      />
+      <ConfirmDialogControlled
+        open={stopOpen}
+        onOpenChange={setStopOpen}
+        title={t("stop_crawl_title")}
+        description={t("stop_crawl_description", { websiteName: websiteDisplay })}
+        confirmLabel={stopRun.isPending ? t("stopping_crawl") : t("stop_crawl")}
+        pending={stopRun.isPending}
+        onConfirm={() => {
+          if (activeRun) stopRun.mutate(activeRun.id);
+        }}
+      />
+    </>
+  );
+}
+
+/** The latest finished run had problems: say so above the content, with links to them. */
+function ContentIssuesBanner({
+  run,
+  onShowFailures
+}: {
+  run: CrawlRun;
+  onShowFailures: (selection: RunSelection) => void;
+}) {
+  const t = useTranslations();
+  const date = useClientTimeText(run.created_at, "date_time");
+  const missingOnly = isCompletedWithMissingResources(run);
+  return (
+    <Banner
+      status={missingOnly ? "info" : "warning"}
+      title={missingOnly ? t("crawl_content_has_missing") : t("crawl_content_has_failures")}
+      description={t("crawl_content_failure_description", { date: date ?? "" })}
+      collapsible={false}
+      endContent={
+        <CrawlFailureActions run={run} onSelect={(kind) => onShowFailures({ run, kind })} />
+      }
+    />
+  );
+}
+
+export function WebsiteDetail({
+  websiteId,
+  integrationRequestFormUrl
+}: {
+  websiteId: string;
+  integrationRequestFormUrl?: string;
+}) {
+  const t = useTranslations();
+  const queryClient = useQueryClient();
+  const { space, routeId } = useSpace();
+  const pathname = usePathname();
+  const params = useSearchParams();
+  const view = readWebsiteContentSearch(params);
+  const { tab } = view;
+  const [startOpen, setStartOpen] = useState(false);
+  const [selectedProblemRun, setSelectedProblemRun] = useState<CrawlRun | null>(null);
+  const [selection, setSelection] = useState<RunSelection | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const baseId = useId();
+  const panelId = `${baseId}-panel`;
+  const tabId = (id: WebsiteTab) => `${baseId}-tab-${id}`;
+
+  const { data: website } = useSuspenseQuery(websiteQueryOptions(browserApi, websiteId));
+  // The latest run is the source of truth for the crawl's progress: polled
+  // quickly while it is active, slowly otherwise (a schedule or another
+  // user can start one).
+  const { data: latest } = useQuery({
+    ...websiteLatestRunQueryOptions(browserApi, websiteId),
+    refetchInterval: pollWhile<CrawlRun | null>(
+      (run) => !!run && isActiveCrawlRun(run),
+      ACTIVE_CRAWL_REFRESH_MS,
+      IDLE_RUNS_REFRESH_MS
+    )
+  });
+  const runPages = useSuspenseInfiniteQuery(websiteCrawlRunsQueryOptions(browserApi, websiteId));
+  const blobPages = useSuspenseInfiniteQuery(websiteBlobPagesQueryOptions(browserApi, websiteId));
+
+  const history = flattenPages<CrawlRun>(runPages.data.pages);
+  const runs = mergeLatestCrawlRun(history, latest ?? null);
+  const runTotal = runPages.data.pages.at(-1)?.total_count ?? history.length;
+
+  const latestRun = runs[0];
+  const previousLatestRun = useRef<{ id: string; state: string } | null | undefined>(undefined);
+  useEffect(() => {
+    const current = latestRun ? { id: latestRun.id, state: crawlRunState(latestRun) } : null;
+    const previous = previousLatestRun.current;
+    previousLatestRun.current = current;
+    if (
+      previous === undefined ||
+      (previous?.id === current?.id && previous?.state === current?.state)
+    ) {
+      return;
+    }
+    // The latest run changed: the website, its space and the history show
+    // the pre-change snapshot; once the run ends, so does the indexed content.
+    void queryClient.invalidateQueries({ queryKey: ["websites", websiteId], exact: true });
+    void queryClient.invalidateQueries({ queryKey: ["spaces", routeId], exact: true });
+    void queryClient.invalidateQueries({
+      queryKey: ["websites", websiteId, "crawl-runs", "pages"]
+    });
+    if (!latestRun || !isActiveCrawlRun(latestRun)) {
+      void queryClient.invalidateQueries({ queryKey: ["websites", websiteId, "info-blobs"] });
+    }
+  }, [latestRun, queryClient, routeId, websiteId]);
+
+  const readonly = website.space_id !== space.id;
+  const activeRun = latestRun && isActiveCrawlRun(latestRun) ? latestRun : undefined;
+  const completedRuns = runs.filter((run) => !isActiveCrawlRun(run));
+  const latestCompletedRun = completedRuns[0];
+  const problemRun = selectedProblemRun
+    ? (completedRuns.find((run) => run.id === selectedProblemRun.id) ?? selectedProblemRun)
+    : latestCompletedRun;
+  const problemRunChoices =
+    selectedProblemRun && !completedRuns.some((run) => run.id === selectedProblemRun.id)
+      ? [...completedRuns, selectedProblemRun]
+      : completedRuns;
+  const onRerun = !readonly && !activeRun ? () => setStartOpen(true) : undefined;
+  const websiteDisplay = website.name ? `${website.name} (${website.url})` : website.url;
+
+  function showFailures(next: RunSelection) {
+    setSelection(next);
+    setDetailsOpen(true);
+  }
+
+  return (
+    <div className="flex w-full flex-col gap-6">
+      <div className="flex flex-col gap-1">
+        <BackLink href={`/spaces/${routeId}/knowledge?tab=websites`} hideOnPhone>
+          {t("knowledge")}
+        </BackLink>
+        <PageHeader title={formatWebsiteName(website)}>
+          {!readonly && (
+            <DockedActions label={t("website_detail_actions")}>
+              <CrawlRunControls
+                websiteId={website.id}
+                websiteDisplay={websiteDisplay}
+                activeRun={activeRun}
+                hasHistory={runs.length > 0}
+                startOpen={startOpen}
+                onStartOpenChange={setStartOpen}
+              />
+            </DockedActions>
+          )}
+        </PageHeader>
+      </div>
+      <div className="flex flex-col gap-4">
+        <TabList
+          role="tablist"
+          aria-label={t("ui_website_tabs_label")}
+          value={tab}
+          onChange={(value) =>
+            replaceUrl(
+              websiteContentHref(pathname, params, {
+                ...view,
+                tab: value === "blobs" ? "blobs" : value === "problems" ? "problems" : "crawls"
+              })
+            )
+          }
+          hasDivider
+        >
+          <Tab id={tabId("crawls")} value="crawls" label={t("crawls")} panelId={panelId} />
+          <Tab id={tabId("blobs")} value="blobs" label={t("indexed_content")} panelId={panelId} />
+          <Tab
+            id={tabId("problems")}
+            value="problems"
+            label={t("source_tab_problems")}
+            panelId={panelId}
+          />
+        </TabList>
+        {/* One panel whose content follows the selected tab, so the tabs'
+            aria-controls point at an element that exists. */}
+        <div
+          role="tabpanel"
+          id={panelId}
+          aria-labelledby={tabId(tab)}
+          className="flex flex-col gap-4"
+        >
+          {integrationRequestFormUrl ? (
+            <CrawlLimitationsBanner integrationRequestFormUrl={integrationRequestFormUrl} />
+          ) : null}
+          {tab === "crawls" ? (
+            <>
+              <CrawlRunsTable runs={runs} onRerun={onRerun} />
+              <LoadMore
+                label={t("website_crawl_history_load_more", {
+                  current: runs.length,
+                  total: runTotal
+                })}
+                query={runPages}
+              />
+            </>
+          ) : tab === "problems" ? (
+            <>
+              {problemRun ? (
+                <>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <h2 className="font-semibold">
+                      {t(
+                        problemRun.id === latestCompletedRun?.id
+                          ? "website_source_latest_completed"
+                          : "website_source_previous_crawl"
+                      )}
+                    </h2>
+                    {problemRunChoices.length > 1 && (
+                      <Selector
+                        label={t("website_source_choose_crawl")}
+                        value={problemRun.id}
+                        options={problemRunChoices.map((run) => ({
+                          value: run.id,
+                          label: run.created_at ?? ""
+                        }))}
+                        renderOption={(option) => (
+                          <ClientTime value={option.label ?? ""} format="date_time" />
+                        )}
+                        renderValue={(option) => (
+                          <ClientTime value={option.label ?? ""} format="date_time" />
+                        )}
+                        onChange={(id) =>
+                          setSelectedProblemRun(
+                            id === latestCompletedRun?.id
+                              ? null
+                              : (problemRunChoices.find((run) => run.id === id) ?? null)
+                          )
+                        }
+                      />
+                    )}
+                  </div>
+                  <ProblemRunDetails key={problemRun.id} run={problemRun} />
+                  {onRerun && (
+                    <div className="border-ax-border flex flex-col items-start gap-2 border-t pt-3">
+                      <p className="text-ax-text-secondary text-xs">
+                        {t("crawl_retry_whole_website_help")}
+                      </p>
+                      <AstryxButton
+                        label={t("crawl_retry_whole_website")}
+                        variant="secondary"
+                        onClick={onRerun}
+                      />
+                    </div>
+                  )}
+                </>
+              ) : (
+                <p className="text-ax-text-secondary py-4 text-sm">
+                  {t("website_source_no_completed")}
+                </p>
+              )}
+              <LoadMore
+                label={t("website_crawl_history_load_more", {
+                  current: runs.length,
+                  total: runTotal
+                })}
+                query={runPages}
+              />
+            </>
+          ) : (
+            <>
+              {latestCompletedRun && hasCrawlIssues(latestCompletedRun) ? (
+                <ContentIssuesBanner run={latestCompletedRun} onShowFailures={showFailures} />
+              ) : null}
+              <WebsiteContent
+                websiteId={websiteId}
+                labelledBy={tabId("blobs")}
+                total={blobPages.data.pages.at(-1)?.total_count ?? 0}
+              />
+            </>
+          )}
+        </div>
+      </div>
+      {selection ? (
+        <CrawlRunDetailsDialog
+          run={selection.run}
+          initialKind={selection.kind}
+          isOpen={detailsOpen}
+          onOpenChange={setDetailsOpen}
+          onRerun={onRerun}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function ProblemRunDetails({ run }: { run: CrawlRun }) {
+  const t = useTranslations();
+  const date = useClientTimeText(run.created_at, "date_time");
+  return (
+    <>
+      <p className="text-ax-text-secondary text-sm">
+        {t("website_source_problems_description", { date: date ?? "" })}
+      </p>
+      <CrawlRunDetailsContent run={run} grouped />
+    </>
+  );
+}

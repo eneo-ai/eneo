@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { ListFilter, Search } from "@lucide/svelte";
+  import ListFilter from "@lucide/svelte/icons/list-filter";
+  import Search from "@lucide/svelte/icons/search";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button, buttonVariants } from "$lib/components/ui/button/index.js";
   import * as InputGroup from "$lib/components/ui/input-group/index.js";

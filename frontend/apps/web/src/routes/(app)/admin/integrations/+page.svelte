@@ -1,7 +1,10 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import { writable } from "svelte/store";
-  import { Info, EllipsisVertical, RefreshCw, Trash2 } from "@lucide/svelte";
+  import Info from "@lucide/svelte/icons/info";
+  import EllipsisVertical from "@lucide/svelte/icons/ellipsis-vertical";
+  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
+  import Trash2 from "@lucide/svelte/icons/trash-2";
   import { Page, Settings } from "$lib/components/layout";
   import type { PageProps } from "./$types";
   import IntegrationCard from "$lib/features/integrations/components/IntegrationCard.svelte";

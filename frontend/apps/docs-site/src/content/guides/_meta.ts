@@ -12,9 +12,11 @@ const meta: MetaRecord = {
   capabilities: "Functions",
   deployment: "Deploy Eneo",
   "file-icon-storage-upgrade": "Upgrade File & Icon Storage",
+  "free-space-earlier-versions": "Free Space from Earlier Versions",
   "object-content-storage": "Choose Content Storage",
   "document-processing": "Document Processing",
   "sharepoint-integration": "SharePoint Integration",
+  "embed-widget": "Embed an Assistant (Web Widget)",
   "upgrade-2-2-0": "Upgrading to 2.2.0",
   "upgrade-1-7-0": "Upgrading to 1.7.0",
 };

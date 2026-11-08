@@ -2,10 +2,13 @@
 
 from uuid import uuid4
 
+import pytest
+
 from eneo.mcp_servers.domain.entities.mcp_server import (
     CAPABILITY_PURPOSES,
     MCPServer,
     MCPServerBackingModel,
+    MCPServerTool,
     duplicate_capability_purposes,
 )
 from eneo.security_classifications.domain.entities.security_classification import (
@@ -62,6 +65,47 @@ def _server(**kwargs) -> MCPServer:
         purpose="image_generation",
         **kwargs,
     )
+
+
+def _tool(*, enabled=True, removed=False, approved=True) -> MCPServerTool:
+    return MCPServerTool(
+        mcp_server_id=uuid4(),
+        name="tool",
+        description="Does a thing" if approved else None,
+        input_schema={"type": "object"} if approved else None,
+        is_enabled_by_default=enabled,
+        removed_from_remote=removed,
+    )
+
+
+class TestUsableTools:
+    @pytest.mark.parametrize("default", [False, True])
+    @pytest.mark.parametrize("override", [None, False, True])
+    def test_readiness_uses_effective_enablement_and_preserves_the_default(
+        self, default, override
+    ):
+        tool = _tool(enabled=default)
+        tool.enabled_override = override
+        server = _server(tools=[tool])
+
+        effective = default if override is None else override
+        assert tool.is_enabled is effective
+        assert server.usable_tools == ([tool] if effective else [])
+        assert server.readiness_reason == (None if effective else "no_approved_tools")
+        assert tool.is_enabled_by_default is default
+
+    def test_filters_disabled_removed_and_unapproved(self):
+        usable = _tool()
+        server = _server(
+            tools=[
+                usable,
+                _tool(enabled=False),
+                _tool(removed=True),
+                _tool(approved=False),
+            ]
+        )
+
+        assert server.usable_tools == [usable]
 
 
 class TestEffectiveSecurityClassification:

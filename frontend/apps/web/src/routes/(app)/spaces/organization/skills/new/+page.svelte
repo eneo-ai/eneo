@@ -5,9 +5,12 @@
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import SkillForm from "$lib/features/skills/SkillForm.svelte";
+  import { skillReferenceCatalog } from "$lib/features/skills/skillReferenceCatalog";
   import type { SkillFormValue } from "$lib/features/skills/skillBindings";
   import { m } from "$lib/paraglide/messages";
-  import { ArrowRight, CircleCheck, Info } from "@lucide/svelte";
+  import ArrowRight from "@lucide/svelte/icons/arrow-right";
+  import CircleCheck from "@lucide/svelte/icons/circle-check";
+  import Info from "@lucide/svelte/icons/info";
 
   let { data } = $props();
 
@@ -82,6 +85,7 @@
             >
           </Alert.Root>
           <SkillForm
+            referenceCatalog={skillReferenceCatalog(data.eneo, { type: "organization" })}
             class="max-w-none"
             onSubmit={createSkill}
             showDiscardAction

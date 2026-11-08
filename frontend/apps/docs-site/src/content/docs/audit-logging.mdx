@@ -83,6 +83,12 @@ Conversation data (questions and app runs) follows a hierarchical retention poli
 2. Space `data_retention_days`
 3. `null` means keep forever
 
+Web widget conversations are outside this hierarchy. Each widget's own retention
+applies, held to the organization's widget policy as it stands that night, and the
+widget's own nightly job removes them; see [Conversation retention](/guides/embed-widget#conversation-retention).
+The retention engine leaves them alone: an assistant, space or organization period
+never reaches them, and neither does the empty-session sweep.
+
 When scheduled retention deletes a question or app run, it also deletes the files attached to it, such as uploaded documents, audio recordings and their transcriptions, once no other chat, assistant, app or app run uses them. A file that is still used elsewhere is kept until its last use is removed. The stored bytes are then removed by the object content lifecycle; see [Files nothing uses anymore](/guides/object-content-storage#files-nothing-uses-anymore).
 
 There is no tenant-level conversation retention setting: it was removed from the retention-policy API (`PUT /api/v1/audit/retention-policy` accepts only `retention_days`) to prevent accidental data loss. Scheduled conversation retention still honours the legacy `conversation_retention_enabled`/`conversation_retention_days` columns on the tenant's audit retention policy row if they were set directly in the database, but no API or UI writes them.
@@ -99,8 +105,8 @@ The general worker runs the shared retention engine once a day, at 03:30 by defa
 The time is read in the worker's time zone; the shipped image runs in UTC. The
 registered tasks remove due questions and App runs, sessions that were created more
 than `RETENTION_EMPTY_SESSION_GRACE_HOURS` ago and have no question, unused upload
-families and expired retention execution records. Audit-log purging remains governed
-by the separate audit retention policy above.
+families and expired retention execution records. Each removal has this one scheduled
+path. Audit-log purging remains governed by the separate audit retention policy above.
 
 Work runs in bounded chunks. Each chunk is one database transaction with durable
 progress. Within a chunk, one question or App run and the files its last use released
@@ -214,12 +220,30 @@ stops the process at start with the reason.
 | `RETENTION_EMPTY_SESSION_GRACE_HOURS` | `24` | Minimum age of a session without a question |
 | `RETENTION_CHUNK_STATEMENT_TIMEOUT_MS` / `RETENTION_CHUNK_LOCK_TIMEOUT_MS` | `30000` / `2000` | PostgreSQL statement and lock timeouts, set first in every retention transaction and in the preview command |
 | `RETENTION_LEASE_STALE_SECONDS` | `3600` | A running execution whose heartbeat is older is taken over by the next run and reads `abandoned` in health |
-| `RETENTION_OVERDUE_WINDOW_DAYS` / `RETENTION_OVERDUE_MAX_ROWS` | `1` / `1000` | Due rows older than the window are overdue; the snapshot stops at this many overdue rows, or after reading `RETENTION_CONVERSATIONS_MAX_ROWS_PER_RUN` owner rows per stream, and then reports itself incomplete |
+| `RETENTION_OVERDUE_WINDOW_DAYS` / `RETENTION_OVERDUE_MAX_ROWS` | `1` / `1000` | Due rows older than the window are overdue; the snapshot stops at this many overdue rows, or after a fixed number of pages per stream (`RETENTION_CONVERSATIONS_MAX_ROWS_PER_RUN` in owner pages; a page full of rows continues inside its owner), and then reports itself incomplete |
 | `RETENTION_HEALTH_TIMEOUT_SECONDS` / `RETENTION_HEALTH_CACHE_SECONDS` | `1.0` / `30` | Longest health read; how long `/api/healthz` reuses one read |
 
 When the row or file budget is spent, the task stops. A unit that does not fit the
 remaining budget is kept and resumed from the stored cursor on a later execution. A
 question, App run or file family is never partly deleted to fit.
+
+#### Removals that run without a choice
+
+Conversation history removes only what an assistant, App, space or legacy
+organization period selects; with none set, it keeps everything. The tasks below
+remove data that no such period selects. Eneo removed this data before the engine
+existed, or it is the engine's own record. They are on by default, and the operator
+can switch each one off:
+
+| Task | Removes | Switch |
+| --- | --- | --- |
+| `sessions.empty` | Sessions without a question, older than `RETENTION_EMPTY_SESSION_GRACE_HOURS` | `RETENTION_EMPTY_SESSIONS_ENABLED` |
+| `files.unused` | Upload families nothing uses, older than `RETENTION_UNUSED_FILE_GRACE_HOURS` | `RETENTION_UNUSED_FILES_ENABLED` |
+| `retention.jobs` | Retention execution records past the audit retention period | `RETENTION_JOB_HISTORY_ENABLED` |
+
+A task added later is off by default unless it removes only what such a period
+selects or is added to this list. Web widget conversations are not an engine task:
+the widget's own nightly job removes them by each widget's retention.
 
 #### Health
 
@@ -233,8 +257,9 @@ unavailable.
 | --- | --- |
 | `initializing` | No task has written an execution record yet, or this task's first execution is still running and has not written its overdue snapshot |
 | `healthy` | No stored execution contradicts it: the latest execution did not fail, the task is not stale, nothing is overdue, and no running execution has a stale heartbeat |
-| `degraded` | The latest execution failed, no execution completed for two days, overdue rows exist, or the task is turned off |
+| `degraded` | The latest execution failed, no execution completed for two days, or overdue rows exist |
 | `unknown` | The latest execution was superseded, timed out on its claim or has a stale heartbeat; the task has no execution although another task has; the overdue snapshot is missing, stale, or was cut off before it found any overdue row; or the health read failed |
+| `disabled` | The operator turned the task off: the worker skipped its latest execution, or, before any execution, the API's own setting turns it off. The overall status leaves the task out |
 
 | Flag | Meaning |
 | --- | --- |
@@ -305,6 +330,8 @@ Endpoint: `POST /api/v1/audit/logs/export/async`
 - cancel: `POST /api/v1/audit/logs/export/{job_id}/cancel`
 
 Async exports are streamed and resilient for large datasets. Each tenant can have at most two async exports running at once. Export files are retained for 24 hours before cleanup.
+
+For a completed export, the admin-protected status response includes `download_url`, the authenticated `/download` endpoint for API clients, usable while the export exists. It also includes `signed_download_url`, valid for 60 seconds, for browsers. Request fresh status when the user downloads the file. This signed URL streams only that export in its tenant and does not use the browser's session cookie. Treat the URL as a temporary credential: signing out does not revoke it before its expiry.
 
 ## UI behavior notes
 

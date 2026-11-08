@@ -32,7 +32,9 @@ had to solve the same problems again: re-checking eligibility under a lock,
 bounding the work, ordering locks, recovering from a crash, writing an audit
 trail and pausing. The answers differed per job, history could be deleted
 without releasing the uploads it used, and no single place could say what a
-"completed" run had proved.
+"completed" run had proved. Web widget conversations have their own nightly
+job, `purge_widget_sessions`, which removes them by each widget's period and
+stays outside this record.
 
 ## Decision
 
@@ -44,6 +46,8 @@ without releasing the uploads it used, and no single place could say what a
    reasons, an ordered list of steps). The engine never imports an adopter; the
    composition root `eneo.main.retention_tasks` lists every task with its
    enable switch and budget, and one cron on the general worker runs that list.
+   Each removal has that one scheduled path; no other cron deletes the same
+   data.
 2. **Two different decisions, two names.** *Retention expiry* removes history
    past its effective period together with that history's links, and releases
    a File family only when no use of it remains. *Erasure of a File* is an
@@ -77,9 +81,17 @@ without releasing the uploads it used, and no single place could say what a
 4. **One owner per rule.** Policy precedence for chat and App history
    (assistant or App value, then Space, then the organization default) is one
    SQL expression shared by discovery, the fresh re-check and the overdue
-   report. The rows a deletion cascades to are derived from the schema
-   metadata (every foreign key to the root with `ON DELETE CASCADE`); a key
-   without it fails at import. Files owns reference truth: every foreign key
+   report. Web widget conversations follow their widget's period, held to the
+   tenant's widget policy as it stands that night, and only the widget's own
+   nightly job removes them. The engine leaves them alone, with one predicate
+   (no widget owns the session): the fresh re-check inside the history delete
+   refuses a widget question, and the empty-session lock and delete refuse a
+   widget session; history discovery, the overdue report and the empty-session
+   window read widget rows inside their bounded window, charge them and pass
+   them, so retained widget conversations never make one unbounded read.
+   The rows a deletion cascades to are derived from the schema metadata (every
+   foreign key to the root with `ON DELETE CASCADE`); a key without it fails
+   at import. Files owns reference truth: every foreign key
    to `files.id` declares `file_usage(kind)` or `file_usage(None)` in its
    column definition, the collector derives usage from the schema metadata,
    and an undeclared key fails at import. Files also owns the meaning of a
@@ -118,7 +130,9 @@ without releasing the uploads it used, and no single place could say what a
    stored executions contradict nothing: no failed latest execution, no two
    days without a completed one, no running execution with a stale heartbeat
    and no overdue work. Contradicting evidence reads `degraded` or `unknown`;
-   a task without evidence reads `initializing` or `unknown`.
+   a task without evidence reads `initializing` or `unknown`. A task the
+   operator turned off reads `disabled` and leaves the overall status out, so
+   a deliberate pause is visible without reading as a fault.
 7. **Deployment scope.** One tenant per deployment
    ([single-tenant-assumption](single-tenant-assumption.md)); deployment-level
    effects are audited in that tenant.
@@ -203,8 +217,9 @@ member of the population per pass, so a pass takes about population divided
 by the task's row budget nights and `partial` is its normal outcome. The
 overdue snapshot runs after the budget, once per execution, in discovery-sized
 owner pages; it stops at `RETENTION_OVERDUE_MAX_ROWS` overdue rows, or after
-reading as many owner rows per stream as the conversation row budget, and
-then reports itself incomplete. The execution record keeps
+a fixed number of pages per stream (the conversation row budget in owner
+pages; a page full of roots continues inside its owner), and then reports
+itself incomplete. The execution record keeps
 counts, blocked reasons, cursors and the snapshot for operators.
 
 Two clocks are in use, both UTC: chat history and sessions compare their age
@@ -355,11 +370,21 @@ at night. A disabled task still records a skipped execution and an audit event,
 so a pause is visible. The documentation site lists every setting with its
 default and meaning.
 
+A task is off by default unless it removes only what an organization, space,
+assistant or App period selects. The exceptions run without such a choice and
+are listed in `EXISTING_WITHOUT_CHOICE` beside the setting that switches them
+off: `sessions.empty` and `files.unused` (removed before this record too) and
+`retention.jobs` (the engine's own records). A test holds the default-on set to
+`conversations.history` plus that list. Widget conversations are not an engine
+task; the widget's own nightly job removes them.
+
 ## Consequences
 
 - Chat, App, empty-session and upload cleanup share one safety contract and
   one place to read results; the three old jobs and `DataRetentionService` are
   removed.
+- Web widget conversations keep their own nightly job and its rules, unchanged;
+  the engine leaves them alone.
 - Adding a domain means a task of a few hundred lines plus a registration,
   not a scheduler, a lock protocol and an audit design.
 - Runs are slower than an unbounded `DELETE` on purpose: work is capped and a

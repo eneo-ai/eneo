@@ -49,6 +49,16 @@ class OwnedChatPartner(NamedTuple):
     assistant_id: UUID | None
 
 
+class SessionOwnership(NamedTuple):
+    """Who a conversation belongs to and whom it is with, without its turns."""
+
+    user_id: UUID | None
+    api_key_id: UUID | None
+    widget_id: UUID | None
+    visitor_id: UUID | None
+    assistant_id: UUID | None
+
+
 @dataclass(frozen=True, slots=True)
 class ChatPartnerAccess:
     """An assistant the user has conversations with.
@@ -205,10 +215,21 @@ class SessionRepository:
     async def update(self, session: SessionUpdate) -> SessionInDB | None:
         return await self._hydrate_optional(await self.delegate.update(session))
 
-    async def add_feedback(self, feedback: SessionFeedback, id: UUID) -> SessionInDB:
+    async def add_feedback(
+        self,
+        feedback: SessionFeedback,
+        id: UUID,
+        *,
+        keep_existing_text: bool = False,
+    ) -> SessionInDB:
+        """Store a vote. ``keep_existing_text`` leaves the stored comment in
+        place when the feedback carries none, instead of clearing it."""
+        values: dict[str, object] = {"feedback_value": feedback.value}
+        if feedback.text is not None or not keep_existing_text:
+            values["feedback_text"] = feedback.text
         stmt = (
             sa.Update(Sessions)
-            .values(feedback_value=feedback.value, feedback_text=feedback.text)
+            .values(values)
             .where(Sessions.id == id)
             .returning(Sessions)
         )
@@ -225,6 +246,20 @@ class SessionRepository:
         return await self._hydrate_optional(
             await self.delegate.get_model_from_query(query)
         )
+
+    async def get_ownership(self, id: UUID) -> SessionOwnership | None:
+        """``get`` reduced to the principal and chat partner columns."""
+        query = self._exclude_helper_run_sessions(
+            sa.select(
+                Sessions.user_id,
+                Sessions.api_key_id,
+                Sessions.widget_id,
+                Sessions.visitor_id,
+                Sessions.assistant_id,
+            ).where(Sessions.id == id)
+        )
+        row = (await self.session.execute(query)).one_or_none()
+        return None if row is None else SessionOwnership(*row)
 
     async def get_owned_chat_partner(
         self,
@@ -556,6 +591,8 @@ class SessionRepository:
         assistant_id: UUID | None = None,
         user_id: UUID | None = None,
         api_key_id: UUID | None = None,
+        widget_id: UUID | None = None,
+        visitor_id: UUID | None = None,
         name_filter: str | None = None,
         start_date: datetime | None = None,
         end_date: datetime | None = None,
@@ -576,6 +613,10 @@ class SessionRepository:
             query = query.where(Sessions.user_id == user_id)
         if api_key_id is not None:
             query = query.where(Sessions.api_key_id == api_key_id)
+        if widget_id is not None:
+            query = query.where(
+                Sessions.widget_id == widget_id, Sessions.visitor_id == visitor_id
+            )
 
         if name_filter is not None:
             query = query.where(Sessions.name.ilike(f"%{name_filter}%"))
@@ -588,79 +629,6 @@ class SessionRepository:
 
         count = await self.session.scalar(query)
         return count if count is not None else 0
-
-    async def get_by_assistant(
-        self,
-        assistant_id: UUID,
-        user_id: UUID | None = None,
-        api_key_id: UUID | None = None,
-        limit: int | None = None,
-        cursor: datetime | None = None,
-        previous: bool = False,
-        name_filter: str | None = None,
-        start_date: datetime | None = None,
-        end_date: datetime | None = None,
-        tenant_id: UUID | None = None,
-    ) -> tuple[list[SessionInDB], int]:
-        normalized_name_filter = name_filter.strip() if name_filter else None
-        query = sa.select(Sessions).where(Sessions.assistant_id == assistant_id)
-
-        if tenant_id is not None:
-            query = self._filter_by_tenant(query, tenant_id)
-        query = self._exclude_helper_run_sessions(query)
-
-        if user_id is not None:
-            query = query.where(Sessions.user_id == user_id)
-        if api_key_id is not None:
-            query = query.where(Sessions.api_key_id == api_key_id)
-
-        if normalized_name_filter is not None:
-            query = query.where(Sessions.name.ilike(f"%{normalized_name_filter}%"))
-
-        if start_date is not None:
-            query = query.where(Sessions.created_at >= start_date)
-
-        if end_date is not None:
-            query = query.where(Sessions.created_at <= end_date)
-
-        total_count = await self._get_total_count(
-            assistant_id=assistant_id,
-            user_id=user_id,
-            api_key_id=api_key_id,
-            name_filter=normalized_name_filter,
-            start_date=start_date,
-            end_date=end_date,
-            tenant_id=tenant_id,
-        )
-
-        if cursor is not None:
-            if previous:
-                query = query.where(Sessions.created_at > cursor).order_by(
-                    Sessions.created_at.asc(),
-                    Sessions.id.asc(),
-                )
-                if limit is not None:
-                    query = query.limit(limit + 1)
-                items = await self._hydrate_sessions(
-                    await self.delegate.get_models_from_query(query)
-                )
-                items.reverse()
-                return (items, total_count)
-            else:
-                query = query.where(Sessions.created_at <= cursor).order_by(
-                    Sessions.created_at.desc(),
-                    Sessions.id.desc(),
-                )
-        else:
-            query = query.order_by(Sessions.created_at.desc(), Sessions.id.desc())
-
-        if limit is not None:
-            query = query.limit(limit + 1)
-
-        sessions = await self._hydrate_sessions(
-            await self.delegate.get_models_from_query(query)
-        )
-        return sessions, total_count
 
     @staticmethod
     def _to_session_metadata(
@@ -681,6 +649,8 @@ class SessionRepository:
         assistant_id: UUID,
         user_id: UUID | None = None,
         api_key_id: UUID | None = None,
+        widget_id: UUID | None = None,
+        visitor_id: UUID | None = None,
         limit: int | None = None,
         cursor: datetime | None = None,
         previous: bool = False,
@@ -702,6 +672,10 @@ class SessionRepository:
             query = query.where(Sessions.user_id == user_id)
         if api_key_id is not None:
             query = query.where(Sessions.api_key_id == api_key_id)
+        if widget_id is not None:
+            query = query.where(
+                Sessions.widget_id == widget_id, Sessions.visitor_id == visitor_id
+            )
 
         if normalized_name_filter is not None:
             query = query.where(Sessions.name.ilike(f"%{normalized_name_filter}%"))
@@ -716,6 +690,8 @@ class SessionRepository:
             assistant_id=assistant_id,
             user_id=user_id,
             api_key_id=api_key_id,
+            widget_id=widget_id,
+            visitor_id=visitor_id,
             name_filter=normalized_name_filter,
             start_date=start_date,
             end_date=end_date,

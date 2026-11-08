@@ -41,12 +41,20 @@ _SKILL_SERVICE_ACCESS_REASON = (
     "Skill service enforces actor permissions and space or assistant membership."
 )
 
+_SKILL_POLICY_SEED_ON_GET = (
+    "Seeds the tenant's default skill runtime policy on first read (INSERT ... ON "
+    "CONFLICT DO NOTHING); the result is the default the read reports either way."
+)
+
 router = APIRouter(
     prefix="/spaces",
     tags=["skills"],
 )
 
-_ContainerWithUser = Annotated[Container, Depends(get_container(with_user=True))]
+# Detail-page reads and chat selections must see a completed save immediately.
+_ContainerWithUser = Annotated[
+    Container, Depends(get_container(with_user=True, transaction_scope="function"))
+]
 _DEFAULT_REVISION_PAGE_LIMIT = 25
 _MAX_REVISION_PAGE_LIMIT = 100
 
@@ -464,6 +472,7 @@ async def list_assistant_skill_bindings(
     authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
     reason=_SKILL_SERVICE_ACCESS_REASON,
+    effect_on_get=_SKILL_POLICY_SEED_ON_GET,
 )
 async def get_assistant_skill_configuration(
     space_id: UUID,

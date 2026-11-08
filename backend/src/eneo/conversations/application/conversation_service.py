@@ -32,7 +32,10 @@ if TYPE_CHECKING:
     from uuid import UUID
 
     from eneo.assistants.api.assistant_models import AssistantResponse
-    from eneo.assistants.assistant_service import AssistantService
+    from eneo.assistants.assistant_service import (
+        AssistantPreflightTarget,
+        AssistantService,
+    )
     from eneo.completion_models.domain.completion_model import CompletionModel
     from eneo.completion_models.infrastructure.completion_service import (
         CompletionService,
@@ -168,11 +171,22 @@ class ConversationService:
         up-front. Model name and context window are echoed so the caller can
         compute percentage fill without a round-trip.
         """
+        # The persistent baseline only makes sense for a bare assistant target
+        # (the config page and a brand-new conversation). For an existing session
+        # the prompt + attachments are already inside the history the client
+        # tracks separately, so leave them at 0 and keep the hot chat path cost
+        # identical to before.
+        baseline_target = (
+            await self.assistant_service.get_preflight_target(assistant_id)
+            if assistant_id is not None and session_id is None
+            else None
+        )
         model, selector_tokens, inline_file_text = await self._resolve_preflight_model(
             question=question,
             session_id=session_id,
             assistant_id=assistant_id,
             tool_assistant_id=tool_assistant_id,
+            assistant_target=baseline_target,
         )
         model_name = _litellm_token_counter_name(model)
 
@@ -214,14 +228,9 @@ class ConversationService:
         assistant_attachment_tokens = 0
         prompt_tokens = 0
         skill_context_tokens = 0
-        # The persistent baseline only makes sense for a bare assistant target
-        # (the config page and a brand-new conversation). For an existing session
-        # the prompt + attachments are already inside the history the client
-        # tracks separately, so leave them at 0 and keep the hot chat path cost
-        # identical to before.
-        if assistant_id is not None and session_id is None:
+        if baseline_target is not None:
             baseline = await self.assistant_service.get_preflight_baseline(
-                assistant_id,
+                baseline_target,
                 prompt_override=assistant_prompt,
             )
             prompt_tokens = baseline.prompt_tokens
@@ -327,6 +336,7 @@ class ConversationService:
         session_id: Optional["UUID"],
         assistant_id: Optional["UUID"],
         tool_assistant_id: Optional["UUID"] = None,
+        assistant_target: "AssistantPreflightTarget | None" = None,
     ) -> "tuple[CompletionModel, int, bool]":
         """Resolve the completion model the next chat request would target.
 
@@ -343,15 +353,14 @@ class ConversationService:
         del question, tool_assistant_id  # routing has no pre-request cost
         selector_tokens = 0
         if session_id:
-            session = await self.session_service.get_session_by_uuid(session_id)
-            assert session is not None
-            assert session.assistant is not None
+            owner = await self.session_service.get_session_ownership(session_id)
+            assert owner.assistant_id is not None
             model, inline_file_text = await self._assistant_preflight_settings(
-                session.assistant.id
+                owner.assistant_id
             )
         elif assistant_id:
             model, inline_file_text = await self._assistant_preflight_settings(
-                assistant_id
+                assistant_id, assistant_target
             )
         else:
             raise BadRequestException("Provide session_id or assistant_id.")
@@ -363,7 +372,9 @@ class ConversationService:
         return model, selector_tokens, inline_file_text
 
     async def _assistant_preflight_settings(
-        self, assistant_id: "UUID"
+        self,
+        assistant_id: "UUID",
+        target: "AssistantPreflightTarget | None" = None,
     ) -> tuple["CompletionModel | None", bool]:
         """Governance-aware model and file-inlining mode for one assistant.
 
@@ -371,19 +382,15 @@ class ConversationService:
         assistant's own model is disallowed, and the governed file policy —
         so the estimate never disagrees with the actual request.
         """
-        (
-            assistant,
-            _,
-            effective_config,
-        ) = await self.assistant_service.get_assistant_with_effective_config(
+        target = target or await self.assistant_service.get_preflight_target(
             assistant_id
         )
         model = select_effective_completion_model(
-            current_model=assistant.completion_model,
-            effective_config=effective_config,
+            current_model=target.assistant.completion_model,
+            effective_config=target.effective_config,
         )
         inline_file_text = select_effective_inline_file_text(
-            assistant.inline_file_text, effective_config
+            target.assistant.inline_file_text, target.effective_config
         )
         if model is not None:
             inline_file_text = inline_file_text_for_model(inline_file_text, model)

@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Website } from "@/features/knowledge/knowledge";
 import { makeAssistant, makeCollection, makeSpace, makeWebsite } from "../testing/space-fixture";
-import { websiteStatus } from "@/features/knowledge/website-status";
-import { assistantModelName } from "../space-models";
 import { overviewKnowledgeRows, recentChatItems, uploadTargets } from "./overview-data";
 
 const compare = new Intl.Collator("sv").compare;
@@ -14,51 +12,6 @@ const crawl = (overrides: Record<string, unknown>) =>
       ...overrides
     }
   }) as unknown as Website;
-
-describe("websiteStatus", () => {
-  const href = "/spaces/s/knowledge/websites/w";
-
-  it("maps every crawl state to a tone and label", () => {
-    expect(websiteStatus(makeWebsite({ latest_crawl: null }) as unknown as Website, href)).toEqual({
-      tone: "neutral",
-      labelKey: "website_not_yet_crawled"
-    });
-    expect(websiteStatus(crawl({ status: "queued" }), href)).toEqual({
-      tone: "accent",
-      labelKey: "queued"
-    });
-    expect(websiteStatus(crawl({ status: "in progress" }), href)).toEqual({
-      tone: "accent",
-      labelKey: "space_status_syncing",
-      isPulsing: true
-    });
-    expect(websiteStatus(crawl({}), href)).toEqual({
-      tone: "success",
-      labelKey: "space_status_indexed"
-    });
-    expect(websiteStatus(crawl({ pages_failed: 3 }), href)).toEqual({
-      tone: "warning",
-      labelKey: "synced_with_warnings"
-    });
-  });
-
-  it("links a failed crawl to the website page, where it can be run again", () => {
-    expect(websiteStatus(crawl({ status: "failed" }), href)).toEqual({
-      tone: "error",
-      labelKey: "space_status_sync_error",
-      fixHref: href
-    });
-  });
-
-  it("treats a skipped duplicate crawl as neutral, not as an error", () => {
-    expect(
-      websiteStatus(
-        crawl({ status: "failed", result_location: "Skipped duplicate crawl: already running" }),
-        href
-      )
-    ).toEqual({ tone: "neutral", labelKey: "sync_skipped" });
-  });
-});
 
 describe("overviewKnowledgeRows", () => {
   it("merges the space's own sources, newest first, with content and status", () => {
@@ -112,8 +65,8 @@ describe("overviewKnowledgeRows", () => {
   });
 });
 
-describe("recentChatItems and assistantModelName", () => {
-  it("puts the most recently changed first and names the model the space offers", () => {
+describe("recentChatItems", () => {
+  it("puts the most recently changed first", () => {
     const older = makeAssistant({ id: "older", updated_at: "2026-01-01T00:00:00Z" });
     const newer = makeAssistant({ id: "newer", name: "B", updated_at: "2026-09-01T00:00:00Z" });
     const sameTime = makeAssistant({
@@ -129,15 +82,6 @@ describe("recentChatItems and assistantModelName", () => {
       "newer",
       "older"
     ]);
-    const [first, second] = recentChatItems(space, compare);
-    expect(assistantModelName(space, first!)).toBeNull();
-    expect(assistantModelName(space, second!)).toBe("Haiku 4.5");
-    expect(
-      assistantModelName(space, makeAssistant({ completion_model_id: "model-2" }) as never)
-    ).toBe("claude-opus");
-    expect(
-      assistantModelName(space, makeAssistant({ completion_model_id: "gone" }) as never)
-    ).toBeNull();
   });
 });
 

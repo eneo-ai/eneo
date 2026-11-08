@@ -1,7 +1,5 @@
-"use client";
-
 import { Heading } from "@astryxdesign/core/Heading";
-import Link from "next/link";
+import Link from "@/lib/link";
 import { useRef } from "react";
 import { cn } from "@/lib/utils";
 import { RemovalFocusScope } from "../removal";
@@ -48,7 +46,10 @@ export function OverviewSection({
   const headingRef = useRef<HTMLHeadingElement>(null);
   return (
     <RemovalFocusScope target={headingRef}>
-      <section aria-labelledby={id} className={cn("flex min-w-0 flex-col gap-3", className)}>
+      <section
+        aria-labelledby={id}
+        className={cn("phone:gap-1 flex min-w-0 flex-col gap-3", className)}
+      >
         <div className="flex min-h-8 flex-wrap items-center justify-between gap-x-3 gap-y-2">
           <Heading
             ref={headingRef}

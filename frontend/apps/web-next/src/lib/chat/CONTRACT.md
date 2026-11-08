@@ -8,7 +8,6 @@ code was ambiguous it was changed and the change is called out.
 | Side     | Code                                                                                                                                  |
 | -------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | Backend  | `backend/src/eneo/conversations/ui_message_stream.py` (used by `conversations_router.chat` when `version=3` and `stream=true`)        |
-| Proxy    | `src/app/api/chat/route.ts` (adds the bearer token, relays the SSE body untouched)                                                    |
 | Client   | `src/lib/chat/transport.ts`, `types.ts`, `map-session.ts`; consumed by `useChat` in `src/features/chat/chat-view.tsx`                 |
 | Fixtures | `backend/tests/fixtures/ui_message_stream/*.json` (shared by both test suites, see [Fixtures](#fixtures))                             |
 | Tests    | `backend/tests/unittests/conversations/test_ui_message_stream*.py`, `src/lib/chat/contract.test.ts`, `src/lib/chat/transport.test.ts` |
@@ -26,21 +25,23 @@ becomes…") was verified against these versions. See
 
 ## Transport
 
-- Client → `POST /api/chat` (same origin, Next route handler) →
-  `POST {ENEO_BACKEND_URL}/api/v1/conversations/?version=3` with
-  `Authorization: Bearer <token>`, `Accept: text/event-stream`. The proxy
-  passes the upstream status and the `content-type`,
-  `x-vercel-ai-ui-message-stream` and `x-trace-id` headers through, and
-  propagates the client's abort to the upstream fetch.
+- Client → `POST /api/v1/conversations/?version=3` (`CHAT_API` in
+  `lib/api/base.ts`), same origin, straight to the backend that serves the
+  app: no proxy. The request goes through `apiFetch` like every other API
+  request, so it carries the browser session cookie and the
+  `Eneo-Session-Generation` header, and a refused response is handled once by
+  the session owner (`handleRefusal`, `lib/api/refusal.ts`). Aborting the
+  answer aborts that fetch.
 - Response: `200`, `content-type: text/event-stream`, marker header
   `x-vercel-ai-ui-message-stream: v1`. **Data-only SSE**: every event is one
   `data: <json>` line; the last event is `data: [DONE]`. The server sends a
   comment line (`: ping - …`) every 15 s while idle (for example while an
   approval is pending); the SDK parser ignores comments.
-- A non-2xx response carries a JSON body (`{"message": …, "eneo_error_code": …}`
-  from the backend, `{"message": "Not authenticated"}` from the proxy). The
-  SDK turns it into a failed request (`status: "error"`, `error.message` =
-  response text) without opening a stream.
+- A non-2xx response carries the backend's JSON error body
+  (`{"message": …, "code": …, "eneo_error_code": …}`). The transport turns it
+  into an `EneoApiError` (status, code, reason, trace id) before the SDK sees
+  it, so the chat can say what happened in a sentence (`chat-error.ts`); no
+  stream is opened.
 
 ### Request body (`ConversationBody`, `types.ts`)
 
@@ -306,11 +307,19 @@ the answer text (the text part may still be open).
 ### `data-error` (eneo, transient)
 
 ```json
-{ "type": "data-error", "transient": true, "data": { "code": 503 } }
+{
+  "type": "data-error",
+  "transient": true,
+  "data": { "code": 503, "reason": "provider_unavailable" }
+}
 ```
 
-Numeric Eneo error code for the UI's message lookup. Always immediately
-followed by `error`.
+The numeric completion error code may be an HTTP status or an Eneo code.
+Optional `reason` preserves the public provider failure identifier already used
+by v2, such as `provider_timeout` or `stream_error`. The UI localizes a known
+reason before falling back to its numeric-code mapping; it never guesses the
+reason from provider text. Older frames without a reason remain valid. Always
+immediately followed by `error`.
 
 ## Ids
 

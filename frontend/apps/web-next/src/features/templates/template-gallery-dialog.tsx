@@ -1,11 +1,13 @@
-"use client";
-
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, BookOpen, FileUp, Loader2, Paperclip, X } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { useMemo, useRef, useState } from "react";
-import { flushSync } from "react-dom";
-import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
+import { LoadingState } from "@/components/composites/loading-state";
+import {
+  FieldProblem,
+  fieldProblemProps,
+  revealProblems
+} from "@/components/composites/field-problem";
 import { useAppContext } from "@/components/providers/app-context";
 import { Button } from "@/components/ui/button";
 import {
@@ -17,9 +19,9 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@astryxdesign/core/Switch";
 import { FileKindIcon } from "@/features/chat/attachments";
-import { collectDroppedFiles } from "@/features/files/collect-dropped-files";
+import { useFileDrop } from "@/features/files/use-file-drop";
 import { FileFormatDetails } from "@/features/files/file-format-details";
 import { toastUploadRejection } from "@/features/files/upload-rejection-toast";
 import { planFileUploads, type FileUploadRules } from "@/features/files/upload-plan";
@@ -35,6 +37,8 @@ import {
 import { formatBytes } from "@/lib/format";
 import type { Schema } from "@/lib/api/models";
 import { toast } from "@/lib/toast";
+import { useMediaQuery } from "@astryxdesign/core/hooks";
+import { cn } from "@/lib/utils";
 import {
   buildTemplateCreate,
   templateHasWizard,
@@ -168,7 +172,10 @@ function TemplateWizard({
   onRemoveAttachment: (key: string) => void;
 }) {
   const t = useTranslations();
+  // Dragging a file onto the page needs a mouse: a touch screen is told to choose files.
+  const coarse = useMediaQuery("(pointer: coarse)");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const { dragging, handlers } = useFileDrop(onAddFiles);
   const wizard = template.wizard;
 
   return (
@@ -216,14 +223,11 @@ function TemplateWizard({
         >
           {wizard.attachments.required ? (
             <div
-              className="flex flex-col gap-3 rounded-lg border-2 border-dashed p-4"
-              onDragOver={(event) => event.preventDefault()}
-              onDrop={(event) => {
-                event.preventDefault();
-                void collectDroppedFiles(event.dataTransfer)
-                  .then(onAddFiles)
-                  .catch(() => toast.error(t("file_upload_error")));
-              }}
+              className={cn(
+                "flex flex-col gap-3 rounded-lg border-2 border-dashed p-4",
+                dragging && "border-primary bg-primary/5"
+              )}
+              {...handlers}
             >
               <input
                 ref={fileInputRef}
@@ -237,7 +241,9 @@ function TemplateWizard({
                 }}
               />
               <TemplateAttachmentList attachments={attachments} onRemove={onRemoveAttachment} />
-              <p className="text-muted-foreground text-sm">{t("upload_dropzone_prompt")}</p>
+              <p className="text-muted-foreground text-sm">
+                {coarse ? t("upload_dropzone_prompt_touch") : t("upload_dropzone_prompt")}
+              </p>
               {/* Uploading, it stays enabled so it keeps focus (the busy spinner
                   replaces its icon); a press meanwhile is ignored. */}
               <Button
@@ -245,9 +251,7 @@ function TemplateWizard({
                 variant="outline"
                 className="w-fit"
                 aria-busy={uploading || undefined}
-                onClick={() => {
-                  if (!uploading) fileInputRef.current?.click();
-                }}
+                onClick={() => fileInputRef.current?.click()}
               >
                 {!uploading && <Paperclip className="size-4" />}
                 {t("upload_files")}
@@ -292,7 +296,11 @@ export function TemplateGalleryDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   pending: boolean;
-  onCreate: (fromTemplate: TemplateCreate, name: string) => Promise<void> | void;
+  onCreate: (
+    fromTemplate: TemplateCreate,
+    name: string,
+    openEditor?: boolean
+  ) => Promise<void> | void;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -300,6 +308,7 @@ export function TemplateGalleryDialog({
   const [selected, setSelected] = useState<TemplateOption | null>(null);
   const [name, setName] = useState("");
   const [submitted, setSubmitted] = useState(false);
+  const [openEditor, setOpenEditor] = useState(false);
   const templatesRef = useRef<HTMLDivElement>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const templateProblem = submitted && !selected ? t("select_a_template") : null;
@@ -330,6 +339,7 @@ export function TemplateGalleryDialog({
     setSelected(null);
     setName("");
     setSubmitted(false);
+    setOpenEditor(false);
     setStep("gallery");
     setKnowledgeSelections({ ...EMPTY_KNOWLEDGE_SELECTIONS });
   };
@@ -353,10 +363,10 @@ export function TemplateGalleryDialog({
   async function submit() {
     if (pending) return;
     if (!selected || !name.trim()) {
-      // Rendered before focus moves, so the field is read with its error.
-      flushSync(() => setSubmitted(true));
-      if (!selected) templatesRef.current?.querySelector("button")?.focus();
-      else nameRef.current?.focus();
+      revealProblems(
+        () => setSubmitted(true),
+        selected ? nameRef.current : templatesRef.current?.querySelector("button")
+      );
       return;
     }
 
@@ -386,7 +396,9 @@ export function TemplateGalleryDialog({
 
     const submittedFiles = uploads.detach();
     try {
-      await onCreate(buildTemplateCreate(selected.id, submission.additionalFields), name.trim());
+      const fromTemplate = buildTemplateCreate(selected.id, submission.additionalFields);
+      if (templateKind === "assistant") await onCreate(fromTemplate, name.trim(), openEditor);
+      else await onCreate(fromTemplate, name.trim());
       releasePreviews(submittedFiles);
       reset({ deleteUploaded: false });
     } catch {
@@ -403,7 +415,7 @@ export function TemplateGalleryDialog({
         else onOpenChange(next);
       }}
     >
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+      <DialogContent className="overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>{t("select_a_template")}</DialogTitle>
         </DialogHeader>
@@ -411,7 +423,7 @@ export function TemplateGalleryDialog({
         {step === "gallery" ? (
           <>
             {templates.isPending ? (
-              <Skeleton className="h-48 w-full" />
+              <LoadingState rows={1} height={192} />
             ) : (templates.data ?? []).length === 0 ? (
               <p className="text-muted-foreground py-6 text-center text-sm">{t("no_results")}</p>
             ) : (
@@ -473,6 +485,17 @@ export function TemplateGalleryDialog({
             uploading={uploading}
             onAddFiles={(files) => void addFiles(files)}
             onRemoveAttachment={uploads.remove}
+          />
+        ) : null}
+
+        {templateKind === "assistant" ? (
+          <Switch
+            label={t("open_assistant_editor_after_creation")}
+            value={openEditor}
+            onChange={(value) => {
+              if (!pending) setOpenEditor(value);
+            }}
+            aria-busy={pending || undefined}
           />
         ) : null}
 

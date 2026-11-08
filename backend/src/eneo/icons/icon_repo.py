@@ -1,17 +1,60 @@
 from dataclasses import dataclass
+from typing import Any
 from uuid import UUID
 
 import sqlalchemy as sa
+from sqlalchemy.orm import InstrumentedAttribute
 
 from eneo.database.database import AsyncSession
+from eneo.database.tables.app_table import Apps
+from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.icons_table import Icons
 from eneo.database.tables.object_content_table import (
     IconContentReferences,
     ObjectContents,
 )
-from eneo.icons.icon import IconMetadata, IconMetadataCreate
+from eneo.database.tables.spaces_table import Spaces
+from eneo.database.tables.widget_templates_table import WidgetTemplates
+from eneo.database.tables.widgets_table import Widgets
+from eneo.icons.icon import IconMetadata, IconMetadataCreate, IconNotAttachableError
+from eneo.main.models import NotProvided, is_provided
 from eneo.object_content.content import ContentAccessClass, ContentState
 from eneo.object_content.file_icon_cleanup import file_icon_legacy_is_cleaned
+
+
+def _json_icon_id(
+    column: InstrumentedAttribute[Any], *keys: str
+) -> sa.ColumnElement[Any]:
+    """An icon id stored inside a JSONB document, as a uuid for comparison."""
+    expr: Any = column
+    for key in keys:
+        expr = expr[key]
+    return sa.cast(expr.astext, sa.Uuid())
+
+
+# Every column that shows an icon. Their foreign keys are ON DELETE SET NULL and
+# icon ids are public, so an icon is only deleted once nothing references it.
+ICON_REFERENCE_COLUMNS: tuple[InstrumentedAttribute[Any], ...] = (
+    Assistants.icon_id,
+    Apps.icon_id,
+    Spaces.icon_id,
+)
+
+# Icons shown from inside JSONB documents: the widget persona avatar on a
+# widget, on a template's draft and in its published release. A template's
+# document is copied onto every follower, so a foreign key could not express
+# these; no cascade clears them either, which is why the delete must refuse
+# while one remains.
+ICON_REFERENCE_DOCUMENTS: tuple[sa.ColumnElement[Any], ...] = (
+    _json_icon_id(Widgets.persona, "avatar_icon_id"),
+    _json_icon_id(WidgetTemplates.persona, "avatar_icon_id"),
+    _json_icon_id(WidgetTemplates.published, "persona", "avatar_icon_id"),
+)
+
+ICON_REFERENCES: tuple[InstrumentedAttribute[Any] | sa.ColumnElement[Any], ...] = (
+    *ICON_REFERENCE_COLUMNS,
+    *ICON_REFERENCE_DOCUMENTS,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,8 +131,19 @@ class IconRepository:
         )
         return None if row is None else IconMetadata.model_validate(row)
 
-    async def get_for_lifecycle(self, icon_id: UUID) -> IconMetadata | None:
-        row = await self.session.get(Icons, icon_id)
+    async def get_for_lifecycle(
+        self, icon_id: UUID, *, lock: bool = False
+    ) -> IconMetadata | None:
+        """With ``lock``, wait for a concurrent delete, so a deleted icon reads as gone."""
+        if lock:
+            row = await self.session.scalar(
+                sa.select(Icons)
+                .where(Icons.id == icon_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        else:
+            row = await self.session.get(Icons, icon_id)
         return None if row is None else IconMetadata.model_validate(row)
 
     async def get_primary_reference(
@@ -146,16 +200,108 @@ class IconRepository:
             media_type=row.legacy_mimetype,
         )
 
-    async def delete_by_tenant(self, icon_id: UUID, tenant_id: UUID) -> bool:
+    async def delete_if_unreferenced(self, icon_id: UUID) -> bool:
+        """Delete the icon unless a resource still shows it; returns whether it did.
+
+        Must run inside a transaction.
+        """
+        # Lock first, then check in a separate statement. Under READ COMMITTED a
+        # single DELETE … WHERE NOT EXISTS evaluates the check on its starting
+        # snapshot even after waiting for a concurrent attach to commit, and the
+        # SET NULL cascade would then clear that attach. With the lock, an attach
+        # either commits before the check reads, or waits and fails its FK check.
+        await self.session.execute(
+            sa.select(Icons.id).where(Icons.id == icon_id).with_for_update()
+        )
         deleted_id = (
             await self.session.execute(
                 sa.delete(Icons)
-                .where(Icons.id == icon_id, Icons.tenant_id == tenant_id)
+                .where(
+                    Icons.id == icon_id,
+                    *(
+                        ~sa.exists().where(reference == Icons.id)
+                        for reference in ICON_REFERENCES
+                    ),
+                )
                 .returning(Icons.id)
             )
         ).scalar_one_or_none()
         return deleted_id is not None
 
-    async def delete(self, icon_id: UUID) -> None:
-        """Delete an icon after its owning aggregate has authorized removal."""
-        await self.session.execute(sa.delete(Icons).where(Icons.id == icon_id))
+    async def lock_for_change(
+        self, previous: UUID | None, requested: UUID | None
+    ) -> None:
+        """Lock the icons an update swaps, in id order, so two updates swapping
+        icons cannot deadlock. The previous icon is locked FOR UPDATE, as its
+        release may delete it; the requested one FOR KEY SHARE, as the foreign
+        key check would, so a concurrent delete either commits first or waits.
+
+        Callers lock the resource row first and read ``previous`` under that lock.
+        """
+        for icon_id in sorted(i for i in (previous, requested) if i is not None):
+            shared = icon_id != previous
+            await self.session.execute(
+                sa.select(Icons.id)
+                .where(Icons.id == icon_id)
+                .with_for_update(read=shared, key_share=shared)
+            )
+
+    async def ensure_attachable(
+        self,
+        previous: UUID | None,
+        requested: UUID | None | NotProvided,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+    ) -> None:
+        """Lock the icons of an icon change, then refuse it if the user did not
+        upload the new icon in their tenant. Icon ids are public, so showing
+        someone else's icon would also keep it from being deleted. Sending the
+        current icon again is fine. Call after locking the resource row."""
+        if not is_provided(requested) or requested == previous:
+            return
+        await self.lock_for_change(previous, requested)
+        if requested is None:
+            return
+        uploaded = await self.session.scalar(
+            sa.select(Icons.id)
+            .join(
+                IconContentReferences,
+                sa.and_(
+                    IconContentReferences.icon_id == Icons.id,
+                    IconContentReferences.variant == "primary",
+                ),
+            )
+            .join(ObjectContents, ObjectContents.id == IconContentReferences.content_id)
+            .where(
+                Icons.id == requested,
+                Icons.tenant_id == tenant_id,
+                ObjectContents.created_by_user_id == user_id,
+            )
+        )
+        if uploaded is None:
+            raise IconNotAttachableError()
+
+    async def release_replaced(
+        self, previous: UUID | None, requested: UUID | None | NotProvided
+    ) -> None:
+        """Delete the icon an update replaced or cleared, unless another resource
+        still shows it. Call after the update is written."""
+        if previous is None or not is_provided(requested) or requested == previous:
+            return
+        await self.delete_if_unreferenced(previous)
+
+    async def lock_shown_in_space(self, space_id: UUID) -> list[UUID]:
+        """Lock the space, then the assistants, apps and widgets in it, as deleting the space would, and return the icons they show in
+        id order. Their icons cannot change until the delete commits."""
+        icon_ids: set[UUID | None] = set()
+        for shown in (
+            sa.select(Spaces.icon_id).where(Spaces.id == space_id),
+            sa.select(Assistants.icon_id).where(Assistants.space_id == space_id),
+            sa.select(Apps.icon_id).where(Apps.space_id == space_id),
+            sa.select(_json_icon_id(Widgets.persona, "avatar_icon_id")).where(
+                Widgets.space_id == space_id
+            ),
+        ):
+            icon_ids.update(await self.session.scalars(shown.with_for_update()))
+        return sorted(icon_id for icon_id in icon_ids if icon_id is not None)

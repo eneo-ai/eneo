@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { CircleAlert, RefreshCw } from "@lucide/svelte";
+  import CircleAlert from "@lucide/svelte/icons/circle-alert";
+  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";

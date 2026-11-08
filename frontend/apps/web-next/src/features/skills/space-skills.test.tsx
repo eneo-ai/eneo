@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { replaceInstructionText } from "@/test/skill-instructions";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -18,8 +19,11 @@ vi.mock("@/features/spaces/use-space", () => ({
     can: () => true
   })
 }));
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
-vi.mock("next-intl", () => ({
+vi.mock("@/lib/navigation", async () => ({
+  ...(await import("@/test/navigation")),
+  useRouter: () => ({ push })
+}));
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
   useLocale: () => "en"
 }));
@@ -74,6 +78,7 @@ afterEach(() => {
 function show(node: React.ReactNode) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(<QueryClientProvider client={client}>{node}</QueryClientProvider>);
+  return client;
 }
 
 describe("space Skills", () => {
@@ -82,14 +87,23 @@ describe("space Skills", () => {
     await screen.findByText("Reports");
     // Named like the page heading (translation keys stand in for the text here).
     expect(screen.getByRole("table", { name: "skills" })).toBeTruthy();
-    expect(get).toHaveBeenCalledWith("/api/v1/spaces/{space_id}/skills/", {
-      params: { path: { space_id: "space-1" }, query: { limit: 25, cursor: null, q: undefined } }
-    });
+    expect(get).toHaveBeenCalledWith(
+      "/api/v1/spaces/{space_id}/skills/",
+      expect.objectContaining({
+        params: {
+          path: { space_id: "space-1" },
+          query: { limit: 25, cursor: undefined, q: undefined }
+        }
+      })
+    );
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "reports" } });
-    fireEvent.submit(screen.getByRole("search"));
     await waitFor(() =>
       expect(get).toHaveBeenCalledWith("/api/v1/spaces/{space_id}/skills/", {
-        params: { path: { space_id: "space-1" }, query: { limit: 25, cursor: null, q: "reports" } }
+        signal: expect.anything(),
+        params: {
+          path: { space_id: "space-1" },
+          query: { limit: 25, cursor: undefined, q: "reports" }
+        }
       })
     );
     await screen.findByText("Reports");
@@ -105,6 +119,22 @@ describe("space Skills", () => {
     );
   });
 
+  it("offers one create action: docked with a list, only the empty state's without", async () => {
+    show(<SpaceSkillsPage />);
+    await screen.findByText("Reports");
+    expect(
+      within(screen.getByRole("group", { name: "space_skills_actions" })).getByRole("link", {
+        name: "skills_library_create"
+      })
+    ).toBeTruthy();
+    cleanup();
+
+    get.mockImplementation(() => ok({ items: [], next_cursor: null }));
+    show(<SpaceSkillsPage />);
+    await screen.findByRole("link", { name: "skills_library_create_first" });
+    expect(screen.queryByRole("link", { name: "skills_library_create" })).toBeNull();
+  });
+
   it("moves focus to the heading when the deleted skill's row goes away", async () => {
     remove.mockImplementation(() => {
       get.mockImplementation(() => ok({ items: [], next_cursor: null }));
@@ -118,9 +148,9 @@ describe("space Skills", () => {
       within(screen.getByRole("alertdialog")).getByRole("button", { name: "delete" })
     );
 
-    await screen.findByRole("heading", { level: 3, name: "skills_library_empty_title" });
+    await screen.findByRole("heading", { level: 2, name: "skills_library_empty_title" });
     await waitFor(() =>
-      expect(document.activeElement).toBe(screen.getByRole("heading", { level: 2, name: "skills" }))
+      expect(document.activeElement).toBe(screen.getByRole("heading", { level: 1, name: "skills" }))
     );
     expect(screen.getByText("skills_library_deleted_success").getAttribute("role")).toBe("status");
   });
@@ -154,6 +184,28 @@ describe("space Skills", () => {
     expect(within(alert).getAllByText("request_failed").length).toBeGreaterThan(0);
   });
 
+  it("focuses an empty instruction editor and associates its field problem", async () => {
+    show(<SpaceSkillNewPage />);
+    fireEvent.change(screen.getByLabelText("skills_display_name_label"), {
+      target: { value: "Reports" }
+    });
+    fireEvent.change(screen.getByLabelText("skills_description_label"), {
+      target: { value: "Find reports" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "skills_create_action" }));
+    const editor = screen.getByLabelText("skills_instructions_label");
+    expect(document.activeElement).toBe(editor);
+    expect(editor.getAttribute("aria-invalid")).toBe("true");
+    const problemId = `${editor.id}-problem`;
+    expect(document.getElementById(problemId)?.textContent).toContain("required_field");
+    expect(editor.getAttribute("aria-describedby")?.split(" ")).toContain(problemId);
+    replaceInstructionText(editor, "Find current reports.");
+    expect(screen.getByLabelText("skills_instructions_label")).toBe(editor);
+    expect(editor.getAttribute("aria-invalid")).toBe("false");
+    expect(screen.queryByText("required_field")).toBeNull();
+    expect(post).not.toHaveBeenCalled();
+  });
+
   it("creates a Skill in the current space using the shared form", async () => {
     show(<SpaceSkillNewPage />);
     // The sticky footer never covers a focused field: the fields keep a
@@ -161,15 +213,18 @@ describe("space Skills", () => {
     expect(
       screen.getByLabelText("skills_display_name_label").closest(".\\[\\&_\\*\\]\\:scroll-mb-20")
     ).toBeTruthy();
+    // And on a window too short for a bar that size (a phone held sideways) it is not sticky.
+    const footer = screen.getByRole("button", { name: "skills_create_action" }).parentElement!
+      .parentElement!;
+    expect(footer.className).toContain("sticky");
+    expect(footer.className).toContain("[@media(height<31.25rem)]:static");
     fireEvent.change(screen.getByLabelText("skills_display_name_label"), {
       target: { value: "Reports" }
     });
     fireEvent.change(screen.getByLabelText("skills_description_label"), {
       target: { value: "Find reports" }
     });
-    fireEvent.change(screen.getByLabelText("skills_instructions_label"), {
-      target: { value: "Search" }
-    });
+    replaceInstructionText(screen.getByLabelText("skills_instructions_label"), "Search");
     fireEvent.click(screen.getByRole("button", { name: "skills_create_action" }));
     await waitFor(() =>
       expect(post).toHaveBeenCalledWith("/api/v1/spaces/{space_id}/skills/", {
@@ -196,9 +251,10 @@ describe("space Skills", () => {
         body: { is_active: false }
       })
     );
-    fireEvent.change(screen.getByLabelText("skills_instructions_label"), {
-      target: { value: "Search the archive" }
-    });
+    replaceInstructionText(
+      screen.getByLabelText("skills_instructions_label"),
+      "Search the archive"
+    );
     fireEvent.click(screen.getByRole("button", { name: "save_changes" }));
     await waitFor(() =>
       expect(post).toHaveBeenCalledWith("/api/v1/spaces/{space_id}/skills/{skill_id}/revisions/", {
@@ -210,6 +266,24 @@ describe("space Skills", () => {
         }
       })
     );
+  });
+
+  it("keeps the form and its unsaved draft when a refresh of the skill fails", async () => {
+    const client = show(<SpaceSkillDetailPage skillId="skill-1" />);
+    const instructions = await screen.findByLabelText("skills_instructions_label");
+    replaceInstructionText(instructions, "Search the archive");
+
+    get.mockImplementation(() =>
+      Promise.resolve({
+        error: { message: "Bad gateway" },
+        response: new Response(null, { status: 502 })
+      })
+    );
+    await client.refetchQueries();
+
+    expect(await screen.findByText("query_error_refresh_title")).toBeTruthy();
+    expect(screen.getByLabelText("skills_instructions_label")).toBe(instructions);
+    expect(instructions.textContent).toBe("Search the archive");
   });
 
   it("keeps focus on the availability switch while it saves, and saves the press once", async () => {

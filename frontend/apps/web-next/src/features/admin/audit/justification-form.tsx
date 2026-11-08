@@ -1,11 +1,13 @@
-"use client";
-
+import { useHotkeys } from "@astryxdesign/core/hooks";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Shield } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useRef, useState } from "react";
-import { flushSync } from "react-dom";
-import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
+import {
+  FieldProblem,
+  fieldProblemProps,
+  revealProblems
+} from "@/components/composites/field-problem";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import {
@@ -37,7 +39,7 @@ const MAX_DESCRIPTION = 500;
 
 /**
  * Access gate for audit logs: the user states a justification, the backend
- * opens a 1-hour HTTP-only access session (cookie, re-scoped by the proxy),
+ * opens a 1-hour audit access session with an HTTP-only cookie,
  * then we refetch the logs. Problems show at their fields on submit, and
  * focus moves to the first.
  */
@@ -49,6 +51,14 @@ export function JustificationForm() {
   const [submitted, setSubmitted] = useState(false);
   const categoryRef = useRef<HTMLButtonElement>(null);
   const descriptionRef = useRef<HTMLTextAreaElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  const submitShortcut = (event: KeyboardEvent) => {
+    if (!event.repeat) formRef.current?.requestSubmit();
+  };
+  useHotkeys([
+    { keys: "ctrl+enter", allowInInputs: true, onPress: submitShortcut },
+    { keys: "meta+enter", allowInInputs: true, onPress: submitShortcut }
+  ]);
 
   const create = useMutation({
     mutationFn: () =>
@@ -68,7 +78,7 @@ export function JustificationForm() {
   const shown = (problem: string | null) => (submitted ? problem : null);
 
   return (
-    <div className="flex min-h-[50vh] items-center justify-center">
+    <div className="flex min-h-[50dvh] items-center justify-center">
       <div className="border-border bg-card w-full max-w-xl rounded-2xl border p-8 shadow-sm">
         <div className="mb-6 flex items-start gap-4">
           <span className="bg-muted flex size-11 items-center justify-center rounded-lg">
@@ -83,6 +93,7 @@ export function JustificationForm() {
         </div>
 
         <form
+          ref={formRef}
           className="flex flex-col gap-5"
           noValidate
           onSubmit={(event) => {
@@ -94,9 +105,7 @@ export function JustificationForm() {
                 ? descriptionRef
                 : null;
             if (firstProblem) {
-              // Rendered before focus moves, so the field is read with its error.
-              flushSync(() => setSubmitted(true));
-              firstProblem.current?.focus();
+              revealProblems(() => setSubmitted(true), firstProblem.current);
               return;
             }
             create.mutate();

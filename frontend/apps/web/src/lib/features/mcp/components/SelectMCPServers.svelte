@@ -9,7 +9,8 @@
   import { Switch } from "$lib/components/ui/switch/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { ChevronRight, LockKeyhole } from "@lucide/svelte";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
+  import LockKeyhole from "@lucide/svelte/icons/lock-keyhole";
   import { SvelteSet } from "svelte/reactivity";
   import { isCapabilityPurpose } from "$lib/features/mcp/capabilities";
   import { modelSupportsToolCalling, readinessMessage } from "$lib/features/mcp/readiness";

@@ -1,7 +1,5 @@
-"use client";
-
-import { CircleAlert, Database, HardDrive, Info } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { ChevronDown, CircleAlert, Database, ExternalLink, HardDrive, Info } from "lucide-react";
+import { useLocale, useTranslations } from "use-intl";
 import { useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -101,12 +99,11 @@ export function StorageOverview({
 
   return (
     <section aria-labelledby="storage-overview-title" className="space-y-4">
-      <div>
-        <h2 id="storage-overview-title" className="text-lg font-semibold">
-          {t("storage_overview_title")}
-        </h2>
-        <p className="text-muted-foreground mt-1 text-sm">{t("storage_overview_description")}</p>
-      </div>
+      {/* No intro: the page's description already says where files go, and each card names
+          its own fact. */}
+      <h2 id="storage-overview-title" className="text-lg font-semibold">
+        {t("storage_overview_title")}
+      </h2>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Card>
           <CardHeader className="flex items-center justify-between">
@@ -131,17 +128,13 @@ export function StorageOverview({
           <CardHeader className="flex items-center justify-between">
             <CardTitle className="text-sm">{t("storage_target_object_store")}</CardTitle>
             <Badge variant={ready || notConfigured ? "outline" : "destructive"}>
-              {ready
-                ? t("storage_connection_summary_configured")
-                : notConfigured
-                  ? t("storage_connection_summary_unconfigured")
-                  : t("storage_overview_attention")}
+              {ready ? t("storage_target_ready") : t("storage_target_unavailable")}
             </Badge>
           </CardHeader>
           <CardContent className="space-y-2">
             <strong>
               {ready
-                ? t("storage_target_ready")
+                ? t("storage_connection_summary_configured")
                 : notConfigured
                   ? t("storage_connection_empty_title")
                   : t(`storage_readiness_${objectStoreCapability.readiness_code}`)}
@@ -151,6 +144,18 @@ export function StorageOverview({
                 ? t("storage_overview_object_store_ready")
                 : t("storage_overview_object_store_help")}
             </p>
+            {!ready && (
+              <Button asChild variant="link" size="sm" className="h-auto px-0">
+                <a
+                  href="https://docs.eneo.ai/guides/object-content-storage"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {t("storage_settings_object_store_docs")}
+                  <ExternalLink className="size-4" aria-hidden="true" />
+                </a>
+              </Button>
+            )}
           </CardContent>
         </Card>
         <Card>
@@ -241,6 +246,10 @@ export function StorageOverview({
             aria-controls="storage-inventory-details"
             onClick={() => setDetailsOpen((open) => !open)}
           >
+            <ChevronDown
+              className={detailsOpen ? "size-4 rotate-180" : "size-4"}
+              aria-hidden="true"
+            />
             {detailsOpen ? t("storage_inventory_hide_details") : t("storage_inventory_caption")}
           </Button>
           {detailsOpen && (

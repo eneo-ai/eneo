@@ -8,7 +8,8 @@
 
 <script lang="ts">
   import type { OutboundHeaderPreview, UserSparse } from "@eneo/eneo-js";
-  import { LoaderCircle, Search } from "@lucide/svelte";
+  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
+  import Search from "@lucide/svelte/icons/search";
   import { onDestroy, tick } from "svelte";
 
   import { getEneo } from "$lib/core/Eneo";

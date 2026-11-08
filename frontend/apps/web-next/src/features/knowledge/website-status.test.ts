@@ -6,6 +6,7 @@ import {
   crawlFailuresText,
   nextCrawlAt,
   pagesAndFilesText,
+  websiteStatus,
   websiteSyncedAt
 } from "./website-status";
 
@@ -18,7 +19,7 @@ const website = (latestCrawl: Partial<CrawlRun> | null, overrides: Record<string
     ...overrides
   }) as unknown as Website;
 
-// ICU-style stand-in for next-intl: enough to see which forms are chosen.
+// ICU-style stand-in for use-intl: enough to see which forms are chosen.
 const t = (key: string, values: Record<string, string | number> = {}) =>
   `${key}(${Object.entries(values)
     .map(([name, value]) => `${name}=${value}`)
@@ -76,5 +77,50 @@ describe("pagesAndFilesText", () => {
       "space_crawl_failed(items=space_pages_count(count=1))"
     );
     expect(crawlFailuresText(t, { pages_failed: 0, files_failed: 0 } as CrawlRun)).toBeUndefined();
+  });
+});
+
+describe("websiteStatus", () => {
+  const href = "/spaces/s/knowledge/websites/w";
+
+  it("maps every crawl state to a tone and label", () => {
+    expect(websiteStatus(website(null), href)).toEqual({
+      tone: "neutral",
+      labelKey: "website_not_yet_crawled"
+    });
+    expect(websiteStatus(website({ status: "queued" }), href)).toEqual({
+      tone: "accent",
+      labelKey: "queued"
+    });
+    expect(websiteStatus(website({ status: "in progress" }), href)).toEqual({
+      tone: "accent",
+      labelKey: "space_status_syncing",
+      isPulsing: true
+    });
+    expect(websiteStatus(website({}), href)).toEqual({
+      tone: "success",
+      labelKey: "space_status_indexed"
+    });
+    expect(websiteStatus(website({ pages_failed: 3 }), href)).toEqual({
+      tone: "warning",
+      labelKey: "synced_with_warnings"
+    });
+  });
+
+  it("links a failed crawl to the website page, where it can be run again", () => {
+    expect(websiteStatus(website({ status: "failed" }), href)).toEqual({
+      tone: "error",
+      labelKey: "space_status_sync_error",
+      fixHref: href
+    });
+  });
+
+  it("treats a skipped duplicate crawl as neutral, not as an error", () => {
+    expect(
+      websiteStatus(
+        website({ status: "failed", result_location: "Skipped duplicate crawl: already running" }),
+        href
+      )
+    ).toEqual({ tone: "neutral", labelKey: "sync_skipped" });
   });
 });

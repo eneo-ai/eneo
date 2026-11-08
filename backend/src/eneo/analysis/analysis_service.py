@@ -446,7 +446,7 @@ class AnalysisService:
 
     @validate_permissions(Permission.INSIGHTS)
     async def get_metadata_statistics_aggregated(
-        self, start_date: datetime, end_date: datetime
+        self, start_date: datetime, end_date: datetime, time_zone: str | None = None
     ):
         """Get aggregated metadata statistics for the tenant.
 
@@ -456,16 +456,19 @@ class AnalysisService:
             tenant_id=self.user.tenant_id,
             start_date=start_date,
             end_date=end_date,
+            time_zone=time_zone,
         )
         sessions = await self.repo.get_session_counts_by_hour_for_tenant(
             tenant_id=self.user.tenant_id,
             start_date=start_date,
             end_date=end_date,
+            time_zone=time_zone,
         )
         questions = await self.repo.get_question_counts_by_hour_for_tenant(
             tenant_id=self.user.tenant_id,
             start_date=start_date,
             end_date=end_date,
+            time_zone=time_zone,
         )
 
         return assistants, sessions, questions

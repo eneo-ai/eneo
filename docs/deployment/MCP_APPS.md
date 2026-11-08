@@ -39,8 +39,8 @@ are saved files, whereas app filters and loaded pages are browser state and
 are not guaranteed to survive a reload.
 
 The native workspace and previews do not depend on `MCP_APPS_ENABLED` or the
-separate app content origin. The document workspace currently supports editing
-through requests to the assistant, rather than direct rich-text typing. The
+separate app content origin. In the standard Eneo app, users can edit a
+document's text directly and through requests to the assistant. The
 [Functions guide](https://docs.eneo.ai/dev/guides/capabilities#tools-files-and-views)
 describes the full workflow, supported previews, revisions and exports.
 

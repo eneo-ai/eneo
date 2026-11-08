@@ -4,7 +4,7 @@ from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import aliased, selectinload
+from sqlalchemy.orm import InstrumentedAttribute, aliased, selectinload
 
 from eneo.analysis.analysis import MessageFeedbackCounts
 from eneo.database.tables.assistant_table import Assistants
@@ -22,6 +22,18 @@ from eneo.files.file_content_loader import FileContentLoader
 from eneo.info_blobs.info_blob_repo import InfoBlobRepository
 from eneo.questions.question_file_projection import attach_question_files
 from eneo.sessions.session import SessionInDB
+
+
+def _hour_bucket(
+    created_at: InstrumentedAttribute[datetime], time_zone: str | None
+) -> sa.Label[datetime]:
+    # Omitted zones retain the database session's bucketing for existing clients.
+    bucket = (
+        sa.func.date_trunc("hour", created_at)
+        if time_zone is None
+        else sa.func.date_trunc("hour", created_at, time_zone)
+    )
+    return bucket.label("created_at")
 
 
 # IMPORTANT: every method in this repo that returns session/question rows or
@@ -688,8 +700,9 @@ class AnalysisRepository:
         tenant_id: UUID,
         start_date: datetime | None = None,
         end_date: datetime | None = None,
+        time_zone: str | None = None,
     ) -> list[CountBucketRow]:
-        bucket = sa.func.date_trunc("hour", Assistants.created_at).label("created_at")
+        bucket = _hour_bucket(Assistants.created_at, time_zone)
         stmt = (
             sa.select(bucket, sa.func.count().label("total"))
             .join(Users, Assistants.user_id == Users.id)
@@ -713,8 +726,9 @@ class AnalysisRepository:
         tenant_id: UUID,
         start_date: datetime | None = None,
         end_date: datetime | None = None,
+        time_zone: str | None = None,
     ) -> list[CountBucketRow]:
-        bucket = sa.func.date_trunc("hour", Sessions.created_at).label("created_at")
+        bucket = _hour_bucket(Sessions.created_at, time_zone)
         stmt = (
             sa.select(bucket, sa.func.count().label("total"))
             .join(Users, Sessions.user_id == Users.id)
@@ -739,8 +753,9 @@ class AnalysisRepository:
         tenant_id: UUID,
         start_date: datetime | None = None,
         end_date: datetime | None = None,
+        time_zone: str | None = None,
     ) -> list[CountBucketRow]:
-        bucket = sa.func.date_trunc("hour", Questions.created_at).label("created_at")
+        bucket = _hour_bucket(Questions.created_at, time_zone)
         stmt = (
             sa.select(bucket, sa.func.count().label("total"))
             .where(Questions.tenant_id == tenant_id)

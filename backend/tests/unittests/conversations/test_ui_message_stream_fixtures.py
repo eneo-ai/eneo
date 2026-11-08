@@ -340,6 +340,7 @@ SCENARIOS: dict[
                 response_type=ResponseType.ERROR,
                 error="The model is unavailable",
                 error_code=503,
+                error_reason="provider_unavailable",
                 stop=True,
             ),
         ],

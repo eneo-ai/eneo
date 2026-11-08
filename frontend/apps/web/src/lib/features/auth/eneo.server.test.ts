@@ -95,11 +95,12 @@ describe("loginWithEneo", () => {
     );
   });
 
-  test("tells the attempt limit and a failing backend apart from rejected credentials", async () => {
+  test("tells the attempt limit, a blocked account and a failing backend apart from rejected credentials", async () => {
     const cases: Array<[number, string]> = [
       [401, "credentials"],
       [422, "credentials"],
       [429, "rate_limited"],
+      [403, "deactivated"],
       [500, "unavailable"],
       [502, "unavailable"]
     ];

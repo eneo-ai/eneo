@@ -5,10 +5,10 @@ on:
     branches: [develop]
     tags: ['v*']
   workflow_dispatch:
-# Serialize all application publication, including alias promotion and reruns.
-concurrency:
-  group: eneo-application-publication
-  cancel-in-progress: false
+# Different commits and refs publish side by side. What they share is serialized where
+# it is written: a version's image tags by the component image jobs, its release assets
+# by the bundle job (each locked by the resolved version, so refs that resolve to the
+# same version wait for each other), and the aliases by the promote job.
 permissions:
   contents: read
   pull-requests: read
@@ -22,6 +22,7 @@ jobs:
     outputs:
       version: ${{ steps.resolve.outputs.version }}
       revision: ${{ steps.resolve.outputs.revision }}
+      managed: ${{ steps.resolve.outputs.managed }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
@@ -29,7 +30,13 @@ jobs:
           persist-credentials: false
       - name: Resolve shared build identity
         id: resolve
-        run: python3 scripts/release_bundle.py resolve
+        env:
+          # Until this repository variable is true, final tags keep the manual
+          # publication path and promote their own aliases.
+          RELEASE_MANAGED: ${{ vars.RELEASE_MANAGED }}
+        run: |
+          python3 scripts/release_bundle.py resolve
+          python3 -m scripts.release_workflow identify
       - name: Validate release branch and notes
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
@@ -37,12 +44,66 @@ jobs:
           tag="${GITHUB_REF#refs/tags/}"
           branch="release/$(echo "$tag" | grep -oE '^v[0-9]+\.[0-9]+')"
           git merge-base --is-ancestor HEAD "origin/$branch"
-          python3 scripts/check_whats_new.py --repo-root . --release-tag "$tag"
+          python3 scripts/check_whats_new.py --repo-root . --branch "$branch" --release-tag "$tag"
       - name: Release and deployment contract tests
         run: python3 -m unittest discover -s scripts/tests -p 'test_release_*.py'
-  checks:
+  # A develop commit has already passed the full suite in the merge queue when that run
+  # left a full-scope receipt (ci.yml's CI job writes it); otherwise, and always for
+  # tags, manual runs and other branches, the full suite runs here.
+  acceptance:
     needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      reuse: ${{ steps.acceptance.outputs.reuse }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts/ci-publication-acceptance.mjs
+          sparse-checkout-cone-mode: false
+      - name: Reuse only a full-suite receipt from the merge queue
+        id: acceptance
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+        run: node .github/scripts/ci-publication-acceptance.mjs
+  checks:
+    needs: [release, acceptance]
+    if: needs.acceptance.outputs.reuse != 'true'
     uses: ./.github/workflows/ci.yml
+    with:
+      # The component image jobs build backend and frontend themselves.
+      publication: true
+  # Advisories and scanning rules change without a commit: a reused result never
+  # replaces a fresh security check of what is published.
+  security:
+    needs: [release, acceptance]
+    if: needs.acceptance.outputs.reuse == 'true'
+    uses: ./.github/workflows/security.yml
+    with:
+      base_sha: ${{ github.event.before || '' }}
+  # Passes by a reused full-suite result with a fresh security check, or by full checks.
+  accepted:
+    needs: [acceptance, checks, security]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require full checks, or a reused full suite and fresh security
+        env:
+          REUSE: ${{ needs.acceptance.outputs.reuse }}
+          CHECKS: ${{ needs.checks.result }}
+          SECURITY: ${{ needs.security.result }}
+        run: |
+          if [[ "$CHECKS" == success || ( "$REUSE" == true && "$CHECKS" == skipped && "$SECURITY" == success ) ]]; then
+            echo "Accepted: checks $CHECKS, reuse $REUSE, security $SECURITY."
+          else
+            echo "::error::Not accepted: checks $CHECKS, reuse $REUSE, security $SECURITY."
+            exit 1
+          fi
   backend:
     needs: release
     uses: ./.github/workflows/application_image.yml
@@ -51,22 +112,10 @@ jobs:
       version: ${{ needs.release.outputs.version }}
       revision: ${{ needs.release.outputs.revision }}
   frontend:
-    needs: [release, backend]
-    uses: ./.github/workflows/application_image.yml
-    with:
-      component: frontend
-      version: ${{ needs.release.outputs.version }}
-      revision: ${{ needs.release.outputs.revision }}
-      backend_digest: ${{ needs.backend.outputs.digest }}
-  # The optional Next beta ships in every bundle; deployments enable it with
-  # the web-next Compose profile.
-  web-next:
     needs: release
     uses: ./.github/workflows/application_image.yml
     with:
-      component: web-next
-      context: ./frontend
-      dockerfile: ./frontend/apps/web-next/Dockerfile
+      component: frontend
       version: ${{ needs.release.outputs.version }}
       revision: ${{ needs.release.outputs.revision }}
   tool-runtime:
@@ -76,17 +125,147 @@ jobs:
       version: ${{ needs.release.outputs.version }}
       revision: ${{ needs.release.outputs.revision }}
       publish: true
-  bundle:
-    needs: [release, checks, backend, frontend, web-next, tool-runtime]
+  # Checks the published images while acceptance runs: the bundle's digests, the
+  # runtime scan and a smoke test of the exact bundle.
+  verify:
+    needs: [release, backend, frontend, tool-runtime]
     runs-on: ubuntu-latest
+    outputs:
+      sums: ${{ steps.bundle.outputs.sums }}
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+        with:
+          version: v0.33.0
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Verify every published component
+        id: bundle
+        # The digests the component jobs built or reused and checked, not their tags again.
+        env:
+          BACKEND_DIGEST: ${{ needs.backend.outputs.digest }}
+          FRONTEND_DIGEST: ${{ needs.frontend.outputs.digest }}
+          RUNTIME_DIGEST: ${{ needs.tool-runtime.outputs.digest }}
+        run: |
+          python3 scripts/release_bundle.py bundle --digest "backend=$BACKEND_DIGEST" \
+            --digest "frontend=$FRONTEND_DIGEST" --digest "tool-runtime=$RUNTIME_DIGEST"
+          echo "runtime-image=$(jq -r '.images["tool-runtime"]' release-bundle/release.json)" >>"$GITHUB_OUTPUT"
+          # Later jobs check the files they download against these, before attesting or promoting.
+          echo "sums=$(cd release-bundle && sha256sum release.json release.env | base64 -w0)" >>"$GITHUB_OUTPUT"
+      - name: Scan the exact runtime digest, including on retries
+        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2
+        with:
+          image: ${{ steps.bundle.outputs.runtime-image }}
+          fail-build: true
+          severity-cutoff: high
+          only-fixed: true
+          output-format: table
+          grype-version: v0.117.0
+      - name: Smoke test the exact bundle
+        run: python3 scripts/smoke_release_bundle.py release-bundle/release.json
+      - name: Keep the verified bundle for acceptance
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: eneo-release-candidate-${{ needs.release.outputs.version }}
+          path: |
+            release-bundle/release.json
+            release-bundle/release.env
+          if-no-files-found: error
+          overwrite: true
+  # Publishes the verified bundle once its commit is accepted.
+  bundle:
+    needs: [release, accepted, verify]
+    # Explicit: one of checks and security is always skipped upstream, and a job with no
+    # status check of its own would be skipped with it.
+    if: >-
+      ${{ !cancelled()
+      && needs.release.result == 'success'
+      && needs.accepted.result == 'success'
+      && needs.verify.result == 'success' }}
+    runs-on: ubuntu-latest
+    concurrency:
+      group: eneo-bundle-${{ needs.release.outputs.version }}
+      queue: max
+      cancel-in-progress: false
     permissions:
       contents: write
-      packages: write
       attestations: write
       artifact-metadata: write
       id-token: write
     env:
       GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: eneo-release-candidate-${{ needs.release.outputs.version }}
+          path: release-bundle
+      - name: Check the bundle is the one verify checked
+        env:
+          SUMS: ${{ needs.verify.outputs.sums }}
+        # Exactly the two files verify checked, unchanged: nothing else is attested,
+        # published or promoted.
+        run: |
+          cd release-bundle
+          test "$(ls -A | sort | tr '\n' ' ')" = "release.env release.json "
+          base64 -d <<<"$SUMS" | sha256sum -c -
+      - name: Attest the complete bundle
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26
+        with:
+          subject-path: release-bundle/release.json,release-bundle/release.env
+      - name: Publish complete bundle artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: eneo-release-${{ needs.release.outputs.version }}
+          path: |
+            release-bundle/release.json
+            release-bundle/release.env
+          if-no-files-found: error
+          overwrite: true
+      - name: Attach bundle to an existing GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: gh release upload "${GITHUB_REF#refs/tags/}" release-bundle/release.json release-bundle/release.env --repo "$GITHUB_REPOSITORY" --clobber
+  release-sbom:
+    needs: bundle
+    if: ${{ !cancelled() && needs.bundle.result == 'success' && startsWith(github.ref, 'refs/tags/v') }}
+    permissions:
+      contents: write
+      packages: read
+      attestations: write
+      artifact-metadata: write
+      id-token: write
+    uses: ./.github/workflows/release_sbom.yml
+    with:
+      tag: ${{ github.ref_name }}
+      upload_release_assets: true
+  # Moves the aliases (develop, a branch's, latest) to this run's verified bundle. Every
+  # alias writer, the release controller in release.yml included, holds the same lock,
+  # and each attempt, retries included, decides again under it after reading every
+  # destination: an alias never moves back, and an interrupted move is completed.
+  promote:
+    needs: [release, verify, bundle, release-sbom]
+    # A final release moves latest only after its SBOM is published.
+    if: >-
+      ${{ !cancelled()
+      && needs.release.outputs.managed != 'true'
+      && needs.bundle.result == 'success'
+      && (needs.release-sbom.result == 'success'
+        || (needs.release-sbom.result == 'skipped' && !startsWith(github.ref, 'refs/tags/'))) }}
+    runs-on: ubuntu-latest
+    concurrency:
+      group: eneo-release-lifecycle
+      queue: max
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
@@ -100,48 +279,21 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
-      - name: Verify every published component
-        id: bundle
-        run: |
-          python3 scripts/release_bundle.py bundle
-          echo "runtime-image=$(jq -r '.images["tool-runtime"]' release-bundle/release.json)" >>"$GITHUB_OUTPUT"
-      - name: Scan the exact runtime digest, including on retries
-        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2
-        with:
-          image: ${{ steps.bundle.outputs.runtime-image }}
-          fail-build: true
-          severity-cutoff: high
-          only-fixed: true
-          output-format: table
-          grype-version: v0.117.0
-      - name: Smoke test the exact bundle
-        run: python3 scripts/smoke_release_bundle.py release-bundle/release.json
-      - name: Attest the complete bundle
-        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26
-        with:
-          subject-path: release-bundle/*
-      - name: Publish complete bundle artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: eneo-release-${{ needs.release.outputs.version }}
-          path: release-bundle/
-          if-no-files-found: error
-          overwrite: true
-      - name: Attach bundle to an existing GitHub release
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: gh release upload "${GITHUB_REF#refs/tags/}" release-bundle/release.json release-bundle/release.env --clobber
-      - name: Promote aliases only for the current branch head or newest final release
-        run: python3 scripts/release_bundle.py promote
-  release-sbom:
-    needs: bundle
-    if: startsWith(github.ref, 'refs/tags/v')
-    permissions:
-      contents: write
-      packages: read
-      attestations: write
-      artifact-metadata: write
-      id-token: write
-    uses: ./.github/workflows/release_sbom.yml
-    with:
-      tag: ${{ github.ref_name }}
-      upload_release_assets: true
+          path: release-bundle
+      - name: Check the bundle is the one verify checked
+        env:
+          SUMS: ${{ needs.verify.outputs.sums }}
+        # Exactly the two files verify checked, unchanged: nothing else is attested,
+        # published or promoted.
+        run: |
+          cd release-bundle
+          test "$(ls -A | sort | tr '\n' ' ')" = "release.env release.json "
+          base64 -d <<<"$SUMS" | sha256sum -c -
+      - name: Promote aliases only forward, to the verified bundle
+        # Managed finals are promoted by the default-branch controller only
+        # after this entire workflow (including SBOM publication) succeeds.
+        if: needs.release.outputs.managed != 'true'
+        run: python3 scripts/release_bundle.py promote --bundle release-bundle/release.json

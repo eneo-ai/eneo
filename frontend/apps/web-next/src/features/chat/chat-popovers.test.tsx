@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { expectNoAxeViolations } from "@/test/axe";
+import { expectNameToHoldVisibleText, expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 import { ComposerAttachments } from "./attachments";
 import type { Capability } from "@/features/capabilities/capabilities";
@@ -69,6 +69,8 @@ describe("ChatTools", () => {
     const onDisabled = vi.fn();
     renderInChat(<McpHarness onDisabled={onDisabled} />);
     const trigger = screen.getByRole("button", { name: "Verktyg: 1 av 2 aktiva" });
+    // The name holds what the pill shows, its label and count, in order (WCAG 2.5.3).
+    expectNameToHoldVisibleText(trigger, "Verktyg: 1 av 2 aktiva");
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(trigger);
     const popover = await screen.findByRole("dialog", { name: "Verktyg" });

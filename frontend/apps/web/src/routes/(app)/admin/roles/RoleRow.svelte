@@ -1,18 +1,16 @@
 <script lang="ts">
   import type { Role } from "@eneo/eneo-js";
   import { resolve } from "$app/paths";
-  import {
-    Check,
-    ChevronRight,
-    LayoutTemplate,
-    Minus,
-    Ellipsis,
-    Pencil,
-    RotateCcw,
-    Star,
-    Trash2,
-    Users
-  } from "@lucide/svelte";
+  import Check from "@lucide/svelte/icons/check";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
+  import LayoutTemplate from "@lucide/svelte/icons/layout-template";
+  import Minus from "@lucide/svelte/icons/minus";
+  import Ellipsis from "@lucide/svelte/icons/ellipsis";
+  import Pencil from "@lucide/svelte/icons/pencil";
+  import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
+  import Star from "@lucide/svelte/icons/star";
+  import Trash2 from "@lucide/svelte/icons/trash-2";
+  import Users from "@lucide/svelte/icons/users";
   import { Badge, badgeVariants } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";

@@ -21,17 +21,15 @@
   import ApiKeySecretDialog from "$lib/features/api-keys/ApiKeySecretDialog.svelte";
   import ApiKeyStateFilter from "$lib/features/api-keys/ApiKeyStateFilter.svelte";
   import type { ApiKeyStateFilterValue } from "$lib/features/api-keys/apiKeyTableUtils";
-  import {
-    Funnel,
-    X,
-    Check,
-    Key,
-    CircleAlert,
-    ChevronDown,
-    RefreshCw,
-    Lock,
-    Globe
-  } from "@lucide/svelte";
+  import Funnel from "@lucide/svelte/icons/funnel";
+  import X from "@lucide/svelte/icons/x";
+  import Check from "@lucide/svelte/icons/check";
+  import Key from "@lucide/svelte/icons/key";
+  import CircleAlert from "@lucide/svelte/icons/circle-alert";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
+  import Lock from "@lucide/svelte/icons/lock";
+  import Globe from "@lucide/svelte/icons/globe";
   import { fly, slide } from "svelte/transition";
   import {
     getAdminNotificationPolicy,

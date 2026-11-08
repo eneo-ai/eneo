@@ -31,6 +31,11 @@ export function getPermissionCopy(name: string, fallbackDescription: string): En
         label: m.permission_personal_chat(),
         description: m.permission_personal_chat_description()
       };
+    case "personal_skills":
+      return {
+        label: m.permission_personal_skills(),
+        description: m.permission_personal_skills_description()
+      };
     case "apps":
       return { label: m.permission_apps(), description: m.permission_apps_description() };
     case "services":
@@ -77,6 +82,11 @@ export function getPermissionCopy(name: string, fallbackDescription: string): En
       return {
         label: m.permission_modules(),
         description: m.permission_modules_description()
+      };
+    case "widgets":
+      return {
+        label: m.permission_widgets(),
+        description: m.permission_widgets_description()
       };
     case "storage":
       return {

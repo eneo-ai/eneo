@@ -1,0 +1,17 @@
+name: Free disk for the E2E stack
+description: On a runner with less than 40 GB free on /, remove preinstalled toolchains that no job here uses.
+runs:
+  using: composite
+  steps:
+    - name: Free disk for the E2E stack
+      shell: bash
+      run: |
+        # Azure runners start with about 86 GB free and the E2E stack build
+        # needs about 14 GB; AWS-hosted runners have failed it with ENOSPC.
+        # ponytail: fixed list; add a directory only when a runner still runs out.
+        free_gb() { df --output=avail -BG / | tail -n1 | tr -dc 0-9; }
+        before=$(free_gb)
+        if [ "$before" -lt 40 ]; then
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+        fi
+        echo "Free space on /: ${before} GB before, $(free_gb) GB after (cleans below 40 GB)." | tee -a "$GITHUB_STEP_SUMMARY"

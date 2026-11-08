@@ -1,10 +1,8 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
-  import {
-    loadLucideIconOrNull,
-    type LucideIconComponent
-  } from "$lib/features/templates/lucideIcons";
+  import { loadLucideIconOrNull, type LucideIconData } from "$lib/features/templates/lucideIcons";
+  import LucideSvg from "$lib/features/templates/components/LucideSvg.svelte";
 
   interface Props {
     name: string;
@@ -19,12 +17,12 @@
   const showTooltip = $derived(description && description.length > 80);
 
   // Icons resolve on demand from the lazily loaded registry (lucideIcons.ts).
-  let IconComponent = $state<LucideIconComponent | null>(null);
+  let icon = $state<LucideIconData | null>(null);
   $effect(() => {
     const name = iconName;
     let stale = false;
-    void loadLucideIconOrNull(name).then((icon) => {
-      if (!stale) IconComponent = icon;
+    void loadLucideIconOrNull(name).then((loaded) => {
+      if (!stale) icon = loaded;
     });
     return () => {
       stale = true;
@@ -38,8 +36,8 @@
       <div
         class="border-stronger bg-subtle flex h-6 w-6 items-center justify-center rounded border"
       >
-        {#if IconComponent}
-          <IconComponent class="text-default h-4 w-4" />
+        {#if icon}
+          <LucideSvg {icon} class="text-default h-4 w-4" />
         {/if}
       </div>
     {/if}

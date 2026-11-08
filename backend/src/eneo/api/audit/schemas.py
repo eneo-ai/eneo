@@ -139,6 +139,13 @@ class ExportJobStatusResponse(BaseModel):
     download_url: Optional[str] = Field(
         None, description="Download URL (when completed)"
     )
+    signed_download_url: Optional[str] = Field(
+        None,
+        description=(
+            "Link valid for 60 seconds that streams the file without credentials, "
+            "for browsers (when completed)"
+        ),
+    )
     created_at: datetime
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None

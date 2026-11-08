@@ -38,18 +38,23 @@ function AlertTitle({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="alert-title"
-      className={cn("col-start-2 line-clamp-1 min-h-4 font-medium tracking-tight", className)}
+      className={cn("col-start-2 min-h-4 font-medium tracking-tight", className)}
       {...props}
     />
   );
 }
 
+/*
+ * The description is a grid, so a link placed in it (after the text, as the
+ * alert's way out) is a grid item on a row of its own, not a link inside a
+ * sentence: on a coarse pointer that row is 44 px tall, like BackLink.
+ */
 function AlertDescription({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="alert-description"
       className={cn(
-        "text-muted-foreground col-start-2 grid justify-items-start gap-1 text-sm [&_p]:leading-relaxed",
+        "text-muted-foreground col-start-2 grid justify-items-start gap-1 text-sm [&_p]:leading-relaxed pointer-coarse:[&>a]:inline-flex pointer-coarse:[&>a]:min-h-11 pointer-coarse:[&>a]:items-center",
         className
       )}
       {...props}

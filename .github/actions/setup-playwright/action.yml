@@ -1,0 +1,53 @@
+name: Set up Playwright Chromium
+description: Install lockfile-matched Chromium from a per-version cache and its missing system libraries with bounded, retried downloads.
+inputs:
+  working-directory:
+    description: Workspace containing the installed Playwright CLI.
+    default: frontend/apps/web
+runs:
+  using: composite
+  steps:
+    - name: Read the installed Playwright version
+      id: playwright
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+    # The cache holds the browser builds, not the system libraries they need.
+    - name: Restore cached browsers
+      id: cache
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}-chromium
+    # Playwright simulates its install (`apt-get install -s`) against the
+    # runner's package index and lists only the libraries that are missing.
+    - name: Install system libraries
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        report="$(bun run --bun playwright install-deps --dry-run chromium 2>&1)" || true
+        echo "$report"
+        if ! grep -qE '^(Missing system dependencies|All system dependencies are installed)' <<< "$report"; then
+          echo "::error::Playwright did not report its missing system libraries."
+          exit 1
+        fi
+        mapfile -t missing < <(sed -n 's/^  \([a-z0-9][a-z0-9.+:-]*\)$/\1/p' <<< "$report")
+        "$GITHUB_WORKSPACE/.github/scripts/ci-apt-install.sh" "${missing[@]}"
+    - name: Install Chromium
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT: "30000"
+      run: |
+        for attempt in 1 2; do
+          if timeout --kill-after=15s 120s bun run --bun playwright install chromium; then
+            exit 0
+          fi
+          if [ "$attempt" -lt 2 ]; then
+            echo "::warning::Chromium download failed; retrying once in 10 seconds."
+            sleep 10
+          fi
+        done
+        echo "::error::Chromium installation failed after two bounded attempts."
+        exit 1

@@ -48,9 +48,15 @@ class ProviderRequest:
 
 def auth_headers_for(provider_type: str, api_key: str) -> dict[str, str]:
     """Auth header set per provider. Bearer for everyone except Anthropic,
-    which uses its own header pair."""
+    which uses its own header pair.
+
+    A server without auth gets no Authorization header: "Bearer " with an
+    empty token is not a valid header value, so httpx refuses to send the
+    request at all."""
     if provider_type == "anthropic":
         return {"x-api-key": api_key, "anthropic-version": "2023-06-01"}
+    if not api_key:
+        return {}
     return {"Authorization": f"Bearer {api_key}"}
 
 
@@ -117,7 +123,7 @@ def connection_check_request(
             headers={"x-goog-api-key": api_key},
             key_rejected_statuses=_KEY_REJECTED_STATUSES | {400},
         )
-    return ProviderRequest(url=url, headers={"Authorization": f"Bearer {api_key}"})
+    return ProviderRequest(url=url, headers=auth_headers_for(provider_type, api_key))
 
 
 def connection_check_supported(provider_type: str, endpoint: str) -> bool:

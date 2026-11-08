@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * Verifies web-next next-intl safety:
+ * Verifies web-next use-intl safety:
  * - generated locale catalogs hold exactly the keys and values that
  *   `bun run i18n:convert` writes (the key order is the converter's);
  * - locale catalogs do not contain duplicate top-level keys;
  * - generated locale catalogs have the same key set;
  * - web-next-only extra catalogs have the same key set;
- * - literal next-intl calls, e.g. `t("save")`, resolve in every generated
+ * - literal use-intl calls, e.g. `t("save")`, resolve in every generated
  *   locale.
  *
  * The first check is strict on purpose, which couples web-next to apps/web:

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import { RefreshCw } from "@lucide/svelte";
+  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import { formatDateTime } from "$lib/core/formatting/dateTime";
   import type {
     AdminCrawlerDetails,

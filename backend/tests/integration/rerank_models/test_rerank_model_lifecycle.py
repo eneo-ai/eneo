@@ -125,6 +125,41 @@ class TestTenantRerankModelService:
             assert updated.name == "editable"
             assert updated.description == "Swedish-capable reranker"
 
+    async def test_candidate_factor_and_cap_default_and_change(
+        self, db_container, rerank_model_factory, admin_user
+    ):
+        async with db_container() as container:
+            session = container.session()
+            seed = await rerank_model_factory(session, "seed")
+            service = TenantRerankModelService(session=session, user=admin_user)
+
+            defaulted = await service.create(
+                TenantRerankModelCreate(
+                    provider_id=seed.provider_id, name="a", display_name="A"
+                )
+            )
+            chosen = await service.create(
+                TenantRerankModelCreate(
+                    provider_id=seed.provider_id,
+                    name="b",
+                    display_name="B",
+                    candidate_factor=3,
+                    max_candidates=250,
+                )
+            )
+            assert (defaulted.candidate_factor, defaulted.max_candidates) == (5, 100)
+            assert (chosen.candidate_factor, chosen.max_candidates) == (3, 250)
+
+            capped = await service.update(
+                chosen.id, TenantRerankModelUpdate(max_candidates=30)
+            )
+            assert (capped.candidate_factor, capped.max_candidates) == (3, 30)
+
+            renamed = await service.update(
+                chosen.id, TenantRerankModelUpdate(display_name="B2")
+            )
+            assert (renamed.candidate_factor, renamed.max_candidates) == (3, 30)
+
     async def test_update_rejects_soft_deleted_model(
         self, db_container, rerank_model_factory, admin_user
     ):

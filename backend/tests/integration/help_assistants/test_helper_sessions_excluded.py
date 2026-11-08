@@ -256,17 +256,9 @@ SESSIONS_REPO_CASES: list[tuple[str, Callable[..., Awaitable[set[UUID]]], str]] 
         "single",
     ),
     (
-        "get_by_assistant_helper_returns_empty",
-        # Listing by the helper assistant must return no sessions.
-        lambda repo, s: repo.get_by_assistant(assistant_id=s["helper_assistant"]),
-        "list_then_total",
-    ),
-    (
-        "get_by_assistant_with_tenant_excludes_helper",
-        lambda repo, s: repo.get_by_assistant(
-            assistant_id=s["helper_assistant"], tenant_id=s["tenant_id"]
-        ),
-        "list_then_total",
+        "get_ownership_returns_none_for_helper",
+        lambda repo, s: repo.get_ownership(s["helper_session"]),
+        "single",
     ),
     (
         "get_metadata_by_assistant_helper_returns_empty",
@@ -364,7 +356,7 @@ async def test_sessions_repo_returns_regular_sessions(db_container, admin_user):
 
         assert (await repo.get(setup["regular_session"])) is not None
 
-        sessions, total = await repo.get_by_assistant(
+        sessions, total = await repo.get_metadata_by_assistant(
             assistant_id=setup["regular_assistant"]
         )
         assert setup["regular_session"] in _ids(sessions)
@@ -605,3 +597,175 @@ async def test_analysis_http_endpoints_exclude_helper(
     assert payload[field] == expected, (
         f"{path}: {field}={payload[field]} (expected {expected}; helper leaked)"
     )
+
+
+@pytest.mark.parametrize(
+    "time_zone,instants,expected",
+    [
+        (
+            "Asia/Kolkata",
+            ["2026-04-10T18:29:59.999999+00:00", "2026-04-10T18:30:00+00:00"],
+            {"2026-04-10 23:00": 1, "2026-04-11 00:00": 1},
+        ),
+        (
+            "Asia/Kathmandu",
+            ["2026-04-10T18:14:59.999999+00:00", "2026-04-10T18:15:00+00:00"],
+            {"2026-04-10 23:00": 1, "2026-04-11 00:00": 1},
+        ),
+        (
+            "Europe/Stockholm",
+            ["2026-10-25T00:30:00+00:00", "2026-10-25T01:30:00+00:00"],
+            {"2026-10-25 02:00": 2},
+        ),
+    ],
+)
+async def test_hourly_analytics_use_local_buckets_and_keep_tenant_helper_and_range_filters(
+    db_container, admin_user, time_zone, instants, expected
+):
+    from zoneinfo import ZoneInfo
+
+    times = [datetime.fromisoformat(value) for value in instants]
+    async with db_container() as container:
+        setup = await _seed(container, admin_user)
+        session = container.session()
+        await session.execute(sa.text("SET LOCAL TIME ZONE 'UTC'"))
+        # A second regular and helper-tagged conversation for the later bucket.
+        later: dict[str, UUID] = {}
+        for kind in ["regular", "helper"]:
+            later[kind] = await _insert_session(
+                session,
+                name=f"later-{kind}-session",
+                user_id=admin_user.id,
+                assistant_id=setup["regular_assistant"],
+            )
+            await _insert_question(
+                session,
+                tenant_id=admin_user.tenant_id,
+                session_id=later[kind],
+                assistant_id=setup["regular_assistant"],
+                text=f"later {kind} question",
+            )
+        await _record_helper_run(
+            container,
+            tenant_id=admin_user.tenant_id,
+            org_space_id=await _get_org_space(session, tenant_id=admin_user.tenant_id),
+            helper_assistant_id=setup["helper_assistant"],
+            target_id=setup["regular_assistant"],
+            session_id=later["helper"],
+            actor_user_id=admin_user.id,
+        )
+        for index, key in enumerate(["regular_assistant", "helper_assistant"]):
+            await session.execute(
+                sa.update(Assistants)
+                .where(Assistants.id == setup[key])
+                .values(created_at=times[index], updated_at=times[index])
+            )
+        for index, session_ids in enumerate(
+            [
+                [setup["regular_session"], setup["helper_session"]],
+                [later["regular"], later["helper"]],
+            ]
+        ):
+            for table, condition in [
+                (Sessions, Sessions.id.in_(session_ids)),
+                (Questions, Questions.session_id.in_(session_ids)),
+            ]:
+                await session.execute(
+                    sa.update(table)
+                    .where(condition)
+                    .values(created_at=times[index], updated_at=times[index])
+                )
+        repo = container.analysis_repo()
+        for read in [
+            repo.get_assistant_counts_by_hour_for_tenant,
+            repo.get_session_counts_by_hour_for_tenant,
+            repo.get_question_counts_by_hour_for_tenant,
+        ]:
+            arguments = dict(
+                start_date=times[0] - timedelta(seconds=1),
+                end_date=times[1] + timedelta(seconds=1),
+                time_zone=time_zone,
+            )
+            rows = await read(tenant_id=admin_user.tenant_id, **arguments)
+            local_counts: dict[str, int] = {}
+            for row in rows:
+                label = row.created_at.astimezone(ZoneInfo(time_zone)).strftime(
+                    "%Y-%m-%d %H:%M"
+                )
+                local_counts[label] = local_counts.get(label, 0) + row.total
+            assert local_counts == expected
+            assert await read(tenant_id=uuid4(), **arguments) == []
+            # The final microsecond counts; the next local midnight does not.
+            arguments["end_date"] = times[0]
+            limited = await read(tenant_id=admin_user.tenant_id, **arguments)
+            assert sum(row.total for row in limited) == 1
+            # Omitting the new option retains the database session's hour buckets.
+            legacy = await read(
+                tenant_id=admin_user.tenant_id,
+                start_date=times[0] - timedelta(seconds=1),
+                end_date=times[1] + timedelta(seconds=1),
+            )
+            legacy_counts = {row.created_at: row.total for row in legacy}
+            expected_legacy: dict[datetime, int] = {}
+            for instant in times:
+                bucket = instant.replace(minute=0, second=0, microsecond=0)
+                expected_legacy[bucket] = expected_legacy.get(bucket, 0) + 1
+            assert legacy_counts == expected_legacy
+
+
+@pytest.mark.parametrize(
+    "time_zone,status",
+    [(None, 200), ("Asia/Kolkata", 200), ("Not/AZone", 400), ("x" * 101, 422)],
+)
+async def test_hourly_metadata_zone_contract_over_http(
+    db_container, admin_user, client, patch_auth_service_jwt, time_zone, status
+):
+    from zoneinfo import ZoneInfo
+
+    async with db_container() as container:
+        if status == 200:
+            await _seed(container, admin_user)
+        token = container.auth_service().create_access_token_for_user(admin_user)
+    response = await client.get(
+        "/api/v1/analysis/metadata-statistics/aggregated/",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"time_zone": time_zone} if time_zone is not None else {},
+    )
+    assert response.status_code == status, response.text
+    if status != 200:
+        return
+    payload = response.json()
+    assert sum(point["count"] for point in payload["sessions"]) == 1
+    assert sum(point["count"] for point in payload["questions"]) == 1
+    if time_zone is not None:
+        for metric in ["assistants", "sessions", "questions"]:
+            assert payload[metric]
+            for point in payload[metric]:
+                instant = datetime.fromisoformat(
+                    point["created_at"].replace("Z", "+00:00")
+                )
+                assert instant.astimezone(ZoneInfo(time_zone)).minute == 0
+
+
+async def test_omitted_analytics_zone_retains_the_database_session_zone(
+    db_container, admin_user
+):
+    from zoneinfo import ZoneInfo
+
+    async with db_container() as container:
+        await _seed(container, admin_user)
+        await container.session().execute(
+            sa.text("SET LOCAL TIME ZONE 'Asia/Kathmandu'")
+        )
+        repo = container.analysis_repo()
+        for read in [
+            repo.get_assistant_counts_by_hour_for_tenant,
+            repo.get_session_counts_by_hour_for_tenant,
+            repo.get_question_counts_by_hour_for_tenant,
+        ]:
+            rows = await read(tenant_id=admin_user.tenant_id)
+            assert rows
+            assert all(
+                row.created_at.astimezone(ZoneInfo("Asia/Kathmandu")).minute == 0
+                for row in rows
+            )

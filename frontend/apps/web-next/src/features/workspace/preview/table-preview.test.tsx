@@ -8,7 +8,7 @@ import { findPassage, locatePassage } from "./selection";
 import { parseTableLocator, tableLocator } from "./table-reference";
 import { TablePreview } from "./table-preview";
 
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 
 afterEach(() => {
   cleanup();

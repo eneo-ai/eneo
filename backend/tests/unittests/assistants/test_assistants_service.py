@@ -30,6 +30,7 @@ from eneo.main.exceptions import (
 )
 from eneo.main.models import ModelId
 from eneo.prompts.api.prompt_models import PromptCreate
+from eneo.roles.permissions import Permission
 from eneo.skills.domain.skill import (
     AssistantSkillBindingReplacement,
     SkillBindingIntent,
@@ -893,7 +894,6 @@ async def test_personal_chat_cannot_store_unsupported_reasoning_effort(
         {"data_retention_days": None},
         {"metadata_json": {}},
         {"icon_id": uuid4()},
-        {"skill_binding_intents": []},
         {"rerank_model_id": uuid4()},
         {"rerank_model_id": None},
     ],
@@ -908,6 +908,38 @@ async def test_personal_chat_cannot_change_extended_default_assistant_fields(
         match="only allows changing the personal assistant's completion model",
     ):
         await setup.service.update_assistant(assistant_id=TEST_UUID, **update)
+
+    assistant.update.assert_not_called()
+
+
+@pytest.mark.parametrize("can_manage_assistants", [False, True])
+async def test_own_personal_chat_skills_need_personal_skills_whatever_else_is_held(
+    setup: Setup, can_manage_assistants: bool
+):
+    assistant, _ = configure_personal_default_assistant(
+        setup, can_manage_assistants=can_manage_assistants
+    )
+    [role] = TEST_USER.roles
+    setup.service.user = TEST_USER.model_copy(
+        update={
+            "roles": [
+                role.model_copy(
+                    update={
+                        "permissions": [
+                            permission
+                            for permission in role.permissions
+                            if permission is not Permission.PERSONAL_SKILLS
+                        ]
+                    }
+                )
+            ]
+        }
+    )
+
+    with pytest.raises(UnauthorizedException, match="Own Skills permission"):
+        await setup.service.update_assistant(
+            assistant_id=TEST_UUID, skill_binding_intents=[]
+        )
 
     assistant.update.assert_not_called()
 

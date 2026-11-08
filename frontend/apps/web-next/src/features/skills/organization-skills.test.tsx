@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { replaceInstructionText } from "@/test/skill-instructions";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -9,12 +10,14 @@ import { deriveSkillSlug, normalizedSkillContent } from "./skill-model";
 const get = vi.hoisted(() => vi.fn());
 const post = vi.hoisted(() => vi.fn());
 const push = vi.hoisted(() => vi.fn());
+const removedFilter = vi.hoisted(() => ({ value: false }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: { GET: get, POST: post } }));
-vi.mock("next/navigation", () => ({
+vi.mock("@/lib/navigation", async () => ({
+  ...(await import("@/test/navigation")),
   useRouter: () => ({ push }),
-  useSearchParams: () => new URLSearchParams()
+  useSearchParams: () => new URLSearchParams(removedFilter.value ? "removed=true" : "")
 }));
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
   useLocale: () => "en"
 }));
@@ -44,6 +47,7 @@ const skill = {
 } as OrganizationSkill;
 
 beforeEach(() => {
+  removedFilter.value = false;
   get.mockImplementation(() => ok({ items: [skill], next_cursor: null }));
   post.mockImplementation(() =>
     ok({
@@ -67,12 +71,33 @@ function show(page: "list" | "new") {
 }
 
 describe("organisation skill catalogue", () => {
+  it("heads an empty list one level under the page's title", async () => {
+    get.mockImplementation(() => ok({ items: [], next_cursor: null }));
+    show("list");
+    // Beside the sidebar the page's Skills is the h1.
+    expect(await screen.findByRole("heading", { level: 1, name: "skills" })).toBeTruthy();
+    expect(
+      await screen.findByRole("heading", {
+        level: 2,
+        name: "organization_skills_empty_manage_title"
+      })
+    ).toBeTruthy();
+  });
+
+  it("shows the removal timestamp in removed list rows", async () => {
+    removedFilter.value = true;
+    get.mockImplementation(() =>
+      ok({ items: [{ ...skill, removed_at: "2026-10-01T10:00:00Z" }], next_cursor: null })
+    );
+    show("list");
+    expect(await screen.findByText("organization_skills_removed_at")).toBeTruthy();
+  });
   it("sends search terms as a query and requests the removed view separately", async () => {
     show("list");
     await screen.findByText("Search reports");
     // A tab of the organization space, whose header holds the page's h1.
-    expect(screen.getByRole("heading", { level: 2, name: "skills" })).toBeTruthy();
-    expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
+    expect(screen.getByRole("heading", { level: 1, name: "skills" })).toBeTruthy();
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
     // The list is named by that heading (translation keys stand in for the text).
     expect(screen.getByRole("table", { name: "skills" })).toBeTruthy();
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "Reports" } });
@@ -157,9 +182,7 @@ describe("organisation skill catalogue", () => {
     fireEvent.change(screen.getByLabelText("skills_description_label"), {
       target: { value: " Search reports " }
     });
-    fireEvent.change(screen.getByLabelText("skills_instructions_label"), {
-      target: { value: " Use the index " }
-    });
+    replaceInstructionText(screen.getByLabelText("skills_instructions_label"), " Use the index ");
     fireEvent.click(screen.getByRole("button", { name: "skills_create_action" }));
     await waitFor(() =>
       expect(post).toHaveBeenCalledWith("/api/v1/skills/organization/", {

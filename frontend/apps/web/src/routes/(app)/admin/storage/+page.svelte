@@ -19,19 +19,17 @@
     type StorageKind,
     type UploadLimitUseCase
   } from "@eneo/eneo-js";
-  import {
-    CircleAlert,
-    ArrowRightLeft,
-    CircleCheck,
-    ChevronDown,
-    Database,
-    ExternalLink,
-    Gauge,
-    HardDrive,
-    Info,
-    LoaderCircle,
-    RefreshCw
-  } from "@lucide/svelte";
+  import CircleAlert from "@lucide/svelte/icons/circle-alert";
+  import ArrowRightLeft from "@lucide/svelte/icons/arrow-right-left";
+  import CircleCheck from "@lucide/svelte/icons/circle-check";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import Database from "@lucide/svelte/icons/database";
+  import ExternalLink from "@lucide/svelte/icons/external-link";
+  import Gauge from "@lucide/svelte/icons/gauge";
+  import HardDrive from "@lucide/svelte/icons/hard-drive";
+  import Info from "@lucide/svelte/icons/info";
+  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
+  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import { Page, Settings } from "$lib/components/layout";
   import * as Alert from "$lib/components/ui/alert/index.js";
@@ -50,6 +48,8 @@
   import PolicySection from "$lib/features/admin/PolicySection.svelte";
   import { hasPermission } from "$lib/core/hasPermission.js";
   import { m } from "$lib/paraglide/messages";
+  import { docsUrl } from "$lib/core/docs";
+  import { getLocale } from "$lib/paraglide/runtime";
   import { toast } from "svelte-sonner";
   import ByteLimitField from "./ByteLimitField.svelte";
   import StorageConnectionSection from "./StorageConnectionSection.svelte";
@@ -863,7 +863,7 @@
                         {/if}
                         {#if objectStoreUnavailable}
                           <Button
-                            href="https://docs.eneo.ai/guides/object-content-storage"
+                            href={docsUrl("guides/object-content-storage", getLocale())}
                             target="_blank"
                             rel="noreferrer"
                             variant="link"

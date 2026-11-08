@@ -66,6 +66,14 @@ const presentation = {
       provider_id: "p1",
       cost_per_image: "0.04"
     })
+  ],
+  rerank_models: [
+    model({
+      id: "r1",
+      name: "Qwen/Qwen3-Reranker-4B",
+      nickname: "Qwen reranker",
+      provider_id: "p2"
+    })
   ]
 } as unknown as ModelsPresentation;
 
@@ -139,6 +147,17 @@ describe("provider status", () => {
     expect(openai.models.map(({ model }) => model.id)).toEqual(["c1", "c2", "t1", "i1"]);
     expect(openai.status).toBe("ready");
     expect(sections[0]!.needsKey).toBe(true);
+    const vllm = sections.find((section) => section.name === "vLLM")!;
+    expect(vllm.models).toEqual([
+      { model: expect.objectContaining({ id: "e1" }), kind: "embedding" },
+      { model: expect.objectContaining({ id: "r1" }), kind: "rerank" }
+    ]);
+  });
+
+  it("reads a presentation without rerank models", () => {
+    const withoutRerank = { ...presentation, rerank_models: undefined };
+    const result = buildProviderSections(withoutRerank, providers, capabilities);
+    expect(result.find((section) => section.name === "vLLM")!.models).toHaveLength(1);
   });
 });
 
@@ -168,7 +187,8 @@ describe("filters", () => {
       "c1",
       "t1",
       "i1",
-      "e1"
+      "e1",
+      "r1"
     ]);
   });
 
@@ -180,29 +200,35 @@ describe("filters", () => {
     expect(ids("gpt-4o")).toEqual(["c1"]);
     expect(ids("whisper")).toEqual(["t1"]);
     expect(ids("gpt image")).toEqual(["i1"]);
-    expect(ids("vllm")).toEqual(["e1"]);
-    expect(ids("  ")).toHaveLength(5);
+    expect(ids("vllm")).toEqual(["e1", "r1"]);
+    expect(ids("reranker")).toEqual(["r1"]);
+    expect(ids("  ")).toHaveLength(6);
   });
 
   it("counts models per type with the other filters applied", () => {
     expect(countByKind(sections, { search: "", security: "all" })).toEqual({
-      all: 5,
+      all: 6,
       completion: 2,
       embedding: 1,
       transcription: 1,
-      image: 1
+      image: 1,
+      rerank: 1
     });
     expect(countByKind(sections, { search: "whisper", security: "all" })).toEqual({
       all: 1,
       completion: 0,
       embedding: 0,
       transcription: 1,
-      image: 0
+      image: 0,
+      rerank: 0
     });
     // Every kind is counted the same way: the image model matches "gpt" too.
     expect(
       filterSections(sections, { ...all, kind: "image" }).map(({ section }) => section.name)
     ).toEqual(["OpenAI"]);
+    expect(
+      filterSections(sections, { ...all, kind: "rerank" }).map(({ section }) => section.name)
+    ).toEqual(["vLLM"]);
   });
 });
 
@@ -245,7 +271,11 @@ describe("lifecycle and attention", () => {
       [provider({ id: "p1" }), provider({ id: "p3", is_active: false, masked_api_key: null })],
       capabilities
     );
-    expect(modelsAttention(quiet, { today: TODAY })).toEqual({ providers: [], deprecated: [] });
+    expect(modelsAttention(quiet, { today: TODAY })).toEqual({
+      providers: [],
+      deprecated: [],
+      retiring: []
+    });
   });
 
   it("reports active providers whose connection check failed or whose key runs out", () => {
@@ -312,5 +342,25 @@ describe("prices", () => {
     });
     expect(modelPrice(model({}), "image")).toEqual({ kind: "unknown" });
     expect(modelPrice(model({}), "embedding")).toEqual({ kind: "unknown" });
+    // Rerank models have no cost fields.
+    expect(modelPrice(model({}), "rerank")).toEqual({ kind: "unknown" });
   });
+});
+
+it("hides migrated rows and counts while retaining their provider deletion dependencies", () => {
+  const sections = buildProviderSections(
+    {
+      completion_models: [model({ id: "migrated", migrated_to_model_id: "replacement" })],
+      embedding_models: [],
+      transcription_models: [],
+      image_models: []
+    } as ModelsPresentation,
+    [provider({ id: "p1" })],
+    { providers: {}, default_fields: [] }
+  );
+  const visible = filterSections(sections, { search: "", kind: "all", security: "all" });
+  expect(visible).toHaveLength(1);
+  expect(visible[0]?.models).toEqual([]);
+  expect(visible[0]?.section.models.map(({ model }) => model.id)).toEqual(["migrated"]);
+  expect(countByKind(sections, { search: "", security: "all" }).all).toBe(0);
 });

@@ -21,6 +21,8 @@ export type PendingImport = {
   batchId?: string;
   /** What the notice for the batch calls it: the group's name. */
   batchName?: string;
+  /** How its job ended, once a list or a read said so: a later list may not show the job. */
+  jobStatus?: Job["status"] | null;
 };
 
 export const PENDING_IMPORTS_STORAGE_KEY = "eneo:pending-imports";
@@ -34,7 +36,10 @@ function isPendingImport(value: unknown): value is PendingImport {
     ) &&
     ["batchId", "batchName"].every(
       (key) => record[key] === undefined || typeof record[key] === "string"
-    )
+    ) &&
+    (record.jobStatus === undefined ||
+      record.jobStatus === null ||
+      typeof record.jobStatus === "string")
   );
 }
 
@@ -82,7 +87,7 @@ function sessionStorageOrNull(): Storage | null {
   }
 }
 
-// Read on first use: the server render has no sessionStorage.
+// Read on first use, including when browser storage is unavailable.
 let store: PendingImports | null = null;
 function pendingStore(): PendingImports {
   store ??= createPendingImports(sessionStorageOrNull());

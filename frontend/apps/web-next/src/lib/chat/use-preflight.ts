@@ -1,5 +1,3 @@
-"use client";
-
 import { useEffect, useRef, useState } from "react";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
@@ -11,28 +9,42 @@ const DEBOUNCE_MS = 400;
 
 /**
  * Debounced token preflight for the context bar. Stale responses are
- * discarded via a generation counter (partner/session switches mid-flight).
+ * aborted on key changes and discarded if they arrive after cancellation.
  */
 export function usePreflight(request: {
   question: string;
   fileIds: string[];
   sessionId?: string | null;
   assistantId?: string | null;
+  revision?: string | null;
 }): PreflightState {
-  const [preflight, setPreflight] = useState<PreflightState>(null);
+  const [preflight, setPreflight] = useState<{ key: string; response: PreflightState } | null>(
+    null
+  );
   const generation = useRef(0);
 
   const { question, sessionId, assistantId } = request;
   const fileKey = request.fileIds.join(",");
 
+  const key = JSON.stringify([
+    question,
+    fileKey,
+    sessionId ?? null,
+    assistantId ?? null,
+    request.revision ?? null
+  ]);
+  const shouldRequest = Boolean(question || fileKey || (assistantId && !sessionId));
+
   useEffect(() => {
     const current = ++generation.current;
-    if (!question && !fileKey) return;
+    if (!shouldRequest) return;
+    const controller = new AbortController();
 
     const timer = setTimeout(async () => {
       try {
         const response = await unwrap(
           browserApi.POST("/api/v1/conversations/preflight", {
+            signal: controller.signal,
             body: {
               question,
               file_ids: fileKey ? fileKey.split(",") : [],
@@ -41,17 +53,22 @@ export function usePreflight(request: {
             }
           })
         );
-        if (generation.current === current) setPreflight(response);
+        if (!controller.signal.aborted && generation.current === current) {
+          setPreflight({ key, response });
+        }
       } catch {
         // Preflight is best-effort UX; stay silent on errors (incl. 429).
       }
     }, DEBOUNCE_MS);
 
-    return () => clearTimeout(timer);
-  }, [question, fileKey, sessionId, assistantId]);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [question, fileKey, sessionId, assistantId, key, shouldRequest]);
 
-  // Empty input: report no pending cost (derived, not reset via setState).
-  return question || fileKey ? preflight : null;
+  // A new draft/partner/session must not expose the old estimate while waiting.
+  return shouldRequest && preflight?.key === key ? preflight.response : null;
 }
 
 /**
@@ -73,8 +90,17 @@ export function deriveContextUsage({
   const contextLimit = preflight?.context_window || fallbackContextLimit || 0;
   const pendingTextTokens = preflight?.input_tokens ?? 0;
   const pendingFileTokens = preflight?.file_tokens ?? 0;
+  const assistantPromptTokens = preflight?.prompt_tokens ?? 0;
+  const assistantAttachmentTokens = preflight?.assistant_attachment_tokens ?? 0;
+  // The backend includes the Skill context in prompt_tokens.
+  const skillContextTokens = preflight?.skill_context_tokens ?? 0;
   const projectedTotal =
-    lockedInputTokens + lockedOutputTokens + pendingTextTokens + pendingFileTokens;
+    lockedInputTokens +
+    lockedOutputTokens +
+    pendingTextTokens +
+    pendingFileTokens +
+    assistantPromptTokens +
+    assistantAttachmentTokens;
   return {
     contextLimit,
     // Per-segment breakdown for the context-usage bar: the last turn's locked
@@ -84,6 +110,9 @@ export function deriveContextUsage({
     lockedOutputTokens,
     pendingTextTokens,
     pendingFileTokens,
+    assistantPromptTokens,
+    assistantAttachmentTokens,
+    skillContextTokens,
     usedTokens: projectedTotal,
     willExceedContext: contextLimit > 0 && projectedTotal > contextLimit
   };

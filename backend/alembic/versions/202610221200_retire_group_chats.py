@@ -11,6 +11,22 @@ The migrated assistant gets the space's first enabled model that can call
 tools, or no model when the space has none; editors then choose one. It gets
 no instructions: the orchestration prompt is the editor's to write.
 
+This revision first followed 202610201100 on a chain that left the main one
+at 202610161000. A database migrated on that chain reports itself at head,
+so `alembic upgrade head` would skip the revisions now before it, and two of
+them (202610261220 and 202610261300) still expect the group_chats table
+that this revision drops. To move such a database without losing data, run
+with this code:
+
+    alembic stamp --purge 202610161000
+    psql -c "CREATE TABLE group_chats (id uuid, space_id uuid, icon_id uuid)"
+    alembic upgrade 202611031206
+    psql -c "DROP TABLE group_chats"
+    alembic stamp head
+
+The empty table only lets those two revisions run; this revision and the
+two before it are already applied.
+
 Revision ID: 202610221200
 Revises: 202610201100
 """
@@ -136,6 +152,13 @@ def downgrade() -> None:
             sa.ForeignKey("icons.id", ondelete="SET NULL"),
             nullable=True,
         ),
+    )
+    # 202610261220 indexed the icon reference; its downgrade drops it.
+    op.create_index(
+        "ix_group_chats_icon_id",
+        "group_chats",
+        ["icon_id"],
+        postgresql_where=sa.text("icon_id IS NOT NULL"),
     )
     op.create_table(
         "group_chats_assistants_mapping",

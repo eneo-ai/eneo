@@ -155,3 +155,79 @@ async def test_impact_preview_keeps_every_resource_list():
     assert {
         key: value for key, value in vars(space).items() if isinstance(value, list)
     } == original
+
+
+def _classified(purpose: str, level: int) -> MCPServer:
+    from eneo.security_classifications.domain.entities.security_classification import (
+        SecurityClassification,
+    )
+
+    server = _server(purpose)
+    server.security_classification = SecurityClassification(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        name=f"klass {level}",
+        security_level=level,
+        security_enabled=True,
+    )
+    return server
+
+
+def _marker_service(monkeypatch, providers):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from eneo.mcp_servers.application import capability_resolver
+
+    # Every purpose's providers in one list, as the one load returns them.
+    lookup = AsyncMock(return_value=providers)
+    monkeypatch.setattr(capability_resolver, "active_capability_providers", lookup)
+    service = _service()
+    service.repo = SimpleNamespace(session=None)
+    service.user = SimpleNamespace(tenant_id=uuid4())
+    return service, lookup
+
+
+async def test_marker_is_rejected_when_no_provider_of_its_purpose_meets_the_space(
+    monkeypatch,
+):
+    # The image provider meets the space; it must not vouch for web search.
+    service, lookup = _marker_service(
+        monkeypatch,
+        [_classified("web_search", 0), _classified("image_generation", 2)],
+    )
+
+    with pytest.raises(BadRequestException, match="Security classification"):
+        await service._validate_capability_markers(
+            [_server("web_search"), _server("image_generation")],
+            _classified("general", 1).security_classification,
+        )
+    assert lookup.await_count == 1
+
+
+async def test_markers_meeting_the_space_pass_with_one_provider_load(monkeypatch):
+    service, lookup = _marker_service(
+        monkeypatch,
+        [
+            _classified("web_search", 0),
+            _classified("web_search", 1),
+            _classified("image_generation", 2),
+        ],
+    )
+
+    await service._validate_capability_markers(
+        [_server("general"), _server("web_search"), _server("image_generation")],
+        _classified("general", 1).security_classification,
+    )
+
+    assert lookup.await_count == 1
+
+
+async def test_markers_without_capabilities_load_no_providers(monkeypatch):
+    service, lookup = _marker_service(monkeypatch, [_classified("web_search", 0)])
+
+    await service._validate_capability_markers(
+        [_server("general")], _classified("general", 1).security_classification
+    )
+
+    lookup.assert_not_awaited()
