@@ -647,24 +647,6 @@ async def _wait_for_lock_waiters(count: int) -> None:
             await asyncio.sleep(0.02)
 
 
-async def _wait_for_waiters_on(session: Any) -> None:
-    """Until a backend waits for a lock this session holds."""
-    pid = await session.scalar(sa.text("SELECT pg_backend_pid()"))
-    async with asyncio.timeout(10):
-        while True:
-            async with sessionmanager.session() as probe, probe.begin():
-                waiting = await probe.scalar(
-                    sa.text(
-                        "SELECT count(*) FROM pg_stat_activity "
-                        "WHERE :pid = ANY(pg_blocking_pids(pid))"
-                    ),
-                    {"pid": pid},
-                )
-            if waiting:
-                return
-            await asyncio.sleep(0.02)
-
-
 async def _race(statement: Any, *sign_ins: Awaitable[UserInDB]) -> list[Any]:
     """Start the sign-ins while ``statement`` holds its row lock; commit it
     once they all wait on that lock."""
@@ -740,9 +722,7 @@ def _retire(account: UUID, subject: str) -> Any:
     )
 
 
-async def test_a_subject_retired_during_the_lock_wait_is_not_added_again(
-    sign_in, enqueued
-):
+async def test_a_subject_retired_during_the_lock_wait_is_refused(sign_in, enqueued):
     account = await _user_id()
     await sign_in("person-a", "client-a")
 
@@ -751,15 +731,15 @@ async def test_a_subject_retired_during_the_lock_wait_is_not_added_again(
         waiting = asyncio.ensure_future(sign_in("person-a", "api-a"))
         await _wait_for_lock_waiters(1)
         await session.execute(_retire(account, "person-b"))
-    # Decided again: the email finds the account, now bound under another pair.
     with pytest.raises(IdentityConflictError) as refused:
         await waiting
 
-    assert refused.value.reason == "account_bound"
+    assert refused.value.reason == "account_changed"
     assert await _bindings(account) == {("client-a", "person-b")}
+    assert [c["account_ids"] for c in _conflicts(enqueued)] == [[str(account)]]
 
 
-async def test_an_email_changed_during_the_lock_wait_binds_nothing(sign_in):
+async def test_an_email_changed_during_the_lock_wait_is_refused(sign_in, enqueued):
     account = await _user_id()
 
     async with sessionmanager.session() as session, session.begin():
@@ -771,15 +751,21 @@ async def test_an_email_changed_during_the_lock_wait_binds_nothing(sign_in):
             .where(Users.id == account)
             .values(email="renamed@example.com")
         )
-    with pytest.raises(FederatedLoginDenied, match="User not found"):
+    with pytest.raises(IdentityConflictError) as refused:
         await waiting
 
+    assert refused.value.reason == "account_changed"
     assert await _bindings() == set()
+    assert [c["account_ids"] for c in _conflicts(enqueued)] == [[str(account)]]
 
 
-async def test_an_account_that_changes_again_during_the_second_wait_is_refused(
+async def test_a_stale_account_is_refused_without_waiting_for_another(
     sign_in, test_tenant, enqueued
 ):
+    """Deciding again could lock the account the email names while holding
+    the first one, and two such sign-ins would wait for each other. The
+    first stale check refuses, so the account locked below is never waited
+    for."""
     first = await _user_id()
     second = await _add_user(test_tenant.id, "second@example.com")
     await sign_in("person-a", "client-a")
@@ -793,20 +779,13 @@ async def test_an_account_that_changes_again_during_the_second_wait_is_refused(
             )
             await _wait_for_lock_waiters(1)
             await hold_first.execute(_retire(first, "person-b"))
-        # Decided again, by the email: now it waits for the second account.
-        await _wait_for_waiters_on(hold_second)
-        await hold_second.execute(
-            sa.update(Users)
-            .where(Users.id == second)
-            .values(email="renamed@example.com")
-        )
-    with pytest.raises(IdentityConflictError) as refused:
-        await waiting
+        with pytest.raises(IdentityConflictError) as refused:
+            await asyncio.wait_for(waiting, 10)
 
     assert refused.value.reason == "account_changed"
     assert await _bindings(first) == {("client-a", "person-b")}
     assert await _bindings(second) == set()
-    assert [c["account_ids"] for c in _conflicts(enqueued)] == [[str(second)]]
+    assert [c["account_ids"] for c in _conflicts(enqueued)] == [[str(first)]]
 
 
 async def test_a_window_opened_during_the_lock_wait_moves_the_account_once(
