@@ -108,8 +108,8 @@ def test_strips_default_port():
 
 def test_accepts_valid_proxy_url():
     """Accepts proxy URLs like m00-https-*."""
-    result = validate_public_origin("https://m00-https-eneo-test.login.sundsvall.se")
-    assert result == "https://m00-https-eneo-test.login.sundsvall.se"
+    result = validate_public_origin("https://m00-https-eneo-test.login.example.com")
+    assert result == "https://m00-https-eneo-test.login.example.com"
 
 
 def test_returns_none_for_none_input():
