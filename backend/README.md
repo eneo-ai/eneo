@@ -131,9 +131,10 @@ for view semantics, query bounds and rollback behavior.
 | POSTGRES_DB                      | x        |                                                          |
 | REDIS_HOST                       | x        |                                                          |
 | REDIS_PORT                       | x        |                                                          |
-| MOBILITYGUARD_DISCOVERY_ENDPOINT |          |                                                          |
-| MOBILITYGUARD_CLIENT_ID          |          |                                                          |
-| MOBILITYGUARD_CLIENT_SECRET      |          |                                                          |
+| OIDC_DISCOVERY_ENDPOINT          |          | Single sign-on: the identity provider's discovery URL    |
+| OIDC_CLIENT_ID                   |          | Single sign-on: the client registered for Eneo           |
+| OIDC_CLIENT_SECRET               |          | Single sign-on: that client's secret                     |
+| OIDC_TENANT_ID                   |          | Resource-server mode: the tenant its users belong to     |
 | OBJECT_CONTENT_INLINE_MAXIMUM_BYTES |          | Operator safety ceiling for one PostgreSQL-inline payload |
 | MAX_IN_QUESTION                  | x        | Max files in a question                                  |
 | SKILL_MAX_BINDINGS               |          | One-time seed for the Skill runtime-policy migration; the stored tenant policy owns the limit afterwards |

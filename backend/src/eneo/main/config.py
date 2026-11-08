@@ -561,7 +561,7 @@ class Settings(BaseSettings):
     oidc_accepted_audience: Optional[str] = None
     oidc_jwks_cache_ttl_seconds: int = 3600
 
-    # Generic OIDC config (renamed from MOBILITYGUARD_*)
+    # Global OIDC sign-in (FEDERATION_ENABLED=false)
     oidc_discovery_endpoint: Optional[str] = None
     oidc_client_id: Optional[str] = None
     oidc_client_secret: Optional[str] = None
@@ -667,12 +667,6 @@ class Settings(BaseSettings):
                 "reference Compose deployment)"
             )
         return self
-
-    # DEPRECATED: Mobilityguard (use OIDC_* instead - will be removed in v3.0)
-    mobilityguard_discovery_endpoint: Optional[str] = None
-    mobilityguard_client_id: Optional[str] = None
-    mobilityguard_client_secret: Optional[str] = None
-    mobilityguard_tenant_id: Optional[str] = None
 
     # Visual content in document attachments (PDF pages with images/graphics,
     # DOCX/PPTX embedded images) is extracted as derived image files so vision
@@ -1114,32 +1108,6 @@ class Settings(BaseSettings):
             )
 
         return self
-
-    @model_validator(mode="before")
-    @classmethod
-    def migrate_legacy_vars(cls, values: dict[str, object]) -> dict[str, object]:
-        """Auto-migrate legacy env vars with deprecation warnings.
-
-        MOBILITYGUARD_* → OIDC_*
-        """
-        migrations = [
-            ("oidc_discovery_endpoint", "mobilityguard_discovery_endpoint"),
-            ("oidc_client_id", "mobilityguard_client_id"),
-            ("oidc_client_secret", "mobilityguard_client_secret"),
-            ("oidc_tenant_id", "mobilityguard_tenant_id"),
-        ]
-
-        for new_name, old_name in migrations:
-            # If new value not set but old value exists
-            if not values.get(new_name) and values.get(old_name):
-                values[new_name] = values[old_name]
-                logging.warning(
-                    f"DEPRECATION: Using {old_name.upper()}. "
-                    f"Please update to {new_name.upper()} in your .env file. "
-                    f"Legacy variables will be removed in v3.0"
-                )
-
-        return values
 
     @model_validator(mode="before")
     @classmethod

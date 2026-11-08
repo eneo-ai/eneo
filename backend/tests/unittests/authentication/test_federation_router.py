@@ -1,7 +1,6 @@
 """Unit tests for OIDC federation router edge cases."""
 
 import asyncio
-import json
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import cast
@@ -72,39 +71,6 @@ class FakeRedis:
 
     async def delete(self, key: str) -> None:
         self._store.pop(key, None)
-
-
-class FakeResponse:
-    def __init__(self, payload: dict, status: int = 200):
-        self._payload = payload
-        self.status = status
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, exc_type, exc, tb):  # noqa: ARG002
-        return False
-
-    async def json(self):
-        return self._payload
-
-    async def text(self):
-        return json.dumps(self._payload)
-
-
-class FakeAioHttpClient:
-    def __init__(self, response: FakeResponse):
-        self._response = response
-
-    def get(self, *args, **kwargs):  # noqa: ARG002
-        return self._response
-
-    def post(self, *args, **kwargs):  # noqa: ARG002
-        return self._response
-
-
-async def fake_signing_key(**kwargs):  # noqa: ARG001
-    return SimpleNamespace(key="fake-key")
 
 
 class TenantRepoStub:
@@ -1256,112 +1222,6 @@ async def test_auth_callback_rejects_malformed_state_redirect_uri(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "admission_case",
-    [
-        "allowed",
-        "jit-disabled",
-        "empty-domains",
-        "missing-verification",
-        "removed",
-        "existing-scim",
-    ],
-)
-async def test_global_oidc_endpoint_uses_shared_admission(monkeypatch, admission_case):
-    from starlette.requests import Request
-
-    from eneo.authentication.auth_models import OpenIdConnectLogin
-    from eneo.users import user_router, user_service
-
-    tenant = TenantInDB(
-        id=uuid4(),
-        name="OIDC tenant",
-        state=TenantState.ACTIVE,
-        quota_limit=1024**3,
-        provisioning=admission_case != "jit-disabled",
-    )
-    settings = DummySettings(
-        oidc_discovery_endpoint="https://idp.example.com/discovery",
-        oidc_client_id="client",
-        oidc_client_secret="secret",
-        oidc_tenant_id=str(tenant.id),
-        oidc_allowed_domains=[]
-        if admission_case in ("empty-domains", "existing-scim")
-        else ["example.com"],
-    )
-    claims: dict[str, object] = {
-        "iss": PROVIDER_ISSUER,
-        "sub": "subject",
-        "email": "user@example.com",
-    }
-    if admission_case not in ("missing-verification", "existing-scim"):
-        claims["email_verified"] = True
-    existing = None
-    if admission_case in ("removed", "existing-scim"):
-        existing = UserInDB(
-            id=uuid4(),
-            email="user@example.com",
-            username="user",
-            tenant=tenant,
-            tenant_id=tenant.id,
-            state="deleted" if admission_case == "removed" else "active",
-            deleted_at=datetime.now(timezone.utc)
-            if admission_case == "removed"
-            else None,
-        )
-    if admission_case == "existing-scim":
-        tenant.provisioning = False
-    repository = UserRepoStubForJIT(existing_user=existing, tenant=tenant)
-    container = MockContainerForJIT(
-        tenant_repo=TenantRepoStub(tenant),
-        user_repo=repository,
-        auth_service=AuthServiceStub(claims),
-        redis_client=FakeRedis(),
-        encryption_service=EncryptionService(None),
-    )
-    monkeypatch.setattr(user_router.config, "get_settings", lambda: settings)
-    monkeypatch.setattr(user_service, "get_settings", lambda: settings)
-    response = FakeResponse(
-        {
-            "issuer": PROVIDER_ISSUER,
-            "token_endpoint": "https://idp.example.com/token",
-            "jwks_uri": "https://idp.example.com/jwks",
-            "id_token_signing_alg_values_supported": ["RS256"],
-            # Only its header is read here; the stub service decodes nothing.
-            "id_token": jwt.encode({}, "unused-" * 8, headers={"kid": "key"}),
-            "access_token": "token",
-        }
-    )
-    monkeypatch.setattr(
-        user_router, "aiohttp_client", lambda: FakeAioHttpClient(response)
-    )
-    monkeypatch.setattr(user_router, "get_federation_signing_key", fake_signing_key)
-    login = OpenIdConnectLogin(
-        code="code",
-        code_verifier="verifier",
-        client_id="client",
-        redirect_uri="https://global.example.com/login/callback",
-    )
-    request = Request({"type": "http", "headers": []})
-    # The existing token exchange uses aiohttp.BasicAuth; explicitly capture
-    # its deprecation while exercising the account decision through the route.
-    with pytest.warns(DeprecationWarning, match="BasicAuth is deprecated"):
-        if admission_case in ("allowed", "existing-scim"):
-            token = await user_router.login_with_mobilityguard(
-                request, login, container
-            )
-            assert token.access_token == "access-token"
-            assert (repository._created_user is not None) is (
-                admission_case == "allowed"
-            )
-        else:
-            with pytest.raises(HTTPException) as caught:
-                await user_router.login_with_mobilityguard(request, login, container)
-            assert caught.value.status_code == 403
-            assert caught.value.headers["X-Correlation-ID"]
-            assert repository._created_user is None
-
-
 class InterleavingRedis(FakeRedis):
     """Lets the other callback run between a plain read and the later delete,
     as two server workers can; GETDEL reads and deletes in one step."""

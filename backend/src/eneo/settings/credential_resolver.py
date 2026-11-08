@@ -386,7 +386,7 @@ class CredentialResolver:
                 and self.settings.oidc_client_secret
             ):
                 config = {
-                    "provider": "mobilityguard",  # Legacy global provider
+                    "provider": "default",
                     "discovery_endpoint": self.settings.oidc_discovery_endpoint,
                     "client_id": self.settings.oidc_client_id,
                     "client_secret": self.settings.oidc_client_secret,

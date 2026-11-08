@@ -10,6 +10,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 UPGRADE_GUIDE_URL = "https://docs.eneo.ai/v2.2/guides/upgrade-2-2-0"
+OIDC_MIGRATION_GUIDE_URL = (
+    "https://docs.eneo.ai/guides/oidc-federation"
+    "#migrate-from-the-mobilityguard-settings"
+)
 
 
 @dataclass(frozen=True)
@@ -17,6 +21,13 @@ class RemovedVariable:
     name: str
     replacement: str | None = None
     note: str = ""
+    removed_in: str | None = "Eneo 2.2"
+    guide_url: str = UPGRADE_GUIDE_URL
+
+    @property
+    def no_longer_read(self) -> str:
+        removed = f" (removed in {self.removed_in})" if self.removed_in else ""
+        return f"{self.name} is no longer read{removed}."
 
 
 _MODULES_PERMISSION_NOTE = (
@@ -27,6 +38,15 @@ REMOVED_VARIABLES: tuple[RemovedVariable, ...] = (
     RemovedVariable("INTRIC_SUPER_API_KEY", replacement="ENEO_SUPER_API_KEY"),
     RemovedVariable("INTRIC_SUPER_DUPER_API_KEY", note=_MODULES_PERMISSION_NOTE),
     RemovedVariable("ENEO_SUPER_DUPER_API_KEY", note=_MODULES_PERMISSION_NOTE),
+    *(
+        RemovedVariable(
+            f"MOBILITYGUARD_{suffix}",
+            replacement=f"OIDC_{suffix}",
+            removed_in=None,
+            guide_url=OIDC_MIGRATION_GUIDE_URL,
+        )
+        for suffix in ("DISCOVERY_ENDPOINT", "CLIENT_ID", "CLIENT_SECRET", "TENANT_ID")
+    ),
 )
 
 
@@ -51,16 +71,16 @@ def check_removed_variables(
     would be lost, and the failure would otherwise surface far from its cause
     (a bare 401 on every sysadmin call).
     """
-    blocking: list[str] = []
+    blocking: list[RemovedVariable] = []
     for variable in REMOVED_VARIABLES:
         if not _is_set(variable.name, environ, values):
             continue
         if variable.replacement is None:
             logging.error(
-                "%s is no longer read (removed in Eneo 2.2). %s Remove the variable. See %s",
-                variable.name,
+                "%s %s Remove the variable. See %s",
+                variable.no_longer_read,
                 variable.note,
-                UPGRADE_GUIDE_URL,
+                variable.guide_url,
             )
         elif _is_set(variable.replacement, environ, values):
             logging.warning(
@@ -70,15 +90,16 @@ def check_removed_variables(
                 variable.name,
             )
         else:
-            blocking.append(
-                f"{variable.name} is no longer read (removed in Eneo 2.2). "
-                f"Rename it to {variable.replacement}."
-            )
+            blocking.append(variable)
 
     if blocking:
+        guides = dict.fromkeys(variable.guide_url for variable in blocking)
         logging.error(
             "Eneo cannot start while removed environment variables are set:\n  %s\nSee %s",
-            "\n  ".join(blocking),
-            UPGRADE_GUIDE_URL,
+            "\n  ".join(
+                f"{variable.no_longer_read} Rename it to {variable.replacement}."
+                for variable in blocking
+            ),
+            "\n  ".join(guides),
         )
         sys.exit(1)

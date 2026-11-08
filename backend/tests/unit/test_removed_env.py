@@ -6,6 +6,7 @@ from pydantic import ValidationError
 
 from eneo.main.config import Settings
 from eneo.main.removed_env import (
+    OIDC_MIGRATION_GUIDE_URL,
     REMOVED_VARIABLES,
     UPGRADE_GUIDE_URL,
     check_removed_variables,
@@ -118,3 +119,44 @@ def test_settings_only_warns_when_the_replacement_is_also_set(
         "INTRIC_SUPER_API_KEY is ignored because ENEO_SUPER_API_KEY is set"
         in caplog.text
     )
+
+
+MOBILITYGUARD_RENAMES = [
+    ("MOBILITYGUARD_DISCOVERY_ENDPOINT", "OIDC_DISCOVERY_ENDPOINT"),
+    ("MOBILITYGUARD_CLIENT_ID", "OIDC_CLIENT_ID"),
+    ("MOBILITYGUARD_CLIENT_SECRET", "OIDC_CLIENT_SECRET"),
+    ("MOBILITYGUARD_TENANT_ID", "OIDC_TENANT_ID"),
+]
+
+
+@pytest.mark.parametrize("name, replacement", MOBILITYGUARD_RENAMES)
+def test_mobilityguard_variable_without_its_oidc_name_stops_startup(
+    name: str, replacement: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    with pytest.raises(SystemExit):
+        check_removed_variables({name: "old"}, {})
+
+    assert f"Rename it to {replacement}" in caplog.text
+    assert OIDC_MIGRATION_GUIDE_URL in caplog.text
+    assert "Eneo 2.2" not in caplog.text
+
+
+@pytest.mark.parametrize("name, replacement", MOBILITYGUARD_RENAMES)
+def test_mobilityguard_variable_next_to_its_oidc_name_only_warns(
+    name: str, replacement: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.WARNING)
+
+    check_removed_variables({name: "old"}, {replacement.lower(): "new"})
+
+    assert f"{name} is ignored because {replacement} is set" in caplog.text
+
+
+def test_settings_refuses_a_mobilityguard_variable_from_an_env_file(
+    tmp_path,
+) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text("MOBILITYGUARD_CLIENT_ID=old\n", encoding="utf-8")
+
+    with pytest.raises(SystemExit):
+        Settings(_env_file=env_file)
