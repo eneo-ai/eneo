@@ -4505,10 +4505,13 @@ class AssistantService:
 
         # An assistant with specialists orchestrates its own answer when its
         # effective model can call tools; a mention (tool_assistant_id) asks
-        # one assistant directly, as before.
+        # one assistant directly, as before. A widget visitor has no user row
+        # to authorize each consultation against, so a widget's assistant
+        # answers alone.
         if (
             delegation_plan is None
             and tool_assistant_id is None
+            and self.user.active_widget is None
             and assistant_to_ask.specialists
             and effective_completion_model.supports_tool_calling
         ):

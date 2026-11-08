@@ -541,6 +541,53 @@ def specialist_plan(turn: TurnFixture, monkeypatch: pytest.MonkeyPatch, speciali
     )
 
 
+async def test_a_widget_visitor_is_answered_by_the_assistant_alone(turn: TurnFixture):
+    """Each consultation is authorized against the asker's user row, which a
+    widget visitor does not have; the widget's assistant answers without its
+    specialists instead of failing."""
+    from eneo.actors import ActorFactory, ActorManager
+    from eneo.widgets.application.visitor_user import build_visitor_user
+    from eneo.widgets.domain.widget import Widget
+
+    specialist = copy.deepcopy(turn.assistant)
+    specialist.id = uuid4()
+    give_specialists(turn, specialist)
+    widget = Widget.create(
+        tenant_id=turn.user.tenant_id,
+        space_id=turn.space.id,
+        target_id=turn.assistant.id,
+        name="Procurement widget",
+    ).model_copy(update={"id": uuid4()})
+    visitor = build_visitor_user(widget, uuid4(), turn.user.tenant)
+    turn.service.user = visitor
+    turn.service.actor_manager = ActorManager(user=visitor, factory=ActorFactory())
+    turn.space.members.clear()
+    offered: list[object] = []
+
+    async def answer(**kwargs: object):
+        offered.append(kwargs.get("tools"))
+        return response("Check the policy.", stream=True)
+
+    turn.provider.side_effect = answer
+
+    async with turn.service.repo.session.begin():
+        reply = await turn.service.ask(
+            question="Which policy applies?",
+            assistant_id=turn.assistant.id,
+            stream=True,
+            version=2,
+        )
+    events = [event async for event in reply.answer]
+
+    assert [
+        event.response_type
+        for event in events
+        if event.response_type in (ResponseType.ERROR, ResponseType.CONSULTATION)
+    ] == []
+    assert "".join(event.text or "" for event in events) == "Check the policy."
+    assert offered == [None]
+
+
 @pytest.mark.parametrize(
     "change",
     ["membership", "disabled_user", "classification", "prompt", "skill_policy"],

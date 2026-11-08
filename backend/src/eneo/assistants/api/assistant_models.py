@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncIterable
 from datetime import datetime
 from enum import Enum
 from typing import Optional, Union
@@ -415,7 +415,7 @@ class AssistantResponse(BaseModel):
     # The files the answer's tools made; only known up front for a complete
     # (non-streaming) answer, since a stream delivers each file as it comes.
     generated_files: list[File] = Field(default_factory=_empty_file_list)
-    answer: str | AsyncGenerator[Completion, None]
+    answer: str | AsyncIterable[Completion]
     info_blobs: list[InfoBlobInDBWithScore]
     completion_model: CompletionModel | CompletionModelPublic
     tools: UseTools
