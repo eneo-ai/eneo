@@ -22,7 +22,8 @@ with this code:
     psql -c "CREATE TABLE group_chats (id uuid, space_id uuid, icon_id uuid)"
     alembic upgrade 202611031206
     psql -c "DROP TABLE group_chats"
-    alembic stamp head
+    alembic stamp 202610221200
+    alembic upgrade head
 
 The empty table only lets those two revisions run; this revision and the
 two before it are already applied.
