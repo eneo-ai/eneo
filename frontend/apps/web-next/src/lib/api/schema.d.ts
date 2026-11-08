@@ -12777,6 +12777,11 @@ export interface components {
       code_verifier?: string | null;
       /** Iss */
       iss?: string | null;
+      /**
+       * Binding Verifier
+       * @description The secret whose S256 hash was sent as binding_challenge at initiate. Required for a bound sign-in and refused for an unbound one.
+       */
+      binding_verifier?: string | null;
     };
     /**
      * CapabilityActivationResponse
@@ -60680,6 +60685,8 @@ export interface operations {
         state?: string | null;
         /** @description Optional redirect URI override. Must exactly match a configured redirect URI for the tenant. */
         redirect_uri?: string | null;
+        /** @description Optional base64url S256 hash of a secret the client keeps (RFC 7636 4.2). The callback then needs that secret as binding_verifier. Create the secret from at least 32 random bytes. */
+        binding_challenge?: string | null;
       };
       header?: never;
       path?: never;
@@ -60764,7 +60771,7 @@ export interface operations {
           "application/json": components["schemas"]["AccessTokenResponse"];
         };
       };
-      /** @description Invalid or expired state */
+      /** @description Invalid or expired state, or a binding_verifier that does not match the sign-in (oidc_transaction_invalid) */
       400: {
         headers: {
           [name: string]: unknown;

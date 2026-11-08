@@ -18,15 +18,21 @@ export function initAuth(client) {
      * @param {Object} params
      * @param {string} params.tenant - Tenant slug
      * @param {string} [params.state] - Optional state parameter
+     * @param {string} [params.bindingChallenge] - Base64url S256 hash of a secret the
+     *   caller keeps (at least 32 random bytes); the callback then needs that secret as
+     *   `bindingVerifier`
      * @returns {Promise<import("../types/resources").InitiateAuthResponse>}
      */
-    initiateAuth: async ({ tenant, state }) => {
+    initiateAuth: async ({ tenant, state, bindingChallenge }) => {
       return await client.fetch("/api/v1/auth/initiate", {
         method: "get",
         params: {
           query: {
             tenant,
-            ...(state && { state })
+            ...(state && { state }),
+            // An empty value is sent too, so the backend refuses it instead of
+            // starting an unbound sign-in.
+            ...(bindingChallenge != null && { binding_challenge: bindingChallenge })
           }
         }
       });
@@ -39,9 +45,11 @@ export function initAuth(client) {
      * @param {string} params.state - State parameter for CSRF protection
      * @param {string} [params.codeVerifier] - Ignored by the backend, which keeps the PKCE verifier itself
      * @param {string} [params.iss] - The provider's `iss` redirect parameter (RFC 9207), when it sent one
+     * @param {string} [params.bindingVerifier] - The secret behind the `bindingChallenge`
+     *   sent at initiate; required when one was sent
      * @returns {Promise<import("../types/resources").AccessTokenResponse>}
      */
-    handleAuthCallback: async ({ code, state, codeVerifier, iss }) => {
+    handleAuthCallback: async ({ code, state, codeVerifier, iss, bindingVerifier }) => {
       /** @type {import("../types/resources").AccessTokenResponse} */
       // @ts-ignore - response type is unknown in schema
       const res = await client.fetch("/api/v1/auth/callback", {
@@ -51,7 +59,8 @@ export function initAuth(client) {
             code,
             state,
             ...(codeVerifier && { code_verifier: codeVerifier }),
-            ...(iss && { iss })
+            ...(iss && { iss }),
+            ...(bindingVerifier != null && { binding_verifier: bindingVerifier })
           }
         }
       });

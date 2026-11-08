@@ -57,6 +57,7 @@ from eneo.authentication.federation_router import (
     initiate_federated_sign_in,
 )
 from eneo.authentication.oidc.errors import OidcSignInError
+from eneo.authentication.oidc.transaction import code_challenge
 from eneo.main.config import (
     LOOPBACK_HOSTS,
     get_settings,
@@ -394,6 +395,9 @@ async def initiate_browser_federation(
                 tenant=tenant,
                 state=binding,
                 redirect_uri_param=origin + path,
+                channel="browser",
+                # Only the browser holding the cookie can redeem the sign-in.
+                binding_challenge=code_challenge(transaction),
             )
         except HTTPException as exc:
             if exc.status_code == 400 and exc.detail.startswith(
@@ -583,7 +587,11 @@ async def complete_browser_federation(
         return _federation_failure("no_code_received", next_path=diagnostics.next_path)
     try:
         token = await federated_sign_in(
-            CallbackRequest(code=code, state=state, iss=iss), container
+            CallbackRequest(
+                code=code, state=state, iss=iss, binding_verifier=transaction
+            ),
+            container,
+            channel="browser",
         )
     except HTTPException as exc:
         diagnostics.public_detail = exc.detail
