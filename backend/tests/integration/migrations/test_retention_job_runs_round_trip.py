@@ -20,7 +20,7 @@ from eneo.database.tables.sessions_table import Sessions
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
-PRE_REVISION = "202610011100"
+PRE_REVISION = "202611031206"
 REVISION = "202610071400"
 _TABLES = (RetentionJobRuns, Files, Questions, AppRuns, Sessions, InfoBlobReferences)
 _ADOPTER_INDEXES = frozenset(
