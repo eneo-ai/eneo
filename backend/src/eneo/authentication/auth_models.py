@@ -788,8 +788,8 @@ DEFAULT_EMAIL_VERIFIED_CLAIMS = ("email_verified", "xms_edov")
 class FederatedIdentity(BaseModel):
     """Email identity extracted only after the OIDC token has been validated.
 
-    Issuer, audience and subject are the key an account is bound to
-    (``identity_bindings``).
+    Issuer, audience, subject claim and subject are the key an account is
+    bound to (``identity_bindings``).
     """
 
     model_config = ConfigDict(frozen=True)
@@ -799,6 +799,9 @@ class FederatedIdentity(BaseModel):
     # sign-in's ID token (aud/azp), or the accepted API audience of a
     # provider's access token. Never invented for a path that proves neither.
     audience: str = Field(min_length=1)
+    # The claim the subject was read from. Another claim's values are another
+    # namespace: the same value there may name someone else.
+    subject_claim: str = Field(default="sub", min_length=1)
     subject: str = Field(min_length=1)
     email: EmailStr
     email_verified: bool = Field(strict=True)
@@ -839,6 +842,7 @@ class FederatedIdentity(BaseModel):
             return cls(
                 issuer=issuer,
                 audience=audience,
+                subject_claim=subject_claim,
                 subject=subject,
                 email=email,
                 # The verification claims verify the standard email, not an

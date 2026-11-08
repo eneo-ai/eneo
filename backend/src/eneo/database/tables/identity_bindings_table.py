@@ -20,7 +20,9 @@ class IdentityBindings(IdMixin, CreatedAtMixin, BaseWithTableName):
 
     The key is the issuer, the verified audience the subject belongs to (the
     client id of a browser sign-in's ID token, or the accepted API audience of
-    a provider's access token) and the subject, within one tenant. A sign-in
+    a provider's access token), the claim the subject was read from and the
+    subject, within one tenant. A binding made under another subject claim
+    never matches, since its values may name other people. A sign-in
     that presents a bound key reaches its account without its email being
     consulted. A removed account keeps its bindings: SCIM reactivation reuses
     the row, so the identity stays reserved for it.
@@ -34,6 +36,7 @@ class IdentityBindings(IdMixin, CreatedAtMixin, BaseWithTableName):
     )
     issuer: Mapped[str] = mapped_column(nullable=False)
     audience: Mapped[str] = mapped_column(nullable=False)
+    subject_claim: Mapped[str] = mapped_column(nullable=False)
     subject: Mapped[str] = mapped_column(nullable=False)
 
     __table_args__ = (
@@ -42,6 +45,7 @@ class IdentityBindings(IdMixin, CreatedAtMixin, BaseWithTableName):
         UniqueConstraint(
             "tenant_id",
             "issuer",
+            "subject_claim",
             "subject",
             "audience",
             name="identity_bindings_identity_key",

@@ -196,13 +196,14 @@ The organisation field `zitadel_org_id` in the sysadmin tenant API is not used b
 
 ## Account Binding
 
-Eneo remembers which provider identity signs in to each account. An identity is three values from the verified token:
+Eneo remembers which provider identity signs in to each account. An identity is four values from the verified token:
 
 | Value | What it is |
 |-------|------------|
 | Issuer | The token's `iss` |
 | Audience | For browser sign-in, Eneo's client ID at the provider. For a provider access token sent to the API as Bearer, the accepted API audience (`OIDC_ACCEPTED_AUDIENCE`) |
-| Subject | The value of the [subject claim](#the-subject-claim), `sub` by default |
+| Subject claim | The name of the [subject claim](#the-subject-claim) the subject was read from, `sub` by default |
+| Subject | The value of that claim |
 
 How a sign-in finds its account:
 
@@ -218,7 +219,7 @@ The subject claim is `claims_mapping.subject` in the provider config, `sub` by d
 
 Set it with `subject_claim` in the federation `PUT` or `PATCH` (`/api/v1/sysadmin/tenants/{tenant_id}/federation`, with the super API key), or as an administrator with `PATCH /api/v1/admin/federation`. A `PUT` without it stores `sub`, a `PATCH` without it keeps the stored claim, and the email claim is refused with `422` (`federation_subject_claim_is_email_claim`). Both `GET` answers show it, and a change is audited as `federation_updated`. Configuration by environment variables always uses `sub`.
 
-Changing the subject claim once people are bound changes every subject under the issuer, for every audience. Before you change it, open a migration window from each issuer and audience people use to itself, for example one for the browser client and one for the API audience: a pair without its own window is refused `subject_mismatch`.
+Changing the subject claim once people are bound changes every subject under the issuer, for every audience. A binding names the claim it was made under and never matches a sign-in under another claim, even with the same value, since the new claim's values may belong to other people. After the change, a person's sign-in finds the account by its email, and the old binding under the pair refuses it unless a window replaces it. Before you change it, open a migration window from each issuer and audience people use to itself, for example one for the browser client and one for the API audience: a pair without its own window is refused `subject_mismatch`.
 
 ### Sign-in conflicts
 
@@ -242,14 +243,14 @@ Two administrator tools let the email bind an account that is already bound. Bot
 |-|----------------------|------------------|
 | Covers | One account | Every account bound under one issuer and audience |
 | Lasts | Until `allowed_until` or the account's next sign-in by email, whichever comes first: single use | Until `closes_at` or until it is closed, for every account |
-| Binds | The presented identity: adds its issuer and audience, or replaces the account's subject there | From one pair to another: adds the new pair and keeps the old, so both keep signing in. From a pair to itself: replaces the subject there, once per account bound before the window opened, whether the email or the new subject under another audience finds the account |
+| Binds | The presented identity: adds its issuer and audience, or replaces the account's subject there | From one pair to another: adds the new pair and keeps the old, so both keep signing in. From a pair to itself: replaces the subject there, with its claim, once per account bound before the window opened, whether the email or the new subject under another audience finds the account |
 | For | One person with a new identity at the provider | A new client ID, a second entry point, a subject claim change |
 
 The endpoints, under `/api/v1/admin`:
 
 | Request | Body | Answer |
 |---------|------|--------|
-| `GET /users/{username}/identity` | | `{"bindings": [{"issuer", "audience", "subject", "created_at"}], "rebinding_allowed_until"}` |
+| `GET /users/{username}/identity` | | `{"bindings": [{"issuer", "audience", "subject_claim", "subject", "created_at"}], "rebinding_allowed_until"}` |
 | `PUT /users/{username}/identity/rebinding` | `{"allowed_until"}` | The same shape |
 | `DELETE /users/{username}/identity/rebinding` | | The same shape |
 | `GET /identity-migration-windows` | | The open windows |

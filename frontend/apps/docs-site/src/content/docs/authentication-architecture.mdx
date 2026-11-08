@@ -492,7 +492,7 @@ The verification claims and their order come from the provider's `email_verified
 
 ### User Claims Extracted
 
-Two claims are used: the email claim (`claims_mapping.email`, default `email`) and the subject claim (`claims_mapping.subject`, default `sub`). The issuer, the audience and the subject select the account the identity is bound to; see [Account Binding](/guides/oidc-federation#account-binding).
+Two claims are used: the email claim (`claims_mapping.email`, default `email`) and the subject claim (`claims_mapping.subject`, default `sub`). The issuer, the audience, the subject claim's name and its value select the account the identity is bound to; see [Account Binding](/guides/oidc-federation#account-binding).
 
 A missing claim is rejected with `401 Email claim not found in ID token`; a malformed address with `401 Email claim from identity provider is invalid. Contact your administrator.`
 

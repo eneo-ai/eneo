@@ -288,6 +288,7 @@ async def test_another_subject_under_the_bound_pair_is_refused_and_writes_nothin
         "reason": "subject_mismatch",
         "issuer": provider.issuer,
         "audience": _audience(entry),
+        "subject_claim": "sub",
         "subject": "someone-else",
         "account_ids": [str(account)],
         "correlation_id": None,
@@ -307,6 +308,7 @@ async def test_a_bound_account_takes_no_new_pair_by_email(
                 user_id=account,
                 issuer=provider.issuer,
                 audience="retired-client",
+                subject_claim="sub",
                 subject="person-old",
             )
         )

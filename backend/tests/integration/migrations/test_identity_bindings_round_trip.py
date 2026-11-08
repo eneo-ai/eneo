@@ -104,7 +104,7 @@ def test_bindings_and_rebinding_round_trip_keeping_accounts() -> None:
                 "tables": {"identity_bindings", "identity_migration_windows"},
                 "rebinding_column": True,
                 "unique": [
-                    ("tenant_id", "issuer", "subject", "audience"),
+                    ("tenant_id", "issuer", "subject_claim", "subject", "audience"),
                     ("user_id", "issuer", "audience"),
                 ],
             }
@@ -117,8 +117,8 @@ def test_bindings_and_rebinding_round_trip_keeping_accounts() -> None:
                 assert cursor.fetchone() == (None,)
                 cursor.execute(
                     "INSERT INTO identity_bindings"
-                    " (tenant_id, user_id, issuer, audience, subject)"
-                    " VALUES (%s, %s, 'https://idp', 'client', 'subject')",
+                    " (tenant_id, user_id, issuer, audience, subject_claim, subject)"
+                    " VALUES (%s, %s, 'https://idp', 'client', 'sub', 'subject')",
                     (str(tenant_id), str(user_id)),
                 )
                 # A window may lead to its own pair (a new subject claim).

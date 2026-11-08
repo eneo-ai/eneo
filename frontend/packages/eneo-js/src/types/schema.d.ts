@@ -16144,6 +16144,11 @@ export interface components {
        * @description The client id of a browser sign-in, or the accepted API audience of a provider's access token.
        */
       audience: string;
+      /**
+       * Subject Claim
+       * @description The token claim the subject was read from; a sign-in under another subject claim does not match this binding.
+       */
+      subject_claim: string;
       /** Subject */
       subject: string;
       /**

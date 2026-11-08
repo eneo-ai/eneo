@@ -17,27 +17,39 @@ class IdentityBindingsInMemory:
         self.rebinding: set[UUID] = set()
 
     async def holder(
-        self, *, tenant_id: UUID, issuer: str, audience: str, subject: str
+        self,
+        *,
+        tenant_id: UUID,
+        issuer: str,
+        audience: str,
+        subject_claim: str,
+        subject: str,
     ) -> UUID | None:
         return next(
             (
                 user_id
                 for tenant, user_id, binding in self.rows
                 if tenant == tenant_id
-                and (binding.issuer, binding.audience, binding.subject)
-                == (issuer, audience, subject)
+                and (
+                    binding.issuer,
+                    binding.audience,
+                    binding.subject_claim,
+                    binding.subject,
+                )
+                == (issuer, audience, subject_claim, subject)
             ),
             None,
         )
 
     async def holders_of_subject(
-        self, *, tenant_id: UUID, issuer: str, subject: str
+        self, *, tenant_id: UUID, issuer: str, subject_claim: str, subject: str
     ) -> list[UUID]:
         holders = {
             user_id
             for tenant, user_id, binding in self.rows
             if tenant == tenant_id
-            and (binding.issuer, binding.subject) == (issuer, subject)
+            and (binding.issuer, binding.subject_claim, binding.subject)
+            == (issuer, subject_claim, subject)
         }
         return sorted(holders)[:2]
 
@@ -51,17 +63,24 @@ class IdentityBindingsInMemory:
         user_id: UUID,
         issuer: str,
         audience: str,
+        subject_claim: str,
         subject: str,
     ) -> bool:
         taken = await self.holder(
-            tenant_id=tenant_id, issuer=issuer, audience=audience, subject=subject
+            tenant_id=tenant_id,
+            issuer=issuer,
+            audience=audience,
+            subject_claim=subject_claim,
+            subject=subject,
         )
         if taken is not None or any(
             (binding.issuer, binding.audience) == (issuer, audience)
             for binding in await self.of_user(user_id)
         ):
             return False
-        binding = IdentityBinding(issuer, audience, subject, datetime.now(timezone.utc))
+        binding = IdentityBinding(
+            issuer, audience, subject_claim, subject, datetime.now(timezone.utc)
+        )
         self.rows.append((tenant_id, user_id, binding))
         return True
 

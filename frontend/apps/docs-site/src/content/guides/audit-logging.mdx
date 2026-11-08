@@ -42,8 +42,8 @@ Four security events record which account a provider identity reaches (see [Acco
 
 | Action | Written when | Metadata |
 |--------|--------------|----------|
-| `identity_bound` (Sign-in Identity Linked) | A sign-in binds an identity to an account | `issuer`, `audience`, `subject`, `method` (`email_match`, `jit`, `same_subject`, `migration_window` or `admin_allowance`), `window_id` for a window, `replaced_subject` when a subject was replaced, `correlation_id` |
-| `identity_conflict` (Sign-in Identity Refused) | A sign-in is refused because its identity cannot be bound; outcome failure | `reason`, `issuer`, `audience`, `subject`, `account_ids`, `correlation_id` |
+| `identity_bound` (Sign-in Identity Linked) | A sign-in binds an identity to an account | `issuer`, `audience`, `subject_claim`, `subject`, `method` (`email_match`, `jit`, `same_subject`, `migration_window` or `admin_allowance`), `window_id` for a window, `replaced_subject_claim` and `replaced_subject` when a subject was replaced, `correlation_id` |
+| `identity_conflict` (Sign-in Identity Refused) | A sign-in is refused because its identity cannot be bound; outcome failure | `reason`, `issuer`, `audience`, `subject_claim`, `subject`, `account_ids`, `correlation_id` |
 | `identity_rebinding_updated` (Sign-in Re-linking Changed) | An administrator opens or withdraws an account's re-binding allowance | The administrator, the account and the old and new `rebinding_allowed_until` |
 | `identity_migration_window_updated` (Sign-in Migration Window Changed) | An administrator opens or closes a migration window | `change` (`opened` or `closed`), `window_id`, `from_issuer`, `from_audience`, `to_issuer`, `to_audience`, `closes_at` |
 

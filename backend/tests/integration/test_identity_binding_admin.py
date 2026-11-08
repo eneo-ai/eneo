@@ -148,9 +148,12 @@ async def test_the_identity_view_shows_the_bindings_and_the_allowance(
     assert response.status_code == 200, response.text
     body = response.json()
     [binding] = body["bindings"]
-    assert {k: binding[k] for k in ("issuer", "audience", "subject")} == {
+    assert {
+        k: binding[k] for k in ("issuer", "audience", "subject_claim", "subject")
+    } == {
         "issuer": ISSUER,
         "audience": "client-a",
+        "subject_claim": "sub",
         "subject": "anna-1",
     }
     assert binding["created_at"]

@@ -1,8 +1,8 @@
 """The provider identities bound to accounts, and the two ways to re-bind.
 
 ``UserService.resolve_federated_user`` owns the decision; this module stores
-it. A binding is unique per (tenant, issuer, audience, subject) and per
-(account, issuer, audience). Inserts never raise on a lost race: they insert
+it. A binding is unique per (tenant, issuer, audience, subject claim,
+subject) and per (account, issuer, audience). Inserts never raise on a lost race: they insert
 nothing and the caller re-reads.
 """
 
@@ -42,6 +42,7 @@ class IdentityConflictError(FederatedLoginDenied):
 class IdentityBinding:
     issuer: str
     audience: str
+    subject_claim: str
     subject: str
     created_at: datetime
 
@@ -73,20 +74,27 @@ class IdentityBindingRepository:
         self.session = session
 
     async def holder(
-        self, *, tenant_id: UUID, issuer: str, audience: str, subject: str
+        self,
+        *,
+        tenant_id: UUID,
+        issuer: str,
+        audience: str,
+        subject_claim: str,
+        subject: str,
     ) -> UUID | None:
         """The account this exact identity is bound to."""
         return await self.session.scalar(
             sa.select(IdentityBindings.user_id).where(
                 IdentityBindings.tenant_id == tenant_id,
                 IdentityBindings.issuer == issuer,
+                IdentityBindings.subject_claim == subject_claim,
                 IdentityBindings.subject == subject,
                 IdentityBindings.audience == audience,
             )
         )
 
     async def holders_of_subject(
-        self, *, tenant_id: UUID, issuer: str, subject: str
+        self, *, tenant_id: UUID, issuer: str, subject_claim: str, subject: str
     ) -> list[UUID]:
         """Up to two accounts that hold this subject under any audience."""
         rows = await self.session.scalars(
@@ -94,6 +102,7 @@ class IdentityBindingRepository:
             .where(
                 IdentityBindings.tenant_id == tenant_id,
                 IdentityBindings.issuer == issuer,
+                IdentityBindings.subject_claim == subject_claim,
                 IdentityBindings.subject == subject,
             )
             .distinct()
@@ -106,6 +115,7 @@ class IdentityBindingRepository:
             sa.select(
                 IdentityBindings.issuer,
                 IdentityBindings.audience,
+                IdentityBindings.subject_claim,
                 IdentityBindings.subject,
                 IdentityBindings.created_at,
             )
@@ -121,6 +131,7 @@ class IdentityBindingRepository:
         user_id: UUID,
         issuer: str,
         audience: str,
+        subject_claim: str,
         subject: str,
     ) -> bool:
         """Insert the binding; False when either unique key is already taken."""
@@ -131,6 +142,7 @@ class IdentityBindingRepository:
                 user_id=user_id,
                 issuer=issuer,
                 audience=audience,
+                subject_claim=subject_claim,
                 subject=subject,
             )
             .on_conflict_do_nothing()

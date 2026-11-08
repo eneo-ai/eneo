@@ -983,7 +983,11 @@ async def test_a_configured_subject_claim_names_the_identity(monkeypatch):
     await login.sign_in()
 
     (identity,) = seen
-    assert (identity.audience, identity.subject) == (provider.client_id, "person-0001")
+    assert (identity.audience, identity.subject_claim, identity.subject) == (
+        provider.client_id,
+        "oid",
+        "person-0001",
+    )
 
 
 @pytest.mark.parametrize("value", [DROP, 7, ""], ids=["missing", "number", "empty"])
@@ -1260,6 +1264,7 @@ class TestHttpAnswers:
             user_id=login.users._user.id,
             issuer=login.provider.issuer,
             audience=login.provider.client_id,
+            subject_claim="sub",
             subject="another-subject",
         )
 

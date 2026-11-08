@@ -287,6 +287,10 @@ class IdentityBindingPublic(BaseModel):
         description="The client id of a browser sign-in, or the accepted API "
         "audience of a provider's access token."
     )
+    subject_claim: str = Field(
+        description="The token claim the subject was read from; a sign-in "
+        "under another subject claim does not match this binding."
+    )
     subject: str
     created_at: datetime
 

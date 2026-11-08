@@ -4,7 +4,8 @@ Revision ID: 202611091010
 Revises: 202611091000
 Create Date: 2026-11-09 10:10:00.000000
 
-identity_bindings maps (tenant, issuer, audience, subject) to one account.
+identity_bindings maps (tenant, issuer, audience, subject claim, subject) to
+one account.
 identity_migration_windows and users.identity_rebinding_until are the two
 explicit ways an organisation admin lets an already bound account take a new
 identity by its email. Existing accounts start unbound: their next sign-in
@@ -64,11 +65,13 @@ def upgrade() -> None:
         ),
         sa.Column("issuer", sa.String(), nullable=False),
         sa.Column("audience", sa.String(), nullable=False),
+        sa.Column("subject_claim", sa.String(), nullable=False),
         sa.Column("subject", sa.String(), nullable=False),
         _created_at(),
         sa.UniqueConstraint(
             "tenant_id",
             "issuer",
+            "subject_claim",
             "subject",
             "audience",
             name="identity_bindings_identity_key",

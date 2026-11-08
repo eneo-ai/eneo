@@ -598,7 +598,7 @@ async def test_the_tenant_subject_claim_names_the_token_identity(setup, monkeypa
     )
 
     (identity,) = seen
-    assert identity.subject == "person-1"
+    assert (identity.subject_claim, identity.subject) == ("oid", "person-1")
 
 
 @pytest.mark.asyncio
@@ -629,6 +629,7 @@ async def test_a_conflicting_identity_is_refused_typed(setup):
         user_id=setup.user.id,
         issuer=ISSUER,
         audience=AUDIENCE,
+        subject_claim="sub",
         subject="another-subject",
     )
 

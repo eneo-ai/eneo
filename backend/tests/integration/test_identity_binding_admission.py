@@ -58,10 +58,12 @@ def sign_in(db_container, test_tenant):
         *,
         email: str = EMAIL,
         issuer: str = ISSUER,
+        subject_claim: str = "sub",
     ) -> UserInDB:
         identity = FederatedIdentity(
             issuer=issuer,
             audience=audience,
+            subject_claim=subject_claim,
             subject=subject,
             email=email,
             email_verified=True,
@@ -113,6 +115,7 @@ async def _bind(tenant_id: UUID, user_id: UUID, subject: str, audience: str) -> 
             user_id=user_id,
             issuer=ISSUER,
             audience=audience,
+            subject_claim="sub",
             subject=subject,
         )
     )
@@ -123,6 +126,17 @@ async def _bindings(user_id: UUID | None = None) -> set[tuple[str, str]]:
     query = sa.select(IdentityBindings.audience, IdentityBindings.subject)
     if user_id is not None:
         query = query.where(IdentityBindings.user_id == user_id)
+    async with sessionmanager.session() as session, session.begin():
+        return set((await session.execute(query)).tuples())
+
+
+async def _claimed_bindings() -> set[tuple[UUID, str, str]]:
+    """(account, subject claim, subject) of every binding."""
+    query = sa.select(
+        IdentityBindings.user_id,
+        IdentityBindings.subject_claim,
+        IdentityBindings.subject,
+    )
     async with sessionmanager.session() as session, session.begin():
         return set((await session.execute(query)).tuples())
 
@@ -448,6 +462,43 @@ async def test_a_pair_without_its_own_same_pair_window_is_refused(
     assert [c["reason"] for c in _conflicts(enqueued)] == ["subject_mismatch"]
 
 
+@pytest.mark.parametrize("window", [False, True], ids=["no-window", "same-pair-window"])
+async def test_a_new_subject_claim_never_signs_one_person_in_to_another(
+    sign_in, test_tenant, enqueued, window
+):
+    """Under the old claim A is "x" and B is "y"; the new claim gives each the
+    other's value. A binding names its claim, so B's new "x" is not A's old
+    one: each reaches their own account through the email, and only a window
+    replaces their binding."""
+    a = await _user_id()
+    b = await _add_user(test_tenant.id, "b@example.com")
+    await sign_in("x")
+    await sign_in("y", email="b@example.com")
+    if window:
+        await _open_window(test_tenant.id, "client-a", "client-a", timedelta(days=1))
+
+    reached: list[UUID | str] = []
+    for subject, email in (("x", "b@example.com"), ("y", EMAIL)):
+        try:
+            user = await sign_in(subject, email=email, subject_claim="oid")
+            reached.append(user.id)
+        except IdentityConflictError as refused:
+            reached.append(refused.reason)
+
+    if window:
+        assert reached == [b, a]
+        assert await _claimed_bindings() == {(b, "oid", "x"), (a, "oid", "y")}
+        moved = (await _bound_audits(b))[-1]
+        assert (moved["subject_claim"], moved["replaced_subject_claim"]) == (
+            "oid",
+            "sub",
+        )
+    else:
+        assert reached == ["subject_mismatch", "subject_mismatch"]
+        assert await _claimed_bindings() == {(a, "sub", "x"), (b, "sub", "y")}
+        assert {c["subject_claim"] for c in _conflicts(enqueued)} == {"oid"}
+
+
 @pytest.mark.parametrize("closed", ["closed", "expired"])
 async def test_a_same_pair_window_no_longer_open_replaces_nothing(
     sign_in, test_tenant, enqueued, closed
@@ -508,6 +559,7 @@ async def test_a_same_pair_window_loses_a_key_taken_while_it_waited(
                 user_id=holder,
                 issuer=ISSUER,
                 audience="client-a",
+                subject_claim="sub",
                 subject="person-b",
             )
         )

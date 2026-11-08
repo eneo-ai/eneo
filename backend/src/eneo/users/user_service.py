@@ -468,8 +468,8 @@ class UserService:
         one under JIT policy.
 
         Every OIDC entry point uses this decision. The identity's binding
-        (issuer, audience, subject) decides first and the email is not
-        consulted: the email binds only an account that has no binding yet,
+        (issuer, audience, subject claim, subject) decides first and the email
+        is not consulted: the email binds only an account that has no binding yet,
         or one an admin opened (a migration window, a re-binding allowance),
         so an address reassigned at the provider cannot take over the account
         it used to name. SCIM/admin own reactivation; signing in must never
@@ -509,6 +509,7 @@ class UserService:
             tenant_id=tenant_id,
             issuer=identity.issuer,
             audience=identity.audience,
+            subject_claim=identity.subject_claim,
             subject=identity.subject,
         )
         if holder_id is not None:
@@ -523,7 +524,10 @@ class UserService:
         # OIDC never reassigns a subject within an issuer, so the subject
         # bound under another audience is the same person, whatever the email.
         holders = await bindings.holders_of_subject(
-            tenant_id=tenant_id, issuer=identity.issuer, subject=identity.subject
+            tenant_id=tenant_id,
+            issuer=identity.issuer,
+            subject_claim=identity.subject_claim,
+            subject=identity.subject,
         )
         if len(holders) > 1:
             await self._refuse_identity(
@@ -669,7 +673,8 @@ class UserService:
         and is used up. Found by its email or by the same subject under
         another audience: a window from the pair to itself, opened after the
         account was bound there, replaces the subject under it (a change of
-        subject claim).
+        subject claim). A binding under another subject claim is another
+        subject, even with the same value.
         """
         bindings = cast(IdentityBindingRepository, self.identity_binding_repo)
         user = await self.repo.get_user_by_id_for_update(user_id)
@@ -687,7 +692,10 @@ class UserService:
         )
         details: dict[str, str] = {}
         if same_pair is not None:
-            if same_pair.subject == identity.subject:
+            if (same_pair.subject_claim, same_pair.subject) == (
+                identity.subject_claim,
+                identity.subject,
+            ):
                 # Bound by a sign-in that held the lock before this one.
                 return user
             # Only a window opened after this binding replaces it, so each
@@ -713,6 +721,7 @@ class UserService:
             await bindings.unbind(
                 user_id=user.id, issuer=identity.issuer, audience=identity.audience
             )
+            details["replaced_subject_claim"] = same_pair.subject_claim
             details["replaced_subject"] = same_pair.subject
         elif bound and found_by == "email":
             window_id = await bindings.open_window(
@@ -735,6 +744,7 @@ class UserService:
         key = {
             "issuer": identity.issuer,
             "audience": identity.audience,
+            "subject_claim": identity.subject_claim,
             "subject": identity.subject,
         }
         if not await bindings.bind(tenant_id=tenant_id, user_id=user.id, **key):
@@ -788,6 +798,7 @@ class UserService:
             "reason": reason,
             "issuer": identity.issuer,
             "audience": identity.audience,
+            "subject_claim": identity.subject_claim,
             "subject": identity.subject,
             "account_ids": [str(account_id) for account_id in account_ids],
         }
