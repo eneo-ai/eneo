@@ -8,7 +8,6 @@ from sqlalchemy.orm import InstrumentedAttribute
 from eneo.database.database import AsyncSession
 from eneo.database.tables.app_table import Apps
 from eneo.database.tables.assistant_table import Assistants
-from eneo.database.tables.group_chats_table import GroupChatsTable
 from eneo.database.tables.icons_table import Icons
 from eneo.database.tables.object_content_table import (
     IconContentReferences,
@@ -39,7 +38,6 @@ ICON_REFERENCE_COLUMNS: tuple[InstrumentedAttribute[Any], ...] = (
     Assistants.icon_id,
     Apps.icon_id,
     Spaces.icon_id,
-    GroupChatsTable.icon_id,
 )
 
 # Icons shown from inside JSONB documents: the widget persona avatar on a
@@ -294,17 +292,13 @@ class IconRepository:
         await self.delete_if_unreferenced(previous)
 
     async def lock_shown_in_space(self, space_id: UUID) -> list[UUID]:
-        """Lock the space, then the assistants, apps, group chats and widgets
-        in it, as deleting the space would, and return the icons they show in
+        """Lock the space, then the assistants, apps and widgets in it, as deleting the space would, and return the icons they show in
         id order. Their icons cannot change until the delete commits."""
         icon_ids: set[UUID | None] = set()
         for shown in (
             sa.select(Spaces.icon_id).where(Spaces.id == space_id),
             sa.select(Assistants.icon_id).where(Assistants.space_id == space_id),
             sa.select(Apps.icon_id).where(Apps.space_id == space_id),
-            sa.select(GroupChatsTable.icon_id).where(
-                GroupChatsTable.space_id == space_id
-            ),
             sa.select(_json_icon_id(Widgets.persona, "avatar_icon_id")).where(
                 Widgets.space_id == space_id
             ),

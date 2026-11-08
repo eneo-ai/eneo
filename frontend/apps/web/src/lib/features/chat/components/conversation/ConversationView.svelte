@@ -58,15 +58,13 @@
   // Validate uploads client-side against the backend's per-format size limits
   // (and the partner model's vision support) so oversized or unsupported files
   // are rejected instantly with a clear message instead of silently failing the
-  // server-side request. Group-chat partners have no completion_model, so vision
-  // formats are simply omitted from the accepted set. Images are also accepted
-  // when image generation is available: the model can hand them to the image
-  // tool as reference images even without seeing them itself.
+  // server-side request. Images are also accepted when image generation is
+  // available: the model can hand them to the image tool as reference images
+  // even without seeing them itself.
   const attachmentRules = getAttachmentRulesStore(
     toStore(() => {
       const partner = chat.partner;
-      const completion_model =
-        partner && "completion_model" in partner ? partner.completion_model : null;
+      const completion_model = partner?.completion_model ?? null;
       return {
         completion_model,
         acceptsImageAttachments:

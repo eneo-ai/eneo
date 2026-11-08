@@ -7,9 +7,8 @@ Pins the three rules of the recent list against a real database:
 * ordering: latest activity (the latest question, or the creation of a
   conversation without one) first, with the limit applied after it;
 * access: a conversation is listed exactly when its own history
-  (``GET /conversations/?assistant_id=`` / ``?group_chat_id=``) opens for the
-  caller, so leaving a space, the organisation space's admin-only rule and
-  unpublished group chats for viewers hide it.
+  (``GET /conversations/?assistant_id=``) opens for the caller, so leaving a
+  space and the organisation space's admin-only rule hide it.
 """
 
 from __future__ import annotations
@@ -22,7 +21,6 @@ import pytest
 import sqlalchemy as sa
 
 from eneo.database.tables.assistant_table import Assistants
-from eneo.database.tables.group_chats_table import GroupChatsTable
 from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces, SpacesUserGroups, SpacesUsers
@@ -40,14 +38,13 @@ NOW = datetime.now(timezone.utc)
 
 @pytest.fixture
 async def member(db_container, admin_user) -> UserInDB:
-    """A user who may chat (assistants, group chats, personal chat) but is no admin."""
+    """A user who may chat (assistants, personal chat) but is no admin."""
     async with db_container() as container:
         role = await container.role_repo().create_role(
             RoleCreate(
                 name=f"chat-{uuid4().hex[:8]}",
                 permissions=[
                     Permission.ASSISTANTS,
-                    Permission.GROUP_CHATS,
                     Permission.PERSONAL_CHAT,
                 ],
                 tenant_id=admin_user.tenant_id,
@@ -125,26 +122,6 @@ async def _assistant(
     return assistant_id
 
 
-async def _group_chat(
-    db, *, space_id: UUID, owner_id: UUID, name: str, published: bool
-) -> UUID:
-    group_chat_id = uuid4()
-    await db.execute(
-        sa.insert(GroupChatsTable).values(
-            id=group_chat_id,
-            name=name,
-            user_id=owner_id,
-            space_id=space_id,
-            allow_mentions=False,
-            show_response_label=False,
-            published=published,
-            insight_enabled=False,
-            type="group-chat",
-        )
-    )
-    return group_chat_id
-
-
 async def _conversation(
     db,
     *,
@@ -152,8 +129,7 @@ async def _conversation(
     name: str,
     created: timedelta,
     asked: list[timedelta] | None = None,
-    assistant_id: UUID | None = None,
-    group_chat_id: UUID | None = None,
+    assistant_id: UUID,
 ) -> UUID:
     """A conversation created `created` ago with questions asked `asked` ago."""
     session_id = uuid4()
@@ -163,7 +139,6 @@ async def _conversation(
             name=name,
             user_id=user.id,
             assistant_id=assistant_id,
-            group_chat_id=group_chat_id,
             created_at=NOW - created,
             updated_at=NOW - created,
         )
@@ -199,8 +174,6 @@ class Scenario:
     group_space: UUID
     personal_chat: UUID
     viewer_assistant: UUID
-    published_group_chat: UUID
-    unpublished_group_chat: UUID
     left_space_assistant: UUID
     org_assistant: UUID
     group_role_assistant: UUID
@@ -233,20 +206,6 @@ async def _scenario(db_container, admin_user: UserInDB, member: UserInDB) -> Sce
         await _member_of(db, space_id=shared_space, user_id=member.id, role="viewer")
         viewer_assistant = await _assistant(
             db, space_id=shared_space, owner_id=admin_user.id, name="Avtalsgranskaren"
-        )
-        published_group_chat = await _group_chat(
-            db,
-            space_id=shared_space,
-            owner_id=admin_user.id,
-            name="Inköpsrådet",
-            published=True,
-        )
-        unpublished_group_chat = await _group_chat(
-            db,
-            space_id=shared_space,
-            owner_id=admin_user.id,
-            name="Utkast",
-            published=False,
         )
 
         # A space the member has left, and the organisation space (admins only).
@@ -307,23 +266,7 @@ async def _scenario(db_container, admin_user: UserInDB, member: UserInDB) -> Sce
             created=timedelta(hours=1),
             assistant_id=viewer_assistant,
         )
-        in_group_chat = await _conversation(
-            db,
-            user=member,
-            name="Group chat",
-            created=timedelta(days=2),
-            asked=[timedelta(hours=3)],
-            group_chat_id=published_group_chat,
-        )
         hidden = (
-            await _conversation(
-                db,
-                user=member,
-                name="Unpublished group chat",
-                created=timedelta(seconds=30),
-                asked=[timedelta(seconds=20)],
-                group_chat_id=unpublished_group_chat,
-            ),
             await _conversation(
                 db,
                 user=member,
@@ -357,12 +300,10 @@ async def _scenario(db_container, admin_user: UserInDB, member: UserInDB) -> Sce
         group_space=group_space,
         personal_chat=personal_chat,
         viewer_assistant=viewer_assistant,
-        published_group_chat=published_group_chat,
-        unpublished_group_chat=unpublished_group_chat,
         left_space_assistant=left_space_assistant,
         org_assistant=org_assistant,
         group_role_assistant=group_role_assistant,
-        listed=(old_but_active, in_group_space, never_asked, in_group_chat),
+        listed=(old_but_active, in_group_space, never_asked),
         hidden=hidden,
     )
 
@@ -378,7 +319,7 @@ async def test_lists_own_conversations_the_user_can_open_latest_activity_first(
     assert response.status_code == 200, response.text
     items = response.json()["items"]
     assert [UUID(item["id"]) for item in items] == list(scenario.listed)
-    personal, via_group, viewer, group_chat = items
+    personal, via_group, viewer = items
     assert personal["partner"] == {
         "type": "default-assistant",
         "id": str(scenario.personal_chat),
@@ -410,11 +351,6 @@ async def test_lists_own_conversations_the_user_can_open_latest_activity_first(
         "personal": False,
         "organization": False,
     }
-    assert group_chat["partner"] == {
-        "type": "group-chat",
-        "id": str(scenario.published_group_chat),
-        "name": "Inköpsrådet",
-    }
 
 
 async def test_lists_exactly_the_partners_whose_history_opens(
@@ -434,8 +370,6 @@ async def test_lists_exactly_the_partners_whose_history_opens(
         scenario.group_role_assistant: "assistant_id",
         scenario.left_space_assistant: "assistant_id",
         scenario.org_assistant: "assistant_id",
-        scenario.published_group_chat: "group_chat_id",
-        scenario.unpublished_group_chat: "group_chat_id",
     }
     for partner_id, param in partners.items():
         history = await client.get(
@@ -448,7 +382,24 @@ async def test_lists_exactly_the_partners_whose_history_opens(
             f"{param}={partner_id}: history {history.status_code}, "
             f"listed={str(partner_id) in listed_partners}"
         )
-    assert len(listed_partners) == 4
+    assert len(listed_partners) == 3
+
+
+async def test_history_by_group_chat_id_is_gone(
+    client, db_container, member, patch_auth_service_jwt
+):
+    """The retired filter answers 410 so old clients learn to send assistant_id."""
+    headers = {"Authorization": f"Bearer {await _token(db_container, member)}"}
+
+    response = await client.get(
+        "/api/v1/conversations/",
+        params={"group_chat_id": str(uuid4())},
+        headers=headers,
+    )
+
+    assert response.status_code == 410, response.text
+    # The exception handler lifts a {"code", "message"} detail to the top level.
+    assert response.json()["code"] == "group_chats_retired"
 
 
 async def test_limit_applies_after_ordering_and_is_bounded(

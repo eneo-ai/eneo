@@ -32,7 +32,6 @@ if TYPE_CHECKING:
     from eneo.collections.domain.collection import Collection
     from eneo.completion_models.domain import CompletionModel
     from eneo.embedding_models.domain.embedding_model import EmbeddingModel
-    from eneo.group_chat.domain.entities.group_chat import GroupChat
     from eneo.integration.domain.entities.integration_knowledge import (
         IntegrationKnowledge,
     )
@@ -75,7 +74,6 @@ class Space:
         members: dict[UUID, SpaceMember] | None,
         created_at: datetime | None = None,
         updated_at: datetime | None = None,
-        group_chats: list["GroupChat"] | None = None,
         security_classification: Optional[SecurityClassification] = None,
         data_retention_days: Optional[int] = None,
         icon_id: Optional[UUID] = None,
@@ -101,7 +99,6 @@ class Space:
         # so they don't auto-create a duplicate default. See SpaceInitService.
         self.default_assistant_load_failed = default_assistant_load_failed
         self.assistants = assistants or []
-        self.group_chats = group_chats or []
         self.apps = apps or []
         self.services = services or []
         self.websites = websites or []
@@ -602,9 +599,6 @@ class Space:
             return self.default_assistant
 
         return self._get_entity(assistant_id, self.assistants)
-
-    def get_group_chat(self, group_chat_id: UUID) -> "GroupChat":
-        return self._get_entity(group_chat_id, self.group_chats)
 
     def get_app(self, app_id: UUID) -> "App":
         return self._get_entity(app_id, self.apps)

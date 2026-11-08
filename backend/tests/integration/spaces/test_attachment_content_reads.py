@@ -214,31 +214,6 @@ async def askable_space(
     return headers, space_id, first, second
 
 
-async def _group_chat(client, headers, space_id: str, *assistant_ids: str) -> str:
-    created = await client.post(
-        f"/api/v1/spaces/{space_id}/applications/group-chats/",
-        json={"name": f"gc-{uuid4().hex[:6]}"},
-        headers=headers,
-    )
-    assert created.status_code in (200, 201), created.text
-    group_chat_id = created.json()["id"]
-    updated = await client.patch(
-        f"/api/v1/group-chats/{group_chat_id}/",
-        json={
-            "allow_mentions": True,
-            "insight_enabled": True,
-            "tools": {
-                "assistants": [
-                    {"id": id, "user_description": "x"} for id in assistant_ids
-                ]
-            },
-        },
-        headers=headers,
-    )
-    assert updated.status_code == 200, updated.text
-    return group_chat_id
-
-
 async def test_an_ask_sends_the_assistants_own_attachments(
     client, askable_space, prompt_file_texts
 ) -> None:
@@ -274,56 +249,6 @@ async def test_a_tool_assistant_ask_sends_the_tool_assistants_attachments(
 
     assert response.status_code == 200, response.text
     assert prompt_file_texts == [["second policy"]]
-
-
-async def test_a_group_chat_ask_sends_the_chosen_members_attachments(
-    client, askable_space, prompt_file_texts
-) -> None:
-    headers, space_id, first, _ = askable_space
-    group_chat_id = await _group_chat(client, headers, space_id, first)
-
-    response = await client.post(
-        "/api/v1/conversations/",
-        json={
-            "question": "Hej",
-            "group_chat_id": group_chat_id,
-            "stream": False,
-            "tools": {"assistants": [{"id": first, "handle": "first"}]},
-        },
-        headers=headers,
-    )
-
-    assert response.status_code == 200, response.text
-    assert ["first policy"] in prompt_file_texts
-
-
-async def test_group_chat_insights_answer_with_the_first_members_attachments(
-    client, askable_space, prompt_file_texts
-) -> None:
-    headers, space_id, first, _ = askable_space
-    group_chat_id = await _group_chat(client, headers, space_id, first)
-    asked = await client.post(
-        "/api/v1/conversations/",
-        json={
-            "question": "Hej",
-            "group_chat_id": group_chat_id,
-            "stream": False,
-            "tools": {"assistants": [{"id": first, "handle": "first"}]},
-        },
-        headers=headers,
-    )
-    assert asked.status_code == 200, asked.text
-    prompt_file_texts.clear()
-
-    response = await client.post(
-        "/api/v1/analysis/conversation-insights/",
-        params={"group_chat_id": group_chat_id, "days_since": 1},
-        json={"question": "Vad frågas det om?", "stream": False},
-        headers=headers,
-    )
-
-    assert response.status_code == 200, response.text
-    assert prompt_file_texts == [["first policy"]]
 
 
 async def test_an_app_run_sends_the_apps_attachments(

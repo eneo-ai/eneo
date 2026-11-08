@@ -84,7 +84,6 @@ const CHECKS: Record<string, (screen: Screen) => Promise<void>> = {
   "/spaces/$/apps/$/edit": (screen) => heading(screen, 1, /^Protokoll /),
   "/spaces/$/assistants": (screen) => heading(screen, 2, /^(Assistenter|Assistants)$/),
   "/spaces/$/assistants/$/edit": (screen) => heading(screen, 1, /^Bygglov /),
-  "/spaces/$/group-chats/$/edit": (screen) => heading(screen, 1, screen.fixtures.groupChatName),
   "/spaces/$/members": (screen) => heading(screen, 2, /^(Medlemmar|Members)$/),
   "/spaces/$/overview": async (screen) => {
     // A phone's and a tablet's space header names the space (#1328).

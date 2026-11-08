@@ -18,11 +18,11 @@
 
 <details class="border-dimmer bg-secondary/40 mt-4 rounded-xl border px-3 py-2">
   <summary class="text-muted cursor-pointer py-1 text-sm focus-visible:ring-2">
-    {m.group_consultations({ count: consultations.length, assistants: assistantCount })}
+    {m.consultations_summary({ count: consultations.length, assistants: assistantCount })}
     <span class="ml-2" role="status">
       {#if streaming && active}
         {active.assistant_name} · {active.status === "awaiting_approval"
-          ? m.group_consultation_approval()
+          ? m.consultation_approval()
           : m.chat_reasoning_working()}
       {/if}
     </span>

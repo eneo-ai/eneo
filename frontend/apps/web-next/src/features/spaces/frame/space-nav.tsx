@@ -84,7 +84,6 @@ function useCurrentItem(): string | null {
   const [, , , section] = usePathname().split("/");
   const hasPartner = useSearchParams().get("type") !== null;
   if (section === "chat") return hasPartner ? "assistants" : "chat";
-  if (section === "group-chats") return "assistants";
   return section ?? null;
 }
 

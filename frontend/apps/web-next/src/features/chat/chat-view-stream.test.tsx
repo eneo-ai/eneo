@@ -340,33 +340,6 @@ describe("ChatView rating a streamed answer", () => {
 });
 
 describe("ChatView sending", () => {
-  it("sends an @-mention to the group chat member it names", async () => {
-    spies.mode = "answer";
-    renderInApp(
-      <Harness
-        chatPartner={{
-          type: "group-chat",
-          id: "group-1",
-          name: "Upphandlingsgruppen",
-          mentionableAssistants: [{ id: "assistant-9", handle: "juristen" }]
-        }}
-      />
-    );
-    fireEvent.click(screen.getByRole("combobox", { name: "Nämn" }));
-    fireEvent.click(await screen.findByRole("option", { name: "@juristen" }));
-    ask("Är avtalet förenligt med LOU?");
-    await waitFor(() => expect(spies.sent).toHaveLength(1));
-    expect(spies.sent[0]?.body).toMatchObject({
-      group_chat_id: "group-1",
-      assistant_id: null,
-      tools: { assistants: [{ id: "assistant-9", handle: "juristen" }] }
-    });
-    // The mention applies to that question only.
-    await waitFor(() =>
-      expect(screen.getByRole("combobox", { name: "Nämn" }).textContent).toContain("Omnämnanden")
-    );
-  });
-
   it("stops an answer from the stop button and says so", async () => {
     spies.mode = "hold";
     renderInApp(<Harness />);
@@ -497,11 +470,7 @@ describe("ChatView offline", () => {
 
 describe("ChatView with nobody to answer", () => {
   it.each([
-    ["an assistant without a usable model", { ...partner, completionModel: null }],
-    [
-      "a group chat without assistants",
-      { type: "group-chat", id: "group-1", name: "Gruppen", assistantCount: 0 }
-    ]
+    ["an assistant without a usable model", { ...partner, completionModel: null }]
   ] satisfies [string, ChatPartner][])(
     "says so at the field and sends nothing: %s",
     (_, chatPartner) => {
@@ -517,12 +486,7 @@ describe("ChatView with nobody to answer", () => {
   );
 
   it.each([
-    ["the assistant loses its model", partner, { ...partner, completionModel: null }],
-    [
-      "the group chat loses its assistants",
-      { type: "group-chat", id: "group-1", name: "Gruppen", assistantCount: 2 },
-      { type: "group-chat", id: "group-1", name: "Gruppen", assistantCount: 0 }
-    ]
+    ["the assistant loses its model", partner, { ...partner, completionModel: null }]
   ] satisfies [string, ChatPartner, ChatPartner][])(
     "keeps a failed question and its files when Retry finds nobody to answer: %s",
     async (_, before, after) => {

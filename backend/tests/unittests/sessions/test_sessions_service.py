@@ -8,11 +8,7 @@ import pytest
 import eneo.sessions.session_service as session_service_module
 from eneo.assistants.api.assistant_models import AssistantSparse
 from eneo.authentication.auth_models import ApiKeyOwnership
-from eneo.main.exceptions import (
-    BadRequestException,
-    NotFoundException,
-    UnauthorizedException,
-)
+from eneo.main.exceptions import NotFoundException, UnauthorizedException
 from eneo.questions.question import MessageFeedback
 from eneo.sessions.session import SessionInDB, SessionUpdate
 from eneo.sessions.session_service import SessionService
@@ -128,7 +124,6 @@ async def test_delete_error_when_user_not_owner_of_session(service: SessionServi
         widget_id=None,
         visitor_id=None,
         assistant_id=None,
-        group_chat_id=None,
     )
 
     with pytest.raises(UnauthorizedException, match="belongs to other principal"):
@@ -152,7 +147,6 @@ async def test_a_service_key_owns_only_its_own_conversations(
         widget_id=None,
         visitor_id=None,
         assistant_id=TEST_UUID,
-        group_chat_id=None,
     )
     service.session_repo.get_ownership.return_value = own
 
@@ -174,20 +168,11 @@ async def test_the_ownership_read_refuses_as_the_full_read(service: SessionServi
         widget_id=None,
         visitor_id=None,
         assistant_id=TEST_UUID,
-        group_chat_id=None,
     )
     service.session_repo.get_ownership.return_value = owned
 
     with pytest.raises(NotFoundException, match="belongs to another assistant"):
         await service.get_session_ownership(TEST_UUID, assistant_id=uuid4())
-
-    service.session_repo.get_ownership.return_value = owned._replace(
-        assistant_id=None, group_chat_id=uuid4()
-    )
-    with pytest.raises(BadRequestException, match="group chat session"):
-        await service.get_session_ownership(TEST_UUID, assistant_id=TEST_UUID)
-    with pytest.raises(NotFoundException, match="belongs to another group chat"):
-        await service.get_session_ownership(TEST_UUID, group_chat_id=uuid4())
 
 
 async def test_question_placeholder_persists_selected_skill_revision(
@@ -270,7 +255,7 @@ async def test_message_partner_is_resolved_for_the_request_principal(
     service: SessionService,
 ):
     session_id, message_id = uuid4(), uuid4()
-    partner = OwnedChatPartner(assistant_id=uuid4(), group_chat_id=None)
+    partner = OwnedChatPartner(assistant_id=uuid4())
     service.session_repo.get_owned_message_partner.return_value = partner
 
     resolved = await service.get_message_partner(

@@ -51,7 +51,6 @@ class StoredSkillActivation(NamedTuple):
 
 class QuestionSessionPartner(NamedTuple):
     assistant_id: UUID | None
-    group_chat_id: UUID | None
 
 
 class QuestionRepository:
@@ -241,7 +240,7 @@ class QuestionRepository:
         tenant_id: UUID,
     ) -> QuestionSessionPartner | None:
         result = await self.session.execute(
-            sa.select(Sessions.assistant_id, Sessions.group_chat_id)
+            sa.select(Sessions.assistant_id)
             .select_from(Questions)
             .join(Sessions, Sessions.id == Questions.session_id)
             .where(
@@ -252,11 +251,8 @@ class QuestionRepository:
         row = result.one_or_none()
         if row is None:
             return None
-        assistant_id, group_chat_id = row
-        return QuestionSessionPartner(
-            assistant_id=assistant_id,
-            group_chat_id=group_chat_id,
-        )
+        (assistant_id,) = row
+        return QuestionSessionPartner(assistant_id=assistant_id)
 
     async def get_with_skill_activation(
         self,

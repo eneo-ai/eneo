@@ -40,7 +40,6 @@ class SessionAdd(SessionBase):
     widget_id: Optional[UUID] = None
     visitor_id: Optional[UUID] = None
     assistant_id: Optional[UUID] = None
-    group_chat_id: Optional[UUID] = None
 
 
 class SessionUpdate(SessionBase):
@@ -57,7 +56,6 @@ class SessionInDB(SessionBase, InDB):
 
     questions: list[Question] = []
     assistant: Optional["AssistantSparse"] = None
-    group_chat_id: Optional[UUID] = None
 
 
 class SessionUpdateRequest(SessionBase):
@@ -75,14 +73,6 @@ class SessionPublic(SessionMetadataPublic):
 
 class SessionId(SessionUpdateRequest, DateTimeModelMixin):
     pass
-
-
-class GroupChatInfo(BaseModel):
-    """Information about the group chat related to this response"""
-
-    id: UUID
-    allow_mentions: bool
-    show_response_label: bool
 
 
 class AskChatResponse(BaseModel):

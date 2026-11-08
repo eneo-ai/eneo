@@ -17,8 +17,6 @@ export type Fixtures = {
   assistant: string;
   app: string;
   run: string;
-  groupChat: string;
-  groupChatName: string;
   website: string;
   collection: string;
   /** The signed-in user, who has token usage to show. */
@@ -102,7 +100,6 @@ export const ROUTES: Record<string, Entry> = {
   "/spaces/$/assistants/$/edit": { url: (f) => `${f.space}/assistants/${f.assistant}/edit` },
   "/spaces/$/assistants/$/widget": { url: (f) => `${f.space}/assistants/${f.assistant}/widget` },
   "/spaces/$/chat": { url: (f) => `${f.space}/chat` },
-  "/spaces/$/group-chats/$/edit": { url: (f) => `${f.space}/group-chats/${f.groupChat}/edit` },
   "/spaces/$/knowledge": { url: (f) => `${f.space}/knowledge` },
   "/spaces/$/knowledge/collections/$": {
     url: (f) => `${f.space}/knowledge/collections/${f.collection}`

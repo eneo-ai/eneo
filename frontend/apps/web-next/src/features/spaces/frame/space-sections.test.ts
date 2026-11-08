@@ -17,8 +17,7 @@ const canFor =
 describe("spaceSections", () => {
   it("lists every tab of a shared space with the counts the space carries", () => {
     const space = makeSpace({
-      assistants: [{ id: "a1" }, { id: "a2" }],
-      groupChats: [{ id: "g1" }],
+      assistants: [{ id: "a1" }, { id: "a2" }, { id: "a3" }],
       apps: [{ id: "p1" }],
       collections: [makeCollection(), makeCollection({ id: "shared", space_id: "other" })],
       websites: [makeWebsite()],
@@ -110,17 +109,12 @@ describe("spaceRoute", () => {
       section: "apps",
       isSectionRoot: false
     });
-    expect(spaceRoute(["group-chats", "g1"])).toMatchObject({
-      section: "assistants",
-      isSectionRoot: false
-    });
     expect(spaceRoute([])).toEqual({ kind: "page", section: null, isSectionRoot: false });
   });
 
-  it("lets the assistant, app and group-chat editors own the surface", () => {
+  it("lets the assistant and app editors own the surface", () => {
     expect(spaceRoute(["assistants", "a1", "edit"])).toEqual({ kind: "editor" });
     expect(spaceRoute(["apps", "p1", "edit"])).toEqual({ kind: "editor" });
-    expect(spaceRoute(["group-chats", "g1", "edit"])).toEqual({ kind: "editor" });
     expect(spaceRoute(["assistants", "a1", "widget"])).toEqual({ kind: "editor" });
     expect(spaceRoute(["apps", "p1", "widget"])).not.toEqual({ kind: "editor" });
     // Only the editor itself: an app's run page and results keep the frame.

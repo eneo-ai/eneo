@@ -60,10 +60,7 @@ async def test_owned_chat_partner_read_is_scalar_tenant_and_owner_scoped():
     assistant_id = uuid4()
     session = AsyncMock()
     result = MagicMock()
-    result.one_or_none.return_value = SimpleNamespace(
-        assistant_id=assistant_id,
-        group_chat_id=None,
-    )
+    result.one_or_none.return_value = SimpleNamespace(assistant_id=assistant_id)
     session.execute.return_value = result
     file_loader = MagicMock()
     repo = SessionRepository(session, file_content_loader=file_loader)
@@ -74,12 +71,12 @@ async def test_owned_chat_partner_read_is_scalar_tenant_and_owner_scoped():
         user_id=user_id,
     )
 
-    assert partner == OwnedChatPartner(assistant_id, None)
+    assert partner == OwnedChatPartner(assistant_id)
     file_loader.assert_not_called()
     statement = session.execute.await_args.args[0]
     compiled = statement.compile(dialect=postgresql.dialect())
     sql = str(compiled)
-    assert sql.startswith("SELECT sessions.assistant_id, sessions.group_chat_id")
+    assert sql.startswith("SELECT sessions.assistant_id \nFROM sessions")
     assert "JOIN users ON sessions.user_id = users.id" in sql
     assert "sessions.id =" in sql
     assert "sessions.user_id =" in sql
@@ -122,9 +119,7 @@ def _compiled(session: AsyncMock):
 async def test_owned_message_partner_is_scoped_to_the_message_owner_and_tenant():
     session_id, message_id, tenant_id, user_id = uuid4(), uuid4(), uuid4(), uuid4()
     assistant_id = uuid4()
-    repo, session = _repo_returning(
-        SimpleNamespace(assistant_id=assistant_id, group_chat_id=None)
-    )
+    repo, session = _repo_returning(SimpleNamespace(assistant_id=assistant_id))
 
     partner = await repo.get_owned_message_partner(
         session_id=session_id,
@@ -134,7 +129,7 @@ async def test_owned_message_partner_is_scoped_to_the_message_owner_and_tenant()
         api_key_id=None,
     )
 
-    assert partner == OwnedChatPartner(assistant_id, None)
+    assert partner == OwnedChatPartner(assistant_id)
     compiled = _compiled(session)
     sql = str(compiled)
     assert "questions.id =" in sql

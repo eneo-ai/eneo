@@ -1,5 +1,4 @@
 import type { Space } from "../src/features/spaces/space";
-import type { Schema } from "../src/lib/api/models";
 import { expect, test } from "./csp";
 import { apiPost, createSpace, sessionResponseHeaders, uniqueName } from "./helpers";
 
@@ -17,55 +16,6 @@ test("draws the split create button as one control", async ({ page }) => {
     });
   });
   expect(halves[1]).toEqual(halves[0]);
-});
-
-test("creates a named group chat and honors both editor choices", async ({ page }, testInfo) => {
-  const space = await createSpace(page, uniqueName("Assistant creation"));
-  for (const openEditor of [false, true]) {
-    await page.goto(`${space}/assistants`);
-    await page.getByRole("button", { name: "Fler sätt att skapa", exact: true }).click();
-    await page.getByRole("menuitem", { name: "Skapa ny gruppchatt", exact: true }).click();
-    const dialog = page.getByRole("dialog", { name: "Skapa en ny gruppchatt", exact: true });
-    const choice = dialog.getByRole("switch", {
-      name: "Öppna gruppchatt-redigerare efter skapande",
-      exact: true
-    });
-    await expect(choice).toBeChecked();
-    const name = uniqueName(openEditor ? "Öppna grupp" : "Behåll grupp");
-    await dialog.getByRole("textbox", { name: "Gruppchattens namn", exact: true }).fill(name);
-    if (!openEditor) {
-      await choice.uncheck();
-      await page.setViewportSize({ width: 390, height: 844 });
-      await expect(dialog).toBeVisible();
-      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
-        390
-      );
-      await page.screenshot({
-        path: testInfo.outputPath("group-create-phone.png"),
-        animations: "disabled"
-      });
-      await page.setViewportSize({ width: 1280, height: 900 });
-    }
-    const creation = page.waitForResponse(
-      (response) =>
-        response.request().method() === "POST" &&
-        new URL(response.url()).pathname === `/api/v1${space}/applications/group-chats/`
-    );
-    if (openEditor)
-      await dialog.getByRole("textbox", { name: "Gruppchattens namn", exact: true }).press("Enter");
-    else await dialog.getByRole("button", { name: "Skapa gruppchatt", exact: true }).click();
-    const response = await creation;
-    expect(response.status()).toBe(201);
-    const group: Schema<"GroupChatPublic"> = await response.json();
-    await expect(dialog).toBeHidden();
-    if (openEditor) {
-      await expect(page).toHaveURL(`${space}/group-chats/${group.id}/edit`);
-      await expect(page.getByRole("textbox", { name: /^Namn/ })).toHaveValue(name);
-    } else {
-      await expect(page).toHaveURL(`${space}/assistants`);
-      await expect(page.getByRole("link", { name, exact: true })).toBeVisible();
-    }
-  }
 });
 
 test("rejects organization assistants by alias and id while keeping shared assistants", async ({

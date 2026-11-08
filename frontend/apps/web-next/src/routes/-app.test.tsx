@@ -128,9 +128,6 @@ beforeEach(async () => {
   vi.doMock("@/features/assistants/editor/assistant-editor", () => ({
     AssistantEditor: ({ assistantId }: { assistantId: string }) => <EditorDraft id={assistantId} />
   }));
-  vi.doMock("@/features/group-chats/group-chat-editor", () => ({
-    GroupChatEditor: ({ groupChatId }: { groupChatId: string }) => <EditorDraft id={groupChatId} />
-  }));
   // Chat streaming has its own feature and browser tests; keep its state observable here.
   vi.doMock("@/features/chat/chat-page", async () => {
     const { replaceUrl } = await import("@/lib/navigation");
@@ -454,7 +451,7 @@ it.each(["assistants", "apps"] as const)(
   }
 );
 
-it.each(["apps", "assistants", "group-chats"] as const)(
+it.each(["apps", "assistants"] as const)(
   "keeps the %s editor draft across section navigation and resets it for another resource",
   async (kind) => {
     replies.set("/api/v1/spaces/space-1/", makeSpace());
@@ -527,17 +524,17 @@ it.each(["services", "services/service-1"])(
   }
 );
 
-it.each([
-  ["apps/missing", "/api/v1/apps/missing/"],
-  ["group-chats/missing/edit", "/api/v1/group-chats/missing/"]
-])("maps a missing space resource %s to not-found after reading it", async (path, apiPath) => {
-  replies.set("/api/v1/spaces/space-1/", makeSpace());
-  replies.set(apiPath, new Response(null, { status: 404 }));
-  replies.set("/api/v1/apps/missing/runs/", { items: [] });
-  await renderRoute(`/spaces/space-1/${path}`);
-  await screen.findByRole("heading", { name: messages.page_not_found });
-  expect(requestedPaths()).toContain(apiPath);
-});
+it.each([["apps/missing", "/api/v1/apps/missing/"]])(
+  "maps a missing space resource %s to not-found after reading it",
+  async (path, apiPath) => {
+    replies.set("/api/v1/spaces/space-1/", makeSpace());
+    replies.set(apiPath, new Response(null, { status: 404 }));
+    replies.set("/api/v1/apps/missing/runs/", { items: [] });
+    await renderRoute(`/spaces/space-1/${path}`);
+    await screen.findByRole("heading", { name: messages.page_not_found });
+    expect(requestedPaths()).toContain(apiPath);
+  }
+);
 
 it("shows a resource load failure through the route error boundary", async () => {
   replies.set("/api/v1/spaces/space-1/", makeSpace());

@@ -11,7 +11,7 @@ import { recentChatItems } from "./overview-data";
 import { OverviewLink, OverviewSection } from "./overview-section";
 
 /**
- * The newest assistants and group chats as cards (three, one row on a tablet),
+ * The newest assistants as cards (three, one row on a tablet),
  * with a small secondary create control in the heading for users who may
  * create, hidden on a phone, where the tab's docked button is one tap away.
  * One control at every width, so a dialog it opened stays open when the screen

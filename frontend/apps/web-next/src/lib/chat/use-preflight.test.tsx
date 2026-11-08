@@ -23,7 +23,7 @@ afterEach(() => {
   api.POST.mockReset();
 });
 
-it("estimates a bare assistant before typing, but not empty sessions or groups", async () => {
+it("estimates a bare assistant before typing, but not empty sessions or no assistant", async () => {
   vi.useFakeTimers();
   api.POST.mockResolvedValue({ data: baseline, response: new Response() });
   const { result, rerender } = renderHook(usePreflight, {
@@ -31,18 +31,17 @@ it("estimates a bare assistant before typing, but not empty sessions or groups",
       question: "",
       fileIds: [] as string[],
       assistantId: "a1",
-      sessionId: null as string | null,
-      groupChatId: null as string | null
+      sessionId: null as string | null
     }
   });
   await act(() => vi.advanceTimersByTimeAsync(400));
   expect(api.POST).toHaveBeenCalledTimes(1);
   expect(api.POST.mock.calls[0]?.[1].body).toMatchObject({ question: "", assistant_id: "a1" });
   expect(result.current).toEqual(baseline);
-  rerender({ question: "", fileIds: [], assistantId: "a1", sessionId: "s1", groupChatId: null });
+  rerender({ question: "", fileIds: [], assistantId: "a1", sessionId: "s1" });
   expect(result.current).toBeNull();
   await act(() => vi.advanceTimersByTimeAsync(400));
-  rerender({ question: "", fileIds: [], assistantId: "", sessionId: null, groupChatId: "g1" });
+  rerender({ question: "", fileIds: [], assistantId: "", sessionId: null });
   await act(() => vi.advanceTimersByTimeAsync(400));
   expect(api.POST).toHaveBeenCalledTimes(1);
 });

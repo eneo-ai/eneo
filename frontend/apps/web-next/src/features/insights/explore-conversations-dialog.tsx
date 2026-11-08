@@ -22,7 +22,7 @@ import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
 const PAGE_SIZE = 50;
 
-type Partner = ChatPartner & { type: "assistant" | "group-chat" };
+type Partner = ChatPartner & { type: "assistant" };
 
 function SessionList({
   partner,

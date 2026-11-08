@@ -2,14 +2,10 @@
 
 The space loader leaves out assistants whose stored row fails validation (for
 example a non-numeric completion_model_kwargs temperature). The former aggregate save deleted rows absent from its filtered projection.
-Settings writes now have no authority over assistant or group chat rows.
-
-The one exception is an explicit member-list replacement on a group chat: the
-submitted list is the whole membership, so a skipped member's seat goes too."""
+Settings writes now have no authority over assistant rows."""
 
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -21,10 +17,6 @@ from eneo.database.tables.ai_models_table import CompletionModels
 from eneo.database.tables.app_table import Apps
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.collections_table import CollectionsTable
-from eneo.database.tables.group_chats_table import (
-    GroupChatsAssistantsMapping,
-    GroupChatsTable,
-)
 from eneo.database.tables.groups_spaces_table import GroupsSpaces
 from eneo.database.tables.mcp_server_table import MCPServers, SpacesMCPServers
 from eneo.database.tables.questions_table import Questions
@@ -41,7 +33,6 @@ from eneo.database.tables.user_groups_table import UserGroups
 from eneo.database.tables.users_table import Users
 from eneo.database.tables.websites_spaces_table import WebsitesSpaces
 from eneo.database.tables.websites_table import Websites
-from eneo.group_chat.domain.entities.group_chat import GroupChatAssistantData
 from eneo.main.exceptions import BadRequestException, UnauthorizedException
 from eneo.spaces.space_update import SpaceUpdate
 from eneo.sysadmin.stored_model_configuration import (
@@ -102,55 +93,6 @@ async def test_nonmember_can_initialize_own_space_without_reading_tenant_hub(
         assert stored_defaults == [default_id]
 
 
-async def test_concurrent_settings_and_chat_edits_preserve_both_results(
-    db_container,
-    space_with_skipped_assistant,
-):
-    ids = space_with_skipped_assistant
-    both_loaded = asyncio.Event()
-    loaded = 0
-
-    async def edit(*, chat):
-        nonlocal loaded
-        async with db_container() as container:
-            await container.space_service().get_space(ids["space_id"])
-            loaded += 1
-            if loaded == 2:
-                both_loaded.set()
-            await both_loaded.wait()
-            if chat:
-                await container.group_chat_service().update_group_chat(
-                    id=ids["group_chat_id"], name="Concurrent chat"
-                )
-            else:
-                await container.space_service().update_space(
-                    id=ids["space_id"], name="Concurrent space"
-                )
-
-    await asyncio.wait_for(
-        asyncio.gather(edit(chat=True), edit(chat=False)), timeout=15
-    )
-    async with db_container() as container:
-        session = container.session()
-        assert (
-            await session.scalar(
-                sa.select(Spaces.name).where(Spaces.id == ids["space_id"])
-            )
-            == "Concurrent space"
-        )
-        assert (
-            await session.scalar(
-                sa.select(GroupChatsTable.name).where(
-                    GroupChatsTable.id == ids["group_chat_id"]
-                )
-            )
-            == "Concurrent chat"
-        )
-        assert ids["corrupt_id"] in await _mapping_assistant_ids(
-            session, ids["group_chat_id"]
-        )
-
-
 async def test_invalid_relationship_rolls_back_settings_in_same_transaction(
     db_container,
     space_with_skipped_assistant,
@@ -188,15 +130,6 @@ async def _clone_assistant(session, source_id, *, name, kwargs):
     return clone_id
 
 
-async def _mapping_assistant_ids(session, group_chat_id) -> set:
-    rows = await session.execute(
-        sa.select(GroupChatsAssistantsMapping.assistant_id).where(
-            GroupChatsAssistantsMapping.group_chat_id == group_chat_id
-        )
-    )
-    return set(rows.scalars().all())
-
-
 @pytest.fixture
 async def space_with_skipped_assistant(db_container, admin_user):
     async with db_container() as container:
@@ -213,41 +146,17 @@ async def space_with_skipped_assistant(db_container, admin_user):
             session, default_id, name="Corrupt sibling", kwargs=CORRUPT_KWARGS
         )
 
-        group_chat_id = uuid4()
-        await session.execute(
-            sa.insert(GroupChatsTable).values(
-                id=group_chat_id,
-                name="Both siblings",
-                space_id=space.id,
-                user_id=admin_user.id,
-                type="group-chat",
-                allow_mentions=False,
-                show_response_label=False,
-                published=False,
-                insight_enabled=False,
-            )
-        )
-        await session.execute(
-            sa.insert(GroupChatsAssistantsMapping).values(
-                [
-                    dict(group_chat_id=group_chat_id, assistant_id=valid_id),
-                    dict(group_chat_id=group_chat_id, assistant_id=corrupt_id),
-                ]
-            )
-        )
-
     return {
         "space_id": space.id,
         "valid_id": valid_id,
         "default_id": default_id,
         "corrupt_id": corrupt_id,
-        "group_chat_id": group_chat_id,
     }
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_renaming_a_space_keeps_a_skipped_assistant_and_its_group_chat_seat(
+async def test_renaming_a_space_keeps_a_skipped_assistant(
     db_container, space_with_skipped_assistant
 ):
     ids = space_with_skipped_assistant
@@ -270,11 +179,6 @@ async def test_renaming_a_space_keeps_a_skipped_assistant_and_its_group_chat_sea
         assert corrupt_row is not None
         assert corrupt_row.completion_model_kwargs == CORRUPT_KWARGS
         assert await session.get(Assistants, ids["valid_id"]) is not None
-        assert await session.get(GroupChatsTable, ids["group_chat_id"]) is not None
-        assert await _mapping_assistant_ids(session, ids["group_chat_id"]) == {
-            ids["valid_id"],
-            ids["corrupt_id"],
-        }
 
 
 @pytest.mark.integration
@@ -293,85 +197,9 @@ async def test_deleting_a_loaded_assistant_still_works_and_spares_the_skipped_on
         corrupt_row = await session.get(Assistants, ids["corrupt_id"])
         assert corrupt_row is not None
         assert corrupt_row.completion_model_kwargs == CORRUPT_KWARGS
-        assert ids["corrupt_id"] in await _mapping_assistant_ids(
-            session, ids["group_chat_id"]
-        )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_clearing_a_group_chats_assistants_also_unseats_the_skipped_one(
-    db_container, space_with_skipped_assistant
-):
-    """PATCH tools.assistants=[] reaches the service as current_assistants=[]
-    and means clear-all. The skipped sibling is hidden from the response, so
-    keeping its seat would leave the stored membership out of step with it."""
-    ids = space_with_skipped_assistant
-
-    async with db_container() as container:
-        updated = await container.group_chat_service().update_group_chat(
-            id=ids["group_chat_id"], current_assistants=[]
-        )
-        assert updated.assistants == []
-
-    async with db_container() as container:
-        session = container.session()
-        assert await session.get(GroupChatsTable, ids["group_chat_id"]) is not None
-        assert await _mapping_assistant_ids(session, ids["group_chat_id"]) == set()
-        # Only the seat is gone. The skipped row itself is still untouched.
-        corrupt_row = await session.get(Assistants, ids["corrupt_id"])
-        assert corrupt_row is not None
-        assert corrupt_row.completion_model_kwargs == CORRUPT_KWARGS
-        assert await session.get(Assistants, ids["valid_id"]) is not None
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_renaming_a_group_chat_keeps_the_skipped_members_seat(
-    db_container, space_with_skipped_assistant
-):
-    """A group chat save that leaves the member list alone (current_assistants
-    omitted) is not a replacement, so the skipped member keeps its seat."""
-    ids = space_with_skipped_assistant
-
-    async with db_container() as container:
-        await container.group_chat_service().update_group_chat(
-            id=ids["group_chat_id"], name="Renamed chat"
-        )
-
-    async with db_container() as container:
-        session = container.session()
-        chat_row = await session.get(GroupChatsTable, ids["group_chat_id"])
-        assert chat_row is not None
-        assert chat_row.name == "Renamed chat"
-        assert await _mapping_assistant_ids(session, ids["group_chat_id"]) == {
-            ids["valid_id"],
-            ids["corrupt_id"],
-        }
-
-
-async def test_default_assistant_seat_survives_loading_and_settings_save(
-    db_container,
-    space_with_skipped_assistant,
-):
-    ids = space_with_skipped_assistant
-    async with db_container() as container:
-        updated = await container.group_chat_service().update_group_chat(
-            id=ids["group_chat_id"],
-            current_assistants=[GroupChatAssistantData(id=ids["default_id"])],
-        )
-        assert updated.assistant_ids == [ids["default_id"]]
-        await container.space_service().update_space(
-            id=ids["space_id"], name="New name"
-        )
-    async with db_container() as container:
-        space = await container.space_service().get_space(ids["space_id"])
-        assert space.get_group_chat(ids["group_chat_id"]).assistant_ids == [
-            ids["default_id"]
-        ]
-
-
-async def test_repair_restores_skipped_assistant_and_existing_group_chat_seat(
+async def test_repair_restores_skipped_assistant(
     db_container,
     admin_user,
     space_with_skipped_assistant,
@@ -398,10 +226,6 @@ async def test_repair_restores_skipped_assistant_and_existing_group_chat_seat(
     async with db_container() as container:
         space = await container.space_service().get_space(ids["space_id"])
         assert ids["corrupt_id"] in {assistant.id for assistant in space.assistants}
-        assert set(space.get_group_chat(ids["group_chat_id"]).assistant_ids) == {
-            ids["valid_id"],
-            ids["corrupt_id"],
-        }
 
 
 async def test_unchanged_and_rename_keep_all_child_data_and_hidden_selections(
@@ -423,8 +247,6 @@ async def test_unchanged_and_rename_keep_all_child_data_and_hidden_selections(
     ids = space_with_skipped_assistant
     tables = (
         Assistants,
-        GroupChatsTable,
-        GroupChatsAssistantsMapping,
         SpacesUsers,
         SpacesUserGroups,
         SpacesCompletionModels,

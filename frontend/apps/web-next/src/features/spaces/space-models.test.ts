@@ -3,7 +3,7 @@ import { makeAssistant, makeSpace } from "./testing/space-fixture";
 import { assistantModelName } from "./space-models";
 
 describe("assistantModelName", () => {
-  it("names the model the space offers, and nothing for a group chat or a model it no longer has", () => {
+  it("names the model the space offers, and nothing for a model it no longer has or none", () => {
     const space = makeSpace();
     expect(assistantModelName(space, makeAssistant() as never)).toBe("Haiku 4.5");
     expect(
@@ -13,7 +13,7 @@ describe("assistantModelName", () => {
       assistantModelName(space, makeAssistant({ completion_model_id: "gone" }) as never)
     ).toBeNull();
     expect(
-      assistantModelName(space, { ...(makeAssistant() as object), type: "group-chat" } as never)
+      assistantModelName(space, makeAssistant({ completion_model_id: null }) as never)
     ).toBeNull();
   });
 });

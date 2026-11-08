@@ -64,7 +64,7 @@ function IconPreview({ url }: { url: string }) {
 
 /**
  * Avatar upload/remove against the icons endpoint; `onSave` persists the new
- * icon id on the owning resource (assistant, group chat, ...), and the server
+ * icon id on the owning resource (assistant, app, space), and the server
  * deletes the icon that id replaced.
  */
 export function IconField({

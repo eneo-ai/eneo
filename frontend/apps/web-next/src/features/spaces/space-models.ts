@@ -8,7 +8,7 @@ export function modelDisplayName(model: { name: string; nickname?: string | null
 
 /** The chat model an assistant uses, when the space still offers it. */
 export function assistantModelName(space: Space, item: ChatAppItem): string | null {
-  if (item.type === "group-chat" || !item.completion_model_id) return null;
+  if (!item.completion_model_id) return null;
   const model = space.completion_models.find(
     (candidate) => candidate.id === item.completion_model_id
   );

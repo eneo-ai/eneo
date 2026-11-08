@@ -138,7 +138,7 @@ class TestScopeEnforcementUnit:
 
     @pytest.mark.parametrize(
         "resource_type",
-        ["space", "assistant", "app", "collection", "website", "group_chat"],
+        ["space", "assistant", "app", "collection", "website"],
     )
     @pytest.mark.asyncio
     async def test_tenant_key_foreign_tenant_resource_denied(self, resource_type):
@@ -913,7 +913,6 @@ class TestScopeRouteGuardCoverage:
             "/app-runs",
             "/conversations",
             "/services",
-            "/group-chats",
             "/groups",
             "/websites",
             "/crawl-runs",
@@ -1047,7 +1046,6 @@ class TestScopeBodyDriven:
     def _make_container(
         self,
         space_by_assistant: Any = None,
-        space_by_group_chat: Any = None,
         space_by_session: Any = None,
         session_obj: Any = None,
         session_not_found: bool = False,
@@ -1063,17 +1061,6 @@ class TestScopeBodyDriven:
             from eneo.main.exceptions import NotFoundException
 
             space_repo.get_space_by_assistant = AsyncMock(
-                side_effect=NotFoundException()
-            )
-
-        if space_by_group_chat is not None:
-            space_repo.get_space_by_group_chat = AsyncMock(
-                return_value=space_by_group_chat
-            )
-        else:
-            from eneo.main.exceptions import NotFoundException
-
-            space_repo.get_space_by_group_chat = AsyncMock(
                 side_effect=NotFoundException()
             )
 
@@ -1128,7 +1115,6 @@ class TestScopeBodyDriven:
             http_request=request,
             container=container,
             assistant_id=uuid4(),
-            group_chat_id=None,
             session_id=None,
         )
 
@@ -1142,7 +1128,6 @@ class TestScopeBodyDriven:
             http_request=request,
             container=container,
             assistant_id=uuid4(),
-            group_chat_id=None,
             session_id=None,
         )
 
@@ -1162,7 +1147,6 @@ class TestScopeBodyDriven:
                 http_request=request,
                 container=container,
                 assistant_id=uuid4(),
-                group_chat_id=None,
                 session_id=None,
             )
         assert exc_info.value.status_code == 403
@@ -1182,7 +1166,6 @@ class TestScopeBodyDriven:
                     http_request=request,
                     container=self._make_container(),
                     assistant_id=uuid4(),
-                    group_chat_id=None,
                     session_id=None,
                 )
         finally:
@@ -1201,7 +1184,6 @@ class TestScopeBodyDriven:
             http_request=request,
             container=container,
             assistant_id=assistant_id,
-            group_chat_id=None,
             session_id=None,
         )
 
@@ -1220,28 +1202,10 @@ class TestScopeBodyDriven:
                 http_request=request,
                 container=container,
                 assistant_id=other_assistant,
-                group_chat_id=None,
                 session_id=None,
             )
         assert exc_info.value.status_code == 403
         assert exc_info.value.detail["code"] == "insufficient_scope"
-
-    @pytest.mark.asyncio
-    async def test_assistant_scope_group_chat_denied(self):
-        """Assistant-scoped key + group_chat_id → 403 (can't access group chats)."""
-        assistant_id = uuid4()
-        request = self._make_http_request(scope_type="assistant", scope_id=assistant_id)
-        container = self._make_container()
-
-        with pytest.raises(HTTPException) as exc_info:
-            await _validate_conversation_scope(
-                http_request=request,
-                container=container,
-                assistant_id=None,
-                group_chat_id=uuid4(),
-                session_id=None,
-            )
-        assert exc_info.value.status_code == 403
 
     @pytest.mark.asyncio
     async def test_assistant_scope_session_own_assistant_passes(self):
@@ -1250,7 +1214,6 @@ class TestScopeBodyDriven:
         session_id = uuid4()
         session_obj = SimpleNamespace(
             assistant=SimpleNamespace(id=assistant_id),
-            group_chat_id=None,
         )
         request = self._make_http_request(scope_type="assistant", scope_id=assistant_id)
         container = self._make_container(session_obj=session_obj)
@@ -1259,7 +1222,6 @@ class TestScopeBodyDriven:
             http_request=request,
             container=container,
             assistant_id=None,
-            group_chat_id=None,
             session_id=session_id,
         )
 
@@ -1271,7 +1233,6 @@ class TestScopeBodyDriven:
         session_id = uuid4()
         session_obj = SimpleNamespace(
             assistant=SimpleNamespace(id=other_assistant),
-            group_chat_id=None,
         )
         request = self._make_http_request(
             scope_type="assistant", scope_id=key_assistant
@@ -1283,7 +1244,6 @@ class TestScopeBodyDriven:
                 http_request=request,
                 container=container,
                 assistant_id=None,
-                group_chat_id=None,
                 session_id=session_id,
             )
         assert exc_info.value.status_code == 403
@@ -1300,7 +1260,6 @@ class TestScopeBodyDriven:
             http_request=request,
             container=container,
             assistant_id=assistant_id,
-            group_chat_id=None,
             session_id=None,
         )
 
@@ -1318,41 +1277,6 @@ class TestScopeBodyDriven:
                 http_request=request,
                 container=container,
                 assistant_id=assistant_id,
-                group_chat_id=None,
-                session_id=None,
-            )
-        assert exc_info.value.status_code == 403
-
-    @pytest.mark.asyncio
-    async def test_space_scope_group_chat_in_own_space_passes(self):
-        """Space-scoped key + group_chat in own space → pass."""
-        space_id = uuid4()
-        group_chat_id = uuid4()
-        request = self._make_http_request(scope_type="space", scope_id=space_id)
-        container = self._make_container(space_by_group_chat=_make_space(space_id))
-
-        await _validate_conversation_scope(
-            http_request=request,
-            container=container,
-            assistant_id=None,
-            group_chat_id=group_chat_id,
-            session_id=None,
-        )
-
-    @pytest.mark.asyncio
-    async def test_space_scope_group_chat_in_other_space_denied(self):
-        """Space-scoped key + group_chat in different space → 403."""
-        key_space = uuid4()
-        other_space = uuid4()
-        request = self._make_http_request(scope_type="space", scope_id=key_space)
-        container = self._make_container(space_by_group_chat=_make_space(other_space))
-
-        with pytest.raises(HTTPException) as exc_info:
-            await _validate_conversation_scope(
-                http_request=request,
-                container=container,
-                assistant_id=None,
-                group_chat_id=uuid4(),
                 session_id=None,
             )
         assert exc_info.value.status_code == 403
@@ -1364,7 +1288,6 @@ class TestScopeBodyDriven:
         session_id = uuid4()
         session_obj = SimpleNamespace(
             assistant=SimpleNamespace(id=uuid4()),
-            group_chat_id=None,
         )
         request = self._make_http_request(scope_type="space", scope_id=space_id)
         container = self._make_container(
@@ -1376,7 +1299,6 @@ class TestScopeBodyDriven:
             http_request=request,
             container=container,
             assistant_id=None,
-            group_chat_id=None,
             session_id=session_id,
         )
 
@@ -1388,7 +1310,6 @@ class TestScopeBodyDriven:
         session_id = uuid4()
         session_obj = SimpleNamespace(
             assistant=SimpleNamespace(id=uuid4()),
-            group_chat_id=None,
         )
         request = self._make_http_request(scope_type="space", scope_id=key_space)
         container = self._make_container(
@@ -1401,7 +1322,6 @@ class TestScopeBodyDriven:
                 http_request=request,
                 container=container,
                 assistant_id=None,
-                group_chat_id=None,
                 session_id=session_id,
             )
         assert exc_info.value.status_code == 403
@@ -1418,7 +1338,6 @@ class TestScopeBodyDriven:
                 http_request=request,
                 container=container,
                 assistant_id=uuid4(),
-                group_chat_id=None,
                 session_id=None,
             )
         msg = exc_info.value.detail["message"]
@@ -1444,7 +1363,6 @@ class TestScopeBodyDriven:
                 http_request=request,
                 container=container,
                 assistant_id=None,
-                group_chat_id=None,
                 session_id=session_id,
             )
         assert exc_info.value.status_code == 403

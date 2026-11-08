@@ -70,35 +70,16 @@ async def _assistant(client: AsyncClient, token: str, space_id: str) -> UUID:
     return UUID(created.json()["id"])
 
 
-async def _group_chat(client: AsyncClient, token: str, space_id: str) -> UUID:
-    member = await _assistant(client, token, space_id)
-    created = await client.post(
-        f"/api/v1/spaces/{space_id}/applications/group-chats/",
-        json={"name": f"ownership-gc-{uuid4().hex[:6]}"},
-        headers=_auth(token),
-    )
-    assert created.status_code in (200, 201), created.text
-    group_chat_id = created.json()["id"]
-    updated = await client.patch(
-        f"/api/v1/group-chats/{group_chat_id}/",
-        json={"tools": {"assistants": [{"id": str(member), "user_description": "x"}]}},
-        headers=_auth(token),
-    )
-    assert updated.status_code == 200, updated.text
-    return UUID(group_chat_id)
-
-
 async def _conversation(
     db_container,
     owner: UserInDB,
     *,
     assistant_id: UUID | None = None,
-    group_chat_id: UUID | None = None,
     turns: int = 3,
 ) -> UUID:
     async with db_container() as container:
         session = await container.session_service().create_session(
-            name="conversation", assistant_id=assistant_id, group_chat_id=group_chat_id
+            name="conversation", assistant_id=assistant_id
         )
         image = await container.file_service().save_image_from_bytes(
             b"\x89PNG" + b"\x00" * 64, name="photo.png", mimetype="image/png"
@@ -183,37 +164,6 @@ async def test_the_owner_reads_the_turns_only_for_a_response_that_returns_them(
         (200, 1),
         (204, 1),
     )
-    assert await _stored(db_container, session_id) is None
-
-
-async def test_a_group_chat_conversation_routes_by_its_group_chat(
-    client, db_container, admin_user, owner_token
-) -> None:
-    space_id = await _space(client, owner_token)
-    group_chat_id = await _group_chat(client, owner_token, space_id)
-    session_id = await _conversation(
-        db_container, admin_user, group_chat_id=group_chat_id
-    )
-    url = f"/api/v1/conversations/{session_id}/"
-
-    preflight = await client.post(
-        "/api/v1/conversations/preflight",
-        json=_preflight(session_id),
-        headers=_auth(owner_token),
-    )
-    rename = await client.patch(
-        url + "name/", json={"name": "renamed"}, headers=_auth(owner_token)
-    )
-    feedback = await client.post(
-        url + "feedback/", json={"value": -1}, headers=_auth(owner_token)
-    )
-    assert await _stored(db_container, session_id) == ("renamed", -1)
-    delete = await client.delete(url, headers=_auth(owner_token))
-
-    assert preflight.status_code == 200, preflight.text
-    assert rename.status_code == 200, rename.text
-    assert feedback.status_code == 200, feedback.text
-    assert delete.status_code == 204, delete.text
     assert await _stored(db_container, session_id) is None
 
 

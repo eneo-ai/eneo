@@ -6,7 +6,6 @@ from uuid import UUID, uuid4
 import pytest
 import sqlalchemy as sa
 
-from eneo.database.tables.group_chats_table import GroupChatsTable
 from eneo.database.tables.spaces_table import SpacesCompletionModels
 from eneo.files.file_content_loader import FileContentLoader
 
@@ -206,13 +205,6 @@ async def test_space_applications_view_does_not_read_attachment_content(
             )
         )
         for number in range(2):
-            session.add(
-                GroupChatsTable(
-                    name=f"Sparse group chat {number}",
-                    space_id=UUID(space_id),
-                    user_id=admin_user.id,
-                )
-            )
             await service_factory(
                 session,
                 f"Sparse service {number}",
@@ -281,7 +273,6 @@ async def test_space_applications_view_does_not_read_attachment_content(
         assert byte_loads > 0
         assert attachment_queries
         assert "files" in matched_attachment_tables
-        assert len(expected_applications["group_chats"]["items"]) == 2
 
         byte_loads = 0
         attachment_queries.clear()

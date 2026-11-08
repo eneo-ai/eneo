@@ -20,7 +20,7 @@ type Recent = {
   name: string;
   created_at: string;
   last_activity_at: string;
-  partner: { type: "assistant" | "default-assistant" | "group-chat"; id: string; name: string };
+  partner: { type: "assistant" | "default-assistant"; id: string; name: string };
   space: { id: string; name: string; personal: boolean; organization: boolean };
 };
 
@@ -446,19 +446,6 @@ describe("HistoryAside scope (decision 29)", () => {
     ).toEqual([["Remiss"], ["Ramavtal"]]);
     expect(queryClient.getQueryState(nav)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(theirs)?.isInvalidated).toBe(true);
-  });
-
-  it("scopes a group chat's list to the group chat", async () => {
-    renderInApp(
-      <HistoryTab
-        partner={{ type: "group-chat", id: "g1", name: "Ledningsgruppen" }}
-        activeSessionId={null}
-        onSelect={vi.fn()}
-        onDeleted={vi.fn()}
-      />,
-      { queryClient: testQueryClient() }
-    );
-    expect(within(scope()).getByRole("radio", { name: "Den här gruppchatten" })).toBeTruthy();
   });
 });
 

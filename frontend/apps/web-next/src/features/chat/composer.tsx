@@ -229,8 +229,6 @@ export type ComposerProps = {
   tools?: ReactNode;
   /** Personal chat: the Skills pill beside Verktyg. */
   skills?: ReactNode;
-  /** Group chats: @-mention picker. */
-  mention?: ReactNode;
   /** Personal assistant: model picker on the right. */
   modelSelector?: ReactNode;
   /** Start state for the personal assistant: the assistant selector as a token. */
@@ -321,7 +319,6 @@ export function Composer({
   knowledgeMode,
   tools,
   skills,
-  mention,
   modelSelector,
   partnerToken,
   contextBar,
@@ -443,7 +440,6 @@ export function Composer({
               <KnowledgePill knowledge={knowledge} mode={knowledgeMode} />
               {tools}
               {skills}
-              {mention}
             </div>
           }
           sendActions={modelSelector}

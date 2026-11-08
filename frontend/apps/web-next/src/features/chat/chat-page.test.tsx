@@ -560,7 +560,7 @@ describe("ChatPage Felsökning", () => {
     expect(await screen.findByRole("tab", { name: "Felsök", selected: true })).toBeTruthy();
   });
 
-  it("is not offered without the debug permission or in a group chat", () => {
+  it("is not offered without the debug permission", () => {
     renderPage(null);
     expect(screen.queryByRole("button", { name: "Felsökning" })).toBeNull();
   });
