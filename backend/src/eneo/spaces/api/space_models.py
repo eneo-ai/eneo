@@ -23,6 +23,7 @@ from eneo.assistants.api.assistant_models import (
     MCPServerPublicDict,
 )
 from eneo.collections.presentation.collection_models import CollectionPublic
+from eneo.data_retention.constants import MAX_RETENTION_DAYS, MIN_RETENTION_DAYS
 from eneo.embedding_models.presentation.embedding_model_models import (
     EmbeddingModelPublic,
 )
@@ -156,8 +157,8 @@ class UpdateSpaceRequest(BaseModel):
 
     data_retention_days: Union[int, None, NotProvided] = Field(
         default=NOT_PROVIDED,
-        ge=1,
-        le=2555,
+        ge=MIN_RETENTION_DAYS,
+        le=MAX_RETENTION_DAYS,
         description=(
             "Number of days to retain conversation history for this space. "
             "Applies to all assistants and apps in the space that don't have "
