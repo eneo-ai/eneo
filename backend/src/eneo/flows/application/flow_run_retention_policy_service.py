@@ -6,9 +6,6 @@ from uuid import UUID
 from eneo.audit.application.audit_service import AuditService
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
-from eneo.data_retention.infrastructure.data_retention_service import (
-    DataRetentionService,
-)
 from eneo.flows.application.flow_retention_authz import (
     require_retention_manage,
     require_retention_view,
@@ -24,6 +21,7 @@ from eneo.flows.domain.flow_run_retention_policy import (
     FlowRunRetentionSpaceTargetPage,
     effective_flow_run_retention_policy,
 )
+from eneo.flows.infrastructure.flow_retention_repo import FlowRetentionRepository
 from eneo.flows.infrastructure.flow_run_retention_policy_repo import (
     FlowRunRetentionPolicyChange,
     FlowRunRetentionPolicyRepository,
@@ -211,7 +209,7 @@ class FlowRunRetentionPolicyService:
             settings = await self.repository.get_organization(
                 tenant_id=self.user.tenant_id
             )
-        result = await DataRetentionService(
+        result = await FlowRetentionRepository(
             self.repository.session
         ).purge_due_flow_run_history_for_tenant(
             tenant_id=self.user.tenant_id,

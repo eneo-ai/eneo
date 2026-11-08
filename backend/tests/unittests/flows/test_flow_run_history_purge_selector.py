@@ -9,9 +9,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from eneo.data_retention.infrastructure.data_retention_service import (
-    DataRetentionService,
-)
+from eneo.flows.infrastructure.flow_retention_repo import FlowRetentionRepository
 
 
 class _EmptyScalarResult:
@@ -39,7 +37,7 @@ def _compile(stmt: sa.Select[tuple[UUID]]) -> str:
 def test_due_flow_run_history_purge_query_keeps_exact_policy_after_anchor_gate() -> (
     None
 ):
-    service = DataRetentionService(cast(AsyncSession, object()))
+    service = FlowRetentionRepository(cast(AsyncSession, object()))
     now = datetime(2026, 6, 10, 12, 0, tzinfo=timezone.utc)
 
     compiled = _compile(service._build_due_flow_run_history_purge_query(now=now))
@@ -72,7 +70,7 @@ async def test_flow_run_history_purge_batch_orders_by_retention_anchor_then_run_
     None
 ):
     session = _RecordingSession()
-    service = DataRetentionService(cast(AsyncSession, session))
+    service = FlowRetentionRepository(cast(AsyncSession, session))
 
     await service._select_flow_run_history_purge_batch(
         now=datetime(2026, 6, 10, 12, 0, tzinfo=timezone.utc),

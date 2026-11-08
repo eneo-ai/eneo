@@ -9,12 +9,10 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import visitors
 
-from eneo.data_retention.infrastructure.data_retention_service import (
-    DataRetentionService,
-)
 from eneo.database.tables.flow_tables import (
     FLOW_RUN_TERMINAL_RETENTION_ANCHOR_INDEX_PREDICATE,
 )
+from eneo.flows.infrastructure.flow_retention_repo import FlowRetentionRepository
 from eneo.settings.settings import FlowRunHistoryPurgeRequest
 from eneo.settings.settings_router import (
     purge_flow_run_history,
@@ -69,7 +67,7 @@ async def test_purge_queries_keep_the_terminal_index_predicate(query_kind):
     session.execute.return_value = rows
     session.scalars.return_value = rows
     session.scalar.return_value = 0  # the bounded legal-hold count
-    await DataRetentionService(session).purge_due_flow_run_history_for_tenant(
+    await FlowRetentionRepository(session).purge_due_flow_run_history_for_tenant(
         tenant_id=uuid4(), now=datetime.now(timezone.utc), limit=2, dry_run=True
     )
     # The first scalars read is the candidate batch; the live-transcript cleanup reads after it.

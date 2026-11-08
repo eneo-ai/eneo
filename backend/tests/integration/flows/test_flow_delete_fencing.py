@@ -16,9 +16,6 @@ import pytest
 import sqlalchemy as sa
 from dependency_injector import providers
 
-from eneo.data_retention.infrastructure.data_retention_service import (
-    DataRetentionService,
-)
 from eneo.database.database import sessionmanager
 from eneo.database.tables.flow_tables import (
     FlowRunAuditOutbox,
@@ -40,6 +37,7 @@ from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.flows.flow_run_error import FlowRunError
 from eneo.flows.infrastructure.flow_repo import FlowRepository
+from eneo.flows.infrastructure.flow_retention_repo import FlowRetentionRepository
 from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
 from eneo.flows.principal import FlowPrincipal
 from eneo.flows.runtime import tasks as flow_runtime_tasks
@@ -596,7 +594,7 @@ async def test_the_history_purge_selects_a_drained_run_once_it_is_due(
     async def selected() -> bool:
         await flow_runtime_tasks._deliver_flow_audit_outbox()
         async with sessionmanager.session() as session, session.begin():
-            result = await DataRetentionService(
+            result = await FlowRetentionRepository(
                 session
             ).purge_due_flow_run_history_for_tenant(
                 tenant_id=admin_user.tenant_id,
