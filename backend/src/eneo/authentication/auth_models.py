@@ -1,5 +1,6 @@
 import base64
 import binascii
+import re
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from enum import Enum
@@ -47,6 +48,8 @@ class JWTMeta(BaseModel):
 
 # A browser session id: 256 random bits, as secrets.token_urlsafe(32) writes them.
 SESSION_ID_PATTERN = r"^[A-Za-z0-9_-]{43}$"
+# A browser session's stable id, in the one form str(UUID) writes.
+SESSION_REF_PATTERN = r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 
 
 class JWTCreds(BaseModel):
@@ -70,12 +73,25 @@ class JWTCreds(BaseModel):
     sid: Optional[str] = Field(
         default=None, exclude=True, strict=True, pattern=SESSION_ID_PATTERN
     )
+    # The same session's stable, non-secret id (browser_sessions.id), signed
+    # beside sid; tokens issued before it existed carry sid alone. Like sid,
+    # never dumped, and a present claim must be the form sign-in writes.
+    session_ref: Optional[UUID] = Field(default=None, exclude=True)
 
     @field_validator("sid", mode="before")
     @classmethod
     def _refuse_null_sid(cls, value: object) -> object:
         if value is None:
             raise ValueError("sid must not be null")
+        return value
+
+    @field_validator("session_ref", mode="before")
+    @classmethod
+    def _refuse_other_session_ref_forms(cls, value: object) -> object:
+        if isinstance(value, UUID):
+            return value
+        if not isinstance(value, str) or not re.fullmatch(SESSION_REF_PATTERN, value):
+            raise ValueError("session_ref must be a session id")
         return value
 
 

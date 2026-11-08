@@ -221,7 +221,7 @@ class AuthService:
         """Verified raw claims, including ones ``JWTPayload`` does not model.
 
         ``verify_exp=False`` still requires ``exp`` but accepts one that has
-        passed. Only sign-out uses it (``BrowserSessionService.end``).
+        passed. Only sign-out uses it (``BrowserSessionService.revoke``).
         """
         algs = algs or [JWT_ALGORITHM]
         try:
@@ -276,8 +276,11 @@ class AuthService:
 
         return payload, claims
 
-    def add_session_id(self, token: str, sid: str) -> str:
-        """A session token this process just issued, re-signed with ``sid``.
+    def add_session_id(
+        self, token: str, sid: str, session_ref: UUID | None = None
+    ) -> str:
+        """A session token this process just issued, re-signed with ``sid``
+        and, when given, the session's stable id as ``session_ref``.
 
         Every other claim stays, the expiry included. Only
         ``BrowserSessionService`` calls it: ``start`` after recording the
@@ -288,7 +291,10 @@ class AuthService:
         claims = self.get_verified_claims(
             token, key=key, aud=settings.jwt_audience, algs=[settings.jwt_algorithm]
         )
-        return jwt.encode({**claims, "sid": sid}, key, algorithm=settings.jwt_algorithm)
+        session: dict[str, object] = {"sid": sid}
+        if session_ref is not None:
+            session["session_ref"] = str(session_ref)
+        return jwt.encode({**claims, **session}, key, algorithm=settings.jwt_algorithm)
 
     def get_payload_from_openid_jwt(
         self,

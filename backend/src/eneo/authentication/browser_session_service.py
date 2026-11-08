@@ -1,11 +1,13 @@
 """Server-side browser sessions: one ``browser_sessions`` row per sign-in.
 
-The token a browser sign-in issues carries a ``sid`` claim naming its row.
-Canonical authentication (``UserService``) admits such a token, as the cookie
-or as Bearer, only while the row exists, matches the token's user and tenant
-and is unexpired. Sign-out deletes the row, so a copied token stops working
-at once. Tokens without ``sid`` (the token login, API, module and MCP tokens)
-are not browser sessions and keep their own lifetime.
+The token a browser sign-in issues carries a ``sid`` claim naming its row,
+and the row's stable, non-secret id as ``session_ref`` (tokens issued before
+rows had one carry the sid alone). Canonical authentication (``UserService``)
+admits such a token, as the cookie or as Bearer, only while the row exists,
+matches the token's user, tenant and ``session_ref`` and is unexpired.
+Sign-out deletes the row, so a copied token stops working at once. Tokens
+without ``sid`` (the token login, API, module and MCP tokens) are not browser
+sessions and keep their own lifetime.
 
 The rows live in PostgreSQL, not Redis: a revoked session must stay revoked
 after a crash, and restoring a Redis snapshot can bring a deleted key back.
@@ -41,6 +43,7 @@ from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication.auth_models import JWTPayload
 from eneo.authentication.auth_service import AuthService
 from eneo.authentication.browser_session import session_generation
+from eneo.database.affected_rows import affected_row_count
 from eneo.database.database import AsyncSession, sessionmanager
 from eneo.database.tables.browser_sessions_table import BrowserSessions
 from eneo.main.config import get_settings
@@ -82,6 +85,19 @@ async def _store_transaction(session: AsyncSession) -> AsyncGenerator[None]:
         yield
 
 
+def _same_session(payload: JWTPayload) -> list[sa.ColumnElement[bool]]:
+    """The row a verified session token names: its sid, user and tenant,
+    and its stable id when the token carries one."""
+    conditions = [
+        BrowserSessions.sid == payload.sid,
+        BrowserSessions.user_id == payload.user_id,
+        BrowserSessions.tenant_id == payload.tenant_id,
+    ]
+    if payload.session_ref is not None:
+        conditions.append(BrowserSessions.id == payload.session_ref)
+    return conditions
+
+
 class BrowserSessionService:
     def __init__(
         self,
@@ -97,56 +113,46 @@ class BrowserSessionService:
         """Record a browser session for the token a sign-in just issued.
 
         Returns the token the session cookie carries: the same claims and
-        expiry with a new ``sid``. Runs in the sign-in's transaction, so the
-        cookie is sent only once the row is committed. The user's expired
-        rows are deleted here too, and so is the session ``replacing`` (the
-        cookie the browser signed in with) names: the new cookie replaces it,
-        so it would otherwise stay valid with nobody holding it.
+        expiry with a new ``sid`` and the new row's stable id as
+        ``session_ref``. Runs in the sign-in's transaction, so the cookie is
+        sent only once the row is committed. The session ``replacing`` (the
+        cookie the browser signed in with) names is deleted too: the new
+        cookie replaces it, so it would otherwise stay valid with nobody
+        holding it. Expired rows are left to ``delete_expired``.
         """
         payload = self._verified_payload(token)
         replaced = self._named_session(replacing) if replacing else None
         if replaced is not None:
             await self.session.execute(
-                sa.delete(BrowserSessions).where(
-                    BrowserSessions.sid == replaced.sid,
-                    BrowserSessions.user_id == replaced.user_id,
-                    BrowserSessions.tenant_id == replaced.tenant_id,
-                )
+                sa.delete(BrowserSessions).where(*_same_session(replaced))
             )
-        # ponytail: a user who never signs in again keeps expired rows until
-        # the user is deleted; join a daily maintenance job if that grows.
-        await self.session.execute(
-            sa.delete(BrowserSessions).where(
-                BrowserSessions.user_id == payload.user_id,
-                BrowserSessions.expires_at <= datetime.now(timezone.utc),
-            )
-        )
         # 256 bits; JWTCreds.sid accepts exactly this form.
         sid = secrets.token_urlsafe(32)
-        await self.session.execute(
-            sa.insert(BrowserSessions).values(
+        session_ref = await self.session.scalar(
+            sa.insert(BrowserSessions)
+            .values(
                 sid=sid,
                 user_id=payload.user_id,
                 tenant_id=payload.tenant_id,
                 expires_at=datetime.fromtimestamp(payload.exp, timezone.utc),
             )
+            .returning(BrowserSessions.id)
         )
-        return self.auth_service.add_session_id(token, sid)
+        return self.auth_service.add_session_id(token, sid, session_ref)
 
     async def admit(self, payload: JWTPayload) -> None:
         """Refuse a verified token whose browser session has ended.
 
-        The row must exist, belong to the token's user and tenant and be
-        unexpired. Independent of ``BROWSER_SESSION_ENABLED``: a ``sid`` token
-        presented as Bearer is checked all the same.
+        The row must exist, belong to the token's user and tenant, be the one
+        its ``session_ref`` names when it carries one, and be unexpired.
+        Independent of ``BROWSER_SESSION_ENABLED``: a ``sid`` token presented
+        as Bearer is checked all the same.
         """
         if (
             payload.sid is None
             or await self.session.scalar(
                 sa.select(BrowserSessions.sid).where(
-                    BrowserSessions.sid == payload.sid,
-                    BrowserSessions.user_id == payload.user_id,
-                    BrowserSessions.tenant_id == payload.tenant_id,
+                    *_same_session(payload),
                     BrowserSessions.expires_at > datetime.now(timezone.utc),
                 )
             )
@@ -154,16 +160,29 @@ class BrowserSessionService:
         ):
             raise AuthenticationException("Could not validate token credentials.")
 
+    async def delete_expired(self) -> int:
+        """Delete every expired session, in the caller's transaction, and
+        return how many there were. An expired row admits nothing, so this
+        only keeps the table small."""
+        result = await self.session.execute(
+            sa.delete(BrowserSessions).where(
+                BrowserSessions.expires_at <= datetime.now(timezone.utc)
+            )
+        )
+        return affected_row_count(result)
+
     async def renew(self, current: JWTPayload, token: str, user: "UserInDB") -> str:
         """Renew the browser session ``current`` names with ``token``.
 
         ``token`` was just issued to ``user`` to replace the admitted session
-        token ``current``. Returns it carrying the same ``sid``, so the
-        session (and its sign-out) stays the same one. The session's row moves
-        to the new token's expiry unless another renewal already moved it
-        later (renewals can be recorded in another order than they were
-        issued), and the renewal is audited, in one transaction that commits
-        within ``STORE_DEADLINE_SECONDS``, before the caller sets the cookie.
+        token ``current``. Returns it carrying the same ``sid`` and
+        ``session_ref`` (none, for a session started before sessions had
+        one), so the session (and its sign-out) stays the same one. The
+        session's row moves to the new token's expiry unless another renewal
+        already moved it later (renewals can be recorded in another order
+        than they were issued), and the renewal is audited, in one
+        transaction that commits within ``STORE_DEADLINE_SECONDS``, before
+        the caller sets the cookie.
         A session that has ended meanwhile (its row is gone or expired) is
         refused, and nothing is written.
 
@@ -171,7 +190,9 @@ class BrowserSessionService:
         """
         if current.sid is None:
             raise AuthenticationException("No browser session")
-        renewed = self.auth_service.add_session_id(token, current.sid)
+        renewed = self.auth_service.add_session_id(
+            token, current.sid, current.session_ref
+        )
         expires_at = datetime.fromtimestamp(
             self._verified_payload(renewed).exp, timezone.utc
         )
@@ -180,9 +201,7 @@ class BrowserSessionService:
                 moved = await self.session.scalar(
                     sa.update(BrowserSessions)
                     .where(
-                        BrowserSessions.sid == current.sid,
-                        BrowserSessions.user_id == current.user_id,
-                        BrowserSessions.tenant_id == current.tenant_id,
+                        *_same_session(current),
                         BrowserSessions.expires_at > datetime.now(timezone.utc),
                     )
                     .values(
@@ -235,8 +254,8 @@ class BrowserSessionService:
             ) from None
         return renewed
 
-    async def end(self, token: str) -> None:
-        """Delete the session a sign-out's cookie names.
+    async def revoke(self, token: str) -> None:
+        """Delete the session a sign-out's token names.
 
         Only a token that meets the local-token contract (signature, issuer,
         audience, typed claims) names a session; any other cookie, or a token
@@ -258,11 +277,7 @@ class BrowserSessionService:
         try:
             async with _store_transaction(self.session):
                 await self.session.execute(
-                    sa.delete(BrowserSessions).where(
-                        BrowserSessions.sid == payload.sid,
-                        BrowserSessions.user_id == payload.user_id,
-                        BrowserSessions.tenant_id == payload.tenant_id,
-                    )
+                    sa.delete(BrowserSessions).where(*_same_session(payload))
                 )
         except Exception as exc:
             logger.error(

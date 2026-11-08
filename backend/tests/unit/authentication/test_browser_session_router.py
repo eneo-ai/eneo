@@ -427,7 +427,7 @@ def test_logout_clears_session_and_txn_cookies(
     assert response.status_code == 204
     assert response.content == b""
     # The server ends the session the cookie names before clearing it.
-    endpoints.sessions.end.assert_awaited_once_with(token)
+    endpoints.sessions.revoke.assert_awaited_once_with(token)
     assert set_cookies(response) == [
         expected_set_cookie(name, EMPTY, 0, production=production)
         for name in (session, txn)
@@ -436,7 +436,7 @@ def test_logout_clears_session_and_txn_cookies(
 
 def test_logout_that_cannot_end_the_session_keeps_the_cookie(endpoints: Endpoints):
     token = mint()
-    endpoints.sessions.end.side_effect = HTTPException(
+    endpoints.sessions.revoke.side_effect = HTTPException(
         503, detail={"code": "sign_out_unavailable", "message": "Try again."}
     )
 
@@ -460,7 +460,7 @@ def test_logout_refuses_cross_site(endpoints: Endpoints, site: dict[str, str]):
     assert response.status_code == 403
     assert response.json()["code"] == "browser_origin_refused"
     assert set_cookies(response) == []
-    endpoints.sessions.end.assert_not_awaited()
+    endpoints.sessions.revoke.assert_not_awaited()
 
 
 @pytest.mark.parametrize("expected", [None, "stale"])
@@ -483,7 +483,7 @@ def test_logout_keeps_a_session_the_page_did_not_expect(
     assert body["code"] == "session_generation_mismatch"
     assert body["message"] == "The browser session changed after this page was loaded."
     assert set_cookies(response) == []
-    endpoints.sessions.end.assert_not_awaited()
+    endpoints.sessions.revoke.assert_not_awaited()
     # Logged once, by the shared domain-exception handler.
     assert [
         (r.name, r.levelno) for r in caplog.records if r.name.startswith("eneo.")
@@ -509,9 +509,9 @@ def test_logout_clears_what_the_page_expects_or_cannot_use(
         SESSION, EMPTY, 0, production=True
     )
     if case == "no session":
-        endpoints.sessions.end.assert_not_awaited()
+        endpoints.sessions.revoke.assert_not_awaited()
     else:
-        endpoints.sessions.end.assert_awaited_once_with(token)
+        endpoints.sessions.revoke.assert_awaited_once_with(token)
 
 
 @pytest.mark.parametrize("path", [SESSION_LOGIN, LOGOUT, PROBE])

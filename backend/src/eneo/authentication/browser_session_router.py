@@ -186,7 +186,7 @@ async def end_browser_session(
     token = session_cookie(request, settings)
     if token is not None:
         refuse_superseded_session(request, token)
-        await container.browser_session_service().end(token)
+        await container.browser_session_service().revoke(token)
     response = Response(status_code=status.HTTP_204_NO_CONTENT)
     clear_session_cookies(response, settings=settings)
     return response

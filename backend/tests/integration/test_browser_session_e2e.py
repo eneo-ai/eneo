@@ -161,6 +161,17 @@ async def _execute(statement) -> None:
         await session.execute(statement)
 
 
+async def _refs(user_id: str) -> dict[str, UUID]:
+    """The stable id of each of the user's sessions, by sid."""
+    async with sessionmanager.session() as session, session.begin():
+        rows = await session.execute(
+            sa.select(BrowserSessions.sid, BrowserSessions.id).where(
+                BrowserSessions.user_id == UUID(user_id)
+            )
+        )
+        return dict(rows.tuples().all())
+
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_session_cookie_signs_the_browser_in_and_out(
@@ -448,12 +459,14 @@ async def test_each_browser_sign_in_records_its_own_session(
     issued = await _login(client, TOKEN_LOGIN, email, PASSWORD)
     ordinary = _claims(issued.json()["access_token"])
 
-    # The token login keeps its contract; a browser sign-in adds only sid.
+    # The token login keeps its contract; a browser sign-in adds only the
+    # session: its sid and its row's stable id.
     assert "sid" not in ordinary
     for browser in (first, second):
-        assert browser.keys() - ordinary.keys() == {"sid"}
+        assert browser.keys() - ordinary.keys() == {"sid", "session_ref"}
         assert browser["auth_method"] == ordinary["auth_method"] == "password"
     assert first["sid"] != second["sid"]
+    assert first["session_ref"] != second["session_ref"]
     rows = await _rows(first["user_id"])
     assert rows.keys() == {first["sid"], second["sid"]}
     for browser in (first, second):
@@ -462,6 +475,9 @@ async def test_each_browser_sign_in_records_its_own_session(
             UUID(browser["tenant_id"]),
             datetime.fromtimestamp(browser["exp"], timezone.utc),
         )
+    assert await _refs(first["user_id"]) == {
+        browser["sid"]: UUID(browser["session_ref"]) for browser in (first, second)
+    }
 
 
 @pytest.mark.integration
@@ -529,7 +545,52 @@ async def test_a_present_sid_must_name_a_session(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_sign_in_deletes_the_users_expired_sessions(
+async def test_a_session_token_names_its_own_row(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+):
+    email = await _create_local_user(client, super_admin_token)
+    token = _session_token(await _login(client, SESSION_LOGIN, email, PASSWORD))
+    other = _claims(
+        _session_token(await _login(client, SESSION_LOGIN, email, PASSWORD))
+    )
+    claims = _claims(token)
+
+    # Signed with the real key: a sid with another session's stable id, or
+    # with an id no session has, names no session.
+    for ref in (other["session_ref"], str(uuid4())):
+        refused = await client.get(
+            "/api/v1/users/me/",
+            headers=_bearer(_signed(claims | {"session_ref": ref})),
+        )
+        assert refused.status_code == 401, refused.text
+
+    # A token issued before sessions had a stable id carries the sid alone.
+    # It is still admitted, keeps its generation, and its renewal stays the
+    # same session without gaining an id.
+    issued_before = _signed(
+        {name: value for name, value in claims.items() if name != "session_ref"}
+    )
+    me = await client.get("/api/v1/users/me/", headers=_cookie(issued_before))
+    assert me.status_code == 200, me.text
+    assert me.headers[GENERATION] == session_generation(issued_before)
+    extended = await client.post(EXTEND, headers=_cookie(issued_before))
+    assert extended.status_code == 200, extended.text
+    renewed = _session_token(extended)
+    assert "session_ref" not in _claims(renewed)
+    assert _claims(renewed)["sid"] == claims["sid"]
+    assert extended.json()["generation"] == session_generation(issued_before)
+    assert (
+        await client.get("/api/v1/users/me/", headers=_cookie(renewed))
+    ).status_code == 200
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_expired_sessions_stay_until_the_nightly_delete(
     client,
     super_admin_token,
     patch_auth_service_jwt,
@@ -553,12 +614,22 @@ async def test_sign_in_deletes_the_users_expired_sessions(
             .values(expires_at=past)
         )
 
-    latest = await _login(client, SESSION_LOGIN, email, PASSWORD)
-    latest_sid = _claims(_session_token(latest))["sid"]
+    # Signing in again leaves the expired rows: one job deletes them.
+    latest_sid = _claims(
+        _session_token(await _login(client, SESSION_LOGIN, email, PASSWORD))
+    )["sid"]
+    assert (await _rows(expired["user_id"])).keys() == {
+        expired["sid"],
+        live["sid"],
+        latest_sid,
+    }
+
+    async with sessionmanager.session() as session, session.begin():
+        container = Container(session=providers.Object(session))
+        await container.browser_session_service().delete_expired()
 
     assert (await _rows(expired["user_id"])).keys() == {live["sid"], latest_sid}
-    # Only the signing-in user's rows: another user's go at their next sign-in.
-    assert (await _rows(others["user_id"])).keys() == {others["sid"]}
+    assert await _rows(others["user_id"]) == {}
 
 
 @pytest.mark.integration
@@ -1144,6 +1215,7 @@ async def test_a_browser_session_extends_itself_and_is_audited(
     assert claims["auth_time"] == original["iat"]
     # It is the same session: no new row, and the row now ends with it.
     assert claims["sid"] == original["sid"]
+    assert claims["session_ref"] == original["session_ref"]
     assert await _rows(original["user_id"]) == {
         original["sid"]: (
             UUID(original["user_id"]),

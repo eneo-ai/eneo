@@ -11,7 +11,7 @@ from starlette.responses import Response
 from starlette.types import Scope
 from yarl import URL
 
-from eneo.authentication.auth_models import SESSION_ID_PATTERN
+from eneo.authentication.auth_models import SESSION_ID_PATTERN, SESSION_REF_PATTERN
 from eneo.main.config import Settings, get_settings
 from eneo.main.logging import get_logger
 
@@ -192,33 +192,33 @@ def session_token_from_request(request: Request) -> str | None:
 def session_generation(token: str) -> str:
     """The generation of a session: 128 bits of a SHA-256.
 
-    A browser session's token (one with ``sid``) hashes its session id. Staying
-    signed in renews the token but keeps the ``sid``, so a page keeps its
-    generation and an answer lost after the cookie changed costs nothing,
-    while every sign-in, to the same account or another, starts a session with
-    a new id and so a new generation. Any other token hashes the token itself,
-    so a different credential has a different generation.
+    A browser session's token (one with ``sid``) hashes the session's stable
+    id (``session_ref``), or its ``sid`` when it was issued before sessions
+    had one, so such a token keeps the generation its pages were loaded
+    with. Staying signed in renews the token but keeps both, so a page keeps
+    its generation and an answer lost after the cookie changed costs nothing,
+    while every sign-in, to the same account or another, starts a session
+    with a new id and so a new generation. Any other token hashes the token
+    itself, so a different credential has a different generation.
 
     Read before the token is verified, as a fingerprint only: it names a
     session without revealing the token or the session id, and a forged token
     with someone's ``sid`` still fails authentication.
     """
-    sid = _unverified_session_id(token)
-    material = token if sid is None else f"sid:{sid}"
-    digest = hashlib.sha256(material.encode()).digest()[:16]
-    return base64.urlsafe_b64encode(digest).decode().rstrip("=")
-
-
-def _unverified_session_id(token: str) -> str | None:
     try:
         claims = jwt.decode(token, options={"verify_signature": False})
     except jwt.PyJWTError:
-        return None
-    sid = claims.get("sid")
-    # Only the form sign-in writes; any other value is no session id.
-    return (
-        sid if isinstance(sid, str) and re.fullmatch(SESSION_ID_PATTERN, sid) else None
-    )
+        claims = {}
+    sid, ref = claims.get("sid"), claims.get("session_ref")
+    # Only the forms sign-in writes; any other value names no session.
+    if not isinstance(sid, str) or not re.fullmatch(SESSION_ID_PATTERN, sid):
+        material = token
+    elif isinstance(ref, str) and re.fullmatch(SESSION_REF_PATTERN, ref):
+        material = f"ref:{ref}"
+    else:
+        material = f"sid:{sid}"
+    digest = hashlib.sha256(material.encode()).digest()[:16]
+    return base64.urlsafe_b64encode(digest).decode().rstrip("=")
 
 
 def admit_session(connection: HTTPConnection) -> None:
