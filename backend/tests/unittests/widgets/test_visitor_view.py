@@ -902,5 +902,8 @@ def test_a_skill_activation_never_reaches_a_restored_session():
     payload = to_session_public(VisitorView(_widget()).session(session))
 
     [message] = payload.model_dump(mode="json")["messages"]
-    assert [call["tool_name"] for call in message["tool_calls"]] == ["search_casefiles"]
+    assert [call["tool_name"] for call in message["tool_calls"]] == [
+        "search_casefiles",
+        "read_source",
+    ]
     assert "rutin-for-arenden" not in json.dumps(message)
