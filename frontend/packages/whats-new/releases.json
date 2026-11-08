@@ -81,8 +81,8 @@
             "sv": "Avsluta sessionen när du loggar ut"
           },
           "body": {
-            "en": "Signing out now also ends your session on the server, so your sign-in stops working everywhere at once, even in a copy of it. If Eneo cannot confirm that, you stay signed in, see a message and can try again.",
-            "sv": "När du loggar ut avslutas nu också sessionen på servern, så att inloggningen slutar gälla överallt på en gång, även i en kopia av den. Om Eneo inte kan bekräfta det förblir du inloggad, får ett meddelande och kan försöka igen."
+            "en": "Signing out now also ends your session on the server, so your sign-in stops working everywhere at once, even in a copy of it. If Eneo cannot confirm that the sign-out went through, you see a message and can try again.",
+            "sv": "När du loggar ut avslutas nu också sessionen på servern, så att inloggningen slutar gälla överallt på en gång, även i en kopia av den. Om Eneo inte kan bekräfta att utloggningen gick igenom får du ett meddelande och kan försöka igen."
           }
         },
         {
