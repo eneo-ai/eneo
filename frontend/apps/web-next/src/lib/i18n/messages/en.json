@@ -5724,6 +5724,7 @@
   "widget_admin_blocker_subtitle_empty": "The description under the title must not be empty.",
   "widget_admin_blocker_legal_texts_lock_subtitle": "The description under the title must not be empty while the template locks the disclosure and footer.",
   "widget_admin_blocker_target_not_published": "Publish the assistant in its space first.",
+  "widget_admin_blocker_target_cannot_answer": "The assistant cannot answer in its space. Check its model and knowledge in the space's settings.",
   "widget_admin_blocker_organization_space_unsupported": "Widgets cannot run in the organisation space. Use an assistant in a shared space.",
   "widget_admin_blocker_personal_space_unsupported": "Widgets cannot run in a personal space yet. Use an assistant in a shared space.",
   "widget_admin_blocker_archived": "The widget is archived.",

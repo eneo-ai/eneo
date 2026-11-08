@@ -11,6 +11,8 @@ export function blockerLabel(code: string, t: Translate): string {
       return t("widget_admin_blocker_legal_texts_lock_subtitle");
     case "target_not_published":
       return t("widget_admin_blocker_target_not_published");
+    case "target_cannot_answer":
+      return t("widget_admin_blocker_target_cannot_answer");
     case "organization_space_unsupported":
       return t("widget_admin_blocker_organization_space_unsupported");
     case "personal_space_unsupported":

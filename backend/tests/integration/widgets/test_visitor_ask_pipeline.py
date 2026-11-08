@@ -769,6 +769,7 @@ async def test_an_oversized_open_with_tool_attachment_refuses_the_visitor_turn(
         json={"question": "Vad kostar ett bygglov?"},
         headers=_auth(token),
     )
-    assert resp.status_code == 400, resp.text
+    assert resp.status_code == 503, resp.text
+    assert resp.json()["detail"]["code"] == "answer_unavailable"
     assert seen.completion_kwargs == []
     assert await question_rows() == before

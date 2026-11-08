@@ -52,6 +52,9 @@ describe("widget errors", () => {
     expect(describeWidgetError(error(404, "widget_not_active"), t)).toBe(
       "widget_error_unavailable"
     );
+    expect(describeWidgetError(error(503, "answer_unavailable"), t)).toBe(
+      "widget_error_unavailable"
+    );
     expect(describeWidgetError(error(400, "challenge_expired"), t)).toBe(
       "widget_error_verification"
     );

@@ -115,6 +115,21 @@ class WidgetProtectionUnavailableError(WidgetPublicError):
         )
 
 
+class WidgetAnswerUnavailableError(WidgetPublicError):
+    """The assistant could not answer; the visitor learns no more than that.
+
+    What failed, the model, the provider or the configuration, is the
+    organisation's business and goes to the server log.
+    """
+
+    status_code = 503
+    code = "answer_unavailable"
+    public_message = "The assistant cannot answer right now."
+
+    def __init__(self) -> None:
+        super().__init__(self.public_message)
+
+
 class WidgetFieldLockedError(WidgetPublicError):
     """An update touched a part of the widget its template governs."""
 

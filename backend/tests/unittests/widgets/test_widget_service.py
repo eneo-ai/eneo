@@ -6,7 +6,11 @@ import pytest
 
 from eneo.main.exceptions import (
     BadRequestException,
+    KnowledgeModelUnavailableException,
+    ModelNotAvailableException,
+    NoModelSelectedException,
     NotFoundException,
+    SecurityClassificationMismatchException,
     UnauthorizedException,
 )
 from eneo.roles.permissions import Permission
@@ -942,3 +946,80 @@ async def test_linking_a_template_releases_the_widgets_own_avatar(assistant):
     )
     assert linked.widget.persona.avatar_icon_id == template_avatar
     assert icons.released == [(own_avatar, template_avatar)]
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        NoModelSelectedException("x"),
+        ModelNotAvailableException("x"),
+        KnowledgeModelUnavailableException("x"),
+        SecurityClassificationMismatchException("x"),
+    ],
+    ids=lambda failure: type(failure).__name__,
+)
+async def test_a_target_the_space_cannot_ask_blocks_activation(assistant, failure):
+    space, _ = _space(uuid4(), assistant)
+    editor = _service(_user(Permission.WIDGETS), space)
+    view = await editor.create_widget(
+        space_id=space.id, target_id=assistant.id, name="w"
+    )
+    await editor.update_widget(
+        view.widget.id,
+        WidgetUpdate.model_validate(
+            {
+                "revision": view.widget.revision,
+                "allowed_origins": ["https://www.kommun.se"],
+            }
+        ),
+    )
+    space.can_ask_assistant = MagicMock(side_effect=failure)
+
+    assert (await editor.get_widget(view.widget.id)).activation_blockers == [
+        "target_cannot_answer"
+    ]
+    space.can_ask_assistant.assert_called_with(assistant=assistant)
+
+    admin_user = _user(Permission.ADMIN)
+    admin_user.tenant_id = editor.user.tenant_id
+    with pytest.raises(WidgetServingBlockedError) as exc:
+        await _service(admin_user, space, repo=editor.repo).activate_widget(
+            view.widget.id
+        )
+    assert exc.value.blockers == ["target_cannot_answer"]
+
+
+async def test_a_target_that_is_gone_is_not_also_reported_as_unable_to_answer(
+    assistant,
+):
+    space, _ = _space(uuid4(), assistant)
+    service = _service(_user(Permission.WIDGETS), space)
+    view = await service.create_widget(
+        space_id=space.id, target_id=assistant.id, name="w"
+    )
+    space.get_assistant.side_effect = NotFoundException()
+
+    blockers = (await service.get_widget(view.widget.id)).activation_blockers
+
+    assert "target_not_published" in blockers
+    assert "target_cannot_answer" not in blockers
+
+
+async def test_blockers_of_many_widgets_load_each_space_once(assistant):
+    space, _ = _space(uuid4(), assistant)
+    editor = _service(_user(Permission.WIDGETS), space)
+    first = await editor.create_widget(
+        space_id=space.id, target_id=assistant.id, name="a"
+    )
+    second = await editor.create_widget(
+        space_id=space.id, target_id=assistant.id, name="b"
+    )
+    space.can_ask_assistant = MagicMock(side_effect=ModelNotAvailableException("x"))
+
+    blockers = await editor.activation_blockers_of([first.widget, second.widget])
+
+    assert blockers == {
+        first.widget.id: ["allowed_origins_empty", "target_cannot_answer"],
+        second.widget.id: ["allowed_origins_empty", "target_cannot_answer"],
+    }
+    editor.space_service.repo.one.assert_awaited_once_with(space.id)
