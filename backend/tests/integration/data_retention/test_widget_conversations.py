@@ -130,7 +130,7 @@ async def _question(
     *,
     tenant_id: UUID,
     assistant_id: UUID,
-    session_id: UUID,
+    session_id: UUID | None,
     created_at: datetime,
 ) -> UUID:
     row = Questions(
@@ -379,6 +379,52 @@ async def test_an_overdue_walk_its_pages_do_not_finish_is_incomplete(
     )
 
     assert (overdue.count, overdue.complete) == (0, False)
+
+
+async def test_a_question_without_a_session_stays_eligible(
+    retention_session: AsyncSession, test_tenant, admin_user, completion_model_factory
+):
+    """Mutant: the widget predicate reads a question without a session as a
+    widget's (a NOT EXISTS over sessions outside widgets), so discovery passes
+    it, the fresh check inside the delete refuses it and the overdue walk
+    leaves it out, while a widget question beside it is still passed."""
+    assistant, widget = await _owner(
+        retention_session,
+        completion_model_factory,
+        tenant_id=test_tenant.id,
+        user_id=admin_user.id,
+    )
+    widget_session = await _session(
+        retention_session, created_at=_ago(DAYS_OLD), widget_id=widget.id
+    )
+    widget_question, sessionless = [
+        await _question(
+            retention_session,
+            tenant_id=test_tenant.id,
+            assistant_id=assistant.id,
+            session_id=session_id,
+            created_at=_ago(DAYS_OLD - offset),
+        )
+        for offset, session_id in enumerate((widget_session, None))
+    ]
+    await retention_session.commit()
+    await retention_session.begin()
+    repository = _questions(retention_session)
+
+    # The window (discovery and the overdue walk) marks only the widget question.
+    page = await repository.lock_due_page(_at_owner(assistant.id), 10)
+    assert [root.id for root in page.roots] == [widget_question, sessionless]
+    assert (list(page.passed_ids), list(page.locked_ids)) == (
+        [widget_question],
+        [sessionless],
+    )
+    overdue = await repository.overdue(
+        window=timedelta(0), limit=10, owner_page=1000, max_pages=10
+    )
+    assert (overdue.count, overdue.complete) == (1, True)
+    # The due query inside the delete refuses only the widget question.
+    assert await repository.delete_if_still_due(widget_question) is None
+    assert await repository.delete_if_still_due(sessionless)
 
 
 async def test_the_empty_session_sweep_leaves_widget_sessions(
