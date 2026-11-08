@@ -61,6 +61,11 @@ function EditorDraft({ id }: { id: string }) {
   );
 }
 
+// The first load of the app's route graph takes seconds on a busy runner. File
+// collection has no timeout, so pay it here; each beforeEach then only
+// re-evaluates the graph for its fresh module registry.
+await import("@/router");
+
 beforeEach(async () => {
   vi.resetModules();
   vi.clearAllMocks();
@@ -166,7 +171,7 @@ beforeEach(async () => {
     // Node's Request needs an absolute base; response/session middleware stays real.
     API_BASE: window.location.origin
   }));
-  // Transform the app graph during fixture setup, outside each behavior assertion's timeout.
+  // Evaluate this registry's graph in fixture setup, outside each assertion's timeout.
   await import("@/router");
 });
 
