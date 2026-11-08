@@ -25,7 +25,7 @@ Audit logging can be turned on or off globally in the admin UI.
 - Go to **Admin** and use the **Audit logging** toggle on the admin overview page to enable or disable logging for your tenant
 - The logs themselves, the per-category and per-action configuration, exports, and the retention setting live under **Admin → Analytics & logs → Audit Logs**
 
-When disabled, no new audit logs are created.
+When disabled, no new audit logs are created, except the actions that are always logged, such as the [sign-in identity actions](#sign-in-identity-actions).
 
 ## Configure what gets logged
 
@@ -35,6 +35,19 @@ You can fine-tune logging in two levels:
 2. **Action toggles** — enable/disable specific actions within a category (e.g., `user_created`).
 
 Changes apply immediately for new events. Historical logs remain unchanged.
+
+## Sign-in identity actions
+
+Four security events record which account a provider identity reaches (see [Account Binding](/guides/oidc-federation#account-binding)). They are always logged: neither the audit logging toggle nor a category or action toggle switches them off.
+
+| Action | Written when | Metadata |
+|--------|--------------|----------|
+| `identity_bound` (Sign-in Identity Linked) | A sign-in binds an identity to an account | `issuer`, `audience`, `subject`, `method` (`email_match`, `jit`, `same_subject`, `migration_window` or `admin_allowance`), `window_id` for a window, `replaced_subject` when a subject was replaced, `correlation_id` |
+| `identity_conflict` (Sign-in Identity Refused) | A sign-in is refused because its identity cannot be bound; outcome failure | `reason`, `issuer`, `audience`, `subject`, `account_ids`, `correlation_id` |
+| `identity_rebinding_updated` (Sign-in Re-linking Changed) | An administrator opens or withdraws an account's re-binding allowance | The administrator, the account and the old and new `rebinding_allowed_until` |
+| `identity_migration_window_updated` (Sign-in Migration Window Changed) | An administrator opens or closes a migration window | `change` (`opened` or `closed`), `window_id`, `from_issuer`, `from_audience`, `to_issuer`, `to_audience`, `closes_at` |
+
+`identity_bound` is written in the sign-in's own transaction, so it exists only for a sign-in that completed. `identity_conflict` is queued and written by the worker, so it survives the refused sign-in; if the queue cannot be reached, the backend log warning `identity_conflict` remains. Neither of the two carries the email or a token.
 
 ## Viewing audit logs
 

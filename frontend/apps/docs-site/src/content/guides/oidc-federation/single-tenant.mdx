@@ -281,7 +281,7 @@ curl "https://your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/federation" \
 
 ## User Provisioning
 
-Eneo matches the signing-in user to an existing Eneo user by the `email` claim of the ID token. By default a user who does not exist is rejected with `403 User not found. Provision the account through SCIM or contact your administrator for access.`
+On the first sign-in, Eneo matches the signing-in user to an existing Eneo user by the `email` claim of the ID token and binds the account to the person's identity; after that, the identity decides and the email is not consulted (see [Account Binding](/guides/oidc-federation#account-binding)). By default a user who does not exist is rejected with `403 User not found. Provision the account through SCIM or contact your administrator for access.`
 
 For deployments using SCIM, keep tenant `provisioning` set to `false` (the default). SCIM creates and manages accounts; OIDC signs users in to their existing active account. A user whose account has not arrived through SCIM must wait for provisioning. Enabling SCIM does not automatically change the tenant's JIT setting.
 
@@ -386,6 +386,12 @@ JIT is enabled and the domain is allowed, but the ID token carries no accepted v
 ### "Email claim not found in ID token"
 
 The ID token has no `email` claim (`401`). On Azure Entra ID this happens when the user has no `mail` attribute or the app registration does not emit the optional `email` claim - see the checklist in [SCIM Provisioning](/guides/scim-provisioning#sign-in-prerequisites-when-paired-with-oidc).
+
+### "This account is already linked to another sign-in"
+
+The account is bound to another identity than the one this sign-in presents (`403` `identity_conflict`), for example after a client ID or subject claim change.
+
+**Fix:** Find the reason in the audit log and follow [Sign-in conflicts](/guides/oidc-federation#sign-in-conflicts).
 
 ### Invalid client
 
