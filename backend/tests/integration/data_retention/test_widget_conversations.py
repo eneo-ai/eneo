@@ -18,6 +18,7 @@ from eneo.data_retention.application.conversation_retention import (
 from eneo.data_retention.application.empty_session_retention_task import (
     EMPTY_SESSIONS_TASK,
 )
+from eneo.data_retention.domain.retention import RetentionKeyset
 from eneo.data_retention.infrastructure.conversation_retention_repo import (
     ConversationRetentionRepository,
 )
@@ -29,6 +30,7 @@ from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.widgets_table import Widgets
+from eneo.main.config import get_settings
 from eneo.widgets.domain.widget import generate_public_id
 from tests.integration.data_retention.retention_support import run_registered_retention
 
@@ -206,6 +208,119 @@ async def test_the_overdue_report_does_not_count_widget_questions(
     )
 
     assert (overdue.count, overdue.complete) == (1, True)
+
+
+@dataclass(frozen=True)
+class WidgetBacklog:
+    owner: UUID
+    # Due by the assistant's rule, oldest first, ahead of the user's question.
+    widget_questions: tuple[UUID, ...]
+    user_question: UUID
+
+
+@pytest.fixture
+async def widget_backlog(
+    retention_session: AsyncSession, test_tenant, admin_user, completion_model_factory
+) -> WidgetBacklog:
+    assistant, widget = await _owner(
+        retention_session,
+        completion_model_factory,
+        tenant_id=test_tenant.id,
+        user_id=admin_user.id,
+    )
+    widget_session = await _session(
+        retention_session, created_at=_ago(DAYS_OLD), widget_id=widget.id
+    )
+    user_session = await _session(
+        retention_session, created_at=_ago(DAYS_OLD), user_id=admin_user.id
+    )
+    widget_questions = tuple(
+        [
+            await _question(
+                retention_session,
+                tenant_id=test_tenant.id,
+                assistant_id=assistant.id,
+                session_id=widget_session,
+                created_at=_ago(DAYS_OLD - offset),
+            )
+            for offset in range(3)
+        ]
+    )
+    user_question = await _question(
+        retention_session,
+        tenant_id=test_tenant.id,
+        assistant_id=assistant.id,
+        session_id=user_session,
+        created_at=_ago(DAYS_OLD - 3),
+    )
+    await retention_session.commit()
+    await retention_session.begin()
+    return WidgetBacklog(assistant.id, widget_questions, user_question)
+
+
+def _at_owner(owner: UUID) -> RetentionKeyset:
+    """A cursor before the owner's first root, so the page starts at it."""
+    return RetentionKeyset(
+        at=datetime.min.replace(tzinfo=timezone.utc), id=UUID(int=0), group=owner
+    )
+
+
+async def test_discovery_reads_its_window_and_passes_widget_questions(
+    retention_session: AsyncSession, widget_backlog: WidgetBacklog
+):
+    """Mutant: discovery filters widget questions inside the owner's window, so
+    one statement reads every widget question the assistant's rule has passed,
+    uncharged, before the first question it returns."""
+    page = await _questions(retention_session).lock_due_page(
+        _at_owner(widget_backlog.owner), 2
+    )
+
+    first_two = widget_backlog.widget_questions[:2]
+    assert tuple(root.id for root in page.roots) == first_two
+    assert tuple(page.passed_ids) == first_two
+    assert tuple(page.locked_ids) == ()
+
+
+async def test_history_reaches_a_question_behind_widget_questions(
+    retention_session: AsyncSession, widget_backlog: WidgetBacklog
+):
+    """Mutants: a window of widget questions ends the owner or stalls the step,
+    so the user's question behind them stays; or a passed widget question is
+    reported as a locked root."""
+    # One root per discovery page.
+    settings = get_settings().model_copy(update={"retention_chunk_rows": 4})
+
+    report = await run_registered_retention(retention_session, settings=settings)
+
+    assert report.counts["questions.questions_deleted"] == 1
+    assert report.blocked == {}
+    assert await retention_session.get(Questions, widget_backlog.user_question) is None
+    for question in widget_backlog.widget_questions:
+        assert await retention_session.get(Questions, question)
+
+
+async def test_the_overdue_walk_counts_a_question_behind_widget_questions(
+    retention_session: AsyncSession, widget_backlog: WidgetBacklog
+):
+    """Mutant: a walk window full of widget questions moves past the owner, so
+    the overdue question behind them is never counted."""
+    overdue = await _questions(retention_session).overdue(
+        window=timedelta(0), limit=1, owner_page=1000, max_pages=10
+    )
+
+    assert (overdue.count, overdue.complete) == (1, True)
+
+
+async def test_an_overdue_walk_its_pages_do_not_finish_is_incomplete(
+    retention_session: AsyncSession, widget_backlog: WidgetBacklog
+):
+    """Mutant: the walk filters widget questions inside one unbounded read and
+    reports complete, however many widget questions it had to read."""
+    overdue = await _questions(retention_session).overdue(
+        window=timedelta(0), limit=1, owner_page=1000, max_pages=1
+    )
+
+    assert (overdue.count, overdue.complete) == (0, False)
 
 
 async def test_the_empty_session_sweep_leaves_widget_sessions(

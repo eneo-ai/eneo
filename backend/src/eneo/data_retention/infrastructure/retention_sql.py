@@ -36,9 +36,9 @@ def outside_widgets() -> sa.ColumnElement[bool]:
     return Sessions.widget_id.is_(None)
 
 
-def question_outside_widgets() -> sa.ColumnElement[bool]:
-    """A question outside every widget conversation; one without a session is."""
-    return ~sa.exists().where(Sessions.id == Questions.session_id, ~outside_widgets())
+def question_in_widget() -> sa.ColumnElement[bool]:
+    """A question of a widget conversation; one without a session is not."""
+    return sa.exists().where(Sessions.id == Questions.session_id, ~outside_widgets())
 
 
 def deployment_tenant_id() -> sa.ScalarSelect[UUID]:
