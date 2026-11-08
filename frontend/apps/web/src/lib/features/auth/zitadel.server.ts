@@ -24,7 +24,7 @@ const basicScopes = ["openid", "email", "urn:zitadel:iam:org:project:id:zitadel:
  * SECURITY: Uses explicit PUBLIC_ORIGIN configuration instead of
  * event.url.origin to prevent redirect_uri mismatches behind reverse proxies.
  *
- * @returns The configured public origin (e.g., "https://eneo.sundsvall.se")
+ * @returns The configured public origin (e.g., "https://eneo.example.com")
  * @throws Error if PUBLIC_ORIGIN is not configured
  */
 function getPublicOrigin(): string {
@@ -33,7 +33,7 @@ function getPublicOrigin(): string {
     throw new Error(
       "[OIDC] PUBLIC_ORIGIN environment variable is required for OIDC authentication. " +
         "Set it to the externally-reachable URL for this application. " +
-        "Example: PUBLIC_ORIGIN=https://eneo.sundsvall.se"
+        "Example: PUBLIC_ORIGIN=https://eneo.example.com"
     );
   }
 
