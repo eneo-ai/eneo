@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Sequence
 
+import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.data_retention.application.retention_registration import (
@@ -64,9 +65,13 @@ async def run_retention(container: Container) -> list[RetentionRunReport]:
     session = container.session()
     if not isinstance(session, AsyncSession):
         raise RetentionContractError("Retention cron requires an AsyncSession.")
+    # Due-ness follows the database's clock, read once for the whole execution,
+    # so a worker whose clock is off neither removes early nor keeps late.
+    async with session.begin():
+        now = (await session.execute(sa.select(sa.func.now()))).scalar_one()
     return await run_registered_tasks(
         session,
-        retention_task_registrations(settings),
+        retention_task_registrations(settings, now=now),
         lambda budget: retention_runner(
             session=session, container=container, settings=settings, budget=budget
         ),

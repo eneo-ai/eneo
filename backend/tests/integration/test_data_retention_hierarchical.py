@@ -486,6 +486,41 @@ async def test_every_combination_of_levels_selects_by_the_nearest_choice(
 
 
 @pytest.mark.asyncio
+async def test_the_nightly_run_reads_due_ness_from_the_database_clock(
+    monkeypatch: pytest.MonkeyPatch,
+    retention_session: AsyncSession,
+    test_assistant: Assistants,
+    test_tenant,
+    admin_user,
+):
+    """Mutant: the nightly run takes its clock from the worker process, so a
+    worker whose clock is behind the database keeps a conversation that is due."""
+    from eneo.main import retention_tasks
+    from eneo.main.config import get_settings
+    from tests.integration.data_retention.retention_support import (
+        run_nightly_retention,
+    )
+
+    class _WorkerClockBehind(datetime):
+        @classmethod
+        def now(cls, tz=None):  # type: ignore[override]
+            return datetime(2000, 1, 1, tzinfo=timezone.utc)
+
+    test_assistant.data_retention_days = 30
+    question = await create_old_question(
+        retention_session, test_assistant.id, test_tenant.id, admin_user.id, 60
+    )
+    await retention_session.commit()
+    monkeypatch.setattr(retention_tasks, "datetime", _WorkerClockBehind)
+
+    await run_nightly_retention(monkeypatch, get_settings())
+
+    retention_session.expunge_all()
+    await retention_session.begin()
+    assert await retention_session.get(Questions, question.id) is None
+
+
+@pytest.mark.asyncio
 async def test_no_retention_keeps_all_questions(
     retention_session: AsyncSession,
     test_assistant: Assistants,
