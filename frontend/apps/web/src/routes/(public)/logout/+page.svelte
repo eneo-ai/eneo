@@ -3,9 +3,9 @@
   import AuthPageShell from "$lib/features/auth/components/AuthPageShell.svelte";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
-  import type { PageData } from "./$types";
+  import type { ActionData, PageData } from "./$types";
 
-  let { data }: { data: PageData } = $props();
+  let { data, form }: { data: PageData; form?: ActionData } = $props();
 
   const expired = $derived(data.message === "expired");
 </script>
@@ -14,23 +14,38 @@
   <title>Eneo.ai – {m.logout()}</title>
 </svelte:head>
 
-<AuthPageShell
-  tone={expired ? "warning" : data.signedIn ? undefined : "success"}
-  title={expired ? m.session_expired() : data.signedIn ? m.logout() : m.logout_success()}
-  description={expired
-    ? m.session_expired_description()
-    : data.signedIn
-      ? m.logout_confirmation_description()
-      : m.logout_description()}
->
-  {#if data.signedIn}
-    <form method="POST" action={localizeHref("/logout?/logout")}>
-      <input type="hidden" name="message" value={expired ? "expired" : "logout"} />
-      <Button type="submit" size="lg" class="w-full">
-        {expired ? m.login_again() : m.logout()}
-      </Button>
+{#if form?.signOutFailed}
+  <!-- The server could not end the session, so the cookies stay and the same
+       action can be tried again. -->
+  <AuthPageShell
+    tone="error"
+    title={m.logout_unavailable()}
+    description={m.logout_unavailable_description()}
+  >
+    <form method="POST" action={localizeHref(`/logout?/${form.signOutFailed}`)}>
+      <input type="hidden" name="message" value={form.message} />
+      <Button type="submit" size="lg" class="w-full">{m.retry()}</Button>
     </form>
-  {:else}
-    <Button href={localizeHref("/login")} size="lg" class="w-full">{m.login_again()}</Button>
-  {/if}
-</AuthPageShell>
+  </AuthPageShell>
+{:else}
+  <AuthPageShell
+    tone={expired ? "warning" : data.signedIn ? undefined : "success"}
+    title={expired ? m.session_expired() : data.signedIn ? m.logout() : m.logout_success()}
+    description={expired
+      ? m.session_expired_description()
+      : data.signedIn
+        ? m.logout_confirmation_description()
+        : m.logout_description()}
+  >
+    {#if data.signedIn}
+      <form method="POST" action={localizeHref("/logout?/logout")}>
+        <input type="hidden" name="message" value={expired ? "expired" : "logout"} />
+        <Button type="submit" size="lg" class="w-full">
+          {expired ? m.login_again() : m.logout()}
+        </Button>
+      </form>
+    {:else}
+      <Button href={localizeHref("/login")} size="lg" class="w-full">{m.login_again()}</Button>
+    {/if}
+  </AuthPageShell>
+{/if}

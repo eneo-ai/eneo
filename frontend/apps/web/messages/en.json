@@ -869,6 +869,8 @@
   "logout_confirmation_description": "Choose Log out to end your session.",
   "login_description": "Sign in to continue to Eneo.",
   "logout_description": "You can close this window or sign in again.",
+  "logout_unavailable": "Logout could not be completed",
+  "logout_unavailable_description": "You are still signed in. Try again in a moment.",
   "session_expired_description": "Sign in again to continue where you left off.",
   "logs": "Logs",
   "member": "Member",

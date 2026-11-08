@@ -2,8 +2,8 @@
 
 Each entry point runs against a fake provider that signs real ID tokens: the
 generic login in database federation mode and in environment-only mode, and
-the browser cookie login. Signing out of a browser session is pinned in
-test_browser_session_router.py; the Svelte logout never calls the backend.
+the browser cookie login. Signing out, with the cookie or the Svelte app's
+Bearer token, is pinned in test_browser_session_router.py.
 """
 
 import hashlib

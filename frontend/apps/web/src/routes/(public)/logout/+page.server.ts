@@ -1,8 +1,9 @@
-import { redirect } from "@sveltejs/kit";
+import { fail, redirect } from "@sveltejs/kit";
 import {
   clearFrontendCookies,
   decodeState,
   encodeState,
+  endEneoSession,
   EneoAccessTokenCookie,
   EneoIdTokenCookie,
   type LogoutStateParam
@@ -51,13 +52,23 @@ export const load = (({ url, locals }) => {
   };
 }) satisfies PageServerLoad;
 
+type SignOutAction = "logout" | "switchOrganisation" | "clearCookies";
+
+/** The session is still signed in, so its cookies stay and the page offers
+ * the same action again. */
+function signOutFailed(action: SignOutAction, message: "expired" | "logout" = "logout") {
+  return fail(503, { signOutFailed: action, message });
+}
+
 // SvelteKit form actions require form-encoded POSTs and enforce its origin
 // check before any cookies change. Keep the three user intents distinct:
 // recovery and organisation switching must not end the provider's session.
+// Each ends the Eneo session first, so a copy of its token stops working.
 export const actions = {
   logout: async (event) => {
     const form = await event.request.formData();
     const message = form.get("message") === "expired" ? "expired" : "logout";
+    if (!(await endEneoSession(event))) return signOutFailed("logout", message);
     clearFrontendCookies(event);
 
     if (event.locals.featureFlags.newAuth) {
@@ -72,13 +83,15 @@ export const actions = {
 
     redirect(303, `/login?message=${message}`);
   },
-  clearCookies: (event) => {
+  clearCookies: async (event) => {
+    if (!(await endEneoSession(event))) return signOutFailed("clearCookies");
     clearFrontendCookies(event);
     redirect(303, "/login");
   },
-  switchOrganisation: ({ cookies }) => {
-    cookies.delete(EneoIdTokenCookie, { path: "/" });
-    cookies.delete(EneoAccessTokenCookie, { path: "/" });
+  switchOrganisation: async (event) => {
+    if (!(await endEneoSession(event))) return signOutFailed("switchOrganisation");
+    event.cookies.delete(EneoIdTokenCookie, { path: "/" });
+    event.cookies.delete(EneoAccessTokenCookie, { path: "/" });
     redirect(303, "/login");
   }
 } satisfies Actions;
