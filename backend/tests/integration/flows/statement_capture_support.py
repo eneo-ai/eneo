@@ -45,7 +45,7 @@ def capture_queries(bind: Connection | Engine) -> Iterator[list[CapturedStatemen
 # reads whether a source still exists, never a turn.
 _COPY_SOURCE_PROBE = re.compile(
     r"FROM questions AS (\w+) \nWHERE \1\.id = "
-    r"content_derivations\.source_question_id\)"
+    r"content_derivations\.source_question_id\n LIMIT ALL OFFSET 0\)"
 )
 
 

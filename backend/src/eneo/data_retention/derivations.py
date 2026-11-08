@@ -45,10 +45,25 @@ class DerivedSourceRemovedError(Exception):
         )
 
 
+def probe(*criteria: ColumnElement[bool]) -> ColumnElement[bool]:
+    """EXISTS that stays one index probe per row it is evaluated for.
+
+    OFFSET 0 is PostgreSQL's optimisation fence: without it the planner may
+    flatten the check into a join or a hashed subplan that reads every
+    question or session on each read, whatever the read's own size.
+    """
+    return (
+        sa.select(sa.literal_column("1", sa.Integer))
+        .where(*criteria)
+        .offset(sa.literal_column("0", sa.Integer))
+        .exists()
+    )
+
+
 def source_removed() -> ColumnElement[bool]:
     """The edge's source question no longer exists; question ids never return."""
     source = aliased(Questions)
-    return ~sa.exists().where(source.id == ContentDerivations.source_question_id)
+    return ~probe(source.id == ContentDerivations.source_question_id)
 
 
 def copy_session_valid(
@@ -59,9 +74,7 @@ def copy_session_valid(
     Read in the same statement as the content, so a source deletion that
     committed before the statement's snapshot makes the copy unreadable.
     """
-    return ~sa.exists().where(
-        ContentDerivations.copy_session_id == session_id, source_removed()
-    )
+    return ~probe(ContentDerivations.copy_session_id == session_id, source_removed())
 
 
 async def is_removed_copy(session: AsyncSession, copy_session_id: UUID) -> bool:
