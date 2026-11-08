@@ -183,11 +183,12 @@ async def _validate_conversation_scope(
 
     space_repo = container.space_repo()
 
-    # If continuing an existing session, resolve it to validate scope
+    # If continuing an existing session, resolve its owner and partner (not its
+    # turns, which a copy of removed content no longer returns) to validate scope
     if session_id is not None:
         session_service = container.session_service()
         try:
-            session = await session_service.get_session_by_uuid(session_id)
+            owner = await session_service.get_session_ownership(session_id)
         except NotFoundException:
             # Session doesn't exist — return 403 (not 404) to prevent
             # scoped keys from enumerating session existence.
@@ -205,10 +206,9 @@ async def _validate_conversation_scope(
                 http_request, "Unable to verify API key scope for this session."
             )
 
-        assert session is not None
+        assert owner is not None
         if scope_type == "assistant":
-            session_assistant_id = session.assistant.id if session.assistant else None
-            if session_assistant_id != scope_id:
+            if owner.assistant_id != scope_id:
                 _raise_conversation_scope_denied(
                     http_request,
                     (

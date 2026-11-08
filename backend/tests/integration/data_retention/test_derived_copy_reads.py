@@ -386,6 +386,44 @@ async def test_an_owner_without_partner_access_gets_the_authorization_refusal(
     )
 
 
+async def test_a_key_scoped_to_the_copys_assistant_gets_the_explanation(
+    client: AsyncClient,
+    owner_token: str,
+    copy: Copy,
+    retention_session: AsyncSession,
+):
+    """Mutant: the API key scope check reads the conversation with its turns,
+    which a copy of removed content no longer returns, so a key scoped to the
+    copy's own Assistant is refused as out of scope instead of told why. A key
+    scoped to another Assistant keeps the scope refusal."""
+    await remove_by_user(client, owner_token, copy, retention_session)
+    secrets: dict[UUID, str] = {}
+    for assistant in (copy.copy_assistant, copy.source_assistant):
+        created = await client.post(
+            "/api/v1/api-keys",
+            json={
+                "name": f"copy-key-{uuid4().hex[:8]}",
+                "key_type": "sk_",
+                "permission": "read",
+                "scope_type": "assistant",
+                "scope_id": str(assistant),
+            },
+            headers=auth(owner_token),
+        )
+        assert created.status_code == 201, created.text
+        secrets[assistant] = created.json()["secret"]
+    export = f"/api/v1/conversations/{copy.copy_session}/documents/{uuid4()}/export/"
+
+    _assert_removed_source(
+        await client.get(export, headers={"X-API-Key": secrets[copy.copy_assistant]})
+    )
+    other = await client.get(
+        export, headers={"X-API-Key": secrets[copy.source_assistant]}
+    )
+    assert other.status_code == 403, other.text
+    assert other.json().get("code") != "derived_source_removed"
+
+
 async def test_follow_ups_and_other_content_readers_refuse_the_copy(
     client: AsyncClient,
     db_container,
