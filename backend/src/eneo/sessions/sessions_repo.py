@@ -245,7 +245,7 @@ class SessionRepository:
         """None also for a copy whose source was removed: it stays unchanged."""
         stmt = self._add_options(
             sa.update(Sessions)
-            .values(**session.model_dump(exclude={"id"}))
+            .values(**session.model_dump(exclude_unset=True, exclude={"id"}))
             .where(
                 Sessions.id == session.id,
                 copy_session_valid(Sessions.id.expression),
