@@ -44,6 +44,12 @@ def test_template_carries_identity_invariants_and_shipped_instructions():
     assert "eneo-question" in template.prompt_text
 
 
+def test_an_installed_help_assistant_keeps_its_conversations_until_someone_chooses():
+    """Mutant: the template fills in a retention period, so a newly installed
+    Help Assistant's conversations are removed without anyone choosing it."""
+    assert get_template(HelperKind.PROMPT_GUIDE).data_retention_days is None
+
+
 def test_list_templates_includes_prompt_guide():
     kinds = {kind for kind, _template in list_templates()}
 
