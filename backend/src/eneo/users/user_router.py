@@ -327,8 +327,10 @@ async def user_login_with_email_and_password(
     description=(
         "End the Eneo session the Bearer token names: a copy of the token "
         "stops working at once. A token that names no session, or is not "
-        "Eneo's, has none to end and also answers 204. When the session cannot "
-        "be ended, 503 `sign_out_unavailable`: the token still works; retry."
+        "Eneo's, has none to end and also answers 204. 503 "
+        "`sign_out_unavailable` means the end is not confirmed: the session "
+        "may already have ended, or the token may still work. Keep the token "
+        "and retry; once the session has ended, a retry answers 204."
     ),
     responses=responses.get_responses([503]),
 )

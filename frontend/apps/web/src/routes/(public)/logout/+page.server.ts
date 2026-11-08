@@ -54,8 +54,9 @@ export const load = (({ url, locals }) => {
 
 type SignOutAction = "logout" | "switchOrganisation" | "clearCookies";
 
-/** The session is still signed in, so its cookies stay and the page offers
- * the same action again. */
+/** The end of the session is not confirmed (it may have ended with its
+ * answer lost), so its cookies stay and the page offers the same action
+ * again; once the session has ended, a retry succeeds. */
 function signOutFailed(action: SignOutAction, message: "expired" | "logout" = "logout") {
   return fail(503, { signOutFailed: action, message });
 }

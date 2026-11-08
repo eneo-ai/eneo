@@ -871,7 +871,7 @@
   "login_description": "Logga in för att fortsätta till Eneo.",
   "logout_description": "Du kan stänga fönstret eller logga in igen.",
   "logout_unavailable": "Utloggningen kunde inte slutföras",
-  "logout_unavailable_description": "Du är fortfarande inloggad. Försök igen om en stund.",
+  "logout_unavailable_description": "Vi kunde inte bekräfta att du loggades ut. Försök igen om en stund.",
   "session_expired_description": "Logga in igen för att fortsätta där du var.",
   "logs": "Loggar",
   "member": "Medlem",

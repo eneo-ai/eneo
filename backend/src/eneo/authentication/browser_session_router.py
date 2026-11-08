@@ -167,9 +167,10 @@ async def create_browser_session(
         "End the browser's Eneo session on the server and clear its cookies: "
         "a copy of the session token stops working at once. The identity "
         "provider's session stays. With `Eneo-Session-Generation`, a session "
-        "other than the one named is left in place (401). When the session "
-        "cannot be ended, nothing is cleared (503). Only for requests from the "
-        "site's own pages."
+        "other than the one named is left in place (401). When the end cannot "
+        "be confirmed, nothing is cleared (503): the session may already have "
+        "ended, and a retry with the same cookie completes the sign-out. Only "
+        "for requests from the site's own pages."
     ),
     responses=responses.get_responses([401, 403, 404, 503]),
 )

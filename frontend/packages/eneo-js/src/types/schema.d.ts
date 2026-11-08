@@ -544,7 +544,7 @@ export interface paths {
     put?: never;
     /**
      * Sign Out
-     * @description End the Eneo session the Bearer token names: a copy of the token stops working at once. A token that names no session, or is not Eneo's, has none to end and also answers 204. When the session cannot be ended, 503 `sign_out_unavailable`: the token still works; retry.
+     * @description End the Eneo session the Bearer token names: a copy of the token stops working at once. A token that names no session, or is not Eneo's, has none to end and also answers 204. 503 `sign_out_unavailable` means the end is not confirmed: the session may already have ended, or the token may still work. Keep the token and retry; once the session has ended, a retry answers 204.
      */
     post: operations["Sign_out_api_v1_users_logout__post"];
     delete?: never;
@@ -10095,7 +10095,7 @@ export interface paths {
     put?: never;
     /**
      * Sign Out The Browser
-     * @description End the browser's Eneo session on the server and clear its cookies: a copy of the session token stops working at once. The identity provider's session stays. With `Eneo-Session-Generation`, a session other than the one named is left in place (401). When the session cannot be ended, nothing is cleared (503). Only for requests from the site's own pages.
+     * @description End the browser's Eneo session on the server and clear its cookies: a copy of the session token stops working at once. The identity provider's session stays. With `Eneo-Session-Generation`, a session other than the one named is left in place (401). When the end cannot be confirmed, nothing is cleared (503): the session may already have ended, and a retry with the same cookie completes the sign-out. Only for requests from the site's own pages.
      */
     post: operations["Sign_out_the_browser_api_v1_auth_session_logout__post"];
     delete?: never;

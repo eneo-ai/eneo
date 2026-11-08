@@ -15,8 +15,8 @@
 </svelte:head>
 
 {#if form?.signOutFailed}
-  <!-- The server could not end the session, so the cookies stay and the same
-       action can be tried again. -->
+  <!-- The server did not confirm the session ended, so the cookies stay and
+       the same action can be tried again. -->
   <AuthPageShell
     tone="error"
     title={m.logout_unavailable()}
