@@ -77,11 +77,19 @@ The policy is read and updated with `GET`/`PUT /api/v1/audit/retention-policy`. 
 
 ### Conversation retention hierarchy
 
-Conversation data (questions and app runs) follows a hierarchical retention policy:
+Conversation data (questions and app runs) follows a hierarchical retention policy.
+The nearest chosen period wins, also when it is longer than an outer one:
 
 1. Assistant or App `data_retention_days` (if set)
 2. Space `data_retention_days`
-3. `null` means keep forever
+3. The legacy organization period, while its switch is on (see below)
+4. With none of these set, the conversation is kept
+
+A question or App run is due when it is older than that period. Its age is measured
+against the database's clock, read once at the start of each execution, so a worker
+whose clock is off neither removes early nor keeps late. Each removal is counted under
+the level that chose the period: `by_assistant_or_app_rule`, `by_space_rule` or
+`by_organization_rule`.
 
 Web widget conversations are outside this hierarchy. Each widget's own retention
 applies, held to the organization's widget policy as it stands that night, and the
@@ -95,7 +103,23 @@ There is no tenant-level conversation retention setting: it was removed from the
 
 In shared and organization spaces, changing or clearing an assistant/app override requires the same space administration permission as changing the space policy. Editors can continue editing other settings but cannot change retention. Personal-space owners retain control of their own assistants and apps.
 
-The existing valid range is 1–2555 days. The space value is a default, not a maximum: administrators can choose a shorter or longer assistant/app override within that range. Setting the override to `null` restores inheritance; omitting it from an update leaves it unchanged. If neither the assistant/app nor its space has a policy, data is kept indefinitely (unless a legacy tenant policy applies).
+The existing valid range is 1–2555 days, a technical bound that the audit log and every conversation period share; web widgets keep their own range of 0–3650 days, where 0 stores nothing. The space value is a default, not a maximum: administrators can choose a shorter or longer assistant/app override within that range. Setting the override to `null` restores inheritance; omitting it from an update leaves it unchanged. If neither the assistant/app nor its space has a policy, data is kept indefinitely (unless a legacy tenant policy applies).
+
+A newly installed Prompt Guide has no period of its own: its conversations follow its
+space or the organization until an administrator chooses one. A Prompt Guide installed
+before keeps the period it was installed with.
+
+#### When a period changes
+
+| Change | Effect |
+| --- | --- |
+| A shorter period | Older conversations become due at the next execution |
+| A longer period | Conversations no longer due are kept; the check inside the delete sees the new period |
+| A cleared period | The level inherits the next chosen period outward, which can be shorter, longer or none, so more conversations can become due |
+| A first period | Conversations older than it become due at the next execution |
+
+A removed conversation never returns. Questions without an owner Assistant follow no
+period, and scheduled retention does not remove them.
 
 ### Scheduled execution and limits
 
@@ -242,8 +266,13 @@ can switch each one off:
 | `retention.jobs` | Retention execution records past the audit retention period | `RETENTION_JOB_HISTORY_ENABLED` |
 
 A task added later is off by default unless it removes only what such a period
-selects or is added to this list. Web widget conversations are not an engine task:
-the widget's own nightly job removes them by each widget's retention.
+selects or is added to this list; a test fails until it is declared one or the other.
+Web widget conversations are not an engine task: the widget's own nightly job removes
+them by each widget's retention.
+
+Outside the engine, the audit log also runs without a choice: it keeps 365 days unless
+an administrator changes the period on the audit log page (see
+[Audit log retention](#audit-log-retention)).
 
 #### Health
 

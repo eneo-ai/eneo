@@ -13,10 +13,11 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.data_retention.domain.retention import RetentionOverdue
+from eneo.data_retention.domain.rules import RetentionRule, resolve_period
 from eneo.database.tables.app_table import AppRuns, Apps
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.audit_retention_policy_table import AuditRetentionPolicy
@@ -24,6 +25,7 @@ from eneo.database.tables.files_table import Files
 from eneo.database.tables.questions_table import Questions, QuestionsFiles
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces
+from eneo.policy_levels import PolicyLevel
 from tests.integration.data_retention.retention_support import (
     run_registered_retention,
     step_batches,
@@ -332,6 +334,190 @@ async def test_tenant_level_retention_fallback(
 
     assert old_exists is None, "Question older than tenant retention should be deleted"
     assert recent_exists is not None, "Question within tenant retention should be kept"
+
+
+# The organisation's conversation value: no row, or (switch on, days). The
+# periods are organisation 30 < Assistant or App 60 < space 90, so an inner
+# choice is longer than an outer one in some combinations and shorter in
+# others, and a strictest-wins rule removes more than the nearest-wins rule.
+_ORGANIZATION_STATES: dict[str, tuple[bool, int | None] | None] = {
+    "no organisation row": None,
+    "organisation off with days": (False, 30),
+    "organisation on without days": (True, None),
+    "organisation on with days": (True, 30),
+}
+
+
+def _expected_period(
+    organization: tuple[bool, int | None] | None, space: int | None, own: int | None
+) -> tuple[int | None, str | None]:
+    """Today's conversation history rule, written out: the nearest chosen
+    period wins, and the organisation's counts only while its switch is on."""
+    if own is not None:
+        return own, "assistant_or_app"
+    if space is not None:
+        return space, "space"
+    if organization is not None and organization[0] and organization[1] is not None:
+        return organization[1], "organization"
+    return None, None
+
+
+@pytest.mark.asyncio
+async def test_every_combination_of_levels_selects_by_the_nearest_choice(
+    retention_session: AsyncSession,
+    test_space: Spaces,
+    test_assistant: Assistants,
+    test_app: Apps,
+    test_tenant,
+    admin_user,
+):
+    """Every combination of the three levels and the organisation switch,
+    for questions and App runs: the nearest chosen period wins, a longer inner
+    period overrides a shorter outer one, nothing is removed without a choice,
+    and each removal is counted under the level that chose it. The SQL removes
+    exactly what the kernel resolves, and both match today's rule written out.
+
+    Mutants: the strictest period wins instead of the nearest; the switch is
+    ignored; the space value is skipped when the owner has none; a removal is
+    counted under another level; the SQL resolves the levels in another order
+    than the rule declares."""
+    ids = (test_space.id, test_assistant.id, test_app.id)
+    space_id, assistant_id, app_id = ids
+    tenant_id, user_id = test_tenant.id, admin_user.id
+    completion_model_id = test_app.completion_model_id
+    ages = (45, 75, 120)
+
+    for state, organization in _ORGANIZATION_STATES.items():
+        for space_days in (None, 90):
+            for own_days in (None, 60):
+                case = f"{state}, space {space_days}, own {own_days}"
+                await retention_session.execute(
+                    delete(AuditRetentionPolicy).where(
+                        AuditRetentionPolicy.tenant_id == tenant_id
+                    )
+                )
+                if organization is not None:
+                    retention_session.add(
+                        AuditRetentionPolicy(
+                            tenant_id=tenant_id,
+                            retention_days=365,
+                            conversation_retention_enabled=organization[0],
+                            conversation_retention_days=organization[1],
+                        )
+                    )
+                await retention_session.execute(
+                    update(Spaces)
+                    .where(Spaces.id == space_id)
+                    .values(data_retention_days=space_days)
+                )
+                for owner in (Assistants, Apps):
+                    await retention_session.execute(
+                        update(owner)
+                        .where(owner.id.in_((assistant_id, app_id)))
+                        .values(data_retention_days=own_days)
+                    )
+                questions = [
+                    (
+                        await create_old_question(
+                            retention_session, assistant_id, tenant_id, user_id, age
+                        )
+                    ).id
+                    for age in ages
+                ]
+                runs = [
+                    (
+                        await create_old_app_run(
+                            retention_session,
+                            app_id,
+                            tenant_id,
+                            user_id,
+                            completion_model_id,
+                            age,
+                        )
+                    ).id
+                    for age in ages
+                ]
+
+                report = await run_registered_retention(retention_session)
+
+                days, level = _expected_period(organization, space_days, own_days)
+                resolved = resolve_period(
+                    RetentionRule.CONVERSATION_HISTORY,
+                    {
+                        PolicyLevel.ORGANIZATION: organization[1]
+                        if organization is not None and organization[0]
+                        else None,
+                        PolicyLevel.SPACE: space_days,
+                        PolicyLevel.ASSISTANT_OR_APP: own_days,
+                    },
+                )
+                assert (resolved.value, resolved.origin) == (days, level), case
+                due = [days is not None and age > days for age in ages]
+                removed_questions = [
+                    await retention_session.get(Questions, question) is None
+                    for question in questions
+                ]
+                removed_runs = [
+                    await retention_session.get(AppRuns, run) is None for run in runs
+                ]
+                assert (removed_questions, removed_runs) == (due, due), case
+                assert {
+                    key: count
+                    for key, count in report.counts.items()
+                    if key.endswith("_rule") and count
+                } == (
+                    {
+                        f"questions.by_{level}_rule": sum(due),
+                        f"app_runs.by_{level}_rule": sum(due),
+                    }
+                    if any(due)
+                    else {}
+                ), case
+
+                await retention_session.execute(
+                    delete(Questions).where(Questions.assistant_id == assistant_id)
+                )
+                await retention_session.execute(
+                    delete(Sessions).where(Sessions.assistant_id == assistant_id)
+                )
+                await retention_session.execute(
+                    delete(AppRuns).where(AppRuns.app_id == app_id)
+                )
+
+
+@pytest.mark.asyncio
+async def test_the_nightly_run_reads_due_ness_from_the_database_clock(
+    monkeypatch: pytest.MonkeyPatch,
+    retention_session: AsyncSession,
+    test_assistant: Assistants,
+    test_tenant,
+    admin_user,
+):
+    """Mutant: the nightly run takes its clock from the worker process, so a
+    worker whose clock is behind the database keeps a conversation that is due."""
+    from eneo.main import retention_tasks
+    from eneo.main.config import get_settings
+    from tests.integration.data_retention.retention_support import (
+        run_nightly_retention,
+    )
+
+    class _WorkerClockBehind(datetime):
+        @classmethod
+        def now(cls, tz=None):  # type: ignore[override]
+            return datetime(2000, 1, 1, tzinfo=timezone.utc)
+
+    test_assistant.data_retention_days = 30
+    question = await create_old_question(
+        retention_session, test_assistant.id, test_tenant.id, admin_user.id, 60
+    )
+    await retention_session.commit()
+    monkeypatch.setattr(retention_tasks, "datetime", _WorkerClockBehind)
+
+    await run_nightly_retention(monkeypatch, get_settings())
+
+    retention_session.expunge_all()
+    await retention_session.begin()
+    assert await retention_session.get(Questions, question.id) is None
 
 
 @pytest.mark.asyncio

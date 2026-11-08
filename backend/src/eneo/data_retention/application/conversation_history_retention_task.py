@@ -19,10 +19,10 @@ from eneo.data_retention.application.retention_runner import (
     RetentionStepResult,
 )
 from eneo.data_retention.application.retention_step_order import rotate_retention_steps
-from eneo.data_retention.domain.conversation_policy import ConversationPolicySource
 from eneo.data_retention.domain.retention import (
     RetentionOverdue,
 )
+from eneo.data_retention.domain.rules import RetentionRule, rule_task
 from eneo.data_retention.infrastructure.conversation_retention_repo import (
     ConversationRetentionRepository,
 )
@@ -37,7 +37,10 @@ class ConversationHistoryRetentionTask:
             *(kind.deleted_key for kind in ConversationRootKind),
             "sessions_deleted",
             "files_deleted",
-            *(f"by_{source.value}_rule" for source in ConversationPolicySource),
+            *(
+                f"by_{level.value}_rule"
+                for level in rule_task(RetentionRule.CONVERSATION_HISTORY).levels
+            ),
         }
     )
     # Examined owners and the Files a deleted conversation's release kept:

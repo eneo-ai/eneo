@@ -20,11 +20,11 @@ from eneo.data_retention.constants import (
     CONVERSATION_UNIT_OVERHEAD_ROWS,
     validate_conversation_unit_budget,
 )
-from eneo.data_retention.domain.conversation_policy import ConversationPolicySource
 from eneo.data_retention.domain.retention import (
     RetentionKeyset,
 )
 from eneo.files.file_retention import FileRetentionReason
+from eneo.policy_levels import PolicyLevel
 
 
 class ConversationRootKind(StrEnum):
@@ -72,7 +72,8 @@ ConversationUnitBlock = ConversationBlockReason | FileRetentionReason
 class ConversationDeletion:
     id: UUID
     tenant_id: UUID
-    source: ConversationPolicySource
+    # The level whose period removed it.
+    source: PolicyLevel
 
 
 @dataclass(frozen=True, slots=True)

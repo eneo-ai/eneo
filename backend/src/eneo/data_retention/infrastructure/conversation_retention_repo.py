@@ -28,7 +28,6 @@ from eneo.data_retention.application.retention_runner import (
     RetentionContractError,
     is_lock_wait_timeout,
 )
-from eneo.data_retention.domain.conversation_policy import ConversationPolicySource
 from eneo.data_retention.domain.retention import (
     RetentionKeyset,
     RetentionOverdue,
@@ -50,6 +49,7 @@ from eneo.database.tables.questions_table import Questions, QuestionsFiles
 from eneo.database.tables.spaces_table import Spaces
 from eneo.files.file_retention import FileRetentionReason
 from eneo.files.file_usage import FileUsageRepository
+from eneo.policy_levels import PolicyLevel
 
 
 class ConversationCascadeError(RuntimeError):
@@ -432,7 +432,7 @@ class ConversationRetentionRepository:
         return ConversationDeletion(
             id=deleted_id,
             tenant_id=tenant_id,
-            source=ConversationPolicySource(source),
+            source=PolicyLevel(source),
         )
 
     async def _release_emptied_session(self, session_id: UUID) -> _SessionRelease:

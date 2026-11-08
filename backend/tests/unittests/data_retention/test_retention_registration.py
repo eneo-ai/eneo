@@ -12,6 +12,14 @@ from eneo.data_retention.application.retention_health import (
     RetentionHealth,
     RetentionHealthStatus,
 )
+from eneo.data_retention.application.retention_registration import (
+    retention_registration_violations,
+)
+from eneo.data_retention.domain.rules import (
+    RETENTION_RULES,
+    RetentionRule,
+    RuleExemption,
+)
 from eneo.database import database
 from eneo.database.database import DatabaseSessionManager
 from eneo.main.config import Settings, get_settings
@@ -76,6 +84,86 @@ def test_only_listed_removals_run_without_a_choice():
             for registration in retention_task_registrations(switched_off)
             if registration.name == task
         ] == [False]
+
+
+def _violations(**changes: object) -> list[str]:
+    declared: dict[str, object] = {
+        "vocabulary": tuple(RetentionRule),
+        "rules": RETENTION_RULES,
+        "registered": [
+            registration.name
+            for registration in retention_task_registrations(get_settings())
+        ],
+        "existing_without_choice": EXISTING_WITHOUT_CHOICE,
+        "settings": Settings.model_fields,
+    }
+    declared.update(changes)
+    return retention_registration_violations(**declared)  # type: ignore[arg-type]
+
+
+def test_every_rule_and_every_registered_task_is_declared():
+    """The platform's own declaration passes: each rule has a task or an
+    exemption, and each task removes a rule's roots or is listed with its
+    switch."""
+    assert _violations() == []
+
+
+def test_the_registration_check_fails_on_each_omission():
+    """Mutants, one per check: a rule without a disposition; a disposition
+    outside the vocabulary; a rule whose task is not registered; a task that
+    is neither a rule's nor listed; a listed task that is not registered; a
+    listed switch that is no setting; a rule's task also listed as running
+    without a choice."""
+    registered = [
+        registration.name
+        for registration in retention_task_registrations(get_settings())
+    ]
+    omissions = {
+        "rule without disposition": {
+            "vocabulary": (*RetentionRule, "unlisted_rule"),
+        },
+        "disposition outside the vocabulary": {
+            "rules": {**RETENTION_RULES, "stray_rule": RuleExemption("stray")},
+        },
+        "rule task not registered": {
+            "registered": [
+                name for name in registered if name != "conversations.history"
+            ],
+        },
+        "task in no list": {"registered": [*registered, "files.everything"]},
+        "listed task that is not registered": {
+            "existing_without_choice": {
+                **EXISTING_WITHOUT_CHOICE,
+                "sessions.gone": "retention_empty_sessions_enabled",
+            },
+        },
+        "switch that is no setting": {
+            "existing_without_choice": {
+                **EXISTING_WITHOUT_CHOICE,
+                "sessions.empty": "retention_no_such_switch",
+            },
+        },
+        "rule task listed as without a choice": {
+            "existing_without_choice": {
+                **EXISTING_WITHOUT_CHOICE,
+                "conversations.history": "retention_conversations_history_enabled",
+            },
+        },
+    }
+    for omission, changes in omissions.items():
+        assert len(_violations(**changes)) == 1, omission
+
+
+def test_a_rule_with_an_exemption_needs_no_task():
+    """Mutant: an exempt rule is required to have a registered task, so a rule
+    removed outside the engine cannot be declared honestly."""
+    assert (
+        _violations(
+            vocabulary=(*RetentionRule, "kept_by_its_owner"),
+            rules={**RETENTION_RULES, "kept_by_its_owner": RuleExemption("owner")},
+        )
+        == []
+    )
 
 
 def test_registrations_match_their_tasks():
