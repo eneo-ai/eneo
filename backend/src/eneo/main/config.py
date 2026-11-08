@@ -18,7 +18,11 @@ from pydantic import (
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from eneo.main.removed_env import UPGRADE_GUIDE_URL, check_removed_variables
+from eneo.main.removed_env import (
+    OIDC_STORED_MODE_GUIDE_URL,
+    UPGRADE_GUIDE_URL,
+    check_removed_variables,
+)
 
 # Version manifest lookup:
 # - Docker: Package is installed with --no-editable, so __file__ points to site-packages.
@@ -1064,6 +1068,37 @@ class Settings(BaseSettings):
             return self
 
         self.federation_enabled = bool(self.federation_per_tenant_enabled)
+        return self
+
+    @model_validator(mode="after")
+    def warn_about_ignored_sign_in_variables(self):
+        """Name the OIDC_* sign-in variables that FEDERATION_ENABLED ignores.
+
+        Browser sign-in then reads only the provider stored in Eneo, and these
+        values are never a fallback. Runs after the flag alias is resolved and
+        logs names only, never values.
+        """
+        if not self.federation_enabled:
+            return self
+        ignored = {
+            "OIDC_DISCOVERY_ENDPOINT": self.oidc_discovery_endpoint,
+            "OIDC_CLIENT_ID": self.oidc_client_id,
+            "OIDC_CLIENT_SECRET": self.oidc_client_secret,
+            # API tokens still fall back to these domains when the stored
+            # provider lists none, so they are not ignored while that is on.
+            "OIDC_ALLOWED_DOMAINS": (
+                None if self.oidc_resource_server_enabled else self.oidc_allowed_domains
+            ),
+        }
+        names = [name for name, value in ignored.items() if value]
+        if names:
+            logging.warning(
+                "FEDERATION_ENABLED is true. Browser sign-in uses the identity "
+                "provider stored in Eneo and ignores %s; they are no fallback. "
+                "Remove them once the settings are stored in Eneo. See %s",
+                ", ".join(names),
+                OIDC_STORED_MODE_GUIDE_URL,
+            )
         return self
 
     @model_validator(mode="after")
