@@ -1276,7 +1276,7 @@ async def delete_conversation(
     "/{session_id}/feedback/",
     response_model=SessionPublic,
     description="Leave feedback for a conversation.",
-    responses=responses.get_responses([400, 403, 404]),
+    responses=responses.get_responses([400, 403, 404, 410]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 @endpoint_access(
@@ -1301,17 +1301,23 @@ async def leave_feedback(
         container, assistant_id=owner.assistant_id, group_chat_id=owner.group_chat_id
     )
 
-    if owner.group_chat_id:
-        updated_session = await session_service.leave_feedback(
-            session_id=session_id,
-            group_chat_id=owner.group_chat_id,
-            feedback=feedback,
-        )
-    else:
-        assert owner.assistant_id is not None
-        updated_session = await session_service.leave_feedback(
-            session_id=session_id, assistant_id=owner.assistant_id, feedback=feedback
-        )
+    try:
+        if owner.group_chat_id:
+            updated_session = await session_service.leave_feedback(
+                session_id=session_id,
+                group_chat_id=owner.group_chat_id,
+                feedback=feedback,
+            )
+        else:
+            assert owner.assistant_id is not None
+            updated_session = await session_service.leave_feedback(
+                session_id=session_id,
+                assistant_id=owner.assistant_id,
+                feedback=feedback,
+            )
+    except NotFoundException:
+        await session_service.refuse_removed_copy(session_id)
+        raise
 
     return to_session_public(updated_session)
 
@@ -1424,7 +1430,13 @@ async def set_title_of_conversation(
     await _authorized_session(container, session_id)
 
     conversation_service = container.conversation_service()
-    updated_session = await conversation_service.set_title_of_conversation(session_id)
+    try:
+        updated_session = await conversation_service.set_title_of_conversation(
+            session_id
+        )
+    except NotFoundException:
+        await container.session_service().refuse_removed_copy(session_id)
+        raise
     assert updated_session is not None
     return to_session_public(updated_session)
 
@@ -1606,7 +1618,7 @@ async def approve_tools(
 @router.patch(
     "/{session_id}/name/",
     response_model=SessionPublic,
-    responses=responses.get_responses([400, 403, 404]),
+    responses=responses.get_responses([400, 403, 404, 410]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
     description="Rename a conversation (session).",
 )
@@ -1629,7 +1641,11 @@ async def rename_conversation(
         container, assistant_id=owner.assistant_id, group_chat_id=owner.group_chat_id
     )
 
-    updated_session = await session_service.update_session(
-        SessionUpdate(id=session_id, name=payload.name)
-    )
+    try:
+        updated_session = await session_service.update_session(
+            SessionUpdate(id=session_id, name=payload.name)
+        )
+    except NotFoundException:
+        await session_service.refuse_removed_copy(session_id)
+        raise
     return to_session_public(updated_session)

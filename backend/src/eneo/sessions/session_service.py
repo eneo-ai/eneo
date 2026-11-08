@@ -646,11 +646,14 @@ class SessionService:
         await self.get_session_ownership(
             session_id, assistant_id=assistant_id, group_chat_id=group_chat_id
         )
-        return await self.session_repo.add_feedback(
+        session = await self.session_repo.add_feedback(
             feedback=feedback,
             id=session_id,
             keep_existing_text=keep_existing_text,
         )
+        if session is None:
+            raise NotFoundException("Session not found")
+        return session
 
     async def get_message_partner(
         self, *, session_id: UUID, message_id: UUID

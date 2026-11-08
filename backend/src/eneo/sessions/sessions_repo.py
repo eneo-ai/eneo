@@ -233,7 +233,20 @@ class SessionRepository:
         return await self.delegate.add(session)
 
     async def update(self, session: SessionUpdate) -> SessionInDB | None:
-        return await self._hydrate_optional(await self.delegate.update(session))
+        """None also for a copy whose source was removed: it stays unchanged."""
+        stmt = self._add_options(
+            sa.update(Sessions)
+            .values(**session.model_dump(exclude={"id"}))
+            .where(
+                Sessions.id == session.id,
+                copy_session_valid(Sessions.id.expression),
+            )
+            .returning(Sessions)
+        )
+        updated = await self.session.scalar(stmt)
+        return await self._hydrate_optional(
+            None if updated is None else SessionInDB.model_validate(updated)
+        )
 
     async def add_feedback(
         self,
@@ -241,23 +254,26 @@ class SessionRepository:
         id: UUID,
         *,
         keep_existing_text: bool = False,
-    ) -> SessionInDB:
+    ) -> SessionInDB | None:
         """Store a vote. ``keep_existing_text`` leaves the stored comment in
-        place when the feedback carries none, instead of clearing it."""
+        place when the feedback carries none, instead of clearing it. None,
+        and nothing stored, for a copy whose source was removed."""
         values: dict[str, object] = {"feedback_value": feedback.value}
         if feedback.text is not None or not keep_existing_text:
             values["feedback_text"] = feedback.text
         stmt = (
             sa.Update(Sessions)
             .values(values)
-            .where(Sessions.id == id)
+            .where(Sessions.id == id, copy_session_valid(Sessions.id.expression))
             .returning(Sessions)
         )
 
         stmt_with_options = self._add_options(stmt)
         session = await self.session.scalar(stmt_with_options)
 
-        return (await self._hydrate_sessions([SessionInDB.model_validate(session)]))[0]
+        return await self._hydrate_optional(
+            None if session is None else SessionInDB.model_validate(session)
+        )
 
     async def get(self, id: UUID) -> SessionInDB | None:
         query = self._exclude_unreadable_copies(

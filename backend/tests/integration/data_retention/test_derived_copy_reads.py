@@ -112,7 +112,8 @@ async def test_a_removed_source_makes_the_copy_unreadable_at_once(
     removal: Removal,
 ):
     """Mutants: a read path skips the validity check (detail, tool result,
-    rename, list, its count, recent), the refusal is untyped, or only one
+    title, rename, either feedback route, list, its count, recent), the refusal
+    is untyped, a refused rename or feedback is stored anyway, or only one
     removal path invalidates the copy. No retention task removes copies here:
     the refusal comes from the read itself."""
     await removal(client, owner_token, copy, retention_session)
@@ -134,10 +135,39 @@ async def test_a_removed_source_makes_the_copy_unreadable_at_once(
             headers=auth(owner_token),
         )
     )
+    _assert_removed_source(
+        await client.patch(
+            f"/api/v1/conversations/{copy.copy_session}/name/",
+            json={"name": "renamed"},
+            headers=auth(owner_token),
+        )
+    )
+    _assert_removed_source(
+        await client.post(
+            f"/api/v1/conversations/{copy.copy_session}/feedback/",
+            json={"value": 1, "text": "kept"},
+            headers=auth(owner_token),
+        )
+    )
+    _assert_removed_source(
+        await client.post(
+            f"/api/v1/assistants/{copy.copy_assistant}/sessions/"
+            f"{copy.copy_session}/feedback/",
+            json={"value": -1},
+            headers=auth(owner_token),
+        )
+    )
     assert await _listed(client, owner_token, copy) == (set(), 0)
     assert str(copy.copy_session) not in await _recent(client, owner_token)
-    # The copy's rows are still there: only the read refuses them.
-    assert await retention_session.get(Sessions, copy.copy_session) is not None
+    # The copy's rows are still there, unchanged: only the read refuses them.
+    stored = (
+        await retention_session.execute(
+            sa.select(Sessions.name, Sessions.feedback_value).where(
+                Sessions.id == copy.copy_session
+            )
+        )
+    ).one()
+    assert tuple(stored) == ("conversation", None)
 
 
 async def test_a_source_removed_while_the_turns_load_hides_them(

@@ -1218,7 +1218,7 @@ async def ask_followup(
     "/{id}/sessions/{session_id}/feedback/",
     response_model=SessionPublic,
     description="Leave feedback on a session.",
-    responses=responses.get_responses([400, 403, 404]),
+    responses=responses.get_responses([400, 403, 404, 410]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 @endpoint_access(
@@ -1239,9 +1239,14 @@ async def leave_feedback(
     session_service = container.session_service()
 
     await assistant_service.get_assistant(id)
-    session = await session_service.leave_feedback(
-        session_id=session_id, assistant_id=id, feedback=feedback
-    )
+    try:
+        session = await session_service.leave_feedback(
+            session_id=session_id, assistant_id=id, feedback=feedback
+        )
+    except NotFoundException:
+        # The partner was authorized above and the owner inside leave_feedback.
+        await session_service.refuse_removed_copy(session_id)
+        raise
 
     return to_session_public(session)
 
