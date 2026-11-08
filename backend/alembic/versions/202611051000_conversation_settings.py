@@ -11,7 +11,8 @@ saved settings:
 
     alembic stamp 202611031206
     alembic upgrade 202610071400
-    alembic stamp head
+    alembic stamp 202611051000
+    alembic upgrade head
 
 Revision ID: 202611051000
 Revises: 202610071400
