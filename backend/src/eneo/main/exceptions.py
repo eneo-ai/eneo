@@ -92,11 +92,24 @@ class ErrorCodes(int, Enum):
     SKILL_REMOVAL_BUSY = 9062
     WEBSITE_CRAWL_ACTIVE = 9063
     WEBSITE_CRAWL_CLEANUP_PENDING = 9064
+    ASSISTANT_PUBLISHED_AS_WIDGET = 9071
     # A prompt library entry the personal assistant governance policy uses
     # cannot be deleted until the policy stops using it.
     PROMPT_IN_USE_BY_GOVERNANCE = 9069
     # A password session must replace its local password before other use.
     PASSWORD_CHANGE_REQUIRED = 9070
+    # An icon cannot be deleted while an assistant, app, space or group chat
+    # shows it.
+    ICON_IN_USE = 9075
+    # A resource can only show an icon the caller uploaded in their tenant.
+    ICON_NOT_ATTACHABLE = 9076
+    # A personal chat save whose own Skills would not run as configured. The
+    # details carry the layer reason so clients can explain it in their language.
+    PERSONAL_SKILLS_REJECTED = 9080
+    SKILL_REFERENCED_BY_REVISION = 9081
+    # Browser-session protocol for the Vite app. Keep distinct from Skill errors
+    # so a refused configuration save never triggers session recovery.
+    SESSION_GENERATION_MISMATCH = 9090
 
 
 class NotFoundException(Exception):

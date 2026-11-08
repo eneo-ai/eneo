@@ -1,4 +1,5 @@
 /// <reference lib="dom" />
+import "./validation-runtime";
 import { createContext, use, useEffect, useRef, useState } from "react";
 import { App, type McpUiHostContext } from "@modelcontextprotocol/ext-apps";
 

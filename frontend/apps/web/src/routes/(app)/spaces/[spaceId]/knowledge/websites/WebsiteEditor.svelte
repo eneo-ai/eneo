@@ -14,7 +14,11 @@
   import { Switch } from "$lib/components/ui/switch/index.js";
   import { m } from "$lib/paraglide/messages";
   import type { Website } from "@eneo/eneo-js";
-  import { CircleAlert, Eye, EyeOff, Info, LockKeyhole } from "@lucide/svelte";
+  import CircleAlert from "@lucide/svelte/icons/circle-alert";
+  import Eye from "@lucide/svelte/icons/eye";
+  import EyeOff from "@lucide/svelte/icons/eye-off";
+  import Info from "@lucide/svelte/icons/info";
+  import LockKeyhole from "@lucide/svelte/icons/lock-keyhole";
   import { untrack } from "svelte";
   import { isSupportedWebsiteUrl } from "./websiteForm";
 

@@ -3,7 +3,11 @@
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { dialogLayout } from "$lib/components/dialogLayout.js";
   import { loadLucideIcons, toKebabCase, type LucideIconRegistry } from "../lucideIcons";
-  import { Search, X, Sparkles, Check } from "@lucide/svelte";
+  import Search from "@lucide/svelte/icons/search";
+  import X from "@lucide/svelte/icons/x";
+  import Sparkles from "@lucide/svelte/icons/sparkles";
+  import Check from "@lucide/svelte/icons/check";
+  import LucideSvg from "./LucideSvg.svelte";
   import { m } from "$lib/paraglide/messages";
 
   let {
@@ -78,13 +82,13 @@
       : []
   );
 
-  function getIconComponent(name: string) {
+  function getIcon(name: string) {
     return icons?.get(name) ?? null;
   }
 
-  const selectedIconComponent = $derived.by(() => {
+  const selectedIcon = $derived.by(() => {
     if (!value) return null;
-    return getIconComponent(value);
+    return getIcon(value);
   });
 
   function handleIconClick(iconName: string) {
@@ -111,9 +115,8 @@
     title={value ? m.change_icon_current({ iconName: value }) : m.choose_icon_optional()}
     aria-label={value ? m.change_icon_current({ iconName: value }) : m.choose_template_icon()}
   >
-    {#if selectedIconComponent}
-      {@const SelectedIcon = selectedIconComponent}
-      <SelectedIcon class="h-5 w-5 text-default" />
+    {#if selectedIcon}
+      <LucideSvg icon={selectedIcon} class="h-5 w-5 text-default" />
     {:else}
       <Sparkles class="text-muted h-5 w-5" />
     {/if}
@@ -129,9 +132,8 @@
         onclick={() => (dialogOpen = true)}
         class="border-stronger bg-primary hover:bg-hover-dimmer flex h-10 min-w-10 items-center gap-2 rounded-lg border px-3 transition-colors"
       >
-        {#if selectedIconComponent}
-          {@const SelectedIcon = selectedIconComponent}
-          <SelectedIcon class="h-5 w-5 text-default" />
+        {#if selectedIcon}
+          <LucideSvg icon={selectedIcon} class="h-5 w-5 text-default" />
           <span class="text-default text-sm">{value}</span>
         {:else}
           <Sparkles class="text-muted h-5 w-5" />
@@ -194,9 +196,9 @@
               </h4>
               <div class="grid grid-cols-4 gap-3 sm:grid-cols-6 md:grid-cols-8">
                 {#each popularIcons as iconName (iconName)}
-                  {@const IconComp = getIconComponent(iconName)}
+                  {@const icon = getIcon(iconName)}
                   {@const kebabName = toKebabCase(iconName)}
-                  {@const isSelected = IconComp !== null && IconComp === selectedIconComponent}
+                  {@const isSelected = icon !== null && icon === selectedIcon}
                   <button
                     type="button"
                     onclick={() => handleIconClick(iconName)}
@@ -208,8 +210,9 @@
                     aria-label={m.select_icon({ iconName: kebabName })}
                     aria-pressed={isSelected}
                   >
-                    {#if IconComp}
-                      <IconComp
+                    {#if icon}
+                      <LucideSvg
+                        {icon}
                         class="h-5 w-5 {isSelected ? 'text-accent-stronger' : 'text-default'}"
                       />
                     {/if}
@@ -233,9 +236,9 @@
             <div class="border-stronger max-h-96 overflow-y-auto rounded-lg border p-3">
               <div class="grid grid-cols-4 gap-3 sm:grid-cols-6 md:grid-cols-8">
                 {#each filteredIcons.slice(0, 200) as iconName (iconName)}
-                  {@const IconComp = getIconComponent(iconName)}
+                  {@const icon = getIcon(iconName)}
                   {@const kebabName = toKebabCase(iconName)}
-                  {@const isSelected = IconComp !== null && IconComp === selectedIconComponent}
+                  {@const isSelected = icon !== null && icon === selectedIcon}
                   <button
                     type="button"
                     onclick={() => handleIconClick(iconName)}
@@ -247,8 +250,9 @@
                     aria-label={m.select_icon({ iconName: kebabName })}
                     aria-pressed={isSelected}
                   >
-                    {#if IconComp}
-                      <IconComp
+                    {#if icon}
+                      <LucideSvg
+                        {icon}
                         class="h-5 w-5 {isSelected ? 'text-accent-stronger' : 'text-default'}"
                       />
                     {/if}

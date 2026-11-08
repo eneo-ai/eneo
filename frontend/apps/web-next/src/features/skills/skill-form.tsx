@@ -1,14 +1,19 @@
-"use client";
-
-import { useTranslations } from "next-intl";
-import { useEffect, useId, useRef, useState, type SubmitEvent } from "react";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { useTranslations } from "use-intl";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
+import type { ReferenceCatalog } from "@eneo/skill-instructions";
+import { SkillInstructionEditor } from "./skill-instruction-editor";
+import { useEffect, useId, useState, type SubmitEvent } from "react";
+import {
+  FieldProblem,
+  fieldProblemProps,
+  revealProblems
+} from "@/components/composites/field-problem";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { getErrorMessage } from "@/lib/api/errors";
-import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
+import { ListError } from "@/components/composites/query-state";
+import { LeaveConfirmation } from "@/components/composites/leave-confirmation";
 import {
   deriveSkillSlug,
   normalizedSkillContent,
@@ -16,7 +21,11 @@ import {
   type SkillCreation
 } from "./skill-model";
 
-type Props =
+type Props = {
+  referenceCatalog?: ReferenceCatalog;
+  referencePickerInline?: boolean;
+  onLeave?: () => void;
+} & (
   | {
       mode: "create";
       onSubmit: (value: SkillCreation) => Promise<void>;
@@ -28,7 +37,8 @@ type Props =
       onSubmit: (value: SkillContent) => Promise<void>;
       initialValue: SkillContent;
       onDirtyChange?: (dirty: boolean) => void;
-    };
+    }
+);
 
 export function SkillForm(props: Props) {
   const t = useTranslations();
@@ -49,25 +59,24 @@ export function SkillForm(props: Props) {
   const [attempted, setAttempted] = useState(false);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const nameRef = useRef<HTMLInputElement>(null);
-  const descriptionRef = useRef<HTMLTextAreaElement>(null);
-  const instructionsRef = useRef<HTMLTextAreaElement>(null);
-  const slugRef = useRef<HTMLInputElement>(null);
+  const [error, setError] = useState<unknown>(null);
   const dirty =
     name !== baseline.name ||
     description !== baseline.description ||
     instructions !== baseline.instructions ||
     (props.mode === "create" && slug !== baseline.slug);
 
-  useBeforeUnloadWarning(dirty);
-
   useEffect(() => onDirtyChange?.(dirty), [dirty, onDirtyChange]);
+
+  const required = (value: string) => (attempted && !value.trim() ? t("required_field") : null);
+  const nameProblem = required(name);
+  const descriptionProblem = required(description);
+  const instructionsProblem = required(instructions);
+  const slugProblem = required(slug);
 
   async function submit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     if (busy) return;
-    setAttempted(true);
     setError(null);
     const content = normalizedSkillContent({
       display_name: name,
@@ -75,13 +84,19 @@ export function SkillForm(props: Props) {
       instructions
     });
     const submittedSlug = slug.trim();
-    if (!content.display_name) nameRef.current?.focus();
-    else if (!content.description) descriptionRef.current?.focus();
-    else if (!content.instructions) instructionsRef.current?.focus();
-    else if (props.mode === "create" && !submittedSlug) {
-      document.getElementById(`${id}-advanced`)?.setAttribute("open", "");
-      slugRef.current?.focus();
+    const firstProblem = !content.display_name
+      ? `${id}-name`
+      : !content.description
+        ? `${id}-description`
+        : !content.instructions
+          ? `${id}-instructions`
+          : props.mode === "create" && !submittedSlug
+            ? `${id}-slug`
+            : null;
+    if (firstProblem) {
+      revealProblems(() => setAttempted(true), firstProblem);
     } else {
+      setAttempted(true);
       setBusy(true);
       try {
         if (props.mode === "create") await props.onSubmit({ ...content, slug: submittedSlug });
@@ -99,7 +114,7 @@ export function SkillForm(props: Props) {
         setAttempted(false);
         setSaved(true);
       } catch (cause) {
-        setError(getErrorMessage(cause, t));
+        setError(cause);
       } finally {
         setBusy(false);
       }
@@ -116,132 +131,141 @@ export function SkillForm(props: Props) {
   }
 
   return (
-    <form
-      className="flex max-w-2xl flex-col gap-6"
-      onSubmit={(event) => void submit(event)}
-      noValidate
-      aria-busy={busy}
-    >
-      {/* The sticky footer (about 4 rem) must never cover focus (WCAG 2.4.11):
+    <>
+      <form
+        className="flex max-w-2xl flex-col gap-6"
+        onSubmit={(event) => void submit(event)}
+        noValidate
+        aria-busy={busy}
+      >
+        {/* The sticky footer (about 4 rem) must never cover focus (WCAG 2.4.11):
           the fields keep 5 rem of bottom scroll margin, so Tab and focus()
           scroll them into view above it. */}
-      <div className="flex flex-col gap-6 [&_*]:scroll-mb-20">
-        <div className="space-y-2">
-          <Label htmlFor={`${id}-name`}>{t("skills_display_name_label")}</Label>
-          <Input
-            ref={nameRef}
-            id={`${id}-name`}
-            value={name}
-            maxLength={200}
-            required
-            disabled={busy}
-            aria-invalid={attempted && !name.trim()}
-            onChange={(event) => {
-              setName(event.target.value);
-              if (props.mode === "create" && !slugCustomized)
-                setSlug(deriveSkillSlug(event.target.value));
-            }}
-          />
-          <p className="text-muted-foreground text-xs">{t("skills_display_name_description")}</p>
-          {attempted && !name.trim() && (
-            <p className="text-destructive text-xs">{t("skills_required_field")}</p>
-          )}
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor={`${id}-description`}>{t("skills_description_label")}</Label>
-          <Textarea
-            ref={descriptionRef}
-            id={`${id}-description`}
-            value={description}
-            rows={3}
-            maxLength={1024}
-            required
-            disabled={busy}
-            aria-invalid={attempted && !description.trim()}
-            onChange={(event) => setDescription(event.target.value)}
-          />
-          <p className="text-muted-foreground text-xs">{t("skills_description_description")}</p>
-          {attempted && !description.trim() && (
-            <p className="text-destructive text-xs">{t("skills_required_field")}</p>
-          )}
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor={`${id}-instructions`}>{t("skills_instructions_label")}</Label>
-          <Textarea
-            ref={instructionsRef}
-            id={`${id}-instructions`}
-            value={instructions}
-            rows={props.mode === "create" ? 8 : 12}
-            className="max-h-[50dvh] min-h-48 overflow-y-auto font-mono text-sm"
-            required
-            disabled={busy}
-            aria-invalid={attempted && !instructions.trim()}
-            onChange={(event) => setInstructions(event.target.value)}
-          />
-          <p className="text-muted-foreground text-xs">{t("skills_instructions_description")}</p>
-          {attempted && !instructions.trim() && (
-            <p className="text-destructive text-xs">{t("skills_required_field")}</p>
-          )}
-        </div>
-        {props.mode === "create" && (
-          <details id={`${id}-advanced`} className="rounded-lg border p-4">
-            <summary className="cursor-pointer text-sm font-medium">
-              {t("skills_advanced_options")}
-            </summary>
-            <div className="mt-4 space-y-2">
-              <Label htmlFor={`${id}-slug`}>{t("skills_slug_label")}</Label>
-              <Input
-                ref={slugRef}
-                id={`${id}-slug`}
-                value={slug}
-                maxLength={64}
-                autoComplete="off"
+        <div className="flex flex-col gap-6 [&_*]:scroll-mb-20">
+          <div className="space-y-2">
+            <Label htmlFor={`${id}-name`}>{t("skills_display_name_label")}</Label>
+            <Input
+              id={`${id}-name`}
+              value={name}
+              maxLength={200}
+              required
+              disabled={busy}
+              {...fieldProblemProps(`${id}-name`, nameProblem)}
+              onChange={(event) => {
+                setName(event.target.value);
+                if (props.mode === "create" && !slugCustomized)
+                  setSlug(deriveSkillSlug(event.target.value));
+              }}
+            />
+            <p className="text-muted-foreground text-xs">{t("skills_display_name_description")}</p>
+            <FieldProblem id={`${id}-name`} problem={nameProblem} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor={`${id}-description`}>{t("skills_description_label")}</Label>
+            <Textarea
+              id={`${id}-description`}
+              value={description}
+              rows={3}
+              maxLength={1024}
+              required
+              disabled={busy}
+              {...fieldProblemProps(`${id}-description`, descriptionProblem)}
+              onChange={(event) => setDescription(event.target.value)}
+            />
+            <p className="text-muted-foreground text-xs">{t("skills_description_description")}</p>
+            <FieldProblem id={`${id}-description`} problem={descriptionProblem} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor={`${id}-instructions`}>{t("skills_instructions_label")}</Label>
+            {props.referenceCatalog ? (
+              <SkillInstructionEditor
+                id={`${id}-instructions`}
+                value={instructions}
+                onChange={setInstructions}
+                disabled={busy}
+                invalid={Boolean(instructionsProblem)}
+                describedBy={`${id}-instructions-problem`}
+                catalog={props.referenceCatalog}
+                inlinePicker={props.referencePickerInline}
+              />
+            ) : (
+              <Textarea
+                id={`${id}-instructions`}
+                value={instructions}
+                rows={props.mode === "create" ? 8 : 12}
+                className="max-h-[50dvh] min-h-48 overflow-y-auto font-mono text-base pointer-fine:text-sm"
                 required
                 disabled={busy}
-                aria-invalid={attempted && !slug.trim()}
-                onChange={(event) => {
-                  setSlug(event.target.value);
-                  setSlugCustomized(true);
-                }}
+                {...fieldProblemProps(`${id}-instructions`, instructionsProblem)}
+                onChange={(event) => setInstructions(event.target.value)}
               />
-              <p className="text-muted-foreground text-xs">{t("skills_slug_description")}</p>
-              {attempted && !slug.trim() && (
-                <p className="text-destructive text-xs">{t("skills_required_field")}</p>
-              )}
-            </div>
-          </details>
-        )}
-        {error && (
-          <Alert variant="destructive" role="alert">
-            <AlertTitle>
-              {t(
+            )}
+            {!props.referenceCatalog && (
+              <p className="text-muted-foreground text-xs">
+                {t("skills_instructions_description")}
+              </p>
+            )}
+            <FieldProblem id={`${id}-instructions`} problem={instructionsProblem} />
+          </div>
+          {props.mode === "create" && (
+            <details className="rounded-lg border p-4">
+              <summary className="cursor-pointer text-sm font-medium">
+                {t("skills_advanced_options")}
+              </summary>
+              <div className="mt-4 space-y-2">
+                <Label htmlFor={`${id}-slug`}>{t("skills_slug_label")}</Label>
+                <Input
+                  id={`${id}-slug`}
+                  value={slug}
+                  maxLength={64}
+                  autoComplete="off"
+                  {...KEYBOARD.identifier}
+                  required
+                  disabled={busy}
+                  {...fieldProblemProps(`${id}-slug`, slugProblem)}
+                  onChange={(event) => {
+                    setSlug(event.target.value);
+                    setSlugCustomized(true);
+                  }}
+                />
+                <p className="text-muted-foreground text-xs">{t("skills_slug_description")}</p>
+                <FieldProblem id={`${id}-slug`} problem={slugProblem} />
+              </div>
+            </details>
+          )}
+          {error != null && (
+            <ListError
+              error={error}
+              title={t(
                 props.mode === "create"
                   ? "skills_form_error_title"
                   : "skills_revision_form_error_title"
               )}
-            </AlertTitle>
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        )}
-      </div>
-      <div className="bg-background sticky bottom-0 flex flex-wrap items-center justify-between gap-3 border-t py-3">
-        <p className="text-muted-foreground text-sm" role="status">
-          {dirty ? t("skills_form_unsaved_status") : saved ? t("skills_form_saved_status") : ""}
-        </p>
-        <div className="flex gap-2">
-          {dirty && (
-            <Button type="button" variant="outline" disabled={busy} onClick={discard}>
-              {t("discard_all_changes")}
-            </Button>
+            />
           )}
-          {/* Busy, it stays enabled so it keeps focus; submit() ignores a second press. */}
-          <Button type="submit" aria-busy={busy || undefined}>
-            {busy
-              ? t(props.mode === "create" ? "skills_creating" : "saving")
-              : t(props.mode === "create" ? "skills_create_action" : "save_changes")}
-          </Button>
         </div>
-      </div>
-    </form>
+        {/* Not sticky on a short window (a phone held sideways leaves about 300 px): the bar
+            would cover a field that has the focus (2.4.11), and a fifth of the screen is its own. */}
+        <div className="bg-background sticky bottom-0 flex flex-wrap items-center justify-between gap-3 border-t py-3 [@media(height<31.25rem)]:static">
+          <p className="text-muted-foreground text-sm" role="status">
+            {dirty ? t("skills_form_unsaved_status") : saved ? t("skills_form_saved_status") : ""}
+          </p>
+          <div className="flex gap-2">
+            {dirty && (
+              <Button type="button" variant="outline" disabled={busy} onClick={discard}>
+                {t("discard_all_changes")}
+              </Button>
+            )}
+            {/* Busy, it stays enabled so it keeps focus; submit() ignores a second press. */}
+            <Button type="submit" aria-busy={busy || undefined}>
+              {busy
+                ? t(props.mode === "create" ? "skills_creating" : "saving")
+                : t(props.mode === "create" ? "skills_create_action" : "save_changes")}
+            </Button>
+          </div>
+        </div>
+      </form>
+      <LeaveConfirmation active={dirty} onLeave={props.onLeave} />
+    </>
   );
 }

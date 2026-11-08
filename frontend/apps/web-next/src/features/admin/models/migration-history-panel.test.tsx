@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 import { afterEach, expect, it, vi } from "vitest";
 import messages from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
@@ -20,9 +20,9 @@ const history: ModelMigrationHistory[] = [
     initiated_by_id: "u1",
     initiated_by_name: "Anna Lind",
     completed_at: "2026-09-01T10:00:00Z",
-    duration: 2500,
+    duration: 2.5,
     migration_details: { assistants: 10, apps: 2, total: 12 },
-    warnings: ["Target model lacks vision support"],
+    warnings: ["lacks_vision", "Legacy migration warning"],
     model_type: "completion"
   },
   {
@@ -41,15 +41,15 @@ const history: ModelMigrationHistory[] = [
 
 afterEach(cleanup);
 
-function renderPanel() {
+function renderPanel(rows = history) {
   const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
-  client.setQueryData(MODEL_MIGRATION_HISTORY_KEY, history);
+  client.setQueryData(MODEL_MIGRATION_HISTORY_KEY, rows);
   render(
-    <NextIntlClientProvider locale="sv" messages={messages}>
+    <IntlProvider locale="sv" messages={messages}>
       <QueryClientProvider client={client}>
         <MigrationHistoryPanel />
       </QueryClientProvider>
-    </NextIntlClientProvider>
+    </IntlProvider>
   );
 }
 
@@ -67,10 +67,19 @@ it("lists migrations with a status label and a disclosure per row", async () => 
 
   expect(toggle.getAttribute("aria-expanded")).toBe("true");
   const detail = document.getElementById(toggle.getAttribute("aria-controls")!);
-  expect(detail?.textContent).toContain("Target model lacks vision support");
   expect(detail?.textContent).toContain("2.5s");
+  expect(detail?.textContent).toContain("Målmodellen saknar stöd för bildförståelse.");
+  expect(detail?.textContent).toContain("Legacy migration warning");
 
   await expectNoAxeViolations(document.body);
+});
+
+it("shows a subsecond API duration in milliseconds", () => {
+  renderPanel(history.map((row) => ({ ...row, duration: 0.25 })));
+  const toggle = screen.getByRole("button", { name: "Detaljer för GPT-4 till GPT-4o" });
+  fireEvent.click(toggle);
+  const detail = document.getElementById(toggle.getAttribute("aria-controls")!);
+  expect(detail?.textContent).toContain("250ms");
 });
 
 it("searches and announces how many migrations match", async () => {
@@ -87,4 +96,72 @@ it("searches and announces how many migrations match", async () => {
       "1 migrering visas"
     )
   );
+});
+
+it("announces a failed read as an error with its retry, not as an empty status", async () => {
+  const { browserApi } = await import("@/lib/api/browser");
+  vi.mocked(browserApi.GET).mockResolvedValue({
+    error: { message: "Boom", error_id: "8bc91e0a" },
+    response: new Response(null, { status: 500 })
+  } as never);
+  const { renderInApp } = await import("@/test/render");
+  renderInApp(<MigrationHistoryPanel />);
+
+  const title = await screen.findByText("Det gick inte att ladda migrationshistoriken");
+  const alert = title.closest<HTMLElement>('[role="alert"]');
+  expect(alert).not.toBeNull();
+  expect(title.closest('[role="status"]')).toBeNull();
+  expect(
+    within(alert!).getByRole("button", {
+      name: "Försök igen: Det gick inte att ladda migrationshistoriken"
+    })
+  ).toBeTruthy();
+});
+
+it("keeps the focused retry button, busy, while a failed read is retried", async () => {
+  const { browserApi } = await import("@/lib/api/browser");
+  // The first read fails; the retry's requests stay in flight.
+  let calls = 0;
+  vi.mocked(browserApi.GET).mockImplementation((() => {
+    calls += 1;
+    return calls <= 2
+      ? Promise.resolve({
+          error: { message: "Boom" },
+          response: new Response(null, { status: 500 })
+        })
+      : new Promise(() => {});
+  }) as never);
+  const { renderInApp } = await import("@/test/render");
+  renderInApp(<MigrationHistoryPanel />);
+
+  const retry = await screen.findByRole("button", {
+    name: "Försök igen: Det gick inte att ladda migrationshistoriken"
+  });
+  retry.focus();
+  fireEvent.click(retry);
+
+  await waitFor(() => expect(retry.getAttribute("aria-busy")).toBe("true"));
+  expect(retry.isConnected).toBe(true);
+  expect(document.activeElement).toBe(retry);
+  expect(screen.queryByText("Laddar...")).toBeNull();
+});
+
+it("keeps the migrations on screen when a refresh fails", async () => {
+  const { browserApi } = await import("@/lib/api/browser");
+  vi.mocked(browserApi.GET).mockResolvedValue({
+    error: { message: "Boom" },
+    response: new Response(null, { status: 500 })
+  } as never);
+  const { renderInApp, testQueryClient } = await import("@/test/render");
+  const queryClient = testQueryClient();
+  queryClient.setQueryData(MODEL_MIGRATION_HISTORY_KEY, history);
+  renderInApp(<MigrationHistoryPanel />, { queryClient });
+  expect(screen.getByRole("table", { name: "Migreringshistorik" })).toBeTruthy();
+
+  await queryClient.refetchQueries({ queryKey: MODEL_MIGRATION_HISTORY_KEY });
+
+  expect(
+    await screen.findByText("Innehållet kunde inte uppdateras. Senast hämtade uppgifter visas.")
+  ).toBeTruthy();
+  expect(screen.getByRole("table", { name: "Migreringshistorik" })).toBeTruthy();
 });

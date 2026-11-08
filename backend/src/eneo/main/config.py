@@ -1,10 +1,12 @@
+import ipaddress
 import json
 import logging
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Optional
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit
 
 from pydantic import (
     Field,
@@ -35,21 +37,92 @@ URL_SIGNING_KEY_MINIMUM_BYTES = 32
 # would stay replayable for as long. 1440 (24 hours) is the recommended value.
 JWT_EXPIRY_TIME_MAXIMUM_MINUTES = 30 * 24 * 60
 
+# The hosts that name this machine, as urlsplit reports them (lowercase, IPv6
+# without brackets). A request to them stays on the machine, and a page served
+# from them runs on the user's own machine.
+LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 
-def _same_origin(first: str, second: str) -> bool:
-    """Whether two URLs share scheme, host and port (default ports included)."""
 
-    def origin(url: str) -> tuple[str, str, int | None]:
-        parts = urlparse(url.strip())
-        scheme = parts.scheme.lower()
-        default_port = {"http": 80, "https": 443}.get(scheme)
-        try:
-            port = parts.port or default_port
-        except ValueError:
-            port = default_port
-        return scheme, (parts.hostname or "").lower(), port
+# Printable ASCII without space, backslash, "?" or "#": a browser reads the
+# scheme and authority of such a URL as written, while it would encode, trim or
+# reinterpret anything else, and the view links append a path and a query to it.
+_BROWSER_LITERAL_URL = re.compile(r"[!-~]+")
+_HOST_LABEL = re.compile(r"(?!-)[a-z0-9-]{1,63}(?<!-)")
+# WHATWG parses a host whose last label is a number (decimal or 0x hex) as IPv4.
+_NUMERIC_LABEL = re.compile(r"[0-9]+|0x[0-9a-f]*")
 
-    return origin(first) == origin(second)
+
+def serialize_origin(url: str) -> str | None:
+    """The origin of an absolute http(s) URL, serialized as a browser does.
+
+    Scheme and host lowercase, an IPv6 host compressed and in brackets, a
+    default port dropped; credentials, path, query and fragment are not part of
+    an origin. None when the URL has no http(s) origin. It normalizes, it does
+    not validate: the validators below decide which origins are acceptable.
+    """
+    try:
+        parts = urlsplit(url.strip())
+        port = parts.port
+        host = parts.hostname  # lowercased by urlsplit
+        if parts.scheme not in ("http", "https") or not host:
+            return None
+        if ":" in host:
+            host = f"[{ipaddress.IPv6Address(host).compressed}]"
+    except ValueError:
+        return None
+    default_port = 443 if parts.scheme == "https" else 80
+    authority = host if port in (None, default_port) else f"{host}:{port}"
+    return f"{parts.scheme}://{authority}"
+
+
+def validate_content_base_url(url: str) -> str:
+    """An absolute http(s) URL whose origin is stored the way a browser serializes it.
+
+    The content origin is framed, compared with the Host header and put in a
+    CSP, so every reader must agree on it: the host is lowercased, an IPv6
+    address compressed and a default port dropped, and any authority a browser
+    would rewrite differently is refused. The path is kept as written; it is
+    only the prefix of the view links. Non-ASCII hosts are refused rather than
+    IDNA-encoded: Python's codec and the browser's UTS #46 mapping differ (ß).
+    The check guarantees agreement, not reachability: a malformed punycode
+    label fails closed in the browser like any host that does not resolve.
+    Messages never repeat the URL.
+    """
+    url = url.strip()
+    if not _BROWSER_LITERAL_URL.fullmatch(url) or any(c in url for c in "\\?#"):
+        raise ValueError(
+            "must be printable ASCII without spaces, backslashes, a query or a "
+            "fragment; write an international host name in punycode (xn--...)"
+        )
+    try:
+        parts = urlsplit(url)
+        port = parts.port
+    except ValueError:
+        raise ValueError("is not a valid URL") from None
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise ValueError("must be an absolute http or https URL")
+    if "@" in parts.netloc:
+        raise ValueError("must not contain credentials")
+    host = parts.hostname  # lowercased by urlsplit
+    try:
+        if parts.netloc.startswith("["):
+            address = ipaddress.IPv6Address(host)
+            if address.scope_id or address.ipv4_mapped:
+                raise ValueError
+            host = f"[{address.compressed}]"
+        elif _NUMERIC_LABEL.fullmatch(host.rsplit(".", 1)[-1]):
+            # Dotted decimal only: no hex, octal or shortened forms.
+            host = str(ipaddress.IPv4Address(host))
+        elif not all(_HOST_LABEL.fullmatch(label) for label in host.split(".")):
+            raise ValueError
+    except ValueError:
+        raise ValueError(
+            "must name a DNS host, a dotted-decimal IPv4 address or a bracketed "
+            "IPv6 address"
+        ) from None
+    default_port = 443 if parts.scheme == "https" else 80
+    authority = host if port in (None, default_port) else f"{host}:{port}"
+    return f"{parts.scheme}://{authority}{parts.path}"
 
 
 def validate_public_origin(origin: str | None) -> str | None:
@@ -57,10 +130,10 @@ def validate_public_origin(origin: str | None) -> str | None:
     Validate and normalize public origin.
 
     Rules:
-    - Must be HTTPS (production security)
-    - Must have hostname
+    - Must be HTTPS (production security); http only for a loopback host
+    - Must have hostname, without wildcards
     - No path, query, or fragment allowed
-    - Normalize: lowercase hostname, strip trailing slash
+    - Normalize: serialized as a browser does (serialize_origin)
 
     Args:
         origin: Raw origin string (e.g., "https://Example.com/")
@@ -86,9 +159,12 @@ def validate_public_origin(origin: str | None) -> str | None:
     if not origin:
         raise ValueError("public_origin cannot be an empty string")
     parsed = urlparse(origin)
+    # A wildcard host can never equal the origin of a request.
+    if "*" in (parsed.hostname or ""):
+        raise ValueError(f"public_origin must not include wildcards: {origin}")
 
     # Validate HTTPS scheme (allow http://localhost for development)
-    is_localhost = parsed.hostname in ("localhost", "127.0.0.1")
+    is_localhost = parsed.hostname in LOOPBACK_HOSTS
     if parsed.scheme != "https" and not (parsed.scheme == "http" and is_localhost):
         raise ValueError(
             f"public_origin must use https:// (or http://localhost for development), got: {origin}"
@@ -106,17 +182,10 @@ def validate_public_origin(origin: str | None) -> str | None:
     if parsed.query or parsed.fragment:
         raise ValueError(f"public_origin must not include query or fragment: {origin}")
 
-    # Normalize: lowercase hostname, preserve non-default port
-    host = parsed.hostname.lower()
-
-    # Preserve scheme for localhost (http allowed), otherwise use https
-    scheme = parsed.scheme if is_localhost else "https"
-
-    # Preserve non-default port (443 for https, 80 for http)
-    default_port = 443 if scheme == "https" else 80
-    port = f":{parsed.port}" if parsed.port and parsed.port != default_port else ""
-
-    return f"{scheme}://{host}{port}"
+    serialized = serialize_origin(origin)
+    if serialized is None:
+        raise ValueError(f"public_origin is not a valid URL: {origin}")
+    return serialized
 
 
 def validate_redirect_uri(uri: str | None) -> str | None:
@@ -141,7 +210,7 @@ def validate_redirect_uri(uri: str | None) -> str | None:
     if "*" in (parsed.hostname or ""):
         raise ValueError(f"redirect_uri must not include wildcards: {uri}")
 
-    is_localhost = parsed.hostname in ("localhost", "127.0.0.1")
+    is_localhost = parsed.hostname in LOOPBACK_HOSTS
     if parsed.scheme != "https" and not (parsed.scheme == "http" and is_localhost):
         raise ValueError(
             "redirect_uri must use https:// "
@@ -158,13 +227,10 @@ def validate_redirect_uri(uri: str | None) -> str | None:
     if parsed.query or parsed.fragment:
         raise ValueError(f"redirect_uri must not include query or fragment: {uri}")
 
-    host = parsed.hostname.lower()
-    scheme = parsed.scheme if is_localhost else "https"
-    default_port = 443 if scheme == "https" else 80
-    port = f":{parsed.port}" if parsed.port and parsed.port != default_port else ""
-    normalized_path = path.rstrip("/") or "/"
-
-    return f"{scheme}://{host}{port}{normalized_path}"
+    origin = serialize_origin(uri)
+    if origin is None:
+        raise ValueError(f"redirect_uri is not a valid URL: {uri}")
+    return f"{origin}{path.rstrip('/') or '/'}"
 
 
 def canonicalize_legacy_redirect_path(path: str | None) -> str | None:
@@ -319,6 +385,14 @@ class Settings(BaseSettings):
     # Upper bound for one rerank call to a provider, starting with the
     # registration-time connection test.
     rerank_request_timeout_seconds: int = 10
+    # Model responses with tool calls that one chat turn may make before the
+    # model must answer from what it gathered. Parallel calls in one response
+    # count once.
+    max_tool_rounds: int = Field(default=40, gt=0)
+    # Upper bound for each wait on a completion provider: connecting, the
+    # response, and in a stream each next chunk. A slow model that keeps
+    # streaming is never cut off; a provider that stops answering is.
+    completion_request_timeout_seconds: float = Field(default=600, gt=0)
     mcp_tool_output_max_chars: int = 32768
     # Decoded size cap for a single MCP image content block; larger images
     # are dropped before they can be persisted as generated files.
@@ -354,6 +428,11 @@ class Settings(BaseSettings):
     # (e.g. ["https://next.your-domain.com"]). Each is held to the rules of
     # public_origin.
     mcp_app_host_origins: list[str] = Field(default_factory=list)
+
+    @field_validator("mcp_app_content_base_url")
+    @classmethod
+    def validate_mcp_app_content_base_url(cls, v: str | None) -> str | None:
+        return None if v is None else validate_content_base_url(v)
 
     @field_validator("mcp_app_host_origins")
     @classmethod
@@ -501,6 +580,94 @@ class Settings(BaseSettings):
     # Used for sharepoint integration so dont remove if you restructure logic for OIDC
     public_origin: Optional[str] = None
 
+    # Web app served by the backend (web-next on Vite; plan §2.3, §3.6).
+    browser_session_enabled: bool = Field(
+        default=False,
+        description=(
+            "Accept the browser session cookie. Migration flag. "
+            "POST-retire-browser-flags removes it once the main host is served "
+            "by the backend."
+        ),
+    )
+    browser_session_max_age: int = Field(
+        default=JWT_EXPIRY_TIME_MAXIMUM_MINUTES,
+        description=(
+            "Minutes a browser session may last in total, counted from sign-in, "
+            "however often the person chooses to stay signed in. At least "
+            "JWT_EXPIRY_TIME (equal turns renewal off), at most 30 days."
+        ),
+    )
+    web_app_enabled: bool = Field(
+        default=False,
+        description=(
+            "Serve the web app build (server/web_app.py) for every path no "
+            "route claims. Migration flag. POST-retire-browser-flags removes it "
+            "once the main host is served by the backend."
+        ),
+    )
+    # Runtime links and switches, under the env names web-next reads today.
+    show_help_center: bool = False
+    help_center_url: Optional[str] = "https://www.eneo.ai/en/external-support-assistant"
+    legacy_app_url: Optional[str] = None
+    accessibility_statement_url: Optional[str] = None
+    request_integration_form_url: Optional[str] = None
+
+    @field_validator(
+        "help_center_url",
+        "legacy_app_url",
+        "accessibility_statement_url",
+        "request_integration_form_url",
+        "mcp_app_content_base_url",
+        mode="before",
+    )
+    @classmethod
+    def blank_link_is_unset(cls, value: object) -> object:
+        return None if isinstance(value, str) and not value.strip() else value
+
+    @model_validator(mode="after")
+    def validate_widget_token_grace(self):
+        # The grace window extends a token's usefulness past its expiry; longer
+        # than the lifetime itself, a leaked token would outlive its purpose.
+        if (
+            self.widget_visitor_token_grace_seconds
+            > self.widget_visitor_token_ttl_seconds
+        ):
+            raise ValueError(
+                "WIDGET_VISITOR_TOKEN_GRACE_SECONDS must not exceed "
+                "WIDGET_VISITOR_TOKEN_TTL_SECONDS"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def validate_browser_session_host(self):
+        # A development cookie (eneo_web, not Secure) only on a local host: the
+        # hosts validate_public_origin accepts over http.
+        if (
+            self.browser_session_enabled
+            and self.is_development
+            and urlparse(self.public_origin or "").hostname not in LOOPBACK_HOSTS
+        ):
+            raise ValueError(
+                "BROWSER_SESSION_ENABLED with ENVIRONMENT=development needs "
+                "PUBLIC_ORIGIN set to a localhost origin"
+            )
+        # One token already lasts JWT_EXPIRY_TIME; a shorter maximum would be
+        # outlived by the first token.
+        if self.browser_session_max_age < self.jwt_expiry_time:
+            raise ValueError(
+                "BROWSER_SESSION_MAX_AGE must be at least JWT_EXPIRY_TIME; set them "
+                "equal to turn off staying signed in"
+            )
+        # The web app signs in only through the browser session.
+        if self.web_app_enabled and not self.browser_session_enabled:
+            raise ValueError(
+                "WEB_APP_ENABLED needs BROWSER_SESSION_ENABLED, the web app's only "
+                "sign-in. To serve the Svelte app instead, set WEB_APP_ENABLED=false "
+                "and route pages to Svelte (FRONTEND_ROUTER_PRIORITY=7 in the "
+                "reference Compose deployment)"
+            )
+        return self
+
     # DEPRECATED: Mobilityguard (use OIDC_* instead - will be removed in v3.0)
     mobilityguard_discovery_endpoint: Optional[str] = None
     mobilityguard_client_id: Optional[str] = None
@@ -577,6 +744,42 @@ class Settings(BaseSettings):
     api_key_rate_limit_assistant_default: int = 1000
     api_key_rate_limit_app_default: int = 1000
     api_key_enforce_resource_permissions: bool = True
+    # Embeddable widgets: anonymous visitor access.
+    # The image supplies these assets; native Vite development points this
+    # explicitly at frontend/packages/widget-loader after building the package.
+    widget_loader_dir: Path = Path("/app/widget-loader")
+    # Tokens are short-lived and re-minted silently; the grace window lets an
+    # expired token prove the visitor's identity without a new proof of work.
+    # It never exceeds the lifetime: a token is usable for at most twice its
+    # TTL, after which the visitor's stored key re-mints with a fresh proof.
+    widget_visitor_token_ttl_seconds: int = Field(default=900, gt=0)
+    widget_visitor_token_grace_seconds: int = Field(default=900, ge=0)
+    widget_preview_token_ttl_seconds: int = Field(default=3600, gt=0)
+    # ALTCHA v2 proof of work: each attempt derives a key with `cost` hash
+    # iterations and must land on `key_prefix`, so the expected work is
+    # 16**len(key_prefix) * cost iterations and the attempt count is
+    # geometric. Measured: one attempt at cost 1000 took ~0.24 s in headless
+    # Chromium on a GitHub runner, far less on a laptop. The defaults keep a
+    # first message under a few seconds on a phone while still charging a
+    # script one solve per visitor identity; raise them for abused widgets.
+    widget_altcha_cost: int = Field(default=1_000, ge=1_000)
+    widget_altcha_key_prefix: str = Field(default="0", pattern=r"^[0-9a-f]{1,4}$")
+    widget_altcha_challenge_ttl_seconds: int = Field(default=300, gt=0)
+    widget_challenge_rate_limit_per_minute: int = Field(default=60, gt=0)
+    # Fail closed by default: an unmetered public LLM endpoint is a cost
+    # incident, so Redis loss blocks widget traffic unless overridden. Open
+    # also skips the ALTCHA replay check, so one solved proof of work can be
+    # reused while Redis is down.
+    widget_rate_limit_fail_open: bool = False
+    widget_budget_timezone: str = "Europe/Stockholm"
+    # Tokens reserved against the daily budget before a widget answer starts;
+    # settled to the real usage afterwards. Sized for a RAG prompt plus a
+    # full answer. This admission estimate does not bound actual model usage.
+    widget_budget_reservation_tokens: int = Field(default=8_000, gt=0)
+    # Knowledge chunks retrieved per widget question. Widgets use the citing
+    # protocol (version 2), whose default retrieval fills half the context
+    # window; a fixed count keeps visitor questions inside the budget.
+    widget_retrieval_chunks: int = Field(default=30, gt=0)
     trusted_proxy_count: int = 0
     trusted_proxy_headers: list[str] = ["x-forwarded-for", "x-real-ip"]
     jwt_audience: str
@@ -765,6 +968,20 @@ class Settings(BaseSettings):
                 "JWT_EXPIRY_TIME is the session lifetime in minutes and may not "
                 f"exceed {JWT_EXPIRY_TIME_MAXIMUM_MINUTES} (30 days). "
                 "Set 1440 for 24-hour sessions."
+            )
+        return v
+
+    @field_validator("browser_session_max_age")
+    @classmethod
+    def validate_browser_session_max_age(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError(
+                "BROWSER_SESSION_MAX_AGE must be a positive number of minutes"
+            )
+        if v > JWT_EXPIRY_TIME_MAXIMUM_MINUTES:
+            raise ValueError(
+                "BROWSER_SESSION_MAX_AGE may not exceed "
+                f"{JWT_EXPIRY_TIME_MAXIMUM_MINUTES} minutes (30 days)"
             )
         return v
 
@@ -1172,7 +1389,8 @@ class Settings(BaseSettings):
         if (
             self.mcp_app_content_base_url
             and self.public_origin
-            and _same_origin(self.mcp_app_content_base_url, self.public_origin)
+            and serialize_origin(self.mcp_app_content_base_url)
+            == serialize_origin(self.public_origin)
         ):
             logging.error(
                 "MCP_APP_CONTENT_BASE_URL must be a different origin than "

@@ -5,7 +5,9 @@ soon as a fixed upstream version is installed; retain the behavior regressions.
 
 ## braces 3.0.3 — CVE-2026-93687 / GHSA-vfj7-8cjw-p6xm
 
-Reviewed 2026-10-05. Review/exception expires 2026-11-05 (CI fails after that date).
+Reviewed 2026-10-05 and again 2026-11-05: GitHub withdrew the advisory on 2026-10-23, but
+`bun audit` still reports it and no fixed release exists, so the patch stays.
+Review/exception expires 2026-12-15 (CI fails after that date).
 There is no published fixed version. The parser and recursive AST walkers now
 bound nesting to 100; prebuilt ASTs and cyclic parent chains are also guarded.
 This is a downstream mitigation, not a claim that upstream 3.0.3 is fixed.
@@ -20,8 +22,9 @@ unbounded recursion this mitigates.
 `node --test scripts/security-patches.test.mjs` exercises the installed copy
 through Nextra → fast-glob → micromatch, including ordinary patterns, excessive
 brace/parenthesis nesting, direct AST inputs and cyclic parents. CI runs it
-before allowing exactly this advisory in the version-based audit. All other
-advisories still fail. Container scans retain the unmodified findings for review;
+before allowing exactly this advisory in the version-based audit. Other high or
+critical advisories still fail; lower severities produce warnings. Container
+scans retain the unmodified findings for review;
 the same tested patch is installed by the frozen Bun install in both Dockerfiles.
 
 The resolutions for xmldom, PostCSS, Mermaid and sharp select published fixes
@@ -41,3 +44,19 @@ cover rendering, size limits and untrusted formulas, including inherited
 `trust` and `processor` properties. Both apps retain the shared
 `@eneo/markdown-math` options. KaTeX 0.18 prefixes internal CSS classes;
 application styles use the stable outer `.katex` and `.katex-display` classes.
+
+## Seroval resolution — CVE-2026-116582 / CVE-2026-116583
+
+Reviewed 2026-10-29. The root resolution selects Seroval 1.6.11, including the
+upstream fixes for [RegExp script injection](https://github.com/advisories/GHSA-9wx9-5pv9-3349)
+and [typed array constructor injection](https://github.com/advisories/GHSA-f86p-h4j2-7qgj).
+There is no audit exception. The installed chain is the beta's
+`@tanstack/react-query-devtools` → `@tanstack/query-devtools` → `solid-js` →
+`seroval`. Remove the override once the parents require a fixed version.
+
+The existing `scripts/security-patches.test.mjs` suite resolves Seroval through
+that chain. It checks synchronous and asynchronous serialization of typed
+arrays with an untrusted own `constructor`, with and without compact buffer
+views, and prevents RegExp sources from ending an HTML script element. It also
+checks typed array contents, RegExp flags, named groups and lookbehinds survive
+the round trip. CI runs these regressions before the dependency audit.

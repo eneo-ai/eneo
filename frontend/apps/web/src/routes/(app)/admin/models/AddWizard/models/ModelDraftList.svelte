@@ -8,7 +8,11 @@
 
 <script lang="ts">
   import { EneoError } from "@eneo/eneo-js";
-  import { LoaderCircle, CircleCheck, CircleX, Zap, Trash2 } from "@lucide/svelte";
+  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
+  import CircleCheck from "@lucide/svelte/icons/circle-check";
+  import CircleX from "@lucide/svelte/icons/circle-x";
+  import Zap from "@lucide/svelte/icons/zap";
+  import Trash2 from "@lucide/svelte/icons/trash-2";
   import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
   import { getEneo } from "$lib/core/Eneo";

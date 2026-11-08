@@ -195,6 +195,47 @@ class TestCheckConnection:
 
         assert check.status is ConnectionCheckStatus.OK
         assert str(sent[0].url) == "https://llm.example.se/v1/models"
+        # MockTransport skips h11's header validation, which refuses to send
+        # "Bearer " with an empty token, so the OK above alone proves nothing.
+        assert "authorization" not in sent[0].headers
+
+    async def test_a_whitespace_only_key_counts_as_no_key(self, respond) -> None:
+        sent = respond(lambda request: httpx.Response(200, json={"data": []}))
+        provider = _provider(
+            provider_type="hosted_vllm",
+            credentials=_encrypted(" \n"),
+            config={"endpoint": "https://llm.example.se"},
+        )
+        service, _ = _service(provider)
+
+        _stored, check = await service.check_connection(provider.id)
+
+        assert check.status is ConnectionCheckStatus.OK
+        assert "authorization" not in sent[0].headers
+
+    async def test_a_key_pasted_with_a_trailing_newline_is_sent_clean(
+        self, respond
+    ) -> None:
+        sent = respond(lambda request: httpx.Response(200, json={"data": []}))
+        provider = _provider(credentials=_encrypted(f"{KEY}\n"))
+        service, _ = _service(provider)
+
+        _stored, check = await service.check_connection(provider.id)
+
+        assert check.status is ConnectionCheckStatus.OK
+        assert sent[0].headers["Authorization"] == f"Bearer {KEY}"
+
+    async def test_a_whitespace_only_required_key_fails_without_calling_out(
+        self, respond
+    ) -> None:
+        sent = respond(lambda request: httpx.Response(200))
+        provider = _provider(credentials=_encrypted("  "))
+        service, _ = _service(provider)
+
+        _stored, check = await service.check_connection(provider.id)
+
+        assert check.error is ConnectionCheckError.MISSING_CREDENTIALS
+        assert sent == []
 
     async def test_unsupported_types_raise_and_record_nothing(self, respond) -> None:
         sent = respond(lambda request: httpx.Response(200))
@@ -230,7 +271,10 @@ class TestUpdateAndCreate:
         assert repository.update.await_args.kwargs == {"clear_connection_check": True}
 
     async def test_an_unchanged_config_keeps_the_check(self) -> None:
-        provider = _provider(config={"endpoint": "https://llm.example.se"})
+        # Keyless on purpose: the edit must not be refused for a missing key.
+        provider = _provider(
+            provider_type="hosted_vllm", config={"endpoint": "https://llm.example.se"}
+        )
         service, repository = _service(provider)
 
         await service.update(
@@ -240,7 +284,9 @@ class TestUpdateAndCreate:
         assert repository.update.await_args.kwargs == {"clear_connection_check": False}
 
     async def test_a_changed_endpoint_clears_the_check(self, monkeypatch) -> None:
-        provider = _provider(config={"endpoint": "https://llm.example.se"})
+        provider = _provider(
+            provider_type="hosted_vllm", config={"endpoint": "https://llm.example.se"}
+        )
         service, repository = _service(provider)
         # A new destination freezes used embedding routes; that lock is a
         # database concern outside this check.

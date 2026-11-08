@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import time
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -14,10 +15,14 @@ from fastapi import FastAPI, Request
 from httpx import ASGITransport, AsyncClient
 from sse_starlette import ServerSentEvent
 
+from eneo.authentication import browser_session_service
+from eneo.authentication.auth_models import JWTPayload
+from eneo.authentication.browser_session_service import SessionWatch
 from eneo.database.database import get_session_with_transaction
 from eneo.jobs import job_events, job_router
 from eneo.jobs.job_models import JobInDb
 from eneo.main.container.container import Container
+from eneo.main.container.request_container import request_container
 from eneo.main.models import Status
 from eneo.server.dependencies import container as container_dependency
 from eneo.tenants.tenant import TenantInDB
@@ -146,6 +151,103 @@ async def test_stream_stops_as_soon_as_the_client_disconnects():
 
 
 @pytest.mark.asyncio
+async def test_stream_ends_when_its_browser_session_does():
+    pubsub = FakePubSub(
+        [{"data": job_events.job_event_payload(make_job())} for _ in range(2)]
+    )
+    redis = MagicMock()
+    redis.pubsub = MagicMock(return_value=pubsub)
+    answers = iter([True, False])
+
+    async def admitted() -> bool:
+        return next(answers)
+
+    events = [
+        event
+        async for event in job_events.stream_job_events(
+            uuid4(), make_request(disconnect_after=5), redis=redis, admitted=admitted
+        )
+    ]
+
+    assert len(events) == 1
+
+
+class HeldPubSub(FakePubSub):
+    """A pubsub whose reads wait ``hold`` seconds, then bring a valid job."""
+
+    def __init__(self, hold: float):
+        super().__init__([])
+        self.hold = hold
+
+    async def get_message(self, ignore_subscribe_messages: bool, timeout: float):
+        await asyncio.sleep(self.hold)
+        return {"data": job_events.job_event_payload(make_job())}
+
+
+def browser_session(expires_in: float) -> JWTPayload:
+    now = time.time()
+    return JWTPayload(
+        iss="eneo",
+        aud="eneo",
+        iat=now,
+        exp=now + expires_in,
+        token_version=2,
+        user_id=uuid4(),
+        tenant_id=uuid4(),
+        credential_version=0,
+        sub="stream@example.com",
+        sid="s" * 43,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ending", ["expiry", "refused check"])
+async def test_a_job_that_arrives_after_the_session_ended_is_not_sent(
+    monkeypatch: pytest.MonkeyPatch, ending: str
+):
+    # The read waits across the session's expiry, or past its next check,
+    # which refuses it; only then does a valid job event arrive.
+    expires_in = 60.0
+    if ending == "expiry":
+        expires_in = 0.1
+    else:
+        monkeypatch.setattr(browser_session_service, "RECHECK_SECONDS", 0.1)
+        monkeypatch.setattr(SessionWatch, "_recheck", AsyncMock(return_value=False))
+    redis = MagicMock()
+    redis.pubsub = MagicMock(return_value=HeldPubSub(hold=0.3))
+
+    events = [
+        event
+        async for event in job_events.stream_job_events(
+            uuid4(),
+            make_request(disconnect_after=5),
+            redis=redis,
+            admitted=SessionWatch(browser_session(expires_in), MagicMock()),
+        )
+    ]
+
+    assert events == []
+
+
+@pytest.mark.asyncio
+async def test_a_check_that_succeeds_only_after_the_expiry_admits_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # The check is due at once and is still running when the token expires;
+    # it then succeeds, but the session has ended by the time it answers.
+    monkeypatch.setattr(browser_session_service, "RECHECK_SECONDS", 0.0)
+
+    async def slow_success(self: SessionWatch) -> bool:
+        await asyncio.sleep(0.3)
+        return True
+
+    monkeypatch.setattr(SessionWatch, "_recheck", slow_success)
+    watch = SessionWatch(browser_session(0.1), MagicMock())
+
+    assert await watch() is False
+
+
+@pytest.mark.asyncio
 async def test_job_route_releases_auth_database_session_before_streaming(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -173,18 +275,24 @@ async def test_job_route_releases_auth_database_session_before_streaming(
             lifecycle.append("session-closed")
 
     def authenticated_container(*, session: providers.Object) -> Container:
-        container = Container(session=session)
+        container = request_container(session=session)
         container.user_service.override(
             providers.Object(SimpleNamespace(authenticate=AsyncMock(return_value=user)))
         )
         return container
 
-    async def stream(owner, request: Request) -> AsyncIterator[ServerSentEvent]:
+    async def stream(
+        owner, request: Request, *, admitted
+    ) -> AsyncIterator[ServerSentEvent]:
         assert owner == user_id
+        # Not a browser session: nothing but the client ends the stream.
+        assert admitted is None
         lifecycle.append("stream")
         yield ServerSentEvent(event="job", data='{"status":"complete"}')
 
-    monkeypatch.setattr(container_dependency, "Container", authenticated_container)
+    monkeypatch.setattr(
+        container_dependency, "request_container", authenticated_container
+    )
     monkeypatch.setattr(job_router, "stream_job_events", stream)
     app = FastAPI()
     app.include_router(job_router.router, prefix="/jobs")

@@ -619,7 +619,12 @@ async def test_missing_and_out_of_scope_knowledge_deletes_have_same_error(
         ),
         "context": {"auth_layer": "api_key_scope"},
         "request_id": "knowledge-scope-denial",
+    }
+    expected_error = {
+        **expected_error,
         "eneo_error_code": ErrorCodes.UNAUTHORIZED.value,
+        # The raised detail, kept for one release for clients that read it.
+        "detail": expected_error,
     }
     for blob_id in (str(uuid4()), blob_b):
         response = await api_client.delete(

@@ -1,12 +1,12 @@
-"use client";
-
 import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";
 import { useQuery } from "@tanstack/react-query";
 import { Download } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useState } from "react";
+import { blockingError } from "@/components/composites/query-state";
 import { toast } from "@/lib/toast";
-import { saveBlob, type DocumentExport, type DocumentExportFormat } from "./document-export";
+import { saveBlob } from "@/features/files/signed-file-url";
+import type { DocumentExport, DocumentExportFormat } from "./document-export";
 
 // Product names of the formats; the same in every language.
 const FORMATS = {
@@ -48,6 +48,7 @@ export function ExportMenu({
     staleTime: 0,
     retry: false
   });
+  const checkFailed = availability.isError || blockingError(availability);
 
   async function exportAs(format: DocumentExportFormat) {
     if (busy) return;
@@ -119,7 +120,20 @@ export function ExportMenu({
           onClick: onSaveOriginal
         },
         formatItem("docx"),
-        formatItem("pdf")
+        formatItem("pdf"),
+        ...(checkFailed
+          ? [
+              {
+                id: "retry",
+                label: t("retry"),
+                description: availability.isFetching ? t("loading") : undefined,
+                hasCloseOnSelect: false,
+                onClick: () => {
+                  if (!availability.isFetching) void availability.refetch({ cancelRefetch: false });
+                }
+              }
+            ]
+          : [])
       ]}
     />
   );

@@ -45,8 +45,27 @@ const imageModel = {
   default_quality: "high",
   used_by_mcp_servers: [{ id: "cap-1", name: "Bildgenerering", purpose: "image_generation" }]
 } as AdminModel;
+const rerankModel = {
+  id: "rerank-1",
+  name: "Qwen/Qwen3-Reranker-4B",
+  nickname: "Qwen Reranker",
+  candidate_factor: 3,
+  max_candidates: 250
+} as AdminModel;
 
 describe("ModelDetailDialog", () => {
+  it("formats the context window in the UI language", async () => {
+    renderInApp(
+      <ModelDetailDialog
+        model={{ ...model, max_input_tokens: 12345 } as AdminModel}
+        kind="completion"
+        open
+        onOpenChange={() => {}}
+      />
+    );
+    expect(await screen.findByText("12 345")).toBeTruthy();
+  });
+
   it("names the usage table by the text above it", async () => {
     renderInApp(<ModelDetailDialog model={model} kind="completion" open onOpenChange={() => {}} />);
 
@@ -76,6 +95,24 @@ describe("ModelDetailDialog", () => {
     await expectNoAxeViolations(dialog);
   });
 
+  it("shows a rerank model's candidate settings without a usage tab", async () => {
+    renderInApp(
+      <ModelDetailDialog model={rerankModel} kind="rerank" open onOpenChange={() => {}} />
+    );
+
+    const dialog = await screen.findByRole("dialog", { name: "Qwen Reranker" });
+    // No usage endpoint for rerank models either.
+    expect(within(dialog).queryByRole("tab")).toBeNull();
+    expect(
+      within(dialog).getByText("Kandidater per efterfrågad chunk").nextElementSibling?.textContent
+    ).toBe("3");
+    expect(
+      within(dialog).getByText("Max antal kandidater per sökning").nextElementSibling?.textContent
+    ).toBe("250");
+    expect(within(dialog).queryByText("Funktioner")).toBeNull();
+    await expectNoAxeViolations(dialog);
+  });
+
   it("says what kind of resource each one is, in Swedish", async () => {
     renderInApp(<ModelDetailDialog model={model} kind="completion" open onOpenChange={() => {}} />);
 
@@ -91,4 +128,93 @@ describe("ModelDetailDialog", () => {
     // A type the app does not know yet shows as the API sends it.
     expect(types).toEqual(["Assistent", "App", "Tjänst", "Assistentmall", "Appmall", "workflow"]);
   });
+});
+
+it("shows completion metadata and offers edit and migration from a deprecated model", async () => {
+  const onEdit = vi.fn();
+  const onMigrate = vi.fn();
+  renderInApp(
+    <ModelDetailDialog
+      model={
+        {
+          ...model,
+          name: "provider/gpt-5",
+          max_input_tokens: 128000,
+          max_output_tokens: 4096,
+          vision: true,
+          reasoning: true,
+          supports_tool_calling: true,
+          hosting: "usa",
+          open_source: false,
+          org: "OpenAI",
+          family: "gpt",
+          description: "Supports the municipality",
+          hf_link: "https://huggingface.co/example/model",
+          input_cost_per_token: "0.000005",
+          output_cost_per_token: "0.00001",
+          is_deprecated: true,
+          security_classification: {
+            id: "s1",
+            name: "Intern",
+            description: null,
+            security_level: 1
+          }
+        } as AdminModel
+      }
+      kind="completion"
+      open
+      onOpenChange={vi.fn()}
+      onEdit={onEdit}
+      onMigrate={onMigrate}
+    />
+  );
+  const dialog = screen.getByRole("dialog", { name: "GPT-5" });
+  expect(within(dialog).getByText("Modellidentifierare").nextElementSibling?.textContent).toBe(
+    "provider/gpt-5"
+  );
+  expect(within(dialog).getByText("Max utdatatokens").nextElementSibling?.textContent).toBe(
+    "4\u00a0096"
+  );
+  expect(within(dialog).getByText("Hosting-region").nextElementSibling?.textContent).toBe("USA");
+  expect(within(dialog).getByText("Leverantör").nextElementSibling?.textContent).toBe("OpenAI");
+  expect(within(dialog).getByText("Öppen källkod").nextElementSibling?.textContent).toBe("Nej");
+  expect(within(dialog).getByText("Säkerhetsklassificering").nextElementSibling?.textContent).toBe(
+    "Intern"
+  );
+  expect(within(dialog).getByText("Verktyg")).toBeTruthy();
+  expect(
+    within(dialog).getByRole("link", { name: "Visa på HuggingFace" }).getAttribute("href")
+  ).toBe("https://huggingface.co/example/model");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Redigera" }));
+  expect(onEdit).toHaveBeenCalledOnce();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Migrera" }));
+  expect(onMigrate).toHaveBeenCalledOnce();
+  await expectNoAxeViolations(dialog);
+});
+
+it("opens embedding details without requesting an unsupported usage endpoint", () => {
+  renderInApp(
+    <ModelDetailDialog
+      model={
+        {
+          ...model,
+          dimensions: 1024,
+          max_input: 512,
+          family: "e5",
+          open_source: true
+        } as AdminModel
+      }
+      kind="embedding"
+      open
+      onOpenChange={vi.fn()}
+    />
+  );
+  const dialog = screen.getByRole("dialog", { name: "GPT-5" });
+  expect(within(dialog).getByText("Dimensioner").nextElementSibling?.textContent).toBe(
+    "1\u00a0024"
+  );
+  expect(within(dialog).getByText("Modellfamilj").nextElementSibling?.textContent).toBe(
+    "E5 (HuggingFace)"
+  );
+  expect(within(dialog).queryByRole("tab", { name: "Användning" })).toBeNull();
 });

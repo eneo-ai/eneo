@@ -1,5 +1,3 @@
-"use client";
-
 import { Spinner } from "@astryxdesign/core/Spinner";
 import {
   ArrowUpDown,
@@ -23,16 +21,18 @@ import {
   UploadCloud,
   type LucideIcon
 } from "lucide-react";
-import { useFormatter, useLocale, useTranslations } from "next-intl";
+import { useFormatter, useLocale, useTranslations } from "use-intl";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { RadioList, RadioListItem } from "@astryxdesign/core/RadioList";
+import { Button as ModeButton } from "@astryxdesign/core/Button";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { useAutosave } from "@/components/composites/use-autosave";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AttachmentPreviewDialog, useSignedUrl } from "@/features/chat/attachments";
-import { signedFileUrl } from "./signed-file-url";
+import { saveUrl, signedFileUrl, toastDownloadError } from "./signed-file-url";
 import { FileFormatDetails } from "@/features/files/file-format-details";
-import { collectDroppedFiles } from "@/features/files/collect-dropped-files";
+import { useFileDrop } from "@/features/files/use-file-drop";
 import { toastUploadRejection } from "@/features/files/upload-rejection-toast";
 import { fileRestrictionsRules, planFileUploads } from "@/features/files/upload-plan";
 import { browserApi } from "@/lib/api/browser";
@@ -40,9 +40,15 @@ import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import type { Schema } from "@/lib/api/models";
 import { formatBytes } from "@/lib/format";
+import { matchesSearch } from "@/lib/search";
+import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { cn } from "@/lib/utils";
 
 type Attachment = Schema<"FilePublic"> | Schema<"AssistantAttachmentPublic">;
+type AttachmentMode = {
+  fileReferencesEnabled: boolean;
+  selectedModel?: { id: string; supports_tool_calling?: boolean | null } | null;
+};
 
 // Assistants persist a read mode per attachment; Apps use the same editor
 // without that field. Preserve the server-owned mode when either is edited.
@@ -81,12 +87,6 @@ function attachmentTypeLabel(file: Attachment): string {
   if (extension) return extension.toUpperCase().slice(0, 5);
   const subtype = file.mimetype.split("/").pop() ?? file.mimetype;
   return (subtype.split(/[.+]/).pop() ?? subtype).toUpperCase().slice(0, 5);
-}
-
-function compactTokens(value: number): string {
-  return new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(
-    Math.round(value)
-  );
 }
 
 async function deleteUploadedFile(id: string): Promise<void> {
@@ -231,7 +231,7 @@ function ResourceAttachmentIcon({ file }: { file: Attachment }) {
 }
 
 function AttachmentPreview({ file, onClose }: { file: Attachment; onClose: () => void }) {
-  const { url, error } = useSignedUrl(file.id);
+  const { url, error, resign } = useSignedUrl(file.id);
   return (
     <AttachmentPreviewDialog
       open
@@ -240,6 +240,7 @@ function AttachmentPreview({ file, onClose }: { file: Attachment; onClose: () =>
       mimetype={file.mimetype}
       url={url}
       error={error}
+      onImageError={resign}
     />
   );
 }
@@ -254,14 +255,18 @@ export function ResourceAttachmentsSection({
   attachments,
   allowedAttachments,
   description,
+  attachmentMode,
   onSave
 }: {
   attachments: Attachment[];
   allowedAttachments: Schema<"FileRestrictions">;
   description: string;
+  attachmentMode?: AttachmentMode;
   onSave: (attachments: Schema<"AssistantAttachmentInput">[]) => Promise<unknown>;
 }) {
   const t = useTranslations();
+  // Dragging a file onto the page needs a mouse: a touch screen is told to choose files.
+  const coarse = useMediaQuery("(pointer: coarse)");
   const locale = useLocale();
   const format = useFormatter();
   const autosave = useAutosave("attachments");
@@ -269,14 +274,40 @@ export function ResourceAttachmentsSection({
 
   const saved: Attachment[] = useMemo(() => attachments, [attachments]);
   const [files, setFiles] = useState<Attachment[]>(saved);
-  const [uploading, setUploading] = useState(false);
-  const [dragActive, setDragActive] = useState(false);
+  const [operation, setOperation] = useState<"upload" | "save" | null>(null);
+  // The ref also rejects a second event before React renders the busy state.
+  const operationInProgress = useRef(false);
+  const busy = operation !== null;
+  const uploading = operation === "upload";
+  function beginOperation(next: "upload" | "save") {
+    if (operationInProgress.current) return false;
+    operationInProgress.current = true;
+    setOperation(next);
+    return true;
+  }
+  function endOperation() {
+    operationInProgress.current = false;
+    setOperation(null);
+  }
   const [preview, setPreview] = useState<Attachment | null>(null);
   const [query, setQuery] = useState("");
+  const [editingMode, setEditingMode] = useState<string | null>(null);
   const [sortAscending, setSortAscending] = useState(true);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const rules = fileRestrictionsRules(allowedAttachments);
   const atCapacity = Number.isFinite(rules.maxFiles) && files.length >= rules.maxFiles;
+
+  function lookupUnavailable(file: Attachment): string | null {
+    if (!attachmentMode) return null;
+    if (["image/", "audio/", "video/"].some((type) => file.mimetype.startsWith(type)))
+      return t("material_file_type_inline");
+    if (file.has_download_reference === false) return t("attachment_mode_lookup_unavailable");
+    if (!attachmentMode.fileReferencesEnabled) return t("material_file_references_unavailable");
+    if (!attachmentMode.selectedModel) return t("material_select_model");
+    if (attachmentMode.selectedModel.supports_tool_calling !== true)
+      return t("material_file_model_fallback");
+    return null;
+  }
 
   // Adopt server changes (our own save landing, or an edit elsewhere) unless the
   // user diverged locally. Attachments persist immediately on add/remove.
@@ -312,15 +343,8 @@ export function ResourceAttachmentsSection({
   const totalSize = files.reduce((sum, file) => sum + (file.size ?? 0), 0);
 
   const filteredFiles = useMemo(() => {
-    const needle = query.trim().toLowerCase();
     return files
-      .filter((file) => {
-        if (!needle) return true;
-        return (
-          file.name.toLowerCase().includes(needle) ||
-          attachmentTypeLabel(file).toLowerCase().includes(needle)
-        );
-      })
+      .filter((file) => matchesSearch([file.name, attachmentTypeLabel(file)], query))
       .sort((first, second) =>
         sortAscending
           ? first.name.localeCompare(second.name)
@@ -332,7 +356,9 @@ export function ResourceAttachmentsSection({
     return [
       attachmentTypeLabel(file),
       formatBytes(file.size, locale),
-      file.token_count != null ? `${compactTokens(file.token_count)} ${t("tokens")}` : null,
+      file.token_count != null
+        ? `${format.number(Math.round(file.token_count), { notation: "compact", maximumFractionDigits: 1 })} ${t("tokens")}`
+        : null,
       file.created_at
         ? format.dateTime(new Date(file.created_at), { day: "numeric", month: "short" })
         : null
@@ -344,29 +370,22 @@ export function ResourceAttachmentsSection({
   async function downloadFile(file: Attachment) {
     setDownloadingId(file.id);
     try {
-      const url = await signedFileUrl(browserApi, file.id, "attachment");
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = file.name;
-      anchor.rel = "noreferrer";
-      document.body.append(anchor);
-      anchor.click();
-      anchor.remove();
+      saveUrl(await signedFileUrl(browserApi, file.id, "attachment"), file.name);
     } catch (error) {
-      toastApiError(error, t);
+      toastDownloadError(error, t);
     } finally {
       setDownloadingId(null);
     }
   }
 
   async function uploadFiles(selected: File[]) {
-    if (selected.length === 0) return;
+    if (operationInProgress.current || selected.length === 0) return;
     const plan = planFileUploads(selected, files, rules);
     const shown = { maxFiles: false };
     for (const rejection of plan.rejected) toastUploadRejection(rejection, t, locale, shown);
     if (plan.accepted.length === 0) return;
 
-    setUploading(true);
+    if (!beginOperation("upload")) return;
     const added: Attachment[] = [];
     try {
       for (const file of plan.accepted) {
@@ -379,28 +398,35 @@ export function ResourceAttachmentsSection({
           })
         );
         added.push({
+          ...uploaded,
           id: uploaded.id,
           name: uploaded.name ?? file.name,
           mimetype: uploaded.mimetype ?? file.type,
           size: uploaded.size ?? file.size,
           created_at: uploaded.created_at ?? null,
           token_count: uploaded.token_count ?? null,
-          transcription: uploaded.transcription ?? null
+          transcription: uploaded.transcription ?? null,
+          ...(attachmentMode ? { inline_text: false } : {})
         });
       }
       if (added.length > 0) {
         const previous = files;
         const next = [...previous, ...added];
         setFiles(next);
-        void persist(next, previous, { deleteOnFailure: added });
+        await persist(next, previous, { deleteOnFailure: added });
       }
     } catch (error) {
       if (added.length > 0) void deleteUploadedFiles(added);
       toastApiError(error, t);
     } finally {
-      setUploading(false);
+      endOperation();
     }
   }
+
+  const { dragging, handlers } = useFileDrop((dropped) => void uploadFiles(dropped), {
+    enabled: !busy,
+    onError: (error) => toastApiError(error, t)
+  });
 
   return (
     <SettingsGroup
@@ -448,60 +474,135 @@ export function ResourceAttachmentsSection({
           <div className="-mx-4">
             {filteredFiles.length > 0 ? (
               <ul className="max-h-80 overflow-y-auto">
-                {filteredFiles.map((file) => (
-                  <li
-                    key={file.id}
-                    className="hover:bg-muted/40 flex items-center gap-3 border-t px-4 py-3"
-                  >
-                    <ResourceAttachmentIcon file={file} />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium">{file.name}</p>
-                      <p className="text-muted-foreground truncate text-xs">{metaLine(file)}</p>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        aria-label={`${t("preview")} ${file.name}`}
-                        onClick={() => setPreview(file)}
-                      >
-                        <Eye className="size-4" />
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        aria-label={`${t("download")} ${file.name}`}
-                        disabled={downloadingId === file.id}
-                        onClick={() => void downloadFile(file)}
-                      >
-                        {downloadingId === file.id ? (
-                          <Spinner size="sm" shade="inherit" />
-                        ) : (
-                          <Download className="size-4" />
+                {filteredFiles.map((file) => {
+                  const unavailable = lookupUnavailable(file);
+                  const inline = attachmentReference(file).inline_text !== false;
+                  return (
+                    <li
+                      key={file.id}
+                      className="hover:bg-muted/40 flex flex-wrap items-center gap-3 border-t px-4 py-3"
+                    >
+                      <ResourceAttachmentIcon file={file} />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">{file.name}</p>
+                        <p className="text-muted-foreground truncate text-xs">{metaLine(file)}</p>
+                        {attachmentMode && (
+                          <>
+                            <p className="text-ax-text-secondary text-sm">
+                              {t(
+                                inline || unavailable
+                                  ? "material_file_inline_status"
+                                  : "material_file_lookup_status"
+                              )}
+                            </p>
+                            {!inline && unavailable && (
+                              <p className="text-warning text-sm">{unavailable}</p>
+                            )}
+                          </>
                         )}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        aria-label={`${t("remove")} ${file.name}`}
-                        onClick={() => {
-                          const previous = files;
-                          const next = files.filter((other) => other.id !== file.id);
-                          const wasSaved = saved.some((savedFile) => savedFile.id === file.id);
-                          setFiles(next);
-                          void persist(next, previous, {
-                            deleteOnSuccess: wasSaved ? [] : [file]
-                          });
-                        }}
-                      >
-                        <Trash2 className="size-4" />
-                      </Button>
-                    </div>
-                  </li>
-                ))}
+                      </div>
+                      <div className="flex items-center gap-1">
+                        {attachmentMode && (
+                          <ModeButton
+                            size="sm"
+                            label={t("material_change")}
+                            aria-label={t("material_change_file", { name: file.name })}
+                            aria-busy={busy || undefined}
+                            aria-disabled={busy || undefined}
+                            aria-expanded={editingMode === file.id}
+                            aria-controls={`attachment-mode-${file.id}`}
+                            onClick={() => {
+                              if (!operationInProgress.current)
+                                setEditingMode(editingMode === file.id ? null : file.id);
+                            }}
+                          />
+                        )}
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          aria-label={`${t("preview")} ${file.name}`}
+                          onClick={() => setPreview(file)}
+                        >
+                          <Eye className="size-4" />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          aria-label={`${t("download")} ${file.name}`}
+                          disabled={downloadingId === file.id}
+                          onClick={() => void downloadFile(file)}
+                        >
+                          {downloadingId === file.id ? (
+                            <Spinner size="sm" shade="inherit" />
+                          ) : (
+                            <Download className="size-4" />
+                          )}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          aria-label={`${t("remove")} ${file.name}`}
+                          aria-busy={busy || undefined}
+                          aria-disabled={busy || undefined}
+                          onClick={() => {
+                            if (!beginOperation("save")) return;
+                            const previous = files;
+                            const next = files.filter((other) => other.id !== file.id);
+                            const wasSaved = saved.some((savedFile) => savedFile.id === file.id);
+                            setFiles(next);
+                            void persist(next, previous, {
+                              deleteOnSuccess: wasSaved ? [] : [file]
+                            }).finally(endOperation);
+                          }}
+                        >
+                          <Trash2 className="size-4" />
+                        </Button>
+                      </div>
+                      {attachmentMode && editingMode === file.id && (
+                        <div
+                          id={`attachment-mode-${file.id}`}
+                          className="w-full"
+                          aria-busy={busy || undefined}
+                        >
+                          <RadioList
+                            label={t("material_change_file", { name: file.name })}
+                            description={t("attachment_mode_help")}
+                            value={inline ? "inline" : "lookup"}
+                            onChange={(value) => {
+                              const nextInline = value === "inline";
+                              if (
+                                nextInline === inline ||
+                                (!nextInline && unavailable) ||
+                                !beginOperation("save")
+                              )
+                                return;
+                              const previous = files;
+                              const next = files.map((other) =>
+                                other.id === file.id ? { ...other, inline_text: nextInline } : other
+                              );
+                              setFiles(next);
+                              void persist(next, previous).finally(endOperation);
+                            }}
+                          >
+                            <RadioListItem
+                              value="lookup"
+                              label={t("material_open_when_needed")}
+                              isDisabled={unavailable !== null && inline}
+                              description={unavailable ?? undefined}
+                            />
+                            <RadioListItem
+                              value="inline"
+                              label={t("material_file_always_option")}
+                            />
+                          </RadioList>
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             ) : (
               <div className="text-muted-foreground flex min-h-24 items-center justify-center px-3 py-6 text-sm">
@@ -511,28 +612,21 @@ export function ResourceAttachmentsSection({
           </div>
 
           <div
-            onDragOver={(event) => {
-              event.preventDefault();
-              setDragActive(true);
-            }}
-            onDragLeave={() => setDragActive(false)}
-            onDrop={(event) => {
-              event.preventDefault();
-              setDragActive(false);
-              void collectDroppedFiles(event.dataTransfer)
-                .then(uploadFiles)
-                .catch((error: unknown) => toastApiError(error, t));
-            }}
+            {...handlers}
             className={cn(
               "flex min-h-28 flex-col items-center justify-center gap-3 rounded-lg border border-dashed px-4 py-5 text-center",
-              dragActive && "border-primary bg-primary/5"
+              dragging && "border-primary bg-primary/5"
             )}
           >
             <span className="bg-muted grid size-10 place-items-center rounded-full">
               <UploadCloud aria-hidden="true" className="text-muted-foreground size-5" />
             </span>
             <p className="text-sm font-medium">
-              {uploading ? t("uploading") : t("drop_files_here")}
+              {uploading
+                ? t("uploading")
+                : coarse
+                  ? t("drop_files_here_touch")
+                  : t("drop_files_here")}
             </p>
             <Button
               type="button"
@@ -540,11 +634,11 @@ export function ResourceAttachmentsSection({
               size="sm"
               className="shrink-0"
               disabled={atCapacity}
-              // Uploading, it stays enabled so it keeps focus (the busy
-              // spinner replaces its icon); a press meanwhile is ignored.
-              aria-busy={uploading || undefined}
+              // Keep focus while a mutation runs; repeated actions are ignored.
+              aria-busy={busy || undefined}
+              aria-disabled={busy || undefined}
               onClick={() => {
-                if (!uploading) fileInput.current?.click();
+                if (!operationInProgress.current) fileInput.current?.click();
               }}
             >
               {!uploading && <Paperclip className="size-4" />}

@@ -131,6 +131,11 @@ class Assistants(BasePublic):
             "id",
             postgresql_where=sa.text("is_default = true"),
         ),
+        Index(
+            "ix_assistants_icon_id",
+            "icon_id",
+            postgresql_where=sa.text("icon_id IS NOT NULL"),
+        ),
         {"extend_existing": True},  # Temporary
     )
 

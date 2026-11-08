@@ -5,6 +5,8 @@
     advanced: number;
     concurrentChange: number;
     contextWindow: number;
+    attachmentLimit: number;
+    conflictingRevisions: number;
   };
 
   export type SkillAdoptionRun = {
@@ -15,6 +17,8 @@
     concurrentChange: number;
     activationUnavailable: number;
     contextWindow: number;
+    attachmentLimit: number;
+    conflictingRevisions: number;
     personalChat: "pending" | "advanced" | "failed" | "not_applicable";
     apps: AppSkillAdoptionRun | null;
     stopRequested?: boolean;
@@ -53,7 +57,11 @@
 
 <script lang="ts">
   import type { SkillAdoptionProjectionPagePublic, SkillDetachmentTotals } from "@eneo/eneo-js";
-  import { CircleAlert, LoaderCircle, RefreshCw, Search, Unlink } from "@lucide/svelte";
+  import CircleAlert from "@lucide/svelte/icons/circle-alert";
+  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
+  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
+  import Search from "@lucide/svelte/icons/search";
+  import Unlink from "@lucide/svelte/icons/unlink";
   import { resolve } from "$app/paths";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
@@ -175,13 +183,22 @@
   let rolloutProcessed = $derived(
     run === null
       ? 0
-      : run.advanced + run.concurrentChange + run.activationUnavailable + run.contextWindow
+      : run.advanced +
+          run.concurrentChange +
+          run.activationUnavailable +
+          run.contextWindow +
+          run.attachmentLimit +
+          run.conflictingRevisions
   );
   let rolloutTotal = $derived(run === null ? 0 : Math.max(run.provisionalTotal, rolloutProcessed));
   let appRolloutProcessed = $derived(
     run?.apps === null || run?.apps === undefined
       ? 0
-      : run.apps.advanced + run.apps.concurrentChange + run.apps.contextWindow
+      : run.apps.advanced +
+          run.apps.concurrentChange +
+          run.apps.contextWindow +
+          run.apps.attachmentLimit +
+          run.apps.conflictingRevisions
   );
   let appRolloutTotal = $derived(
     run?.apps === null || run?.apps === undefined
@@ -710,6 +727,16 @@
                 <Table.Cell>{m.organization_skills_rollout_context_window()}</Table.Cell>
                 <Table.Cell class="text-right tabular-nums">{run.contextWindow}</Table.Cell>
               </Table.Row>
+              <Table.Row
+                ><Table.Cell>{m.organization_skills_rollout_attachment_limit()}</Table.Cell
+                ><Table.Cell class="text-right tabular-nums">{run.attachmentLimit}</Table.Cell
+                ></Table.Row
+              >
+              <Table.Row
+                ><Table.Cell>{m.organization_skills_rollout_conflicting_revisions()}</Table.Cell
+                ><Table.Cell class="text-right tabular-nums">{run.conflictingRevisions}</Table.Cell
+                ></Table.Row
+              >
             </Table.Body>
           </Table.Root>
         </div>
@@ -767,6 +794,18 @@
                     {run.apps.contextWindow}
                   </Table.Cell>
                 </Table.Row>
+                <Table.Row
+                  ><Table.Cell>{m.organization_skills_rollout_attachment_limit()}</Table.Cell
+                  ><Table.Cell class="text-right tabular-nums"
+                    >{run.apps.attachmentLimit}</Table.Cell
+                  ></Table.Row
+                >
+                <Table.Row
+                  ><Table.Cell>{m.organization_skills_rollout_conflicting_revisions()}</Table.Cell
+                  ><Table.Cell class="text-right tabular-nums"
+                    >{run.apps.conflictingRevisions}</Table.Cell
+                  ></Table.Row
+                >
               </Table.Body>
             </Table.Root>
           </div>

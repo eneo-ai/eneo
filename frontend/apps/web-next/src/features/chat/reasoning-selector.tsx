@@ -1,8 +1,6 @@
-"use client";
-
 import { Selector, type SelectorOptionType } from "@astryxdesign/core/Selector";
 import { Brain } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useState } from "react";
 import { effectiveReasoningEffort, reasoningEffortLabel } from "./reasoning-effort";
 
@@ -94,7 +92,7 @@ export function ReasoningEffortSelector({
           .catch(() => {})
           .finally(() => setPending((current) => (current === next ? null : current)));
       }}
-      className={className}
+      controlClassName={className}
     />
   );
 }

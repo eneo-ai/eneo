@@ -42,4 +42,14 @@ def mask_api_key(api_key: str | None) -> str:
     return f"{prefix}...{suffix}"
 
 
-__all__ = ["mask_api_key"]
+def looks_masked(value: str) -> bool:
+    """A value that is only the display form of a secret, never a secret.
+
+    Covers what ``mask_api_key`` returns and a row of mask characters, so a
+    form that echoed the masked value back cannot store it as the secret.
+    """
+    stripped = value.strip()
+    return stripped.removeprefix("sk-").startswith("...") or set(stripped) <= set("*•·")
+
+
+__all__ = ["looks_masked", "mask_api_key"]

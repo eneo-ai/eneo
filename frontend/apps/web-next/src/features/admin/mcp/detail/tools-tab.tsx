@@ -1,5 +1,3 @@
-"use client";
-
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Check,
@@ -13,8 +11,11 @@ import {
   Trash2,
   X
 } from "lucide-react";
-import { useTranslations } from "next-intl";
-import { useMemo, useState } from "react";
+import { useTranslations } from "use-intl";
+import { useMemo, useRef, useState } from "react";
+import { QueryStateBoundary } from "@/components/composites/query-state";
+import { useFocusRescue } from "@/lib/focus-rescue";
+import { invalidateSpaces } from "@/features/spaces/space";
 import { EmptyState } from "@/components/composites/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,11 +23,11 @@ import { Card } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { browserApi } from "@/lib/api/browser";
 import { toastApiError } from "@/lib/api/toast";
+import { matchesSearch, searchTerms } from "@/lib/search";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import {
@@ -34,13 +35,15 @@ import {
   approveToolChanges,
   MCP_KEY,
   mcpServerToolsQueryOptions,
-  mcpToolsKey,
   type McpServerTool,
+  type McpServer,
   rejectToolChanges,
   syncMcpServerTools,
   updateTenantToolEnabled
 } from "../mcp";
 import { readableParams, toolRisk } from "../mcp-helpers";
+import { ToolNameEditor } from "./tool-name-editor";
+import { PendingToolView } from "./pending-tool-view";
 
 function RiskChip({ tool }: { tool: McpServerTool }) {
   const t = useTranslations();
@@ -53,7 +56,7 @@ function RiskChip({ tool }: { tool: McpServerTool }) {
             "gap-1 font-normal",
             risk === "write"
               ? "border-warning/30 bg-warning/15 text-warning"
-              : "border-success/30 bg-success/15 text-success"
+              : "border-success/30 bg-ax-success-muted text-ax-success"
           )}
         >
           {risk === "write" ? (
@@ -94,11 +97,15 @@ function ParamList({ schema }: { schema: McpServerTool["input_schema"] }) {
 }
 
 function ActiveToolRow({
+  serverId,
+  onRenamed,
   tool,
   busy,
   onToggle
 }: {
   tool: McpServerTool;
+  serverId: string;
+  onRenamed: () => void;
   /** Its own toggle is saving. */
   busy: boolean;
   onToggle: (enabled: boolean) => void;
@@ -106,11 +113,7 @@ function ActiveToolRow({
   const t = useTranslations();
   const [open, setOpen] = useState(false);
   return (
-    <Collapsible
-      open={open}
-      onOpenChange={setOpen}
-      className={cn("border-border rounded-lg border", !tool.is_enabled_by_default && "opacity-60")}
-    >
+    <Collapsible open={open} onOpenChange={setOpen} className="border-border rounded-lg border">
       <div className="flex items-center gap-3 p-3">
         <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-2 text-left">
           <ChevronRight
@@ -118,8 +121,10 @@ function ActiveToolRow({
             aria-hidden="true"
           />
           <span className="min-w-0">
-            <span className="block truncate text-sm font-medium">{tool.title || tool.name}</span>
-            {tool.title && (
+            <span className="block truncate text-sm font-medium">
+              {tool.display_name || tool.title || tool.name}
+            </span>
+            {(tool.display_name || tool.title) && (
               <span className="text-muted-foreground block truncate font-mono text-xs">
                 {tool.name}
               </span>
@@ -134,6 +139,9 @@ function ActiveToolRow({
           onCheckedChange={onToggle}
         />
       </div>
+      <div className="px-3 pb-3">
+        <ToolNameEditor serverId={serverId} tool={tool} onSaved={onRenamed} />
+      </div>
       <CollapsibleContent className="border-t px-3 py-3">
         {tool.description && (
           <p className="text-muted-foreground mb-3 text-sm">{tool.description}</p>
@@ -145,19 +153,30 @@ function ActiveToolRow({
 }
 
 function PendingToolRow({
+  serverId,
   tool,
   busy,
   onApprove,
   onReject
 }: {
   tool: McpServerTool;
+  serverId: string;
   /** Which of its decisions is being saved. */
   busy: "approve" | "reject" | null;
   onApprove: () => void;
   onReject: () => void;
 }) {
   const t = useTranslations();
-  const changed = !tool.removed_from_remote && Boolean(tool.pending_description);
+  // The backend's reject operation identifies never-approved discoveries by
+  // their absent approved description and schema (pending values do not count).
+  const isNew = tool.description == null && tool.input_schema == null;
+  const descriptionChanged =
+    !isNew && tool.pending_description != null && tool.pending_description !== tool.description;
+  const description = isNew ? tool.pending_description : tool.description;
+  const pendingView =
+    !tool.removed_from_remote &&
+    Boolean(tool.pending_ui_resource_sha256) &&
+    tool.pending_ui_resource_sha256 !== tool.ui_resource_sha256;
   return (
     <li className="border-warning/30 bg-warning/10 rounded-lg border p-3">
       <div className="flex items-start gap-3">
@@ -169,18 +188,18 @@ function PendingToolRow({
                 <Trash2 className="size-3" aria-hidden="true" />
                 {t("removed_from_server")}
               </span>
-            ) : changed ? (
+            ) : !isNew ? (
               <Badge className="border-warning/30 bg-warning/15 text-warning gap-1 font-normal">
                 {t("mcp_change_changed")}
               </Badge>
             ) : (
-              <Badge className="border-success/30 bg-success/15 text-success gap-1 font-normal">
+              <Badge className="border-success/30 bg-ax-success-muted text-ax-success gap-1 font-normal">
                 {t("mcp_change_new")}
               </Badge>
             )}
           </div>
 
-          {changed ? (
+          {descriptionChanged && !tool.removed_from_remote ? (
             <div className="mt-2 space-y-1.5">
               {tool.description && (
                 <div className="bg-secondary rounded px-2.5 py-1.5">
@@ -198,17 +217,18 @@ function PendingToolRow({
               </div>
             </div>
           ) : (
-            tool.description && (
+            description && (
               <p
                 className={cn(
                   "text-muted-foreground mt-1 text-xs leading-snug",
                   tool.removed_from_remote && "line-through"
                 )}
               >
-                {tool.description}
+                {description}
               </p>
             )
           )}
+          {pendingView && <PendingToolView serverId={serverId} tool={tool} />}
         </div>
 
         <div className="flex shrink-0 items-center gap-1">
@@ -246,17 +266,24 @@ function PendingToolRow({
   );
 }
 
-export function ToolsTab({ serverId }: { serverId: string }) {
+export function ToolsTab({
+  server
+}: {
+  server: Pick<McpServer, "id" | "purpose" | "http_auth_type">;
+}) {
+  const serverId = server.id;
+  const readOnly = server.http_auth_type === "internal";
   const t = useTranslations();
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
 
-  const { data: tools, isPending } = useQuery(mcpServerToolsQueryOptions(browserApi, serverId));
+  const query = useQuery(mcpServerToolsQueryOptions(browserApi, serverId));
+  const tools = query.data;
+  const heading = useRef<HTMLHeadingElement>(null);
+  const rescue = useFocusRescue();
 
-  const invalidate = () => {
-    void queryClient.invalidateQueries({ queryKey: mcpToolsKey(serverId) });
-    void queryClient.invalidateQueries({ queryKey: MCP_KEY });
-  };
+  // The servers and, under them, this server's tools.
+  const invalidate = () => void queryClient.invalidateQueries({ queryKey: MCP_KEY });
 
   const sync = useMutation({
     mutationFn: () => syncMcpServerTools(browserApi, serverId),
@@ -323,10 +350,9 @@ export function ToolsTab({ serverId }: { serverId: string }) {
   const pending = useMemo(() => (tools ?? []).filter((tool) => tool.requires_approval), [tools]);
   const active = useMemo(() => (tools ?? []).filter((tool) => !tool.requires_approval), [tools]);
   const filteredActive = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    if (!query) return active;
+    if (searchTerms(search).length === 0) return active;
     return active.filter((tool) =>
-      [tool.name, tool.title ?? "", tool.description ?? ""].join(" ").toLowerCase().includes(query)
+      matchesSearch([tool.name, tool.display_name, tool.title, tool.description], search)
     );
   }, [active, search]);
 
@@ -336,158 +362,208 @@ export function ToolsTab({ serverId }: { serverId: string }) {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between gap-2">
-        <h2 className="text-base font-semibold">{t("mcp_server_tools")}</h2>
-        <Button
-          variant="outline"
-          size="sm"
-          aria-busy={sync.isPending || undefined}
-          onClick={() => {
-            if (!sync.isPending) sync.mutate();
-          }}
-        >
-          {!sync.isPending && <RefreshCw className="size-4" />}
-          {sync.isPending ? t("syncing") : t("sync_tools")}
-        </Button>
+        <h2 ref={heading} tabIndex={-1} className="text-base font-semibold">
+          {t("mcp_server_tools")}
+        </h2>
+        {!readOnly && (
+          <Button
+            variant="outline"
+            size="sm"
+            aria-busy={sync.isPending || undefined}
+            onClick={() => run("sync", () => sync.mutate(undefined, settle))}
+          >
+            {!sync.isPending && <RefreshCw className="size-4" />}
+            {sync.isPending ? t("syncing") : t("sync_tools")}
+          </Button>
+        )}
       </div>
 
-      {isPending ? (
-        <Skeleton className="h-40 w-full" />
-      ) : !tools || tools.length === 0 ? (
-        <EmptyState title={t("no_tools_found")} description={t("click_sync_to_discover_tools")} />
-      ) : (
-        <>
-          {pending.length > 0 && (
-            <Card className="border-warning/30 gap-3 p-4">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-warning flex items-center gap-2 text-sm font-medium">
-                  <ShieldAlert className="size-4 shrink-0" aria-hidden="true" />
-                  {t("mcp_review_inbox_title", { count: pending.length })}
-                </span>
-                <div className="flex shrink-0 items-center gap-1.5">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    aria-busy={busyOn("approve-all")}
-                    onClick={() =>
-                      run("approve-all", () => review.mutate({ kind: "approve-all" }, settle))
-                    }
-                  >
-                    {!busyOn("approve-all") && <Check className="size-3.5" />} {t("approve_all")}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    aria-busy={busyOn("reject-all")}
-                    onClick={() =>
-                      run("reject-all", () =>
-                        review.mutate(
-                          { kind: "reject", toolIds: pending.map((tool) => tool.id) },
-                          settle
-                        )
-                      )
-                    }
-                  >
-                    {!busyOn("reject-all") && <X className="size-3.5" />} {t("reject_all")}
-                  </Button>
-                </div>
-              </div>
-              <p className="text-muted-foreground text-sm">
-                {t("tool_uses_previous_until_approved")}
-              </p>
-              <ul className="flex flex-col gap-2">
-                {pending.map((tool) => (
-                  <PendingToolRow
+      <QueryStateBoundary query={query} rows={1} height={160}>
+        {(loaded) =>
+          loaded.length === 0 ? (
+            <EmptyState
+              title={t("no_tools_found")}
+              description={readOnly ? undefined : t("click_sync_to_discover_tools")}
+            />
+          ) : readOnly ? (
+            <ul className="flex flex-col gap-3" aria-label={t("mcp_available_tools_aria")}>
+              {loaded.map((tool) => {
+                const imageTool =
+                  server.purpose === "image_generation" && tool.name === "generate_image";
+                const title =
+                  tool.display_name ??
+                  (imageTool ? t("tool_generate_image_title") : (tool.title ?? tool.name));
+                const description = imageTool
+                  ? t("tool_generate_image_description")
+                  : tool.description?.split(/\n\s*\n/)[0];
+                return (
+                  <li
                     key={tool.id}
-                    tool={tool}
-                    busy={
-                      busyOn(`approve:${tool.id}`)
-                        ? "approve"
-                        : busyOn(`reject:${tool.id}`)
-                          ? "reject"
-                          : null
-                    }
-                    onApprove={() =>
-                      run(`approve:${tool.id}`, () =>
-                        review.mutate({ kind: "approve", toolIds: [tool.id] }, settle)
-                      )
-                    }
-                    onReject={() =>
-                      run(`reject:${tool.id}`, () =>
-                        review.mutate({ kind: "reject", toolIds: [tool.id] }, settle)
-                      )
-                    }
-                  />
-                ))}
-              </ul>
-            </Card>
-          )}
-
-          {active.length > 0 && (
-            <div className="flex flex-col gap-3">
-              <div className="relative">
-                <Search
-                  className="text-muted-foreground absolute top-1/2 left-2.5 size-4 -translate-y-1/2"
-                  aria-hidden="true"
-                />
-                <Input
-                  className="pl-8"
-                  placeholder={t("mcp_search_tools")}
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                  aria-label={t("mcp_search_tools")}
-                />
-              </div>
-
-              <div className="flex items-center gap-3">
-                <Progress value={percent} className="flex-1" />
-                <span className="text-muted-foreground shrink-0 text-sm tabular-nums">
-                  {t("mcp_tools_enabled_of", { enabled: enabledCount, total: active.length })}
-                </span>
-                <div className="flex shrink-0 items-center gap-1">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    aria-busy={busyOn("all-on")}
-                    onClick={() => run("all-on", () => bulkToggle.mutate(true, settle))}
+                    className="border-border flex flex-wrap items-start justify-between gap-3 rounded-lg border p-3"
                   >
-                    {t("mcp_all_on")}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    aria-busy={busyOn("all-off")}
-                    onClick={() => run("all-off", () => bulkToggle.mutate(false, settle))}
-                  >
-                    {t("mcp_all_off")}
-                  </Button>
-                </div>
-              </div>
-
-              {filteredActive.length === 0 ? (
-                <p className="text-muted-foreground py-6 text-center text-sm">
-                  {t("mcp_no_match")}
-                </p>
-              ) : (
-                <ul className="flex flex-col gap-2" aria-label={t("mcp_available_tools_aria")}>
-                  {filteredActive.map((tool) => (
-                    <li key={tool.id}>
-                      <ActiveToolRow
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium">{title}</p>
+                      {title !== tool.name && (
+                        <p className="text-muted-foreground font-mono text-xs break-all">
+                          {tool.name}
+                        </p>
+                      )}
+                      {description && (
+                        <p className="text-muted-foreground mt-1 text-sm">{description}</p>
+                      )}
+                    </div>
+                    <Badge>{t(tool.is_enabled_by_default ? "enabled" : "disabled")}</Badge>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <>
+              <p className="text-ax-text-secondary text-xs pointer-fine:hidden">
+                {t("mcp_risk_heuristic_hint")}
+              </p>
+              {pending.length > 0 && (
+                <Card className="border-warning/30 gap-3 p-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-warning flex items-center gap-2 text-sm font-medium">
+                      <ShieldAlert className="size-4 shrink-0" aria-hidden="true" />
+                      {t("mcp_review_inbox_title", { count: pending.length })}
+                    </span>
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        aria-busy={busyOn("approve-all")}
+                        onClick={() =>
+                          run("approve-all", () => review.mutate({ kind: "approve-all" }, settle))
+                        }
+                      >
+                        {!busyOn("approve-all") && <Check className="size-3.5" />}{" "}
+                        {t("approve_all")}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        aria-busy={busyOn("reject-all")}
+                        onClick={() =>
+                          run("reject-all", () =>
+                            review.mutate(
+                              { kind: "reject", toolIds: pending.map((tool) => tool.id) },
+                              settle
+                            )
+                          )
+                        }
+                      >
+                        {!busyOn("reject-all") && <X className="size-3.5" />} {t("reject_all")}
+                      </Button>
+                    </div>
+                  </div>
+                  <p className="text-muted-foreground text-sm">
+                    {t("tool_uses_previous_until_approved")}
+                  </p>
+                  <ul className="flex flex-col gap-2">
+                    {pending.map((tool) => (
+                      <PendingToolRow
+                        key={tool.id}
+                        serverId={serverId}
                         tool={tool}
-                        busy={busyOn(`toggle:${tool.id}`) ?? false}
-                        onToggle={(checked) =>
-                          run(`toggle:${tool.id}`, () =>
-                            toggle.mutate({ toolId: tool.id, isEnabled: checked }, settle)
+                        busy={
+                          busyOn(`approve:${tool.id}`)
+                            ? "approve"
+                            : busyOn(`reject:${tool.id}`)
+                              ? "reject"
+                              : null
+                        }
+                        onApprove={() =>
+                          run(`approve:${tool.id}`, () =>
+                            review.mutate({ kind: "approve", toolIds: [tool.id] }, settle)
+                          )
+                        }
+                        onReject={() =>
+                          run(`reject:${tool.id}`, () =>
+                            review.mutate({ kind: "reject", toolIds: [tool.id] }, settle)
                           )
                         }
                       />
-                    </li>
-                  ))}
-                </ul>
+                    ))}
+                  </ul>
+                </Card>
               )}
-            </div>
-          )}
-        </>
-      )}
+
+              {active.length > 0 && (
+                <div className="flex flex-col gap-3">
+                  <div className="relative">
+                    <Search
+                      className="text-muted-foreground absolute top-1/2 left-2.5 size-4 -translate-y-1/2"
+                      aria-hidden="true"
+                    />
+                    <Input
+                      className="pl-8"
+                      placeholder={t("mcp_search_tools")}
+                      value={search}
+                      onChange={(event) => setSearch(event.target.value)}
+                      aria-label={t("mcp_search_tools")}
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <Progress value={percent} className="flex-1" />
+                    <span className="text-muted-foreground shrink-0 text-sm tabular-nums">
+                      {t("mcp_tools_enabled_of", { enabled: enabledCount, total: active.length })}
+                    </span>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        aria-busy={busyOn("all-on")}
+                        onClick={() => run("all-on", () => bulkToggle.mutate(true, settle))}
+                      >
+                        {t("mcp_all_on")}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        aria-busy={busyOn("all-off")}
+                        onClick={() => run("all-off", () => bulkToggle.mutate(false, settle))}
+                      >
+                        {t("mcp_all_off")}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {filteredActive.length === 0 ? (
+                    <p className="text-muted-foreground py-6 text-center text-sm">
+                      {t("mcp_no_match")}
+                    </p>
+                  ) : (
+                    <ul className="flex flex-col gap-2" aria-label={t("mcp_available_tools_aria")}>
+                      {filteredActive.map((tool) => (
+                        <li key={tool.id}>
+                          <ActiveToolRow
+                            serverId={serverId}
+                            onRenamed={() => {
+                              rescue(heading.current);
+                              invalidate();
+                              void invalidateSpaces(queryClient);
+                            }}
+                            tool={tool}
+                            busy={busyOn(`toggle:${tool.id}`) ?? false}
+                            onToggle={(checked) =>
+                              run(`toggle:${tool.id}`, () =>
+                                toggle.mutate({ toolId: tool.id, isEnabled: checked }, settle)
+                              )
+                            }
+                          />
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </>
+          )
+        }
+      </QueryStateBoundary>
     </div>
   );
 }

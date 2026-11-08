@@ -18,7 +18,8 @@
   } from "$lib/features/auth/passwordChange";
   import PasswordPolicyChecklist from "$lib/features/auth/PasswordPolicyChecklist.svelte";
   import { m } from "$lib/paraglide/messages";
-  import { Eye, EyeOff } from "@lucide/svelte";
+  import Eye from "@lucide/svelte/icons/eye";
+  import EyeOff from "@lucide/svelte/icons/eye-off";
   import type { SubmitFunction } from "@sveltejs/kit";
 
   let {

@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+from freezegun import freeze_time
 from pydantic import ValidationError
 
 from eneo.authentication.auth_models import ApiKeyV2InDB, JWTPayload
@@ -470,6 +471,7 @@ def test_websocket_connections_are_gated_too():
         authorize_user(websocket, user)
 
 
+@freeze_time(NOW)
 def test_compliant_password_sessions_pass():
     user = password_user(changed_at=NOW - timedelta(days=10), max_age_days=30)
     authorize_user(connection_for(gated_endpoint()), user)
@@ -485,6 +487,8 @@ def test_only_the_password_change_routes_are_exempt_from_the_gate():
         and policy.reachable_before_password_change
     }
     assert exempt == {
+        # Checks which browser session the cookie holds; reveals only that.
+        "/api/v1/auth/session/",
         "/api/v1/users/me/",
         "/api/v1/users/me/password/",
         "/api/v1/users/me/sessions/invalidate/",

@@ -10,6 +10,7 @@ connection the assistant MCP client opens apply this one rule.
 from enum import Enum
 from urllib.parse import urlsplit
 
+from eneo.main.config import LOOPBACK_HOSTS
 from eneo.mcp_servers.domain.entities.mcp_server import (
     BUNDLED_AUTH_TYPE,
     INTERNAL_AUTH_TYPE,
@@ -23,11 +24,6 @@ from eneo.mcp_servers.domain.entities.mcp_server import (
 _AUTH_TYPES_WITHOUT_ADMIN_CREDENTIAL = frozenset(
     {"none", INTERNAL_AUTH_TYPE, BUNDLED_AUTH_TYPE}
 )
-
-# The hosts public_origin also accepts over http (main/config.py), plus the
-# IPv6 loopback. The MCP client sends requests to them directly, never through
-# a proxy from the environment, so a request to them stays on the machine.
-LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 
 # Shown to the admin at registration and when a server saved before this rule
 # is used; it names neither the address nor the credential.

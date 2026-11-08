@@ -3,10 +3,9 @@ import type { Collection, IntegrationKnowledge, Website } from "../knowledge";
 import {
   availableKnowledge,
   byOrigin,
+  classifyKnowledgeOrigin,
   collectionInfoBlobCount,
   integrationOptions,
-  isOrgItem,
-  isPersonalItem,
   selectedIntegrationDisplay,
   websiteFailedPageCount,
   websiteIndexedResultCount
@@ -49,24 +48,28 @@ function integration(
 }
 
 describe("origin", () => {
-  it("treats unowned or current-space items as personal", () => {
-    expect(isPersonalItem({ space_id: null }, "current")).toBe(true);
-    expect(isPersonalItem({ space_id: "current" }, "current")).toBe(true);
-    expect(isPersonalItem({ space_id: "other" }, "current")).toBe(false);
+  it("files only what the organization space owns under the organization", () => {
+    expect(classifyKnowledgeOrigin({ space_id: "org" }, "current", "org")).toBe("organization");
+    expect(classifyKnowledgeOrigin({ space_id: null }, "current", "org")).toBe("personal");
+    expect(classifyKnowledgeOrigin({ space_id: "current" }, "current", "org")).toBe("personal");
+    expect(classifyKnowledgeOrigin({ space_id: "other" }, "current", "org")).toBe("personal");
+    expect(classifyKnowledgeOrigin({ space_id: "other" }, "current", undefined)).toBe("personal");
   });
 
-  it("matches org by the configured org space, else any foreign space", () => {
-    expect(isOrgItem({ space_id: "org" }, "current", "org")).toBe(true);
-    expect(isOrgItem({ space_id: "other" }, "current", "org")).toBe(false);
-    expect(isOrgItem({ space_id: "other" }, "current", undefined)).toBe(true);
+  it("keeps the organization space's own knowledge in one section there", () => {
+    expect(classifyKnowledgeOrigin({ space_id: "org" }, "org", "org")).toBe("personal");
   });
 
-  it("filters lists by origin", () => {
+  it("puts every item in exactly one section", () => {
     const items = [
       { id: "a", space_id: "current" },
-      { id: "b", space_id: "org" }
+      { id: "b", space_id: "org" },
+      { id: "c", space_id: "other" }
     ];
-    expect(byOrigin(items, "personal", "current", "org").map((item) => item.id)).toEqual(["a"]);
+    expect(byOrigin(items, "personal", "current", "org").map((item) => item.id)).toEqual([
+      "a",
+      "c"
+    ]);
     expect(byOrigin(items, "organization", "current", "org").map((item) => item.id)).toEqual(["b"]);
   });
 });
@@ -105,6 +108,20 @@ describe("selectedIntegrationDisplay", () => {
     const display = selectedIntegrationDisplay([all[0]!], all);
     expect(display).toHaveLength(1);
     expect(display[0]).toMatchObject({ type: "single", key: "integration:a" });
+  });
+
+  it("does not group equally sized selections that miss a current item id", () => {
+    const old = integration("old", { wrapper_id: "w", wrapper_name: "Wrapper" });
+    const display = selectedIntegrationDisplay([all[0]!, old], all);
+    expect(display.map((entry) => entry.key)).toEqual(["integration:a", "integration:old"]);
+  });
+
+  it("keeps every selected item when the selection covers all current wrapper ids", () => {
+    const extra = integration("extra", { wrapper_id: "w", wrapper_name: "Wrapper" });
+    const display = selectedIntegrationDisplay([...all, extra], all);
+    expect(display).toMatchObject([
+      { type: "wrapper", wrapper: { items: [{ id: "a" }, { id: "b" }, { id: "extra" }] } }
+    ]);
   });
 });
 
@@ -146,6 +163,13 @@ describe("availableKnowledge", () => {
     const m1 = sections.find((section) => section.modelId === "m1");
     expect(m1?.websites).toHaveLength(0);
     expect(m1?.collections.map((item) => item.id)).toEqual(["c1"]);
+  });
+
+  it("trims the text filter and finds every word in any order", () => {
+    const { sections } = availableKnowledge(space, none, " example W1 ");
+    const m1 = sections.find((section) => section.modelId === "m1");
+    expect(m1?.websites.map((item) => item.id)).toEqual(["w1"]);
+    expect(m1?.collections).toHaveLength(0);
   });
 });
 

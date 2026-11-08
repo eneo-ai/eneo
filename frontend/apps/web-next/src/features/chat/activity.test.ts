@@ -240,8 +240,8 @@ describe("deriveActivity", () => {
       ["tool-call-5", "done", 1],
       "answer"
     ]);
-    // Errors count per call, not per step.
-    expect(activity.errorCount).toBe(1);
+    // While replying, the model can still correct the failed call.
+    expect(activity.errorCount).toBe(0);
   });
 
   it("names the running step while streaming and stops unfinished steps afterwards", () => {
@@ -256,6 +256,43 @@ describe("deriveActivity", () => {
     const stopped = deriveActivity(assistant(parts));
     expect(stopped.steps.at(-1)).toMatchObject({ kind: "tool", status: "stopped" });
     expect(currentStep(stopped)).toBeNull();
+  });
+
+  it("marks a failed call followed by the same tool's success as a previous attempt, across step groups", () => {
+    const failed = tool("bad", "output-error", { errorText: "Invalid arguments" });
+    const activity = deriveActivity(
+      assistant([
+        failed,
+        { type: "reasoning", text: "Try a smaller input", state: "done" },
+        tool("good", "output-available", { output: { status: "succeeded" } })
+      ])
+    );
+    const calls = activity.steps.flatMap((step) => (step.kind === "tool" ? step.calls : []));
+    expect(calls.map((call) => call.status)).toEqual(["previous-attempt", "done"]);
+    expect(activity.errorCount).toBe(0);
+    expect(failed).toMatchObject({ state: "output-error", errorText: "Invalid arguments" });
+  });
+
+  it("keeps later and unrelated failures unresolved, and denials distinct", () => {
+    const activity = deriveActivity(
+      assistant([
+        tool("success", "output-available", { output: { status: "succeeded" } }),
+        tool("failed", "output-error", { errorText: "Failed" }),
+        tool("other", "output-available", {
+          toolName: "other_tool",
+          output: { status: "succeeded" }
+        }),
+        tool("denied", "output-error", { errorText: "denied" })
+      ])
+    );
+    expect(activity.errorCount).toBe(1);
+    expect(activity.steps[0]).toMatchObject({ status: "error" });
+    const live = deriveActivity(
+      assistant([tool("failed", "output-error", { errorText: "Failed" })]),
+      { streaming: true }
+    );
+    expect(live.errorCount).toBe(0);
+    expect(live.steps[0]).toMatchObject({ status: "previous-attempt" });
   });
 
   it("counts failed tool calls as errors", () => {

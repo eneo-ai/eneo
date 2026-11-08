@@ -96,6 +96,11 @@ jobs:
         working-directory: frontend
         run: bun install --frozen-lockfile
 
+      - name: Test documentation languages, links and search
+        if: steps.plan.outputs.changed == 'true'
+        working-directory: frontend/apps/docs-site
+        run: bun test scripts/languages.test.ts
+
       - name: Build complete versioned documentation
         if: steps.plan.outputs.changed == 'true'
         working-directory: frontend/apps/docs-site

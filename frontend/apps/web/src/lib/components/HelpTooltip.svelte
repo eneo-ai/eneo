@@ -2,7 +2,7 @@
 
 <script lang="ts">
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
-  import { CircleQuestionMark } from "@lucide/svelte";
+  import CircleQuestionMark from "@lucide/svelte/icons/circle-question-mark";
 
   let { text }: { text: string } = $props();
 </script>

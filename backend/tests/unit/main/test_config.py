@@ -140,6 +140,49 @@ def test_jwt_expiry_time_rejects_values_beyond_thirty_days(minutes: int) -> None
         )
 
 
+def test_browser_session_max_age_defaults_to_thirty_days() -> None:
+    assert Settings.model_fields["browser_session_max_age"].default == (
+        JWT_EXPIRY_TIME_MAXIMUM_MINUTES
+    )
+
+
+@pytest.mark.parametrize("minutes", [1440, 10080, JWT_EXPIRY_TIME_MAXIMUM_MINUTES])
+def test_browser_session_max_age_accepts_minutes_from_the_token_lifetime_up(
+    minutes: int,
+) -> None:
+    settings = Settings.model_validate(
+        {
+            **get_settings().model_dump(),
+            "jwt_expiry_time": 1440,
+            "browser_session_max_age": minutes,
+        }
+    )
+
+    assert settings.browser_session_max_age == minutes
+
+
+@pytest.mark.parametrize(
+    "minutes,message",
+    [
+        (0, "positive"),
+        (JWT_EXPIRY_TIME_MAXIMUM_MINUTES + 1, "30 days"),
+        # Shorter than one token: a session would outlive its own maximum.
+        (60, "at least JWT_EXPIRY_TIME"),
+    ],
+)
+def test_browser_session_max_age_rejects_values_outside_its_range(
+    minutes: int, message: str
+) -> None:
+    with pytest.raises(ValidationError, match=message):
+        Settings.model_validate(
+            {
+                **get_settings().model_dump(),
+                "jwt_expiry_time": 1440,
+                "browser_session_max_age": minutes,
+            }
+        )
+
+
 @pytest.mark.parametrize("key", ["", "   ", "short-key", "x" * 31])
 def test_url_signing_key_rejects_blank_or_short_keys(key: str) -> None:
     with pytest.raises(ValidationError, match="URL_SIGNING_KEY") as exc_info:

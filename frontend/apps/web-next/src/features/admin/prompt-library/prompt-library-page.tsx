@@ -1,5 +1,3 @@
-"use client";
-
 import { Button } from "@astryxdesign/core/Button";
 import {
   DropdownMenu,
@@ -20,7 +18,7 @@ import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { BookText, History, MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId, useMemo, useRef, useState } from "react";
 import { ClientTime } from "@/components/composites/client-time";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
@@ -161,10 +159,12 @@ function EntryTable({
     {
       key: "updated_at",
       header: t("governance_col_updated"),
-      width: proportional(1),
+      // Room for the longest relative time ("för 59 minuter sedan") on one line;
+      // with a reader's wider text spacing it wraps rather than being cut off.
+      width: pixel(176),
       sortable: true,
       renderCell: (entry) => (
-        <span className="text-ax-text-secondary whitespace-nowrap">
+        <span className="text-ax-text-secondary">
           <ClientTime value={entry.updated_at} format="auto" />
         </span>
       )
@@ -261,13 +261,14 @@ export function PromptLibraryPage() {
   );
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
+    <div className="flex w-full flex-col gap-6">
       <PageHeader
         title={t("governance_tab_prompts")}
         description={t("governance_prompts_intro")}
         headingId={headingId}
         headingRef={headingRef}
-        actions={createButton}
+        // The empty state carries its own; a failed or loading list still allows creating.
+        actions={list.data?.length === 0 ? undefined : createButton}
       />
       <QueryStateBoundary query={list} rows={4}>
         {(items) =>
@@ -298,6 +299,7 @@ export function PromptLibraryPage() {
               />
               {filtered.length === 0 ? (
                 <EmptyState
+                  isAnnounced={false}
                   title={t("governance_prompts_no_results")}
                   actions={
                     <Button

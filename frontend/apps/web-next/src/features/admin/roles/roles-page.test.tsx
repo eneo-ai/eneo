@@ -2,24 +2,27 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { sessionKeys } from "@/lib/api/session";
 import { expectNoAxeViolations } from "@/test/axe";
 
 const get = vi.hoisted(() => vi.fn());
 const post = vi.hoisted(() => vi.fn());
 const remove = vi.hoisted(() => vi.fn());
-const refresh = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api/browser", () => ({ browserApi: { GET: get, POST: post, DELETE: remove } }));
 vi.mock("@/components/providers/app-context", () => ({
   useAppContext: () => ({ tenant: { default_role_id: "default" } })
 }));
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
   useLocale: () => "en"
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
+import { toast as sonner } from "sonner";
 import { RolesPage } from "./roles-page";
+
+/** What a support request quotes, under the user's language labels. */
+const REFERENCES = { description: "error_id: error-1 · trace_id: trace-1" };
 
 const ok = (data: unknown) =>
   Promise.resolve({ data, response: new Response("{}", { status: 200 }) });
@@ -61,6 +64,7 @@ function show() {
       <RolesPage />
     </QueryClientProvider>
   );
+  return vi.spyOn(client, "invalidateQueries");
 }
 
 function openActions(row: HTMLElement) {
@@ -89,7 +93,14 @@ describe("role administration", () => {
   it("shows the default role and searches the permissions granted by a role", async () => {
     show();
     expect(await screen.findByText("Everyone")).toBeTruthy();
-    expect(screen.getByText("roles_default_badge")).toBeTruthy();
+    // A status, not a second primary: never the accent fill of "Skapa roll".
+    expect(screen.getByText("roles_default_badge").getAttribute("data-variant")).toBe("secondary");
+    // The actions wrap on a phone instead of running out of the card (320 px).
+    const actions = screen.getAllByRole("button", { name: /^edit$|Redigera/ })[0]!.parentElement!;
+    expect(actions.className).toContain("flex-wrap");
+    // Beside them, the name is centred on their line (it sat 10 px higher on an iPad).
+    expect(actions.parentElement!.className).toContain("sm:items-center");
+    expect(actions.parentElement!.className).not.toContain("sm:items-start");
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "permission_admin" } });
     expect(screen.getByText("Manager")).toBeTruthy();
     expect(screen.queryByText("Everyone")).toBeNull();
@@ -139,6 +150,35 @@ describe("role administration", () => {
     expect(post).not.toHaveBeenCalled();
   });
 
+  it("toasts a refused save or delete with its message and support references", async () => {
+    const refused = () =>
+      Promise.resolve({
+        error: { message: "Name taken", eneo_error_code: 9017, error_id: "error-1" },
+        response: new Response("{}", { status: 409, headers: { "x-trace-id": "trace-1" } })
+      });
+    const toastError = vi.mocked(sonner.error);
+    post.mockImplementation(refused);
+    remove.mockImplementation(refused);
+    show();
+    await screen.findByText("Everyone");
+    fireEvent.click(screen.getByRole("button", { name: "create_role" }));
+    fireEvent.change(screen.getByLabelText("role_name"), { target: { value: "Readers" } });
+    fireEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "create_role" })
+    );
+    const toasted = ["eneo_error_9017", expect.objectContaining(REFERENCES)];
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith(...toasted));
+
+    toastError.mockClear();
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "cancel" }));
+    const { menu } = openActions(screen.getByText("Manager").closest("article")!);
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "delete_role" }));
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", { name: "delete" })
+    );
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith(...toasted));
+  });
+
   it("updates only changed fields and refreshes the role list", async () => {
     show();
     const row = (await screen.findByText("Manager")).closest("article");
@@ -157,11 +197,10 @@ describe("role administration", () => {
   });
 
   it("requires confirmation before changing the default and prevents deleting it", async () => {
-    show();
+    const invalidate = show();
     const defaultRow = (await screen.findByText("Everyone")).closest("article");
     const customRow = screen.getByText("Manager").closest("article");
     if (!defaultRow || !customRow) throw new Error("Role row missing");
-    expect(within(defaultRow).queryByRole("button", { name: "ui_more_actions_for" })).toBeNull();
     const { menu } = openActions(customRow);
     expect(within(menu).getByRole("menuitem", { name: "reset_to_template" })).toBeTruthy();
     expect(within(menu).getByRole("menuitem", { name: "delete_role" })).toBeTruthy();
@@ -175,7 +214,23 @@ describe("role administration", () => {
         params: { path: { role_id: "custom" } }
       })
     );
-    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: sessionKeys.tenant });
+  });
+
+  it("shows the default role's Delete disabled, with the reason in the menu", async () => {
+    show();
+    // The default role has no template, so Delete is its menu's only item.
+    const defaultRow = (await screen.findByText("Everyone")).closest("article");
+    if (!defaultRow) throw new Error("Role row missing");
+    const { menu } = openActions(defaultRow);
+
+    const remove = within(menu).getByRole("menuitem", { name: /^delete_role/ });
+    expect(remove.getAttribute("aria-disabled")).toBe("true");
+    expect(within(menu).getByText("roles_cannot_delete_default")).toBeTruthy();
+    expect(within(menu).queryByRole("menuitem", { name: "set_as_default_role" })).toBeNull();
+    fireEvent.click(remove);
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    await expectNoAxeViolations(document.body);
   });
 
   it("keeps user navigation as a link and returns focus to the role menu trigger", async () => {

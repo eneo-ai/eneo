@@ -89,8 +89,7 @@
 
 <!-- Hover preloading is scoped to the authenticated shell: its navigation
      loads are reads, so a hovered link fetches the next page's data early.
-     Public pages keep the tap default because their loads (logout, login with
-     clear_cookies) change cookies. In-shell links to those pages opt out. -->
+     Session-changing controls submit POST forms and cannot be preloaded. -->
 <div
   class="bg-secondary mx-auto flex min-h-[100svh] w-full max-w-[2000px] flex-col p-0 md:px-4 md:pt-3"
   data-sveltekit-preload-data="hover"

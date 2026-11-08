@@ -90,10 +90,9 @@ async def _create_api_key(
 
 
 def _error_detail(response) -> dict:
-    payload = response.json()
-    if isinstance(payload, dict) and isinstance(payload.get("detail"), dict):
-        return payload["detail"]
-    return payload
+    # Refusals answer in the flat envelope; a nested `detail` is only the
+    # deprecated copy of what the route raised, without the request_id.
+    return response.json()
 
 
 def _governance_paths() -> list[str]:

@@ -23,6 +23,20 @@ describe("run_javascript", () => {
     expect(result).toMatchObject({ ok: true, result: 3, logs: [] });
   });
 
+  test("returns figures as a spreadsheet shows them, decimal strings as written", async () => {
+    const result = await tool().execute(
+      {
+        code: "return { summa: 0.1 + 0.2, rader: [[input.utfall - input.budget]], exakt: new Decimal(input.utfall).minus(input.budget).toFixed(2) };",
+        input: { utfall: 1607240.97, budget: 1678000 },
+      },
+      ctx,
+    );
+    expect(result).toMatchObject({
+      ok: true,
+      result: { summa: 0.3, rader: [[-70759.03]], exakt: "-70759.03" },
+    });
+  });
+
   test("attaches the table as a CSV file when exporting", async () => {
     const result = await tool().execute({ code: rows, export: true }, ctx);
     expect(result).toBeInstanceOf(RichResult);

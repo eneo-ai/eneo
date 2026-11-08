@@ -1,11 +1,9 @@
 <script lang="ts">
   import { intlLocale } from "$lib/core/formatting/dateTime";
-  import {
-    Calendar as CalendarIcon,
-    TriangleAlert,
-    Infinity as InfinityIcon,
-    ChevronDown
-  } from "@lucide/svelte";
+  import CalendarIcon from "@lucide/svelte/icons/calendar";
+  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
+  import InfinityIcon from "@lucide/svelte/icons/infinity";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import { fly } from "svelte/transition";
   import { m } from "$lib/paraglide/messages";
   import { SvelteDate } from "svelte/reactivity";

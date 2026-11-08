@@ -12,6 +12,7 @@ from fastapi.dependencies.models import Dependant
 from fastapi.routing import APIWebSocketRoute, RouteContext, iter_route_contexts
 from starlette.routing import BaseRoute, Mount, Route
 
+from eneo.authentication.browser_session import SAFE_METHODS
 from eneo.authentication.endpoint_access import (
     Authentication,
     Authorization,
@@ -64,6 +65,10 @@ def access_violations(route: EndpointRoute) -> list[str]:
     policy = access_for(route.endpoint)
     if policy is None:
         return [f"{route.path}: missing explicit authentication and authorization"]
+    if policy.effect_on_get is not None and not (
+        SAFE_METHODS & (route.context.methods or set())
+    ):
+        return [f"{route.path}: declares an effect on GET but serves no GET"]
     if has_authentication(policy, route.dependant):
         return []
     if route.dependant is None:

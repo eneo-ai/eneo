@@ -7,7 +7,11 @@
 <script lang="ts">
   import { getAttachmentManager } from "$lib/features/attachments/AttachmentManager";
   import { Button } from "$lib/components/ui/button/index.js";
-  import { X, LoaderCircle, Paperclip, ChevronDown, ChevronUp } from "@lucide/svelte";
+  import X from "@lucide/svelte/icons/x";
+  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
+  import Paperclip from "@lucide/svelte/icons/paperclip";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import ChevronUp from "@lucide/svelte/icons/chevron-up";
   import { m } from "$lib/paraglide/messages";
   import { fileExtension } from "$lib/core/formatting/fileExtension";
   import { formatBytes } from "$lib/core/formatting/formatBytes";

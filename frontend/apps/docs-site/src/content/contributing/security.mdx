@@ -14,11 +14,39 @@ Pull requests into `develop` run the following security and quality gates:
 
 ### CI
 
-`CI / CI` is the main app check. It runs backend quality checks, backend tests, frontend checks, package lint, and the frontend production build.
+`CI / CI` is the main app check. Pull requests run the checks that
+`.github/scripts/ci-change-scope.mjs` selects from their diff. Missing history,
+an empty diff, unknown runtime paths, and changes to CI workflows or local
+actions select full validation. Merge-queue candidates always run the full
+suite: the candidate is exactly what lands on `develop`.
+
+Backend changes require backend quality checks, all six test shards, schema
+checks, and both frontend E2E suites. Each frontend's changes require that
+app's checks, E2E tests, and Docker build. Shared frontend packages and lockfiles
+select both apps. Security scanning and repository checks remain required even
+for documentation-only changes. The final gate rejects failed, cancelled,
+missing, or unexpectedly skipped jobs; only jobs excluded by the scope plan
+may be skipped.
 
 Backend dependency installs use `uv sync --frozen --all-groups`. Frontend dependency installs use `bun install --frozen-lockfile`. This matters because dependency PRs should prove that the committed lockfiles still install and the app still builds.
 
-The CI workflow also builds the backend, Svelte frontend, Next frontend, and devcontainer Docker images without pushing them. This catches Dockerfile and base-image update problems before Dependabot Docker PRs merge.
+The Docker matrix contains only the affected backend, Svelte frontend, Next
+frontend, or devcontainer images, built without pushing them. This catches
+Dockerfile and base-image update problems before Dependabot Docker PRs merge.
+The Svelte production build runs in E2E and Docker; there is no additional
+standalone build of the same app. The web-next E2E and accessibility checks are
+part of the required aggregate when selected.
+
+Pushes to `develop` publish through **Build and Push Docker Images**. When the
+merge queue's run on that exact commit passed the full suite, its CI job left a
+validation receipt (commit, workflow, run, attempt and scope), and publication
+reuses that result instead of running the suite again. It still runs a fresh
+security scan, scans the published images and smoke tests the bundle. Without a
+valid receipt the full suite runs in publication. Release-branch pushes run
+full CI directly; tag and manual publication always run the full suite.
+
+See the [CI operations guide](https://github.com/eneo-ai/eneo/blob/develop/docs/CODE_QUALITY.md#ci-execution-and-recovery)
+for time limits, build diagnostics, validation commands, and recovery.
 
 Ruff currently checks `backend/src/eneo`. Tests and Alembic are not part of the Ruff gate yet.
 
@@ -33,6 +61,13 @@ When this check fails, update the dependency to a safe version, remove it, or do
 The reusable `Security` workflow is part of the CI aggregate. It runs a complete
 lockfile audit, Semgrep's security-audit and GitHub Actions rules, and Gitleaks on
 added Git history.
+The dependency audit blocks `high` and `critical` findings, including those
+without a fixed version. `low` and `moderate` findings produce warning
+annotations and remain in the reports. Python audit severities come from the
+GitHub Advisory Database; the fetched ratings are retained with the raw audit
+report. Unknown severity, failed scans and invalid reports still fail CI.
+Existing exact, unexpired exceptions remain valid; expired exceptions still
+require review and fail the check.
 Temporary dependency mitigations require a documented owner, targeted tests and
 an expiry; see `frontend/patches/SECURITY.md`.
 
@@ -123,10 +158,14 @@ the nested-router and mounted-API tests when upgrading FastAPI.
 
 ## Required Checks in Branch Protection
 
-The `develop` ruleset should require these checks:
+The `develop` ruleset requires these checks:
 
 - `CI / CI`
 - `Dependency Review / Dependency Review`
+
+A separate `PR label classification` ruleset requires `PR label policy / PR labels` on `develop`, `main` and `release/**`.
+
+Who can approve, merge and release, and how branches and tags are protected, is described in [Governance and Roles](/contributing/governance).
 
 Remove older or paused required status checks if they appear as `Expected` and never report:
 

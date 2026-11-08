@@ -209,7 +209,8 @@ class Datastore:
         rerank: Optional["RerankSpec"] = None,
     ) -> list[InfoBlobChunkInDBWithScore]:
         """Nearest chunks in scope. With ``rerank`` the K best are returned in
-        reranker order with reranker scores and ``autocut`` does not apply."""
+        reranker order with reranker scores, followed by any requested chunks
+        beyond K, and ``autocut`` does not apply."""
         group_ids = [group.id for group in (collections or [])]
         website_ids = [website.id for website in (websites or [])]
         integration_knowledge_ids = [i.id for i in (integration_knowledge_list or [])]
@@ -263,13 +264,20 @@ class Datastore:
         if rerank is not None:
             reranked = await self._rerank(rerank, semantic_results[:candidates])
             if reranked is not None:
+                # Chunks beyond the cap follow in vector order at the lowest
+                # reranker score, so no unsorted chunk outranks a sorted one.
+                unsorted = [
+                    chunk.model_copy(update={"score": reranked[-1].score})
+                    for chunk in semantic_results[candidates:limit]
+                ]
                 logger.info(
                     f"Reranked search: Embed step: {step_1 - start},"
                     f" Search step: {end - step_1},"
                     f" Rerank step: {time.time() - end},"
-                    f" candidates: {len(reranked)}, model: {rerank.model_name}"
+                    f" candidates: {len(reranked)}, unsorted: {len(unsorted)},"
+                    f" model: {rerank.model_name}"
                 )
-                return reranked
+                return reranked + unsorted
             semantic_results = semantic_results[:limit]
 
         scores = [res.score for res in semantic_results]

@@ -1,22 +1,13 @@
-"use client";
-
+import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { ChevronRight, Plus, Sparkles } from "lucide-react";
-import { useTranslations } from "next-intl";
-import Link from "next/link";
+import { useTranslations } from "use-intl";
+import Link from "@/lib/link";
 import { useId, useState } from "react";
 import { ConfirmDialog } from "@/components/composites/confirm-dialog";
 import { PageHeader } from "@/components/composites/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger
-} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -24,6 +15,7 @@ import { useSettingSwitch } from "@/features/admin/use-setting-switch";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
+import { matchesSearch } from "@/lib/search";
 import {
   type HelperKind,
   type HelperTemplate,
@@ -74,37 +66,34 @@ function AddHelpAssistant({ templates }: { templates: HelperTemplate[] }) {
   // is visible text: a disabled button's tooltip reaches no keyboard user.
   return (
     <div className="flex flex-col items-end gap-1">
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            type="button"
-            disabled={noneAvailable}
-            aria-busy={install.isPending || undefined}
-            aria-describedby={noneAvailable ? reasonId : undefined}
-          >
-            {!install.isPending && <Plus className="size-4" />}
-            {t("admin_help_assistants_add_button")}
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-80 max-w-[calc(100vw-2rem)]">
-          <DropdownMenuLabel>{t("admin_help_assistants_add_menu_label")}</DropdownMenuLabel>
-          <DropdownMenuSeparator />
-          {templates.map((template) => (
-            <DropdownMenuItem
-              key={template.kind}
-              className="flex cursor-pointer flex-col items-start gap-0.5 whitespace-normal"
-              onClick={() => {
+      <DropdownMenu
+        button={{
+          label: t("admin_help_assistants_add_button"),
+          variant: "primary",
+          icon: <Plus aria-hidden="true" />,
+          isDisabled: noneAvailable,
+          isLoading: install.isPending,
+          isInterruptible: true,
+          "aria-describedby": noneAvailable ? reasonId : undefined
+        }}
+        placement="below"
+        alignment="end"
+        menuWidth={320}
+        items={[
+          {
+            type: "section",
+            title: t("admin_help_assistants_add_menu_label"),
+            items: templates.map((template) => ({
+              id: template.kind,
+              label: template.name,
+              description: template.description,
+              onClick: () => {
                 if (!install.isPending) install.mutate(template.kind);
-              }}
-            >
-              <span className="font-medium">{template.name}</span>
-              <span className="text-muted-foreground text-xs leading-snug">
-                {template.description}
-              </span>
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuContent>
-      </DropdownMenu>
+              }
+            }))
+          }
+        ]}
+      />
       {noneAvailable && (
         <p id={reasonId} className="text-muted-foreground text-sm">
           {t("admin_help_assistants_add_none_available")}
@@ -230,21 +219,19 @@ export function HelpAssistantsPage() {
   const { data: templates } = useSuspenseQuery(helpTemplatesQueryOptions(browserApi));
   const [filter, setFilter] = useState("");
 
-  const normalizedFilter = filter.trim().toLowerCase();
-  const filteredRoles = roles.filter((role) => {
-    const haystack = `${role.assistant_name ?? ""} ${roleKindLabel(role.kind, t)}`.toLowerCase();
-    return haystack.includes(normalizedFilter);
-  });
+  const filteredRoles = roles.filter((role) =>
+    matchesSearch([role.assistant_name, roleKindLabel(role.kind, t)], filter)
+  );
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
+    <div className="flex w-full flex-col gap-6">
       <PageHeader title={t("admin_help_assistants_page_title")}>
         <AddHelpAssistant templates={templates} />
       </PageHeader>
       <p className="text-muted-foreground max-w-3xl">{t("admin_help_assistants_page_intro")}</p>
 
       {roles.length === 0 ? (
-        <div className="text-muted-foreground rounded-md border border-dashed px-5 py-10 text-center">
+        <div className="text-muted-foreground border-ax-border-strong rounded-md border border-dashed px-5 py-10 text-center">
           {t("admin_help_assistants_roles_empty")}
         </div>
       ) : (
@@ -257,7 +244,7 @@ export function HelpAssistantsPage() {
             onChange={(event) => setFilter(event.target.value)}
           />
           {filteredRoles.length === 0 ? (
-            <div className="text-muted-foreground rounded-md border border-dashed px-5 py-10 text-center">
+            <div className="text-muted-foreground border-ax-border-strong rounded-md border border-dashed px-5 py-10 text-center">
               {t("admin_help_assistants_filter_empty")}
             </div>
           ) : (

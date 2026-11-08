@@ -296,15 +296,16 @@ function QueryResultView() {
       notices={
         <>
           {calculation.map((warning, index) => (
-            <Banner key={index} status="warning" container="section"
+            <Banner key={index} status="warning" role="alert" container="section"
               title={text.calculation(warning.filename, warning.sheet, warning.missing_cached_results)} />
           ))}
           {rejected > 0 && (
-            <Banner status="warning" container="section" title={text.rejected(rejected)} />
+            <Banner status="warning" role="alert" container="section" title={text.rejected(rejected)} />
           )}
           {failed && (
             <Banner
               status="error"
+              role="alert"
               container="section"
               title={text.failed}
               endContent={

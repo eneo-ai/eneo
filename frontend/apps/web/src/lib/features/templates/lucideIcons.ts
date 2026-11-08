@@ -2,21 +2,23 @@
     Copyright (c) 2026 Sundsvalls Kommun
 */
 
-import type { Component } from "svelte";
+import type { IconNode } from "@lucide/svelte";
 
 /**
  * Template icons are picked by name from the whole Lucide set, so they cannot
- * be tree-shaken to a fixed list. Importing the library statically for that
- * lookup put every icon (about 4 MB of JavaScript, 145 KB gzipped) into the
- * chunk the app loads before the first paint of every page. Loading it here on
- * demand keeps it off the startup path: only surfaces that render a template
+ * be tree-shaken to a fixed list. The set comes as data: every icon's SVG
+ * nodes in one module (plugins/lucide-icon-data.js), drawn by LucideSvg.svelte,
+ * rather than a Svelte component per icon that the build would have to
+ * compile. It is about 90 KB gzipped, so it is loaded here on
+ * demand and kept off the startup path: only surfaces that render a template
  * icon or open the icon picker fetch it, once, and the immutable chunk is
  * cached after that.
  */
 
-export type LucideIconComponent = Component<{ class?: string }>;
+/** Lucide's name for an icon (the `lucide-<name>` class) and its SVG nodes. */
+export type LucideIconData = { name: string; iconNode: IconNode };
 
-type LucideModule = Record<string, unknown> & { icons: Record<string, LucideIconComponent> };
+export type LucideIconSet = (typeof import("virtual:lucide-icon-data"))["default"];
 
 export type LucideIconRegistry = {
   /** Current icon names in PascalCase: what the picker offers. */
@@ -25,17 +27,31 @@ export type LucideIconRegistry = {
    * The icon for a stored name. Lucide keeps aliases for icons it has renamed
    * (`home` is now `house`), so names saved from older versions still resolve.
    */
-  get(name: string | null | undefined): LucideIconComponent | null;
+  get(name: string | null | undefined): LucideIconData | null;
 };
 
-export function createLucideRegistry(module: LucideModule): LucideIconRegistry {
+export function createLucideRegistry(set: LucideIconSet): LucideIconRegistry {
+  const icons = new Map(
+    Object.entries(set.icons).map(([key, [name, iconNode]]) => [key, { name, iconNode }])
+  );
+  const aliases = new Map(Object.entries(set.aliases));
+  const find = (key: string) => {
+    const current = aliases.get(key);
+    return icons.get(key) ?? (current ? icons.get(current) : undefined);
+  };
   return {
-    names: Object.keys(module.icons).sort(),
+    names: [...icons.keys()].sort(),
     get(name) {
       if (!name) return null;
       const key = toPascalCase(name);
-      if (key === "Icon") return null;
-      return module.icons[key] ?? (module[key] as LucideIconComponent | undefined) ?? null;
+      // @lucide/svelte also exports each icon and alias as `Lucide<Name>` and
+      // `<Name>Icon`; the plugin checks that the package still does.
+      return (
+        find(key) ??
+        (key.startsWith("Lucide") ? find(key.slice("Lucide".length)) : undefined) ??
+        (key.endsWith("Icon") ? find(key.slice(0, -"Icon".length)) : undefined) ??
+        null
+      );
     }
   };
 }
@@ -44,8 +60,8 @@ let registry: Promise<LucideIconRegistry> | undefined;
 
 /** The full Lucide registry, fetched on first use and shared afterwards. */
 export function loadLucideIcons(): Promise<LucideIconRegistry> {
-  registry ??= import("@lucide/svelte").then(
-    (module) => createLucideRegistry(module as unknown as LucideModule),
+  registry ??= import("virtual:lucide-icon-data").then(
+    (module) => createLucideRegistry(module.default),
     (error: unknown) => {
       // Do not keep a failed download; the next caller retries the request.
       registry = undefined;
@@ -67,10 +83,10 @@ export function toKebabCase(name: string): string {
   return name.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
 }
 
-/** The component for a stored icon name, or null when unset or unknown. */
+/** The icon for a stored name, or null when unset or unknown. */
 export async function loadLucideIcon(
   name: string | null | undefined
-): Promise<LucideIconComponent | null> {
+): Promise<LucideIconData | null> {
   if (!name) return null;
   const icons = await loadLucideIcons();
   return icons.get(name);
@@ -79,6 +95,6 @@ export async function loadLucideIcon(
 /** Like loadLucideIcon, but a failed download yields null instead of rejecting. */
 export function loadLucideIconOrNull(
   name: string | null | undefined
-): Promise<LucideIconComponent | null> {
+): Promise<LucideIconData | null> {
   return loadLucideIcon(name).catch(() => null);
 }

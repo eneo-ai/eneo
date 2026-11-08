@@ -398,9 +398,9 @@ async def test_upload_batch_and_crawls_share_atomic_quota_without_locking_provid
     final_checks = 0
     original_check = QuotaService.ensure_capacity
 
-    async def pause_after_precheck(self, size_in_bytes):
+    async def pause_after_precheck(self, size_in_bytes, *, released=None):
         nonlocal final_checks
-        await original_check(self, size_in_bytes)
+        await original_check(self, size_in_bytes, released=released)
         if size_in_bytes == 0:
             final_checks += 1
             if final_checks == 2:
@@ -508,9 +508,9 @@ async def test_upload_http_response_waits_for_final_quota_check(
     original_check = QuotaService.ensure_capacity
     limit_changed = False
 
-    async def lower_limit_after_precheck(self, size_in_bytes):
+    async def lower_limit_after_precheck(self, size_in_bytes, *, released=None):
         nonlocal limit_changed
-        await original_check(self, size_in_bytes)
+        await original_check(self, size_in_bytes, released=released)
         if size_in_bytes == 0:
             async with db_session() as session:
                 await session.execute(
@@ -1674,7 +1674,7 @@ async def test_changed_document_publishes_one_active_version_and_keeps_history(
     replacement_text = "Updated knowledge that should become searchable"
 
     async with db_container() as container:
-        group, embedding_model, previous, previous_chunk = await _seed_active_document(
+        group, embedding_model, previous, _ = await _seed_active_document(
             container,
             text=previous_text,
             title=title,
@@ -1711,16 +1711,16 @@ async def test_changed_document_publishes_one_active_version_and_keeps_history(
                 )
             )
         ).all()
-        assert {chunk.info_blob_id for chunk in chunk_rows} == {
-            previous.id,
-            published.id,
-        }
-        assert any(chunk.id == previous_chunk.id for chunk in chunk_rows)
+        # The replaced version keeps its text for citations; only the active
+        # version is searched, so its chunks are released.
+        assert {chunk.info_blob_id for chunk in chunk_rows} == {published.id}
 
         visible = await container.info_blob_repo().get_by_group(group.id)
         historical = await container.info_blob_repo().get(previous.id)
         assert [blob.id for blob in visible] == [published.id]
         assert historical.id == previous.id
+        assert historical.text == previous_text
+        assert historical.size == len(previous_text.encode())
         assert await container.info_blob_repo().get_count_of_group(group.id) == 1
         assert (
             await container.info_blob_repo().get_total_size_of_group(group.id)
@@ -2121,12 +2121,13 @@ async def test_retained_versions_consume_quota_until_family_deletion(
         container.create_embeddings_service.override(providers.Object(embeddings))
         user = container.user()
         user.tenant.quota_limit = 1_000_000
+        group_id = group.id
 
         published = await container.text_processor().process_text(
             text="First replacement retained in history",
             title="quota-history.txt",
             embedding_model=embedding_model,
-            group_id=group.id,
+            group_id=group_id,
         )
         retained_usage = await container.info_blob_repo().get_retained_size_of_tenant(
             user.tenant_id
@@ -2136,15 +2137,17 @@ async def test_retained_versions_consume_quota_until_family_deletion(
             retained_usage + len(rejected_text.encode("utf-8")) - 1
         )
 
+        # The replaced version keeps its text, so a replacement that grows the
+        # source still has to fit next to that history.
         with pytest.raises(QuotaExceededException, match="Tenant quota limit exceeded"):
             await container.text_processor().process_text(
                 text=rejected_text,
                 title="quota-history.txt",
                 embedding_model=embedding_model,
-                group_id=group.id,
+                group_id=group_id,
             )
 
-        visible = await container.info_blob_repo().get_by_group(group.id)
+        visible = await container.info_blob_repo().get_by_group(group_id)
         assert [blob.id for blob in visible if blob.title == "quota-history.txt"] == [
             published.id
         ]

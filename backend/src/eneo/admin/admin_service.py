@@ -1,4 +1,5 @@
 import sqlalchemy as sa
+from pydantic import EmailStr, TypeAdapter
 
 from eneo.admin.admin_models import (
     AdminUsersQueryParams,
@@ -35,6 +36,8 @@ from eneo.users.user_service import UserService
 
 logger = get_logger(__name__)
 
+_EMAIL: TypeAdapter[str] = TypeAdapter(EmailStr)
+
 
 class AdminService:
     def __init__(
@@ -51,19 +54,6 @@ class AdminService:
         self.tenant_service = tenant_service
         self.user_service = user_service
         self.api_key_scope_revoker = api_key_scope_revoker
-
-    @validate_permissions(Permission.ADMIN)
-    async def get_tenant_users(self) -> list[UserInDB]:
-        logger.info(
-            f"Admin user {self.user.username} listing all users in tenant {self.user.tenant_id}"
-        )
-
-        users = await self.user_repo.get_all_users(self.user.tenant_id)
-
-        logger.info(
-            f"Successfully retrieved {len(users)} users for tenant {self.user.tenant_id}"
-        )
-        return users
 
     @validate_permissions(Permission.ADMIN)
     async def list_users_paginated(
@@ -380,22 +370,28 @@ class AdminService:
             f"Admin user {self.user.username} listing inactive users in tenant {self.user.tenant_id}"
         )
 
-        # Get all active users (deleted_at IS NULL) and filter for INACTIVE state
-        all_users = await self.user_repo.get_all_users(self.user.tenant_id)
-        inactive_users = [
-            user for user in all_users if user.state == UserState.INACTIVE
-        ]
-
-        # Convert to lightweight response format
-        inactive_list = [
-            UserStateListItem(
-                username=user.username or str(user.email),
-                email=user.email,
-                state=user.state,
-                state_changed_at=user.updated_at,
+        # Only the listed columns of the inactive rows, in the email order of
+        # the full user list this used to filter. Emails are validated as
+        # UserInDB did, which normalises the domain.
+        query = (
+            sa.select(Users.username, Users.email, Users.updated_at)
+            .where(Users.tenant_id == self.user.tenant_id)
+            .where(Users.deleted_at.is_(None))
+            .where(Users.is_system_user.is_(False))
+            .where(Users.state == UserState.INACTIVE.value)
+            .order_by(sa.func.lower(Users.email).asc())
+        )
+        inactive_list: list[UserStateListItem] = []
+        for row in await self.user_repo.session.execute(query):
+            email = _EMAIL.validate_python(row.email)
+            inactive_list.append(
+                UserStateListItem(
+                    username=row.username or email,
+                    email=email,
+                    state=UserState.INACTIVE,
+                    state_changed_at=row.updated_at,
+                )
             )
-            for user in inactive_users
-        ]
 
         logger.info(
             f"Successfully retrieved {len(inactive_list)} inactive users for tenant {self.user.tenant_id}"

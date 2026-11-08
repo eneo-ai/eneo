@@ -5,7 +5,8 @@
     SkillRuntimePolicyUpdate
   } from "@eneo/eneo-js";
   import { useId } from "bits-ui";
-  import { CircleAlert, RotateCcw } from "@lucide/svelte";
+  import CircleAlert from "@lucide/svelte/icons/circle-alert";
+  import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import { untrack } from "svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";

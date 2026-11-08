@@ -12,7 +12,7 @@ describe("nextPageCursor", () => {
 
   it("returns undefined (stop fetching) on the last page", () => {
     expect(nextPageCursor(page(["a"], null))).toBeUndefined();
-    expect(nextPageCursor({ items: [], total_count: 0 })).toBeUndefined();
+    expect(nextPageCursor({})).toBeUndefined();
   });
 });
 

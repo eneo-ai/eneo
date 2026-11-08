@@ -18,10 +18,10 @@ describe("getJobFailureMessage", () => {
   });
 
   it.each(["tenant_quota_exceeded", "user_quota_exceeded"])(
-    "identifies which storage quota stopped a crawl: %s",
+    "identifies which storage quota stopped a job, in the words of its task: %s",
     (code) => {
       expect(getJobFailureMessage(t, code, "crawl")).toBe(`crawl_failure_${code}`);
-      expect(getJobFailureMessage(t, code, "upload_info_blob")).toBe(`crawl_failure_${code}`);
+      expect(getJobFailureMessage(t, code, "upload_info_blob")).toBe(`job_failure_${code}`);
     }
   );
 

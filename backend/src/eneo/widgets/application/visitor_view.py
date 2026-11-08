@@ -1,0 +1,333 @@
+# Copyright (c) 2026 Sundsvalls Kommun
+#
+# Licensed under the MIT License.
+
+
+from dataclasses import replace
+from typing import Any, Optional
+
+from eneo.ai_models.completion_models.completion_model import (
+    Completion,
+    McpToolReference,
+    ResponseType,
+    ToolCallMetadata,
+)
+from eneo.assistants.api.assistant_models import AssistantResponse
+from eneo.assistants.reference_tags import (
+    INLINE_REFERENCE_PATTERN,
+    InlineReferenceStripper,
+    strip_inline_references,
+)
+from eneo.completion_models.domain.skill_activation import SKILL_ACTIVATION_TOOL_NAME
+from eneo.internal_mcp.constants import KNOWLEDGE_SERVER_NAME
+from eneo.questions.question import (
+    McpToolReferencePublic,
+    Question,
+    ToolCallInfo,
+    UseTools,
+)
+from eneo.sessions.session import SessionInDB
+from eneo.widgets.domain.exceptions import WidgetAnswerUnavailableError
+from eneo.widgets.domain.widget import Widget
+
+# The keys of a resource's `_meta` that clients render: a title, the kind of
+# source and where in it the passage sits. Anything else a server put there
+# is implementation detail.
+DISPLAY_META_KEYS = frozenset({"title", "sourceType", "pageRange", "section"})
+
+# A passage from Eneo's knowledge tool also names its document, so the widget
+# lists it like injected knowledge: a crawled page by its address, an upload
+# by the document id a visitor can pass on.
+KNOWLEDGE_URI_PREFIX = "eneo://info-blob/"
+KNOWLEDGE_META_KEYS = DISPLAY_META_KEYS | {"info_blob_id", "url"}
+
+# The one argument the widget shows beside a tool's name, looked up in the
+# order the widget uses (widgetToolSteps.argumentDetail) and falling back to
+# the first text argument. Web search labels read `query` or `q`.
+DISPLAY_ARGUMENT_KEYS = (
+    "query",
+    "q",
+    "search",
+    "timezone",
+    "location",
+    "url",
+    "path",
+    "name",
+    "title",
+    "id",
+)
+
+# What the widget renders of a tool call. A call is rebuilt from these alone, so
+# a field added to tool calls later stays on the server until the widget needs
+# it.
+SHOWN_CALL_FIELDS = (
+    "server_name",
+    "tool_name",
+    "title",
+    "tool_call_id",
+    "approved",
+    "result_status",
+    "purpose",
+    "is_internal",
+    "is_bundled",
+)
+
+# A citation marker split across two text chunks is found in the tail of the
+# previous chunk plus the next one.
+_MARKER_TAIL = len('<inref id="00000000"/>') - 1
+
+
+class VisitorView:
+    """What an anonymous widget visitor may see of an answer.
+
+    The one filter for every visitor-facing payload: the ask response and its
+    stream, the restored session, and the session the feedback call returns.
+    Shapes stay those of the ordinary conversation API and only values are
+    cleared, so the embed page drives the same client code as the app.
+
+    Never shown: the model record, reasoning, token counts, the assistant and
+    Skills behind the answer, tool results and tool ``_meta``, the raw content
+    of tool resources, and any tool argument beyond the one the widget shows.
+    Tool calls carry only ``SHOWN_CALL_FIELDS`` and resource ``_meta`` only its
+    display keys: an allowlist, so a new field is hidden until it is added.
+    An error says only that the assistant cannot answer.
+    With ``show_sources`` off no reference of any kind leaves the server: no
+    citation in the answer text and no knowledge-call argument but its search
+    terms. With ``show_tool_activity`` off no tool call does. A resource a tool returned
+    reaches the visitor only once the answer cites it, on a tool event with an
+    empty tool list, so the stream carries what a restore does.
+
+    One instance filters one answer stream: it holds the uncited resources and
+    the end of a text chunk that may be the start of a citation, which
+    ``finish`` releases once the stream has ended.
+    """
+
+    def __init__(self, widget: Widget) -> None:
+        self.widget = widget
+        self._uncited: dict[str, McpToolReference] = {}
+        self._tail = ""
+        self._citations = InlineReferenceStripper()
+
+    # --- ask ----------------------------------------------------------------
+
+    def response(self, response: AssistantResponse) -> AssistantResponse:
+        """The first-chunk part of an ask response.
+
+        Retrieved documents are never listed up front: the cited ones arrive
+        with the answer text, and only when sources are shown.
+        """
+        return response.model_copy(
+            update={
+                "completion_model": None,
+                "info_blobs": [],
+                "tools": UseTools(assistants=[]),
+                "mcp_tool_references": [],
+                "description": None,
+            }
+        )
+
+    def events(self, chunk: Completion) -> list[Completion]:
+        """The stream events a visitor gets for one pipeline event, in order."""
+        if chunk.response_type in (
+            ResponseType.REASONING,
+            # Partial JSON cannot be restricted to the one display argument.
+            # Visitors get only the sanitized TOOL_CALL activity below.
+            ResponseType.TOOL_CALL_DELTA,
+            # Visitors are never asked to approve a tool.
+            ResponseType.TOOL_APPROVAL_REQUIRED,
+            ResponseType.TOOL_APPROVAL_TIMEOUT,
+            # The widget shows no context meter; counts reveal prompt sizes.
+            ResponseType.TOKEN_USAGE,
+        ):
+            return []
+        if chunk.response_type == ResponseType.TEXT:
+            cited = self._newly_cited(chunk.text or "")
+            if not self.widget.show_sources:
+                chunk = replace(
+                    chunk,
+                    text=self._citations.strip(chunk.text or ""),
+                    reference_chunks=None,
+                )
+            return [*cited, chunk]
+        if chunk.response_type == ResponseType.TOOL_CALL:
+            return self._tool_events(chunk)
+        if chunk.response_type == ResponseType.ERROR:
+            # The adapter has logged what failed. A cut-off answer still needs
+            # its error event, but not the provider's reason for it.
+            return [
+                *self.finish(),
+                replace(
+                    chunk,
+                    error=WidgetAnswerUnavailableError.public_message,
+                    error_code=WidgetAnswerUnavailableError.status_code,
+                    error_reason=WidgetAnswerUnavailableError.code,
+                ),
+            ]
+        return [chunk]
+
+    def finish(self) -> list[Completion]:
+        """Text held back for a citation that never came, in its own event.
+
+        Only for the end of the answer: a tool event can fall inside a citation
+        split across two chunks.
+        """
+        held = self._citations.flush()
+        return [Completion(text=held, response_type=ResponseType.TEXT)] if held else []
+
+    def _tool_events(self, chunk: Completion) -> list[Completion]:
+        calls: list[ToolCallMetadata] = (
+            [
+                ToolCallMetadata(**self._shown_call(call))
+                for call in chunk.tool_calls_metadata or []
+                if self._is_shown(call)
+            ]
+            if self.widget.show_tool_activity
+            else []
+        )
+        shown: list[McpToolReference] = []
+        if self.widget.show_sources:
+            for ref in chunk.mcp_tool_references or []:
+                # Images cannot be cited and are kept on the answer as is.
+                if (ref.mime_type or "").startswith("image/"):
+                    shown.append(self._visible_reference(ref))
+                else:
+                    self._uncited.setdefault(str(ref.id)[:8], ref)
+        if not calls and not shown:
+            return []
+        return [
+            replace(
+                chunk,
+                tool_calls_metadata=calls or None,
+                mcp_tool_references=shown or None,
+            )
+        ]
+
+    def _newly_cited(self, text: str) -> list[Completion]:
+        if not self._uncited or not text:
+            self._tail = (self._tail + text)[-_MARKER_TAIL:]
+            return []
+        window = self._tail + text
+        self._tail = window[-_MARKER_TAIL:]
+        cited = [
+            self._uncited.pop(short_id)
+            for short_id in dict.fromkeys(INLINE_REFERENCE_PATTERN.findall(window))
+            if short_id in self._uncited
+        ]
+        if not cited:
+            return []
+        return [
+            Completion(
+                text="",
+                response_type=ResponseType.TOOL_CALL,
+                mcp_tool_references=[self._visible_reference(ref) for ref in cited],
+            )
+        ]
+
+    def _visible_reference(self, ref: McpToolReference) -> McpToolReference:
+        return replace(ref, **self._reference_changes(ref.uri, ref.meta))
+
+    # --- sessions -----------------------------------------------------------
+
+    def session(self, session: SessionInDB) -> SessionInDB:
+        return session.model_copy(
+            update={"questions": [self._question(q) for q in session.questions]}
+        )
+
+    def _question(self, question: Question) -> Question:
+        show_sources = self.widget.show_sources
+        return question.model_copy(
+            update={
+                "completion_model": None,
+                "reasoning": None,
+                "skill_provenance": None,
+                "skill_activation": None,
+                "logging_details": None,
+                "num_tokens_question": 0,
+                "num_tokens_answer": 0,
+                "context_prompt_tokens": None,
+                "context_completion_tokens": None,
+                "skill_context_tokens": None,
+                # Without them the message's tools name no assistant.
+                "assistant_id": None,
+                "assistant_name": None,
+                "answer": (
+                    question.answer
+                    if show_sources
+                    else strip_inline_references(question.answer)
+                ),
+                "info_blobs": question.info_blobs if show_sources else [],
+                "mcp_tool_references": (
+                    [
+                        self._stored_reference(ref)
+                        for ref in question.mcp_tool_references
+                    ]
+                    if show_sources
+                    else []
+                ),
+                "tool_calls": (
+                    [
+                        ToolCallInfo(**self._shown_call(call))
+                        for call in question.tool_calls or []
+                        if self._is_shown(call)
+                    ]
+                    if self.widget.show_tool_activity
+                    else None
+                ),
+            }
+        )
+
+    def _stored_reference(self, ref: McpToolReferencePublic) -> McpToolReferencePublic:
+        return ref.model_copy(update=self._reference_changes(ref.uri, ref.meta))
+
+    # --- shared -------------------------------------------------------------
+
+    @staticmethod
+    def _is_shown(call: ToolCallMetadata | ToolCallInfo) -> bool:
+        # Activating a Skill is a step of the assistant's own instructions, and
+        # its key and name would say which Skills the assistant has.
+        return call.mcp_tool_name != SKILL_ACTIVATION_TOOL_NAME
+
+    def _shown_call(self, call: ToolCallMetadata | ToolCallInfo) -> dict[str, Any]:
+        return {
+            **{name: getattr(call, name) for name in SHOWN_CALL_FIELDS},
+            "arguments": self._shown_argument(call),
+        }
+
+    def _shown_argument(
+        self, call: ToolCallMetadata | ToolCallInfo
+    ) -> Optional[dict[str, object]]:
+        arguments = call.arguments
+        if not arguments:
+            return arguments
+        # With sources hidden, the document or source a knowledge call names
+        # is a source too; its search terms are the visitor's own subject.
+        keys = (
+            ("query",)
+            if not self.widget.show_sources
+            and call.server_name == KNOWLEDGE_SERVER_NAME
+            and call.is_internal is not False
+            else (*DISPLAY_ARGUMENT_KEYS, *arguments)
+        )
+        for key in keys:
+            value = arguments.get(key)
+            if isinstance(value, str) and value.strip():
+                return {key: value}
+        return {}
+
+    def _reference_changes(self, uri: str, meta: dict[str, Any]) -> dict[str, Any]:
+        """One rule for a tool resource, streamed or restored: its title and
+        link stay, its content does not, and with tool activity hidden
+        nothing ties it to the call that produced it."""
+        shown = (
+            KNOWLEDGE_META_KEYS
+            if uri.startswith(KNOWLEDGE_URI_PREFIX)
+            else DISPLAY_META_KEYS
+        )
+        changes: dict[str, Any] = {
+            "content": None,
+            "meta": {key: meta[key] for key in meta if key in shown},
+            "mcp_tool_name": None,
+        }
+        if not self.widget.show_tool_activity:
+            changes["tool_call_id"] = None
+        return changes

@@ -1,7 +1,5 @@
-"use client";
-
 import { AlertCircle, ChevronRight, Info, Plug } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useState } from "react";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -83,7 +81,7 @@ export function McpRestrictionSection({ draft }: { draft: PolicyDraft }) {
               const available = allMcpServers.find((server) => server.id === id)?.is_available;
               return (
                 <div key={id} className={selected ? "bg-muted/40" : ""}>
-                  <div className="flex items-center gap-3 py-2.5 pr-4 pl-1">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5 pr-4 pl-1">
                     <span
                       className="flex size-8 shrink-0 items-center justify-center"
                       aria-hidden="true"
@@ -96,7 +94,7 @@ export function McpRestrictionSection({ draft }: { draft: PolicyDraft }) {
                       onCheckedChange={(on) => toggleCapability(capability.purpose, on)}
                       aria-label={t("governance_mcp_allow_aria", { name: t(capability.purpose) })}
                     />
-                    <div className="min-w-0 flex-1">
+                    <div className="min-w-0 flex-1 basis-40">
                       <span
                         className={
                           selected
@@ -145,10 +143,10 @@ export function McpRestrictionSection({ draft }: { draft: PolicyDraft }) {
                 ).length;
                 return (
                   <div key={server.id} className={isSelected ? "bg-muted/40" : ""}>
-                    <div className="flex items-center gap-3 py-2.5 pr-4 pl-1">
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5 pr-4 pl-1">
                       <button
                         type="button"
-                        className="text-muted-foreground hover:text-foreground disabled:hover:text-muted-foreground flex size-8 shrink-0 items-center justify-center rounded-md disabled:opacity-20"
+                        className="text-muted-foreground hover:text-foreground disabled:hover:text-muted-foreground flex size-8 shrink-0 items-center justify-center rounded-md disabled:opacity-20 pointer-coarse:size-11"
                         disabled={!isSelected || !hasTools}
                         onClick={() => toggleExpanded(server.id)}
                         aria-label={
@@ -167,7 +165,7 @@ export function McpRestrictionSection({ draft }: { draft: PolicyDraft }) {
                         onCheckedChange={(value) => toggleMcp(server.id, value)}
                         aria-label={t("governance_mcp_allow_aria", { name: server.name })}
                       />
-                      <div className="min-w-0 flex-1">
+                      <div className="min-w-0 flex-1 basis-40">
                         <div className="flex items-center gap-2">
                           <span
                             className={`text-sm font-medium ${isSelected ? "" : "text-muted-foreground"}`}
@@ -215,7 +213,7 @@ export function McpRestrictionSection({ draft }: { draft: PolicyDraft }) {
                           <div className="flex items-center gap-1">
                             <button
                               type="button"
-                              className="text-muted-foreground hover:text-foreground hover:bg-accent rounded px-2 py-1 text-[10px] font-medium disabled:pointer-events-none disabled:opacity-40"
+                              className="text-muted-foreground hover:text-foreground hover:bg-accent focus-visible:outline-ring rounded px-2 py-1 text-xs font-medium focus-visible:outline-2 disabled:pointer-events-none disabled:opacity-40 pointer-coarse:min-h-11 pointer-coarse:px-3"
                               disabled={enabledCount === tools.length}
                               onClick={() => tools.forEach((tool) => toggleMcpTool(tool.id, true))}
                             >
@@ -226,7 +224,7 @@ export function McpRestrictionSection({ draft }: { draft: PolicyDraft }) {
                             </span>
                             <button
                               type="button"
-                              className="text-muted-foreground hover:text-foreground hover:bg-accent rounded px-2 py-1 text-[10px] font-medium disabled:pointer-events-none disabled:opacity-40"
+                              className="text-muted-foreground hover:text-foreground hover:bg-accent focus-visible:outline-ring rounded px-2 py-1 text-xs font-medium focus-visible:outline-2 disabled:pointer-events-none disabled:opacity-40 pointer-coarse:min-h-11 pointer-coarse:px-3"
                               disabled={enabledCount === 0}
                               onClick={() => tools.forEach((tool) => toggleMcpTool(tool.id, false))}
                             >
@@ -240,7 +238,7 @@ export function McpRestrictionSection({ draft }: { draft: PolicyDraft }) {
                             return (
                               <label
                                 key={tool.id}
-                                className={`hover:bg-accent flex items-center gap-3 px-3 py-2 ${toolEnabled ? "" : "opacity-50"}`}
+                                className="hover:bg-accent flex items-center gap-3 px-3 py-2"
                               >
                                 <span className="min-w-0 flex-1">
                                   <span className="block truncate font-mono text-xs font-medium">

@@ -7,17 +7,15 @@
     type ObjectStoreCredentialRotation,
     type ObjectContentReadinessCode
   } from "@eneo/eneo-js";
-  import {
-    CircleAlert,
-    ArrowLeftRight,
-    CircleCheck,
-    ChevronDown,
-    ExternalLink,
-    HardDrive,
-    KeyRound,
-    LoaderCircle,
-    Settings2
-  } from "@lucide/svelte";
+  import CircleAlert from "@lucide/svelte/icons/circle-alert";
+  import ArrowLeftRight from "@lucide/svelte/icons/arrow-left-right";
+  import CircleCheck from "@lucide/svelte/icons/circle-check";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import ExternalLink from "@lucide/svelte/icons/external-link";
+  import HardDrive from "@lucide/svelte/icons/hard-drive";
+  import KeyRound from "@lucide/svelte/icons/key-round";
+  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
+  import Settings2 from "@lucide/svelte/icons/settings-2";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
@@ -29,6 +27,8 @@
   import { getEneo } from "$lib/core/Eneo";
   import PolicySection from "$lib/features/admin/PolicySection.svelte";
   import { m } from "$lib/paraglide/messages";
+  import { getLocale } from "$lib/paraglide/runtime";
+  import { docsUrl } from "$lib/core/docs";
 
   type Capability = {
     configured: boolean;
@@ -894,7 +894,11 @@
                   <li>{m.storage_switch_checklist_reversible()}</li>
                 </ul>
                 <Button
-                  href="https://docs.eneo.ai/guides/object-content-storage#move-to-another-s3-compatible-service"
+                  href={docsUrl(
+                    "guides/object-content-storage",
+                    getLocale(),
+                    "move-to-another-s3-compatible-service"
+                  )}
                   target="_blank"
                   rel="noreferrer"
                   variant="link"

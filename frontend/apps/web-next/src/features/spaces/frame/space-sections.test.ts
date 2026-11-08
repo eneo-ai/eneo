@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { spaceHasPermission, type ResourcePermission, type SpaceResource } from "../space";
 import { makeCollection, makeSpace, makeWebsite } from "../testing/space-fixture";
-import { ownKnowledgeCount, spaceLandingHref, spaceRoute, spaceSections } from "./space-sections";
+import {
+  ownKnowledgeCount,
+  phoneSections,
+  spaceLandingHref,
+  spaceNavGroups,
+  spaceRoute,
+  spaceSections
+} from "./space-sections";
 
 const canFor =
   (space: ReturnType<typeof makeSpace>) => (action: ResourcePermission, resource: SpaceResource) =>
@@ -25,7 +32,6 @@ describe("spaceSections", () => {
       "apps",
       "knowledge",
       "skills",
-      "services",
       "members",
       "settings"
     ]);
@@ -36,7 +42,6 @@ describe("spaceSections", () => {
       // The collection shared in from another space is not this space's knowledge.
       knowledge: 2,
       skills: undefined,
-      services: undefined,
       members: 2,
       settings: undefined
     });
@@ -52,13 +57,13 @@ describe("spaceSections", () => {
       }
     });
     const ids = spaceSections(space, canFor(space), "personal").map((section) => section.id);
-    expect(ids).toEqual(["overview", "assistants", "apps", "knowledge", "skills", "services"]);
+    expect(ids).toEqual(["overview", "assistants", "apps", "knowledge", "skills"]);
   });
 
-  it("limits the organization space to knowledge, skills, services and settings", () => {
+  it("limits the organization space to knowledge, skills and settings", () => {
     const space = makeSpace({ overrides: { organization: true } });
     const ids = spaceSections(space, canFor(space), "organization").map((section) => section.id);
-    expect(ids).toEqual(["knowledge", "skills", "services", "settings"]);
+    expect(ids).toEqual(["knowledge", "skills", "settings"]);
     expect(
       spaceLandingHref(spaceSections(space, canFor(space), "organization"), "organization")
     ).toBe("/spaces/organization/knowledge");
@@ -116,8 +121,80 @@ describe("spaceRoute", () => {
     expect(spaceRoute(["assistants", "a1", "edit"])).toEqual({ kind: "editor" });
     expect(spaceRoute(["apps", "p1", "edit"])).toEqual({ kind: "editor" });
     expect(spaceRoute(["group-chats", "g1", "edit"])).toEqual({ kind: "editor" });
+    expect(spaceRoute(["assistants", "a1", "widget"])).toEqual({ kind: "editor" });
+    expect(spaceRoute(["apps", "p1", "widget"])).not.toEqual({ kind: "editor" });
     // Only the editor itself: an app's run page and results keep the frame.
     expect(spaceRoute(["apps", "p1", "results", "r1"])).toMatchObject({ kind: "page" });
     expect(spaceRoute(["skills", "s1", "edit"])).toMatchObject({ kind: "page", section: "skills" });
+  });
+});
+
+describe("phoneSections (decision 24)", () => {
+  const ids = (sections: { id: string }[]) => sections.map((section) => section.id);
+
+  it("keeps the content as tabs and lists what manages the space under Hantera ytan", () => {
+    const space = makeSpace();
+    const { tabs, manage } = phoneSections(spaceSections(space, canFor(space), "space-1"));
+    expect(ids(tabs)).toEqual(["overview", "assistants", "apps", "knowledge"]);
+    expect(ids(manage)).toEqual(["members", "settings", "skills"]);
+  });
+
+  it("lists only what the user may manage", () => {
+    const space = makeSpace({
+      overrides: { personal: true, members: { items: [], count: 0, permissions: [] } },
+      permissions: ["read"]
+    });
+    const { manage } = phoneSections(spaceSections(space, canFor(space), "personal"));
+    expect(ids(manage)).toEqual(["skills"]);
+  });
+
+  it("keeps every tab of a space without Översikt, the organisation space (F4)", () => {
+    const space = makeSpace({ overrides: { organization: true } });
+    const { tabs, manage } = phoneSections(spaceSections(space, canFor(space), "organization"));
+    expect(ids(tabs)).toEqual(["knowledge", "skills", "settings"]);
+    expect(manage).toEqual([]);
+  });
+});
+
+describe("spaceNavGroups", () => {
+  const ids = (groups: ReturnType<typeof spaceNavGroups>) =>
+    groups.map((group) => group.map((item) => item.id));
+
+  // Svelte's SpaceMenu.svelte: personal Chatt, a divider, the content, a divider, the management.
+  it("starts the personal space with Chatt, then its sections", () => {
+    const space = makeSpace({
+      permissions: ["read"],
+      overrides: { personal: true, members: { items: [], count: 0, permissions: [] } }
+    });
+    const groups = spaceNavGroups(space, canFor(space), "personal");
+    expect(ids(groups)).toEqual([
+      ["chat"],
+      ["overview", "assistants", "apps", "knowledge", "skills"]
+    ]);
+    expect(groups[0]?.[0]?.href).toBe("/spaces/personal/chat?tab=chat");
+  });
+
+  it("sets members and settings apart in a shared space", () => {
+    const space = makeSpace();
+    expect(ids(spaceNavGroups(space, canFor(space), "space-1"))).toEqual([
+      ["overview", "assistants", "apps", "knowledge", "skills"],
+      ["members", "settings"]
+    ]);
+  });
+
+  it("keeps settings with the content in the organisation space, which has no members", () => {
+    const space = makeSpace({ overrides: { organization: true } });
+    expect(ids(spaceNavGroups(space, canFor(space), "organization"))).toEqual([
+      ["knowledge", "skills", "settings"]
+    ]);
+  });
+
+  it("drops empty groups", () => {
+    const space = makeSpace({
+      resourcePermissions: [],
+      skillPermissions: [],
+      permissions: ["read"]
+    });
+    expect(ids(spaceNavGroups(space, canFor(space), "space-1"))).toEqual([["overview"]]);
   });
 });

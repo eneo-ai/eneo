@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="462" viewBox="0 0 900 462" role="img" aria-labelledby="title desc" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif">
+  <title id="title">How a change reaches Eneo</title>
+  <desc id="desc">Three lanes. Collaborators from partner municipalities and agencies agree on a change in an issue, build it in a fork and open a pull request. GitHub runs CI, dependency review and label checks. Core Maintainers at Sundsvalls kommun approve the pull request, merge it through the merge queue into develop, and publish releases from a release branch with a v tag. GitHub rulesets ensure that only Core Maintainers can merge into develop, push to release branches and create v tags. Pull requests from forks run with a read-only token and without secrets.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="#455a64"/>
+    </marker>
+  </defs>
+
+  <rect x="0.5" y="0.5" width="899" height="461" rx="12" fill="#ffffff" stroke="#d0d7de"/>
+
+  <rect x="24" y="20" width="852" height="36" fill="#1a1a1a"/>
+  <text x="40" y="44" fill="#ffffff" font-size="16" font-weight="700">How a change reaches Eneo</text>
+
+  <!-- Lanes -->
+  <rect x="24" y="72" width="852" height="104" rx="8" fill="#f6f8fa" stroke="#d0d7de"/>
+  <rect x="24" y="184" width="852" height="80" rx="8" fill="#f6f8fa" stroke="#d0d7de"/>
+  <rect x="24" y="272" width="852" height="104" rx="8" fill="#eef7f8" stroke="#0e7c86"/>
+
+  <text x="40" y="108" fill="#1a1a1a" font-size="13" font-weight="700">Collaborators</text>
+  <text x="40" y="127" fill="#455a64" font-size="11">Partner</text>
+  <text x="40" y="142" fill="#455a64" font-size="11">municipalities</text>
+  <text x="40" y="157" fill="#455a64" font-size="11">and agencies</text>
+
+  <text x="40" y="220" fill="#1a1a1a" font-size="13" font-weight="700">GitHub</text>
+  <text x="40" y="238" fill="#455a64" font-size="11">Automated checks</text>
+
+  <text x="40" y="308" fill="#1a1a1a" font-size="13" font-weight="700">Core Maintainers</text>
+  <text x="40" y="327" fill="#455a64" font-size="11">Sundsvalls kommun,</text>
+  <text x="40" y="342" fill="#455a64" font-size="11">stewards of</text>
+  <text x="40" y="357" fill="#455a64" font-size="11">the platform</text>
+
+  <!-- 1 Issue -->
+  <rect x="170" y="86" width="106" height="76" rx="8" fill="#ffffff" stroke="#455a64"/>
+  <text x="180" y="108" fill="#1a1a1a" font-size="12" font-weight="700">1 Issue</text>
+  <text x="180" y="128" fill="#455a64" font-size="11">Agree on the</text>
+  <text x="180" y="144" fill="#455a64" font-size="11">change first</text>
+
+  <line x1="277" y1="124" x2="286" y2="124" stroke="#455a64" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- 2 Fork and PR -->
+  <rect x="288" y="86" width="106" height="76" rx="8" fill="#ffffff" stroke="#455a64"/>
+  <text x="298" y="108" fill="#1a1a1a" font-size="12" font-weight="700">2 Fork + PR</text>
+  <text x="298" y="128" fill="#455a64" font-size="11">Build in a fork</text>
+  <text x="298" y="144" fill="#455a64" font-size="11">and open a PR</text>
+
+  <path d="M394 124 H459 V192" fill="none" stroke="#455a64" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- 3 Checks -->
+  <rect x="406" y="194" width="106" height="60" rx="8" fill="#ffffff" stroke="#455a64" stroke-dasharray="4 3"/>
+  <text x="416" y="214" fill="#1a1a1a" font-size="12" font-weight="700">3 Checks</text>
+  <text x="416" y="231" fill="#455a64" font-size="11">CI, dependency</text>
+  <text x="416" y="246" fill="#455a64" font-size="11">and labels</text>
+
+  <path d="M512 224 H577 V284" fill="none" stroke="#455a64" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- 4 Review -->
+  <rect x="524" y="286" width="106" height="76" rx="8" fill="#ffffff" stroke="#0e7c86" stroke-width="1.5"/>
+  <text x="534" y="308" fill="#1a1a1a" font-size="12" font-weight="700">4 Review</text>
+  <text x="534" y="328" fill="#455a64" font-size="11">Approved by a</text>
+  <text x="534" y="344" fill="#455a64" font-size="11">Core Maintainer</text>
+
+  <line x1="631" y1="324" x2="640" y2="324" stroke="#455a64" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- 5 Merge queue -->
+  <rect x="642" y="286" width="106" height="76" rx="8" fill="#ffffff" stroke="#0e7c86" stroke-width="1.5"/>
+  <text x="652" y="308" fill="#1a1a1a" font-size="12" font-weight="700">5 Merge</text>
+  <text x="652" y="328" fill="#455a64" font-size="11">Merge queue</text>
+  <text x="652" y="344" fill="#455a64" font-size="11">into develop</text>
+
+  <line x1="749" y1="324" x2="758" y2="324" stroke="#455a64" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- 6 Release -->
+  <rect x="760" y="286" width="106" height="76" rx="8" fill="#ffffff" stroke="#0e7c86" stroke-width="1.5"/>
+  <text x="770" y="308" fill="#1a1a1a" font-size="12" font-weight="700">6 Release</text>
+  <text x="770" y="328" fill="#455a64" font-size="11">Release branch</text>
+  <text x="770" y="344" fill="#455a64" font-size="11">and v* tag</text>
+
+  <!-- Enforcement -->
+  <rect x="24" y="388" width="852" height="56" rx="8" fill="#ffffff" stroke="#0e7c86"/>
+  <text x="40" y="411" fill="#1a1a1a" font-size="12"><tspan font-weight="700">Enforced by GitHub rulesets:</tspan> only Core Maintainers can merge into develop, push to release/** and create v* tags.</text>
+  <text x="40" y="431" fill="#455a64" font-size="12">Pull requests from forks run with a read-only token and without secrets. A v* tag is the only way to publish release images.</text>
+</svg>

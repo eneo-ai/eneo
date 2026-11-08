@@ -1,7 +1,5 @@
-"use client";
-
 import { useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -58,7 +56,7 @@ export function ByteLimitField({
           disabled={disabled}
           aria-label={t("storage_limit_unit", { limit: label })}
           aria-describedby={`${id}-description`}
-          className="bg-background border-input focus-visible:ring-ring h-9 rounded-md border px-2 text-sm focus-visible:ring-2 focus-visible:outline-none"
+          className="border-input focus-visible:ring-ring h-9 rounded-md border bg-transparent px-2 text-base focus-visible:ring-2 focus-visible:outline-none pointer-coarse:min-h-11 md:pointer-fine:text-sm"
         >
           {units.map((candidate) => (
             <option key={candidate} value={candidate}>

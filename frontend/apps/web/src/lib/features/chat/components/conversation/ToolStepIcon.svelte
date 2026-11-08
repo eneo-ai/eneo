@@ -9,7 +9,7 @@
 -->
 <script lang="ts">
   import type { CapabilityDescriptor } from "$lib/features/mcp/capabilities";
-  import { X } from "@lucide/svelte";
+  import X from "@lucide/svelte/icons/x";
 
   let {
     icon,

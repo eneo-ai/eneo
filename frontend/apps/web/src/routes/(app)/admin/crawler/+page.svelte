@@ -7,7 +7,8 @@
     AdminCrawlerScheduledWebsitePage,
     AdminCrawlerScheduleQuery
   } from "@eneo/eneo-js";
-  import { ArrowRight, RefreshCw } from "@lucide/svelte";
+  import ArrowRight from "@lucide/svelte/icons/arrow-right";
+  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import { Page } from "$lib/components/layout";
   import * as Card from "$lib/components/ui/card/index.js";
   import * as Field from "$lib/components/ui/field/index.js";

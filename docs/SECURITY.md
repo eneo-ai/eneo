@@ -6,7 +6,13 @@ public GitHub issues, pull requests, or discussions.
 
 ## Reporting a Vulnerability
 
-Email security reports to `security@sundsvall.se`.
+Report a vulnerability privately in one of two ways:
+
+- On GitHub, through **Security → Report a vulnerability**
+  (<https://github.com/eneo-ai/eneo/security/advisories/new>). The report is
+  visible only to you and the maintainers, and the fix can be coordinated in a
+  private advisory.
+- By email to `security@sundsvall.se`.
 
 Include as much of the following as possible:
 
@@ -56,7 +62,12 @@ The repository uses GitHub security features and CI to prevent regressions:
 - The reusable `Security` workflow audits the complete runtime Python lock and
   frontend lock, runs Semgrep security-audit/GitHub Actions rules, and scans the
   added Git history with Gitleaks. It is included in the required CI aggregate
-  and runs before image publication. Reports are retained as CI artifacts.
+  and runs before image publication. The dependency gate blocks `high` and
+  `critical` findings, including those without a fix; lower severities emit
+  warnings. Exact, unexpired exceptions are retained. Unknown severities,
+  failed scans, invalid reports and expired exceptions still fail the check.
+  Python severity ratings come from the GitHub Advisory Database and are
+  retained alongside the raw audit reports as CI artifacts.
 - Temporary dependency mitigations belong in `frontend/patches/SECURITY.md`, with
   an owner, exact advisory, regression tests and review expiry. The audit retains
   the raw finding and only accepts the named mitigation after its tests pass.
@@ -71,7 +82,7 @@ The repository uses GitHub security features and CI to prevent regressions:
   setup that gives developers useful feedback without high false-positive noise.
   Re-enable code scanning only after the query set and triage process are tuned
   enough that alerts are actionable for maintainers.
-- Release SBOMs are generated from the published backend, Svelte frontend, Next frontend, and bundled
+- Release SBOMs are generated from the published backend (including the React web build), Svelte frontend, tools runtime, and bundled
   SeaweedFS container
   image digests and attached to GitHub Releases as CycloneDX JSON, SPDX JSON,
   and human-readable table files. The backend release also includes a narrower
@@ -130,9 +141,63 @@ The repository uses GitHub security features and CI to prevent regressions:
 - The normal `CI` gate validates frozen backend and frontend installs before
   dependency update pull requests are merged.
 
-Branch protection should require `CI` and `Dependency Review`. While code
-scanning is paused, remove `CodeQL gate` from the GitHub ruleset; otherwise pull
-requests can wait for a check that no longer runs.
+The `develop` ruleset requires `CI` and `Dependency Review`, and the PR label
+classification ruleset requires `PR labels` on `develop`, `main` and
+`release/**`. While code scanning is paused, remove `CodeQL gate` from the
+GitHub ruleset; otherwise pull requests can wait for a check that no longer
+runs.
+
+## Repository Access and Change Control
+
+Access to the `eneo-ai` organisation follows least privilege. Core Maintainers
+(the Eneo team at Sundsvalls kommun) steward the platform and are accountable
+for what is merged and released. Collaborators from partner municipalities and
+agencies contribute through pull requests. The contributor-facing explanation,
+including the role table, diagrams and an FAQ, is
+[Governance and Roles](../frontend/apps/docs-site/src/content/contributing/governance.mdx)
+on the documentation site.
+
+- **Roles.** `@eneo-ai/core-maintainers` is the only team with write-level
+  (Maintain) access. It also holds the organisation's Security manager and
+  CI/CD admin roles. Collaborators (`@eneo-ai/collaborators`) have Triage
+  access and contribute from forks. A small number of organisation owners hold
+  Admin rights for rulesets, team access and repository settings. The
+  organisation base permission is read.
+- **`develop`.** Changes arrive only through pull requests, and only Core
+  Maintainers can add a pull request to the merge queue. Required checks must
+  pass and review conversations must be resolved. A Core Maintainer reviews
+  and approves contributions from outside the team before queueing them;
+  `.github/CODEOWNERS` requests that review automatically. If someone without
+  write access pushes new commits afterwards, GitHub cancels the pending
+  merge. Core Maintainers may queue their own pull requests without a second
+  approval.
+- **Releases.** Only Core Maintainers can create, update or delete
+  `release/**` branches and control human `v*` tag operations. When configured
+  and enabled with repository variable `RELEASE_MANAGED`,
+  the repository-scoped release App can create final tags after a reviewed
+  preparation PR is merged and push CI succeeds on that exact commit. Its tag
+  creation permission must be separate from update/deletion protections; it
+  cannot merge PRs, move/delete tags or bypass branch checks. A `v*` tag starts
+  image publication, so these restrictions control who can publish a release.
+- **`main`.** Protected against deletion and force pushes.
+- **No bypass on `develop`.** The `develop` ruleset has no bypass actors, so
+  no one can skip the required checks or the merge queue. Repository
+  administrators are not exempt from rulesets unless they are on a bypass
+  list. If GitHub itself blocks a critical fix, an organisation owner may
+  change the ruleset temporarily; restore it straight away and record the
+  change in a GitHub issue. The release branch and tag rulesets keep Core
+  Maintainers as bypass actors because cutting releases requires it.
+- **Workflow trust.** Pull requests from forks run with a read-only
+  `GITHUB_TOKEN` and without repository secrets. Workflows started from
+  branches in this repository can request package write permissions, which is
+  why write access is not granted outside Core Maintainers. Keep repository
+  and organisation secrets limited to those referenced by workflows; when a
+  secret is no longer used, delete it and revoke it at its source.
+  The release controller's privileged `workflow_run` jobs execute only code
+  from `develop`; release checkouts are validated as data, never executed.
+- **Changes to access.** Only organisation owners change team roles, rulesets
+  or bypass lists. Record each change in a GitHub issue so the access history
+  is reviewable.
 
 ## Alert Triage
 

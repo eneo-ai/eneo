@@ -24,7 +24,11 @@
   import { previewKindOf } from "$lib/features/file-preview/previewKind";
   import type { CapabilityDescriptor } from "$lib/features/mcp/capabilities";
   import { m } from "$lib/paraglide/messages";
-  import { AppWindow, ChevronRight, Download, FileText, X } from "@lucide/svelte";
+  import AppWindow from "@lucide/svelte/icons/app-window";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
+  import Download from "@lucide/svelte/icons/download";
+  import FileText from "@lucide/svelte/icons/file-text";
+  import X from "@lucide/svelte/icons/x";
   import type { GeneratedDocument } from "../../documentVersions";
   import ShimmerText from "./ShimmerText.svelte";
   import ToolCallDetailsPanel from "./ToolCallDetailsPanel.svelte";

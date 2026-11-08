@@ -1,7 +1,7 @@
 import { page } from "@vitest/browser/context";
 import { render } from "vitest-browser-svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { House, Rocket } from "@lucide/svelte";
+import type { IconNode } from "@lucide/svelte";
 import { m } from "$lib/paraglide/messages";
 import { createLucideRegistry, loadLucideIcons } from "../lucideIcons";
 import LucideIconPicker from "./LucideIconPicker.svelte";
@@ -11,7 +11,8 @@ vi.mock("../lucideIcons", async (importOriginal) => ({
   loadLucideIcons: vi.fn()
 }));
 
-const registry = createLucideRegistry({ icons: { Rocket } } as never);
+const node: IconNode = [["path", { d: "M4 4h16v16H4z" }]];
+const registry = createLucideRegistry({ icons: { Rocket: ["rocket", node] }, aliases: {} });
 const rocketIcon = () => document.querySelector("svg.lucide-rocket");
 
 beforeEach(() => {
@@ -54,7 +55,9 @@ describe("LucideIconPicker", () => {
   it("shows an icon saved under a name Lucide has since renamed", async () => {
     vi.mocked(loadLucideIcons)
       .mockReset()
-      .mockResolvedValue(createLucideRegistry({ icons: { House }, Home: House } as never));
+      .mockResolvedValue(
+        createLucideRegistry({ icons: { House: ["house", node] }, aliases: { Home: "House" } })
+      );
     render(LucideIconPicker, { value: "home", compact: true });
 
     await vi.waitFor(() => expect(document.querySelector("svg.lucide-house")).not.toBeNull());

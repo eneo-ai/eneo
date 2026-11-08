@@ -10,12 +10,14 @@ import { getBackendUrl } from "$lib/core/environment.server";
 
 /**
  * Why a login did not succeed, at the level the login page can act on:
- * `credentials` is the user's to fix, `rate_limited` is temporary, and
+ * `credentials` is the user's to fix, `rate_limited` is temporary,
+ * `deactivated` means the credentials were right but the account or its
+ * organisation is not allowed to sign in (an administrator's to fix), and
  * `unavailable` means the backend did not give a usable answer at all
  * (unreachable, misconfigured, or failing) so the user should not be told to
  * check their password.
  */
-export type EneoLoginFailureReason = "credentials" | "rate_limited" | "unavailable";
+export type EneoLoginFailureReason = "credentials" | "rate_limited" | "deactivated" | "unavailable";
 
 export type EneoLoginResult = {
   success: boolean;
@@ -48,10 +50,13 @@ function readCode(fields: Record<string, unknown>): string | null {
 }
 
 /** The login endpoint answers 401 for wrong credentials, 422 for a malformed
- * email, 429 at the attempt limit; anything else did not evaluate them. */
+ * email, 429 at the attempt limit and 403 for a verified account that is
+ * inactive or whose organisation is suspended; anything else did not
+ * evaluate the credentials. */
 function failureReason(status: number): EneoLoginFailureReason {
   if (status === 401 || status === 422) return "credentials";
   if (status === 429) return "rate_limited";
+  if (status === 403) return "deactivated";
   return "unavailable";
 }
 

@@ -1,0 +1,127 @@
+import {
+  ChatLayoutScrollButton,
+  useChatNewMessages,
+  useChatStreamScroll
+} from "@astryxdesign/core/Chat";
+import { useTranslator } from "@astryxdesign/core/i18n";
+import { useLayoutEffect, useRef, type ReactNode, type RefObject } from "react";
+import { StillLayoutScope } from "@/components/astryx/collapsible";
+import { cn } from "@/lib/utils";
+
+/**
+ * A started conversation: the messages scroll, the composer sits flat under
+ * them (decision 16: no glass) and never covers one, so nothing focused can
+ * hide behind it (WCAG 2.4.11) at any width.
+ *
+ * Astryx ChatLayout's wiring, kept: the answer is followed while the reader
+ * is at the bottom (`useChatStreamScroll`; its overflow-anchor rule comes
+ * nonce'd from the root layout under the CSP), and a button scrolls to the
+ * latest, "Nya meddelanden" when an answer grew out of view
+ * (`useChatNewMessages` watches the content wrapper, as ChatLayout's context
+ * is not exported). It mounts with the scroller: the hooks attach to it once.
+ * Disclosures in the messages open and close at once (`StillLayoutScope`), so
+ * nothing but the follow hooks moves this scroller while an answer streams.
+ *
+ * `sheetOver`: a non-modal sheet covers the lower 62 % (decision 28, an
+ * answer's activity where the side panel cannot sit beside it). The dock
+ * gives up its place (the draft stays), the conversation can scroll its end
+ * above the sheet and focus moved in it stops above the sheet (scroll
+ * padding); the scroll button under it is inert. Nothing focusable hides
+ * behind the sheet (WCAG 2.4.11). What it was opened from (`sheetOpener`)
+ * stays in view above it.
+ */
+export function ConversationLayout({
+  children,
+  composer,
+  sheetOver = false,
+  sheetOpener,
+  followKey,
+  className
+}: {
+  /** The message list. */
+  children: ReactNode;
+  /** The docked composer. */
+  composer: ReactNode;
+  sheetOver?: boolean;
+  sheetOpener?: RefObject<HTMLElement | null>;
+  /**
+   * Changes when the reader sends a question (not when an answer grows): the
+   * list then jumps to the end, so the question and its answer are what is on
+   * screen even if the reader had scrolled up to an earlier answer.
+   */
+  followKey?: string;
+  className?: string;
+}) {
+  const t = useTranslator();
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const { isScrolledUp, isLocked, scrollIfLocked, scrollToBottom } = useChatStreamScroll({
+    scrollRef
+  });
+  const { contentRef, hasNewMessages, dismiss } = useChatNewMessages({
+    isLocked,
+    onResize: scrollIfLocked
+  });
+  const followed = useRef(followKey);
+  useLayoutEffect(() => {
+    if (followKey === followed.current) return;
+    followed.current = followKey;
+    dismiss();
+    scrollToBottom({ behavior: "instant" });
+  }, [followKey, dismiss, scrollToBottom]);
+  // With the end padding in place, before paint.
+  useLayoutEffect(() => {
+    if (sheetOver) sheetOpener?.current?.scrollIntoView({ block: "nearest" });
+  }, [sheetOver, sheetOpener]);
+
+  return (
+    <div className={cn("flex min-h-0 flex-col", className)}>
+      {/* overflow-hidden: the scroll button slides out of view when hidden,
+          and must not make the page panel scroll with it. */}
+      <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div
+          ref={scrollRef}
+          // The list pads itself 16 px; the dock's 16 px lines the composer up with it.
+          className={cn(
+            "flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-y-contain",
+            sheetOver ? "scroll-pb-[62dvh] pb-[62dvh]" : "pb-6"
+          )}
+        >
+          <div ref={contentRef} className="flex flex-1 flex-col">
+            <StillLayoutScope>{children}</StillLayoutScope>
+          </div>
+        </div>
+        <div inert={sheetOver} className="pointer-events-none absolute inset-x-0 bottom-0">
+          <ChatLayoutScrollButton
+            isVisible={isScrolledUp || hasNewMessages}
+            label={hasNewMessages ? t("@astryx.chatLayout.newMessages") : undefined}
+            onClick={() => {
+              dismiss();
+              scrollToBottom();
+            }}
+          />
+        </div>
+      </div>
+      <ComposerDock hidden={sheetOver}>{composer}</ComposerDock>
+    </div>
+  );
+}
+
+/**
+ * The composer's place under a conversation, and under the start state on
+ * phones and touch screens, where it already stands before the first question
+ * (decision 5).
+ * At most two thirds of the height (a phone on its side, a keyboard up, a
+ * long draft with attachments): the rest stays the page's, and the dock
+ * scrolls what does not fit, its sovereignty note first. pt-1.5 keeps the
+ * composer's focus ring (5 px out) inside the clip.
+ */
+export function ComposerDock({ children, hidden }: { children: ReactNode; hidden?: boolean }) {
+  return (
+    <div
+      hidden={hidden}
+      className="max-h-[65%] shrink-0 overflow-y-auto overscroll-y-contain px-4 pt-1.5 pb-3"
+    >
+      {children}
+    </div>
+  );
+}

@@ -74,6 +74,10 @@ const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
   // --- Model lifecycle ---
   9039: () => m.eneo_error_9039(), // MODEL_IN_USE
 
+  // --- Icons ---
+  9075: () => m.eneo_error_9075(), // ICON_IN_USE
+  9076: () => m.eneo_error_9076(), // ICON_NOT_ATTACHABLE
+
   // --- Governance ---
   9069: () => m.eneo_error_9069(), // PROMPT_IN_USE_BY_GOVERNANCE
 
@@ -83,13 +87,17 @@ const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
   9055: () => m.eneo_error_9055(), // SKILL_RUNTIME_POLICY_CHANGED
 
   // --- Skill lifecycle ---
+  9081: () => m.eneo_error_9081(), // SKILL_REFERENCED_BY_REVISION
   9048: () => m.eneo_error_9048(), // SKILL_SLUG_TAKEN
   9049: () => m.eneo_error_9049(), // SKILL_PUBLISHED_NOT_DELETABLE
   9050: () => m.eneo_error_9050(), // SKILL_IN_USE_BY_APP_RUN
   9051: () => m.eneo_error_9051(), // SKILL_STILL_ATTACHED
   9053: () => m.eneo_error_9053(), // SKILL_NOT_PUBLISHED_FOR_BINDING
   9054: () => m.eneo_error_9054(), // SKILL_BLOCKED_FOR_BINDING
-  9062: () => m.eneo_error_9062() // SKILL_REMOVAL_BUSY
+  9062: () => m.eneo_error_9062(), // SKILL_REMOVAL_BUSY
+
+  // --- Widgets ---
+  9071: () => m.eneo_error_9071() // ASSISTANT_PUBLISHED_AS_WIDGET
 };
 
 /**

@@ -12,7 +12,8 @@
 <script lang="ts">
   import type { OutboundHeaderOptions } from "@eneo/eneo-js";
   import { onMount, tick, untrack } from "svelte";
-  import { ArrowLeft, LoaderCircle } from "@lucide/svelte";
+  import ArrowLeft from "@lucide/svelte/icons/arrow-left";
+  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
