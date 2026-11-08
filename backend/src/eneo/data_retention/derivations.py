@@ -17,11 +17,9 @@ from sqlalchemy.orm import aliased
 from sqlalchemy.sql.elements import ColumnElement
 
 from eneo.database.database import sessionmanager
-from eneo.database.tables.api_keys_v2_table import ApiKeysV2
 from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.retention_tables import ContentDerivations
 from eneo.database.tables.sessions_table import Sessions
-from eneo.database.tables.users_table import Users
 
 # Each feature that stores copies, as "module:function" of the function that
 # returns copied content. A test proves that each one calls
@@ -90,7 +88,6 @@ async def is_removed_copy(session: AsyncSession, copy_session_id: UUID) -> bool:
 
 async def register_derivations(
     *,
-    tenant_id: UUID,
     copy_session_id: UUID,
     source_question_ids: Collection[UUID],
 ) -> None:
@@ -98,8 +95,8 @@ async def register_derivations(
 
     Runs in its own short transaction and returns only once it committed, so
     the producer may let the content go. The copy session must already be
-    committed and belong to the tenant: it is held FOR KEY SHARE, so it cannot
-    be deleted while its edges are written. Any failure, including an unknown
+    committed: it is held FOR KEY SHARE, so it cannot be deleted while its
+    edges are written. Any failure, including an unknown
     commit outcome, raises DerivationRegistrationError; the producer then
     returns no copied content. A source removed before this commits leaves a
     dangling edge, which makes the copy invalid at once.
@@ -111,24 +108,16 @@ async def register_derivations(
         async with sessionmanager.session() as session, session.begin():
             held = await session.scalar(
                 sa.select(Sessions.id)
-                .outerjoin(Users, Sessions.user_id == Users.id)
-                .outerjoin(ApiKeysV2, Sessions.api_key_id == ApiKeysV2.id)
-                .where(
-                    Sessions.id == copy_session_id,
-                    sa.func.coalesce(Users.tenant_id, ApiKeysV2.tenant_id) == tenant_id,
-                )
-                .with_for_update(of=Sessions, key_share=True)
+                .where(Sessions.id == copy_session_id)
+                .with_for_update(key_share=True)
             )
             if held is None:
-                raise DerivationRegistrationError(
-                    "The copy session does not exist in this tenant."
-                )
+                raise DerivationRegistrationError("The copy session does not exist.")
             await session.execute(
                 insert(ContentDerivations)
                 .values(
                     [
                         {
-                            "tenant_id": tenant_id,
                             "copy_session_id": copy_session_id,
                             "source_question_id": source,
                         }

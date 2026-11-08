@@ -72,13 +72,13 @@ def test_the_check_tells_a_registering_producer_from_one_that_does_not():
     """Mutant: the detector accepts any function, so both checks pass vacuously."""
     tree = ast.parse(
         "async def copies(session):\n"
-        "    await register_derivations(tenant_id=t, copy_session_id=s,"
+        "    await register_derivations(copy_session_id=s,"
         " source_question_ids=q)\n"
         "    return content\n"
         "async def leaks(session):\n"
         "    return content\n"
         "async def by_module(session):\n"
-        "    await derivations.register_derivations(tenant_id=t,"
+        "    await derivations.register_derivations("
         " copy_session_id=s, source_question_ids=q)\n"
     )
     found = {node.name: _registers(node) for node in _functions(tree)}

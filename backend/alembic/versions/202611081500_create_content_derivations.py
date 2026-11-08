@@ -28,7 +28,6 @@ def upgrade() -> None:
             primary_key=True,
             server_default=sa.text("gen_random_uuid()"),
         ),
-        sa.Column("tenant_id", sa.Uuid(), nullable=False),
         sa.Column("copy_session_id", sa.Uuid(), nullable=False),
         sa.Column("source_question_id", sa.Uuid(), nullable=False),
         sa.Column(

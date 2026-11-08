@@ -137,7 +137,6 @@ async def test_an_invalid_copy_goes_with_its_files_session_and_edges(
         db_container, admin_user, assistant_id=copy.copy_assistant, turns=1
     )
     await register_derivations(
-        tenant_id=admin_user.tenant_id,
         copy_session_id=other_session,
         source_question_ids=[copy.copy_questions[0]],
     )
@@ -182,7 +181,6 @@ async def test_an_invalid_copy_left_empty_is_released_after_the_margin(
             )
         ).id
     await register_derivations(
-        tenant_id=admin_user.tenant_id,
         copy_session_id=empty,
         source_question_ids=[copy.source_question],
     )
@@ -218,7 +216,6 @@ async def test_a_source_removed_behind_the_cursor_is_found_on_the_next_sweep(
         db_container, admin_user, assistant_id=copy.copy_assistant, turns=1
     )
     await register_derivations(
-        tenant_id=admin_user.tenant_id,
         copy_session_id=second,
         source_question_ids=[copy.source_question],
     )
@@ -264,7 +261,6 @@ async def test_registration_and_removal_wait_on_no_lock_of_the_other(
         )
         await asyncio.wait_for(
             register_derivations(
-                tenant_id=admin_user.tenant_id,
                 copy_session_id=copy.copy_session,
                 source_question_ids=[another_source],
             ),

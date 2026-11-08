@@ -285,36 +285,28 @@ async def test_insight_reads_refuse_the_copy_after_their_access_check(
         assert copy.copy_session not in {session.id for session in sessions}
 
 
-async def test_registration_needs_a_committed_session_of_the_tenant(
+async def test_registration_needs_a_committed_session(
     db_container, admin_user: UserInDB, copy: Copy
 ):
-    """Mutants: an edge is written against an uncommitted, deleted or foreign
-    session, so a producer would release content whose provenance is lost; a
-    retry duplicates edges; the call returns before the edges are visible."""
+    """Mutants: an edge is written against an uncommitted or deleted session,
+    so a producer would release content whose provenance is lost; a retry
+    duplicates edges; the call returns before the edges are visible."""
     async with sessionmanager.session() as open_transaction, open_transaction.begin():
         uncommitted = Sessions(user_id=admin_user.id, name="not yet committed")
         open_transaction.add(uncommitted)
         await open_transaction.flush()
         with pytest.raises(DerivationRegistrationError):
             await register_derivations(
-                tenant_id=admin_user.tenant_id,
                 copy_session_id=uncommitted.id,
                 source_question_ids=[copy.source_question],
             )
         await open_transaction.rollback()
-    for session_id, tenant_id in (
-        (uuid4(), admin_user.tenant_id),
-        (copy.copy_session, uuid4()),
-    ):
-        with pytest.raises(DerivationRegistrationError):
-            await register_derivations(
-                tenant_id=tenant_id,
-                copy_session_id=session_id,
-                source_question_ids=[copy.source_question],
-            )
+    with pytest.raises(DerivationRegistrationError):
+        await register_derivations(
+            copy_session_id=uuid4(), source_question_ids=[copy.source_question]
+        )
 
     await register_derivations(
-        tenant_id=admin_user.tenant_id,
         copy_session_id=copy.copy_session,
         source_question_ids=[copy.source_question, copy.source_question],
     )

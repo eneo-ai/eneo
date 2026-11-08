@@ -91,7 +91,6 @@ async def make_copy(
         db_container, admin_user, assistant_id=copy_assistant, turns=2
     )
     await register_derivations(
-        tenant_id=admin_user.tenant_id,
         copy_session_id=copy_session,
         source_question_ids=[source_question],
     )

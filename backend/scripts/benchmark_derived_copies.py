@@ -82,8 +82,8 @@ CREATE TEMP TABLE copies AS
 SELECT s.id, row_number() OVER (ORDER BY s.created_at DESC) AS k
 FROM sessions s
 WHERE (substr(s.name, 14)::int / %(assistants)s) %% %(copy_every)s = 0;
-INSERT INTO content_derivations (tenant_id, copy_session_id, source_question_id)
-SELECT '00000000-0000-0000-0000-000000000001', c.id, p.id
+INSERT INTO content_derivations (copy_session_id, source_question_id)
+SELECT c.id, p.id
 FROM copies c
 CROSS JOIN LATERAL generate_series(
     1, greatest(1, floor(%(max_edges)s / power(c.k, 1.2)))::int) e

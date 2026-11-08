@@ -139,7 +139,6 @@ class ContentDerivations(IdMixin, CreatedAtMixin, BaseWithTableName):
     unique key is also the index the validity check and the cleanup read.
     """
 
-    tenant_id: Mapped[UUID] = mapped_column(sa.Uuid, nullable=False)
     copy_session_id: Mapped[UUID] = mapped_column(sa.Uuid, nullable=False)
     source_question_id: Mapped[UUID] = mapped_column(sa.Uuid, nullable=False)
 
