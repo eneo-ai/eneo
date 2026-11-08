@@ -310,6 +310,9 @@
         body: form
       });
       const result = deserialize(await response.text());
+      if (result.type === "failure" && result.data?.unavailable === true) {
+        federationError = m.oidc_error_login_unavailable();
+      }
       if (result.type !== "redirect") throw new Error("OIDC initiation failed");
 
       // Allow natural browser history navigation - back button returns to tenant selector
@@ -317,7 +320,7 @@
       return true;
     } catch (err) {
       console.error("Failed to initiate OIDC authentication:", err);
-      federationError = m.failed_to_start_authentication();
+      federationError ??= m.failed_to_start_authentication();
       isAwaitingLoginResponse = false;
       isInitializing = false;
       showTenantSelector = preloadedTenants.length > 0;
@@ -394,6 +397,9 @@
     }
     if (oidcErrorDetailCode === "unauthorized") {
       return m.oidc_error_unauthorized();
+    }
+    if (oidcErrorDetailCode === "login_unavailable") {
+      return m.oidc_error_login_unavailable();
     }
     return m.oidc_error_generic();
   }

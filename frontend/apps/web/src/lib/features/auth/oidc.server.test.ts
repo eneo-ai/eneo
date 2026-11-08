@@ -13,7 +13,17 @@ vi.mock("./auth.server", () => ({
   setFrontendAuthCookie: mocks.setFrontendAuthCookie
 }));
 
+import { LoginError } from "./LoginError";
 import { loginWithOidc } from "./oidc.server";
+
+function refusal(status: number, code: string, message: string) {
+  return vi.fn().mockResolvedValue(
+    new Response(JSON.stringify({ message, eneo_error_code: 9000, code }), {
+      status,
+      headers: { "Content-Type": "application/json" }
+    })
+  );
+}
 
 describe("loginWithOidc", () => {
   beforeEach(() => {
@@ -58,5 +68,41 @@ describe("loginWithOidc", () => {
     await expect(loginWithOidc("code", "state", fetchFn)).resolves.toEqual({
       frontendState: ""
     });
+  });
+
+  test("forwards the provider's iss parameter to the backend", async () => {
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ access_token: "eneo-token" }), { status: 200 })
+      );
+
+    await loginWithOidc("code", "state", fetchFn, "https://idp.example");
+
+    const [, request] = fetchFn.mock.calls[0];
+    expect(JSON.parse(request.body)).toEqual({
+      code: "code",
+      state: "state",
+      iss: "https://idp.example"
+    });
+  });
+
+  test.each([
+    [503, "oidc_login_unavailable", "LOGIN_UNAVAILABLE"],
+    [400, "oidc_transaction_invalid", "ATTEMPT_EXPIRED"],
+    [401, "oidc_response_not_verified", "UNAUTHORIZED"]
+  ])("a typed %i refusal (%s) becomes %s", async (status, code, loginErrorCode) => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const error = await loginWithOidc("code", "state", refusal(status, code, "Refused.")).catch(
+      (caught: unknown) => caught
+    );
+
+    expect(error).toBeInstanceOf(LoginError);
+    expect(error).toMatchObject({
+      code: loginErrorCode,
+      statusCode: status,
+      rawDetail: "Refused."
+    });
+    expect(mocks.setFrontendAuthCookie).not.toHaveBeenCalled();
   });
 });

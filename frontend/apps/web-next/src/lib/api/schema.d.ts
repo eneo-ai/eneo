@@ -12795,6 +12795,8 @@ export interface components {
       state: string;
       /** Code Verifier */
       code_verifier?: string | null;
+      /** Iss */
+      iss?: string | null;
     };
     /**
      * CapabilityActivationResponse
@@ -15253,6 +15255,9 @@ export interface components {
       | 9070
       | 9075
       | 9076
+      | 9077
+      | 9078
+      | 9079
       | 9080
       | 9081
       | 9090;
@@ -15478,6 +15483,10 @@ export interface components {
       allowed_domains: string[];
       /** Additional Redirect Uris */
       additional_redirect_uris: string[];
+      /** Signing Algorithms */
+      signing_algorithms?: string[] | null;
+      /** Email Verified Claims */
+      email_verified_claims?: string[] | null;
       /**
        * Configured At
        * Format: date-time
@@ -20127,6 +20136,23 @@ export interface components {
        *     ]
        */
       additional_redirect_uris?: string[] | null;
+      /**
+       * Signing Algorithms
+       * @description ID token signing algorithms to accept. Omitted: the ones the provider's discovery lists, else RS256. Symmetric algorithms and 'none' are refused.
+       * @example [
+       *       "RS256",
+       *       "ES256"
+       *     ]
+       */
+      signing_algorithms?: string[] | null;
+      /**
+       * Email Verified Claims
+       * @description Claims that say the email is verified, in order; the first one present decides. Omitted: ['email_verified', 'xms_edov'].
+       * @example [
+       *       "email_verified"
+       *     ]
+       */
+      email_verified_claims?: string[] | null;
     };
     /**
      * PendingObjectStoreDestination
@@ -21772,6 +21798,23 @@ export interface components {
        *     ]
        */
       additional_redirect_uris?: string[] | null;
+      /**
+       * Signing Algorithms
+       * @description ID token signing algorithms to accept. Omitted: the ones the provider's discovery lists, else RS256. Symmetric algorithms and 'none' are refused.
+       * @example [
+       *       "RS256",
+       *       "ES256"
+       *     ]
+       */
+      signing_algorithms?: string[] | null;
+      /**
+       * Email Verified Claims
+       * @description Claims that say the email is verified, in order; the first one present decides. Omitted: ['email_verified', 'xms_edov'].
+       * @example [
+       *       "email_verified"
+       *     ]
+       */
+      email_verified_claims?: string[] | null;
     };
     /**
      * SetFederationResponse
@@ -60811,6 +60854,13 @@ export interface operations {
         };
         content?: never;
       };
+      /** @description Sign-in store unavailable (oidc_login_unavailable) */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
     };
   };
   auth_callback_api_v1_auth_callback_post: {
@@ -60871,6 +60921,13 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
         };
+      };
+      /** @description Sign-in store unavailable (oidc_login_unavailable) */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
     };
   };

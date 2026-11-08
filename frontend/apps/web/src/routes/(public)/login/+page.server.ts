@@ -8,6 +8,7 @@ import {
   resolveSafeLoginDestination
 } from "$lib/features/auth/auth.server";
 import { loginWithEneo, type EneoLoginFailureReason } from "$lib/features/auth/eneo.server";
+import { backendErrorCode } from "$lib/features/auth/LoginError";
 import { getMobilityguardLink } from "$lib/features/auth/mobilityguard.server";
 import { getZitadelLink } from "$lib/features/auth/zitadel.server";
 import { redirect, fail, type Actions } from "@sveltejs/kit";
@@ -71,6 +72,7 @@ export const actions: Actions = {
     const attemptId = crypto.randomUUID();
     const frontendState = encodeState({ loginMethod: "oidc", next: destination, attemptId });
     let authorizationUrl: string;
+    let unavailable = false;
     try {
       const backendUrl = getBackendUrl();
       if (!backendUrl) throw new Error("Missing backend URL");
@@ -78,7 +80,11 @@ export const actions: Actions = {
       initiateUrl.searchParams.set("state", frontendState);
       if (tenant !== null) initiateUrl.searchParams.set("tenant", tenant);
       const response = await event.fetch(initiateUrl);
-      if (!response.ok) throw new Error(`OIDC initiate returned HTTP ${response.status}`);
+      if (!response.ok) {
+        const body: unknown = await response.json().catch(() => null);
+        unavailable = backendErrorCode(body) === "oidc_login_unavailable";
+        throw new Error(`OIDC initiate returned HTTP ${response.status}`);
+      }
 
       const responseData: unknown = await response.json();
       if (
@@ -116,7 +122,7 @@ export const actions: Actions = {
       console.error("[OIDC] Failed to initiate authentication", {
         reason: error instanceof Error ? error.message : "Unknown error"
       });
-      return fail(503, { oidcFailed: true });
+      return fail(503, { oidcFailed: true, unavailable });
     }
 
     redirect(303, authorizationUrl);

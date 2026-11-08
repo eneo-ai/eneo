@@ -362,7 +362,7 @@ describe("login resume", () => {
       status: 302,
       location: DEFAULT_LANDING_PAGE
     });
-    expect(mocks.loginWithOidc).toHaveBeenCalledWith("new-code", result.state, event.fetch);
+    expect(mocks.loginWithOidc).toHaveBeenCalledWith("new-code", result.state, event.fetch, null);
   });
 
   test.each(["mismatch", "no-code", "no-state", "provider-error"])(
@@ -428,6 +428,25 @@ describe("login resume", () => {
       expect(event.cookies.set).not.toHaveBeenCalled();
     }
   );
+
+  test("an initiation refused because sign-in is unavailable says so", async () => {
+    const event = loginEvent();
+    event.fetch.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          message: "Unavailable.",
+          eneo_error_code: 9077,
+          code: "oidc_login_unavailable"
+        }),
+        { status: 503 }
+      )
+    );
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const result = await actions.oidc!(event as never);
+
+    expect(result).toMatchObject({ status: 503, data: { oidcFailed: true, unavailable: true } });
+  });
 
   test("rejects an invalid tenant without contacting the backend or replacing an attempt", async () => {
     const form = new FormData();

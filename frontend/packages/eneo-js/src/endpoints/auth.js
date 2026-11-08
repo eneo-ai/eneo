@@ -37,10 +37,11 @@ export function initAuth(client) {
      * @param {Object} params
      * @param {string} params.code - Authorization code from IdP
      * @param {string} params.state - State parameter for CSRF protection
-     * @param {string} [params.codeVerifier] - PKCE code verifier (if applicable)
+     * @param {string} [params.codeVerifier] - Ignored by the backend, which keeps the PKCE verifier itself
+     * @param {string} [params.iss] - The provider's `iss` redirect parameter (RFC 9207), when it sent one
      * @returns {Promise<import("../types/resources").AccessTokenResponse>}
      */
-    handleAuthCallback: async ({ code, state, codeVerifier }) => {
+    handleAuthCallback: async ({ code, state, codeVerifier, iss }) => {
       /** @type {import("../types/resources").AccessTokenResponse} */
       // @ts-ignore - response type is unknown in schema
       const res = await client.fetch("/api/v1/auth/callback", {
@@ -49,7 +50,8 @@ export function initAuth(client) {
           "application/json": {
             code,
             state,
-            ...(codeVerifier && { code_verifier: codeVerifier })
+            ...(codeVerifier && { code_verifier: codeVerifier }),
+            ...(iss && { iss })
           }
         }
       });

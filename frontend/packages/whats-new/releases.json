@@ -60,6 +60,19 @@
           }
         },
         {
+          "id": "sso-sign-in-refusal-reasons",
+          "type": "improved",
+          "area": "platform",
+          "title": {
+            "en": "See why signing in through your organisation failed",
+            "sv": "Se varför inloggningen via din organisation misslyckades"
+          },
+          "body": {
+            "en": "When signing in through your organisation does not work, the login page now tells you why: the attempt has expired and must be started again, sign-in is temporarily unavailable, or the sign-in could not be verified. Before, most of these cases showed the same general message.",
+            "sv": "När inloggningen via din organisation inte fungerar visar inloggningssidan nu varför: försöket har gått ut och behöver startas om, inloggningen är tillfälligt otillgänglig eller så kunde inloggningen inte verifieras. Tidigare visades oftast samma allmänna meddelande."
+          }
+        },
+        {
           "id": "sharepoint-credential-health",
           "type": "new",
           "area": "admin",

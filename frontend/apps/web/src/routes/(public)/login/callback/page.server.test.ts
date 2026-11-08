@@ -20,6 +20,7 @@ vi.mock("$lib/features/auth/zitadel.server", () => ({
   loginWithZitadel: mocks.loginWithZitadel
 }));
 
+import { LoginError } from "$lib/features/auth/LoginError";
 import { load as authCallbackLoad } from "../../auth/callback/+page.server";
 import { load as loginCallbackLoad } from "./+page.server";
 import { DEFAULT_LANDING_PAGE } from "$lib/core/constants";
@@ -95,7 +96,8 @@ describe("generic OIDC browser-bound callback", () => {
     expect(mocks.loginWithOidc).toHaveBeenCalledWith(
       "authorization-code",
       signedState,
-      expect.any(Function)
+      expect.any(Function),
+      null
     );
     expect(cookies.delete).toHaveBeenCalledWith(RESUME_COOKIE, { path: "/" });
   });
@@ -275,5 +277,55 @@ describe("generic OIDC browser-bound callback", () => {
     );
     expect(location.pathname).toBe("/login/failed");
     expect(location.searchParams.get("next")).toBe(destination);
+  });
+
+  test("forwards the provider's iss parameter with the code", async () => {
+    const state = frontendState(null);
+    mocks.loginWithOidc.mockResolvedValue({ frontendState: state });
+
+    await expect(
+      loginCallbackLoad(
+        callbackEvent(
+          `/login/callback?code=authorization-code&state=${callbackState(state)}&iss=${encodeURIComponent("https://idp.example")}`,
+          cookieJar(null)
+        ) as never
+      )
+    ).rejects.toMatchObject({ status: 302 });
+
+    expect(mocks.loginWithOidc).toHaveBeenCalledWith(
+      "authorization-code",
+      callbackState(state),
+      expect.any(Function),
+      "https://idp.example"
+    );
+  });
+
+  test.each([
+    ["LOGIN_UNAVAILABLE", "oidc_callback_failed", "login_unavailable"],
+    ["ATTEMPT_EXPIRED", "oidc_attempt_rejected", null]
+  ] as const)("a %s refusal shows %s on the login page", async (code, message, detailCode) => {
+    const state = frontendState(null);
+    mocks.loginWithOidc.mockRejectedValue(new LoginError("oidc", code));
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    let redirectError: unknown;
+    try {
+      await loginCallbackLoad(
+        callbackEvent(
+          `/login/callback?code=authorization-code&state=${callbackState(state)}`,
+          cookieJar(null)
+        ) as never
+      );
+    } catch (caught) {
+      redirectError = caught;
+    }
+
+    const location = new URL(
+      (redirectError as { location: string }).location,
+      "https://eneo.example"
+    );
+    expect(location.pathname).toBe("/login");
+    expect(location.searchParams.get("message")).toBe(message);
+    expect(location.searchParams.get("detailCode")).toBe(detailCode);
   });
 });
