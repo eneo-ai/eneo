@@ -67,8 +67,8 @@ class JWTCreds(BaseModel):
     sub: EmailStr
     username: Optional[str] = None
     # The server-side browser session (eneo.authentication.
-    # browser_session_service). Only a browser sign-in adds it to a token, so
-    # minting never dumps it. A present claim is a session id: null or any
+    # browser_session_service). Only starting a session adds it to a token,
+    # so minting never dumps it. A present claim is a session id: null or any
     # other value is refused, never read as a token without one.
     sid: Optional[str] = Field(
         default=None, exclude=True, strict=True, pattern=SESSION_ID_PATTERN

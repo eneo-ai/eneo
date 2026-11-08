@@ -130,6 +130,14 @@ class AuthServiceStub:
         return "access-token"
 
 
+class _SessionsHandBack:
+    """The callback route starts a browser session for the token it hands
+    out; these tests check the sign-in, so the token comes back unchanged."""
+
+    async def start(self, access_token: str) -> str:
+        return access_token
+
+
 class MockContainer:
     def __init__(
         self,
@@ -145,6 +153,9 @@ class MockContainer:
         self._auth_service = auth_service
         self._redis_client = redis_client
         self._encryption_service = encryption_service
+
+    def browser_session_service(self):
+        return _SessionsHandBack()
 
     def tenant_repo(self):
         return self._tenant_repo
@@ -828,6 +839,9 @@ class MockContainerForJIT:
         self._encryption_service = encryption_service
         self._audit_service = audit_service
         self._allowed_origin_repo = allowed_origin_repo
+
+    def browser_session_service(self):
+        return _SessionsHandBack()
 
     def tenant_repo(self):
         return self._tenant_repo

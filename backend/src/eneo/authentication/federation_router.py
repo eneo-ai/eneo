@@ -898,10 +898,22 @@ async def initiate_federated_sign_in(
 )
 async def auth_callback(
     callback: CallbackRequest,
-    container: Annotated[Container, Depends(get_container())],
+    # The session (and an account the sign-in created) commits before the
+    # token leaves, so its first request is admitted.
+    container: Annotated[
+        Container, Depends(get_container(transaction_scope="function"))
+    ],
 ) -> AccessTokenResponse:
     """Handle the OIDC callback after the user authenticated with the IdP."""
-    return await federated_sign_in(callback, container, channel="api")
+    signed_in = await federated_sign_in(callback, container, channel="api")
+    # The token names its session, so signing out (POST /users/logout/)
+    # ends every copy of it.
+    return AccessTokenResponse(
+        access_token=await container.browser_session_service().start(
+            signed_in["access_token"]
+        ),
+        frontend_state=signed_in["frontend_state"],
+    )
 
 
 async def federated_sign_in(

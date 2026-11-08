@@ -296,6 +296,8 @@ async def test_valid_idp_token_resolves_correct_user(setup):
 
     assert user.id == setup.user.id
     assert user.email == "user@example.com"
+    # A provider's token authenticates on its own; it starts no session.
+    assert user.browser_session is None
 
 
 @pytest.mark.asyncio

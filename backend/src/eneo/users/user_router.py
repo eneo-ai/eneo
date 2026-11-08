@@ -5,6 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.security import OAuth2PasswordRequestForm
+from fastapi.security.utils import get_authorization_scheme_param
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -294,15 +295,57 @@ async def login_with_password(
 async def user_login_with_email_and_password(
     request: Request,
     form_data: Annotated[OAuth2PasswordRequestForm, Depends(OAuth2PasswordRequestForm)],
-    container: Annotated[Container, Depends(get_container())],
+    # The session commits before the token leaves, so its first request is
+    # admitted.
+    container: Annotated[
+        Container, Depends(get_container(transaction_scope="function"))
+    ],
 ) -> AccessToken:
     """OAuth2 Login with comprehensive error handling and logging"""
-    return await login_with_password(
+    token = await login_with_password(
         request=request,
         email=form_data.username,
         password=form_data.password,
         container=container,
     )
+    # The token names its session, so signing out (POST /users/logout/)
+    # ends every copy of it.
+    return AccessToken(
+        access_token=await container.browser_session_service().start(
+            token.access_token
+        ),
+        token_type=token.token_type,
+    )
+
+
+@router.post(
+    "/logout/",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+    response_model=None,
+    name="Sign out",
+    description=(
+        "End the Eneo session the Bearer token names: a copy of the token "
+        "stops working at once. A token that names no session, or is not "
+        "Eneo's, has none to end and also answers 204. When the session cannot "
+        "be ended, 503 `sign_out_unavailable`: the token still works; retry."
+    ),
+    responses=responses.get_responses([503]),
+)
+@endpoint_access(
+    authentication=Authentication.PUBLIC,
+    authorization=Authorization.PUBLIC,
+    reason="Sign-out must also end a session whose token no longer authenticates (expired, restricted account); it reads only the Authorization header, never a cookie, so another site cannot sign a browser out.",
+)
+async def sign_out(
+    request: Request,
+    # The deletion commits before the response says signed out.
+    container: Annotated[Container, Depends(get_container(with_transaction=False))],
+) -> Response:
+    scheme, token = get_authorization_scheme_param(request.headers.get("Authorization"))
+    if scheme.lower() == "bearer" and token:
+        await container.browser_session_service().revoke(token)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get(

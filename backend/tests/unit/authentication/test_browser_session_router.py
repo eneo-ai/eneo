@@ -76,6 +76,7 @@ from tests.unit.test_endpoint_access import make_user
 SESSION_LOGIN = "/api/v1/auth/session/password/"
 TOKEN_LOGIN = "/api/v1/users/login/token/"
 LOGOUT = "/api/v1/auth/session/logout/"
+BEARER_LOGOUT = "/api/v1/users/logout/"
 PROBE = "/api/v1/auth/session/"
 EXTEND = "/api/v1/auth/session/extend/"
 EXPIRES_IN = "Eneo-Session-Expires-In"
@@ -173,7 +174,7 @@ def endpoints(
     app.dependency_overrides[get_session] = session
     app.dependency_overrides[get_session_with_transaction] = session
     for route in endpoint_routes(app.routes):
-        if route.path in (SESSION_LOGIN, TOKEN_LOGIN, LOGOUT):
+        if route.path in (SESSION_LOGIN, TOKEN_LOGIN, LOGOUT, BEARER_LOGOUT):
             assert route.dependant is not None
             [container] = [
                 dependency
@@ -211,7 +212,7 @@ def set_cookies(response: Response) -> list[str]:
 
 
 def test_session_endpoints_are_declared():
-    for endpoint in (create_browser_session, end_browser_session):
+    for endpoint in (create_browser_session, end_browser_session, user_router.sign_out):
         policy = access_for(endpoint)
         assert policy is not None
         assert policy.authentication is Authentication.PUBLIC
@@ -512,6 +513,79 @@ def test_logout_clears_what_the_page_expects_or_cannot_use(
         endpoints.sessions.revoke.assert_not_awaited()
     else:
         endpoints.sessions.revoke.assert_awaited_once_with(token)
+
+
+def test_token_login_hands_out_the_session_it_starts(endpoints: Endpoints):
+    token = mint()
+    endpoints.login.return_value = AccessToken(access_token=token, token_type="bearer")
+
+    response = endpoints.client.post(TOKEN_LOGIN, data=FORM)
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "access_token": with_session(token),
+        "token_type": "bearer",
+    }
+    endpoints.sessions.start.assert_awaited_once_with(token)
+    assert set_cookies(response) == []
+
+
+@pytest.mark.parametrize("enabled", [True, False], ids=["cookie on", "cookie off"])
+def test_bearer_sign_out_ends_the_session_its_token_names(
+    endpoints: Endpoints, browser_settings: Settings, enabled: bool
+):
+    # A server holding the token signs out with it; the cookie setting is
+    # about the cookie only.
+    set_settings(
+        browser_settings.model_copy(update={"browser_session_enabled": enabled})
+    )
+    token = with_session(mint())
+
+    response = endpoints.client.post(
+        BEARER_LOGOUT, headers={"Authorization": f"Bearer {token}"}
+    )
+
+    assert response.status_code == 204, response.text
+    assert response.content == b""
+    assert set_cookies(response) == []
+    endpoints.sessions.revoke.assert_awaited_once_with(token)
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {},
+        {"Authorization": "Basic dXNlcjpwYXNz"},
+        {"Authorization": "Bearer"},
+        {"Cookie": f"{SESSION}={with_session(mint())}"},
+    ],
+    ids=["no credential", "another scheme", "empty bearer", "cookie only"],
+)
+def test_bearer_sign_out_without_a_bearer_token_ends_nothing(
+    endpoints: Endpoints, headers: dict[str, str]
+):
+    # Only the Authorization header names the session: a cookie is never
+    # read, so another site's form cannot sign a browser out.
+    response = endpoints.client.post(BEARER_LOGOUT, headers=SAME_ORIGIN | headers)
+
+    assert response.status_code == 204, response.text
+    assert set_cookies(response) == []
+    endpoints.sessions.revoke.assert_not_awaited()
+
+
+def test_bearer_sign_out_that_cannot_end_the_session_answers_503(
+    endpoints: Endpoints,
+):
+    endpoints.sessions.revoke.side_effect = HTTPException(
+        503, detail={"code": "sign_out_unavailable", "message": "Try again."}
+    )
+
+    response = endpoints.client.post(
+        BEARER_LOGOUT, headers={"Authorization": f"Bearer {with_session(mint())}"}
+    )
+
+    assert response.status_code == 503
+    assert response.json()["code"] == "sign_out_unavailable"
 
 
 @pytest.mark.parametrize("path", [SESSION_LOGIN, LOGOUT, PROBE])

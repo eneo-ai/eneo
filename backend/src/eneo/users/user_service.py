@@ -8,7 +8,7 @@ from uuid import UUID
 import idna
 import sqlalchemy as sa
 from fastapi import HTTPException
-from starlette.requests import Request
+from starlette.requests import HTTPConnection, Request
 
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.application.audit_service import AuditService
@@ -1873,14 +1873,14 @@ class UserService:
         return user_in_db
 
     async def authenticate_payload(
-        self, payload: JWTPayload, request: Request | None = None
+        self, payload: JWTPayload, request: HTTPConnection | None = None
     ) -> "UserInDB":
         """``authenticate`` for a local token verified earlier.
 
         A response that stays open after its request authenticated (the
-        job-event stream) asks again with the token's claims, so what refuses
-        a new request ends it too: its browser session ended, the user's
-        credentials were invalidated (a password change, signing out
+        job-event stream, a socket) asks again with the token's claims, so
+        what refuses a new request ends it too: its browser session ended, the
+        user's credentials were invalidated (a password change, signing out
         everywhere), or the account or tenant is restricted.
         """
         return await self._admit_user(
@@ -1888,7 +1888,7 @@ class UserService:
         )
 
     async def _admit_user(
-        self, user_in_db: "UserInDB | None", request: Request | None
+        self, user_in_db: "UserInDB | None", request: HTTPConnection | None
     ) -> "UserInDB":
         if user_in_db is None:
             raise AuthenticationException("No authenticated user.")

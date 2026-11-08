@@ -207,8 +207,13 @@ async def test_a_domain_outside_the_allowlist_is_refused(monkeypatch):
     assert login.users._created_user is None
 
 
-async def test_frontend_state_comes_back_from_the_callback(monkeypatch):
+async def test_the_callback_route_hands_out_a_session_and_the_frontend_state(
+    monkeypatch,
+):
     login = Login(monkeypatch, FakeOidcProvider(), existing_email="user@example.com")
+    sessions = AsyncMock(spec=BrowserSessionService)
+    sessions.start.side_effect = lambda issued: f"{issued}.session"
+    login.container.browser_session_service = lambda: sessions
 
     started = await login.initiate(frontend_state='{"next":"/spaces"}')
     answer = login.provider.authorize(started.authorization_url)
@@ -216,7 +221,12 @@ async def test_frontend_state_comes_back_from_the_callback(monkeypatch):
         CallbackRequest(code=answer.code, state=started.state), login.container
     )
 
-    assert result["frontend_state"] == '{"next":"/spaces"}'
+    [(issued,), _] = sessions.start.await_args
+    assert login.signed_in_user({"access_token": issued})
+    assert result == {
+        "access_token": f"{issued}.session",
+        "frontend_state": '{"next":"/spaces"}',
+    }
 
 
 async def test_the_authorization_request_keeps_its_parameters(monkeypatch):

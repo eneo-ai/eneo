@@ -5,8 +5,10 @@ and the row's stable, non-secret id as ``session_ref`` (tokens issued before
 rows had one carry the sid alone). Canonical authentication (``UserService``)
 admits such a token, as the cookie or as Bearer, only while the row exists,
 matches the token's user, tenant and ``session_ref`` and is unexpired.
-Sign-out deletes the row, so a copied token stops working at once. Tokens
-without ``sid`` (the token login, API, module and MCP tokens) are not browser
+Sign-out deletes the row, so a copied token stops working at once. Every
+sign-in a person makes starts one (the cookie and token logins, password or
+OIDC). Tokens without ``sid`` (API, module and MCP tokens, the provider-bound
+login's, and tokens issued before sign-ins started sessions) are not browser
 sessions and keep their own lifetime.
 
 The rows live in PostgreSQL, not Redis: a revoked session must stay revoked
@@ -19,10 +21,9 @@ renew itself.
 
 Admission is checked when a request authenticates. Finite HTTP and SSE work
 admitted before sign-out may still finish. The job-event stream
-(``GET /jobs/events/``) stays open until the client leaves, so while it serves
-a browser session it re-runs authentication (``SessionWatch``) and ends at the
-token's expiry. A WebSocket keeps its user for as long as it is open, so a
-browser session's token cannot open one.
+(``GET /jobs/events/``) and the socket (``/ws``) stay open until the client
+leaves, so while they serve a browser session they re-run authentication
+(``SessionWatch``) and end at the token's expiry; the socket closes with 1008.
 """
 
 import asyncio
@@ -35,7 +36,8 @@ from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
 from dependency_injector import providers
-from fastapi import HTTPException, Request, status
+from fastapi import HTTPException, status
+from starlette.requests import HTTPConnection
 
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
@@ -346,9 +348,9 @@ class SessionWatch:
     serves past its own ``exp``.
     """
 
-    def __init__(self, payload: JWTPayload, request: Request):
+    def __init__(self, payload: JWTPayload, connection: HTTPConnection):
         self._payload = payload
-        self._request = request
+        self._connection = connection
         self._admitted = True
         # The request has just authenticated.
         self._next_check = time.monotonic() + RECHECK_SECONDS
@@ -370,7 +372,7 @@ class SessionWatch:
             async with sessionmanager.session() as session, _store_transaction(session):
                 container = request_container(session=providers.Object(session))
                 await container.user_service().authenticate_payload(
-                    self._payload, self._request
+                    self._payload, self._connection
                 )
             return True
         except AuthenticationException:

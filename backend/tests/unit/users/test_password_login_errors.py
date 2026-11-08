@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from eneo.authentication.auth_models import AccessToken
 from eneo.authentication.auth_service import AuthService
+from eneo.authentication.browser_session_service import BrowserSessionService
 from eneo.authentication.login_attempts import LoginAttempt
 from eneo.main.container.container import Container
 from eneo.main.exceptions import (
@@ -33,6 +34,8 @@ LOGIN_PATH = "/api/v1/users/login/token/"
 EMAIL = "login@example.com"
 PASSWORD = "LoginCredential-SENTINEL-123!"
 TOKEN = AccessToken(access_token="issued-token", token_type="bearer")
+# What the session store returns for TOKEN: the token the login hands out.
+SESSION_TOKEN = AccessToken(access_token="session-token", token_type="bearer")
 PEER_IP = "10.0.0.1"
 
 
@@ -42,6 +45,7 @@ class LoginEndpoint:
     service: AsyncMock
     count: AsyncMock
     clear: AsyncMock
+    sessions: AsyncMock
 
 
 @pytest.fixture
@@ -55,9 +59,12 @@ def login_endpoint(
     monkeypatch.setattr(user_router, "count_login_attempt", count)
     monkeypatch.setattr(user_router, "clear_login_attempts", clear)
 
+    sessions = AsyncMock(spec=BrowserSessionService)
+    sessions.start.return_value = SESSION_TOKEN.access_token
     container = Container(
         user_service=providers.Object(service),
         redis_client=providers.Object(object()),
+        browser_session_service=providers.Object(sessions),
     )
     app = get_application()
     route = next(
@@ -79,7 +86,7 @@ def login_endpoint(
     # A real peer address: the request context keeps only valid IPs.
     client = TestClient(app, client=(PEER_IP, 50000))
     try:
-        yield LoginEndpoint(client, service, count, clear)
+        yield LoginEndpoint(client, service, count, clear, sessions)
     finally:
         client.close()
         user_router.logger.removeHandler(caplog.handler)
@@ -461,7 +468,9 @@ def test_success_preserves_the_token_and_recovers_from_limiter_outages(
     )
 
     assert response.status_code == 200
-    assert response.json() == TOKEN.model_dump()
+    # The issued token, carrying the session the login started for it.
+    assert response.json() == SESSION_TOKEN.model_dump()
+    login_endpoint.sessions.start.assert_awaited_once_with(TOKEN.access_token)
     assert PASSWORD not in structured_logs(caplog)
     if limiter_failure == "count":
         login_endpoint.clear.assert_not_awaited()
@@ -496,7 +505,7 @@ def test_existing_password_length_boundaries_still_reach_authentication(
     )
 
     assert response.status_code == 200
-    assert response.json() == TOKEN.model_dump()
+    assert response.json() == SESSION_TOKEN.model_dump()
 
 
 def test_client_sent_forwarded_for_never_reaches_the_security_logs(

@@ -976,6 +976,11 @@ MUTATING_ALLOWLIST_PREFIXES: dict[str, str] = {
 MUTATING_ALLOWLIST_EXACT: dict[tuple[str, str], str] = {
     (
         "POST",
+        "/users/logout/",
+    ): "Public sign-out: ends only the session the Bearer token it verifies names; "
+    "an API key names no session, so it has nothing to end.",
+    (
+        "POST",
         "/icons/",
     ): "Tenant-wide icon upload; service layer enforces tenant scope via user.tenant_id "
     "and require_user_for_creation refuses service keys. "

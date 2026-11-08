@@ -533,6 +533,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/users/logout/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Sign Out
+     * @description End the Eneo session the Bearer token names: a copy of the token stops working at once. A token that names no session, or is not Eneo's, has none to end and also answers 204. When the session cannot be ended, 503 `sign_out_unavailable`: the token still works; retry.
+     */
+    post: operations["Sign_out_api_v1_users_logout__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/users/": {
     parameters: {
       query?: never;
@@ -29691,6 +29711,33 @@ export interface operations {
       };
       /** @description Internal Server Error */
       500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  Sign_out_api_v1_users_logout__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Service Unavailable */
+      503: {
         headers: {
           [name: string]: unknown;
         };
