@@ -11,6 +11,6 @@ EXPECTED_CATEGORY_COUNTS: dict[str, int] = {
     "security_events": 13,
     "file_operations": 8,
     "integration_events": 24,
-    "system_actions": 3,
+    "system_actions": 6,
     "audit_access": 3,  # Includes AUDIT_SESSION_CREATED
 }

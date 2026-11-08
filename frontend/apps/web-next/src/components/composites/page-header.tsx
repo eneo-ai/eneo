@@ -33,6 +33,11 @@ export type PageHeaderProps = {
   /** One-line summary under the title. */
   description?: React.ReactNode;
   /**
+   * The summary wraps to three lines above a list on a phone: there it stays
+   * for screen readers only.
+   */
+  isDescriptionHiddenOnPhone?: boolean;
+  /**
    * Ancestor trail above the title, root first. Crumbs with `href` are links,
    * crumbs without one are plain labels; only a crumb with `current` is
    * announced as the current page. Skip on top-level pages.
@@ -80,6 +85,7 @@ export function PageHeader({
   headingId,
   headingRef,
   description,
+  isDescriptionHiddenOnPhone = false,
   breadcrumbs,
   actions,
   children,
@@ -137,7 +143,12 @@ export function PageHeader({
             {title}
           </Heading>
           {description ? (
-            <Text as="p" type="body" color="secondary" className="max-w-prose">
+            <Text
+              as="p"
+              type="body"
+              color="secondary"
+              className={cn("max-w-prose", isDescriptionHiddenOnPhone && "phone:sr-only")}
+            >
               {description}
             </Text>
           ) : null}

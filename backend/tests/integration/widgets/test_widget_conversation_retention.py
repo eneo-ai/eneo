@@ -5,8 +5,8 @@ from uuid import UUID, uuid4
 
 import sqlalchemy as sa
 
-from eneo.data_retention.infrastructure.data_retention_service import (
-    DataRetentionService,
+from eneo.data_retention.application.empty_session_retention_task import (
+    EMPTY_SESSIONS_TASK,
 )
 from eneo.database.database import sessionmanager
 from eneo.database.tables.assistant_table import Assistants
@@ -18,6 +18,7 @@ from eneo.database.tables.widgets_table import Widgets
 from eneo.widgets.application.widget_retention import purge_expired_widget_sessions
 from eneo.widgets.domain.widget import generate_public_id
 from eneo.widgets.infrastructure.widget_repo_impl import WidgetRepoImpl
+from tests.integration.data_retention.retention_support import run_registered_retention
 
 
 def _days_ago(days: int) -> datetime:
@@ -154,14 +155,10 @@ async def test_only_the_widget_job_deletes_widget_conversations_within_the_polic
     widget_conversations = [within_minimum, past_minimum, past_maximum]
     everything = [internal, *widget_conversations, without_questions]
 
-    async with sessionmanager.session() as session, session.begin():
-        retention = DataRetentionService(session)
-        assert (
-            await retention.get_affected_questions_count_for_assistant(assistant_id, 1)
-            == 1
-        )
-        assert await retention.delete_old_questions() == 1
-        await retention.delete_old_sessions()
+    async with sessionmanager.session() as session:
+        history = await run_registered_retention(session)
+        assert history.counts["questions.questions_deleted"] == 1
+        await run_registered_retention(session, task_name=EMPTY_SESSIONS_TASK)
 
     assert await _question_sessions(everything) == set(widget_conversations)
     assert await _existing(everything) == {*widget_conversations, without_questions}

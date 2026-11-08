@@ -51,6 +51,167 @@ test.describe("an editor on a phone (decision 21)", () => {
     await expect(prompt).toBeHidden();
   });
 
+  test("keeps the index's rows still when a save lands on it", async ({ page }) => {
+    const { editor } = await assistantEditor(page);
+    await page.goto(`${editor}?section=instructions`);
+    let land = () => {};
+    const held = new Promise<void>((resolve) => (land = resolve));
+    await page.route(/\/api\/v1\/assistants\/[^/]+\/$/, async (route) => {
+      if (route.request().method() === "POST") await held;
+      await route.fallback();
+    });
+    await page.locator("#assistant-prompt").fill("Svara kort.");
+    await page
+      .locator("[data-phone-page-bar]")
+      .getByRole("link", { name: /^Tillbaka till / })
+      .click();
+
+    const row = page.getByRole("navigation", { name: "Avsnitt" }).getByRole("link", {
+      name: /^Instruktioner/
+    });
+    await expect(row).toBeVisible();
+    const strip = page.locator("[data-editor-strip]").first();
+    await expect(strip).not.toBeEmpty();
+    const before = (await row.boundingBox())!.y;
+    land();
+    await expect(strip).toBeEmpty();
+    expect((await row.boundingBox())!.y).toBe(before);
+  });
+
+  test("the save state shows once on each side of the width where it moves", async ({ page }) => {
+    const { editor } = await assistantEditor(page);
+    await page.goto(`${editor}?section=instructions`);
+    await page.route(/\/api\/v1\/assistants\/[^/]+\/$/, async (route) => {
+      if (route.request().method() !== "POST") await route.fallback();
+    });
+    await page.locator("#assistant-prompt").fill("Svara kort.");
+    await page
+      .locator("[data-phone-page-bar]")
+      .getByRole("link", { name: /^Tillbaka till / })
+      .click();
+    const status = page.getByRole("main").getByText("Sparar…").filter({ visible: true });
+    // 390 px is 19.5 rem at 125% and 19.3 at 126%, then 18.8 at 133%, under the 19 rem it moves at.
+    for (const size of [100, 125, 126, 133, 150]) {
+      await page.evaluate(
+        (percent) =>
+          document.documentElement.style.setProperty("font-size", `${percent}%`, "important"),
+        size
+      );
+      await expect(status).toHaveCount(1);
+    }
+  });
+
+  test("at large text the save state leaves the bar, and the rows stay still", async ({ page }) => {
+    const { editor } = await assistantEditor(page);
+    await page.goto(`${editor}?section=instructions`);
+    let land = () => {};
+    const held = new Promise<void>((resolve) => (land = resolve));
+    await page.route(/\/api\/v1\/assistants\/[^/]+\/$/, async (route) => {
+      if (route.request().method() === "POST") await held;
+      await route.fallback();
+    });
+    await page.locator("#assistant-prompt").fill("Svara kort.");
+    await page
+      .locator("[data-phone-page-bar]")
+      .getByRole("link", { name: /^Tillbaka till / })
+      .click();
+    await page.evaluate(() =>
+      document.documentElement.style.setProperty("font-size", "200%", "important")
+    );
+
+    const row = page.getByRole("navigation", { name: "Avsnitt" }).getByRole("link", {
+      name: /^Instruktioner/
+    });
+    const status = page.getByRole("main").getByText("Sparar…").filter({ visible: true });
+    await expect(status).toBeVisible();
+    expect(
+      await page
+        .locator("main#main-content")
+        .evaluate((main) => main.scrollWidth - main.clientWidth)
+    ).toBeLessThanOrEqual(0);
+    const before = (await row.boundingBox())!.y;
+    land();
+    await expect(status).toBeHidden();
+    expect((await row.boundingBox())!.y).toBe(before);
+  });
+
+  test("a section's failed save stays in reach at every text size", async ({ page }) => {
+    const { editor } = await assistantEditor(page);
+    await page.goto(`${editor}?section=instructions`);
+    await page.route(/\/api\/v1\/assistants\/[^/]+\/$/, async (route) => {
+      if (route.request().method() === "POST") await route.fulfill({ status: 500, json: {} });
+      else await route.fallback();
+    });
+    await page.locator("#assistant-prompt").fill("Svara kort.");
+    await page.locator("#assistant-prompt").blur();
+
+    const failed = page
+      .getByRole("main")
+      .getByRole("link", { name: "Kunde inte spara" })
+      .filter({ visible: true });
+    await expect(failed).toHaveCount(1);
+    const main = page.locator("main#main-content");
+    for (const width of [390, 320]) {
+      await page.setViewportSize({ width, height: 844 });
+      for (const size of [100, 125, 150, 175, 200]) {
+        await page.evaluate(
+          (percent) =>
+            document.documentElement.style.setProperty("font-size", `${percent}%`, "important"),
+          size
+        );
+        await expect(failed).toHaveCount(1);
+        expect(await main.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0);
+      }
+    }
+
+    const field = await failed.getAttribute("href");
+    await failed.click();
+    await expect(page.locator(field!)).toBeFocused();
+  });
+
+  test("a press on a failed save reaches the field while it saves again", async ({ page }) => {
+    const { editor } = await assistantEditor(page);
+    await page.goto(`${editor}?section=instructions`);
+    const saves = /\/api\/v1\/assistants\/[^/]+\/$/;
+    let held: Promise<void> = Promise.resolve();
+    let release = () => {};
+    const holdNextSave = () => {
+      held = new Promise((resolve) => (release = resolve));
+    };
+    await page.route(saves, async (route) => {
+      if (route.request().method() !== "POST") return route.fallback();
+      await held;
+      await route.fulfill({ status: 500, json: {} });
+    });
+    const field = page.locator("#assistant-prompt");
+    await field.fill("Svara kort.");
+    await field.blur();
+    const failed = page
+      .getByRole("main")
+      .getByRole("link", { name: "Kunde inte spara" })
+      .filter({ visible: true });
+    await expect(failed).toHaveCount(1);
+
+    // The press takes focus from the field, which saves again under the finger.
+    await field.focus();
+    holdNextSave();
+    const retry = page.waitForRequest((r) => saves.test(r.url()) && r.method() === "POST");
+    const box = (await failed.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await retry;
+    await page.mouse.up();
+    await expect(field).toBeFocused();
+    release();
+    await expect(failed).toHaveCount(1);
+
+    await field.focus();
+    holdNextSave();
+    await failed.tap();
+    await expect(field).toBeFocused();
+    release();
+  });
+
   test("opens a section from its address, after a reload too", async ({ page }) => {
     const { editor } = await assistantEditor(page);
     await page.goto(`${editor}?section=ai`);

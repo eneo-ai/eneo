@@ -18,7 +18,11 @@ function DashboardPage() {
   const t = useTranslations();
   return (
     <PageFrame className="gap-6">
-      <PageHeader title={t("assistants")} description={t("shell_catalog_description")} />
+      <PageHeader
+        title={t("assistants")}
+        description={t("shell_catalog_description")}
+        isDescriptionHiddenOnPhone
+      />
       <DashboardList />
     </PageFrame>
   );

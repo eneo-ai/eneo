@@ -248,7 +248,7 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="dialog-header"
-      className={cn("flex flex-col gap-2 text-center sm:text-start", className)}
+      className={cn("flex flex-col gap-2 text-start", className)}
       {...props}
     />
   );
@@ -264,8 +264,9 @@ function DialogFooter({
   return (
     <div
       data-slot="dialog-footer"
-      // Stacked below sm in DOM order: focus order follows the visual order.
-      className={cn("flex flex-col gap-2 sm:flex-row sm:justify-end", className)}
+      // Below sm the buttons share a row while their labels fit, as DockedActions' do, and wrap
+      // in DOM order at larger text: focus order follows the visual order.
+      className={cn("flex flex-wrap justify-end gap-2 max-sm:[&>*]:flex-[1_1_auto]", className)}
       {...props}
     >
       {children}

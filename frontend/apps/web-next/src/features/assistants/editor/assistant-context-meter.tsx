@@ -7,6 +7,7 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { useAnnounceChange } from "@/lib/hooks/use-announce-change";
+import { cn } from "@/lib/utils";
 
 export function AssistantContextMeter({
   assistantId,
@@ -102,8 +103,9 @@ export function AssistantContextMeter({
           }
         ]}
       />
-      <p className="text-ax-text-secondary text-sm">{t("assistant_context_scope")}</p>
-      <p className="text-ax-text-secondary text-sm">
+      <p className="text-ax-text-secondary phone:sr-only text-sm">{t("assistant_context_scope")}</p>
+      {/* A warning leans on the reserve: without it a phone's percentage contradicts it. */}
+      <p className={cn("text-ax-text-secondary text-sm", variant === "neutral" && "phone:sr-only")}>
         {t("assistant_context_reserve", { tokens: format.number(reserve) })}
       </p>
       {variant !== "neutral" && (

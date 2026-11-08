@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { openMenuOnRelease, tap } from "@/test/menus";
 import { renderInApp } from "@/test/render";
 import { setViewport } from "@/test/setup-dom";
 import {
@@ -79,6 +80,18 @@ describe("AssistantsPage filter", () => {
     act(() => setViewport("phone"));
     expect(screen.queryByRole("textbox", { name: /Filtrera/ })).toBeNull();
     expect(screen.getByText("Assistent 2")).toBeTruthy();
+  });
+
+  it("drops a chosen sort when its control goes (a turned screen), so no order is left stuck", async () => {
+    setViewport("tablet-portrait");
+    show(3);
+    const names = () => screen.getAllByText(/^Assistent \d$/).map((name) => name.textContent);
+    const menu = await openMenuOnRelease(screen.getByRole("button", { name: /^Sortera/ }));
+    tap(within(menu).getByRole("menuitemradio", { name: /^Namn · Fallande/ }));
+    await waitFor(() => expect(names()[0]).toBe("Assistent 3"));
+
+    act(() => setViewport("phone"));
+    expect(names()[0]).toBe("Assistent 1");
   });
 
   it("is always there from a tablet up", () => {

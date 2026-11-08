@@ -301,6 +301,12 @@ describe("Composer", () => {
     expect(screen.queryByText(/Kontrollera viktiga uppgifter/)).toBeNull();
   });
 
+  it("keeps the advice to check an answer on a phone", () => {
+    setViewport("phone");
+    renderComposer();
+    expect(screen.getByText(/Kontrollera viktiga uppgifter/)).toBeTruthy();
+  });
+
   it("has no axe violations", async () => {
     const { container } = renderComposer({ initial: "Hej" });
     await expectNoAxeViolations(container);

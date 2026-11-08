@@ -513,16 +513,14 @@ async def update_widget_policy(body: WidgetPolicyUpdate, container: _ContainerWi
 )
 async def get_widget_overview(container: _ContainerWithUser):
     user = container.user()
-    policy = container.widget_service().get_policy()
+    service = container.widget_service()
+    policy = service.get_policy()
     rows = await container.widget_overview_repo().list_tenant(
         user.tenant_id, today=container.widget_budget().today()
     )
+    blockers = await service.activation_blockers_of([row.widget for row in rows])
     items: list[WidgetOverviewItem] = []
     for row in rows:
-        blockers = row.widget.activation_blockers(
-            target_published=bool(row.target_published)
-        )
-        blockers.extend(policy.violations(row.widget))
         items.append(
             WidgetOverviewItem(
                 id=row.id,
@@ -547,7 +545,7 @@ async def get_widget_overview(container: _ContainerWithUser):
                 last_activity=row.last_activity,
                 daily_token_budget=policy.daily_token_budget_for(row.widget),
                 budget_used_today=row.budget_used_today,
-                activation_blockers=blockers,
+                activation_blockers=blockers[row.id],
             )
         )
     totals = WidgetOverviewTotals(

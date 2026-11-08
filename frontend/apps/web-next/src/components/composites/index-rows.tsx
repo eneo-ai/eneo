@@ -7,8 +7,8 @@ import { Children, type ComponentProps, type ReactNode } from "react";
  * A phone's index of rows under a group heading (decisions 21 and 22): an
  * editor's sections, Konto's settings. The rows run edge to edge; their text
  * keeps to the page's gutter, `--index-inset` (16 px unless the page sets it).
- * From 768 px, where only Konto shows an index (an editor's is phone-only),
- * each group is an inset card, as in iPad Settings.
+ * Where the layout is not a phone's, only Konto shows an index (an editor's is
+ * phone-only), and each group is an inset card, as in iPad Settings.
  */
 export function IndexGroup({ title, children }: { title?: string; children: ReactNode }) {
   // A group whose rows all depend on what the user may do can be empty.
@@ -20,7 +20,7 @@ export function IndexGroup({ title, children }: { title?: string; children: Reac
           {title}
         </h2>
       ) : null}
-      <ul className="border-ax-border divide-ax-border md:bg-ax-card divide-y border-y md:overflow-hidden md:rounded-xl md:border">
+      <ul className="border-ax-border divide-ax-border wide:bg-ax-card wide:overflow-hidden wide:rounded-xl wide:border divide-y border-y">
         {children}
       </ul>
     </div>
@@ -55,16 +55,21 @@ export function IndexRow({
         {Icon ? (
           <Icon aria-hidden="true" className="text-ax-text-secondary size-5 shrink-0" />
         ) : null}
-        <span className="min-w-0 flex-1 break-words">
-          {label}
-          {isExternal ? <span className="sr-only"> {t("chat_opens_in_new_tab")}</span> : null}
+        {/* The name stays on its line; the summary gives way, then wraps under it at large text. */}
+        <span className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-3">
+          <span className="max-w-full break-words">
+            {label}
+            {isExternal ? <span className="sr-only"> {t("chat_opens_in_new_tab")}</span> : null}
+          </span>
+          {summary ? (
+            <>
+              <span className="sr-only">, </span>
+              <span className="text-ax-text-secondary min-w-[min(100%,4rem)] flex-1 truncate text-end text-sm">
+                {summary}
+              </span>
+            </>
+          ) : null}
         </span>
-        {summary ? (
-          <>
-            <span className="sr-only">, </span>
-            <span className="text-ax-text-secondary max-w-[45%] truncate text-sm">{summary}</span>
-          </>
-        ) : null}
         {isExternal ? (
           <ExternalLink aria-hidden="true" className="text-ax-text-secondary size-4 shrink-0" />
         ) : (

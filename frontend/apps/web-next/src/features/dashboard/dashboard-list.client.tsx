@@ -113,7 +113,7 @@ export function DashboardList() {
 
   return (
     <div className="flex flex-col gap-8">
-      <div className="w-full max-w-sm">
+      <div className="phone:max-w-none w-full max-w-sm">
         <TextInput
           label={t("shell_catalog_search_label")}
           isLabelHidden

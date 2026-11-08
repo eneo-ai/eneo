@@ -21,6 +21,7 @@ import { AREA_HUES } from "@/components/composites/icon-tile";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { iconUrl } from "@/components/composites/icon-field";
 import { PageHeader } from "@/components/composites/page-header";
+import { DockedActions } from "@/components/shell/docked-actions";
 import { ResourceCard, ResourceCollection } from "@/components/composites/resource-tile";
 import { useAppContext } from "@/components/providers/app-context";
 import { useShell } from "@/components/shell/shell-context";
@@ -178,7 +179,12 @@ export function SpacesList({ title }: { title: string }) {
         title={title}
         headingRef={headingRef}
         description={t("space_list_description")}
-        actions={canCreate && sharedSpaces.length > 0 ? createButton : undefined}
+        isDescriptionHiddenOnPhone
+        actions={
+          canCreate && sharedSpaces.length > 0 ? (
+            <DockedActions label={t("space_list_actions")}>{createButton}</DockedActions>
+          ) : undefined
+        }
       />
       {sharedSpaces.length === 0 ? (
         <EmptyState
@@ -192,8 +198,9 @@ export function SpacesList({ title }: { title: string }) {
         />
       ) : (
         <>
-          <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="phone:flex-nowrap flex flex-wrap items-center justify-between gap-3">
             <ResourceFilterInput
+              className="phone:flex-1"
               value={filter}
               onChange={setFilter}
               label={t("space_list_filter_label")}

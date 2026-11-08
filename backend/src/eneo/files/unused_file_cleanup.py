@@ -1,17 +1,17 @@
 """Delete uploaded Files that no product record uses anymore.
 
 A File family is in use while a chat message, Assistant, App or App run links
-to any of its members. Deleting such a record calls
-``delete_unused_root_files`` with the Files it used, so retention and manual
-deletion release uploads immediately. The daily sweep catches everything
-else: cascades from deleting an Assistant, App, Space or group chat, uploads
-that were never attached, and Files left behind before this cleanup existed.
+to any of its members. Manual deletion calls ``delete_unused_root_files``;
+retention uses the same reference owner within its bounded atomic unit. Both
+release uploads when their last use is removed. The registered unused-files
+task catches cascades from deleting an Assistant, App, Space or group chat,
+uploads that were never attached, and Files left behind before this cleanup existed.
 
 Every deletion locks the family and re-checks its usage first. Deleting the
 Files row releases its content references, and the object-content lifecycle
 removes the stored bytes, including audio originals and transcriptions.
 
-Operators can preview or run the sweep inside the worker environment:
+Operators can preview or run one budgeted execution inside the worker environment:
     python -m eneo.files.unused_file_cleanup preview|run
 """
 
@@ -19,18 +19,20 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import sys
 from collections import Counter
 from collections.abc import Iterable
 from contextlib import redirect_stdout
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from datetime import timedelta
 from uuid import UUID
 
 import sqlalchemy as sa
+from pydantic import TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from eneo.data_retention.application.retention_runner import RetentionRunReport
+from eneo.data_retention.application.retention_sql_limits import set_retention_timeouts
 from eneo.database.affected_rows import affected_row_count
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.object_content_table import (
@@ -38,20 +40,18 @@ from eneo.database.tables.object_content_table import (
     ObjectContents,
 )
 from eneo.files.file_usage import FileUsageRepository
-
-# Uploads are linked to their chat message or App run in a later request, and
-# generated images when the answer is saved. Younger unreferenced Files are
-# left for the next sweep.
-UNUSED_FILE_MIN_AGE = timedelta(hours=24)
-UNUSED_FILE_SWEEP_PAGE_SIZE = 1000
+from eneo.main.config import get_settings
 
 
 @dataclass
 class UnusedFileSweepResult:
+    """Unused File families (a root with its derived Files) and their stored bytes."""
+
     dry_run: bool
-    files: int = 0
+    families: int = 0
+    # Managed bytes of every family together, not per organization.
     managed_bytes: int = 0
-    files_by_tenant: dict[str, int] = field(default_factory=dict[str, int])
+    families_by_tenant: dict[str, int] = field(default_factory=dict[str, int])
 
 
 async def delete_unused_root_files(
@@ -68,24 +68,30 @@ async def delete_unused_root_files(
     return affected_row_count(result)
 
 
-async def sweep_unused_files(
+async def preview_unused_files(
     session: AsyncSession,
     *,
-    dry_run: bool,
-    older_than: timedelta = UNUSED_FILE_MIN_AGE,
-    page_size: int = UNUSED_FILE_SWEEP_PAGE_SIZE,
+    older_than: timedelta,
+    page_size: int,
+    statement_timeout_ms: int,
+    lock_timeout_ms: int,
 ) -> UnusedFileSweepResult:
-    """Delete, or with ``dry_run`` only count, every unused root File family.
+    """Advisory inventory using the same reference owner as retention deletion.
 
-    Each page runs in its own transaction, so locks are held briefly and
-    progress survives an interrupted run. The session must not be in a
-    transaction.
+    Each page locks its candidate families like a retention chunk, so it takes
+    the chunk's wait limits: a File a user holds ends the preview with a lock
+    timeout instead of making that user wait for it.
     """
-    result = UnusedFileSweepResult(dry_run=dry_run)
+    result = UnusedFileSweepResult(dry_run=True)
     tenants: Counter[str] = Counter()
     after: UUID | None = None
     while True:
         async with session.begin():
+            await set_retention_timeouts(
+                session,
+                statement_timeout_ms=statement_timeout_ms,
+                lock_timeout_ms=lock_timeout_ms,
+            )
             usage = FileUsageRepository(session)
             page = await usage.list_unreferenced_roots(
                 after=after,
@@ -100,14 +106,8 @@ async def sweep_unused_files(
                 continue
             tenants.update(await _tenant_counts(session, unused_ids))
             result.managed_bytes += await _managed_bytes(session, unused_ids)
-            if dry_run:
-                result.files += len(unused_ids)
-            else:
-                deleted = await session.execute(
-                    sa.delete(Files).where(Files.id.in_(unused_ids))
-                )
-                result.files += affected_row_count(deleted)
-    result.files_by_tenant = dict(sorted(tenants.items()))
+            result.families += len(unused_ids)
+    result.families_by_tenant = dict(sorted(tenants.items()))
     return result
 
 
@@ -140,15 +140,44 @@ async def _managed_bytes(session: AsyncSession, root_ids: list[UUID]) -> int:
     return int(total or 0)
 
 
-async def _run_from_cli(*, dry_run: bool) -> UnusedFileSweepResult:
-    from eneo.database.database import DatabaseSessionManager
-    from eneo.main.config import get_settings
+async def _run_from_cli(*, dry_run: bool) -> UnusedFileSweepResult | RetentionRunReport:
+    from dependency_injector import providers
 
+    from eneo.data_retention.infrastructure.retention_worker import retention_runner
+    from eneo.database.database import DatabaseSessionManager
+    from eneo.files.unused_file_retention_task import UNUSED_FILES_TASK
+    from eneo.main.container.container import Container
+    from eneo.main.retention_tasks import retention_task_registrations
+
+    settings = get_settings()
     database = DatabaseSessionManager()
-    database.init(get_settings().database_url)
+    database.init(settings.database_url)
     try:
         async with database.session() as session:
-            return await sweep_unused_files(session, dry_run=dry_run)
+            if dry_run:
+                return await preview_unused_files(
+                    session,
+                    older_than=timedelta(
+                        hours=settings.retention_unused_file_grace_hours
+                    ),
+                    page_size=settings.retention_chunk_rows,
+                    statement_timeout_ms=settings.retention_chunk_statement_timeout_ms,
+                    lock_timeout_ms=settings.retention_chunk_lock_timeout_ms,
+                )
+            registration = next(
+                task
+                for task in retention_task_registrations(settings)
+                if task.name == UNUSED_FILES_TASK
+            )
+            runner = retention_runner(
+                session=session,
+                container=Container(session=providers.Object(session)),
+                settings=settings,
+                budget=registration.budget,
+            )
+            if not registration.enabled:
+                return await runner.skip(registration.name)
+            return await runner.run(registration.build(session))
     finally:
         await database.close()
 
@@ -161,7 +190,10 @@ def main() -> None:
     # stderr and reserve stdout for one complete JSON result.
     with redirect_stdout(sys.stderr):
         result = asyncio.run(_run_from_cli(dry_run=arguments.command == "preview"))
-    print(json.dumps(asdict(result), indent=2))
+    report_type: TypeAdapter[UnusedFileSweepResult | RetentionRunReport] = TypeAdapter(
+        UnusedFileSweepResult | RetentionRunReport
+    )
+    print(report_type.dump_json(result, indent=2).decode())
 
 
 if __name__ == "__main__":

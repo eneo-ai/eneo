@@ -58,7 +58,7 @@ class Sessions(BasePublic):
     group_chat: Mapped[Optional[GroupChatsTable]] = relationship(viewonly=True)
 
     __table_args__ = (
-        Index("created_at_idx", "created_at"),
+        Index("ix_sessions_created_id", "created_at", "id"),
         CheckConstraint(
             "(user_id IS NOT NULL)::int + (api_key_id IS NOT NULL)::int"
             " + (widget_id IS NOT NULL)::int = 1",

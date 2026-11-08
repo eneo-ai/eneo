@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+from freezegun import freeze_time
 from pydantic import ValidationError
 
 from eneo.authentication.auth_models import ApiKeyV2InDB, JWTPayload
@@ -470,6 +471,7 @@ def test_websocket_connections_are_gated_too():
         authorize_user(websocket, user)
 
 
+@freeze_time(NOW)
 def test_compliant_password_sessions_pass():
     user = password_user(changed_at=NOW - timedelta(days=10), max_age_days=30)
     authorize_user(connection_for(gated_endpoint()), user)

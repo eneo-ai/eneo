@@ -1,5 +1,10 @@
 import type { WidgetPublicConfig } from "@eneo/eneo-js";
-import { localizeUrl } from "$lib/paraglide/runtime";
+import { deLocalizeUrl, localizeUrl } from "$lib/paraglide/runtime";
+
+/** The widget's embed page, at the address of either language. */
+export function isEmbedPage(url: URL): boolean {
+  return deLocalizeUrl(url).pathname.startsWith("/embed/");
+}
 
 /**
  * Where the embed page belongs for a widget whose language is fixed, or null

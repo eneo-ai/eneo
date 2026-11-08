@@ -132,6 +132,29 @@ test.describe("a phone turned while an editor's section is open", () => {
   });
 });
 
+test.describe("a tablet that becomes a phone's layout with a dialog open", () => {
+  test.use({ viewport: { width: 820, height: 1180 }, hasTouch: true });
+
+  test("keeps the dialog, and focus comes back to the page, not to a hidden opener", async ({
+    page
+  }) => {
+    const { space } = await spaceWithAssistant(page);
+    await page.goto(`${space}/overview`);
+    const more = page.getByRole("button", { name: "Fler sätt att skapa" }).first();
+    await more.click();
+    await page.getByRole("menuitem", { name: "Skapa ny gruppchatt" }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+
+    // An iPad into Split View.
+    await page.setViewportSize({ width: 590, height: 820 });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("button", { name: "Avbryt" }).click();
+    await expect(dialog).toBeHidden();
+    await expect(page.locator("main#main-content")).toBeFocused();
+  });
+});
+
 test.describe("an iPad keeps the tablet's layout", () => {
   for (const size of [
     { name: "turned with its keyboard up", width: 1180, height: 470 },
@@ -163,5 +186,47 @@ test.describe("an iPad split in half", () => {
     await page.goto(`${space}/overview`);
     await expect(page.locator("[data-phone-page-bar]")).toBeVisible();
     await expect(sideNav(page)).toBeHidden();
+  });
+});
+
+test.describe("the template list on a turned phone", () => {
+  test.use({ viewport: { width: 844, height: 390 }, hasTouch: true, isMobile: true });
+
+  test("keeps its filter and Ny mall on one row", async ({ page }) => {
+    await page.route("**/api/v1/settings/", async (route) => {
+      const response = await route.fetch();
+      await route.fulfill({
+        response,
+        json: { ...(await response.json()), using_templates: true }
+      });
+    });
+    await page.route("**/api/v1/admin/templates/**", async (route) => {
+      const assistants = new URL(route.request().url()).pathname.endsWith("/assistants/");
+      const items = assistants
+        ? [
+            {
+              id: "template",
+              name: "Bygglov",
+              category: "advice",
+              created_at: "2026-01-01T00:00:00Z"
+            }
+          ]
+        : [];
+      await route.fulfill({
+        response: await route.fetch(),
+        status: 200,
+        json: { items, count: items.length }
+      });
+    });
+
+    await page.goto("/admin/templates");
+    const field = page.getByRole("main").getByRole("textbox");
+    await expect(field).toBeVisible();
+    const filter = await field.boundingBox();
+    const create = await page
+      .getByRole("button", { name: /^(Ny mall|New template)$/ })
+      .boundingBox();
+    const middle = (box: typeof filter) => (box?.y ?? 0) + (box?.height ?? 0) / 2;
+    expect(Math.abs(middle(filter) - middle(create))).toBeLessThan(2);
   });
 });

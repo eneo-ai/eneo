@@ -21,6 +21,7 @@ import { markJustCreated } from "@/features/spaces/just-created";
 import { createWithUniqueName } from "@/features/spaces/unique-name";
 import { useSpace } from "@/features/spaces/use-space";
 import { TemplateGalleryDialog } from "@/features/templates/template-gallery-dialog";
+import { cn } from "@/lib/utils";
 
 /**
  * Split button: the primary action creates a blank assistant at once, named
@@ -32,7 +33,14 @@ import { TemplateGalleryDialog } from "@/features/templates/template-gallery-dia
  * `secondary` makes it small and unfilled where it is not the screen's primary
  * action (a phone's space overview; the tab's docked button is).
  */
-export function CreateChatAppMenu({ secondary = false }: { secondary?: boolean }) {
+export function CreateChatAppMenu({
+  secondary = false,
+  isHiddenOnPhone = false
+}: {
+  secondary?: boolean;
+  /** Only the buttons go: a dialog they opened stays open if the screen becomes a phone's. */
+  isHiddenOnPhone?: boolean;
+}) {
   const t = useTranslations();
   const router = useRouter();
   const { space, routeId } = useSpace();
@@ -134,7 +142,7 @@ export function CreateChatAppMenu({ secondary = false }: { secondary?: boolean }
 
   return (
     <>
-      <div className="flex max-w-full">
+      <div className={cn("flex max-w-full", isHiddenOnPhone && "phone:hidden")}>
         <Button
           label={t("create_assistant")}
           variant={variant}
