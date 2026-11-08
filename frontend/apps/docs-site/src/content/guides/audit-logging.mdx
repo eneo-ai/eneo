@@ -44,8 +44,8 @@ Four security events record which account a provider identity reaches (see [Acco
 |--------|--------------|----------|
 | `identity_bound` (Sign-in Identity Linked) | A sign-in binds an identity to an account | `issuer`, `audience`, `subject_claim`, `subject`, `method` (`email_match`, `jit`, `same_subject`, `migration_window` or `admin_allowance`), `window_id` for a window, `replaced_subject_claim` and `replaced_subject` when a subject was replaced, `correlation_id` |
 | `identity_conflict` (Sign-in Identity Refused) | A sign-in is refused because its identity cannot be bound; outcome failure | `reason`, `issuer`, `audience`, `subject_claim`, `subject`, `account_ids`, `correlation_id` |
-| `identity_rebinding_updated` (Sign-in Re-linking Changed) | An administrator opens or withdraws an account's re-binding allowance | The administrator, the account and the old and new `rebinding_allowed_until` |
-| `identity_migration_window_updated` (Sign-in Migration Window Changed) | An administrator opens or closes a migration window | `change` (`opened` or `closed`), `window_id`, `from_issuer`, `from_audience`, `to_issuer`, `to_audience`, `closes_at` |
+| `identity_rebinding_updated` (Sign-in Re-linking Changed) | An administrator opens or withdraws an account's re-binding allowance | `actor` (the administrator: `type`, `id`, `name`, `email`), `target` (the account's `id`), `changes.rebinding_allowed_until` with `old` and `new` |
+| `identity_migration_window_updated` (Sign-in Migration Window Changed) | An administrator opens or closes a migration window | `actor` (the administrator: `type`, `id`, `name`, `email`), `target` (the window's `id`), and in `extra`: `change` (`opened` or `closed`), `window_id`, `from_issuer`, `from_audience`, `to_issuer`, `to_audience`, `closes_at` |
 
 `identity_bound` is written in the sign-in's own transaction, so it exists only for a sign-in that completed. `identity_conflict` is queued and written by the worker, so it survives the refused sign-in; if the queue cannot be reached, the backend log warning `identity_conflict` remains. Neither of the two carries the email or a token.
 
