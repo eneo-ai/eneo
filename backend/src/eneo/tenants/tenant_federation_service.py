@@ -857,6 +857,45 @@ class TenantFederationService:
         )
         return federation_config
 
+    async def store_env_settings(
+        self,
+        tenant: TenantInDB,
+        request: SetFederationRequest,
+        *,
+        expected: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Store the OIDC_* settings as the tenant's registration: the move
+        into Eneo.
+
+        Fetches nothing. Sign-in reads the issuer and endpoints from discovery,
+        as env mode did, so the move works while the provider is unreachable.
+        It stores only over the settings the caller read (``expected``), so a
+        registration made meanwhile is never overwritten.
+        """
+        federation_config = _build_full_federation_config(
+            request,
+            encrypted_secret=self.encryption_service.encrypt(request.client_secret),
+            discovery_metadata={},
+        )
+
+        current = await self._lock(tenant)
+        if federation_revision(current) != federation_revision(expected):
+            raise _error(
+                status.HTTP_409_CONFLICT,
+                "federation_config_revision_conflict",
+                "The sign-in settings changed while the OIDC_* settings were being "
+                "moved. Nothing was stored; check the current settings.",
+            )
+        await self._save(
+            tenant,
+            current,
+            federation_config,
+            user=None,
+            secret_replaced=True,
+            description=f"The OIDC_* settings of {tenant.name} were moved into Eneo",
+        )
+        return federation_config
+
     async def patch(
         self, tenant: TenantInDB, request: PatchFederationRequest
     ) -> dict[str, Any]:

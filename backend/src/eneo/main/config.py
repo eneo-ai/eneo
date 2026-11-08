@@ -1464,6 +1464,20 @@ class Settings(BaseSettings):
         return self
 
 
+def has_env_oidc_client(settings: Settings) -> bool:
+    """Whether the OIDC_* settings name a whole client.
+
+    Sign-in needs the discovery URL, the client ID and the secret. With any of
+    them missing, env sign-in is neither offered nor resolved, and there is
+    nothing to move into Eneo.
+    """
+    return bool(
+        settings.oidc_discovery_endpoint
+        and settings.oidc_client_id
+        and settings.oidc_client_secret
+    )
+
+
 _settings: Optional[Settings] = None
 
 
