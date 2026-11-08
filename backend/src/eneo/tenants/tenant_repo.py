@@ -672,6 +672,7 @@ class TenantRepository:
             - masked_secret: str (last 4 chars)
             - issuer: str
             - allowed_domains: list[str]
+            - signing_algorithms, email_verified_claims: list[str] | None
             - encrypted_at: str (ISO timestamp)
             - encryption_status: "encrypted" | "plaintext"
 
@@ -711,6 +712,11 @@ class TenantRepository:
         def _str_or_none(v: object) -> str | None:
             return v if isinstance(v, str) else None
 
+        def _strs_or_none(v: object) -> list[str] | None:
+            if not isinstance(v, list):
+                return None
+            return [s for s in cast(list[object], v) if isinstance(s, str)]
+
         domains_raw = config_typed.get("allowed_domains", [])
         domains: list[str] = (
             [d for d in cast(list[object], domains_raw) if isinstance(d, str)]
@@ -731,6 +737,10 @@ class TenantRepository:
             "issuer": _str_or_none(config_typed.get("issuer")),
             "allowed_domains": domains,
             "additional_redirect_uris": redirect_uris,
+            "signing_algorithms": _strs_or_none(config_typed.get("signing_algorithms")),
+            "email_verified_claims": _strs_or_none(
+                config_typed.get("email_verified_claims")
+            ),
             "encrypted_at": _str_or_none(config_typed.get("encrypted_at")),
             "encryption_status": encryption_status,
         }

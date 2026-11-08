@@ -1,6 +1,6 @@
 import base64
 import binascii
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from enum import Enum
 from typing import TYPE_CHECKING, Literal, Optional
@@ -763,41 +763,64 @@ def _is_verified_claim(value: object) -> bool:
     return False
 
 
+# The claims that can vouch for the standard email, in order. The first one the
+# provider sends (not null) decides, so an explicit negative never falls
+# through to the next.
+DEFAULT_EMAIL_VERIFIED_CLAIMS = ("email_verified", "xms_edov")
+
+
 class FederatedIdentity(BaseModel):
     """Email identity extracted only after the OIDC token has been validated."""
 
     model_config = ConfigDict(frozen=True)
 
+    issuer: str = Field(min_length=1)
+    # Only from a verified ID token's aud/azp; an IdP access token leaves it
+    # unset, because the API audience does not name the signing-in client.
+    client_id: str | None = Field(default=None, min_length=1)
+    subject: str = Field(min_length=1)
     email: EmailStr
     email_verified: bool = Field(strict=True)
 
     @classmethod
     def from_claims(
-        cls, claims: Mapping[str, object], email_claim: str = "email"
+        cls,
+        claims: Mapping[str, object],
+        *,
+        issuer: str,
+        client_id: str | None = None,
+        email_claim: str = "email",
+        email_verified_claims: Sequence[str] = DEFAULT_EMAIL_VERIFIED_CLAIMS,
     ) -> "FederatedIdentity":
         email = claims.get(email_claim)
         if not isinstance(email, str) or not email:
             raise ValueError("Email claim not found in ID token")
-        if email_claim == "email" and claims.get("email_verified") is False:
-            raise ValueError("Email is not verified by the identity provider")
         # Entra ID omits email_verified for organisational accounts and sends
         # xms_edov ("email domain owner verified") instead. A domain the
         # tenant owner has verified is as authoritative for the address as the
         # standard flag, and the mandatory domain allowlist still applies.
-        # xms_edov is only a fallback for a missing email_verified: any value
+        # A later claim is only a fallback for missing earlier ones: any value
         # the IdP does send, negative or unrecognised, keeps its own verdict.
-        email_verified = claims.get("email_verified")
-        verified = (
-            _is_verified_claim(email_verified)
-            if email_verified is not None
-            else _is_verified_claim(claims.get("xms_edov"))
+        deciding = next(
+            (name for name in email_verified_claims if claims.get(name) is not None),
+            None,
         )
+        verdict = claims[deciding] if deciding is not None else None
+        if email_claim == "email" and deciding == "email_verified" and verdict is False:
+            raise ValueError("Email is not verified by the identity provider")
+        subject = claims.get("sub")
+        if not isinstance(subject, str) or not subject:
+            raise ValueError("ID token is missing its subject")
         try:
             return cls(
+                issuer=issuer,
+                client_id=client_id,
+                subject=subject,
                 email=email,
                 # The verification claims verify the standard email, not an
                 # unrelated address selected by a custom claims mapping.
-                email_verified=verified and claims.get("email") == email,
+                email_verified=_is_verified_claim(verdict)
+                and claims.get("email") == email,
             )
         except ValueError as exc:
             raise ValueError(

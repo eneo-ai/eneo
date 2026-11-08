@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-import time
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import cast
@@ -15,13 +14,20 @@ from fastapi import FastAPI, HTTPException, Response
 from fastapi.testclient import TestClient
 
 from eneo.authentication import federation_router
+from eneo.authentication.auth_models import FederatedIdentity
 from eneo.authentication.federation_router import CallbackRequest
+from eneo.authentication.oidc.errors import (
+    OidcLoginUnavailableError,
+    OidcTransactionInvalidError,
+)
+from eneo.authentication.oidc.transaction import OidcTransaction, save_transaction
 from eneo.server.endpoint_routes import endpoint_routes
 from eneo.server.middleware.request_context import RequestContextMiddleware
 from eneo.settings.encryption_service import EncryptionService
 from eneo.tenants.tenant import TenantInDB, TenantState
 from eneo.users.user import UserInDB
 from eneo.users.user_service import UserService
+from tests.fake_oidc_provider import DROP, FakeOidcProvider, install
 
 
 class DummySettings(SimpleNamespace):
@@ -29,6 +35,7 @@ class DummySettings(SimpleNamespace):
         defaults = {
             "jwt_secret": "unit-test-secret-padded-to-the-hs256-minimum",
             "oidc_state_ttl_seconds": 600,
+            "oidc_jwks_cache_ttl_seconds": 3600,
             "oidc_redirect_grace_period_seconds": 900,
             "strict_oidc_redirect_validation": True,
             "tenant_credentials_enabled": False,
@@ -96,15 +103,8 @@ class FakeAioHttpClient:
         return self._response
 
 
-class FakeJWKClient:
-    def __init__(self, jwks_uri: str):  # noqa: ARG002
-        pass
-
-    def get_signing_key_from_jwt(self, _: str):
-        class Key:
-            key = "fake-key"
-
-        return Key()
+async def fake_signing_key(**kwargs):  # noqa: ARG001
+    return SimpleNamespace(key="fake-key")
 
 
 class TenantRepoStub:
@@ -155,17 +155,6 @@ class AuthServiceStub:
         return "access-token"
 
 
-class AuthServiceInvalidEmailStub:
-    def __init__(self, email: str):
-        self._email = email
-
-    def get_payload_from_openid_jwt(self, **kwargs):  # noqa: ARG002
-        return {"email": self._email}
-
-    def create_access_token_for_user(self, user: UserInDB):  # noqa: ARG002
-        return "access-token"
-
-
 class MockContainer:
     def __init__(
         self,
@@ -208,6 +197,67 @@ class MockContainer:
             settings_repo=None,
             info_blob_repo=None,
         )
+
+
+PROVIDER_ISSUER = "https://idp.example.com"
+
+
+@pytest.fixture(autouse=True)
+def provider(monkeypatch) -> FakeOidcProvider:
+    """The organisations' provider: discovery, keys and the token endpoint."""
+    fake = FakeOidcProvider(
+        issuer=PROVIDER_ISSUER, client_id="client", client_secret="secret"
+    )
+    install(monkeypatch, fake)
+    return fake
+
+
+async def _signed_callback(
+    redis_client: FakeRedis,
+    provider: FakeOidcProvider,
+    *,
+    tenant: TenantInDB,
+    redirect_uri: str,
+    frontend_state: str = "",
+    correlation_id: str = "corr",
+    config_version: str | None = None,
+    claims: dict[str, object] | None = None,
+) -> CallbackRequest:
+    """A callback for a sign-in started at the tenant, as initiate stores it.
+
+    With ``claims`` the provider sends exactly those email facts (no
+    email_verified unless given); without, its defaults.
+    """
+    transaction = OidcTransaction.start(
+        "login",
+        redirect_uri=redirect_uri,
+        tenant_id=str(tenant.id),
+        tenant_slug=cast(str, tenant.slug),
+        config_version=config_version,
+        issuer=provider.issuer,
+        iss_parameter_supported=provider.advertise_iss_parameter,
+    )
+    await save_transaction(redis_client, transaction, ttl_seconds=600)
+    state = jwt.encode(
+        {
+            "tenant_id": transaction.tenant_id,
+            "tenant_slug": transaction.tenant_slug,
+            "frontend_state": frontend_state,
+            "transaction_id": transaction.id,
+            "correlation_id": correlation_id,
+            "exp": transaction.issued_at + 600,
+            "iat": transaction.issued_at,
+        },
+        DummySettings().jwt_secret,
+        algorithm="HS256",
+    )
+    code = provider.issue_code(
+        client_id="client",
+        redirect_uri=redirect_uri,
+        nonce=transaction.nonce,
+        **({"email_verified": DROP, **claims} if claims is not None else {}),
+    )
+    return CallbackRequest(code=code, state=state)
 
 
 @pytest.mark.asyncio
@@ -397,15 +447,6 @@ async def test_initiate_auth_single_tenant_accepts_db_redirect_uri(monkeypatch):
         public_origin="https://canonical.example.com",
     )
     monkeypatch.setattr(federation_router, "get_settings", lambda: dummy_settings)
-    monkeypatch.setattr(
-        federation_router,
-        "aiohttp_client",
-        lambda: FakeAioHttpClient(
-            FakeResponse(
-                {"authorization_endpoint": "https://idp.example.com/authorize"}
-            )
-        ),
-    )
 
     container = MockContainer(
         tenant_repo=TenantRepoStub(tenant),
@@ -480,7 +521,7 @@ async def test_initiate_auth_rejects_unregistered_redirect_uri(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_auth_callback_accepts_recent_redirect_change(monkeypatch):
+async def test_auth_callback_accepts_recent_redirect_change(monkeypatch, provider):
     dummy_settings = DummySettings(federation_enabled=True)
     monkeypatch.setattr(federation_router, "get_settings", lambda: dummy_settings)
 
@@ -537,34 +578,14 @@ async def test_auth_callback_accepts_recent_redirect_change(monkeypatch):
         encryption_service=EncryptionService(None),
     )
 
-    issue_time = int(time.time())
-    state_payload = {
-        "tenant_id": str(tenant_id),
-        "tenant_slug": slug,
-        "frontend_state": '{"loginMethod":"oidc","next":"/module-login?state=a%2526b"}',
-        "nonce": "nonce",
-        "redirect_uri": "https://old.tenant.example.com/login/callback",
-        "correlation_id": "corr-123",
-        "exp": issue_time + 600,
-        "iat": issue_time,
-        "config_version": old_version,
-    }
-
-    signed_state = jwt.encode(
-        state_payload, dummy_settings.jwt_secret, algorithm="HS256"
-    )
-
-    cache_payload = {
-        "tenant_id": str(tenant_id),
-        "tenant_slug": slug,
-        "redirect_uri": state_payload["redirect_uri"],
-        "config_version": old_version,
-        "iat": state_payload["iat"],
-    }
-    await redis_client.setex(
-        f"oidc:state:{state_payload['nonce']}",  # Use nonce, not full JWT
-        dummy_settings.oidc_state_ttl_seconds,
-        json.dumps(cache_payload),
+    callback = await _signed_callback(
+        redis_client,
+        provider,
+        tenant=tenant,
+        redirect_uri="https://old.tenant.example.com/login/callback",
+        frontend_state='{"loginMethod":"oidc","next":"/module-login?state=a%2526b"}',
+        correlation_id="corr-123",
+        config_version=old_version,
     )
 
     # Simulate canonical origin update during login
@@ -573,28 +594,17 @@ async def test_auth_callback_accepts_recent_redirect_change(monkeypatch):
     )
     tenant.updated_at = datetime.now(timezone.utc)
 
-    fake_response = FakeResponse({"id_token": "id", "access_token": "token"})
-    monkeypatch.setattr(
-        federation_router,
-        "aiohttp_client",
-        lambda: FakeAioHttpClient(fake_response),
-    )
-    monkeypatch.setattr(federation_router, "PyJWKClient", FakeJWKClient)
-    monkeypatch.setattr(federation_router, "JWKClient", FakeJWKClient)
-
-    callback = CallbackRequest(code="auth-code", state=signed_state)
-
     result = await federation_router.auth_callback(callback, container=container)
 
     assert result == {
         "access_token": "access-token",
-        "frontend_state": state_payload["frontend_state"],
+        "frontend_state": '{"loginMethod":"oidc","next":"/module-login?state=a%2526b"}',
     }
     assert redis_client._store == {}
 
 
 @pytest.mark.asyncio
-async def test_auth_callback_accepts_additional_redirect_uri(monkeypatch):
+async def test_auth_callback_accepts_additional_redirect_uri(monkeypatch, provider):
     dummy_settings = DummySettings(
         federation_enabled=True,
         oidc_redirect_grace_period_seconds=0,
@@ -657,47 +667,15 @@ async def test_auth_callback_accepts_additional_redirect_uri(monkeypatch):
         encryption_service=EncryptionService(None),
     )
 
-    issue_time = int(time.time())
-    config_version = datetime.now(timezone.utc).isoformat()
-    state_payload = {
-        "tenant_id": str(tenant_id),
-        "tenant_slug": slug,
-        "frontend_state": "",
-        "nonce": "nonce-additional-redirect",
-        "redirect_uri": "https://alt.tenant.example.com/auth/callback",
-        "correlation_id": "corr-additional-redirect",
-        "exp": issue_time + 600,
-        "iat": issue_time,
-        "config_version": config_version,
-    }
-
-    signed_state = jwt.encode(
-        state_payload, dummy_settings.jwt_secret, algorithm="HS256"
+    callback = await _signed_callback(
+        redis_client,
+        provider,
+        tenant=tenant,
+        redirect_uri="https://alt.tenant.example.com/auth/callback",
+        frontend_state="",
+        correlation_id="corr-additional-redirect",
+        config_version=datetime.now(timezone.utc).isoformat(),
     )
-
-    cache_payload = {
-        "tenant_id": str(tenant_id),
-        "tenant_slug": slug,
-        "redirect_uri": state_payload["redirect_uri"],
-        "config_version": config_version,
-        "iat": state_payload["iat"],
-    }
-    await redis_client.setex(
-        f"oidc:state:{state_payload['nonce']}",
-        dummy_settings.oidc_state_ttl_seconds,
-        json.dumps(cache_payload),
-    )
-
-    fake_response = FakeResponse({"id_token": "id", "access_token": "token"})
-    monkeypatch.setattr(
-        federation_router,
-        "aiohttp_client",
-        lambda: FakeAioHttpClient(fake_response),
-    )
-    monkeypatch.setattr(federation_router, "PyJWKClient", FakeJWKClient)
-    monkeypatch.setattr(federation_router, "JWKClient", FakeJWKClient)
-
-    callback = CallbackRequest(code="auth-code", state=signed_state)
     result = await federation_router.auth_callback(callback, container=container)
 
     assert result == {"access_token": "access-token", "frontend_state": ""}
@@ -706,7 +684,9 @@ async def test_auth_callback_accepts_additional_redirect_uri(monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("bad_email", ["@example.com", "user@@example.com"])
-async def test_auth_callback_rejects_invalid_email_format(monkeypatch, bad_email):
+async def test_auth_callback_rejects_invalid_email_format(
+    monkeypatch, provider, bad_email
+):
     dummy_settings = DummySettings(federation_enabled=True)
     monkeypatch.setattr(federation_router, "get_settings", lambda: dummy_settings)
 
@@ -757,52 +737,21 @@ async def test_auth_callback_rejects_invalid_email_format(monkeypatch, bad_email
     container = MockContainer(
         tenant_repo=TenantRepoStub(tenant),
         user_repo=UserRepoStub(user),
-        auth_service=AuthServiceInvalidEmailStub(bad_email),
+        auth_service=AuthServiceStub(),
         redis_client=redis_client,
         encryption_service=EncryptionService(None),
     )
 
-    issue_time = int(time.time())
-    state_payload = {
-        "tenant_id": str(tenant_id),
-        "tenant_slug": slug,
-        "frontend_state": "",
-        "nonce": "nonce",
-        "redirect_uri": "https://tenant.invalid/login/callback",
-        "correlation_id": "corr-invalid",
-        "exp": issue_time + 600,
-        "iat": issue_time,
-        "config_version": datetime.now(timezone.utc).isoformat(),
-    }
-
-    signed_state = jwt.encode(
-        state_payload, dummy_settings.jwt_secret, algorithm="HS256"
+    callback = await _signed_callback(
+        redis_client,
+        provider,
+        tenant=tenant,
+        redirect_uri="https://tenant.invalid/login/callback",
+        frontend_state="",
+        correlation_id="corr-invalid",
+        config_version=datetime.now(timezone.utc).isoformat(),
+        claims={"email": bad_email},
     )
-
-    # Store state in Redis cache with correct key format (uses nonce, not full JWT)
-    cache_payload = {
-        "tenant_id": str(tenant_id),
-        "tenant_slug": slug,
-        "redirect_uri": state_payload["redirect_uri"],
-        "config_version": state_payload["config_version"],
-        "iat": state_payload["iat"],
-    }
-    await redis_client.setex(
-        f"oidc:state:{state_payload['nonce']}",  # Use nonce, not full JWT
-        dummy_settings.oidc_state_ttl_seconds,
-        json.dumps(cache_payload),
-    )
-
-    fake_response = FakeResponse({"id_token": "id", "access_token": "token"})
-    monkeypatch.setattr(
-        federation_router,
-        "aiohttp_client",
-        lambda: FakeAioHttpClient(fake_response),
-    )
-    monkeypatch.setattr(federation_router, "PyJWKClient", FakeJWKClient)
-    monkeypatch.setattr(federation_router, "JWKClient", FakeJWKClient)
-
-    callback = CallbackRequest(code="auth-code", state=signed_state)
 
     with pytest.raises(HTTPException) as exc:
         await federation_router.auth_callback(callback, container=container)
@@ -954,7 +903,7 @@ class MockContainerForJIT:
         "inactive",
     ],
 )
-async def test_callback_enforces_jit_admission(monkeypatch, admission_case):
+async def test_callback_enforces_jit_admission(monkeypatch, provider, admission_case):
     """The callback only creates users that meet the complete admission policy."""
     dummy_settings = DummySettings(federation_enabled=True)
     monkeypatch.setattr(federation_router, "get_settings", lambda: dummy_settings)
@@ -1040,53 +989,22 @@ async def test_callback_enforces_jit_admission(monkeypatch, admission_case):
     container = MockContainerForJIT(
         tenant_repo=TenantRepoStub(tenant),
         user_repo=user_repo,
-        auth_service=AuthServiceStub(claims),
+        auth_service=AuthServiceStub(),
         redis_client=redis_client,
         encryption_service=EncryptionService(None),
         audit_service=audit_service,
     )
 
-    issue_time = int(time.time())
-    config_version = datetime.now(timezone.utc).isoformat()
-    state_payload = {
-        "tenant_id": str(tenant_id),
-        "tenant_slug": slug,
-        "frontend_state": "",
-        "nonce": "nonce-jit",
-        "redirect_uri": "https://tenant.jit.example.com/login/callback",
-        "correlation_id": "corr-jit",
-        "exp": issue_time + 600,
-        "iat": issue_time,
-        "config_version": config_version,
-    }
-
-    signed_state = jwt.encode(
-        state_payload, dummy_settings.jwt_secret, algorithm="HS256"
+    callback = await _signed_callback(
+        redis_client,
+        provider,
+        tenant=tenant,
+        redirect_uri="https://tenant.jit.example.com/login/callback",
+        frontend_state="",
+        correlation_id="corr-jit",
+        config_version=datetime.now(timezone.utc).isoformat(),
+        claims=claims,
     )
-
-    cache_payload = {
-        "tenant_id": str(tenant_id),
-        "tenant_slug": slug,
-        "redirect_uri": state_payload["redirect_uri"],
-        "config_version": config_version,
-        "iat": state_payload["iat"],
-    }
-    await redis_client.setex(
-        f"oidc:state:{state_payload['nonce']}",
-        dummy_settings.oidc_state_ttl_seconds,
-        json.dumps(cache_payload),
-    )
-
-    fake_response = FakeResponse({"id_token": "id", "access_token": "token"})
-    monkeypatch.setattr(
-        federation_router,
-        "aiohttp_client",
-        lambda: FakeAioHttpClient(fake_response),
-    )
-    monkeypatch.setattr(federation_router, "PyJWKClient", FakeJWKClient)
-    monkeypatch.setattr(federation_router, "JWKClient", FakeJWKClient)
-
-    callback = CallbackRequest(code="auth-code", state=signed_state)
 
     if admission_case not in (
         "allowed",
@@ -1101,7 +1019,7 @@ async def test_callback_enforces_jit_admission(monkeypatch, admission_case):
         assert caught.value.headers["X-Correlation-ID"] == "corr-jit"
         assert user_repo._created_user is None
         assert audit_service.logged_events == []
-        assert await redis_client.get("oidc:state:nonce-jit") is None
+        assert redis_client._store == {}
         return
 
     result = await federation_router.auth_callback(callback, container=container)
@@ -1165,10 +1083,14 @@ async def test_jit_provisioning_does_not_reuse_a_taken_username():
         encryption_service=EncryptionService(None),
     )
 
-    from eneo.authentication.auth_models import FederatedIdentity
-
     created, was_created = await container.user_service().resolve_federated_user(
-        identity=FederatedIdentity(email="anna.svensson@ange.se", email_verified=True),
+        identity=FederatedIdentity(
+            issuer=PROVIDER_ISSUER,
+            client_id="client",
+            subject="subject",
+            email="anna.svensson@ange.se",
+            email_verified=True,
+        ),
         tenant_id=tenant.id,
         allowed_domains=["ange.se"],
         correlation_id="corr-jit-username",
@@ -1182,7 +1104,7 @@ async def test_jit_provisioning_does_not_reuse_a_taken_username():
 
 
 @pytest.mark.asyncio
-async def test_jit_provisioning_returns_403_when_disabled(monkeypatch):
+async def test_jit_provisioning_returns_403_when_disabled(monkeypatch, provider):
     """Test that login fails with 403 when JIT provisioning is disabled and user doesn't exist."""
     dummy_settings = DummySettings(federation_enabled=True)
     monkeypatch.setattr(federation_router, "get_settings", lambda: dummy_settings)
@@ -1230,47 +1152,15 @@ async def test_jit_provisioning_returns_403_when_disabled(monkeypatch):
         audit_service=None,
     )
 
-    issue_time = int(time.time())
-    config_version = datetime.now(timezone.utc).isoformat()
-    state_payload = {
-        "tenant_id": str(tenant_id),
-        "tenant_slug": slug,
-        "frontend_state": "",
-        "nonce": "nonce-no-jit",
-        "redirect_uri": "https://tenant.nojit.example.com/login/callback",
-        "correlation_id": "corr-no-jit",
-        "exp": issue_time + 600,
-        "iat": issue_time,
-        "config_version": config_version,
-    }
-
-    signed_state = jwt.encode(
-        state_payload, dummy_settings.jwt_secret, algorithm="HS256"
+    callback = await _signed_callback(
+        redis_client,
+        provider,
+        tenant=tenant,
+        redirect_uri="https://tenant.nojit.example.com/login/callback",
+        frontend_state="",
+        correlation_id="corr-no-jit",
+        config_version=datetime.now(timezone.utc).isoformat(),
     )
-
-    cache_payload = {
-        "tenant_id": str(tenant_id),
-        "tenant_slug": slug,
-        "redirect_uri": state_payload["redirect_uri"],
-        "config_version": config_version,
-        "iat": state_payload["iat"],
-    }
-    await redis_client.setex(
-        f"oidc:state:{state_payload['nonce']}",
-        dummy_settings.oidc_state_ttl_seconds,
-        json.dumps(cache_payload),
-    )
-
-    fake_response = FakeResponse({"id_token": "id", "access_token": "token"})
-    monkeypatch.setattr(
-        federation_router,
-        "aiohttp_client",
-        lambda: FakeAioHttpClient(fake_response),
-    )
-    monkeypatch.setattr(federation_router, "PyJWKClient", FakeJWKClient)
-    monkeypatch.setattr(federation_router, "JWKClient", FakeJWKClient)
-
-    callback = CallbackRequest(code="auth-code", state=signed_state)
 
     with pytest.raises(HTTPException) as exc:
         await federation_router.auth_callback(callback, container=container)
@@ -1283,7 +1173,9 @@ async def test_jit_provisioning_returns_403_when_disabled(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_auth_callback_rejects_malformed_state_redirect_uri(monkeypatch):
+async def test_auth_callback_rejects_malformed_state_redirect_uri(
+    monkeypatch, provider
+):
     dummy_settings = DummySettings(
         federation_enabled=True,
         oidc_redirect_grace_period_seconds=0,
@@ -1346,47 +1238,15 @@ async def test_auth_callback_rejects_malformed_state_redirect_uri(monkeypatch):
         encryption_service=EncryptionService(None),
     )
 
-    issue_time = int(time.time())
-    config_version = datetime.now(timezone.utc).isoformat()
-    state_payload = {
-        "tenant_id": str(tenant_id),
-        "tenant_slug": slug,
-        "frontend_state": "",
-        "nonce": "nonce-malformed-redirect",
-        "redirect_uri": "https://alt.tenant.example.com/auth/callback?x=1",
-        "correlation_id": "corr-malformed-redirect",
-        "exp": issue_time + 600,
-        "iat": issue_time,
-        "config_version": config_version,
-    }
-
-    signed_state = jwt.encode(
-        state_payload, dummy_settings.jwt_secret, algorithm="HS256"
+    callback = await _signed_callback(
+        redis_client,
+        provider,
+        tenant=tenant,
+        redirect_uri="https://alt.tenant.example.com/auth/callback?x=1",
+        frontend_state="",
+        correlation_id="corr-malformed-redirect",
+        config_version=datetime.now(timezone.utc).isoformat(),
     )
-
-    cache_payload = {
-        "tenant_id": str(tenant_id),
-        "tenant_slug": slug,
-        "redirect_uri": state_payload["redirect_uri"],
-        "config_version": config_version,
-        "iat": state_payload["iat"],
-    }
-    await redis_client.setex(
-        f"oidc:state:{state_payload['nonce']}",
-        dummy_settings.oidc_state_ttl_seconds,
-        json.dumps(cache_payload),
-    )
-
-    fake_response = FakeResponse({"id_token": "id", "access_token": "token"})
-    monkeypatch.setattr(
-        federation_router,
-        "aiohttp_client",
-        lambda: FakeAioHttpClient(fake_response),
-    )
-    monkeypatch.setattr(federation_router, "PyJWKClient", FakeJWKClient)
-    monkeypatch.setattr(federation_router, "JWKClient", FakeJWKClient)
-
-    callback = CallbackRequest(code="auth-code", state=signed_state)
 
     with pytest.raises(HTTPException) as exc:
         await federation_router.auth_callback(callback, container=container)
@@ -1429,7 +1289,11 @@ async def test_global_oidc_endpoint_uses_shared_admission(monkeypatch, admission
         if admission_case in ("empty-domains", "existing-scim")
         else ["example.com"],
     )
-    claims: dict[str, object] = {"sub": "subject", "email": "user@example.com"}
+    claims: dict[str, object] = {
+        "iss": PROVIDER_ISSUER,
+        "sub": "subject",
+        "email": "user@example.com",
+    }
     if admission_case not in ("missing-verification", "existing-scim"):
         claims["email_verified"] = True
     existing = None
@@ -1459,17 +1323,19 @@ async def test_global_oidc_endpoint_uses_shared_admission(monkeypatch, admission
     monkeypatch.setattr(user_service, "get_settings", lambda: settings)
     response = FakeResponse(
         {
+            "issuer": PROVIDER_ISSUER,
             "token_endpoint": "https://idp.example.com/token",
             "jwks_uri": "https://idp.example.com/jwks",
             "id_token_signing_alg_values_supported": ["RS256"],
-            "id_token": "id",
+            # Only its header is read here; the stub service decodes nothing.
+            "id_token": jwt.encode({}, "unused-" * 8, headers={"kid": "key"}),
             "access_token": "token",
         }
     )
     monkeypatch.setattr(
         user_router, "aiohttp_client", lambda: FakeAioHttpClient(response)
     )
-    monkeypatch.setattr(user_router.jwt, "PyJWKClient", FakeJWKClient)
+    monkeypatch.setattr(user_router, "get_federation_signing_key", fake_signing_key)
     login = OpenIdConnectLogin(
         code="code",
         code_verifier="verifier",
@@ -1511,8 +1377,8 @@ class FailingStateRedis(FakeRedis):
         raise ConnectionError("redis unavailable")
 
 
-async def _single_use_callback(monkeypatch, redis_client: FakeRedis):
-    """A valid tenant callback whose state is cached once in redis_client."""
+async def _single_use_callback(monkeypatch, provider, redis_client: FakeRedis):
+    """A valid tenant callback whose transaction is stored once in redis_client."""
     dummy_settings = DummySettings(federation_enabled=True)
     monkeypatch.setattr(federation_router, "get_settings", lambda: dummy_settings)
     tenant_id = uuid4()
@@ -1562,68 +1428,32 @@ async def _single_use_callback(monkeypatch, redis_client: FakeRedis):
         redis_client=redis_client,
         encryption_service=EncryptionService(None),
     )
-    issue_time = int(time.time())
-    version = datetime.now(timezone.utc).isoformat()
-    state_payload = {
-        "tenant_id": str(tenant_id),
-        "tenant_slug": slug,
-        "frontend_state": "{}",
-        "nonce": "single-use-nonce",
-        "redirect_uri": "https://tenant.example.com/login/callback",
-        "correlation_id": "corr-single-use",
-        "exp": issue_time + 600,
-        "iat": issue_time,
-        "config_version": version,
-    }
-    await redis_client.setex(
-        "oidc:state:single-use-nonce",
-        dummy_settings.oidc_state_ttl_seconds,
-        json.dumps(
-            {
-                "tenant_id": str(tenant_id),
-                "tenant_slug": slug,
-                "redirect_uri": state_payload["redirect_uri"],
-                "config_version": version,
-                "iat": issue_time,
-            }
-        ),
+    callback = await _signed_callback(
+        FakeRedis() if isinstance(redis_client, FailingStateRedis) else redis_client,
+        provider,
+        tenant=tenant,
+        redirect_uri="https://tenant.example.com/login/callback",
+        frontend_state="{}",
+        correlation_id="corr-single-use",
+        config_version=datetime.now(timezone.utc).isoformat(),
     )
-    monkeypatch.setattr(
-        federation_router,
-        "aiohttp_client",
-        lambda: FakeAioHttpClient(
-            FakeResponse({"id_token": "id", "access_token": "token"})
-        ),
-    )
-    monkeypatch.setattr(federation_router, "PyJWKClient", FakeJWKClient)
-    monkeypatch.setattr(federation_router, "JWKClient", FakeJWKClient)
-    signed_state = jwt.encode(
-        state_payload, dummy_settings.jwt_secret, algorithm="HS256"
-    )
-    return CallbackRequest(code="auth-code", state=signed_state), container
+    return callback, container
 
 
-def _is_expired_session(error: BaseException) -> bool:
-    return (
-        isinstance(error, HTTPException)
-        and error.status_code == 400
-        and "Authorization session is invalid or has expired" in str(error.detail)
-    )
-
-
-async def test_auth_callback_state_is_single_use(monkeypatch):
-    callback, container = await _single_use_callback(monkeypatch, FakeRedis())
+async def test_auth_callback_state_is_single_use(monkeypatch, provider):
+    callback, container = await _single_use_callback(monkeypatch, provider, FakeRedis())
 
     first = await federation_router.auth_callback(callback, container=container)
     assert first["access_token"] == "access-token"
 
-    with pytest.raises(HTTPException) as caught:
+    with pytest.raises(OidcTransactionInvalidError):
         await federation_router.auth_callback(callback, container=container)
-    assert _is_expired_session(caught.value)
 
 
-async def test_concurrent_callbacks_admit_exactly_one(monkeypatch):
-    callback, container = await _single_use_callback(monkeypatch, InterleavingRedis())
+async def test_concurrent_callbacks_admit_exactly_one(monkeypatch, provider):
+    callback, container = await _single_use_callback(
+        monkeypatch, provider, InterleavingRedis()
+    )
 
     results = await asyncio.gather(
         federation_router.auth_callback(callback, container=container),
@@ -1634,12 +1464,14 @@ async def test_concurrent_callbacks_admit_exactly_one(monkeypatch):
     admitted = [r for r in results if isinstance(r, dict)]
     refused = [r for r in results if isinstance(r, BaseException)]
     assert len(admitted) == 1
-    assert len(refused) == 1 and _is_expired_session(refused[0])
+    assert len(refused) == 1
+    assert isinstance(refused[0], OidcTransactionInvalidError)
 
 
-async def test_state_lookup_failure_rejects(monkeypatch):
-    callback, container = await _single_use_callback(monkeypatch, FailingStateRedis())
+async def test_state_lookup_failure_is_unavailable(monkeypatch, provider):
+    callback, container = await _single_use_callback(
+        monkeypatch, provider, FailingStateRedis()
+    )
 
-    with pytest.raises(HTTPException) as caught:
+    with pytest.raises(OidcLoginUnavailableError):
         await federation_router.auth_callback(callback, container=container)
-    assert _is_expired_session(caught.value)

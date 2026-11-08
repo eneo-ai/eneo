@@ -19,7 +19,7 @@ This guide applies when `FEDERATION_ENABLED=true` (`FEDERATION_PER_TENANT_ENABLE
 ## 1. Before You Start
 - `FEDERATION_ENABLED=true` in backend `.env`
 - Super admin API key available (needed for every `/api/v1/sysadmin/...` call)
-- Redis running (recommended for the debug toggle; file fallback works)
+- Redis running (required to sign in: each sign-in is a one-time transaction stored there, and a missing or failing store answers `503` `oidc_login_unavailable`; the debug toggle also uses it, with a file fallback)
 - Each tenant has a slug (`tenant.slug`). Backfill once with:
   ```bash
   cd backend
@@ -121,8 +121,7 @@ journalctl -u backend.service -o cat | jq 'select(.correlation_id=="fa4fdb8fdbee
 | `callback.domain_rejected`         | Email domain not in tenant `allowed_domains`  | Add domain or ask user to use approved account          |
 | `callback.user_missing`            | Email not found in tenant user table          | Invite/import the user for that tenant                  |
 | `callback.user_tenant_mismatch`    | User exists but belongs to another tenant     | Move user to correct tenant or adjust login link        |
-| `callback.state_cache_error`       | Redis unavailable during login                | Check Redis health; retry once cache is restored        |
-| `initiate.state_cache_failed`      | Redis write failed during initiate            | Investigate Redis/file permissions, then retry          |
+| `oidc_transaction_store_failed`    | Redis missing or failing; sign-in answers `503` | Check Redis health, then start the sign-in again      |
 
 Turn off logging once the incident is resolved:
 ```bash

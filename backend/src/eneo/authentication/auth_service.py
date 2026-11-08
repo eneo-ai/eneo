@@ -1,10 +1,12 @@
 import base64
+import hashlib
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Literal, cast
 from uuid import UUID
 
 import bcrypt
 import jwt
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from pydantic import ValidationError
 
 from eneo.authentication.auth_models import (
@@ -451,10 +453,9 @@ class AuthService:
         # If at_hash NOT present → Skip validation (valid per OIDC spec)
         # This allows compatibility with both MobilityGuard (includes at_hash)
         # and Entra ID (may omit at_hash in authorization code flow)
-        expected_at_hash = payload.get("at_hash") if verify_at_hash else None
-
-        if expected_at_hash:
-            # at_hash present → MUST validate
+        if verify_at_hash and "at_hash" in payload:
+            # at_hash present → MUST validate, so an empty or null value fails
+            expected_at_hash = payload["at_hash"]
             logger.debug(
                 "at_hash present - validating",
                 extra={
@@ -464,11 +465,14 @@ class AuthService:
             )
 
             try:
-                # Get the pyjwt algorithm object
-                alg_obj = jwt.get_algorithm_by_name(header["alg"])
-
-                # Compute at_hash
-                digest = alg_obj.compute_hash_digest(access_token.encode())
+                # EdDSA names no hash; Ed25519 tokens hash with SHA-512
+                # (OpenID Connect Token Hash Algorithms 1.0).
+                if header["alg"] == "EdDSA" and isinstance(key, Ed25519PublicKey):
+                    digest = hashlib.sha512(access_token.encode()).digest()
+                else:
+                    digest = jwt.get_algorithm_by_name(
+                        header["alg"]
+                    ).compute_hash_digest(access_token.encode())
                 computed_at_hash = (
                     base64.urlsafe_b64encode(digest[: (len(digest) // 2)])
                     .rstrip(b"=")

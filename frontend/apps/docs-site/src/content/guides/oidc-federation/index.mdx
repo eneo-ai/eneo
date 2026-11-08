@@ -66,7 +66,8 @@ Make sure you have:
 
 **For the sysadmin API (single-tenant API setup and multi-tenant):**
 - `FEDERATION_ENABLED=true`, an `ENCRYPTION_KEY` and an `ENEO_SUPER_API_KEY` in the backend `.env`
-- Redis (recommended - it caches auth state for tamper detection, but the login flow also works without it)
+
+**For every setup:** Redis. Each sign-in keeps its one-time transaction there; without Redis, sign-in is refused.
 
 ---
 
@@ -82,6 +83,42 @@ Eneo uses the **OAuth 2.0 Authorization Code Flow** with OpenID Connect:
 6. User is logged in
 
 For technical details, see [Authentication Architecture](/docs/authentication-architecture). To keep users and groups in sync from your directory, see [SCIM Provisioning](/guides/scim-provisioning).
+
+---
+
+## Provider Contract
+
+What Eneo expects from any OIDC provider on the generic sign-in (`/api/v1/auth/initiate` and `/api/v1/auth/callback`), whichever setup you use.
+
+**Eneo sends** `state`, `nonce` and a PKCE `code_challenge` with method `S256` on every authorization request, and the matching `code_verifier` with the token request. A provider that ignores PKCE still signs users in; Eneo then relies on `state`, `nonce` and the client secret, so such a provider does not give you PKCE protection.
+
+**Eneo checks**, before anyone is signed in:
+
+- The ID token's signature against the provider's JWKS, using only the allowed algorithms (never `none` or a symmetric algorithm)
+- `iss` equals the issuer the sign-in started with. If the provider's issuer changes during a sign-in, that sign-in ends with `400` (`oidc_transaction_invalid`) before the code is sent anywhere. When the provider's discovery said at the start that it sends the `iss` parameter on its redirect ([RFC 9207](https://www.rfc-editor.org/rfc/rfc9207)), that parameter must be present and equal too; otherwise it may be missing, but one that is sent must be equal
+- `aud` contains Eneo's client ID; `azp`, when present, equals it, and it is required when `aud` names several clients
+- `exp`, `iat` and `sub` are present, the token has not expired, and `iat` and `auth_time` are not in the future (`oidc_clock_leeway_seconds`, default 120 seconds, allows for clock skew)
+- `nonce` equals the one Eneo sent for this sign-in
+
+A response that fails any check ends the sign-in with `401` (`oidc_response_not_verified`); nothing falls back to a weaker check.
+
+The provider-bound MobilityGuard and Zitadel logins in the Svelte frontend keep their own requests: they send PKCE but no `nonce`. The MobilityGuard backend route checks the signature, `aud`, expiry and that `iss` equals the issuer in the provider's discovery document.
+
+**Optional provider settings.** Set them through the [federation API](/guides/oidc-federation/multi-tenant#configure-the-tenant-via-api), which also serves a single-tenant setup made through the API. Leave them out to keep the defaults.
+
+| Field | Default | Meaning |
+|-------|---------|---------|
+| `signing_algorithms` | The provider's `id_token_signing_alg_values_supported`, else `["RS256"]` | ID token algorithms to accept. Only `RS256`/`384`/`512`, `PS256`/`384`/`512`, `ES256`/`384`/`512` and `EdDSA` (Ed25519 keys) are allowed |
+| `email_verified_claims` | `["email_verified", "xms_edov"]` | Claims that say the email is verified, in order. The first one present decides, so an explicit `false` is never overridden by a later claim |
+
+### Upgrading
+
+- Redis is required for sign-in.
+- The ID token's `iss` must equal the issuer in the provider's discovery document. If your discovery URL is a shared one whose issuer contains a placeholder (for example `{tenantid}`), switch to your organisation's own discovery URL before upgrading (`discovery_endpoint` in the federation config, or `OIDC_DISCOVERY_ENDPOINT`). Otherwise every sign-in fails with `oidc_response_not_verified` (`issuer_mismatch`).
+- PKCE (`S256`) and `nonce` are always sent. A provider that ignores PKCE keeps working.
+- The MobilityGuard backend route now refuses an ID token whose `iss` is missing or differs from the issuer in the provider's discovery document, with `401` `OIDC authentication failed` (the backend logs `ID token is not from the configured issuer`). A correctly configured provider signs in as before.
+- A sign-in started before the upgrade must be started again.
+- Upgrade the frontend together with the backend: the older frontend does not forward the provider's `iss` parameter.
 
 ---
 

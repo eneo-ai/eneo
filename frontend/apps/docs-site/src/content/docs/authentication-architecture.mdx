@@ -16,7 +16,7 @@ import { Callout, Tabs, Steps } from 'nextra/components'
 
 ## OIDC Protocol Flow
 
-Eneo implements the **OAuth 2.0 Authorization Code Flow** with OpenID Connect. Both single-tenant and multi-tenant setups go through the same public endpoints (`/api/v1/auth/initiate` and `/api/v1/auth/callback`) and use server-signed state JWTs (HS256) for security.
+Eneo implements the **OAuth 2.0 Authorization Code Flow** with OpenID Connect, PKCE (`S256`) and a `nonce`. Both single-tenant and multi-tenant setups go through the same public endpoints (`/api/v1/auth/initiate` and `/api/v1/auth/callback`). Each sign-in is a one-time transaction in Redis, named by a server-signed state JWT (HS256). The provider contract is summarised in the [OIDC guide](/guides/oidc-federation#provider-contract).
 
 ### Overview
 
@@ -30,12 +30,12 @@ Eneo implements the **OAuth 2.0 Authorization Code Flow** with OpenID Connect. B
 
 <Steps>
 ### Authorization Request
-The frontend calls `GET /api/v1/auth/initiate` (with `?tenant={slug}` in multi-tenant mode). The backend resolves the tenant's IdP configuration, computes the `redirect_uri` server-side and generates:
-- `state` - JWT signed with HS256, contains tenant context
-- `nonce` - 32 hex characters (`secrets.token_hex(16)`)
-- `correlation_id` - 16 hex characters (`secrets.token_hex(8)`) for request tracing
+The frontend calls `GET /api/v1/auth/initiate` (with `?tenant={slug}` in multi-tenant mode). The backend resolves the tenant's IdP configuration and discovery document, computes the `redirect_uri` server-side and starts a [sign-in transaction](#sign-in-transaction) holding a fresh `nonce` and PKCE `code_verifier`. The authorization URL carries:
+- `state` - JWT signed with HS256 that names the transaction
+- `nonce`
+- `code_challenge` (the verifier's SHA-256) with `code_challenge_method=S256`
 
-A copy of the state is cached in Redis under `oidc:state:{nonce}` on a best-effort basis (a cache failure is logged and the flow continues).
+A `correlation_id` (16 hex characters) traces the request. When Redis cannot store the transaction, initiation is refused with `503` (`oidc_login_unavailable`).
 
 ### User Authentication
 User authenticates with their Identity Provider.
@@ -44,12 +44,13 @@ User authenticates with their Identity Provider.
 IdP redirects to `{origin}/login/callback` with:
 - `code` - Authorization code (single-use)
 - `state` - Original state JWT for validation
+- `iss` - The provider's issuer, when it sends one ([RFC 9207](https://www.rfc-editor.org/rfc/rfc9207))
 
 ### Token Exchange
-The frontend posts `code` and `state` to `POST /api/v1/auth/callback`. The backend validates the state JWT signature (HS256) and expiry, compares it with the cached state when Redis is available, validates the `redirect_uri`, then exchanges the code for tokens at the IdP's token endpoint.
+The frontend posts `code`, `state` and `iss` to `POST /api/v1/auth/callback`. The backend validates the state JWT signature (HS256) and expiry, takes the transaction from Redis exactly once, checks that it belongs to the state's tenant, validates the `redirect_uri` and the `iss` parameter, then exchanges the code and the PKCE verifier for tokens at the IdP's token endpoint.
 
 ### ID Token Validation
-JWT signature verified against the IdP's JWKS (RS256). Claims validated: `aud` (audience), `exp` (expiration), `at_hash` when present.
+JWT signature verified against the IdP's JWKS with the allowed algorithms, then the claims listed under [ID Token Validation](#id-token-validation). Any failure is refused with `401` (`oidc_response_not_verified`).
 
 ### Session Creation
 After token validation, both OIDC entry points delegate tenant membership and JIT admission to `UserService.resolve_federated_user`. It checks the configured domain restriction, tenant and account state, and the additional JIT requirements below before an Eneo session JWT is issued.
@@ -235,25 +236,7 @@ the claim keep working during a rolling upgrade.
 
 ### Signed State Token
 
-The `state` parameter is a JWT signed with HS256:
-
-```python
-# federation_router.py
-state_payload: OIDCStatePayload = {
-    "tenant_id": str(tenant_obj.id),
-    "tenant_slug": tenant_obj.slug or tenant_obj.name,
-    "frontend_state": state or "",
-    "nonce": secrets.token_hex(16),
-    "redirect_uri": redirect_uri,
-    "correlation_id": correlation_id,
-    "exp": int(time.time()) + settings.oidc_state_ttl_seconds,
-    "iat": int(time.time()),
-    "config_version": tenant_config_version,
-}
-signed_state = pyjwt.encode(
-    cast(dict[str, Any], state_payload), settings.jwt_secret, algorithm="HS256"
-)
-```
+The `state` parameter is a JWT signed with HS256 that names the sign-in transaction. It carries `tenant_id`, `tenant_slug`, `frontend_state`, `transaction_id`, `correlation_id`, `iat` and `exp`; the nonce and the PKCE verifier are never in it.
 
 **Key parameters:**
 | Parameter | Value | Source |
@@ -261,10 +244,9 @@ signed_state = pyjwt.encode(
 | Algorithm | HS256 | `federation_router.py` |
 | Signing key | `JWT_SECRET` | `config.py` |
 | TTL | 600 seconds (10 minutes) | `oidc_state_ttl_seconds` |
-| Nonce length | 32 hex chars (16 bytes) | `secrets.token_hex(16)` |
 | Correlation ID | 16 hex chars (8 bytes) | `secrets.token_hex(8)` |
 
-An expired state is rejected with `400 Authorization session expired. Please try logging in again.`; a state that fails signature validation is rejected with `400 Invalid state parameter`.
+An expired state is rejected with `400 Authorization session expired. Please try logging in again.`; a state that fails signature validation, or one issued by a version without sign-in transactions, is rejected with `400 Invalid state parameter`.
 
 ### Browser Login Binding
 
@@ -300,37 +282,23 @@ starting authentication again does. After deploying this change, attempts starte
 with an older cookie format must restart login.
 
 The legacy Zitadel and MobilityGuard flows continue to use their existing local
-PKCE verifier cookies.
+PKCE verifier cookies and send no nonce. The MobilityGuard backend route checks
+the ID token's signature, `aud` and expiry, and that `iss` equals the issuer in
+the provider's discovery document.
 
-### Redis State Cache
+### Sign-in Transaction
 
-```python
-# federation_router.py
-state_cache_payload: OIDCStateCache = {
-    "tenant_id": str(tenant_obj.id),
-    "tenant_slug": tenant_obj.slug or tenant_obj.name,
-    "redirect_uri": redirect_uri,
-    "config_version": tenant_config_version,
-    "iat": state_payload["iat"],
-}
-state_cache_key = f"oidc:state:{state_payload['nonce']}"
+`authentication/oidc/transaction.py` stores each sign-in in Redis under `oidc:transaction:{id}` for `oidc_state_ttl_seconds`. It holds the `nonce`, the PKCE `code_verifier`, the `redirect_uri`, the tenant and its config version, the provider's issuer and whether its discovery announced the `iss` parameter, and the time the sign-in started. The browser and the provider never see the verifier. The callback checks the `iss` parameter and the ID token's `iss` against the stored issuer, so a config or discovery change during a sign-in does not change what it accepts. If the provider's issuer has changed since, the callback refuses before the token exchange.
 
-await redis_client.setex(
-    state_cache_key,
-    settings.oidc_state_ttl_seconds,
-    json.dumps(state_cache_payload, separators=(",", ":")),
-)
-```
-
-The cache is **best-effort**:
+The callback takes the transaction with `GETDEL`, so exactly one callback can use it:
 
 | Situation | Behaviour |
 |-----------|-----------|
-| Redis reachable, key present | Cached state is compared with the signed state (tamper detection) and used for the grace-period check |
-| Redis reachable, key missing (expired or already consumed) | `400 Authorization session is invalid or has expired. Please restart the sign-in flow.` |
-| Redis unavailable | Warning logged (`initiate.state_cache_failed` / `callback.state_cache_error`), the flow continues on the signed state alone |
+| Transaction present | Taken and removed; its tenant must match the state's, otherwise `400 Authorization state mismatch detected. Please restart the sign-in flow.` |
+| Transaction missing or unreadable (expired, already used, Redis restarted, or started before an upgrade), or the provider's issuer changed since the sign-in started | `400` `oidc_transaction_invalid`: "Authorization session is invalid or has expired. Please restart the sign-in flow." |
+| Redis unavailable, or no answer within 2 seconds | `503` `oidc_login_unavailable` at initiation or callback. A callback whose read got no answer counts the transaction as used, so the sign-in must be started again |
 
-The key is deleted when the callback finishes, whether it succeeded or failed, so a state cannot be replayed while Redis is available.
+None of these refusals writes a session or a user row.
 
 ### Redirect URI Grace Period
 
@@ -353,16 +321,15 @@ if redirect_mismatch:
         ...
 ```
 
-The `redirect_uri` carried in the state is first checked for well-formedness and then compared with the tenant's currently configured redirect URIs (canonical plus `additional_redirect_uris`). On a mismatch:
+The `redirect_uri` stored in the transaction is first checked for well-formedness and then compared with the tenant's currently configured redirect URIs (canonical plus `additional_redirect_uris`). On a mismatch:
 
-- **`strict_oidc_redirect_validation = false`**: any well-formed `redirect_uri` from the state is accepted.
+- **`strict_oidc_redirect_validation = false`**: any well-formed `redirect_uri` from the transaction is accepted.
 - **`strict_oidc_redirect_validation = true`** (default): the old `redirect_uri` is accepted only if **all** of the following hold:
 
 | Condition | Check |
 |-----------|-------|
 | Config version changed | `current_config_version != state_config_version` |
 | Grace period configured | `grace_period > 0` |
-| Cached state available and consistent | `cached_state.redirect_uri == redirect_uri` (requires Redis) |
 | State issued within grace period | `seconds_since_issue <= grace_period` |
 | Config updated within grace period | `seconds_since_update <= grace_period` |
 | Config changed after state issued | `tenant_updated_at > state_config_dt` |
@@ -419,34 +386,6 @@ Authentication is blocked for non-active tenants at both initiate and callback s
 <Callout type="warning">
   If a tenant becomes suspended during a user's authentication flow, the callback will fail even if initiate succeeded.
 </Callout>
-
-### State Tamper Detection
-
-When the cached state is available, the callback validates that the tenant context in the signed state matches the cached state to detect tampering:
-
-```python
-# federation_router.py
-expected_tenant_id = cached_state["tenant_id"]
-if expected_tenant_id and expected_tenant_id != str(tenant_id):
-    ...
-    raise HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail=(
-            "Authorization state mismatch detected. "
-            "Please restart the sign-in flow."
-        ),
-        headers={"X-Correlation-ID": correlation_id},
-    )
-```
-
-**Validation checks:**
-
-| Field | Comparison | Purpose |
-|-------|------------|---------|
-| `tenant_id` | Exact match | Prevents tenant ID substitution |
-| `tenant_slug` | Case-insensitive | Prevents tenant slug substitution |
-
-Both checks return `400` with the same detail and are logged as `callback.state_tampered` debug events with `reason` set to `tenant_id_mismatch` or `tenant_slug_mismatch`. The checks only run when Redis returned a cached state; the signed JWT itself is always verified.
 
 ---
 
@@ -518,18 +457,25 @@ uv run python -m eneo.cli.generate_encryption_key
 
 ### Claims Validated
 
-`auth_service.py` owns token validation; `FederatedIdentity` owns the validated email identity:
+`authentication/oidc/verification.py` owns the response check; `FederatedIdentity` owns the validated email identity. Every failure is refused with `401` (`oidc_response_not_verified`) and logged as `oidc_response_refused` with a reason, never with the token:
 
 | Claim | Validated? | Details |
 |-------|------------|---------|
-| `aud` | **Yes** | Must match `client_id` |
-| `exp` | **Yes** | Automatic PyJWT validation |
-| `iss` | **No** | Not checked (no `issuer` is passed to PyJWT); trust comes from the signature against the configured `jwks_uri` |
-| `iat` | **Yes** | A token issued more than the clock leeway in the future is rejected as not yet valid (`ImmatureSignatureError`); the drift is logged |
-| `nonce` | **No** | Not validated in ID token |
+| `alg` | **Yes** | One of the provider's [allowed algorithms](/guides/oidc-federation#provider-contract); `none` and symmetric algorithms never |
+| `iss` | **Yes** | Required; must equal the provider's issuer (the stored `issuer`, else discovery's) |
+| `aud` | **Yes** | Required; must contain `client_id` |
+| `azp` | Conditional | When present, must equal `client_id`; required when `aud` names several clients |
+| `exp` | **Yes** | Required; automatic PyJWT validation |
+| `iat` | **Yes** | Required; a token issued more than the clock leeway in the future is rejected as not yet valid |
+| `sub` | **Yes** | Required |
+| `nonce` | **Yes** | Must equal the transaction's nonce |
+| `auth_time` | Conditional | When present, a number not in the future |
+| `acr`, `amr` | Conditional | When present, text and a list of text |
 | `at_hash` | Conditional | If present, must match access token hash |
-| `email_verified` | Conditional | For the standard `email`, explicit `false` rejects login before account lookup; omission is allowed for existing active members, while JIT requires `true` |
+| `email_verified` | Conditional | For the standard `email`, explicit `false` rejects login before account lookup when this claim decides; omission is allowed for existing active members, while JIT requires `true` |
 | `xms_edov` | Conditional | Entra ID's "email domain owner verified" claim; a positive value verifies the standard `email` for JIT when `email_verified` is absent |
+
+The verification claims and their order come from the provider's `email_verified_claims` (default `["email_verified", "xms_edov"]`); the first one present decides. A claim left out of that list decides nothing, `email_verified` included.
 
 **Clock skew tolerance:** 120 seconds (2 minutes) - configurable via `oidc_clock_leeway_seconds`
 
@@ -537,20 +483,9 @@ uv run python -m eneo.cli.generate_encryption_key
 
 Only the email claim is used. The claim name comes from `claims_mapping.email` (default `email`); the ID token's `sub` is logged for diagnostics but not persisted:
 
-```python
-# federation_router.py
-claims_mapping: OIDCClaimsMapping = federation_config.get(
-    "claims_mapping"
-) or {"email": "email"}
-email_claim = claims_mapping.get("email", "email")
-...
-identity = FederatedIdentity.from_claims(payload, email_claim=email_claim)
-email = identity.email
-```
-
 A missing claim is rejected with `401 Email claim not found in ID token`; a malformed address with `401 Email claim from identity provider is invalid. Contact your administrator.`
 
-An explicit boolean `email_verified: false` for the standard `email` claim is rejected before account lookup or JIT provisioning. The federation callback returns `401 Email is not verified by the identity provider`; global MobilityGuard login also rejects the token. A missing flag remains accepted for existing active members when enterprise IdPs issue administrator-controlled directory addresses without this claim. JIT creation still requires verified email, as described below.
+When `email_verified` is the claim that decides, an explicit boolean `false` for the standard `email` claim is rejected before account lookup or JIT provisioning. The federation callback returns `401 Email is not verified by the identity provider`; global MobilityGuard login also rejects the token. A missing flag remains accepted for existing active members when enterprise IdPs issue administrator-controlled directory addresses without this claim. JIT creation still requires verified email, as described below.
 
 Eneo still links accounts by email, so the configured IdP must control who can claim that address. If `claims_mapping.email` uses a different claim, such as `upn`, the standard `email_verified` flag does not describe that claim and is not applied to it. Administrators must choose a claim controlled by their organization's directory. This check does not introduce an issuer/subject account binding.
 
@@ -585,22 +520,9 @@ New accounts use `state=ACTIVE`, the email local part as username (falling back 
 
 ## JWKS Handling
 
-The signing key is fetched with PyJWT's `PyJWKClient`, constructed anew for every callback:
+The signing key is looked up by the token's `kid` among the signing keys in the provider's JWKS (`use` is `sig` or absent; a key marked `enc` is never used). The key set is cached per `jwks_uri`, shared by every issuer that uses that address, for `oidc_jwks_cache_ttl_seconds` (default one hour) and fetched again, at a limited rate, when a token names an unknown `kid`. The discovery document is cached per URL for the same time, and concurrent sign-ins share one fetch. When it cannot be fetched, sign-in fails rather than falling back to stored values, and the URL is tried again at most every 30 seconds.
 
-```python
-# federation_router.py
-jwk_client = JWKClient(jwks_uri)
-signing_key = jwk_client.get_signing_key_from_jwt(
-    id_token
-).key  # Extract raw key from PyJWK wrapper
-```
-
-**Caching:**
-- No JWKS caching across requests - each callback creates a fresh client and downloads the key set
-- No Redis/persistent caching for JWKS keys
-- Endpoints missing from the stored config (`authorization_endpoint`, `token_endpoint`, `jwks_uri`) are resolved by fetching the discovery document, also without caching. API-configured tenants have these stored at `PUT`/`PATCH` time; the environment-variable configuration only has `discovery_endpoint`, so discovery is fetched on every login
-
-A JWKS fetch or key lookup failure is reported as `401 Failed to validate ID token signature`.
+The MobilityGuard backend route uses the same cache. A JWKS fetch or key lookup failure is reported as `401 Failed to validate ID token signature`, and on the MobilityGuard route, as before, as `502 Failed to verify OIDC token signature`.
 
 ---
 
@@ -617,9 +539,10 @@ From `config.py`:
 | `public_origin` (`PUBLIC_ORIGIN`) | - | Origin used to build `redirect_uri` when the tenant has no `canonical_public_origin`; must be `https://` (or `http://localhost`) without a path |
 | `encryption_key` (`ENCRYPTION_KEY`) | - | Fernet key; required when `FEDERATION_ENABLED=true` |
 | `eneo_super_api_key` (`ENEO_SUPER_API_KEY`) | - | Super admin key for the sysadmin API (sent as `X-API-Key`) |
-| `oidc_state_ttl_seconds` | 600 | State token TTL (10 minutes) |
+| `oidc_state_ttl_seconds` | 600 | State token and sign-in transaction TTL (10 minutes) |
 | `oidc_redirect_grace_period_seconds` | 900 | Config change grace period (15 min, capped at the state TTL) |
 | `oidc_clock_leeway_seconds` | 120 | Clock skew tolerance (2 minutes) |
+| `oidc_jwks_cache_ttl_seconds` | 3600 | How long a provider's JWKS and discovery document are cached |
 | `strict_oidc_redirect_validation` | true | Enforce exact redirect_uri match (with grace period) |
 
 ---
@@ -674,22 +597,17 @@ Generated with `secrets.token_hex(8)` → 16 hex characters.
 Enable debug logging via the observability API (`POST /api/v1/sysadmin/observability/oidc-debug/`). Events follow pattern `[OIDC DEBUG] {event}`:
 
 **Initiate phase:**
-- `initiate.state_cached`
-- `initiate.state_cache_failed` / `initiate.state_cache_skipped`
 - `initiate.authorization_ready`
 
 **Callback phase:**
 - `callback.state_decoded`
-- `callback.state_cache_hit` / `callback.state_cache_miss`
-- `callback.state_cache_error` / `callback.state_cache_unavailable` / `callback.state_cache_missing`
-- `callback.state_tampered` (with `reason`: `tenant_id_mismatch` or `tenant_slug_mismatch`)
-- `callback.tenant_loaded`
-- `callback.tenant_inactive`
 - `callback.email_extracted`
 - `callback.user_denied`
 - `callback.jit_provisioning`
 - `callback.success`
 - `callback.unexpected_error`
+
+A refused or failed sign-in is logged whether or not debug logging is on: `oidc_transaction_refused` and `oidc_response_refused` name the check that refused it, and `oidc_transaction_store_failed` means Redis is missing or failing.
 
 ---
 

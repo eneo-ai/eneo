@@ -132,6 +132,8 @@ async def test_put_get_patch_test_delete_answer_as_before(
         "issuer": idp["issuer"],
         "allowed_domains": [f"{slug}.gov"],
         "additional_redirect_uris": [],
+        "signing_algorithms": None,
+        "email_verified_claims": None,
         "encryption_status": "encrypted",
     }
 
@@ -163,6 +165,44 @@ async def test_put_get_patch_test_delete_answer_as_before(
         "message": "Federation config deleted successfully",
     }
     assert await _stored(tenant["id"]) == {}
+
+
+async def test_optional_provider_keys_round_trip(
+    client: AsyncClient,
+    super_admin_token: str,
+    oidc_mock,
+    mock_transcription_models,
+):
+    slug = f"fed-keys-{uuid4().hex[:6]}"
+    tenant = await _tenant(client, super_admin_token, slug)
+    idp = _idp(slug)
+    oidc_mock(discovery=_discovery(idp))
+    headers = {"X-API-Key": super_admin_token}
+    url = f"/api/v1/sysadmin/tenants/{tenant['id']}/federation"
+    keys = {
+        "signing_algorithms": ["ES256", "RS256"],
+        "email_verified_claims": ["email_verified"],
+    }
+
+    put = await client.put(url, json={**_put_body(slug, idp), **keys}, headers=headers)
+    assert put.status_code == 200, put.text
+    stored = await _stored(tenant["id"])
+    assert {key: stored[key] for key in keys} == keys
+    get = await client.get(url, headers=headers)
+    assert {key: get.json()[key] for key in keys} == keys
+
+    patch = await client.patch(
+        url,
+        json={"signing_algorithms": ["PS256"], "email_verified_claims": None},
+        headers=headers,
+    )
+    assert patch.status_code == 200, patch.text
+    patched = await _stored(tenant["id"])
+    assert patched["signing_algorithms"] == ["PS256"]
+    assert "email_verified_claims" not in patched
+    get = await client.get(url, headers=headers)
+    assert get.json()["signing_algorithms"] == ["PS256"]
+    assert get.json()["email_verified_claims"] is None
 
 
 async def test_operator_errors_answer_as_before(

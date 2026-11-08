@@ -103,6 +103,10 @@ class ErrorCodes(int, Enum):
     ICON_IN_USE = 9075
     # A resource can only show an icon the caller uploaded in their tenant.
     ICON_NOT_ATTACHABLE = 9076
+    # OIDC sign-in refusals; the string ``code`` names the case for clients.
+    OIDC_LOGIN_UNAVAILABLE = 9077
+    OIDC_TRANSACTION_INVALID = 9078
+    OIDC_RESPONSE_NOT_VERIFIED = 9079
     # A personal chat save whose own Skills would not run as configured. The
     # details carry the layer reason so clients can explain it in their language.
     PERSONAL_SKILLS_REJECTED = 9080

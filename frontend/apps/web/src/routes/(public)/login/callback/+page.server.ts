@@ -18,6 +18,7 @@ import type { PageServerLoad } from "./$types";
 export const load = (async (event) => {
   const code = event.url.searchParams.get("code");
   const state = event.url.searchParams.get("state");
+  const iss = event.url.searchParams.get("iss");
   const error = event.url.searchParams.get("error");
   const errorDescription = event.url.searchParams.get("error_description");
   const decodedState = decodeState<LoginStateParam>(state);
@@ -134,7 +135,7 @@ export const load = (async (event) => {
       // Generic OIDC flow (single-tenant or new backend-first flow)
       // loginMethod is undefined when using backend-generated state JWT
       console.debug("[OIDC Callback] Using generic OIDC flow (backend-first)");
-      const oidcResult = await loginWithOidc(code, state, event.fetch);
+      const oidcResult = await loginWithOidc(code, state, event.fetch, iss);
       success = oidcResult !== null;
       if (oidcResult !== null) {
         redirectUrl =
@@ -202,6 +203,11 @@ export const load = (async (event) => {
     } else if (loginError.code === "UNAUTHORIZED") {
       params.set("message", "oidc_unauthorized");
       params.set("detailCode", "unauthorized");
+    } else if (loginError.code === "LOGIN_UNAVAILABLE") {
+      params.set("message", "oidc_callback_failed");
+      params.set("detailCode", "login_unavailable");
+    } else if (loginError.code === "ATTEMPT_EXPIRED") {
+      params.set("message", "oidc_attempt_rejected");
     } else {
       params.set("message", "oidc_callback_failed");
     }

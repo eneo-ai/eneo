@@ -50,7 +50,12 @@ async def test_colliding_usernames_keep_identity_and_private_resources_isolated(
         ):
             if login_method == "jit":
                 owner, created = await container.user_service().resolve_federated_user(
-                    identity=FederatedIdentity(email=email, email_verified=True),
+                    identity=FederatedIdentity(
+                        issuer="https://idp.example.org",
+                        subject=f"subject-{tenant_id}",
+                        email=email,
+                        email_verified=True,
+                    ),
                     tenant_id=tenant_id,
                     allowed_domains=["sundsvall.se", "ange.se"],
                     correlation_id="session-identity-regression",
