@@ -1490,6 +1490,8 @@
   "sync_skipped": "Synkronisering hoppades över",
   "synced_with_warnings": "Synkroniserad med varningar",
   "login_too_many_attempts_later": "För många misslyckade inloggningsförsök. Försök igen senare.",
+  "invalid_credentials": "Ogiltiga inloggningsuppgifter",
+  "authentication_service_error": "Autentiseringstjänsten stötte på ett problem. Försök igen.",
   "provider_form_api_key_masked": "Det ser ut som nyckelns maskerade visning. Ange den faktiska API-nyckeln.",
   "conversation_retention_space_admin_only": "Endast administratörer för utrymmet kan ändra gallringen.",
   "websites_bulk_actions": "Åtgärder för valda webbplatser",

@@ -5,25 +5,18 @@ const mocks = vi.hoisted(() => ({
   getBackendUrl: vi.fn(() => "https://eneo.example"),
   loginWithEneo: vi.fn(),
   loginWithOidc: vi.fn(),
-  getMobilityguardLink: vi.fn(),
   getZitadelLink: vi.fn(),
-  clearMobilityguardCookie: vi.fn(),
   clearZitadelCookie: vi.fn(),
-  loginWithMobilityguard: vi.fn(),
-  loginWithZitadel: vi.fn()
+  loginWithZitadel: vi.fn(),
+  privateEnv: {} as Record<string, string | undefined>
 }));
 
-vi.mock("$env/dynamic/private", () => ({ env: {} }));
+vi.mock("$env/dynamic/private", () => ({ env: mocks.privateEnv }));
 vi.mock("$lib/core/environment.server", () => ({
   getBackendUrl: mocks.getBackendUrl
 }));
 vi.mock("$lib/features/auth/eneo.server", () => ({
   loginWithEneo: mocks.loginWithEneo
-}));
-vi.mock("$lib/features/auth/mobilityguard.server", () => ({
-  getMobilityguardLink: mocks.getMobilityguardLink,
-  clearMobilityguardCookie: mocks.clearMobilityguardCookie,
-  loginWithMobilityguard: mocks.loginWithMobilityguard
 }));
 vi.mock("$lib/features/auth/zitadel.server", () => ({
   getZitadelLink: mocks.getZitadelLink,
@@ -100,7 +93,6 @@ describe("login resume", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getBackendUrl.mockReturnValue("https://eneo.example");
-    mocks.getMobilityguardLink.mockResolvedValue(undefined);
     mocks.getZitadelLink.mockResolvedValue(undefined);
   });
 
@@ -128,6 +120,35 @@ describe("login resume", () => {
     expect(event.cookies.set).not.toHaveBeenCalled();
     expect(event.cookies.delete).not.toHaveBeenCalled();
   });
+
+  test.each([
+    { oldSetting: true, global: false, multi: false, zitadel: false, unavailable: true },
+    { oldSetting: true, global: true, multi: false, zitadel: false, unavailable: false },
+    { oldSetting: true, global: false, multi: true, zitadel: false, unavailable: false },
+    { oldSetting: true, global: false, multi: false, zitadel: true, unavailable: false },
+    { oldSetting: false, global: false, multi: false, zitadel: false, unavailable: false }
+  ])(
+    "says organisation sign-in is unavailable only where the removed setting is the sole one: %o",
+    async (mode) => {
+      mocks.privateEnv.MOBILITY_GUARD_AUTH = mode.oldSetting ? "https://idp.example/authorize" : "";
+      mocks.getZitadelLink.mockResolvedValue("https://zitadel.example/oauth/v2/authorize");
+      const event = loginEvent();
+      event.locals.featureFlags.newAuth = mode.zitadel;
+      event.locals.featureFlags.federationStatus = {
+        has_single_tenant_federation: false,
+        has_global_oidc_config: mode.global,
+        has_multi_tenant_federation: mode.multi
+      };
+      try {
+        const result = await load(event as never);
+        expect(result.organisationSignInUnavailable).toBe(mode.unavailable);
+        expect(result).not.toHaveProperty("mobilityguardLink");
+        expect(event.cookies.set).not.toHaveBeenCalled();
+      } finally {
+        delete mocks.privateEnv.MOBILITY_GUARD_AUTH;
+      }
+    }
+  );
 
   test("username/password preserves nested encoding without a second decode", async () => {
     const destination = "/module-login?state=a%2526b%253Dc";

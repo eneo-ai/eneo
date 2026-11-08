@@ -52,6 +52,24 @@ describe("inspectDeploymentEnv", () => {
   });
 });
 
+describe("removed MobilityGuard settings", () => {
+  it.each(["MOBILITY_GUARD_AUTH", "MOBILITYGUARD_CLIENT_ID"])(
+    "warns that %s is no longer read and points to the OIDC settings",
+    (name) => {
+      const report = inspectDeploymentEnv({ ...configured, [name]: "old" });
+
+      expect(report.errors).toEqual([]);
+      expect(report.warnings).toHaveLength(1);
+      expect(report.warnings[0]).toContain(`${name} is no longer used for sign-in`);
+      expect(report.warnings[0]).toContain("OIDC_");
+      expect(report.warnings[0]).toContain(
+        "https://docs.eneo.ai/guides/oidc-federation#migrate-from-the-mobilityguard-settings"
+      );
+      expect(report.warnings[0]).not.toContain("Eneo 2.2");
+    }
+  );
+});
+
 describe("assertDeploymentEnv", () => {
   it("throws with every problem at once", () => {
     expect(() =>

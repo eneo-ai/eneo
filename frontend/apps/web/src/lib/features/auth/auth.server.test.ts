@@ -246,7 +246,7 @@ describe("clearFrontendCookies", () => {
     const jar = cookieJar({
       auth: "id-token",
       acc: "access-token",
-      mobilityguard: "verifier",
+      other: "value",
       PARAGLIDE_LOCALE: "sv"
     });
 
@@ -256,7 +256,7 @@ describe("clearFrontendCookies", () => {
     expect(jar.deleted).toEqual([
       { name: "auth", path: "/" },
       { name: "acc", path: "/" },
-      { name: "mobilityguard", path: "/" },
+      { name: "other", path: "/" },
       { name: "PARAGLIDE_LOCALE", path: "/" }
     ]);
   });

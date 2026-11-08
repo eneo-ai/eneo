@@ -9,7 +9,6 @@ import {
 } from "$lib/features/auth/auth.server";
 import { loginWithEneo, type EneoLoginFailureReason } from "$lib/features/auth/eneo.server";
 import { backendErrorCode } from "$lib/features/auth/LoginError";
-import { getMobilityguardLink } from "$lib/features/auth/mobilityguard.server";
 import { getZitadelLink } from "$lib/features/auth/zitadel.server";
 import { redirect, fail, type Actions } from "@sveltejs/kit";
 import type { PageServerLoad } from "./$types";
@@ -131,7 +130,6 @@ export const actions: Actions = {
 
 export const load = (async (event) => {
   let zitadelLink: string | undefined = undefined;
-  let mobilityguardLink: string | undefined = undefined;
   const requestedDestination = event.url.searchParams.get("next");
 
   // If user is logged in already: forward to base url, as login doesn't make sense
@@ -143,19 +141,23 @@ export const load = (async (event) => {
     zitadelLink = await getZitadelLink(event);
   }
 
-  if (env.MOBILITY_GUARD_AUTH) {
-    mobilityguardLink = await getMobilityguardLink(event);
-  }
-
   const { federationStatus } = event.locals.featureFlags;
   const hasSingleTenantOidc =
     !federationStatus.has_multi_tenant_federation &&
     (federationStatus.has_single_tenant_federation || federationStatus.has_global_oidc_config);
+  // The removed MobilityGuard link still being set means people are meant to
+  // sign in through their organisation, which this page cannot offer now
+  // unless another single sign-on is available.
+  const organisationSignInUnavailable =
+    Boolean(env.MOBILITY_GUARD_AUTH?.trim()) &&
+    !zitadelLink &&
+    !hasSingleTenantOidc &&
+    !federationStatus.has_multi_tenant_federation;
 
   return {
-    mobilityguardLink,
     zitadelLink,
     hasSingleTenantOidc,
+    organisationSignInUnavailable,
     featureFlags: event.locals.featureFlags
   };
 }) satisfies PageServerLoad;
