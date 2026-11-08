@@ -201,3 +201,10 @@ def downgrade() -> None:
             nullable=True,
         ),
     )
+    # 20260130_add_analytics_indexes indexed the column; its downgrade drops it.
+    op.create_index(
+        "idx_sessions_group_chat_created_at",
+        "sessions",
+        ["group_chat_id", "created_at"],
+        unique=False,
+    )
