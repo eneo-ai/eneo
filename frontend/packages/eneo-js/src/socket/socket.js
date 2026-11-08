@@ -73,15 +73,18 @@ export function createEneoSocket(args, options) {
   }
 
   function disconnect() {
+    // Only an existing socket can be told; the local state goes either way,
+    // also after a 1008 left none, so a later connect starts clean.
     if (socket) {
       currentSubscriptions.forEach((count, type) => {
         sendMessage({ type: "unsubscribe", data: { channel: type } });
       });
-      currentSubscriptions.clear();
-      handlers.clear();
-      clearInterval(heartbeatInterval);
-      safelyCloseSocket();
     }
+    currentSubscriptions.clear();
+    handlers.clear();
+    clearTimeout(heartbeatReconnectTimeout);
+    clearInterval(heartbeatInterval);
+    safelyCloseSocket();
   }
 
   /** @param {MessageEvent} event */

@@ -51,14 +51,15 @@ function connected(t) {
     mock.timers.reset();
     globalThis.WebSocket = original;
   });
-  createEneoSocket({ baseUrl: "https://eneo.example", token: "token" }).connect();
+  const client = createEneoSocket({ baseUrl: "https://eneo.example", token: "token" });
+  client.connect();
   const [socket] = FakeWebSocket.opened;
   socket.open();
-  return socket;
+  return { client, socket };
 }
 
 test("a socket the server closes with 1008 stays closed", (t) => {
-  const socket = connected(t);
+  const { socket } = connected(t);
 
   // A ping is out, waiting for its pong, when the session ends.
   mock.timers.tick(PING_INTERVAL);
@@ -81,4 +82,22 @@ test("a lost pong still reconnects", (t) => {
   mock.timers.tick(PONG_TIMEOUT);
 
   assert.equal(FakeWebSocket.opened.length, 2);
+});
+
+test("a disconnect after a 1008 ends the subscriptions it held", (t) => {
+  const { client, socket } = connected(t);
+  /** @type {unknown[]} */
+  const seen = [];
+  client.subscribe("app_run_updates", (data) => seen.push(data));
+  socket.closedByServer(1008);
+
+  client.disconnect();
+  client.connect();
+  const reopened = FakeWebSocket.opened[1];
+  reopened.open();
+  reopened.onmessage?.({ data: JSON.stringify({ type: "app_run_updates", data: 1 }) });
+
+  // The new connection starts clean: no old channel, no old handler.
+  assert.deepEqual(reopened.sent, []);
+  assert.deepEqual(seen, []);
 });
