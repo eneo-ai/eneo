@@ -11,7 +11,7 @@ from typing import Annotated, Any, Literal, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from eneo.authentication import auth
 from eneo.authentication.endpoint_access import (
@@ -26,6 +26,7 @@ from eneo.server.protocol import responses
 from eneo.tenants.tenant_federation_service import (
     PatchFederationRequest,
     SetFederationRequest,
+    stored_subject_claim,
 )
 
 __all__ = ["PatchFederationRequest", "SetFederationRequest", "router"]
@@ -84,6 +85,9 @@ class FederationInfo(BaseModel):
     # Null when the key is not stored, so the built-in default applies.
     signing_algorithms: list[str] | None = None
     email_verified_claims: list[str] | None = None
+    subject_claim: str = Field(
+        default="sub", description="The token claim an account is bound to"
+    )
     configured_at: datetime
     encryption_status: Literal["encrypted", "plaintext"]
 
@@ -256,6 +260,7 @@ async def get_tenant_federation(
         additional_redirect_uris=metadata.get("additional_redirect_uris", []),
         signing_algorithms=metadata.get("signing_algorithms"),
         email_verified_claims=metadata.get("email_verified_claims"),
+        subject_claim=stored_subject_claim(tenant.federation_config),
         configured_at=configured_at,
         encryption_status=metadata["encryption_status"],
     )

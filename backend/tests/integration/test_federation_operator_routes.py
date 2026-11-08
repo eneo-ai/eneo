@@ -143,6 +143,7 @@ async def test_put_get_patch_test_delete_answer_as_before(
         "additional_redirect_uris": [],
         "signing_algorithms": None,
         "email_verified_claims": None,
+        "subject_claim": "sub",
         "encryption_status": "encrypted",
     }
 
@@ -212,6 +213,52 @@ async def test_optional_provider_keys_round_trip(
     get = await client.get(url, headers=headers)
     assert get.json()["signing_algorithms"] == ["PS256"]
     assert get.json()["email_verified_claims"] is None
+
+
+async def test_the_subject_claim_is_set_by_put_and_patch(
+    client: AsyncClient,
+    super_admin_token: str,
+    oidc_mock,
+    mock_transcription_models,
+):
+    slug = f"fed-subject-{uuid4().hex[:6]}"
+    tenant = await _tenant(client, super_admin_token, slug)
+    idp = _idp(slug)
+    oidc_mock(discovery=_discovery(idp))
+    headers = {"X-API-Key": super_admin_token}
+    url = f"/api/v1/sysadmin/tenants/{tenant['id']}/federation"
+
+    put = await client.put(
+        url, json={**_put_body(slug, idp), "subject_claim": "oid"}, headers=headers
+    )
+    assert put.status_code == 200, put.text
+    assert (await _stored(tenant["id"]))["claims_mapping"] == {
+        "email": "email",
+        "subject": "oid",
+        "username": "sub",
+        "name": "name",
+    }
+    assert (await client.get(url, headers=headers)).json()["subject_claim"] == "oid"
+
+    patch = await client.patch(
+        url, json={"subject_claim": "employee_id"}, headers=headers
+    )
+    assert patch.status_code == 200, patch.text
+    stored = await _stored(tenant["id"])
+    assert stored["claims_mapping"] == {
+        "email": "email",
+        "subject": "employee_id",
+        "username": "sub",
+        "name": "name",
+    }
+
+    for refused in ({"subject_claim": "email"}, {"subject_claim": None}):
+        response = await client.patch(url, json=refused, headers=headers)
+        assert response.status_code == 422, (refused, response.text)
+        assert await _stored(tenant["id"]) == stored
+    unchanged = await client.patch(url, json={"client_id": "next"}, headers=headers)
+    assert unchanged.status_code == 200, unchanged.text
+    assert (await _stored(tenant["id"]))["claims_mapping"] == stored["claims_mapping"]
 
 
 async def test_operator_errors_answer_as_before(

@@ -3,9 +3,9 @@
 Two doors use it. The operator's super-key routes (tenant_federation_router)
 register, replace, patch, test and delete a tenant's identity provider. An org
 admin in an interactive session (tenant_self_federation_router) edits the label,
-client ID, secret and allowed domains of their own tenant's IdP; the
-authorization server and everything derived from it, the redirect topology and
-the claim mapping stay with the operator.
+client ID, secret, allowed domains and subject claim of their own tenant's IdP;
+the authorization server and everything derived from it, the redirect topology
+and the rest of the claim mapping stay with the operator.
 
 Every write reads the stored config with the tenant row locked, is audited as
 FEDERATION_UPDATED in the same transaction (always, whatever the tenant's audit
@@ -32,7 +32,9 @@ from eneo.authentication.oidc.profile import (
     DEFAULT_SCOPES,
     SIGNING_ALGORITHM_ALLOWLIST,
     TEMPLATED_ISSUER_GUIDANCE,
+    OidcProviderError,
     is_templated_issuer,
+    subject_claim,
 )
 from eneo.main.config import (
     Settings,
@@ -68,6 +70,47 @@ DEFAULT_CLAIMS_MAPPING = {
 _REGISTRATION_FIELDS = ("provider", "client_id", "client_secret", "discovery_endpoint")
 _DOMAIN_PATTERN = re.compile(r"^[a-z0-9]+([\-\.]{1}[a-z0-9]+)*\.[a-z]{2,}$")
 _OPERATOR_ACTOR = {"type": "sysadmin", "via": "eneo_super_api_key"}
+
+
+_SUBJECT_CLAIM_DESCRIPTION = (
+    "The token claim an account is bound to, stored as claims_mapping.subject: "
+    "an immutable id the provider never gives to another person, never the email "
+    "claim. Omitted: unchanged, or 'sub' when the provider is first registered. "
+    "Changing it after people are bound needs a migration window from each "
+    "issuer and audience to itself first."
+)
+
+
+def _validate_claim_name(value: str | None) -> str | None:
+    if value is None:
+        return None
+    claim = value.strip()
+    if not claim:
+        raise ValueError("subject_claim must name a claim")
+    return claim
+
+
+def _with_subject_claim(config: Mapping[str, Any], claim: str | None) -> dict[str, Any]:
+    """The config's claims mapping with ``claim`` as its subject claim when
+    given. Refused (422) when it names the mapping's email claim: an address
+    can be reassigned, and the subject is what keeps it out of the account."""
+    stored = config.get("claims_mapping")
+    mapping = (
+        dict(cast(Mapping[str, Any], stored))
+        if isinstance(stored, Mapping)
+        else DEFAULT_CLAIMS_MAPPING.copy()
+    )
+    if claim is not None:
+        mapping["subject"] = claim
+        try:
+            subject_claim(mapping, email_claim=_text(mapping.get("email")) or "email")
+        except OidcProviderError as exc:
+            raise _error(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "federation_subject_claim_is_email_claim",
+                "The subject claim cannot be the email claim.",
+            ) from exc
+    return mapping
 
 
 def _validate_domains(domains: list[str] | None) -> list[str] | None:
@@ -142,6 +185,14 @@ class FederationRequestBase(BaseModel):
         ),
         examples=[["email_verified"]],
     )
+    subject_claim: str | None = Field(
+        None, max_length=255, description=_SUBJECT_CLAIM_DESCRIPTION, examples=["oid"]
+    )
+
+    @field_validator("subject_claim")
+    @classmethod
+    def validate_subject_claim(cls, value: str | None) -> str | None:
+        return _validate_claim_name(value)
 
     @field_validator("client_secret")
     @classmethod
@@ -244,6 +295,7 @@ class PatchFederationRequest(FederationRequestBase):
                 "discovery_endpoint",
                 "client_id",
                 "client_secret",
+                "subject_claim",
             )
             if field in self.model_fields_set and getattr(self, field) is None
         ]
@@ -258,8 +310,8 @@ class TenantAdminFederationPatch(BaseModel):
     """What an org admin may change in their tenant's registered IdP.
 
     Every other field (the authorization server and its endpoints, redirect
-    topology, scopes, claim mapping, token auth method) is operator-owned and
-    refused as an unknown field.
+    topology, scopes, the rest of the claim mapping, token auth method) is
+    operator-owned and refused as an unknown field.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -297,6 +349,14 @@ class TenantAdminFederationPatch(BaseModel):
         description="Email domains allowed to sign in (e.g., ['stockholm.se'])",
         examples=[["stockholm.se", "stockholm.gov.se"]],
     )
+    subject_claim: (
+        Annotated[str, Field(min_length=1, max_length=255)] | SkipJsonSchema[None]
+    ) = Field(default=None, description=_SUBJECT_CLAIM_DESCRIPTION, examples=["oid"])
+
+    @field_validator("subject_claim")
+    @classmethod
+    def validate_subject_claim(cls, value: str | None) -> str | None:
+        return _validate_claim_name(value)
 
     @field_validator("provider", "client_id", "client_secret", mode="before")
     @classmethod
@@ -356,6 +416,9 @@ class TenantFederationAdminView(BaseModel):
         default=None, description="Set when the redirect URIs cannot be computed"
     )
     scopes: list[str] = Field(default_factory=list)
+    subject_claim: str = Field(
+        default="sub", description="The token claim an account is bound to"
+    )
     token_endpoint_auth_method: Optional[str] = None
     revision: Optional[str] = Field(
         default=None,
@@ -438,6 +501,17 @@ def federation_changes(
     return changes
 
 
+def stored_subject_claim(config: Mapping[str, Any]) -> str:
+    """The subject claim a stored config names, ``sub`` when it names none."""
+    mapping = config.get("claims_mapping")
+    claim = (
+        cast(Mapping[str, Any], mapping).get("subject")
+        if isinstance(mapping, Mapping)
+        else None
+    )
+    return _text(claim) or "sub"
+
+
 def build_admin_view(
     tenant: TenantInDB, settings: Settings
 ) -> TenantFederationAdminView:
@@ -471,6 +545,7 @@ def build_admin_view(
         redirect_uris=redirect_uris,
         redirect_uris_problem=redirect_problem,
         scopes=_texts(config.get("scopes", list(DEFAULT_SCOPES))),
+        subject_claim=stored_subject_claim(config),
         token_endpoint_auth_method=_text(config.get("token_endpoint_auth_method")),
         revision=federation_revision(config),
         configured_at=secret_updated_at or tenant.updated_at,
@@ -643,7 +718,7 @@ def _build_full_federation_config(
         "client_secret": encrypted_secret,
         "scopes": list(DEFAULT_SCOPES),
         "allowed_domains": request.allowed_domains,
-        "claims_mapping": DEFAULT_CLAIMS_MAPPING.copy(),
+        "claims_mapping": _with_subject_claim({}, request.subject_claim),
         "encrypted_at": datetime.now(timezone.utc).isoformat(),
     }
     federation_config.update(discovery_metadata)
@@ -698,6 +773,9 @@ def _merge_federation_config(
             merged.pop(field, None)
         else:
             merged[field] = value
+
+    if "subject_claim" in updates:
+        merged["claims_mapping"] = _with_subject_claim(merged, updates["subject_claim"])
 
     if encrypted_secret is not None:
         merged["client_secret"] = encrypted_secret

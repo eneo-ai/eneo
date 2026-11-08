@@ -492,6 +492,51 @@ async def test_changes_are_audited_even_with_auditing_switched_off(
     assert operator_row["changes"]["client_secret"] == {"replaced": True}
 
 
+async def test_an_admin_sets_the_subject_claim_audited_and_never_the_email_claim(
+    client: AsyncClient,
+    admin_token: str,
+    admin_user,
+    configured: dict[str, str],
+    test_tenant,
+):
+    headers = _bearer(admin_token)
+    view = await _view(client, admin_token)
+    assert view["subject_claim"] == "sub"
+    before = await _stored(test_tenant.id)
+
+    refused = await client.patch(
+        URL,
+        json={"revision": view["revision"], "subject_claim": "email"},
+        headers=headers,
+    )
+    assert refused.status_code == 422, refused.text
+    assert refused.json()["code"] == "federation_subject_claim_is_email_claim"
+    assert await _stored(test_tenant.id) == before
+
+    response = await client.patch(
+        URL,
+        json={"revision": view["revision"], "subject_claim": "oid"},
+        headers=headers,
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["subject_claim"] == "oid"
+    stored = await _stored(test_tenant.id)
+    assert stored == {
+        **before,
+        "claims_mapping": {**before["claims_mapping"], "subject": "oid"},
+    }
+    rows = await _audit_rows(test_tenant.id)
+    assert len(rows) == 2  # the operator's PUT and this change
+    assert rows[-1]["actor_id"] == admin_user.id
+    assert rows[-1]["metadata"]["changes"] == {
+        "claims_mapping": {
+            "old": before["claims_mapping"],
+            "new": stored["claims_mapping"],
+        }
+    }
+
+
 async def test_the_secret_never_reaches_the_logs(
     client: AsyncClient, admin_token: str, configured: dict[str, str]
 ):

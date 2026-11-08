@@ -214,9 +214,11 @@ A removed or deactivated account keeps its identity: no other account can take i
 
 ### The subject claim
 
-The subject claim is `claims_mapping.subject` in the provider config, `sub` by default. It must be an immutable id that the provider never gives to another person, and never the email claim: Eneo refuses that configuration. Some providers issue a different `sub` for each client (Microsoft Entra ID, for example, whose `oid` claim is the stable one). With such a provider, a stable id claim must be the subject claim before people sign in, or every new client ID and every API audience looks like a new person. `claims_mapping` is stored with the provider config; the federation API does not change it.
+The subject claim is `claims_mapping.subject` in the provider config, `sub` by default. It must be an immutable id that the provider never gives to another person, and never the email claim: Eneo refuses that configuration. Some providers issue a different `sub` for each client (Microsoft Entra ID, for example, whose `oid` claim is the stable one). With such a provider, a stable id claim must be the subject claim before people sign in, or every new client ID and every API audience looks like a new person.
 
-Changing the subject claim later changes every subject under the same issuer and audience. Open a migration window from that pair to itself first.
+Set it with `subject_claim` in the federation `PUT` or `PATCH` (`/api/v1/sysadmin/tenants/{tenant_id}/federation`, with the super API key), or as an administrator with `PATCH /api/v1/admin/federation`. A `PUT` without it stores `sub`, a `PATCH` without it keeps the stored claim, and the email claim is refused with `422` (`federation_subject_claim_is_email_claim`). Both `GET` answers show it, and a change is audited as `federation_updated`. Configuration by environment variables always uses `sub`.
+
+Changing the subject claim once people are bound changes every subject under the same issuer and audience. Open a migration window from that pair to itself before you change it.
 
 ### Sign-in conflicts
 

@@ -15601,6 +15601,12 @@ export interface components {
       /** Email Verified Claims */
       email_verified_claims?: string[] | null;
       /**
+       * Subject Claim
+       * @description The token claim an account is bound to
+       * @default sub
+       */
+      subject_claim?: string;
+      /**
        * Configured At
        * Format: date-time
        */
@@ -20318,6 +20324,12 @@ export interface components {
        *     ]
        */
       email_verified_claims?: string[] | null;
+      /**
+       * Subject Claim
+       * @description The token claim an account is bound to, stored as claims_mapping.subject: an immutable id the provider never gives to another person, never the email claim. Omitted: unchanged, or 'sub' when the provider is first registered. Changing it after people are bound needs a migration window from each issuer and audience to itself first.
+       * @example oid
+       */
+      subject_claim?: string | null;
     };
     /**
      * PendingObjectStoreDestination
@@ -21980,6 +21992,12 @@ export interface components {
        *     ]
        */
       email_verified_claims?: string[] | null;
+      /**
+       * Subject Claim
+       * @description The token claim an account is bound to, stored as claims_mapping.subject: an immutable id the provider never gives to another person, never the email claim. Omitted: unchanged, or 'sub' when the provider is first registered. Changing it after people are bound needs a migration window from each issuer and audience to itself first.
+       * @example oid
+       */
+      subject_claim?: string | null;
     };
     /**
      * SetFederationResponse
@@ -23809,8 +23827,8 @@ export interface components {
      * @description What an org admin may change in their tenant's registered IdP.
      *
      *     Every other field (the authorization server and its endpoints, redirect
-     *     topology, scopes, claim mapping, token auth method) is operator-owned and
-     *     refused as an unknown field.
+     *     topology, scopes, the rest of the claim mapping, token auth method) is
+     *     operator-owned and refused as an unknown field.
      */
     TenantAdminFederationPatch: {
       /**
@@ -23842,6 +23860,12 @@ export interface components {
        *     ]
        */
       allowed_domains?: string[];
+      /**
+       * Subject Claim
+       * @description The token claim an account is bound to, stored as claims_mapping.subject: an immutable id the provider never gives to another person, never the email claim. Omitted: unchanged, or 'sub' when the provider is first registered. Changing it after people are bound needs a migration window from each issuer and audience to itself first.
+       * @example oid
+       */
+      subject_claim?: string;
     };
     /**
      * TenantAppTestResult
@@ -24163,6 +24187,12 @@ export interface components {
       redirect_uris_problem?: "unresolvable" | null;
       /** Scopes */
       scopes?: string[];
+      /**
+       * Subject Claim
+       * @description The token claim an account is bound to
+       * @default sub
+       */
+      subject_claim?: string;
       /** Token Endpoint Auth Method */
       token_endpoint_auth_method?: string | null;
       /**

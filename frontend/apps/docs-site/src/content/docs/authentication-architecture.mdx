@@ -437,7 +437,7 @@ Federation config is stored in the `federation_config` JSONB column of the `tena
 | `issuer`, `authorization_endpoint`, `token_endpoint`, `userinfo_endpoint`, `jwks_uri` | discovery | Resolved at PUT/PATCH time |
 | `token_endpoint_auth_method`, `token_endpoint_auth_methods_supported` | discovery | See [Token Auth Method Selection](#token-auth-method-selection) |
 | `scopes` | default | `["openid", "email", "profile"]` (not configurable via the API) |
-| `claims_mapping` | default | `{"email": "email", "subject": "sub", "username": "sub", "name": "name"}` (not configurable via the API); `email` and `subject` are read at login |
+| `claims_mapping` | default | `{"email": "email", "subject": "sub", "username": "sub", "name": "name"}`; only `subject` is configurable, as `subject_claim` on `PUT`, `PATCH` and the administrators' `PATCH /api/v1/admin/federation`; `email` and `subject` are read at login |
 | `encrypted_at` | server | Timestamp of the last secret encryption |
 
 A `PATCH` that sets `canonical_public_origin`, `redirect_path`, `additional_redirect_uris`, `signing_algorithms` or `email_verified_claims` to `null` removes the key, which restores its default. A `GET` returns `null` for a key that is not stored.
