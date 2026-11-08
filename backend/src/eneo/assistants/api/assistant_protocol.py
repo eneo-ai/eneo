@@ -1,5 +1,4 @@
 from collections.abc import Sequence
-from contextlib import aclosing
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional, Protocol, cast
 
@@ -472,8 +471,8 @@ async def to_conversation_response(
     references: dict["UUID", InfoBlobAskAssistantPublic] = {}
     if not isinstance(response.answer, str):
         answer_parts: list[str] = []
-        async with aclosing(response.answer):
-            async for chunk in response.answer:
+        async with closing(response.answer, "answer stream") as answer:
+            async for chunk in answer:
                 if chunk.response_type == ResponseType.ERROR:
                     raise OpenAIException(
                         chunk.error or "The assistant execution failed.",
