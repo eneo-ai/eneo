@@ -52,12 +52,10 @@ export type AdminNavGroup = {
  */
 export function adminNavGroups({
   usingTemplates,
-  canManageModules,
-  federationEnabled = false
+  canManageModules
 }: {
   usingTemplates: boolean;
   canManageModules: boolean;
-  federationEnabled?: boolean;
 }): AdminNavGroup[] {
   return [
     {
@@ -97,9 +95,7 @@ export function adminNavGroups({
       items: [
         { href: "/admin/models", icon: Cpu, labelKey: "models" },
         { href: "/admin/integrations", icon: Plug, labelKey: "integrations" },
-        ...(federationEnabled
-          ? [{ href: "/admin/federation", icon: Fingerprint, labelKey: "federation_admin_nav" }]
-          : []),
+        { href: "/admin/federation", icon: Fingerprint, labelKey: "federation_admin_nav" },
         ...(canManageModules
           ? [{ href: "/admin/modules", icon: Blocks, labelKey: "module_admin_title" }]
           : []),

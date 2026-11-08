@@ -67,9 +67,10 @@ export function FederationPage() {
       <PageHeader
         title={t("federation_admin_title")}
         description={t("federation_admin_description")}
+        tour="admin-federation"
       />
       {disabled ? (
-        <NotConfigured />
+        <ManagedByOperator />
       ) : (
         <QueryStateBoundary
           query={query}
@@ -104,6 +105,18 @@ function NotConfigured() {
       icon={<KeyRound />}
       title={t("federation_admin_not_configured_title")}
       description={t("federation_admin_not_configured_description")}
+    />
+  );
+}
+
+/** Sign-in still set in the server configuration: nothing to change here yet. */
+function ManagedByOperator() {
+  const t = useTranslations();
+  return (
+    <EmptyState
+      icon={<KeyRound />}
+      title={t("federation_admin_disabled_title")}
+      description={t("federation_admin_disabled_description")}
     />
   );
 }
@@ -375,6 +388,7 @@ function FederationForm({
               </li>
             ))}
           </ul>
+          {changed.includes("client_id") && <Text>{t("federation_admin_confirm_client_id")}</Text>}
           <Text type="supporting">{t("federation_admin_confirm_recovery")}</Text>
         </div>
       </ConfirmDialogControlled>

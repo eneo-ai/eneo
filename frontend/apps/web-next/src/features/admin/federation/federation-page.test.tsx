@@ -80,22 +80,27 @@ describe("states", () => {
     await screen.findByLabelText(/Klient-ID/);
   });
 
-  it.each([
-    ["not configured", () => ok({ ...view, configured: false, revision: null })],
-    [
-      "federation disabled",
-      () =>
-        refused(404, {
-          code: "federation_disabled",
-          message: "Federation is not enabled on this installation."
-        })
-    ]
-  ])("%s: tells the admin the operator connects the IdP and shows no form", async (_, read) => {
-    api.GET.mockImplementation(read);
+  it("not configured: tells the admin the operator connects the IdP and shows no form", async () => {
+    api.GET.mockImplementation(() => ok({ ...view, configured: false, revision: null }));
     const { container } = renderInApp(<FederationPage />);
 
     await screen.findByText("Ingen identitetsleverantör är inkopplad");
     expect(screen.getByText(/kopplar in organisationens identitetsleverantör/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Spara ändringar" })).toBeNull();
+    await expectNoAxeViolations(container);
+  });
+
+  it("settings kept in the server configuration: says who manages them and shows no form", async () => {
+    api.GET.mockImplementation(() =>
+      refused(404, {
+        code: "federation_disabled",
+        message: "Federation is not enabled on this installation."
+      })
+    );
+    const { container } = renderInApp(<FederationPage />);
+
+    await screen.findByText(sv.federation_admin_disabled_title);
+    expect(screen.getByText(sv.federation_admin_disabled_description)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Spara ändringar" })).toBeNull();
     await expectNoAxeViolations(container);
   });
@@ -147,6 +152,7 @@ describe("saving", () => {
       .getAllByRole("listitem")
       .map((item) => item.textContent);
     expect(changes).toEqual(["Klient-ID: eneo-client → next-client"]);
+    expect(dialog.textContent).toContain(sv.federation_admin_confirm_client_id);
     await expectNoAxeViolations(dialog);
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Spara och använd" }));
@@ -161,6 +167,18 @@ describe("saving", () => {
     expect(screen.queryByRole("alertdialog")).toBeNull();
     expect(api.PATCH).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(announced()).toBe("Inloggningsinställningarna är sparade."));
+  });
+
+  it("warns about existing accounts only when the client ID changes", async () => {
+    await show();
+
+    fireEvent.change(screen.getByLabelText(/Tillåtna e-postdomäner/), {
+      target: { value: "example.org" }
+    });
+    fireEvent.click(save());
+
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog.textContent).not.toContain(sv.federation_admin_confirm_client_id);
   });
 
   it("cannot be closed with Escape while saving", async () => {

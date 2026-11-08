@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, screen } from "@testing-library/react";
+import { cleanup, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppShellFrame } from "@/components/shell/app-shell";
 import { expectNoAxeViolations } from "@/test/axe";
@@ -39,7 +39,8 @@ describe("AdminPageBar on a phone", () => {
   it("keeps the federation title in the bar", () => {
     setViewport("phone");
     renderAdminPage("/admin/federation");
-    expect(screen.getByText("Inloggning (SSO)").closest("[data-own-phone-header]")).toBeTruthy();
+    const bar = document.querySelector<HTMLElement>("[data-own-phone-header]")!;
+    expect(within(bar).getByText("Inloggning (SSO)")).toBeTruthy();
   });
 
   it("takes an admin area back to Administration, in place of the top bar", async () => {
