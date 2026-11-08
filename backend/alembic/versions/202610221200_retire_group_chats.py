@@ -114,7 +114,12 @@ def downgrade() -> None:
     # pointing at them. Restore from a backup to get the group rows back.
     op.create_table(
         "group_chats",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column(
+            "id",
+            postgresql.UUID(as_uuid=True),
+            primary_key=True,
+            server_default=sa.text("gen_random_uuid()"),
+        ),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
