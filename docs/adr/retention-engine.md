@@ -85,11 +85,10 @@ stays outside this record.
    tenant's widget policy as it stands that night, and only the widget's own
    nightly job removes them. The engine leaves them alone, with one predicate
    (no widget owns the session): the fresh re-check inside the history delete
-   refuses a widget question; history discovery and the overdue report read
-   widget questions inside their bounded window, charge them and pass them, so
-   a widget backlog within an owner's period never becomes one unbounded read;
-   the empty-session sweep leaves widget sessions out of its window, its lock
-   and its delete.
+   refuses a widget question, and the empty-session lock and delete refuse a
+   widget session; history discovery, the overdue report and the empty-session
+   window read widget rows inside their bounded window, charge them and pass
+   them, so retained widget conversations never make one unbounded read.
    The rows a deletion cascades to are derived from the schema metadata (every
    foreign key to the root with `ON DELETE CASCADE`); a key without it fails
    at import. Files owns reference truth: every foreign key

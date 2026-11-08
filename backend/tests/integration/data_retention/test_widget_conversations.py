@@ -430,8 +430,8 @@ async def test_a_question_without_a_session_stays_eligible(
 async def test_the_empty_session_sweep_leaves_widget_sessions(
     retention_session: AsyncSession, test_tenant, admin_user, completion_model_factory
 ):
-    """Mutants: the sweep discovers widget sessions, or its lock or delete takes
-    one, before the widget's own retention allows it."""
+    """Mutants: the sweep's window does not mark a widget session, or its lock
+    or delete takes one, before the widget's own retention allows it."""
     _assistant, widget = await _owner(
         retention_session,
         completion_model_factory,
@@ -449,9 +449,10 @@ async def test_the_empty_session_sweep_leaves_widget_sessions(
         retention_session, now=datetime.now(timezone.utc), grace=timedelta(days=1)
     )
 
-    assert [row.id for row in await sessions.window(None, 1000)].count(
-        widget_session
-    ) == 0
+    assert {root.id: passed for root, passed in await sessions.window(None, 1000)} == {
+        widget_session: True,
+        user_session: False,
+    }
     assert set(await sessions.lock_empty([widget_session, user_session])) == {
         user_session
     }
@@ -464,3 +465,79 @@ async def test_the_empty_session_sweep_leaves_widget_sessions(
     assert report.counts["sessions.sessions_deleted"] >= 1
     assert await retention_session.get(Sessions, user_session) is None
     assert await retention_session.get(Sessions, widget_session)
+
+
+async def test_the_empty_session_sweep_reads_its_page_and_passes_widget_sessions(
+    retention_session: AsyncSession, test_tenant, admin_user, completion_model_factory
+):
+    """Mutants: the sweep filters widget sessions inside its window, so one
+    statement reads every retained widget session, uncharged, before the first
+    ordinary one, and a timeout repeats that read every night; or a passed
+    widget session is locked, deleted or reported as blocked."""
+    _assistant, widget = await _owner(
+        retention_session,
+        completion_model_factory,
+        tenant_id=test_tenant.id,
+        user_id=admin_user.id,
+    )
+    # Three retained widget sessions, oldest first, ahead of two empty ones.
+    widget_sessions = [
+        await _session(
+            retention_session,
+            created_at=_ago(10) + timedelta(seconds=offset),
+            widget_id=widget.id,
+        )
+        for offset in range(3)
+    ]
+    ordinary = [
+        await _session(
+            retention_session,
+            created_at=_ago(5) + timedelta(seconds=offset),
+            user_id=admin_user.id,
+        )
+        for offset in range(2)
+    ]
+    await retention_session.commit()
+    await retention_session.begin()
+
+    # A page is the next sessions as they are, the widget ones marked.
+    page = await EmptySessionRepository(
+        retention_session, now=datetime.now(timezone.utc), grace=timedelta(days=1)
+    ).window(None, 2)
+    assert [(root.id, passed) for root, passed in page] == [
+        (widget_sessions[0], True),
+        (widget_sessions[1], True),
+    ]
+
+    # One session per call; the budget ends the first night after the widget
+    # sessions, each charged one discovery row.
+    settings = get_settings().model_copy(
+        update={"retention_chunk_rows": 4, "retention_max_rows_per_run": 6}
+    )
+    first = await run_registered_retention(
+        retention_session, task_name=EMPTY_SESSIONS_TASK, settings=settings
+    )
+
+    assert first.counts == {
+        "sessions.sessions_examined": 3,
+        "sessions.deferred": 1,
+    }
+    assert first.blocked == {}
+    row = await retention_session.get(RetentionJobRuns, first.job_run_id)
+    assert row is not None and row.cursors["sessions"]["id"] == str(widget_sessions[-1])
+
+    second = await run_registered_retention(
+        retention_session,
+        task_name=EMPTY_SESSIONS_TASK,
+        settings=get_settings().model_copy(update={"retention_chunk_rows": 4}),
+    )
+
+    assert second.counts == {
+        "sessions.sessions_examined": 2,
+        "sessions.sessions_deleted": 2,
+    }
+    assert second.blocked == {}
+    for session_id in ordinary:
+        assert await retention_session.get(Sessions, session_id) is None
+    for session_id in widget_sessions:
+        assert await retention_session.get(Sessions, session_id)

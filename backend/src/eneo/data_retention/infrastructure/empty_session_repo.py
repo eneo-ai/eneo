@@ -36,17 +36,25 @@ class EmptySessionRepository:
 
     async def window(
         self, cursor: RetentionKeyset | None, limit: int
-    ) -> Sequence[RetentionKeyset]:
-        statement = sa.select(Sessions.id, Sessions.created_at).where(
-            Sessions.created_at < self.now - self.grace, outside_widgets()
-        )
+    ) -> Sequence[tuple[RetentionKeyset, bool]]:
+        """The next `limit` sessions past the grace period in keyset order, each
+        with whether a widget owns it (to be passed: widget retention removes
+        it). The keyset index reads exactly the rows returned, so retained
+        widget sessions never make one window an unbounded read; the lock and
+        the delete refuse them again."""
+        statement = sa.select(
+            Sessions.id, Sessions.created_at, (~outside_widgets()).label("passed")
+        ).where(Sessions.created_at < self.now - self.grace)
         if cursor is not None:
             statement = statement.where(
                 sa.tuple_(Sessions.created_at, Sessions.id) > (cursor.at, cursor.id)
             )
         statement = statement.order_by(Sessions.created_at, Sessions.id).limit(limit)
         rows = (await self.session.execute(statement)).tuples().all()
-        return tuple(RetentionKeyset(id=identifier, at=at) for identifier, at in rows)
+        return tuple(
+            (RetentionKeyset(id=identifier, at=at), passed)
+            for identifier, at, passed in rows
+        )
 
     async def lock_empty(self, ids: Sequence[UUID]) -> Mapping[UUID, int]:
         # The helper's UNIQUE session_id bounds its cascade to at most one row.

@@ -6,12 +6,14 @@ were emptied by other paths, or were held by a live chat when their last
 question went. Its own task, not a step of conversation history: every session
 older than the grace period is scanned, a standing population rather than a due
 backlog, and sharing a budget with due history would let that scan spend it
-first. Widget sessions are left to widget retention and each widget's period.
+first. Widget sessions are left to widget retention and each widget's period:
+the window reads them, charges them and passes them.
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta, timezone
 from enum import StrEnum
+from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -57,7 +59,7 @@ class EmptySessionRetentionTask:
         """
         out = RetentionEffects()
         # Each windowed session charges its discovery row and at most one
-        # release.
+        # release; a widget session only its discovery row.
         limit = batch.rows // (1 + EmptySessionRepository.MAX_RELEASE_ROWS)
         if limit == 0:
             return out.result(
@@ -66,8 +68,11 @@ class EmptySessionRetentionTask:
         window = await self.sessions.window(batch.cursor, limit)
         if not window:
             return out.result(rows=0, exhausted=True, cursor=batch.cursor)
-        costs = await self.sessions.lock_empty([root.id for root in window])
-        admitted = [root.id for root in window if root.id in costs]
+        candidates = [root.id for root, passed in window if not passed]
+        costs: Mapping[UUID, int] = (
+            await self.sessions.lock_empty(candidates) if candidates else {}
+        )
+        admitted = [identifier for identifier in candidates if identifier in costs]
         deleted = await self.sessions.delete_due(admitted) if admitted else ()
         out.blocked[EmptySessionBlockReason.NO_LONGER_DUE.value] += len(admitted) - len(
             deleted
@@ -77,5 +82,5 @@ class EmptySessionRetentionTask:
         return out.result(
             rows=len(window) + len(costs) + sum(costs[root] for root in deleted),
             exhausted=len(window) < limit,
-            cursor=window[-1],
+            cursor=window[-1][0],
         )
