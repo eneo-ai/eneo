@@ -1,6 +1,7 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
 <script lang="ts">
+  import type { Package } from "@lucide/svelte";
   import { resolveProviderLogoType } from "$lib/features/ai-models/providerLogoAliases";
 
   /**
@@ -13,6 +14,8 @@
    */
   export let providerType: string = "";
   export let size: "sm" | "md" | "lg" = "md";
+  /** A glyph in place of a logo, such as Eneo's tool service's (it has no logo). */
+  export let icon: typeof Package | undefined = undefined;
 
   const sizes = {
     sm: { chip: "w-6 h-6", img: "w-3.5 h-3.5", icon: "w-3 h-3", radius: "rounded-md" },
@@ -51,9 +54,11 @@
     hover:translate-y-[-1px]
     hover:shadow-sm
   "
-  title={providerType}
+  title={icon ? undefined : providerType}
 >
-  {#if logoUrl}
+  {#if icon}
+    <svelte:component this={icon} class="{sizeConfig.icon} text-secondary" aria-hidden="true" />
+  {:else if logoUrl}
     <img
       src={logoUrl}
       alt={providerType}

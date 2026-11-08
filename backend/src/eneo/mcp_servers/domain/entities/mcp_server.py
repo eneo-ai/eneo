@@ -2,7 +2,7 @@ import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Literal, Optional
 from urllib.parse import unquote, urlsplit
 from uuid import UUID
 
@@ -41,6 +41,7 @@ CAPABILITY_PURPOSES: tuple[CapabilityPurpose, ...] = (
     "file_creation",
     "charts",
     "compute",
+    "forecast",
 )
 
 # Purposes whose providers deliver files. A binary embedded resource of one
@@ -73,6 +74,9 @@ GENERATED_FILE_TYPES_BY_PURPOSE: dict[str, frozenset[str]] = {
     # A tabular calculation result, exported so charts, spreadsheets and
     # documents can take it as a source file.
     "compute": frozenset({CSV_MIME_TYPE}),
+    # A forecast with the recent history before it, for a download, a chart or a
+    # spreadsheet.
+    "forecast": frozenset({CSV_MIME_TYPE}),
 }
 _GENERATED_FILE_EXTENSIONS: dict[str, str] = {
     DOCX_MIME_TYPE: "docx",
@@ -141,9 +145,14 @@ class BundledToolSpec:
     forward_identity: bool
 
 
+# Why a deployment cannot offer one of the bundled runtime's tools: it has no
+# runtime, or the runtime lacks the model the tool runs on.
+BundledUnavailableReason = Literal["runtime_not_configured", "model_missing"]
+
 BUNDLED_TOOLS: dict[str, BundledToolSpec] = {
     "compute": BundledToolSpec(purpose="compute", forward_identity=False),
     "charts": BundledToolSpec(purpose="charts", forward_identity=False),
+    "forecast": BundledToolSpec(purpose="forecast", forward_identity=False),
     "file-analysis": BundledToolSpec(purpose="file_analysis", forward_identity=True),
     "file-creation": BundledToolSpec(purpose="file_creation", forward_identity=False),
 }
@@ -159,9 +168,20 @@ def bundled_tool_name(http_url: str) -> str | None:
     return tool if tool in BUNDLED_TOOLS else None
 
 
+# The bundled Forecast source runs on a catalog forecast model
+# (``forecast_model_id``), the way a built-in provider runs on an image model;
+# the database requires one on exactly these rows.
+FORECAST_PURPOSE = "forecast"
+
+
+def runs_forecast_model(http_auth_type: str | None, purpose: str | None) -> bool:
+    return is_bundled_server(http_auth_type) and purpose == FORECAST_PURPOSE
+
+
 @dataclass(frozen=True)
 class MCPServerBackingModel:
-    """Read-only projection of the catalog model a built-in provider runs on."""
+    """Read-only projection of the catalog model a server runs on: the image
+    model of a built-in provider, the forecast model of the Forecast source."""
 
     id: UUID
     name: str
@@ -172,6 +192,7 @@ class MCPServerBackingModel:
     security_classification: "SecurityClassification | None"
     is_deprecated: bool = False
     provider_is_active: bool = True
+    provider_id: UUID | None = None
 
 
 def is_capability_purpose(purpose: str | None) -> bool:
@@ -392,6 +413,8 @@ class MCPServer(Entity):
         user_groups: Optional[list[MCPServerAudienceGroup]] = None,
         image_model_id: Optional[UUID] = None,
         image_model: Optional[MCPServerBackingModel] = None,
+        forecast_model_id: Optional[UUID] = None,
+        forecast_model: Optional[MCPServerBackingModel] = None,
         forward_identity: bool = False,
         tool_catalog_max_count: int = MCP_TOOL_CATALOG_DEFAULT_MAX_COUNT,
         tool_catalog_max_bytes: int = MCP_TOOL_CATALOG_DEFAULT_MAX_BYTES,
@@ -426,6 +449,8 @@ class MCPServer(Entity):
         self.user_groups = list(user_groups or [])
         self.image_model_id = image_model_id
         self.image_model = image_model
+        self.forecast_model_id = forecast_model_id
+        self.forecast_model = forecast_model
         self.forward_identity = forward_identity
         self.tool_catalog_max_count = tool_catalog_max_count
         self.tool_catalog_max_bytes = tool_catalog_max_bytes
@@ -509,18 +534,35 @@ class MCPServer(Entity):
         return [group.id for group in self.user_groups]
 
     @property
+    def backing_model(self) -> MCPServerBackingModel | None:
+        """The catalog model the server runs on, as the reader loaded it.
+
+        A built-in provider runs on an image model and the Forecast source on
+        a forecast model; the database allows each only on such rows.
+        """
+        if self.image_model is not None:
+            return self.image_model
+        return self.forecast_model
+
+    @property
     def effective_security_classification(self) -> "SecurityClassification | None":
-        """The row's own classification, else that of the model it runs on.
+        """The classification this server is approved for.
 
         A built-in provider never stores its own classification, so for it
         this is always the image model's; an external server has no backing
-        model, so this is always its own.
+        model, so this is always its own. Governance approves the model the
+        Forecast source runs on, so the source's own can only tighten it: the
+        lower of the two, and None without a classified model, which fails
+        closed in a classified space.
         """
-        if self.security_classification is not None:
-            return self.security_classification
-        if self.image_model is not None:
-            return self.image_model.security_classification
-        return None
+        own = self.security_classification
+        model = self.backing_model
+        models = model.security_classification if model is not None else None
+        if runs_forecast_model(self.http_auth_type, self.purpose):
+            if own is not None and models is not None and models.is_greater_than(own):
+                return own
+            return models
+        return own if own is not None else models
 
     @property
     def is_backing_model_available(self) -> bool:
@@ -529,9 +571,12 @@ class MCPServer(Entity):
 
     @property
     def backing_model_blocker(self) -> str | None:
-        if not is_builtin_provider(self.http_auth_type):
+        if not (
+            is_builtin_provider(self.http_auth_type)
+            or runs_forecast_model(self.http_auth_type, self.purpose)
+        ):
             return None
-        model = self.image_model
+        model = self.backing_model
         if model is None or model.is_deleted:
             return "model_missing"
         if not model.is_enabled:

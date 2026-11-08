@@ -4,6 +4,9 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.mcp_servers.application.capability_resolver import (
+    meets_security_classification,
+)
 from eneo.mcp_servers.domain.entities.mcp_server import (
     CAPABILITY_PURPOSES,
     MCPServer,
@@ -44,6 +47,8 @@ def _backing_model(
     *,
     enabled: bool = True,
     deleted: bool = False,
+    deprecated: bool = False,
+    provider_active: bool = True,
     classification: SecurityClassification | None = None,
 ) -> MCPServerBackingModel:
     return MCPServerBackingModel(
@@ -53,6 +58,8 @@ def _backing_model(
         provider_name="OpenAI",
         is_enabled=enabled,
         is_deleted=deleted,
+        is_deprecated=deprecated,
+        provider_is_active=provider_active,
         security_classification=classification,
     )
 
@@ -146,6 +153,99 @@ class TestIsBackingModelAvailable:
         assert not _server(
             http_auth_type="internal", image_model=_backing_model(deleted=True)
         ).is_backing_model_available
+
+
+def _forecast_source(**kwargs) -> MCPServer:
+    return MCPServer(
+        tenant_id=uuid4(),
+        name="Forecast",
+        http_url="http://tool-runtime:3010/mcp/forecast",
+        http_auth_type="bundled",
+        purpose="forecast",
+        **kwargs,
+    )
+
+
+class TestForecastSourceRunsOnItsForecastModel:
+    """The bundled Forecast source follows its catalog forecast model the way a
+    built-in provider follows its image model."""
+
+    def test_an_enabled_model_leaves_it_available(self):
+        model = _backing_model()
+        source = _forecast_source(forecast_model=model)
+
+        assert source.backing_model is model
+        assert source.backing_model_blocker is None
+
+    @pytest.mark.parametrize(
+        "model,reason",
+        [
+            (None, "model_missing"),
+            (_backing_model(deleted=True), "model_missing"),
+            (_backing_model(enabled=False), "model_disabled"),
+            (_backing_model(deprecated=True), "model_deprecated"),
+            (_backing_model(provider_active=False), "model_provider_inactive"),
+        ],
+    )
+    def test_an_unusable_model_makes_it_unavailable(self, model, reason):
+        source = _forecast_source(forecast_model=model)
+
+        assert source.backing_model_blocker == reason
+        assert source.readiness_reason == reason
+        assert not source.is_backing_model_available
+
+    def test_without_its_own_classification_it_is_the_models(self):
+        inherited = _classification(3)
+        model = _backing_model(classification=inherited)
+
+        assert (
+            _forecast_source(forecast_model=model).effective_security_classification
+            is inherited
+        )
+
+    def test_its_own_classification_can_tighten_the_models(self):
+        own = _classification(1)
+        model = _backing_model(classification=_classification(3))
+
+        assert (
+            _forecast_source(
+                forecast_model=model, security_classification=own
+            ).effective_security_classification
+            is own
+        )
+
+    def test_its_own_classification_cannot_raise_the_models(self):
+        approved = _classification(1)
+        model = _backing_model(classification=approved)
+
+        assert (
+            _forecast_source(
+                forecast_model=model, security_classification=_classification(3)
+            ).effective_security_classification
+            is approved
+        )
+
+    @pytest.mark.parametrize("model", [None, _backing_model()])
+    def test_a_model_without_a_class_leaves_it_unclassified(self, model):
+        source = _forecast_source(
+            forecast_model=model, security_classification=_classification(3)
+        )
+
+        assert source.effective_security_classification is None
+        space = _classification(3)
+        assert meets_security_classification(source, space) is False
+
+    def test_other_bundled_servers_run_on_no_model(self):
+        compute = MCPServer(
+            tenant_id=uuid4(),
+            name="Compute",
+            http_url="http://tool-runtime:3010/mcp/compute",
+            http_auth_type="bundled",
+            purpose="compute",
+        )
+
+        assert compute.backing_model is None
+        assert compute.backing_model_blocker is None
 
 
 class TestIsInternal:

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SECURITY_CLASSIFICATIONS_KEY } from "@/features/admin/security-classifications/security-classifications";
 import { expectNoAxeViolations } from "@/test/axe";
@@ -24,7 +24,7 @@ import {
   PROVIDERS_KEY
 } from "./model-providers";
 import { type AdminModel, MODELS_KEY } from "./models";
-import type { ModelKind } from "./models";
+import type { TenantModelKind } from "./models";
 
 const ok = (data: unknown) => Promise.resolve({ data, response: new Response("{}") });
 
@@ -95,6 +95,7 @@ const liveRerankModels = [{ name: "Qwen/Qwen3-Reranker-4B", mode: "rerank" }];
 function renderWizard({
   initialProviderId,
   models = [],
+  providers = [existing],
   providersLoaded = true,
   caps = capabilities,
   fixedKind,
@@ -105,12 +106,13 @@ function renderWizard({
 }: {
   initialProviderId?: string;
   models?: AdminModel[];
+  providers?: ModelProvider[];
   providersLoaded?: boolean;
   caps?: {
     providers: Record<string, typeof capabilities.providers.openai>;
     default_fields: typeof capabilities.default_fields;
   };
-  fixedKind?: ModelKind;
+  fixedKind?: TenantModelKind;
   onCreated?: (ids: string[]) => void;
   imageModels?: typeof liveImageModels;
   providerList?: ModelProvider[];
@@ -329,6 +331,30 @@ describe("the add-provider wizard's credentials", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Nästa" }));
     expect(await within(dialog).findByRole("checkbox", { name: /gpt-5/ })).toBeTruthy();
     await expectNoAxeViolations(document.body);
+  });
+
+  it("never offers the provider that comes with the installation", () => {
+    // Eneo's tool service takes no models from an admin.
+    const tools: ModelProvider = {
+      ...existing,
+      id: "p-tools",
+      name: "Eneo tool service",
+      provider_type: "eneo_tool_service",
+      masked_api_key: null,
+      is_managed: true
+    };
+    const { dialog } = renderWizard({ providerList: [tools, existing] });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Välj en befintlig leverantör" }));
+    // The first provider an admin can add models to is preselected.
+    const picker = within(dialog).getByRole("combobox", { name: /^Leverantör/ });
+    expect(picker.textContent).toContain("Kommunens vLLM");
+    cleanup();
+
+    // With only that one, there is no existing provider to choose.
+    const alone = renderWizard({ providerList: [tools] }).dialog;
+    expect(
+      within(alone).queryByRole("button", { name: "Välj en befintlig leverantör" })
+    ).toBeNull();
   });
 
   it("asks for an existing provider at its picker instead of disabling Nästa", async () => {

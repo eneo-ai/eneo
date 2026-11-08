@@ -8,7 +8,8 @@ export type Role = Schema<"RolePublic">;
 export type Permission = Schema<"Permission">;
 export type PermissionEntry = Schema<"PermissionPublic">;
 export type RoleTemplate = { name: string; permissions: Permission[] };
-export type PermissionGroupId = "chat" | "build" | "knowledge" | "insight" | "admin" | "other";
+export type PermissionGroupId =
+  "chat" | "functions" | "build" | "knowledge" | "insight" | "admin" | "other";
 export type PermissionGroup = { id: PermissionGroupId; permissions: PermissionEntry[] };
 
 export const ROLES_KEY = ["roles"] as const;
@@ -65,13 +66,17 @@ export function templatesQueryOptions(api: EneoClient, catalogue: readonly Permi
 }
 
 const MEMBERS: Record<Exclude<PermissionGroupId, "other">, readonly string[]> = {
-  chat: [
-    "personal_chat",
-    "personal_skills",
-    "group_chats",
-    "shared_spaces",
+  chat: ["personal_chat", "personal_skills", "group_chats", "shared_spaces"],
+  // The functions assistants offer (Admin > Tools > Functions); each is a permission of its
+  // own, so a new function is visible here instead of lost among the chat rights.
+  functions: [
     "web_search",
-    "image_generation"
+    "image_generation",
+    "file_analysis",
+    "file_creation",
+    "charts",
+    "compute",
+    "forecast"
   ],
   build: ["assistants", "apps", "services", "skills", "skills_management", "AI"],
   knowledge: ["collections", "websites", "integrations"],
@@ -80,6 +85,7 @@ const MEMBERS: Record<Exclude<PermissionGroupId, "other">, readonly string[]> = 
 };
 const ORDER: readonly PermissionGroupId[] = [
   "chat",
+  "functions",
   "build",
   "knowledge",
   "insight",

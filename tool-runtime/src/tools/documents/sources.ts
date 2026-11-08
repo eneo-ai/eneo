@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { ToolError } from "../../errors";
 import { spillDirectory } from "../tabular/engine/duckdb";
-import { convertXlsxToCsvSheets } from "../tabular/engine/xlsx-to-csv";
+import { convertXlsxToCsvSheets, dateText, type SheetCsv } from "../tabular/engine/xlsx-to-csv";
 import { assertZipWithinBounds } from "../tabular/zip-guard";
 import type {
   Cell,
@@ -34,10 +34,15 @@ async function resolveSheet(sheet: SheetRequest): Promise<SheetSpec> {
   return { name: sheet.name, columns, rows };
 }
 
-/** Reads a downloaded CSV or XLSX source (one sheet) as typed columns and rows. */
+/**
+ * Reads a downloaded CSV or XLSX source (one sheet) as typed columns and rows. With `asText`,
+ * every cell keeps the text the file holds (empty cells are null): for a caller that must
+ * validate dates and numbers itself rather than accept the reader's guess at their format.
+ */
 export async function readSource(
   source: SheetSource,
-): Promise<{ columns: string[]; rows: Cell[][] }> {
+  options: { asText?: boolean } = {},
+): Promise<{ columns: string[]; rows: Cell[][]; uncalculated?: string[] }> {
   const { path, isXlsx } = source;
   if (!path) throw new ToolError("RENDER_FAILED", "A source file was not downloaded.");
   const bytes = await readFile(path);
@@ -45,18 +50,26 @@ export async function readSource(
   if (isXlsx) {
     if (bytes.length < 2 || bytes.readUInt16LE(0) !== 0x4b50)
       throw new ToolError("INVALID_FILE", "The source is not an XLSX workbook.");
-    assertZipWithinBounds(bytes, MAX_EXPANDED_BYTES);
-    const workbook = await convertXlsxToCsvSheets(bytes);
+    const workbook = await readWorkbook(bytes);
+    // The reader leaves out sheets without data, so they cannot be chosen.
+    if (!workbook.length) throw new ToolError("INVALID_FILE", "The source workbook has no data.");
+    const names = workbook.map((s) => s.name).join(", ");
     const wanted = source.sheet;
     if (!wanted && workbook.length > 1)
       throw new ToolError(
         "SHEET_REQUIRED",
-        `The source workbook has several sheets (${workbook.map((s) => s.name).join(", ")}). Pass source.sheet.`,
+        `The source workbook has several sheets (${names}). Pass source.sheet.`,
       );
     const picked = wanted ? workbook.find((s) => s.name === wanted) : workbook[0];
-    if (!picked) throw new ToolError("UNKNOWN_SHEET", "Unknown sheet in the source workbook.");
+    if (!picked)
+      throw new ToolError(
+        "UNKNOWN_SHEET",
+        `The source workbook has no sheet "${wanted}" with data. Sheets with data: ${names}.`,
+      );
     csvPath = join(dirname(path), `${source.index}.csv`);
     await writeFile(csvPath, picked.csv, { mode: 0o600 });
+    const table = await readTypedCsv(csvPath, options.asText === true);
+    return picked.uncalculated ? { ...table, uncalculated: picked.uncalculated } : table;
   } else {
     if (bytes.includes(0))
       throw new ToolError("INVALID_FILE", "The source is not a text CSV file.");
@@ -66,10 +79,24 @@ export async function readSource(
       throw new ToolError("INVALID_FILE", "CSV sources must use UTF-8 encoding.");
     }
   }
-  return readTypedCsv(csvPath);
+  return readTypedCsv(csvPath, options.asText === true);
 }
 
-async function readTypedCsv(csvPath: string): Promise<{ columns: string[]; rows: Cell[][] }> {
+/** The workbook's sheets. Whatever a file named .xlsx does to the parser is the file's fault. */
+async function readWorkbook(bytes: Buffer): Promise<SheetCsv[]> {
+  try {
+    assertZipWithinBounds(bytes, MAX_EXPANDED_BYTES);
+    return await convertXlsxToCsvSheets(bytes);
+  } catch (error) {
+    if (error instanceof ToolError) throw error;
+    throw new ToolError("INVALID_FILE", "The source workbook could not be read.");
+  }
+}
+
+async function readTypedCsv(
+  csvPath: string,
+  asText: boolean,
+): Promise<{ columns: string[]; rows: Cell[][] }> {
   // Server-built SQL over a file this child was given; no model SQL runs here.
   const instance = await DuckDBInstance.create(":memory:", {
     memory_limit: "256MB",
@@ -84,7 +111,7 @@ async function readTypedCsv(csvPath: string): Promise<{ columns: string[]; rows:
     try {
       const literal = "'" + csvPath.replaceAll("'", "''") + "'";
       const reader = await conn.runAndReadAll(
-        `SELECT * FROM read_csv_auto(${literal}) LIMIT ${SOURCE_ROW_LIMIT + 1}`,
+        `SELECT * FROM read_csv_auto(${literal}${asText ? ", all_varchar = true" : ""}) LIMIT ${SOURCE_ROW_LIMIT + 1}`,
       );
       const rows = reader.getRowsJS();
       if (rows.length > SOURCE_ROW_LIMIT)
@@ -112,6 +139,9 @@ function toCell(value: unknown): Cell {
       : value.toString();
   if (typeof value === "number" || typeof value === "boolean" || typeof value === "string")
     return value;
-  // Dates, timestamps and decimals keep DuckDB's own text form.
+  // DuckDB hands dates and timestamps over as UTC instants: written as XLSX conversion writes
+  // them, never in the host's locale or time zone.
+  if (value instanceof Date) return dateText(value);
+  // Decimals and other values keep DuckDB's own text form.
   return String(value);
 }

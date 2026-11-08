@@ -40,6 +40,9 @@ export function appViewTitle(call: McpAppCall | null | undefined): string {
   if (call?.is_bundled === true && call.tool_name === "run_javascript") {
     return m.mcp_app_compute_title();
   }
+  if (call?.is_bundled === true && call.tool_name === "create_forecast") {
+    return m.mcp_app_forecast_title();
+  }
   return call?.title || call?.tool_name || m.mcp_app_view_title();
 }
 
@@ -123,11 +126,14 @@ export function findAppCall(
   return null;
 }
 
+/** Eneo's tools that draw a chart: as a view, or as an image when asked to. */
+const CHART_TOOLS = new Set(["create_chart", "create_forecast"]);
+
 /** A bundled chart exported only as an input to another tool, such as a report. */
 export function isChartDocumentAsset(call: ToolCall): boolean {
   return (
     call.is_bundled === true &&
-    call.tool_name === "create_chart" &&
+    CHART_TOOLS.has(call.tool_name ?? "") &&
     call.arguments?.display === "none"
   );
 }
@@ -140,7 +146,7 @@ export function appViewCalls(calls: ToolCall[] | null | undefined): McpAppCall[]
     // Explicit image exports render through the existing image block.
     if (
       call.is_bundled &&
-      call.tool_name === "create_chart" &&
+      CHART_TOOLS.has(call.tool_name ?? "") &&
       (call.arguments?.format === "png" || call.arguments?.include_svg === true)
     )
       continue;

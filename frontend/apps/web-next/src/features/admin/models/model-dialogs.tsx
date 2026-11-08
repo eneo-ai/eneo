@@ -12,7 +12,7 @@ import { DeleteBlockedDialog } from "./delete-blocked-dialog";
 import { EditModelDialog } from "./edit-model-dialog";
 import { MigrateModelDialog } from "./migrate-model-dialog";
 import { ModelDetailDialog } from "./model-detail-dialog";
-import { deleteTenantModel, imageModelUsedBy, MODELS_KEY } from "./models";
+import { deleteTenantModel, MODELS_KEY, modelUsedBy, type TenantModelKind } from "./models";
 import type { KindedModel } from "./provider-sections";
 
 export type ModelAction = "edit" | "migrate" | "detail" | "delete";
@@ -42,11 +42,11 @@ export function ModelDialogs({
     if (!open) onClose();
   };
   const label = modelDisplayName(model);
-  const usedBy = imageModelUsedBy(model);
+  const usedBy = modelUsedBy(model);
   const deleteBlocked = usedBy.length > 0;
   const usedByNames = usedBy.map((source) => source.name).join(", ");
   const remove = useRemovalMutation({
-    mutationFn: () => deleteTenantModel(browserApi, kind, model.id),
+    mutationFn: () => deleteTenantModel(browserApi, kind as TenantModelKind, model.id),
     refresh: refetchModels,
     onRemoved: () => {
       onClose();

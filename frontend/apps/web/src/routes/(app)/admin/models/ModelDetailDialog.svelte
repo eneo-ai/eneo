@@ -10,6 +10,7 @@
   import type {
     CompletionModel,
     EmbeddingModel,
+    ForecastModel,
     ImageModel,
     RerankModel,
     TranscriptionModel
@@ -41,11 +42,27 @@
     completionModels = []
   }: {
     openController: Writable<boolean>;
-    model: CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel | RerankModel;
+    model:
+      | CompletionModel
+      | EmbeddingModel
+      | TranscriptionModel
+      | ImageModel
+      | RerankModel
+      | ForecastModel;
     type:
-      "completionModel" | "embeddingModel" | "transcriptionModel" | "imageModel" | "rerankModel";
+      | "completionModel"
+      | "embeddingModel"
+      | "transcriptionModel"
+      | "imageModel"
+      | "rerankModel"
+      | "forecastModel";
     completionModels?: CompletionModel[];
   } = $props();
+
+  // A forecast model runs in Eneo's tool service and has none of these.
+  const hosting = $derived("hosting" in model ? model.hosting : null);
+  const family = $derived("family" in model ? model.family : null);
+  const hfLink = $derived("hf_link" in model ? model.hf_link : null);
 
   // Bridge the legacy Writable<boolean> contract to runes so shadcn Dialog's
   // bind:open works. Same pattern as AddWizard / EditModelDialog.
@@ -160,12 +177,15 @@
           >
           <td class="py-2.5">{model.nickname ?? model.name}</td>
         </tr>
-        <tr>
-          <td class="text-muted w-40 py-2.5 pr-8 align-top whitespace-nowrap"
-            >{m.model_identifier()}</td
-          >
-          <td class="py-2.5">{model.name}</td>
-        </tr>
+        <!-- A forecast model's stored name is an internal key, not something to read -->
+        {#if type !== "forecastModel"}
+          <tr>
+            <td class="text-muted w-40 py-2.5 pr-8 align-top whitespace-nowrap"
+              >{m.model_identifier()}</td
+            >
+            <td class="py-2.5">{model.name}</td>
+          </tr>
+        {/if}
 
         <!-- Context window -->
         {#if "max_input_tokens" in model}
@@ -234,10 +254,10 @@
         </tr>
 
         <!-- Hosting -->
-        {#if model.hosting}
+        {#if hosting}
           <tr>
             <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap">{m.hosting_region()}</td>
-            <td class="py-2.5">{findHostingLabel(model.hosting) || model.hosting.toUpperCase()}</td>
+            <td class="py-2.5">{findHostingLabel(hosting) || hosting.toUpperCase()}</td>
           </tr>
         {/if}
 
@@ -257,15 +277,17 @@
           </tr>
         {/if}
 
-        <!-- Indicative cost -->
-        <tr>
-          <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap"
-            >{m.model_pricing_label()}</td
-          >
-          <td class="py-2.5">
-            <ModelCostBadge {model} />
-          </td>
-        </tr>
+        <!-- Indicative cost; a forecast model has none to set, so no row calls it unknown -->
+        {#if type !== "forecastModel"}
+          <tr>
+            <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap"
+              >{m.model_pricing_label()}</td
+            >
+            <td class="py-2.5">
+              <ModelCostBadge {model} />
+            </td>
+          </tr>
+        {/if}
 
         <!-- Security classification (read-only) -->
         <tr>
@@ -293,21 +315,24 @@
         {/if}
 
         <!-- Metadata divider only if at least one of the metadata rows below renders -->
-        {#if model.family || model.org || model.description}
+        {#if family || model.org || model.description}
           <tr>
             <td colspan="2" class="py-2"><div class="border-dimmer border-t"></div></td>
           </tr>
         {/if}
 
-        {#if model.family}
+        {#if family}
           <tr>
             <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap">{m.model_family()}</td>
-            <td class="py-2.5">{model.family}</td>
+            <td class="py-2.5">{family}</td>
           </tr>
         {/if}
         {#if model.org}
           <tr>
-            <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap">{m.provider()}</td>
+            <!-- Who made the model; the provider that runs it is the card it is listed under. -->
+            <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap"
+              >{m.model_developed_by()}</td
+            >
             <td class="py-2.5">{model.org}</td>
           </tr>
         {/if}
@@ -320,10 +345,10 @@
       </tbody>
     </table>
 
-    {#if model.hf_link}
+    {#if hfLink}
       <!-- eslint-disable svelte/no-navigation-without-resolve -- external HuggingFace URL from model metadata -->
       <a
-        href={model.hf_link}
+        href={hfLink}
         target="_blank"
         rel="noopener noreferrer"
         class="text-accent-default mt-4 inline-flex items-center gap-1.5 text-sm hover:underline"

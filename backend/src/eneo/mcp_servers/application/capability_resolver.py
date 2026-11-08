@@ -83,7 +83,8 @@ def meets_security_classification(
 ) -> bool:
     """False when the space's classification is stricter than the provider's.
 
-    A built-in provider's classification is the one of the model it runs on.
+    Read through ``effective_security_classification``, which accounts for the
+    model a provider runs on.
     """
     if space_security_classification is None:
         return True

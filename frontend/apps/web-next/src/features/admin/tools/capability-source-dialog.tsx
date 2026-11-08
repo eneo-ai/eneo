@@ -30,6 +30,7 @@ import { securityClassificationsQueryOptions } from "@/features/admin/security-c
 import { modelProvidersQueryOptions } from "@/features/admin/governance/governance";
 import { AddModelWizard } from "@/features/admin/models/add-model-wizard";
 import { useImageOptionLabels } from "@/features/admin/models/image-model-options";
+import { modelsHref } from "@/features/admin/models/provider-sections";
 import { userGroupsQueryOptions } from "@/features/admin/user-groups/user-groups";
 import { readinessKey, type Capability } from "@/features/capabilities/capabilities";
 import { CATALOG_LIMITS } from "../mcp/mcp-settings";
@@ -288,7 +289,7 @@ export function CapabilitySourceDialog({
                     imageModels.length === 0 ? (
                       <p className="text-muted-foreground text-sm">
                         {t("mcp_builtin_no_image_models")}{" "}
-                        <Link className="underline" href="/admin/models">
+                        <Link className="underline" href={modelsHref("image")}>
                           {t("models")}
                         </Link>
                       </p>

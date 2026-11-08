@@ -25,6 +25,11 @@ import { chartConfigSchema } from "./tools/charts/config";
 import type { ChartResult } from "./tools/charts/ports";
 import { chartTools } from "./tools/charts/tool";
 import { chartView } from "./tools/charts/view";
+import { DEFAULT_FORECAST_MODEL, forecastScheduler } from "./tools/forecast/config";
+import type { ForecastResult } from "./tools/forecast/ports";
+import { forecastReady } from "./tools/forecast/engine/timestral";
+import { forecastTools } from "./tools/forecast/tool";
+import { forecastView } from "./tools/forecast/view";
 
 const config = loadConfig(process.env);
 const isolate = (job: SandboxJob, timeoutMs: number) =>
@@ -135,6 +140,8 @@ const inspector = fileInspector((job) =>
 const builtinTemplate = builtinTemplateProvider((job) =>
   slot(async () => (await isolate({ job }, renderTimeoutMs)) as RenderResult),
 );
+// Charts and a forecast's picture are drawn alike: one size and image limit.
+const charts = chartConfigSchema.parse({});
 // One endpoint creates every kind of file, so one Eneo provider serves the capability.
 endpoints.push(
   {
@@ -149,7 +156,7 @@ endpoints.push(
     slug: "charts",
     toolTimeoutMs: renderTimeoutMs + 5_000,
     tools: chartTools(
-      chartConfigSchema.parse({}),
+      charts,
       (job) => slot(async () => (await isolate({ job }, renderTimeoutMs)) as ChartResult),
       {
         allowedFileOrigins: config.tabular.allowedFileOrigins,
@@ -160,6 +167,27 @@ endpoints.push(
     ),
   },
 );
+
+const forecasts = forecastScheduler(config.forecastConcurrency, config.maxConcurrency);
+// The whole-job deadline covers reading the file, the sidecar (at most 25 s with its torch
+// import and model load) and drawing the picture.
+const forecastJobTimeoutMs = 40_000;
+endpoints.push({
+  slug: "forecast",
+  toolTimeoutMs: forecastJobTimeoutMs + 5_000,
+  ready: () => forecastReady(config.forecast.model_path),
+  models: [{ id: DEFAULT_FORECAST_MODEL, name: config.forecast.model_name }],
+  tools: forecastTools(
+    config.forecast,
+    charts,
+    (job) =>
+      forecasts.run(
+        async () => (await isolate({ job }, forecastJobTimeoutMs)) as ForecastResult,
+      ),
+    fileAccess,
+    await forecastView(),
+  ),
+});
 
 const fetch = createHandler({
   token: config.token,

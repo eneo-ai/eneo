@@ -4,6 +4,7 @@
   import type {
     CompletionModel,
     EmbeddingModel,
+    ForecastModel,
     ImageModel,
     RerankModel,
     TranscriptionModel
@@ -18,7 +19,13 @@
     ariaLabel: string;
   };
 
-  type AnyModel = CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel | RerankModel;
+  type AnyModel =
+    | CompletionModel
+    | EmbeddingModel
+    | TranscriptionModel
+    | ImageModel
+    | RerankModel
+    | ForecastModel;
 
   export function getStatusIcons(model: AnyModel): StatusIcon[] {
     const icons: StatusIcon[] = [];

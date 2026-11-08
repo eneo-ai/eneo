@@ -1,7 +1,7 @@
 # Bundled tool runtime: operator guide
 
 The tool runtime is an isolated container included in the standard Eneo
-deployment. It serves the Eneo-maintained MCP tools behind four Functions, from
+deployment. It serves the Eneo-maintained MCP tools behind five Functions, from
 its own process and network, never from the backend:
 
 | Endpoint | Function | Tools |
@@ -10,6 +10,7 @@ its own process and network, never from the backend:
 | `/mcp/file-analysis` | **Ask a file** (`file_analysis`, "Fråga fil") | `inspect_table`, `query_table`, `assert_table` |
 | `/mcp/file-creation` | **Create a file** (`file_creation`, "Skapa fil") | `create_document`, `edit_document`, `fill_template`, `create_spreadsheet` |
 | `/mcp/charts` | **Charts** (`charts`, "Diagram") | `create_chart` |
+| `/mcp/forecast` | **Forecast** (`forecast`, "Prognos") | `create_forecast` |
 
 This guide covers deploying, configuring, upgrading, diagnosing and omitting
 the runtime. Other pages own the rest:
@@ -103,8 +104,8 @@ would serve show **Not enabled in this deployment** under **Admin > Tools**.
 ## Turning Functions on
 
 In **Admin > Tools > Functions**, turn on **Ask a file**, **Create a file**,
-**Charts** or **Compute** (**Built into Eneo**), then make each Function
-available on the spaces and assistants that should use it. Roles still need
+**Charts**, **Compute** or **Forecast** (**Built into Eneo**), then make each
+Function available on the spaces and assistants that should use it. Roles still need
 the matching permission; active external providers are not replaced
 automatically. The [Functions guide](https://docs.eneo.ai/dev/guides/capabilities)
 covers the administrator workflow.
@@ -129,6 +130,15 @@ the space and assistant. The migration grants the `compute` permission to the
 predefined Owner role only, as new installs do. A bundled compute server added
 earlier from the MCP servers tab keeps its attachments and coexists with the
 new provider; retire it once the Function is configured.
+
+### After upgrading to a release that adds Forecast
+
+Mount a checkpoint as described in [The forecast model](#the-forecast-model)
+and apply migrations `202611061000` and `202611061010`, then add **Built into Eneo** under
+**Admin > Tools > Functions > Forecast** and activate it. Enable **Forecast**
+on the space and assistant, or allow it for the personal assistant under
+**Admin > Personal assistant > Tools**. The migration grants the `forecast` permission to the predefined Owner role only,
+as new installs do; an administrator opts other roles in.
 
 ## Configuration
 
@@ -157,9 +167,62 @@ Variables without a `.env` mapping in the reference stack
 `tool-runtime/README.md`; set them on the service in a Compose override if you
 need to.
 
+The forecast engine reads `FORECAST_MODEL_PATH`, `FORECAST_MODEL_NAME`,
+`FORECAST_CONCURRENCY` and `FORECAST_THREADS`; see
+[The forecast model](#the-forecast-model).
+
 `BUNDLED_CATALOG_TTL_SECONDS` on the backend (default 300) controls how long a
 backend process caches the runtime's tool catalog; see
 [Upgrading the runtime](#upgrading-the-runtime).
+
+## The forecast model
+
+The `/mcp/forecast` endpoint runs Timestral, a time-series model from Mistral AI,
+on the runtime's CPU. The image holds the engine (CPU-only torch and the Apache-2.0
+`timestral` library, pinned in `tool-runtime/scripts/requirements-forecast.txt`)
+but no model weights. You provide a checkpoint, and the runtime never downloads one.
+
+Whoever sets up a model checks that its licence allows their use of it. Keep the licence
+file with the weights.
+
+1. Download one checkpoint at a pinned revision to the host, for example
+   Timestral 28M:
+
+   ```bash
+   hf download mistralai/Timestral-28M config.json model.safetensors LICENSE \
+     --revision 49b26409ac87b5935539a5d8ffe7f397b720db47 \
+     --local-dir /srv/eneo/models/timestral-28m
+   ```
+
+   `hf` comes with `pip install huggingface_hub`. The directory must hold
+   `config.json` and `model.safetensors`.
+
+2. Mount it read-only into the runtime in a Compose override, and name it for
+   users:
+
+   ```yaml
+   services:
+     tool-runtime:
+       environment:
+         FORECAST_MODEL_NAME: "Timestral 28M"
+       volumes:
+         - /srv/eneo/models/timestral-28m:/models/forecast:ro
+   ```
+
+3. Recreate `tool-runtime`.
+
+| Runtime variable | Default | Meaning |
+| --- | --- | --- |
+| `FORECAST_MODEL_PATH` | `/models/forecast` | Checkpoint directory inside the container |
+| `FORECAST_MODEL_NAME` | `Timestral` | How users see the model named |
+| `FORECAST_CONCURRENCY` | 1 | Forecasts at a time; each runs its own Python sidecar |
+| `FORECAST_THREADS` | 2 | CPU threads one forecast may use |
+
+Without a checkpoint, or with a directory that is not a Timestral checkpoint, a
+forecast fails with `MODEL_UNAVAILABLE` and every other tool keeps working.
+While the checkpoint files are missing, **Admin > Tools** says so; see
+[Diagnostics](#diagnostics). A larger checkpoint (Timestral 123M or 209M) fits the same steps; give the
+runtime more memory and threads before you raise `FORECAST_CONCURRENCY`.
 
 ## Isolation checklist
 
@@ -231,6 +294,16 @@ with a three-second deadline and cache the answer for 30 seconds. They never
 gate tool execution or ordinary chat. The public `GET /health/live` and
 `GET /health/ready` endpoints report liveness only.
 
+The diagnostics also list, under `unavailable`, the endpoints that cannot run
+now. `forecast` is listed while the sidecar's Python or the checkpoint files
+(`config.json` and `model.safetensors` in `FORECAST_MODEL_PATH`) are missing.
+The runtime checks on each diagnostics request, so a checkpoint copied into
+the mounted directory later counts without a restart. **Admin > Tools** then
+offers Forecast as unavailable, saying "This function needs a model that your
+operator adds to the tool runtime." (reason `model_missing`); it raises no
+warning on the runtime card. Calls are not refused: a forecast fails with
+`MODEL_UNAVAILABLE` and every other tool keeps working.
+
 Structured runtime events report request ID, tool, queue and execution time,
 cache revalidation, transferred bytes and cancellation. They omit tokens,
 signed URLs, file contents and model arguments.
@@ -272,7 +345,11 @@ Each concurrent compute call costs about 32 MiB for its child process. A
 tabular query child can use up to 256 MB for DuckDB plus 256 MB of spill
 space. Such children and the Office renderers share
 `TOOL_RUNTIME_TABULAR_CONCURRENCY` slots; PDF renders have their own pool of
-two Python sidecars. The standard stack caps the container at 2 GiB, 2 CPUs
+two Python sidecars, and forecasts one sidecar at a time (`FORECAST_CONCURRENCY`).
+A Timestral 28M forecast takes about a second and the container peaked at
+850 MiB while the longest one (4,096 days of history, 180 days ahead) ran
+next to a compute call, measured on linux/arm64 with the standard limits and
+Landlock. The standard stack caps the container at 2 GiB, 2 CPUs
 and 256 processes. `/tmp` is a 512 MiB tmpfs that holds job scratch space and
 the 256 MiB cache, and it counts towards memory. If you raise a concurrency
 setting, raise `mem_limit` with it.

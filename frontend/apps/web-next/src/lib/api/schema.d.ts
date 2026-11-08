@@ -4541,6 +4541,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/forecast-models/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Forecast Models
+     * @description List the tenant's forecast models.
+     */
+    get: operations["get_forecast_models_api_v1_forecast_models__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/forecast-models/{id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Update Forecast Model
+     * @description Turn a forecast model on or off, set its security classification or rename it. Fields left out keep their value.
+     */
+    post: operations["update_forecast_model_api_v1_forecast_models__id___post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/model-providers/": {
     parameters: {
       query?: never;
@@ -8776,7 +8816,7 @@ export interface paths {
     };
     /**
      * Get all AI models
-     * @description Get all completion, embedding, transcription and image models.
+     * @description Get all completion, embedding, transcription, image, rerank and forecast models.
      */
     get: operations["get_models_api_v1_ai_models__get"];
     put?: never;
@@ -10305,6 +10345,7 @@ export interface components {
       | "rerank_model_created"
       | "rerank_model_updated"
       | "rerank_model_deleted"
+      | "forecast_model_updated"
       | "template_created"
       | "template_updated"
       | "template_deleted"
@@ -11626,7 +11667,13 @@ export interface components {
     AskAssistant: {
       /** Disabled Capabilities */
       disabled_capabilities?: (
-        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts" | "compute"
+        | "web_search"
+        | "image_generation"
+        | "file_analysis"
+        | "file_creation"
+        | "charts"
+        | "compute"
+        | "forecast"
       )[];
       /** Disabled Mcp Server Ids */
       disabled_mcp_server_ids?: string[];
@@ -11794,6 +11841,7 @@ export interface components {
             | "file_creation"
             | "charts"
             | "compute"
+            | "forecast"
           )[]
         | null;
       /**
@@ -11981,7 +12029,13 @@ export interface components {
       id: string;
       /** Enabled Capabilities */
       enabled_capabilities?: (
-        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts" | "compute"
+        | "web_search"
+        | "image_generation"
+        | "file_analysis"
+        | "file_creation"
+        | "charts"
+        | "compute"
+        | "forecast"
       )[];
       document_template?: components["schemas"]["DocumentTemplateChoicePublic"];
       /** Available Capabilities */
@@ -12779,6 +12833,8 @@ export interface components {
       available: boolean;
       /** Mcp Server Id */
       mcp_server_id?: string | null;
+      /** Unavailable Reason */
+      unavailable_reason?: ("runtime_not_configured" | "model_missing") | null;
     };
     /**
      * CallbackRequest
@@ -12820,7 +12876,8 @@ export interface components {
         | "file_analysis"
         | "file_creation"
         | "charts"
-        | "compute";
+        | "compute"
+        | "forecast";
       /** Available */
       available: boolean;
       /** Reason */
@@ -13600,7 +13657,13 @@ export interface components {
       disabled_mcp_server_ids?: string[];
       /** Disabled Capabilities */
       disabled_capabilities?: (
-        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts" | "compute"
+        | "web_search"
+        | "image_generation"
+        | "file_analysis"
+        | "file_creation"
+        | "charts"
+        | "compute"
+        | "forecast"
       )[];
     };
     /** Counts */
@@ -14025,6 +14088,7 @@ export interface components {
             | "file_creation"
             | "charts"
             | "compute"
+            | "forecast"
           )[]
         | null;
       from_template?: components["schemas"]["TemplateCreate"] | null;
@@ -14350,7 +14414,13 @@ export interface components {
       id: string;
       /** Enabled Capabilities */
       enabled_capabilities?: (
-        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts" | "compute"
+        | "web_search"
+        | "image_generation"
+        | "file_analysis"
+        | "file_creation"
+        | "charts"
+        | "compute"
+        | "forecast"
       )[];
       document_template?: components["schemas"]["DocumentTemplateChoicePublic"];
       /** Available Capabilities */
@@ -14755,11 +14825,23 @@ export interface components {
       available_capabilities?: components["schemas"]["CapabilityAvailability"][];
       /** Enabled Capabilities */
       enabled_capabilities?: (
-        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts" | "compute"
+        | "web_search"
+        | "image_generation"
+        | "file_analysis"
+        | "file_creation"
+        | "charts"
+        | "compute"
+        | "forecast"
       )[];
       /** Default Disabled Capabilities */
       default_disabled_capabilities?: (
-        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts" | "compute"
+        | "web_search"
+        | "image_generation"
+        | "file_analysis"
+        | "file_creation"
+        | "charts"
+        | "compute"
+        | "forecast"
       )[];
       /** Models Enforced */
       models_enforced: boolean;
@@ -15169,6 +15251,7 @@ export interface components {
       | "transcription_model"
       | "image_model"
       | "rerank_model"
+      | "forecast_model"
       | "audit_log"
       | "session"
       | "mcp_server"
@@ -15583,6 +15666,147 @@ export interface components {
       /** Count */
       count: number;
     };
+    /** ForecastModelPublic */
+    ForecastModelPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Name
+       * @description The key the tool service knows the checkpoint by; set by Eneo.
+       */
+      name: string;
+      /** Nickname */
+      nickname: string;
+      /** Org */
+      org?: string | null;
+      /** Open Source */
+      open_source?: boolean | null;
+      /** Description */
+      description?: string | null;
+      /**
+       * Is Deprecated
+       * @default false
+       */
+      is_deprecated?: boolean;
+      /**
+       * Can Access
+       * @default false
+       */
+      can_access?: boolean;
+      /**
+       * Is Org Enabled
+       * @default false
+       */
+      is_org_enabled?: boolean;
+      security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /**
+       * Provider Id
+       * Format: uuid
+       */
+      provider_id: string;
+      /** Provider Name */
+      provider_name?: string | null;
+      /** Provider Type */
+      provider_type?: string | null;
+      /**
+       * Used By Mcp Servers
+       * @default []
+       */
+      used_by_mcp_servers?: components["schemas"]["ForecastModelUsedByPublic"][];
+    };
+    /** ForecastModelSecurityStatus */
+    ForecastModelSecurityStatus: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Name
+       * @description The key the tool service knows the checkpoint by; set by Eneo.
+       */
+      name: string;
+      /** Nickname */
+      nickname: string;
+      /** Org */
+      org?: string | null;
+      /** Open Source */
+      open_source?: boolean | null;
+      /** Description */
+      description?: string | null;
+      /**
+       * Is Deprecated
+       * @default false
+       */
+      is_deprecated?: boolean;
+      /**
+       * Can Access
+       * @default false
+       */
+      can_access?: boolean;
+      /**
+       * Is Org Enabled
+       * @default false
+       */
+      is_org_enabled?: boolean;
+      security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /**
+       * Provider Id
+       * Format: uuid
+       */
+      provider_id: string;
+      /** Provider Name */
+      provider_name?: string | null;
+      /** Provider Type */
+      provider_type?: string | null;
+      /**
+       * Used By Mcp Servers
+       * @default []
+       */
+      used_by_mcp_servers?: components["schemas"]["ForecastModelUsedByPublic"][];
+      /** Meets Security Classification */
+      meets_security_classification?: boolean | null;
+    };
+    /**
+     * ForecastModelUpdate
+     * @description Turn the model on or off, classify it or rename it; absent fields stay.
+     */
+    ForecastModelUpdate: {
+      /** Is Org Enabled */
+      is_org_enabled?: boolean | null;
+      /** Security Classification */
+      security_classification?: components["schemas"]["ModelId"] | null;
+      /** Display Name */
+      display_name?: string | null;
+    };
+    /**
+     * ForecastModelUsedByPublic
+     * @description A Forecast source that runs on the model.
+     */
+    ForecastModelUsedByPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Purpose */
+      purpose: string;
+    };
     /** FormatLimit */
     FormatLimit: {
       /** Mimetype */
@@ -15611,7 +15835,8 @@ export interface components {
         | "file_analysis"
         | "file_creation"
         | "charts"
-        | "compute";
+        | "compute"
+        | "forecast";
     };
     /** GeneralError */
     GeneralError: {
@@ -16960,7 +17185,8 @@ export interface components {
     };
     /**
      * MCPServerBackingModelPublic
-     * @description The catalog image model a built-in provider runs on (read-only).
+     * @description The catalog model a server runs on (read-only): a built-in provider's
+     *     image model, the Forecast source's forecast model.
      */
     MCPServerBackingModelPublic: {
       /**
@@ -17006,7 +17232,8 @@ export interface components {
         | "file_analysis"
         | "file_creation"
         | "charts"
-        | "compute";
+        | "compute"
+        | "forecast";
       /** Description */
       description?: string | null;
       /** Http Auth Config Schema */
@@ -17097,10 +17324,14 @@ export interface components {
         | "file_analysis"
         | "file_creation"
         | "charts"
-        | "compute";
+        | "compute"
+        | "forecast";
       /** Image Model Id */
       image_model_id?: string | null;
       image_model?: components["schemas"]["MCPServerBackingModelPublic"] | null;
+      /** Forecast Model Id */
+      forecast_model_id?: string | null;
+      forecast_model?: components["schemas"]["MCPServerBackingModelPublic"] | null;
       /**
        * Is Enabled
        * @default true
@@ -17227,10 +17458,14 @@ export interface components {
         | "file_analysis"
         | "file_creation"
         | "charts"
-        | "compute";
+        | "compute"
+        | "forecast";
       /** Image Model Id */
       image_model_id?: string | null;
       image_model?: components["schemas"]["MCPServerBackingModelPublic"] | null;
+      /** Forecast Model Id */
+      forecast_model_id?: string | null;
+      forecast_model?: components["schemas"]["MCPServerBackingModelPublic"] | null;
       /**
        * Is Enabled
        * @default true
@@ -17459,6 +17694,7 @@ export interface components {
             | "file_creation"
             | "charts"
             | "compute"
+            | "forecast"
           )
         | null;
       /** Description */
@@ -18084,6 +18320,12 @@ export interface components {
       };
       /** Is Active */
       is_active: boolean;
+      /**
+       * Is Managed
+       * @description The provider comes with the deployment (Eneo's tool service): Eneo creates it, its connection stays in the deployment's settings, and it cannot be edited or deleted.
+       * @default false
+       */
+      is_managed?: boolean;
       /** Masked Api Key */
       masked_api_key?: string | null;
       /**
@@ -18323,6 +18565,11 @@ export interface components {
        * @default []
        */
       rerank_models?: components["schemas"]["RerankModelSecurityStatus"][];
+      /**
+       * Forecast Models
+       * @default []
+       */
+      forecast_models?: components["schemas"]["ForecastModelSecurityStatus"][];
     };
     /** ModelsRestrictionInput */
     ModelsRestrictionInput: {
@@ -19279,6 +19526,19 @@ export interface components {
        */
       readonly count: number;
     };
+    /** PaginatedResponse[ForecastModelPublic] */
+    PaginatedResponse_ForecastModelPublic_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["ForecastModelPublic"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+    };
     /** PaginatedResponse[GroupPublicWithMetadata] */
     PaginatedResponse_GroupPublicWithMetadata_: {
       /**
@@ -19801,6 +20061,7 @@ export interface components {
             | "file_creation"
             | "charts"
             | "compute"
+            | "forecast"
           )[]
         | null;
       /** Space Id */
@@ -19985,6 +20246,7 @@ export interface components {
             | "file_creation"
             | "charts"
             | "compute"
+            | "forecast"
           )[]
         | null;
       /** Name */
@@ -20183,7 +20445,8 @@ export interface components {
       | "file_analysis"
       | "file_creation"
       | "charts"
-      | "compute";
+      | "compute"
+      | "forecast";
     /** PermissionPublic */
     PermissionPublic: {
       name: components["schemas"]["Permission"];
@@ -20284,7 +20547,8 @@ export interface components {
         | "file_analysis"
         | "file_creation"
         | "charts"
-        | "compute";
+        | "compute"
+        | "forecast";
       /**
        * Is Default Enabled
        * @default true
@@ -23172,7 +23436,13 @@ export interface components {
       organization_space_id: string | null;
       /** Enabled Capabilities */
       enabled_capabilities?: (
-        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts" | "compute"
+        | "web_search"
+        | "image_generation"
+        | "file_analysis"
+        | "file_creation"
+        | "charts"
+        | "compute"
+        | "forecast"
       )[];
       /** Available Capabilities */
       available_capabilities?: components["schemas"]["CapabilityAvailability"][];
@@ -25063,7 +25333,13 @@ export interface components {
     UpdateSpaceDryRunResponse: {
       /** Capabilities */
       capabilities?: (
-        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts" | "compute"
+        | "web_search"
+        | "image_generation"
+        | "file_analysis"
+        | "file_creation"
+        | "charts"
+        | "compute"
+        | "forecast"
       )[];
       /** Assistants */
       assistants: components["schemas"]["AssistantSparse"][];
@@ -43921,6 +44197,106 @@ export interface operations {
       };
     };
   };
+  get_forecast_models_api_v1_forecast_models__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_ForecastModelPublic_"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  update_forecast_model_api_v1_forecast_models__id___post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ForecastModelUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ForecastModelPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   list_providers_api_v1_admin_model_providers__get: {
     parameters: {
       query?: never;
@@ -44663,6 +45039,15 @@ export interface operations {
           "application/json": {
             [key: string]: unknown;
           };
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -51476,6 +51861,7 @@ export interface operations {
               | "file_creation"
               | "charts"
               | "compute"
+              | "forecast"
             )
           | null;
       };
@@ -51586,6 +51972,7 @@ export interface operations {
               | "file_creation"
               | "charts"
               | "compute"
+              | "forecast"
             )
           | null;
       };

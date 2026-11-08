@@ -6,6 +6,7 @@ import type { EneoUIMessage } from "@/lib/chat/types";
 import { renderInApp } from "@/test/render";
 import { observedElements, reportResize } from "@/test/setup-dom";
 import { SidePanel } from "./side-panel";
+import type { PreviewFile } from "@/features/workspace/preview/preview-kind";
 import { SidePanelStore } from "./side-panel-store";
 
 afterEach(cleanup);
@@ -177,5 +178,43 @@ describe("SidePanel as a cover (an interactive view that cannot sit beside)", ()
       expect(cover.className).toContain(`env(safe-area-inset-${side},0px)`);
     }
     expect(cover.contains(document.activeElement)).toBe(true);
+  });
+});
+
+describe("SidePanel's button while it is closed", () => {
+  function Closed() {
+    const [panel] = useState(() => new SidePanelStore(() => Promise.reject(new Error("unused"))));
+    return (
+      <SidePanel
+        panel={panel}
+        messages={[]}
+        contents={{
+          views: [],
+          documents: [],
+          uploads: [{ id: "a", name: "besok.csv", mimetype: "text/csv", size: 1 } as PreviewFile]
+        }}
+        versionsOf={() => []}
+        exportOf={() => null}
+        saverOf={() => null}
+        latestActivity={null}
+        activity={null}
+      >
+        <textarea aria-label="Fråga" />
+      </SidePanel>
+    );
+  }
+  const place = () =>
+    screen.getByRole("button", { name: "Visa sidopanelen med filer och vyer" }).parentElement;
+
+  it("floats only where it fits beside the column of messages", () => {
+    renderInApp(<Closed />);
+    layOut(1040);
+    expect(place()?.className).toContain("absolute");
+  });
+
+  it("takes a row of its own where the column would reach it, so it covers no message", () => {
+    renderInApp(<Closed />);
+    layOut(1039);
+    expect(place()?.className).not.toContain("absolute");
   });
 });

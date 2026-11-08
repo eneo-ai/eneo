@@ -189,7 +189,7 @@ test.describe("image source on a touch screen", () => {
     const sourceDialog = page.getByRole("dialog", { name: /Ändra.*Bildgenerering/ });
     await sourceDialog.getByLabel("Namn", { exact: true }).fill("Touch draft");
     await expect(sourceDialog.getByText(/1536x1024/)).toBeVisible();
-    await expect(sourceDialog.getByText("Bildmodellen är inaktiverad.")).toBeVisible();
+    await expect(sourceDialog.getByText("Modellen är inaktiverad.")).toBeVisible();
     const add = sourceDialog.getByRole("button", { name: "Lägg till bildmodell" });
     await add.focus();
     await add.click();
