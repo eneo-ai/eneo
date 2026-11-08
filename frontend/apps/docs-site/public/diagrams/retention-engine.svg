@@ -43,5 +43,5 @@
   <rect class="box" x="20" y="320" width="820" height="80" rx="8"/>
   <text class="h" x="40" y="346">Two different decisions, never mixed</text>
   <text class="t" x="40" y="370">Expiry removes a record whose period has passed, with its links. A shared file stays until its last use is gone.</text>
-  <text class="t" x="40" y="390">Erasure of one file from every place is an explicit decision with its own scope and its own report (planned, eneo-s55b.36).</text>
+  <text class="t" x="40" y="390">Erasure of one file from every place is an explicit decision with its own scope and its own report (planned).</text>
 </svg>

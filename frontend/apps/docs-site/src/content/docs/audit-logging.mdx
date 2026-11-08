@@ -83,6 +83,12 @@ Conversation data (questions and app runs) follows a hierarchical retention poli
 2. Space `data_retention_days`
 3. `null` means keep forever
 
+Web widget conversations are outside this hierarchy. Each widget's own retention
+applies, held to the organization's widget policy as it stands that night, and the
+widget's own nightly job removes them; see [Conversation retention](/guides/embed-widget#conversation-retention).
+The retention engine leaves them alone: an assistant, space or organization period
+never reaches them, and neither does the empty-session sweep.
+
 When scheduled retention deletes a question or app run, it also deletes the files attached to it, such as uploaded documents, audio recordings and their transcriptions, once no other chat, assistant, app or app run uses them. A file that is still used elsewhere is kept until its last use is removed. The stored bytes are then removed by the object content lifecycle; see [Files nothing uses anymore](/guides/object-content-storage#files-nothing-uses-anymore).
 
 There is no tenant-level conversation retention setting: it was removed from the retention-policy API (`PUT /api/v1/audit/retention-policy` accepts only `retention_days`) to prevent accidental data loss. Scheduled conversation retention still honours the legacy `conversation_retention_enabled`/`conversation_retention_days` columns on the tenant's audit retention policy row if they were set directly in the database, but no API or UI writes them.
@@ -99,8 +105,8 @@ The general worker runs the shared retention engine once a day, at 03:30 by defa
 The time is read in the worker's time zone; the shipped image runs in UTC. The
 registered tasks remove due questions and App runs, sessions that were created more
 than `RETENTION_EMPTY_SESSION_GRACE_HOURS` ago and have no question, unused upload
-families and expired retention execution records. Audit-log purging remains governed
-by the separate audit retention policy above.
+families and expired retention execution records. Each removal has this one scheduled
+path. Audit-log purging remains governed by the separate audit retention policy above.
 
 Work runs in bounded chunks. Each chunk is one database transaction with durable
 progress. Within a chunk, one question or App run and the files its last use released
@@ -220,6 +226,24 @@ stops the process at start with the reason.
 When the row or file budget is spent, the task stops. A unit that does not fit the
 remaining budget is kept and resumed from the stored cursor on a later execution. A
 question, App run or file family is never partly deleted to fit.
+
+#### Removals that run without a choice
+
+Conversation history removes only what an assistant, App, space or legacy
+organization period selects; with none set, it keeps everything. The tasks below
+remove data that no such period selects. Eneo removed this data before the engine
+existed, or it is the engine's own record. They are on by default, and the operator
+can switch each one off:
+
+| Task | Removes | Switch |
+| --- | --- | --- |
+| `sessions.empty` | Sessions without a question, older than `RETENTION_EMPTY_SESSION_GRACE_HOURS` | `RETENTION_EMPTY_SESSIONS_ENABLED` |
+| `files.unused` | Upload families nothing uses, older than `RETENTION_UNUSED_FILE_GRACE_HOURS` | `RETENTION_UNUSED_FILES_ENABLED` |
+| `retention.jobs` | Retention execution records past the audit retention period | `RETENTION_JOB_HISTORY_ENABLED` |
+
+A task added later is off by default unless it removes only what such a period
+selects or is added to this list. Web widget conversations are not an engine task:
+the widget's own nightly job removes them by each widget's retention.
 
 #### Health
 
