@@ -131,7 +131,9 @@ stays outside this record.
    stored executions contradict nothing: no failed latest execution, no two
    days without a completed one, no running execution with a stale heartbeat
    and no overdue work. Contradicting evidence reads `degraded` or `unknown`;
-   a task without evidence reads `initializing` or `unknown`.
+   a task without evidence reads `initializing` or `unknown`. A task the
+   operator turned off reads `disabled` and leaves the overall status out, so
+   a deliberate pause is visible without reading as a fault.
 7. **Deployment scope.** One tenant per deployment
    ([single-tenant-assumption](single-tenant-assumption.md)); deployment-level
    effects are audited in that tenant.

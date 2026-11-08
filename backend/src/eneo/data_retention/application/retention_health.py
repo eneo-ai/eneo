@@ -26,6 +26,8 @@ class RetentionHealthStatus(StrEnum):
     HEALTHY = "healthy"
     DEGRADED = "degraded"
     UNKNOWN = "unknown"
+    DISABLED = "disabled"
+    """A task the operator switched off; never the overall status."""
 
 
 class RetentionTaskHealth(BaseModel):
@@ -37,7 +39,8 @@ class RetentionTaskHealth(BaseModel):
     disabled: bool = False
     """The worker's latest execution was skipped because a deployment setting
     turns the task off (before any execution: the API process's setting).
-    Status degraded: no due data is removed."""
+    Status disabled: no due data is removed, by the operator's choice, so the
+    overall status leaves the task out."""
     stale: bool = False
     """No execution completed (succeeded or partial) for two days."""
     overdue: bool = False
@@ -95,7 +98,8 @@ async def load_retention_health(
     raised before writing one) is unknown, as is missing evidence after a run.
     A run that failed is degraded; one that was superseded, abandoned or could
     not claim its task proves nothing about the due work, so it is unknown.
-    A task turned off is degraded.
+    A task turned off is disabled and does not count towards the overall
+    status; with every task turned off it reads healthy.
     """
     names = [registered.name for registered in tasks]
     # Read once, and only when a task has no row.
@@ -151,7 +155,7 @@ async def _task_health(
     if _turned_off(latest, enabled=task.enabled):
         return RetentionTaskHealth(
             name=task.name,
-            status=RetentionHealthStatus.DEGRADED,
+            status=RetentionHealthStatus.DISABLED,
             disabled=True,
             no_execution=latest is None,
             latest_outcome=latest_outcome,

@@ -257,8 +257,9 @@ unavailable.
 | --- | --- |
 | `initializing` | No task has written an execution record yet, or this task's first execution is still running and has not written its overdue snapshot |
 | `healthy` | No stored execution contradicts it: the latest execution did not fail, the task is not stale, nothing is overdue, and no running execution has a stale heartbeat |
-| `degraded` | The latest execution failed, no execution completed for two days, overdue rows exist, or the task is turned off |
+| `degraded` | The latest execution failed, no execution completed for two days, or overdue rows exist |
 | `unknown` | The latest execution was superseded, timed out on its claim or has a stale heartbeat; the task has no execution although another task has; the overdue snapshot is missing, stale, or was cut off before it found any overdue row; or the health read failed |
+| `disabled` | The operator turned the task off: the worker skipped its latest execution, or, before any execution, the API's own setting turns it off. The overall status leaves the task out |
 
 | Flag | Meaning |
 | --- | --- |
