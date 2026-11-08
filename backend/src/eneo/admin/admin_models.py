@@ -312,7 +312,8 @@ class IdentityMigrationWindowCreate(BaseModel):
     """While open, an account bound under the from pair also binds under the
     to pair by its email. Its from binding stays. A window from a pair to
     itself is for a change of subject claim: an account bound there before
-    the window opened has its subject replaced once, by email."""
+    the window opened has its subject replaced once, found by its email or
+    by the new subject under another audience."""
 
     from_issuer: str = Field(min_length=1)
     from_audience: str = Field(min_length=1)

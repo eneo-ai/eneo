@@ -218,7 +218,7 @@ The subject claim is `claims_mapping.subject` in the provider config, `sub` by d
 
 Set it with `subject_claim` in the federation `PUT` or `PATCH` (`/api/v1/sysadmin/tenants/{tenant_id}/federation`, with the super API key), or as an administrator with `PATCH /api/v1/admin/federation`. A `PUT` without it stores `sub`, a `PATCH` without it keeps the stored claim, and the email claim is refused with `422` (`federation_subject_claim_is_email_claim`). Both `GET` answers show it, and a change is audited as `federation_updated`. Configuration by environment variables always uses `sub`.
 
-Changing the subject claim once people are bound changes every subject under the same issuer and audience. Open a migration window from that pair to itself before you change it.
+Changing the subject claim once people are bound changes every subject under the issuer, for every audience. Before you change it, open a migration window from each issuer and audience people use to itself, for example one for the browser client and one for the API audience: a pair without its own window is refused `subject_mismatch`.
 
 ### Sign-in conflicts
 
@@ -226,7 +226,7 @@ When the identity cannot be bound, the sign-in is refused. The login page says t
 
 | Reason | Meaning | What an administrator does |
 |--------|---------|----------------------------|
-| `subject_mismatch` | The account is bound under this issuer and audience to another subject | Confirm it is the same person, then open a re-binding allowance; after a subject claim change, a migration window to the same pair |
+| `subject_mismatch` | The account is bound under this issuer and audience to another subject | Confirm it is the same person, then open a re-binding allowance; after a subject claim change, a migration window from this pair to itself |
 | `account_bound` | The account is bound, but not under this issuer and audience, for example after a client ID change | A migration window from the old pair, or an allowance for one person |
 | `duplicate_email` | Several accounts have the email, in different letter case | Leave one account with the address |
 | `duplicate_subject` | The subject is bound to two accounts under different audiences | Find which account is the person's from the accounts the audit entry names |
@@ -242,7 +242,7 @@ Two administrator tools let the email bind an account that is already bound. Bot
 |-|----------------------|------------------|
 | Covers | One account | Every account bound under one issuer and audience |
 | Lasts | Until `allowed_until` or the account's next sign-in by email, whichever comes first: single use | Until `closes_at` or until it is closed, for every account |
-| Binds | The presented identity: adds its issuer and audience, or replaces the account's subject there | From one pair to another: adds the new pair and keeps the old, so both keep signing in. From a pair to itself: replaces the subject there, once per account bound before the window opened |
+| Binds | The presented identity: adds its issuer and audience, or replaces the account's subject there | From one pair to another: adds the new pair and keeps the old, so both keep signing in. From a pair to itself: replaces the subject there, once per account bound before the window opened, whether the email or the new subject under another audience finds the account |
 | For | One person with a new identity at the provider | A new client ID, a second entry point, a subject claim change |
 
 The endpoints, under `/api/v1/admin`:
@@ -261,7 +261,7 @@ The endpoints, under `/api/v1/admin`:
 ### Upgrading to account binding
 
 - Existing accounts have no binding; each one is bound by its email on its next sign-in.
-- Open a migration window before you change the client ID (from the old pair to the new one) or the subject claim (from the pair to itself).
+- Open a migration window before you change the client ID (from the old pair to the new one) or the subject claim (from each pair to itself).
 - There is no administration screen for bindings yet: use the API above.
 
 ---

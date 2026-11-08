@@ -397,6 +397,57 @@ async def test_a_window_to_the_same_pair_replaces_the_subject_once(
     assert [c["reason"] for c in _conflicts(enqueued)] == ["subject_mismatch"]
 
 
+async def test_same_pair_windows_move_every_audience_of_a_changed_subject_claim(
+    sign_in, test_tenant
+):
+    """A person bound under the browser client and the API audience: after the
+    subject claim changes, the second audience finds the account by its new
+    subject under the browser pair, not by email, and its window still moves
+    it."""
+    account = await _user_id()
+    await sign_in("person-a", "client-a")
+    await sign_in("person-a", "api-a")
+    windows = {
+        audience: await _open_window(
+            test_tenant.id, audience, audience, timedelta(days=1)
+        )
+        for audience in ("client-a", "api-a")
+    }
+
+    assert (await sign_in("person-b", "client-a")).id == account
+    assert (await sign_in("person-b", "api-a")).id == account
+
+    assert await _bindings(account) == {("client-a", "person-b"), ("api-a", "person-b")}
+    moved = {
+        audit["audience"]: audit
+        for audit in await _bound_audits(account)
+        if audit["method"] == "migration_window"
+    }
+    assert {
+        audience: (audit["window_id"], audit["replaced_subject"])
+        for audience, audit in moved.items()
+    } == {
+        "client-a": (str(windows["client-a"]), "person-a"),
+        "api-a": (str(windows["api-a"]), "person-a"),
+    }
+
+
+async def test_a_pair_without_its_own_same_pair_window_is_refused(
+    sign_in, test_tenant, enqueued
+):
+    account = await _user_id()
+    await sign_in("person-a", "client-a")
+    await sign_in("person-a", "api-a")
+    await _open_window(test_tenant.id, "client-a", "client-a", timedelta(days=1))
+
+    assert (await sign_in("person-b", "client-a")).id == account
+    with pytest.raises(IdentityConflictError):
+        await sign_in("person-b", "api-a")
+
+    assert await _bindings(account) == {("client-a", "person-b"), ("api-a", "person-a")}
+    assert [c["reason"] for c in _conflicts(enqueued)] == ["subject_mismatch"]
+
+
 @pytest.mark.parametrize("closed", ["closed", "expired"])
 async def test_a_same_pair_window_no_longer_open_replaces_nothing(
     sign_in, test_tenant, enqueued, closed

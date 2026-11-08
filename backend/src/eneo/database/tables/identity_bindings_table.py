@@ -60,7 +60,8 @@ class IdentityMigrationWindows(IdMixin, CreatedAtMixin, BaseWithTableName):
 
     A window from a pair to itself is for a change of subject claim: each
     account bound under the pair before the window opened may have its
-    subject there replaced once, by email.
+    subject there replaced once, found by its email or by the new subject
+    under another audience.
     """
 
     tenant_id: Mapped[UUID] = mapped_column(
