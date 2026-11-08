@@ -98,6 +98,9 @@ vi.mock("sonner", async (importOriginal) => {
 
 afterEach(() => {
   cleanup();
+  // Unmounting saves the composer's draft for its conversation; without this
+  // the next test of the same conversation starts with a typed question.
+  sessionStorage.clear();
   vi.clearAllMocks();
   recents.items = [];
   recents.fail = false;
