@@ -4,6 +4,19 @@ An assistant may consult other assistants in its space (its specialists)
 and answer with one combined reply. The consultations of a question are
 kept on the question. Historical questions have no consultation records.
 
+This revision and 202610071400 first followed 202610161000. A database
+migrated on that chain reports itself at head, so `alembic upgrade head`
+would skip the revisions now before them. Downgrading it drops the
+specialists and consultations; to keep them, run with this code:
+
+    alembic stamp --purge 202610161000
+    alembic upgrade 202611031206
+    alembic stamp 202610201100
+    alembic upgrade head
+
+Neither revision changed, so their tables are already in place; the last
+step runs whatever revisions follow them.
+
 Revision ID: 202610201100
 Revises: 202610071400
 """
