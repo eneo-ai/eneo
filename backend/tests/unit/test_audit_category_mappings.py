@@ -185,6 +185,9 @@ class TestCategoryMappings:
         """Verify system action types are correctly mapped."""
         system_actions = [
             ActionType.RETENTION_POLICY_APPLIED,
+            ActionType.DATA_RETENTION_BATCH,
+            ActionType.DATA_RETENTION_RUN,
+            ActionType.DATA_RETENTION_SKIPPED,
             ActionType.ENCRYPTION_KEY_ROTATED,
             ActionType.SYSTEM_MAINTENANCE,
         ]
