@@ -653,10 +653,10 @@ class TestAllCategoriesHaveCorrectActionCounts:
         )
         assert count == 24
 
-    def test_system_actions_has_6_actions(self):
-        """Verify system_actions has 6 action types (retention batch, run and skip included)."""
+    def test_system_actions_count(self):
+        """Verify system_actions matches the shared expectation."""
         count = sum(1 for cat in CATEGORY_MAPPINGS.values() if cat == "system_actions")
-        assert count == 6
+        assert count == EXPECTED_CATEGORY_COUNTS["system_actions"]
 
     def test_audit_access_has_3_actions(self):
         """Verify audit_access has 3 action types (including AUDIT_SESSION_CREATED)."""
