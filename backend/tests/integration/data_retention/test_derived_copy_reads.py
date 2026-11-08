@@ -260,6 +260,66 @@ async def test_a_copy_removed_after_its_turns_load_refuses_the_read(
     assert not returned
 
 
+async def _read_copy_question(
+    container, copy: Copy, reader: str, tenant_id: UUID
+) -> bool:
+    """Whether ``reader`` returned the copy's first question."""
+    questions = container.question_repo()
+    question_id = copy.copy_questions[0]
+    if reader == "logging":
+        read = await questions.get_for_tenant(id=question_id, tenant_id=tenant_id)
+        return read is not None
+    if reader == "skill":
+        read = await questions.get_with_skill_activation(
+            id=question_id, tenant_id=tenant_id
+        )
+        return read is not None
+    exported = await questions.get_by_tenant(
+        tenant_id=tenant_id,
+        start_date=datetime.now(timezone.utc) - timedelta(days=1),
+        end_date=datetime.now(timezone.utc) + timedelta(days=1),
+    )
+    return question_id in {question.id for question in exported}
+
+
+@pytest.mark.parametrize("reader", ["logging", "skill", "export"])
+async def test_a_source_removed_while_a_question_loads_refuses_the_read(
+    db_container, admin_user: UserInDB, copy: Copy, reader: str
+):
+    """Mutant: a question read checks the copy only in its first statement, so
+    a source removed before the question's logging details, files and
+    references load, in later statements, still returns the question. The
+    removal commits right after that first statement."""
+    seen = {"question": False, "removed": False}
+
+    async def remove_source() -> None:
+        async with sessionmanager.session() as other, other.begin():
+            await other.execute(
+                sa.delete(Questions).where(Questions.id == copy.source_question)
+            )
+
+    def after_the_question(_conn, _cursor, statement: str, *_: object) -> None:
+        if not seen["question"]:
+            seen["question"] = "content_derivations" in statement
+        elif not seen["removed"]:
+            seen["removed"] = True
+            await_only(remove_source())
+
+    async with db_container() as container:
+        bind = container.session().sync_session.bind
+        assert bind is not None
+        sa.event.listen(bind.engine, "before_cursor_execute", after_the_question)
+        try:
+            returned = await _read_copy_question(
+                container, copy, reader, admin_user.tenant_id
+            )
+        finally:
+            sa.event.remove(bind.engine, "before_cursor_execute", after_the_question)
+
+    assert seen["removed"], "the question's details were not loaded afterwards"
+    assert not returned
+
+
 async def test_another_principal_learns_nothing_about_a_removed_source(
     client: AsyncClient,
     owner_token: str,

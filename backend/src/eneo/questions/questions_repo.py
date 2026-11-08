@@ -7,7 +7,7 @@ import sqlalchemy as sa
 from pydantic import TypeAdapter
 from sqlalchemy.orm import selectinload, undefer
 
-from eneo.data_retention.derivations import copy_session_valid
+from eneo.data_retention.derivations import copy_session_valid, readable_sessions
 from eneo.database.database import AsyncSession
 from eneo.database.repositories.base import BaseRepositoryDelegate
 from eneo.database.tables.help_assistant_runs_table import HelpAssistantRuns
@@ -88,6 +88,22 @@ class QuestionRepository:
             loader=self.file_content_loader,
         )
         return questions
+
+    async def _hydrate_readable(self, questions: list[Question]) -> list[Question]:
+        """``_hydrate_questions`` for content reads: details, files and
+        references load in later statements, so only the questions whose
+        conversation is still readable afterwards are returned (see
+        ``readable_sessions``). Questions outside a conversation stay."""
+        hydrated = await self._hydrate_questions(questions)
+        readable = await readable_sessions(
+            self.session,
+            {question.session_id for question in hydrated if question.session_id},
+        )
+        return [
+            question
+            for question in hydrated
+            if question.session_id is None or question.session_id in readable
+        ]
 
     def _get_options(self):
         return [
@@ -218,7 +234,8 @@ class QuestionRepository:
         )
         if question is None:
             return None
-        return (await self._hydrate_questions([question]))[0]
+        readable = await self._hydrate_readable([question])
+        return readable[0] if readable else None
 
     async def in_removed_copy(self, *, id: UUID, tenant_id: UUID) -> bool:
         """Whether this question is in a copy whose source was removed: why
@@ -273,7 +290,8 @@ class QuestionRepository:
         question = await self.delegate.get_model_from_query(stmt)
         if question is None:
             return None
-        return (await self._hydrate_questions([question]))[0]
+        readable = await self._hydrate_readable([question])
+        return readable[0] if readable else None
 
     async def get_skill_activation_evidence(
         self,
@@ -553,4 +571,4 @@ class QuestionRepository:
         )
 
         questions = await self.delegate.get_models_from_query(stmt)
-        return await self._hydrate_questions(questions)
+        return await self._hydrate_readable(questions)
