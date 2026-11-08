@@ -92,30 +92,34 @@ _RAW_EDGE_WRITE = re.compile(
 )
 
 
-def _edge_writes(function: FunctionNode) -> set[str]:
-    """The statement verbs this function applies to the edges table."""
-    return {
-        verb
-        for node in ast.walk(function)
-        if isinstance(node, ast.Call)
-        and (
-            verb := str(
-                getattr(node.func, "id", None) or getattr(node.func, "attr", "")
-            ).lower()
-        )
-        in ("insert", "update", "delete")
-        and any(
+def _edge_uses(function: FunctionNode) -> set[str]:
+    """What this function does with the edges table itself rather than with its
+    columns: the statement or call it passes the table to, or "construct" for
+    a new ORM instance. A column read such as ``ContentDerivations.id`` is no
+    use; an ORM load or instance is, since it could change an edge unseen."""
+    uses: set[str] = set()
+    for node in ast.walk(function):
+        if not isinstance(node, ast.Call):
+            continue
+        if isinstance(node.func, ast.Name) and node.func.id == _EDGE_TABLE:
+            uses.add("construct")
+        elif any(
             isinstance(argument, ast.Name) and argument.id == _EDGE_TABLE
             for argument in node.args
-        )
-    }
+        ):
+            uses.add(
+                str(
+                    getattr(node.func, "id", None) or getattr(node.func, "attr", "")
+                ).lower()
+            )
+    return uses
 
 
 def test_edges_are_only_added_and_only_removed_with_their_session():
     """Mutant: a path deletes or changes an edge of an existing copy. A copy
     found invalid must stay invalid, because the derived copies task removes
     its questions without reading the edges again."""
-    writers: dict[str, set[str]] = {"insert": set(), "update": set(), "delete": set()}
+    uses: dict[str, set[str]] = {}
     for path in SOURCE_ROOT.rglob("*.py"):
         source = path.read_text()
         assert not _RAW_EDGE_WRITE.search(source), f"{path} writes edges in SQL"
@@ -125,32 +129,35 @@ def test_edges_are_only_added_and_only_removed_with_their_session():
             ("eneo", *path.relative_to(SOURCE_ROOT).with_suffix("").parts)
         )
         for function in _functions(ast.parse(source)):
-            for verb in _edge_writes(function):
-                writers[verb].add(f"{module}:{function.name}")
+            if found := _edge_uses(function):
+                uses[f"{module}:{function.name}"] = found
 
-    assert writers == {
-        "insert": {"eneo.data_retention.derivations:register_derivations"},
-        "update": set(),
-        "delete": {
-            "eneo.data_retention.infrastructure.derived_copy_repo:"
-            "delete_edges_of_removed_sessions"
-        },
+    assert uses == {
+        "eneo.data_retention.derivations:register_derivations": {"insert"},
+        "eneo.data_retention.infrastructure.derived_copy_repo:"
+        "delete_edges_of_removed_sessions": {"delete"},
     }
 
 
-def test_the_edge_check_sees_each_kind_of_write():
-    """Mutant: the detector misses a write, so the check above passes vacuously."""
+def test_the_edge_check_sees_each_kind_of_use():
+    """Mutant: the detector misses a use, so the check above passes vacuously."""
     tree = ast.parse(
         "def add():\n    insert(ContentDerivations).values(x)\n"
         "def change():\n    sa.Update(ContentDerivations).values(x)\n"
         "def remove():\n    sa.delete(ContentDerivations).where(x)\n"
+        "def load():\n    session.get(ContentDerivations, x)\n"
+        "def make():\n    session.add(ContentDerivations(copy_session_id=x))\n"
+        "def columns():\n    sa.select(ContentDerivations.id)\n"
         "def other():\n    sa.delete(Questions).where(x)\n"
     )
-    found = {node.name: _edge_writes(node) for node in _functions(tree)}
+    found = {node.name: _edge_uses(node) for node in _functions(tree)}
     assert found == {
         "add": {"insert"},
         "change": {"update"},
         "remove": {"delete"},
+        "load": {"get"},
+        "make": {"construct"},
+        "columns": set(),
         "other": set(),
     }
     assert _RAW_EDGE_WRITE.search("DELETE FROM content_derivations WHERE x")
