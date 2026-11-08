@@ -1010,6 +1010,30 @@ class TestProfileDefaults:
         with pytest.raises(OidcProviderError):
             self._profile(**config)
 
+    @pytest.mark.parametrize("source", ["discovered", "stored"])
+    def test_a_templated_issuer_is_refused(self, source):
+        """A multi-tenant endpoint's issuer (Entra ``common``) names no
+        directory, so no ID token could ever match it."""
+        templated = "https://login.microsoftonline.com/{tenantid}/v2.0"
+
+        with pytest.raises(OidcProviderError, match="template"):
+            if source == "discovered":
+                self._profile({"issuer": templated}, issuer=None)
+            else:
+                self._profile(issuer=templated)
+
+    @pytest.mark.parametrize("source", ["discovered", "stored"])
+    def test_a_literal_issuer_is_accepted(self, source):
+        issuer = "https://login.microsoftonline.com/a1b2c3d4/v2.0"
+
+        profile = (
+            self._profile({"issuer": issuer}, issuer=None)
+            if source == "discovered"
+            else self._profile(issuer=issuer)
+        )
+
+        assert profile.issuer == issuer
+
     def test_the_stored_issuer_wins_over_discovery(self):
         profile = self._profile({"issuer": "https://elsewhere.example"})
 

@@ -795,3 +795,42 @@ async def test_real_initiate_writes_state_only_for_registered_callback(
                 ).hexdigest()
                 + ":/dashboard"
             )
+
+
+@pytest.mark.asyncio
+async def test_real_initiate_refuses_a_templated_issuer_without_a_cookie(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from httpx import ASGITransport, AsyncClient
+
+    from tests.unittests.authentication.test_federation_router import (
+        FakeRedis,
+        _single_use_tenant,
+    )
+
+    _provider(monkeypatch)
+    redis = FakeRedis()
+    tenant, container = _single_use_tenant(monkeypatch, redis)
+    tenant.federation_config["issuer"] = (
+        "https://login.microsoftonline.com/{tenantid}/v2.0"
+    )
+    tenant.federation_config["additional_redirect_uris"] = [
+        "https://beta.example.se/login/callback"
+    ]
+    app = get_application()
+    for route in endpoint_routes(app.routes):
+        if route.path == INITIATE and route.dependant:
+            for dependency in route.dependant.dependencies:
+                if dependency.name == "container":
+                    app.dependency_overrides[dependency.call] = lambda: container
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="https://beta.example.se"
+    ) as client:
+        response = await client.get(
+            INITIATE, params={"tenant": tenant.slug}, headers=SAME_ORIGIN
+        )
+
+    assert response.status_code == 303
+    assert detail_code(response) == "http_500"
+    assert "set-cookie" not in response.headers
+    assert redis._store == {}

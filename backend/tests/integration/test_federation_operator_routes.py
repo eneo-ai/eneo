@@ -15,10 +15,14 @@ from httpx import AsyncClient
 from eneo.database.database import sessionmanager
 from eneo.main.config import get_settings, set_settings
 from eneo.tenants.tenant_repo import TenantRepository
+from tests.integration.test_federation_tenant_admin import _audit_rows
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 SECRET = "super-secret"
+TEMPLATED_ISSUER_GUIDANCE = (
+    "The provider's issuer is a template; use your own directory's discovery endpoint"
+)
 
 
 def _idp(slug: str) -> dict[str, str]:
@@ -254,3 +258,44 @@ async def test_operator_errors_answer_as_before(
         set_settings(original)
     assert disabled.status_code == 404
     assert disabled.json()["detail"] == "Federation is not enabled"
+
+
+async def test_a_templated_issuer_is_refused_before_it_is_saved(
+    client: AsyncClient,
+    super_admin_token: str,
+    oidc_mock,
+    mock_transcription_models,
+):
+    """A multi-tenant discovery document (Entra ``common``) names an issuer
+    template no ID token can match: the save is refused, not the sign-in."""
+    slug = f"fed-golden-tpl-{uuid4().hex[:6]}"
+    tenant = await _tenant(client, super_admin_token, slug)
+    idp = _idp(slug)
+    template = "https://login.microsoftonline.com/{tenantid}/v2.0"
+    headers = {"X-API-Key": super_admin_token}
+    url = f"/api/v1/sysadmin/tenants/{tenant['id']}/federation"
+
+    oidc_mock(discovery=_discovery({**idp, "issuer": template}))
+    refused_put = await client.put(url, json=_put_body(slug, idp), headers=headers)
+    assert refused_put.status_code == 400
+    assert refused_put.json()["detail"] == TEMPLATED_ISSUER_GUIDANCE
+    assert await _stored(tenant["id"]) == {}
+
+    oidc_mock(discovery=_discovery(idp))
+    saved = await client.put(url, json=_put_body(slug, idp), headers=headers)
+    assert saved.status_code == 200, saved.text
+    stored = await _stored(tenant["id"])
+    common = _idp(f"{slug}-common")
+    oidc_mock(discovery=_discovery({**common, "issuer": template}))
+    refused_patch = await client.patch(
+        url, json={"discovery_endpoint": common["discovery_endpoint"]}, headers=headers
+    )
+    assert refused_patch.status_code == 400
+    assert refused_patch.json()["detail"] == TEMPLATED_ISSUER_GUIDANCE
+    assert await _stored(tenant["id"]) == stored
+    assert len(await _audit_rows(tenant["id"])) == 1  # only the accepted PUT
+
+    oidc_mock(discovery=_discovery({**idp, "issuer": template}))
+    probe = await client.post(f"{url}/test", headers=headers)
+    assert probe.status_code == 500
+    assert probe.json()["detail"] == TEMPLATED_ISSUER_GUIDANCE

@@ -31,6 +31,8 @@ from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication.oidc.profile import (
     DEFAULT_SCOPES,
     SIGNING_ALGORITHM_ALLOWLIST,
+    TEMPLATED_ISSUER_GUIDANCE,
+    is_templated_issuer,
 )
 from eneo.main.config import (
     Settings,
@@ -584,6 +586,19 @@ async def _fetch_discovery_metadata(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Discovery endpoint missing required fields",
         )
+    if is_templated_issuer(cast(str, issuer)):
+        logger.error(
+            "Discovery endpoint names a templated issuer",
+            extra={
+                "tenant_id": str(tenant.id),
+                "discovery_endpoint": discovery_endpoint,
+                "issuer": issuer,
+            },
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=TEMPLATED_ISSUER_GUIDANCE,
+        )
 
     logger.debug(
         "Discovery endpoint validated successfully",
@@ -984,6 +999,11 @@ class TenantFederationService:
                     raise HTTPException(
                         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                         detail=f"Discovery endpoint missing required fields: {missing}",
+                    )
+                if is_templated_issuer(str(discovery["issuer"])):
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail=TEMPLATED_ISSUER_GUIDANCE,
                     )
         except aiohttp.ClientError as e:
             logger.error(

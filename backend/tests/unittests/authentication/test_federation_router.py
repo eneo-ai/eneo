@@ -1596,3 +1596,24 @@ class TestRedeemerBinding:
         assert refused.status_code == 400
         assert refused.json()["code"] == "oidc_transaction_invalid"
         assert _token_exchanges(provider) == 0
+
+
+async def test_initiate_refuses_a_templated_issuer_before_storing_anything(
+    monkeypatch, provider
+):
+    """A config saved before the check, an environment-only config or the
+    startup migration can still name a template; initiate stops before any
+    transaction or authorization URL exists."""
+    redis_client = FakeRedis()
+    tenant, container = _single_use_tenant(monkeypatch, redis_client)
+    tenant.federation_config["issuer"] = (
+        "https://login.microsoftonline.com/{tenantid}/v2.0"
+    )
+
+    async with _http(container) as client:
+        refused = await client.get("/auth/initiate", params={"tenant": SINGLE_USE_SLUG})
+
+    assert refused.status_code == 500
+    assert "template" in refused.json()["detail"]
+    assert "authorization_url" not in refused.text
+    assert redis_client._store == {}
