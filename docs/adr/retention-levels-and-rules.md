@@ -105,7 +105,7 @@ tasks in the same execution.
 
 | Change | Effect |
 | --- | --- |
-| Adoption of this record | none: no schema or data change, and the same questions and App runs are due before and after |
+| Adoption of this record | no schema or data change; every chosen period and the nearest-choice order stay as they were. Due-ness follows the database clock, and a newly installed Prompt Guide has no period |
 | A shorter period | older conversations become due at the next execution |
 | A longer period | the fresh check inside the delete stops removal of conversations no longer due |
 | A cleared period | the level inherits the next chosen value outward, which can be shorter, longer or none, so more conversations can become due |
@@ -122,8 +122,10 @@ owner Assistant follow no policy and are not removed; that is unchanged.
   without a choice. `eneo.audit.domain.constants.DEFAULT_RETENTION_DAYS` is its
   one definition, used by the table default, the first read of the policy and
   the retention engine's own job history.
-- Every retention period is validated against 1 to 2555 days, a technical
-  sanity bound with one owner, `eneo.data_retention.constants`.
+- The audit log and every conversation period are validated against 1 to
+  2555 days, a technical sanity bound with one owner,
+  `eneo.data_retention.constants`. Web widgets keep their own range, 0 to
+  3650 days.
 - The Prompt Guide is installed without a period. Its conversations follow
   the space or the organisation until an administrator chooses a period for
   it. Guides installed before keep the period they were installed with.

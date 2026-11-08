@@ -103,7 +103,7 @@ There is no tenant-level conversation retention setting: it was removed from the
 
 In shared and organization spaces, changing or clearing an assistant/app override requires the same space administration permission as changing the space policy. Editors can continue editing other settings but cannot change retention. Personal-space owners retain control of their own assistants and apps.
 
-The existing valid range is 1–2555 days, a technical bound that every retention field shares. The space value is a default, not a maximum: administrators can choose a shorter or longer assistant/app override within that range. Setting the override to `null` restores inheritance; omitting it from an update leaves it unchanged. If neither the assistant/app nor its space has a policy, data is kept indefinitely (unless a legacy tenant policy applies).
+The existing valid range is 1–2555 days, a technical bound that the audit log and every conversation period share; web widgets keep their own range of 0–3650 days, where 0 stores nothing. The space value is a default, not a maximum: administrators can choose a shorter or longer assistant/app override within that range. Setting the override to `null` restores inheritance; omitting it from an update leaves it unchanged. If neither the assistant/app nor its space has a policy, data is kept indefinitely (unless a legacy tenant policy applies).
 
 A newly installed Prompt Guide has no period of its own: its conversations follow its
 space or the organization until an administrator chooses one. A Prompt Guide installed
@@ -118,8 +118,8 @@ before keeps the period it was installed with.
 | A cleared period | The level inherits the next chosen period outward, which can be shorter, longer or none, so more conversations can become due |
 | A first period | Conversations older than it become due at the next execution |
 
-A removed conversation never returns. Questions whose Assistant was deleted follow no
-period and are kept.
+A removed conversation never returns. Questions without an owner Assistant follow no
+period, and scheduled retention does not remove them.
 
 ### Scheduled execution and limits
 

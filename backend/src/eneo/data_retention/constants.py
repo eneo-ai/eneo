@@ -1,7 +1,8 @@
 """Constants for data retention policies."""
 
 # The days any retention period may be set to: a technical sanity bound, not a
-# legal one. Every retention field validates against it.
+# legal one. The audit log and the conversation periods validate against it;
+# web widgets have their own range.
 MIN_RETENTION_DAYS = 1
 MAX_RETENTION_DAYS = 2555
 
