@@ -170,11 +170,11 @@ async def test_a_removed_source_makes_the_copy_unreadable_at_once(
     assert tuple(stored) == ("conversation", None)
 
 
-async def test_a_source_removed_while_the_turns_load_hides_them(
+async def test_a_source_removed_while_the_turns_load_refuses_the_read(
     db_container, copy: Copy
 ):
-    """Mutant: the statement that loads a conversation's turns skips the copy
-    check, so a source removed after the session row was read still shows
+    """Mutant: a read checks the copy only with the session row, so a source
+    removed before its turns are loaded, in a later statement, still returns
     the copy's turns. The removal commits between the two statements."""
     removed: list[str] = []
 
@@ -202,8 +202,7 @@ async def test_a_source_removed_while_the_turns_load_hides_them(
             sa.event.remove(bind.engine, "before_cursor_execute", between_statements)
 
     assert removed, "the turns were not loaded in a statement of their own"
-    assert loaded is not None
-    assert loaded.questions == []
+    assert loaded is None
 
 
 async def test_another_principal_learns_nothing_about_a_removed_source(

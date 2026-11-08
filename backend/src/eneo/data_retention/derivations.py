@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 from sqlalchemy.sql.elements import ColumnElement
 
+from eneo.data_retention.infrastructure.retention_sql import uuid_in
 from eneo.database.database import sessionmanager
 from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.retention_tables import ContentDerivations
@@ -75,15 +76,29 @@ def copy_session_valid(
     return ~probe(ContentDerivations.copy_session_id == session_id, source_removed())
 
 
-async def is_removed_copy(session: AsyncSession, copy_session_id: UUID) -> bool:
-    """Whether an existing session is a copy whose source was removed."""
-    return bool(
-        await session.scalar(
-            sa.select(~copy_session_valid(Sessions.id.expression)).where(
-                Sessions.id == copy_session_id
+async def removed_copies(
+    session: AsyncSession, copy_session_ids: Collection[UUID]
+) -> frozenset[UUID]:
+    """Which of these existing sessions are copies whose source was removed.
+
+    A read whose content takes several statements asks after the last one:
+    a removal committed while it read is then seen, and the read refused.
+    """
+    if not copy_session_ids:
+        return frozenset()
+    return frozenset(
+        await session.scalars(
+            sa.select(Sessions.id).where(
+                uuid_in(Sessions.id, sorted(set(copy_session_ids))),
+                ~copy_session_valid(Sessions.id.expression),
             )
         )
     )
+
+
+async def is_removed_copy(session: AsyncSession, copy_session_id: UUID) -> bool:
+    """Whether an existing session is a copy whose source was removed."""
+    return copy_session_id in await removed_copies(session, (copy_session_id,))
 
 
 async def register_derivations(
@@ -96,10 +111,11 @@ async def register_derivations(
     Runs in its own short transaction and returns only once it committed, so
     the producer may let the content go. The copy session must already be
     committed: it is held FOR KEY SHARE, so it cannot be deleted while its
-    edges are written, and ordinary updates of it go on meanwhile. Any failure, including an unknown
-    commit outcome, raises DerivationRegistrationError; the producer then
-    returns no copied content. A source removed before this commits leaves a
-    dangling edge, which makes the copy invalid at once.
+    edges are written, and ordinary updates of it go on meanwhile. Any
+    failure, including an unknown commit outcome, raises
+    DerivationRegistrationError; the producer then returns no copied content.
+    A source removed before this commits leaves a dangling edge, which makes
+    the copy invalid at once.
     """
     sources = sorted(set(source_question_ids))
     if not sources:

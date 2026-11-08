@@ -10,7 +10,11 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import QueryableAttribute, aliased, selectinload
 
 from eneo.actors.actors.space_actor import SpaceAccessFacts, SpaceRoleFact
-from eneo.data_retention.derivations import copy_session_valid, is_removed_copy
+from eneo.data_retention.derivations import (
+    copy_session_valid,
+    is_removed_copy,
+    removed_copies,
+)
 from eneo.database.database import AsyncSession
 from eneo.database.repositories.base import BaseRepositoryDelegate
 from eneo.database.tables.api_keys_v2_table import ApiKeysV2
@@ -95,16 +99,11 @@ class RecentSessionRow(NamedTuple):
 
 
 def session_turn_options() -> list[Any]:
-    """Load a session's turns with what each of them shows.
-
-    The statement that reads the turns leaves out a copy whose source was
-    removed, so a removal committed after the session row was read still
-    hides them. What the turns show is loaded by the ids of the turns it read.
-    """
+    """Load a session's turns with what each of them shows. They come in
+    statements after the session row, so a read hydrating them asks
+    ``removed_copies`` last."""
     return [
-        selectinload(
-            Sessions.questions.and_(copy_session_valid(Questions.session_id.expression))
-        ).options(
+        selectinload(Sessions.questions).options(
             selectinload(Questions.info_blob_references)
             .selectinload(InfoBlobReferences.info_blob)
             .options(selectinload(InfoBlobs.group), selectinload(InfoBlobs.website)),
@@ -135,6 +134,16 @@ class SessionRepository:
         self,
         sessions: list[SessionInDB],
     ) -> list[SessionInDB]:
+        """The sessions with what their turns show, without a copy whose source
+        was removed while they were read: the statement that read or changed
+        the session row checked it, the later statements did not."""
+        await self._attach_turn_details(sessions)
+        removed = await removed_copies(
+            self.session, [session.id for session in sessions]
+        )
+        return [session for session in sessions if session.id not in removed]
+
+    async def _attach_turn_details(self, sessions: list[SessionInDB]) -> None:
         info_blobs = [
             info_blob
             for session in sessions
@@ -158,12 +167,11 @@ class SessionRepository:
                 for question in session.questions
             ):
                 raise RuntimeError("Session files require FileContentLoader")
-            return sessions
+            return
         await attach_question_files(
             [question for session in sessions for question in session.questions],
             loader=self.file_content_loader,
         )
-        return sessions
 
     async def _hydrate_optional(
         self,
@@ -171,7 +179,8 @@ class SessionRepository:
     ) -> SessionInDB | None:
         if session is None:
             return None
-        return (await self._hydrate_sessions([session]))[0]
+        hydrated = await self._hydrate_sessions([session])
+        return hydrated[0] if hydrated else None
 
     @staticmethod
     def _options() -> list[Any]:
