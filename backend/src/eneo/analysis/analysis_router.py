@@ -763,7 +763,7 @@ async def get_conversation_insight_sessions(
 @router.get(
     "/conversation-insights/sessions/{session_id}/",
     response_model=SessionPublic,
-    responses=responses.get_responses([403, 404]),
+    responses=responses.get_responses([403, 404, 410]),
 )
 @endpoint_access(
     authentication=Authentication.USER,

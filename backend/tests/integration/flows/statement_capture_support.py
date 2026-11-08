@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -38,3 +39,17 @@ def capture_queries(bind: Connection | Engine) -> Iterator[list[CapturedStatemen
         yield captured
     finally:
         sa.event.remove(bind, "before_cursor_execute", record)
+
+
+# The copy check probes a copy's source questions by id inside NOT EXISTS: it
+# reads whether a source still exists, never a turn.
+_COPY_SOURCE_PROBE = re.compile(
+    r"FROM questions AS (\w+) \nWHERE \1\.id = "
+    r"content_derivations\.source_question_id\)"
+)
+
+
+def without_copy_source_probe(sql: str) -> str:
+    """``sql`` without the copy check's probe of source question ids, so a pin
+    that a statement reads no turns still catches every other questions read."""
+    return _COPY_SOURCE_PROBE.sub("", sql)

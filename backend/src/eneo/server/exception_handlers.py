@@ -16,6 +16,7 @@ from eneo.authentication.oidc.errors import (
     OidcResponseNotVerifiedError,
     OidcTransactionInvalidError,
 )
+from eneo.data_retention.derivations import DerivedSourceRemovedError
 from eneo.files.file_models import (
     FileInUseError,
     FileOriginalNotFoundError,
@@ -443,6 +444,8 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
         "archive the widget before the Assistant can move to another Space.",
         ErrorCodes.ASSISTANT_PUBLISHED_AS_WIDGET,
     ),
+    # --- Copies of removed content ---
+    DerivedSourceRemovedError: (410, None, ErrorCodes.DERIVED_SOURCE_REMOVED),
 }
 
 

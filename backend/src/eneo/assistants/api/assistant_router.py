@@ -39,7 +39,7 @@ from eneo.authentication.endpoint_access import (
 from eneo.database.database import AsyncSession
 from eneo.document_templates.domain import DocumentTemplateChoice
 from eneo.main.container.container import Container
-from eneo.main.exceptions import BadRequestException
+from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.main.models import (
     NOT_PROVIDED,
     CursorPaginatedResponse,
@@ -1076,7 +1076,7 @@ async def get_assistant_sessions(
 @router.get(
     "/{id}/sessions/{session_id}/",
     response_model=SessionPublic,
-    responses=responses.get_responses([400, 403, 404]),
+    responses=responses.get_responses([400, 403, 404, 410]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 @endpoint_access(
@@ -1093,7 +1093,13 @@ async def get_assistant_session(
     session_service = container.session_service()
 
     await assistant_service.get_assistant(id)
-    session = await session_service.get_session_by_uuid(session_id, assistant_id=id)
+    try:
+        session = await session_service.get_session_by_uuid(session_id, assistant_id=id)
+    except NotFoundException:
+        # The partner was authorized above; the owner check comes first.
+        await session_service.get_session_ownership(session_id, assistant_id=id)
+        await session_service.refuse_removed_copy(session_id)
+        raise
     return to_session_public(session)
 
 

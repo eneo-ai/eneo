@@ -7,6 +7,7 @@ import sqlalchemy as sa
 from pydantic import TypeAdapter
 from sqlalchemy.orm import selectinload, undefer
 
+from eneo.data_retention.derivations import copy_session_valid
 from eneo.database.database import AsyncSession
 from eneo.database.repositories.base import BaseRepositoryDelegate
 from eneo.database.tables.help_assistant_runs_table import HelpAssistantRuns
@@ -212,11 +213,24 @@ class QuestionRepository:
             sa.select(Questions).where(
                 Questions.id == id,
                 Questions.tenant_id == tenant_id,
+                copy_session_valid(Questions.session_id.expression),
             )
         )
         if question is None:
             return None
         return (await self._hydrate_questions([question]))[0]
+
+    async def in_removed_copy(self, *, id: UUID, tenant_id: UUID) -> bool:
+        """Whether this question is in a copy whose source was removed: why
+        ``get_for_tenant`` misses it. A fact for callers that already
+        authorized the reader."""
+        return bool(
+            await self.session.scalar(
+                sa.select(~copy_session_valid(Questions.session_id.expression)).where(
+                    Questions.id == id, Questions.tenant_id == tenant_id
+                )
+            )
+        )
 
     async def get_session_partner(
         self,
@@ -253,6 +267,7 @@ class QuestionRepository:
             sa.select(Questions)
             .where(Questions.id == id)
             .where(Questions.tenant_id == tenant_id)
+            .where(copy_session_valid(Questions.session_id.expression))
             .options(undefer(Questions.skill_activation_data))
         )
         question = await self.delegate.get_model_from_query(stmt)
@@ -531,6 +546,7 @@ class QuestionRepository:
                     )
                 )
             )
+            .where(copy_session_valid(Sessions.id.expression))
             .filter(Questions.created_at >= start_date)
             .filter(Questions.created_at <= end_date)
             .order_by(Questions.created_at)

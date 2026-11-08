@@ -9,6 +9,7 @@ from eneo.ai_models.completion_models.completion_model import CompletionModel
 from eneo.assistants.assistant_service import AssistantService
 from eneo.authentication.auth_models import is_service_api_key, is_widget_visitor
 from eneo.completion_models.infrastructure.context_builder import count_tokens
+from eneo.data_retention.derivations import DerivedSourceRemovedError
 from eneo.database.database import AsyncSession, sessionmanager
 from eneo.files.file_content_loader import FileContentLoader
 from eneo.files.file_models import File
@@ -360,6 +361,16 @@ class SessionService:
         return self._check_exists_and_belongs_to_user(
             session, assistant_id=assistant_id, group_chat_id=group_chat_id
         )
+
+    async def refuse_removed_copy(self, id: UUID) -> None:
+        """Raise DerivedSourceRemovedError when ``get_session_by_uuid`` missed
+        this session because it is a copy whose source was removed.
+
+        Call only after the caller's ownership and current partner access were
+        checked on the session's facts, so nobody else learns that it exists.
+        """
+        if await self.session_repo.is_removed_copy(id):
+            raise DerivedSourceRemovedError()
 
     async def get_session_ownership(
         self,

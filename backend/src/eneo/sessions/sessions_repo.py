@@ -10,6 +10,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import QueryableAttribute, aliased, selectinload
 
 from eneo.actors.actors.space_actor import SpaceAccessFacts, SpaceRoleFact
+from eneo.data_retention.derivations import copy_session_valid, is_removed_copy
 from eneo.database.database import AsyncSession
 from eneo.database.repositories.base import BaseRepositoryDelegate
 from eneo.database.tables.api_keys_v2_table import ApiKeysV2
@@ -198,7 +199,9 @@ class SessionRepository:
     # IMPORTANT: every method in this repo that returns session or question
     # rows must apply this filter. If you add a new such method, either call
     # this helper or document the explicit exception in a comment on the new
-    # method. See PRD §4.
+    # method. See PRD §4. A method that returns content, a list or a count of
+    # conversations also applies ``_exclude_unreadable_copies``; facts about
+    # ownership and the chat partner do not, so a refusal can be explained.
     @staticmethod
     def _exclude_helper_run_sessions(query: sa.Select[Any]) -> sa.Select[Any]:
         """Exclude sessions referenced by a help_assistant_runs row.
@@ -216,6 +219,11 @@ class SessionRepository:
                 )
             )
         )
+
+    @staticmethod
+    def _exclude_unreadable_copies(query: sa.Select[Any]) -> sa.Select[Any]:
+        """Exclude copies whose source was removed, in the reading statement."""
+        return query.where(copy_session_valid(Sessions.id.expression))
 
     async def add(self, session: SessionAdd) -> SessionInDB:
         return await self.delegate.add(session)
@@ -248,12 +256,19 @@ class SessionRepository:
         return (await self._hydrate_sessions([SessionInDB.model_validate(session)]))[0]
 
     async def get(self, id: UUID) -> SessionInDB | None:
-        query = self._exclude_helper_run_sessions(
-            sa.select(Sessions).where(Sessions.id == id)
+        query = self._exclude_unreadable_copies(
+            self._exclude_helper_run_sessions(
+                sa.select(Sessions).where(Sessions.id == id)
+            )
         )
         return await self._hydrate_optional(
             await self.delegate.get_model_from_query(query)
         )
+
+    async def is_removed_copy(self, id: UUID) -> bool:
+        """Whether ``get`` misses this existing session because it is a copy
+        whose source was removed. A fact: callers ask only after authorizing."""
+        return await is_removed_copy(self.session, id)
 
     async def get_ownership(self, id: UUID) -> SessionOwnership | None:
         """``get`` reduced to the principal and chat partner columns."""
@@ -455,27 +470,29 @@ class SessionRepository:
         last_activity_at = sa.func.coalesce(
             last_question_at, Sessions.created_at
         ).label("last_activity_at")
-        query = self._exclude_helper_run_sessions(
-            sa.select(
-                Sessions.id,
-                Sessions.name,
-                Sessions.created_at,
-                last_activity_at,
-                Sessions.assistant_id,
-                Sessions.group_chat_id,
-            )
-            .where(Sessions.user_id == user_id)
-            .where(
-                sa.or_(
-                    sa.and_(
-                        Sessions.group_chat_id.is_(None),
-                        Sessions.assistant_id.in_(assistant_ids),
-                    ),
-                    Sessions.group_chat_id.in_(group_chat_ids),
+        query = self._exclude_unreadable_copies(
+            self._exclude_helper_run_sessions(
+                sa.select(
+                    Sessions.id,
+                    Sessions.name,
+                    Sessions.created_at,
+                    last_activity_at,
+                    Sessions.assistant_id,
+                    Sessions.group_chat_id,
                 )
+                .where(Sessions.user_id == user_id)
+                .where(
+                    sa.or_(
+                        sa.and_(
+                            Sessions.group_chat_id.is_(None),
+                            Sessions.assistant_id.in_(assistant_ids),
+                        ),
+                        Sessions.group_chat_id.in_(group_chat_ids),
+                    )
+                )
+                .order_by(last_activity_at.desc(), Sessions.id.desc())
+                .limit(limit)
             )
-            .order_by(last_activity_at.desc(), Sessions.id.desc())
-            .limit(limit)
         )
         result = await self.session.execute(query)
         return [RecentSessionRow(*row) for row in result.tuples()]
@@ -629,13 +646,16 @@ class SessionRepository:
         Documented exception to ``_exclude_helper_run_sessions``: the
         HelperRunService follow-up-turn path needs the session row that
         ``help_assistant_runs`` points at, so the completion call can rebuild
-        prior conversation context. Tenant-scoped defensively via
+        prior conversation context. A copy whose source was removed is still
+        excluded. Tenant-scoped defensively via
         :meth:`_filter_by_tenant` — the caller already authorized against the
         run's actor, but a stray cross-tenant lookup must still fail. No
         other code path may call this method. See PRD §4 + §6.
         """
-        query = self._filter_by_tenant(
-            sa.select(Sessions).where(Sessions.id == id), tenant_id
+        query = self._exclude_unreadable_copies(
+            self._filter_by_tenant(
+                sa.select(Sessions).where(Sessions.id == id), tenant_id
+            )
         )
         return await self._hydrate_optional(
             await self.delegate.get_model_from_query(query)
@@ -658,7 +678,9 @@ class SessionRepository:
 
         if tenant_id is not None:
             query = self._filter_by_tenant(query, tenant_id)
-        query = self._exclude_helper_run_sessions(query)
+        query = self._exclude_unreadable_copies(
+            self._exclude_helper_run_sessions(query)
+        )
 
         if assistant_id is not None:
             query = query.where(Sessions.assistant_id == assistant_id)
@@ -724,7 +746,9 @@ class SessionRepository:
 
         if tenant_id is not None:
             query = self._filter_by_tenant(query, tenant_id)
-        query = self._exclude_helper_run_sessions(query)
+        query = self._exclude_unreadable_copies(
+            self._exclude_helper_run_sessions(query)
+        )
 
         if user_id is not None:
             query = query.where(Sessions.user_id == user_id)
@@ -805,7 +829,9 @@ class SessionRepository:
 
         if tenant_id is not None:
             query = self._filter_by_tenant(query, tenant_id)
-        query = self._exclude_helper_run_sessions(query)
+        query = self._exclude_unreadable_copies(
+            self._exclude_helper_run_sessions(query)
+        )
 
         if user_id is not None:
             query = query.where(Sessions.user_id == user_id)
@@ -871,7 +897,9 @@ class SessionRepository:
         end_date: datetime | None = None,
     ) -> list[SessionInDB]:
         query = self._filter_by_tenant(sa.select(Sessions), tenant_id)
-        query = self._exclude_helper_run_sessions(query)
+        query = self._exclude_unreadable_copies(
+            self._exclude_helper_run_sessions(query)
+        )
 
         if start_date is not None:
             query = query.filter(Sessions.created_at >= start_date)

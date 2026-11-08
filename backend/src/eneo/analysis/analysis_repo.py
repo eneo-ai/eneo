@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute, aliased, selectinload
 
 from eneo.analysis.analysis import MessageFeedbackCounts
+from eneo.data_retention.derivations import copy_session_valid
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.group_chats_table import GroupChatsTable
 from eneo.database.tables.help_assistant_runs_table import HelpAssistantRuns
@@ -113,6 +114,14 @@ class AssistantInsightQuestionRow(NamedTuple):
     session_id: UUID
     feedback_value: int | None
     feedback_text: str | None
+
+
+# Content and its lists (not the aggregate counts) also leave out copies whose
+# source was removed, read in the same statement.
+def _exclude_unreadable_copies(
+    query: sa.Select[Any], session_id_col: Any
+) -> sa.Select[Any]:
+    return query.where(copy_session_valid(session_id_col))
 
 
 class AnalysisRepository:
@@ -227,6 +236,7 @@ class AnalysisRepository:
             Users.tenant_id == tenant_id
         )
         stmt = _exclude_helper_run_sessions(stmt, Sessions.id)
+        stmt = _exclude_unreadable_copies(stmt, Sessions.id)
 
         if from_date is not None:
             stmt = stmt.where(Sessions.created_at >= from_date)
@@ -296,6 +306,7 @@ class AnalysisRepository:
             Users.tenant_id == tenant_id
         )
         stmt = _exclude_helper_run_sessions(stmt, Sessions.id)
+        stmt = _exclude_unreadable_copies(stmt, Sessions.id)
 
         if from_date is not None:
             stmt = stmt.where(Sessions.created_at >= from_date)
@@ -421,6 +432,7 @@ class AnalysisRepository:
             .where(Questions.question.isnot(None))
         )
         base_stmt = _exclude_helper_run_sessions(base_stmt, Sessions.id)
+        base_stmt = _exclude_unreadable_copies(base_stmt, Sessions.id)
 
         if assistant_id is not None:
             base_stmt = base_stmt.where(Sessions.assistant_id == assistant_id)
@@ -495,6 +507,7 @@ class AnalysisRepository:
             .where(Questions.question.isnot(None))
         )
         base_stmt = _exclude_helper_run_sessions(base_stmt, Sessions.id)
+        base_stmt = _exclude_unreadable_copies(base_stmt, Sessions.id)
         if query:
             normalized_query = query.strip()
             if normalized_query:
