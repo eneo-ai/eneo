@@ -1099,7 +1099,6 @@ async def federated_sign_in(
             ) from exc
 
         email = identity.email
-        set_request_context(user_email=email)
         await _log_oidc_debug(
             redis_client=redis_client,
             correlation_id=correlation_id,
@@ -1137,6 +1136,11 @@ async def federated_sign_in(
                 detail=str(exc),
                 headers={"X-Correlation-ID": correlation_id},
             ) from exc
+
+        # Only an admitted sign-in puts its email in the request's log context,
+        # so a refused one (an identity conflict, a denied account) logs none,
+        # like the provider-response refusals before it.
+        set_request_context(user_email=email)
 
         if created:
             await _log_oidc_debug(

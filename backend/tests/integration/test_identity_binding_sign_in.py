@@ -8,7 +8,8 @@ tests/fake_oidc_provider.py, so every token is really signed and verified.
 """
 
 import json
-from collections.abc import AsyncIterator, Awaitable, Callable
+import logging
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 from uuid import UUID, uuid4
@@ -24,6 +25,8 @@ from eneo.database.tables.browser_sessions_table import BrowserSessions
 from eneo.database.tables.identity_bindings_table import IdentityBindings
 from eneo.database.tables.users_table import Users
 from eneo.main.config import get_settings, set_settings
+from eneo.main.logging import OTELJSONFormatter
+from eneo.users import user_service as user_service_module
 from eneo.users.identity_binding_repo import IdentityConflictError
 from tests.fake_oidc_provider import FakeOidcProvider
 from tests.integration.test_federation_tenant_admin import (
@@ -231,6 +234,39 @@ async def test_an_unbound_account_is_bound_by_its_email(sign_in, provider, entry
 
     assert await _bindings() == {(account, _audience(entry), "person-a")}
     assert await _bound_methods(account) == ["email_match"]
+
+
+@pytest.fixture
+def conflict_logs() -> Iterator[list[str]]:
+    """The identity_conflict log events as emitted: formatted while they are
+    logged, so the request context of that moment is in them."""
+    lines: list[str] = []
+    formatter = OTELJSONFormatter()
+
+    class Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            if record.getMessage() == "identity_conflict":
+                lines.append(formatter.format(record))
+
+    handler = Capture()
+    user_service_module.logger.addHandler(handler)
+    try:
+        yield lines
+    finally:
+        user_service_module.logger.removeHandler(handler)
+
+
+@pytest.mark.parametrize("entry", ENTRY_POINTS)
+async def test_a_conflict_is_logged_without_the_email(
+    sign_in, provider, conflict_logs, entry
+):
+    assert await sign_in(entry, "person-a") == SIGNED_IN
+
+    assert await sign_in(entry, "someone-else") == "identity_conflict"
+
+    [line] = conflict_logs
+    assert json.loads(line)["attributes"]["reason"] == "subject_mismatch"
+    assert EMAIL not in line
 
 
 @pytest.mark.parametrize("entry", ENTRY_POINTS)
