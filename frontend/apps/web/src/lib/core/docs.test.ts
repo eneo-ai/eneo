@@ -3,7 +3,11 @@ import { docsUrl, docsVersionPath } from "./docs";
 
 const catalog = vi.hoisted(() => ({
   releases: [
-    { version: "next", date: undefined as string | undefined, entries: [{ id: "web-widgets" }] },
+    {
+      version: "next",
+      date: undefined as string | undefined,
+      entries: [{ id: "web-widgets" }, { id: "admin-sign-in-settings" }]
+    },
     { version: "2.3.0", date: "2026-11-02", entries: [] }
   ]
 }));
@@ -26,6 +30,14 @@ describe("docs links", () => {
     );
     expect(docsUrl("guides/object-content-storage", "en")).toBe(
       "https://docs.eneo.ai/v2.3/guides/object-content-storage"
+    );
+  });
+
+  it("keeps the unreleased sign-in settings section on development docs", () => {
+    expect(
+      docsUrl("guides/oidc-federation/single-tenant", "sv", "move-the-settings-into-eneo")
+    ).toBe(
+      "https://docs.eneo.ai/dev/sv/guides/oidc-federation/single-tenant#move-the-settings-into-eneo"
     );
   });
 
