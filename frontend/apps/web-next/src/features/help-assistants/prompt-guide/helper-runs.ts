@@ -1,4 +1,6 @@
+import { readEventStream } from "@/lib/api/event-stream";
 import { queryOptions } from "@tanstack/react-query";
+import { API_BASE, apiFetch } from "@/lib/api/base";
 import type { EneoClient } from "@/lib/api/browser";
 import { apiErrorFromResponse, unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
@@ -68,18 +70,17 @@ export async function updateHelperRunStatus(
   runId: string,
   status: Exclude<HelperRunStatus, "in_progress">
 ): Promise<HelperRun> {
-  const response = await fetch(
-    `/api/eneo/api/v1/help-assistants/runs/${encodeURIComponent(runId)}/`,
-    {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ status })
-    }
-  );
+  const url = `${API_BASE}/api/v1/help-assistants/runs/${encodeURIComponent(runId)}/`;
+  const response = await apiFetch(url, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ status })
+  });
 
-  const body = await readJsonBody(response);
-  if (!response.ok) throw apiErrorFromResponse(response, body);
-  return body as HelperRun;
+  if (!response.ok) {
+    throw apiErrorFromResponse(response, await readJsonBody(response));
+  }
+  return (await readJsonBody(response)) as HelperRun;
 }
 
 type StreamBody =
@@ -104,7 +105,8 @@ async function streamHelperRun(
     onAnswer?: (chunk: HelperRunResponse) => void;
   }
 ): Promise<HelperRunResponse> {
-  const response = await fetch(`/api/eneo${path}`, {
+  const url = `${API_BASE}${path}`;
+  const response = await apiFetch(url, {
     method: "POST",
     headers: {
       accept: "text/event-stream",
@@ -160,61 +162,4 @@ async function readJsonBody(response: Response): Promise<unknown> {
   if (contentType.includes("application/json")) return response.json();
   const text = await response.text();
   return text.length > 0 ? text : undefined;
-}
-
-async function readEventStream(
-  body: ReadableStream<Uint8Array>,
-  onMessage: (data: string) => void
-): Promise<void> {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  try {
-    for (;;) {
-      const result = await reader.read();
-      if (result.done) break;
-      buffer += decoder.decode(result.value, { stream: true });
-      buffer = consumeCompleteEvents(buffer, onMessage);
-    }
-
-    buffer += decoder.decode();
-    if (buffer.trim().length > 0) onMessage(parseEventData(buffer));
-  } finally {
-    reader.releaseLock();
-  }
-}
-
-function consumeCompleteEvents(buffer: string, onMessage: (data: string) => void): string {
-  let rest = buffer;
-
-  for (;;) {
-    const boundary = findEventBoundary(rest);
-    if (!boundary) return rest;
-
-    const event = rest.slice(0, boundary.index);
-    onMessage(parseEventData(event));
-    rest = rest.slice(boundary.index + boundary.length);
-  }
-}
-
-function findEventBoundary(buffer: string): { index: number; length: number } | null {
-  const boundaries = [
-    { index: buffer.indexOf("\r\n\r\n"), length: 4 },
-    { index: buffer.indexOf("\n\n"), length: 2 },
-    { index: buffer.indexOf("\r\r"), length: 2 }
-  ].filter((candidate) => candidate.index >= 0);
-
-  if (boundaries.length === 0) return null;
-  return boundaries.reduce((first, candidate) =>
-    candidate.index < first.index ? candidate : first
-  );
-}
-
-function parseEventData(event: string): string {
-  return event
-    .split(/\r?\n/)
-    .filter((line) => line.startsWith("data:"))
-    .map((line) => line.slice(5).replace(/^ /, ""))
-    .join("\n");
 }

@@ -1,4 +1,4 @@
-import { matchesSearch, type SearchValue } from "@/features/spaces/resource-filter";
+import { matchesSearch, type SearchValue } from "@/lib/search";
 import { formatWebsiteName, type Collection, type CrawlRun, type Website } from "./knowledge";
 
 /**

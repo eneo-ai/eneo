@@ -1,7 +1,9 @@
 <script lang="ts">
   import { formatDateTime } from "$lib/core/formatting/dateTime";
   import type { AdminCrawlerScheduledWebsite } from "@eneo/eneo-js";
-  import { Clock3, LoaderCircle, TriangleAlert } from "@lucide/svelte";
+  import Clock3 from "@lucide/svelte/icons/clock-3";
+  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
+  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Table from "$lib/components/ui/table/index.js";

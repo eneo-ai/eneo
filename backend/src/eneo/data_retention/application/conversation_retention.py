@@ -110,12 +110,15 @@ class ConversationPage:
 
     `owners_probed` owners (at most the page limit, the last `last_owner`) were
     read in id order after the cursor, and their roots up to the same limit.
+    `passed_ids` are roots another task owns (a widget conversation's
+    questions): read and charged with the page, never locked or deleted.
     """
 
     roots: Sequence[RetentionKeyset]
     locked_ids: Sequence[UUID]
     owners_probed: int
     last_owner: UUID | None
+    passed_ids: Sequence[UUID] = ()
 
 
 class ConversationPageRepository(Protocol):
@@ -202,7 +205,7 @@ async def run_conversation_page(
 ) -> RetentionStepResult:
     """Lock one page of due roots and delete those that fit, in keyset order.
 
-    Charges: one row per probed owner and per locked or attempted root
+    Charges: one row per probed owner and per locked, attempted or passed root
     (discovery), the child rows each proof examined, then one row for the root
     DELETE plus the emptied session and the Files work.
     A root whose children exceed a fully funded unit is blocked and passed; one
@@ -237,6 +240,7 @@ async def run_conversation_page(
         return out.result(rows=0, exhausted=True, cursor=batch.cursor)
 
     locked = frozenset(page.locked_ids)
+    passed = frozenset(page.passed_ids)
     rows = page.owners_probed + len(roots)
     out.add(None, "owners_examined", page.owners_probed)
     files = 0
@@ -247,6 +251,10 @@ async def run_conversation_page(
         # The first root always runs so every chunk makes progress.
         if visited and clock() >= stop_at:
             break
+        if root.id in passed:
+            cursor = root
+            visited += 1
+            continue
         if root.id not in locked:
             out.blocked[ConversationBlockReason.ROOT_LOCKED.key] += 1
             cursor = root

@@ -9,7 +9,7 @@ from eneo.audit.application.audit_config_service import (
     AUDIT_CONFIG_CACHE_TTL,
     AuditConfigService,
 )
-from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.action_types import ALWAYS_AUDITED_ACTIONS, ActionType
 from eneo.audit.domain.category_mappings import (
     CATEGORY_MAPPINGS,
 )
@@ -25,16 +25,7 @@ ALL_CATEGORIES = [
     "audit_access",
 ]
 
-# Expected action counts per category
-EXPECTED_CATEGORY_COUNTS = {
-    "admin_actions": 56,
-    "user_actions": 52,
-    "security_events": 12,
-    "file_operations": 8,
-    "integration_events": 24,
-    "system_actions": 6,
-    "audit_access": 3,  # Includes AUDIT_SESSION_CREATED
-}
+from tests.audit_category_counts import EXPECTED_CATEGORY_COUNTS
 
 
 @pytest.fixture
@@ -518,7 +509,9 @@ class TestGetActionConfig:
         result = await config_service.get_action_config(tenant_id)
 
         for action_config in result.actions:
-            if action_config.category == "admin_actions":
+            if action_config.action in ALWAYS_AUDITED_ACTIONS:
+                assert action_config.enabled is True
+            elif action_config.category == "admin_actions":
                 assert action_config.enabled is False
             elif action_config.category == "user_actions":
                 assert action_config.enabled is True
@@ -634,20 +627,19 @@ class TestUpdateActionConfig:
 class TestAllCategoriesHaveCorrectActionCounts:
     """Verify each category has the expected number of actions mapped."""
 
-    def test_admin_actions_has_56_actions(self):
-        """Verify admin_actions has 56 action types."""
+    def test_admin_actions_count(self):
         count = sum(1 for cat in CATEGORY_MAPPINGS.values() if cat == "admin_actions")
-        assert count == 56
+        assert count == EXPECTED_CATEGORY_COUNTS["admin_actions"]
 
-    def test_user_actions_has_52_actions(self):
-        """Verify user_actions has 52 action types."""
+    def test_user_actions_count(self):
+        """Verify user_actions matches the shared expectation."""
         count = sum(1 for cat in CATEGORY_MAPPINGS.values() if cat == "user_actions")
-        assert count == 52
+        assert count == EXPECTED_CATEGORY_COUNTS["user_actions"]
 
-    def test_security_events_has_12_actions(self):
-        """Verify security_events has 12 action types."""
+    def test_security_events_has_13_actions(self):
+        """Verify security_events has 13 action types."""
         count = sum(1 for cat in CATEGORY_MAPPINGS.values() if cat == "security_events")
-        assert count == 12
+        assert count == 13
 
     def test_file_operations_has_8_actions(self):
         """Verify file_operations has 8 action types."""
@@ -661,10 +653,10 @@ class TestAllCategoriesHaveCorrectActionCounts:
         )
         assert count == 24
 
-    def test_system_actions_has_6_actions(self):
-        """Verify system_actions has 6 action types (retention batch, run and skip included)."""
+    def test_system_actions_count(self):
+        """Verify system_actions matches the shared expectation."""
         count = sum(1 for cat in CATEGORY_MAPPINGS.values() if cat == "system_actions")
-        assert count == 6
+        assert count == EXPECTED_CATEGORY_COUNTS["system_actions"]
 
     def test_audit_access_has_3_actions(self):
         """Verify audit_access has 3 action types (including AUDIT_SESSION_CREATED)."""

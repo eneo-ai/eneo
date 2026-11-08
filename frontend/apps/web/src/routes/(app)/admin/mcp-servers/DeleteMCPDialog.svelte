@@ -4,7 +4,7 @@
 
 <script lang="ts">
   import type { components } from "@eneo/eneo-js";
-  import { TriangleAlert } from "@lucide/svelte";
+  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import { m } from "$lib/paraglide/messages";
 

@@ -24,7 +24,6 @@ backend/tests/fixtures/ui_message_stream/ are asserted by both test suites.
 
 import json
 import time
-from contextlib import aclosing
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Optional
 from uuid import uuid4
 
@@ -40,6 +39,7 @@ from eneo.files.file_models import ContentDisposition, FilePublic
 from eneo.info_blobs.info_blob import InfoBlobAskAssistantPublic, InfoBlobMetadata
 from eneo.main.logging import get_logger
 from eneo.questions.question import ConsultationInfo
+from eneo.server.protocol.sse import ClosingEventSourceResponse, closing
 
 if TYPE_CHECKING:
     from eneo.ai_models.completion_models.completion_model import ToolCallMetadata
@@ -344,8 +344,8 @@ async def _ui_message_chunks(
     pending_approvals: dict[str, list[str]] = {}
 
     assert not isinstance(response.answer, str)
-    async with aclosing(response.answer):
-        async for completion in response.answer:
+    async with closing(response.answer, "answer stream") as answer:
+        async for completion in answer:
             response_type = completion.response_type
 
             if response_type == ResponseType.REASONING:
@@ -383,11 +383,14 @@ async def _ui_message_chunks(
                         text_index += 1
                         yield {"type": "text-start", "id": text_id}
                     yield {"type": "text-delta", "id": text_id, "delta": delta}
+                # Each text chunk lists every source cited so far; build a source
+                # part only the first time.
                 for blob in completion.reference_chunks or []:
+                    if str(blob.id) in seen_source_ids:
+                        continue
                     chunk_dict = _source_document_chunk(blob)
-                    if chunk_dict["sourceId"] not in seen_source_ids:
-                        seen_source_ids.add(chunk_dict["sourceId"])
-                        yield chunk_dict
+                    seen_source_ids.add(chunk_dict["sourceId"])
+                    yield chunk_dict
 
             elif response_type == ResponseType.FILES:
                 assert completion.generated_file is not None
@@ -489,7 +492,14 @@ async def _ui_message_chunks(
             elif response_type == ResponseType.ERROR:
                 yield {
                     "type": "data-error",
-                    "data": {"code": completion.error_code},
+                    "data": {
+                        "code": completion.error_code,
+                        **(
+                            {"reason": completion.error_reason}
+                            if completion.error_reason
+                            else {}
+                        ),
+                    },
                     "transient": True,
                 }
                 yield {"type": "error", "errorText": completion.error or ""}
@@ -515,11 +525,16 @@ def to_ui_message_stream_response(
     """version=3 streaming response: AI SDK UI Message Stream over SSE."""
 
     async def event_stream():
-        async with aclosing(_ui_message_chunks(response, base_url)) as chunks:
+        async with closing(
+            _ui_message_chunks(response, base_url), "ui message stream"
+        ) as chunks:
             async for chunk in chunks:
                 yield _event(chunk)
         yield ServerSentEvent("[DONE]")
 
-    return EventSourceResponse(
-        event_stream(), ping=15, headers=dict(UI_MESSAGE_STREAM_HEADERS)
+    return ClosingEventSourceResponse(
+        event_stream(),
+        ping=15,
+        headers=dict(UI_MESSAGE_STREAM_HEADERS),
+        closes=[response.answer],
     )

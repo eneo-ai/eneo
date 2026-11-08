@@ -11,6 +11,8 @@ from sqlalchemy.sql import SQLColumnExpression
 
 from eneo.data_retention.constants import DEFAULT_AUDIT_RETENTION_DAYS
 from eneo.database.tables.audit_retention_policy_table import AuditRetentionPolicy
+from eneo.database.tables.questions_table import Questions
+from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.tenant_table import Tenants
 
 
@@ -22,6 +24,21 @@ def uuid_in(
     return column == sa.any_(
         sa.literal(list(values), type_=postgresql.ARRAY(postgresql.UUID(as_uuid=True)))
     )
+
+
+def outside_widgets() -> sa.ColumnElement[bool]:
+    """A session no widget owns.
+
+    Widget conversations follow their widget's retention, held to the tenant's
+    widget policy, and only widget retention removes them: an assistant, space
+    or tenant rule, or the empty-session grace, would cut them short.
+    """
+    return Sessions.widget_id.is_(None)
+
+
+def question_in_widget() -> sa.ColumnElement[bool]:
+    """A question of a widget conversation; one without a session is not."""
+    return sa.exists().where(Sessions.id == Questions.session_id, ~outside_widgets())
 
 
 def deployment_tenant_id() -> sa.ScalarSelect[UUID]:

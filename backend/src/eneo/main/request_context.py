@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import secrets
 from contextvars import ContextVar
 from typing import Any, Dict
 
@@ -35,3 +36,18 @@ def clear_request_context() -> None:
     """Remove all stored context for the active task."""
 
     _request_context.set({})
+
+
+def ensure_correlation_id() -> str:
+    """The request's correlation id, minted and stored only when it has none.
+
+    Logs, the ``X-Correlation-ID`` header and support lookups share this id:
+    the trace id when a span is active, otherwise the caller's legacy header.
+    A handler that minted its own would split one request across two ids.
+    """
+    correlation_id = get_request_context().get("correlation_id")
+    if correlation_id:
+        return str(correlation_id)
+    correlation_id = secrets.token_hex(8)
+    set_request_context(correlation_id=correlation_id)
+    return correlation_id

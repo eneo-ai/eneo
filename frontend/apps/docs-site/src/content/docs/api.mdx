@@ -116,6 +116,8 @@ Failed attempts are limited to 5 per login name within 10 minutes. Each `401` re
 
 The `429` response also carries a `Retry-After` header. The limit applies to password login only; API keys and OIDC sign-in are unaffected.
 
+Malformed login input returns `422` with the validation fields `loc`, `type` and a static `msg`; `loc` names the submitted form field, for example `["body", "username"]`. Submitted values, validation context and library URLs are omitted. A login refused after password verification because the user is inactive or the organisation is suspended returns `403`; the web app then tells the user the account cannot sign in, rather than that sign-in is unavailable. Unexpected login failures return `500` with `code: "login_unavailable"` and a generic message. The `X-Correlation-ID` response header carries the id found in the server logs for the request; use it for support. Login logs keep the exception type and traceback with the submitted password redacted.
+
 Users of tenants that authenticate through OIDC federation obtain their token from the `/api/v1/auth/*` flow instead; see [Multi-Tenant OIDC Federation](/guides/oidc-federation/multi-tenant). Both this flow and `POST /api/v1/users/login/openid-connect/mobilityguard/` return `403` when a validated identity is not permitted to access or join the configured tenant. A missing account requires SCIM/admin provisioning or all [JIT admission requirements](/guides/oidc-federation/single-tenant#user-provisioning).
 
 If a request carries both an `Authorization: Bearer` token and an API key header, the bearer token is used and the API key is ignored.
@@ -327,16 +329,26 @@ Two response shapes are used.
 
 ## Errors
 
-Errors are JSON. Four shapes occur, depending on where the error is raised:
+Errors are JSON. Every error except request validation answers in one envelope:
 
-| Shape                                                                                                                    | When                                                                                                                                    |
-| ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `{"detail": "message"}`                                                                                                  | Simple HTTP errors, and authentication failures without a code.                                                                         |
-| `{"detail": [{"loc": [...], "msg": "...", "type": "..."}]}`                                                              | `422` request validation errors (FastAPI default).                                                                                      |
-| `{"code": "...", "message": "...", "request_id"?: "...", "context"?: {...}}`                                             | Structured errors from API key authentication, scope checks, and endpoints that raise coded errors. `code` is stable; `message` is not. |
-| `{"message": "...", "eneo_error_code": ..., "code"?: "...", "request_id"?: "...", "context"?: {...}, "details"?: {...}}` | Domain errors mapped by the global exception handlers (not found, unauthorized, conflicts, and so on).                                  |
+```json
+{
+  "message": "Human-readable reason",
+  "eneo_error_code": 9001,
+  "code": "forbidden_action",
+  "context": {"auth_layer": "domain_policy"},
+  "details": {},
+  "request_id": "req-123"
+}
+```
 
-Unhandled failures return `500` with `{"error": "Internal server error", "error_id": "...", "message": "..."}`. Quote the `error_id` when reporting a problem; in development mode the body also contains a `detail` object with the exception type and path.
+`message` is always present. `eneo_error_code` is absent when the route refused with a plain message and no code; `code`, `context`, `details` and `request_id` are optional. A route may add fields next to `code`, such as `retry_after_seconds` on a `429` with `code` `rate_limit_exceeded`. Unknown routes (`404`) and unsupported methods (`405`) use the same envelope.
+
+`422` request validation errors keep FastAPI's shape: `{"detail": [{"loc": [...], "msg": "...", "type": "..."}]}`.
+
+A refusal raised as an HTTP exception also carries `detail`, its raw value (a string or an object). It is deprecated and kept for one release so existing clients keep working; read the top-level fields instead. An object without a `code`, such as the `/api/healthz` report, is also in `details`.
+
+Unhandled failures return `500` with `error`, `error_id` and `message`. Quote the `error_id` when reporting a problem; in development mode the body also contains a `detail` object with the exception type and path.
 
 Every response carries an `X-Trace-Id` header (and `X-Correlation-ID` for older clients). If you send `X-Correlation-ID` or `X-Request-ID` with a request, the value is echoed as `request_id` in structured error bodies, which makes client and server logs easy to correlate.
 
@@ -443,6 +455,32 @@ store raw option dictionaries, which are validated when an application is
 instantiated. Legacy data and direct SQL/import writes therefore need inspection;
 an invalid row alone does not establish which path wrote it. Avoid raw SQL updates
 that bypass the validated repair path.
+
+## Icons
+
+Assistants, apps, spaces and group chats show an uploaded icon through their
+`icon_id`. Upload the image with `POST /api/v1/icons/`, then set the returned id
+with the resource's own update endpoint. Icon ids are public:
+`GET /api/v1/icons/{id}/` needs no authentication, so an id proves nothing about
+who may change the icon. A resource therefore accepts a new `icon_id` only for
+an icon the caller uploaded in their own tenant; any other id returns `400` with
+`eneo_error_code` `9076`.
+Sending the resource's current `icon_id` again is always accepted. An icon whose
+uploader is not recorded (icons from before object-content storage, or of a
+removed user) keeps showing where it is but cannot be attached anywhere new.
+Service API keys have no user, so they cannot upload (`403`) or attach icons;
+use a user account or a user-owned key.
+
+`DELETE /api/v1/icons/{id}/` deletes an icon only when no assistant, app, space
+or group chat shows it. An icon that is still shown returns `409` with
+`eneo_error_code` `9075`: clear `icon_id` on the resource first, which runs that
+resource's own permission check. An icon of another tenant returns `400`.
+
+A resource releases its icon itself: replacing or clearing `icon_id`, or
+deleting the resource, deletes the previous icon when nothing else shows it.
+Deleting a space does the same for the icons of its assistants, apps and group
+chats. A client therefore only calls `DELETE` for an icon it uploaded but never
+attached.
 
 ## Related pages
 

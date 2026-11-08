@@ -1,6 +1,10 @@
 <script lang="ts">
   import type { CrawlRun } from "@eneo/eneo-js";
-  import { CircleCheck, CircleX, Clock3, LoaderCircle, TriangleAlert } from "@lucide/svelte";
+  import CircleCheck from "@lucide/svelte/icons/circle-check";
+  import CircleX from "@lucide/svelte/icons/circle-x";
+  import Clock3 from "@lucide/svelte/icons/clock-3";
+  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
+  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { m } from "$lib/paraglide/messages";
   import {

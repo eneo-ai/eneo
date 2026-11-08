@@ -1,26 +1,35 @@
-"use client";
-
 import { useSyncExternalStore } from "react";
+import { createApiEventSource, JOB_EVENTS_PATH, type ApiEventSource } from "@/lib/api/base";
 import type { Job } from "./jobs";
 
 /**
  * The live feed of the signed-in user's job updates: one EventSource per tab
- * on the app's `/api/jobs/events` proxy, shared by every subscriber. The
- * browser reconnects on its own after a dropped connection; after an HTTP
- * refusal (a session that expired) it stops, and this module tries again
- * later. While the feed is down, JobsProvider's polling carries on, so a
- * missed event only costs a few seconds, never a reload.
+ * on JOB_EVENTS_PATH, shared by every subscriber. The browser reconnects on
+ * its own after a dropped connection; after an HTTP refusal (a session that
+ * expired) it stops, and this module tries again later. While the feed is
+ * down, JobsProvider's polling carries on, so a missed event only costs a
+ * few seconds, never a reload.
+ *
+ * A tab hidden for HIDDEN_GRACE_MS closes its feed: each open feed holds a
+ * Redis subscription on the server and re-authenticates every 30 seconds,
+ * and a tab left in the background all day would keep both. Shown again,
+ * the tab reopens the feed, and the reopen refetches what it missed (the
+ * jobs poll pauses in hidden tabs too).
  */
-export const JOB_EVENTS_PATH = "/api/jobs/events";
 export const JOB_EVENT_NAME = "job";
 /** How long to wait before reopening a feed the server refused. */
 const RETRY_AFTER_REFUSAL_MS = 30_000;
+/** How long a hidden tab keeps its feed: a quick look elsewhere costs nothing. */
+const HIDDEN_GRACE_MS = 90_000;
 
 type JobListener = (job: Job) => void;
 type Listener = () => void;
 
-let source: EventSource | null = null;
+let source: ApiEventSource | null = null;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
+let hiddenTimer: ReturnType<typeof setTimeout> | null = null;
+/** Closed for a tab hidden past the grace period, until it is shown. */
+let suspended = false;
 let connected = false;
 /** True once the feed has been open at least once: the next open is a reconnect. */
 let wasConnected = false;
@@ -36,7 +45,7 @@ function setConnected(next: boolean): void {
 
 function open(): void {
   if (source !== null || typeof EventSource === "undefined") return;
-  source = new EventSource(JOB_EVENTS_PATH);
+  source = createApiEventSource(JOB_EVENTS_PATH);
   source.addEventListener("open", () => {
     setConnected(true);
     // Anything that happened while the feed was down is fetched again by
@@ -63,7 +72,8 @@ function open(): void {
       if (jobListeners.size > 0 && retryTimer === null) {
         retryTimer = setTimeout(() => {
           retryTimer = null;
-          open();
+          // A sleeping tab opens it when shown, the wait being over by then.
+          if (!suspended) open();
         }, RETRY_AFTER_REFUSAL_MS);
       }
     }
@@ -76,6 +86,26 @@ function close(): void {
   setConnected(false);
 }
 
+function clearTimer(timer: ReturnType<typeof setTimeout> | null): null {
+  if (timer !== null) clearTimeout(timer);
+  return null;
+}
+
+function onVisibilityChange(): void {
+  if (document.visibilityState !== "hidden") {
+    hiddenTimer = clearTimer(hiddenTimer);
+    suspended = false;
+    // A refused feed keeps its wait, through a sleep too; its retry opens it.
+    if (retryTimer === null) open();
+  } else if (hiddenTimer === null && !suspended) {
+    hiddenTimer = setTimeout(() => {
+      hiddenTimer = null;
+      suspended = true;
+      close();
+    }, HIDDEN_GRACE_MS);
+  }
+}
+
 /**
  * Receive every job update for the signed-in user. `onReconnect` fires when
  * the feed comes back after an interruption, so the caller can refetch what
@@ -83,6 +113,10 @@ function close(): void {
  * subscriber.
  */
 export function subscribeJobEvents(onJob: JobListener, onReconnect?: Listener): () => void {
+  if (jobListeners.size === 0) {
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    onVisibilityChange();
+  }
   jobListeners.add(onJob);
   if (onReconnect) reconnectListeners.add(onReconnect);
   open();
@@ -90,8 +124,10 @@ export function subscribeJobEvents(onJob: JobListener, onReconnect?: Listener): 
     jobListeners.delete(onJob);
     if (onReconnect) reconnectListeners.delete(onReconnect);
     if (jobListeners.size === 0) {
-      if (retryTimer !== null) clearTimeout(retryTimer);
-      retryTimer = null;
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      retryTimer = clearTimer(retryTimer);
+      hiddenTimer = clearTimer(hiddenTimer);
+      suspended = false;
       close();
       wasConnected = false;
     }
@@ -103,9 +139,8 @@ const subscribeStatus = (listener: Listener) => {
   return () => statusListeners.delete(listener);
 };
 const getConnected = () => connected;
-const getServerConnected = () => false;
 
-/** Whether the live feed is open right now; false on the server and while reconnecting. */
+/** Whether the live feed is open right now; false while reconnecting. */
 export function useJobEventsConnected(): boolean {
-  return useSyncExternalStore(subscribeStatus, getConnected, getServerConnected);
+  return useSyncExternalStore(subscribeStatus, getConnected);
 }

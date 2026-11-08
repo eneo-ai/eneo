@@ -1,7 +1,5 @@
-"use client";
-
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useState } from "react";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { useAutosave } from "@/components/composites/use-autosave";
@@ -15,6 +13,7 @@ import { toastApiError } from "@/lib/api/toast";
 import { useSpace } from "@/features/spaces/use-space";
 import { PublishDialog } from "../publish-dialog";
 import { useUpdateAssistant, type Assistant } from "./use-assistant";
+import { invalidateExpiringApiKeys } from "@/features/api-keys/api-keys";
 
 function PublishStatusRow({ assistant }: { assistant: Assistant }) {
   const t = useTranslations();
@@ -33,6 +32,7 @@ function PublishStatusRow({ assistant }: { assistant: Assistant }) {
     onSuccess: (updated) => {
       queryClient.setQueryData(["assistants", assistant.id], updated);
       void queryClient.invalidateQueries({ queryKey: ["spaces", routeId] });
+      void invalidateExpiringApiKeys(queryClient);
       setShowDialog(false);
     },
     onError: (error) => toastApiError(error, t)
@@ -78,11 +78,16 @@ export function PublishingSection({ assistant }: { assistant: Assistant }) {
   return (
     <SettingsGroup title={t("publishing")}>
       {canPublish && <PublishStatusRow assistant={assistant} />}
-      <SettingsRow title={t("insights")} description={t("insights_description")}>
-        <Label
-          className="flex items-center justify-between gap-2 py-1 font-normal"
-          title={canToggleInsights ? undefined : t("only_space_admins_toggle")}
-        >
+      <SettingsRow
+        title={t("insights")}
+        description={
+          // Why the switch is off is written out: a title attribute is not shown on touch.
+          canToggleInsights
+            ? t("insights_description")
+            : `${t("insights_description")} ${t("only_space_admins_toggle")}`
+        }
+      >
+        <Label className="flex items-center justify-between gap-2 py-1 font-normal">
           {t("enable_insights")}
           {/* Saving, it stays enabled so it keeps focus; a toggle meanwhile is ignored. */}
           <Switch

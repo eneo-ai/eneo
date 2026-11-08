@@ -70,6 +70,14 @@ class AssistantSpecialist:
         return self.user_description or self.default_description or ""
 
 
+def _with_addendum(prompt: str, addendum: str | None) -> str:
+    """The turn's prompt with a surface-specific instruction appended, so a
+    caller such as the widget can shape tone without editing the assistant."""
+    if not addendum:
+        return prompt
+    return f"{prompt}\n\n{addendum}" if prompt else addendum
+
+
 class Assistant(Entity):
     def __init__(
         self,
@@ -127,6 +135,8 @@ class Assistant(Entity):
         self._attachment_inline_text: dict[UUID, bool] = dict(
             attachment_inline_text or {}
         )
+        # Per turn, never persisted: see withhold_file_reader.
+        self._file_reader_available = True
         self.source_template = source_template
         self.published = published
         self.is_default = is_default
@@ -260,8 +270,19 @@ class Assistant(Entity):
             file_id: bool(inline) for file_id, inline in inline_text_by_id.items()
         }
 
+    def withhold_file_reader(self) -> None:
+        """This turn's principal gets no files tool (a widget visitor), so an
+        attachment marked "open with tool" would reach the model as a link
+        nothing can open: every attachment inlines like any other instead."""
+        self._file_reader_available = False
+
+    def restore_file_reader(self) -> None:
+        self._file_reader_available = True
+
     def url_only_attachment_ids(self, completion_model: CompletionModel) -> set[UUID]:
         """Attachments this model receives as signed URLs only (shared predicate)."""
+        if not self._file_reader_available:
+            return set()
         return url_only_attachment_ids(
             self._attachments, self._attachment_inline_text, completion_model
         )
@@ -553,12 +574,14 @@ class Assistant(Entity):
         files: list["File"] | None = None,
         stream: bool = False,
         version: int = 1,
+        num_chunks_override: int | None = None,
         capability_mcp_servers: Sequence["MCPServer"] = (),
         require_tool_approval: bool = False,
         completion_model_override: Optional[CompletionModel] = None,
         model_kwargs_override: ModelKwargs | None = None,
         mcp_servers_override: Optional[list["MCPServer"]] = None,
         prompt_override: str | None = None,
+        prompt_addendum: str | None = None,
         completion_prompt_files: list["File"] | None = None,
         knowledge_mcp_server: Optional["MCPServer"] = None,
         internal_mcp_servers: Sequence["MCPServer"] = (),
@@ -609,6 +632,7 @@ class Assistant(Entity):
                 integration_knowledge_list=self.integration_knowledge_list,
                 context_window_tokens=effective_model.max_input_tokens,
                 version=version,
+                num_chunks_override=num_chunks_override,
                 rerank=rerank,
             )
         else:
@@ -649,9 +673,12 @@ class Assistant(Entity):
             model=completion_model,
             text_input=question,
             files=completion_message_files,
-            prompt=prompt_override
-            if prompt_override is not None
-            else self.get_prompt_text(),
+            prompt=_with_addendum(
+                prompt_override
+                if prompt_override is not None
+                else self.get_prompt_text(),
+                prompt_addendum,
+            ),
             prompt_files=prompt_files_for_completion,
             info_blob_chunks=datastore_result.chunks,
             session=session,

@@ -1,7 +1,12 @@
 <script lang="ts">
   import { tick } from "svelte";
   import { getEneo } from "$lib/core/Eneo";
-  import { Cloud, Earth, Info, LoaderCircle, RefreshCw, Search } from "@lucide/svelte";
+  import Cloud from "@lucide/svelte/icons/cloud";
+  import Earth from "@lucide/svelte/icons/earth";
+  import Info from "@lucide/svelte/icons/info";
+  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
+  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
+  import Search from "@lucide/svelte/icons/search";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import * as InputGroup from "$lib/components/ui/input-group/index.js";

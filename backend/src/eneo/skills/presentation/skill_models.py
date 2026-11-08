@@ -15,8 +15,11 @@ from eneo.skills.domain.skill import (
     AssistantPinAdvanceIncompatibleReason,
     AssistantPinAdvanceOutcome,
     PersonalChatPinAdvanceOutcome,
+    PersonalSkillLayerReason,
+    PersonalSkillLayerStatus,
     SkillActivationFallbackReason,
     SkillActivationMode,
+    SkillActivationRejectionReason,
     SkillAdoptionDrift,
     SkillAdoptionResourceKind,
     SkillBindingSource,
@@ -394,6 +397,13 @@ class AssistantSkillBindingInput(SkillBindingReferenceInput):
     )
 
 
+class SkillDependencySummary(BaseModel):
+    skill_id: UUID
+    skill_revision_id: UUID
+    revision_number: int
+    display_name: str
+
+
 class SkillBindingSummary(BaseModel):
     skill_id: UUID
     skill_revision_id: UUID
@@ -408,6 +418,9 @@ class SkillBindingSummary(BaseModel):
     is_active: bool
     source: SkillBindingSource
     execution_blocked: bool
+    dependencies: list[SkillDependencySummary] = Field(
+        default_factory=list[SkillDependencySummary]
+    )
 
 
 class AssistantSkillBindingSummary(SkillBindingSummary):
@@ -423,6 +436,22 @@ class AssistantSkillRuntimeSummary(BaseModel):
     token_count_source: TokenCountSource
 
 
+class PersonalChatSkillLayerPublic(BaseModel):
+    """Whether the person's own Skills run in their personal chat, and why not."""
+
+    status: PersonalSkillLayerStatus
+    reason: PersonalSkillLayerReason | None
+    # The existing activation reason behind an on-demand or fit failure.
+    detail: SkillActivationFallbackReason | SkillActivationRejectionReason | None
+
+
 class AssistantSkillConfigurationPublic(BaseModel):
+    # For the personal chat these are the person's own Skills.
     bindings: list[AssistantSkillBindingSummary]
     runtime: AssistantSkillRuntimeSummary | None
+    # Personal chat only: the organisation's Skills, which always run first
+    # and which the person cannot change.
+    organisation_bindings: list[AssistantSkillBindingSummary] = Field(
+        default_factory=list[AssistantSkillBindingSummary]
+    )
+    personal_layer: PersonalChatSkillLayerPublic | None = None

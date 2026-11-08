@@ -1,4 +1,5 @@
-from collections.abc import Sequence
+from collections import defaultdict
+from collections.abc import Collection, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Optional
@@ -96,6 +97,7 @@ from eneo.spaces.space_factory import SpaceFactory
 from eneo.spaces.space_update import SpaceUpdate
 from eneo.spaces.utils.space_utils import effective_space_ids_for
 from eneo.user_groups.user_group import UserGroupState
+from eneo.user_groups.user_groups_repo import count_group_users
 
 logger = get_logger(__name__)
 
@@ -242,27 +244,35 @@ class SpaceRepository:
     async def _load_application_attachments(
         self,
         *,
-        tenant_id: UUID,
+        space_tenants: Mapping[UUID, UUID],
         assistants: Sequence[Assistants],
         apps: Sequence[Apps],
+        content_owners: Collection[tuple[str, UUID]] = (),
     ) -> tuple[dict[UUID, list[File]], dict[UUID, list[File]]]:
-        groups = [
-            FileAttachmentGroup(
-                owner_kind=owner_kind,
-                owner_id=record.id,
-                tenant_id=tenant_id,
-                files=tuple(
-                    FileMetadata.model_validate(attachment.file)
-                    for attachment in record.attachments
-                ),
-            )
-            for owner_kind, records in (
-                ("assistant", assistants),
-                ("app", apps),
-            )
-            for record in records
-        ]
-        loaded = await self.file_content_loader.load_attachment_groups(groups)
+        """Attachments of the assistants and apps of several spaces, each
+        confined to the tenant of the space that owns it.
+
+        A space read presents its applications without their files' content,
+        so only ``content_owners`` get it: the one assistant or app in use.
+        """
+        groups: list[FileAttachmentGroup] = []
+        for owner_kind, records in (("assistant", assistants), ("app", apps)):
+            for record in records:
+                assert record.space_id is not None, "read by its space"
+                groups.append(
+                    FileAttachmentGroup(
+                        owner_kind=owner_kind,
+                        owner_id=record.id,
+                        tenant_id=space_tenants[record.space_id],
+                        files=tuple(
+                            FileMetadata.model_validate(attachment.file)
+                            for attachment in record.attachments
+                        ),
+                    )
+                )
+        loaded = await self.file_content_loader.load_attachment_groups(
+            groups, content_owners=content_owners
+        )
         return (
             {record.id: loaded[("assistant", record.id)] for record in assistants},
             {record.id: loaded[("app", record.id)] for record in apps},
@@ -271,9 +281,9 @@ class SpaceRepository:
     def _options(self) -> list[Any]:
         return [
             selectinload(Spaces.members).selectinload(SpacesUsers.user),
-            selectinload(Spaces.group_members)
-            .selectinload(SpacesUserGroups.user_group)
-            .selectinload(UserGroups.users),
+            selectinload(Spaces.group_members).selectinload(
+                SpacesUserGroups.user_group
+            ),
             selectinload(Spaces.services).selectinload(Services.user),
             selectinload(Spaces.integration_knowledge_list).selectinload(
                 IntegrationKnowledge.embedding_model
@@ -703,7 +713,8 @@ class SpaceRepository:
                 input_schema=tool_db.input_schema,
                 meta=tool_db.meta,
                 ui_resource_sha256=tool_db.ui_resource_sha256,
-                is_enabled_by_default=is_enabled,  # Effective status after all overrides
+                is_enabled_by_default=tool_db.is_enabled_by_default,
+                enabled_override=is_enabled,
                 created_at=tool_db.created_at,
                 updated_at=tool_db.updated_at,
             )
@@ -776,10 +787,22 @@ class SpaceRepository:
                 override.mcp_server_tool_id
             ] = override.is_enabled
 
+        # Each assistant is projected over its own servers' rows only, so the
+        # work stays the size of what it returns, not assistants x catalog.
+        tools_by_server: dict[UUID, list[MCPServerToolsTable]] = {}
+        for tool in tools_db:
+            tools_by_server.setdefault(tool.mcp_server_id, []).append(tool)
+
         return {
             projection.assistant_id: self._project_assistant_mcp_server_tools(
                 mcp_servers=deepcopy(list(projection.mcp_servers)),
-                tools_db=tools_db,
+                tools_db=[
+                    tool
+                    for server_id in dict.fromkeys(
+                        server.id for server in projection.mcp_servers
+                    )
+                    for tool in tools_by_server.get(server_id, ())
+                ],
                 tenant_tool_settings=tenant_tool_settings,
                 space_tool_overrides=space_tool_overrides.get(projection.space_id, {}),
                 assistant_tool_overrides=assistant_tool_overrides.get(
@@ -811,11 +834,13 @@ class SpaceRepository:
             ),
         )
 
-    async def _get_assistants(self, space_id: UUID) -> Sequence[Assistants]:
+    async def _get_assistants(self, space_ids: Sequence[UUID]) -> Sequence[Assistants]:
+        """The assistants of the spaces, oldest first. Assistants created at the
+        same instant come in no defined order, as when one space is read."""
         stmt = (
             sa.select(Assistants)
             .execution_options(populate_existing=True)
-            .where(Assistants.space_id == space_id)
+            .where(Assistants.space_id.in_(space_ids))
             .options(
                 selectinload(Assistants.assistant_websites),
                 selectinload(Assistants.assistant_groups),
@@ -832,6 +857,8 @@ class SpaceRepository:
         )
         assistant_records = await self.session.execute(stmt)
         assistants = assistant_records.scalars().all()
+        if not assistants:
+            return []
 
         assistant_ids = [assistant.id for assistant in assistants]
         stmt = (
@@ -845,37 +872,38 @@ class SpaceRepository:
         prompt_records = await self.session.execute(stmt)
         prompts = prompt_records.all()
 
+        # The first selected prompt of each assistant, looked up, not rescanned.
+        prompt_by_assistant: dict[UUID, Prompts] = {}
+        for prompt, assistant_id in prompts:
+            prompt_by_assistant.setdefault(assistant_id, prompt)
         for assistant in assistants:
-            assistant.prompt = next(  # type: ignore[attr-defined]
-                (
-                    prompt
-                    for prompt, assistant_id in prompts
-                    if assistant_id == assistant.id
-                ),
-                None,
+            assistant.prompt = prompt_by_assistant.get(assistant.id)  # type: ignore[attr-defined]
+
+        # Each assistant's MCP servers with their tools, switched by the space
+        # and by that assistant, projected for all assistants in one pass.
+        from eneo.mcp_servers.infrastructure.mappers.mcp_server_mapper import (
+            MCPServerMapper,
+        )
+
+        with_mcp_servers = [
+            assistant for assistant in assistants if assistant.mcp_servers
+        ]
+        projections: list[AssistantMCPServerProjection] = []
+        for assistant in with_mcp_servers:
+            assert assistant.space_id is not None, "read by its space"
+            projections.append(
+                AssistantMCPServerProjection(
+                    space_id=assistant.space_id,
+                    assistant_id=assistant.id,
+                    mcp_servers=tuple(
+                        MCPServerMapper.to_entities(assistant.mcp_servers)
+                    ),
+                )
             )
-
-        # For each assistant, load MCP servers with tools and apply space+assistant overrides
-        for assistant in assistants:
-            if assistant.mcp_servers:
-                from eneo.mcp_servers.infrastructure.mappers.mcp_server_mapper import (
-                    MCPServerMapper,
-                )
-
-                # Map to domain entities first
-                mcp_servers = MCPServerMapper.to_entities(assistant.mcp_servers)
-
-                # Apply space + assistant level overrides using same logic as space MCP loading
-                mcp_servers = (
-                    await self._load_assistant_mcp_server_tools_with_overrides(
-                        space_id=space_id,
-                        assistant_id=assistant.id,
-                        mcp_servers=mcp_servers,
-                    )
-                )
-
-                # Store the filtered entities back on the assistant for the factory
-                setattr(assistant, "_mcp_server_entities", mcp_servers)
+        projected = await self.project_assistants_mcp_servers(projections)
+        for assistant in with_mcp_servers:
+            # The factory takes these in place of the unfiltered relationship.
+            setattr(assistant, "_mcp_server_entities", projected[assistant.id])
 
         return assistants
 
@@ -897,12 +925,15 @@ class SpaceRepository:
 
         return services_db
 
-    async def _get_group_chats(self, space_id: UUID) -> Sequence[GroupChatsTable]:
-        # Fetch all group chats for the space
+    async def _get_group_chats(
+        self, space_ids: Sequence[UUID]
+    ) -> Sequence[GroupChatsTable]:
+        # Group chats have never had an ORDER BY, so their order is whatever
+        # the scan returns, for one space or several.
         stmt = (
             sa.select(GroupChatsTable)
             .execution_options(populate_existing=True)
-            .where(GroupChatsTable.space_id == space_id)
+            .where(GroupChatsTable.space_id.in_(space_ids))
             .options(selectinload(GroupChatsTable.group_chat_assistants))
         )
 
@@ -1072,7 +1103,8 @@ class SpaceRepository:
                 input_schema=tool_db.input_schema,
                 meta=tool_db.meta,
                 ui_resource_sha256=tool_db.ui_resource_sha256,
-                is_enabled_by_default=is_enabled,  # Effective status after overrides
+                is_enabled_by_default=tool_db.is_enabled_by_default,
+                enabled_override=is_enabled,
                 created_at=tool_db.created_at,
                 updated_at=tool_db.updated_at,
             )
@@ -1084,11 +1116,13 @@ class SpaceRepository:
 
         return mcp_servers
 
-    async def _get_apps(self, space_id: UUID) -> Sequence[Apps]:
+    async def _get_apps(self, space_ids: Sequence[UUID]) -> Sequence[Apps]:
+        """The apps of the spaces, oldest first. Apps created at the same
+        instant come in no defined order, as when one space is read."""
         stmt = (
             sa.select(Apps)
             .execution_options(populate_existing=True)
-            .where(Apps.space_id == space_id)
+            .where(Apps.space_id.in_(space_ids))
             .options(
                 selectinload(Apps.input_fields),
                 selectinload(Apps.attachments).selectinload(AppsFiles.file),
@@ -1115,15 +1149,21 @@ class SpaceRepository:
         prompt_records = await self.session.execute(stmt)
         prompts = prompt_records.all()
 
+        # The first selected prompt of each app, looked up, not rescanned.
+        prompt_by_app: dict[UUID, Prompts] = {}
+        for prompt, app_id in prompts:
+            prompt_by_app.setdefault(app_id, prompt)
         for app in apps_db:
-            app.prompt = next(  # type: ignore[attr-defined]
-                (prompt for prompt, app_id in prompts if app_id == app.id), None
-            )
+            app.prompt = prompt_by_app.get(app.id)  # type: ignore[attr-defined]
 
         return apps_db
 
     async def _get_from_query(
-        self, query: sa.Select[tuple[Spaces]], *, with_document_counts: bool = False
+        self,
+        query: sa.Select[tuple[Spaces]],
+        *,
+        with_document_counts: bool = False,
+        content_owners: Collection[tuple[str, UUID]] = (),
     ) -> Space | None:
         entry_in_db = await self._get_record_with_options(query)
         if not entry_in_db:
@@ -1208,22 +1248,24 @@ class SpaceRepository:
                 entry_in_db.id, mcp_servers
             )
 
-        assistants = await self._get_assistants(space_id=entry_in_db.id)
-        apps = await self._get_apps(space_id=entry_in_db.id)
+        assistants = await self._get_assistants([entry_in_db.id])
+        apps = await self._get_apps([entry_in_db.id])
         (
             assistant_attachments,
             app_attachments,
         ) = await self._load_application_attachments(
-            tenant_id=entry_in_db.tenant_id,
+            space_tenants={entry_in_db.id: entry_in_db.tenant_id},
             assistants=assistants,
             apps=apps,
+            content_owners=content_owners,
         )
-        group_chats = await self._get_group_chats(space_id=entry_in_db.id)
+        group_chats = await self._get_group_chats([entry_in_db.id])
         services = await self._get_services(space_id=entry_in_db.id)
 
         space = self.factory.create_space_from_db(
             entry_in_db,
             user=self.user,
+            group_user_counts=await self._group_user_counts([entry_in_db]),
             collections_in_db=collections,
             websites_in_db=websites,
             completion_models=completion_models,
@@ -1240,11 +1282,16 @@ class SpaceRepository:
             security_classification=entry_in_db.security_classification,
         )
         from eneo.mcp_servers.application.capability_resolver import (
-            capability_availability,
+            active_capability_providers,
+            availability_from_providers,
         )
 
-        space.available_capabilities = await capability_availability(
-            self.session, self.user.tenant_id, space.security_classification
+        # One provider load serves the tenant-wide and the user-scoped view.
+        capability_providers = await active_capability_providers(
+            self.session, self.user.tenant_id
+        )
+        space.available_capabilities = availability_from_providers(
+            capability_providers, space.security_classification
         )
         if space.is_personal():
             space.enabled_capabilities = [
@@ -1259,9 +1306,8 @@ class SpaceRepository:
                 allowed_capability_purposes,
             )
 
-            personal_availability = await capability_availability(
-                self.session,
-                self.user.tenant_id,
+            personal_availability = availability_from_providers(
+                capability_providers,
                 space.security_classification,
                 user_group_ids=self.user.user_groups_ids,
                 allowed_purposes=allowed_capability_purposes(self.user.permissions),
@@ -1301,6 +1347,12 @@ class SpaceRepository:
             query.execution_options(populate_existing=True)
         )
         return result.all()
+
+    async def _group_user_counts(self, records: Sequence[Spaces]) -> dict[UUID, int]:
+        return await count_group_users(
+            self.session,
+            {link.user_group_id for record in records for link in record.group_members},
+        )
 
     async def add(self, space: Space) -> Space:
         query = (
@@ -1488,41 +1540,48 @@ class SpaceRepository:
         )
 
         records = await self._get_records_with_options(query)
+        group_user_counts = await self._group_user_counts(records)
 
-        spaces: list[Space] = []
-        for record in records:
-            if include_applications:
-                assistants = await self._get_assistants(space_id=record.id)
-                apps = await self._get_apps(space_id=record.id)
-                (
-                    assistant_attachments,
-                    app_attachments,
-                ) = await self._load_application_attachments(
-                    tenant_id=record.tenant_id,
-                    assistants=assistants,
-                    apps=apps,
-                )
-                group_chats = await self._get_group_chats(space_id=record.id)
-            else:
-                assistants: Sequence[Assistants] = []
-                apps: Sequence[Apps] = []
-                assistant_attachments: dict[UUID, list[File]] = {}
-                app_attachments: dict[UUID, list[File]] = {}
-                group_chats: Sequence[GroupChatsTable] = []
-
-            spaces.append(
-                self.factory.create_space_from_db(
-                    record,
-                    user=self.user,
-                    assistants_in_db=assistants,
-                    assistant_attachments=assistant_attachments,
-                    apps_in_db=apps,
-                    app_attachments=app_attachments,
-                    group_chats_in_db=group_chats,
-                )
+        # The applications of all the spaces are read together, then handed
+        # to each space in the order the batched read returns them.
+        assistants: dict[UUID, list[Assistants]] = defaultdict(list)
+        apps: dict[UUID, list[Apps]] = defaultdict(list)
+        group_chats: dict[UUID, list[GroupChatsTable]] = defaultdict(list)
+        assistant_attachments: dict[UUID, list[File]] = {}
+        app_attachments: dict[UUID, list[File]] = {}
+        if include_applications and records:
+            space_ids = [record.id for record in records]
+            assistant_rows = await self._get_assistants(space_ids)
+            app_rows = await self._get_apps(space_ids)
+            (
+                assistant_attachments,
+                app_attachments,
+            ) = await self._load_application_attachments(
+                space_tenants={record.id: record.tenant_id for record in records},
+                assistants=assistant_rows,
+                apps=app_rows,
             )
+            for assistant in assistant_rows:
+                assert assistant.space_id is not None
+                assistants[assistant.space_id].append(assistant)
+            for app in app_rows:
+                apps[app.space_id].append(app)
+            for group_chat in await self._get_group_chats(space_ids):
+                group_chats[group_chat.space_id].append(group_chat)
 
-        return spaces
+        return [
+            self.factory.create_space_from_db(
+                record,
+                user=self.user,
+                group_user_counts=group_user_counts,
+                assistants_in_db=assistants[record.id],
+                assistant_attachments=assistant_attachments,
+                apps_in_db=apps[record.id],
+                app_attachments=app_attachments,
+                group_chats_in_db=group_chats[record.id],
+            )
+            for record in records
+        ]
 
     async def get_personal_space(self, user_id: UUID) -> Space | None:
         query = self._in_caller_tenant(
@@ -1531,12 +1590,23 @@ class SpaceRepository:
 
         return await self._get_from_query(query, with_document_counts=True)
 
-    async def get_space_by_assistant(self, assistant_id: UUID) -> Space:
+    async def get_space_by_assistant(
+        self, assistant_id: UUID, *, tool_assistant_id: UUID | None = None
+    ) -> Space:
+        """The assistant's space, with the content of its attachments and the
+        tool assistant's; no other assistant or app in the space has any."""
         query = self._in_caller_tenant(
             sa.select(Spaces).join(Assistants).where(Assistants.id == assistant_id)
         )
 
-        space = await self._get_from_query(query)
+        space = await self._get_from_query(
+            query,
+            content_owners=[
+                ("assistant", id)
+                for id in (assistant_id, tool_assistant_id)
+                if id is not None
+            ],
+        )
 
         if space is None:
             raise NotFoundException()
@@ -1548,7 +1618,7 @@ class SpaceRepository:
             sa.select(Spaces).join(Apps).where(Apps.id == app_id)
         )
 
-        space = await self._get_from_query(query)
+        space = await self._get_from_query(query, content_owners=[("app", app_id)])
 
         if space is None:
             raise NotFoundException()

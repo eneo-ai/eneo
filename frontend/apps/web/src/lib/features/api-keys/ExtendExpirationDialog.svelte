@@ -1,7 +1,9 @@
 <script lang="ts">
   import { intlLocale } from "$lib/core/formatting/dateTime";
   import type { ApiKeyV2 } from "@eneo/eneo-js";
-  import { CircleAlert, Calendar, Infinity as InfinityIcon } from "@lucide/svelte";
+  import CircleAlert from "@lucide/svelte/icons/circle-alert";
+  import Calendar from "@lucide/svelte/icons/calendar";
+  import InfinityIcon from "@lucide/svelte/icons/infinity";
   import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "svelte-sonner";

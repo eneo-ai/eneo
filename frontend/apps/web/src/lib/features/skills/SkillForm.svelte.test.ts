@@ -14,6 +14,15 @@ describe("SkillForm", () => {
     const nameInput = page.getByLabelText(m.skills_display_name_label());
     await expect.element(nameInput).toHaveFocus();
     await expect.element(nameInput).toHaveAttribute("aria-invalid", "true");
+    for (const label of [
+      m.skills_display_name_label(),
+      m.skills_description_label(),
+      m.skills_instructions_label()
+    ]) {
+      await expect
+        .element(page.getByLabelText(label))
+        .toHaveAccessibleDescription(new RegExp(m.skills_required_field()));
+    }
     await expect
       .element(page.getByLabelText(m.skills_description_label()))
       .toHaveAttribute("aria-invalid", "true");
@@ -37,7 +46,29 @@ describe("SkillForm", () => {
     await expect.element(slugInput).toBeVisible();
     await expect.element(slugInput).toHaveFocus();
     await expect.element(slugInput).toHaveAttribute("aria-invalid", "true");
+    await expect
+      .element(slugInput)
+      .toHaveAccessibleDescription(new RegExp(m.skills_required_field()));
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  test("associates required-field feedback with the reference editor", async () => {
+    render(SkillForm, {
+      mode: "create",
+      initialValue: { display_name: "Guide", description: "Writing support" },
+      referenceCatalog: {
+        key: "space",
+        skills: vi.fn(),
+        servers: vi.fn(),
+        tools: vi.fn(),
+        preview: vi.fn()
+      },
+      onSubmit: vi.fn()
+    });
+    await page.getByRole("button", { name: m.skills_create_action() }).click();
+    const editor = page.getByRole("textbox", { name: m.skills_instructions_label() });
+    await expect.element(editor).toHaveFocus();
+    await expect.element(editor).toHaveAccessibleDescription(new RegExp(m.skills_required_field()));
   });
 
   test("reopens and focuses a cleared identifier after Advanced is collapsed", async () => {

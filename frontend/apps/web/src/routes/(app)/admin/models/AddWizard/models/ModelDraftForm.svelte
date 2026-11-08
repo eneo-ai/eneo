@@ -11,7 +11,8 @@
 
 <script lang="ts">
   import { onMount, tick } from "svelte";
-  import { LoaderCircle, ListPlus } from "@lucide/svelte";
+  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
+  import ListPlus from "@lucide/svelte/icons/list-plus";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   import { getEneo } from "$lib/core/Eneo";
@@ -35,6 +36,8 @@
   import {
     MAX_COST_INPUT,
     perMillionFromTokenCost,
+    RERANK_CANDIDATE_FACTOR,
+    RERANK_MAX_CANDIDATES,
     type ModelDraftState,
     type ModelType
   } from "./draft";
@@ -292,6 +295,39 @@
     <Field.Field>
       <Field.Label for="max-input">{m.max_input_tokens()}</Field.Label>
       <Input id="max-input" type="number" bind:value={draft.maxInputStr} placeholder="8191" />
+    </Field.Field>
+  </div>
+{/if}
+
+{#if modelType === "rerank"}
+  <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+    <Field.Field>
+      <Field.Label for="candidate-factor" class="flex items-center gap-1.5">
+        {m.rerank_candidate_factor()}
+        <HelpTooltip text={m.rerank_candidate_factor_help()} />
+      </Field.Label>
+      <Input
+        id="candidate-factor"
+        type="number"
+        step="1"
+        min={RERANK_CANDIDATE_FACTOR.min}
+        max={RERANK_CANDIDATE_FACTOR.max}
+        bind:value={draft.candidateFactorStr}
+      />
+    </Field.Field>
+    <Field.Field>
+      <Field.Label for="max-candidates" class="flex items-center gap-1.5">
+        {m.rerank_max_candidates()}
+        <HelpTooltip text={m.rerank_max_candidates_help()} />
+      </Field.Label>
+      <Input
+        id="max-candidates"
+        type="number"
+        step="1"
+        min={RERANK_MAX_CANDIDATES.min}
+        max={RERANK_MAX_CANDIDATES.max}
+        bind:value={draft.maxCandidatesStr}
+      />
     </Field.Field>
   </div>
 {/if}

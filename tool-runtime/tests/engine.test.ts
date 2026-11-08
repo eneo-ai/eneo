@@ -287,7 +287,8 @@ describe("prelude", () => {
       `return [new Decimal("0.1").plus("0.2").toString(), new Decimal(1234.5).times(1.12).toFixed(2), new Decimal("0.1").plus("0.2"), 0.1 + 0.2];`,
     );
     expect(outcome.ok).toBe(true);
-    expect(outcome.result).toEqual(["0.3", "1382.64", "0.3", 0.30000000000000004]);
+    // A plain double leaves cleaned of its noise too (src/precision.ts).
+    expect(outcome.result).toEqual(["0.3", "1382.64", "0.3", 0.3]);
   });
   test("fmt formats numbers, percentages and dates the Swedish way", async () => {
     const outcome = await run(

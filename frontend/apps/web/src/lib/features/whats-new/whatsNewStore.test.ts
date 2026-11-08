@@ -179,19 +179,27 @@ describe("whatsNewStore", () => {
   it("isolates reminders by account and release, including newer versions and rollback", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-10-20T10:00:00Z"));
-    makeStore(null, "2.3.0-rc.1", true, "2.3.0-rc.1").store.snoozeLatest();
+    makeStore(null, `${version}-rc.1`, true, `${version}-rc.1`).store.snoozeLatest();
     expect(
-      makeStore(null, "2.3.0-rc.1", true, "2.3.0-rc.2").store.pendingAnnouncement()?.version
-    ).toBe("2.3.0-rc.2");
+      makeStore(null, `${version}-rc.1`, true, `${version}-rc.2`).store.pendingAnnouncement()
+        ?.version
+    ).toBe(`${version}-rc.2`);
     vi.setSystemTime(new Date("2026-10-21T10:00:00Z"));
     expect(
-      makeStore(null, "2.3.0-rc.1", true, "2.3.0-rc.1").store.pendingAnnouncement()?.version
-    ).toBe("2.3.0-rc.1");
+      makeStore(null, `${version}-rc.1`, true, `${version}-rc.1`).store.pendingAnnouncement()
+        ?.version
+    ).toBe(`${version}-rc.1`);
     expect(
-      makeStore(null, "2.3.0-rc.1", true, "2.3.0-rc.1", "user-2").store.pendingAnnouncement()
+      makeStore(
+        null,
+        `${version}-rc.1`,
+        true,
+        `${version}-rc.1`,
+        "user-2"
+      ).store.pendingAnnouncement()
     ).toBeNull();
     expect(
-      makeStore(null, "2.3.0-rc.2", true, "2.3.0-rc.1").store.pendingAnnouncement()
+      makeStore(null, `${version}-rc.2`, true, `${version}-rc.1`).store.pendingAnnouncement()
     ).toBeNull();
   });
 
@@ -254,9 +262,9 @@ describe("whatsNewStore", () => {
   });
 
   it("announces every RC and the final once, and keeps read progress independent", async () => {
-    let seen: Marker = "2.2.0";
-    let announced: Marker = "2.2.0";
-    for (const installed of ["2.3.0-rc.0", "2.3.0-rc.1", "2.3.0-rc.10", "2.3.0"]) {
+    let seen: Marker = "0.0.1";
+    let announced: Marker = "0.0.1";
+    for (const installed of [`${version}-rc.0`, `${version}-rc.1`, `${version}-rc.10`, version]) {
       const { store, client } = makeStore(seen, announced, true, installed);
       expect(store.pendingAnnouncement()?.version).toBe(installed);
       expect(get(store.hasUnseen)).toBe(true);
@@ -272,9 +280,37 @@ describe("whatsNewStore", () => {
     }
   });
 
+  it("lists unreleased notes on development builds without announcing or recording them", async () => {
+    const upcoming: Release = { ...latest, version: news.UNRELEASED };
+    delete upcoming.date;
+    vi.spyOn(news, "releasesForVersion").mockReturnValue([upcoming, latest]);
+
+    const caughtUp = makeStore(version, version, true, "develop-0123456789ab");
+    expect(caughtUp.store.releases.map((release) => release.version)).toEqual([
+      news.UNRELEASED,
+      version
+    ]);
+    expect(caughtUp.store.pendingAnnouncement()).toBeNull();
+    expect(get(caughtUp.store.hasUnseen)).toBe(false);
+    await caughtUp.store.markLatestSeen();
+    expect(caughtUp.client.markSeen).not.toHaveBeenCalled();
+
+    const behind = makeStore(null, null, true, "develop-0123456789ab");
+    expect(behind.store.pendingAnnouncement()).toBe(latest);
+    await behind.store.markLatestAnnounced();
+    await behind.store.markLatestSeen();
+    expect(behind.client.markAnnounced).toHaveBeenCalledExactlyOnceWith(version);
+    expect(behind.client.markSeen).toHaveBeenCalledExactlyOnceWith(version);
+
+    vi.mocked(news.releasesForVersion).mockReturnValue([upcoming]);
+    const onlyUpcoming = makeStore(null, null, true, "develop-0123456789ab");
+    expect(onlyUpcoming.store.pendingAnnouncement()).toBeNull();
+    expect(get(onlyUpcoming.store.hasUnseen)).toBe(false);
+  });
+
   it("does not announce an older RC or move markers backwards after rollback", async () => {
-    for (const recorded of ["2.3.0-rc.10", "2.3.0"]) {
-      const { store, client } = makeStore(recorded, recorded, true, "2.3.0-rc.1");
+    for (const recorded of [`${version}-rc.10`, version]) {
+      const { store, client } = makeStore(recorded, recorded, true, `${version}-rc.1`);
       expect(store.pendingAnnouncement()).toBeNull();
       expect(get(store.hasUnseen)).toBe(false);
       await store.markLatestSeen();

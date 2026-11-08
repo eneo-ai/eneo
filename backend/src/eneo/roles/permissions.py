@@ -15,6 +15,10 @@ class Permission(str, Enum):
     ASSISTANTS = "assistants"
     SKILLS = "skills"
     SKILLS_MANAGEMENT = "skills_management"
+    # Skills in your own personal space and in your personal chat only,
+    # decoupled from SKILLS and SKILLS_MANAGEMENT the way PERSONAL_CHAT is
+    # decoupled from ASSISTANTS.
+    PERSONAL_SKILLS = "personal_skills"
     PERSONAL_CHAT = "personal_chat"
     GROUP_CHATS = "group_chats"
     APPS = "apps"
@@ -30,6 +34,7 @@ class Permission(str, Enum):
     API_KEYS = "api_keys"
     STORAGE = "storage"
     MODULES = "modules"
+    WIDGETS = "widgets"
     ASSISTANT_DEBUG = "assistant_debug"
     # Capability use permissions. Each value equals the MCP capability purpose
     # it governs (see CAPABILITY_PURPOSES) so the purpose -> permission mapping

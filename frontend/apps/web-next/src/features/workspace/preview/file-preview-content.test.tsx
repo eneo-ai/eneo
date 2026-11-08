@@ -6,7 +6,7 @@ import { renderInApp } from "@/test/render";
 import { FilePreviewContent } from "./file-preview-content";
 import type { PreviewContent } from "./load-preview";
 
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 
 const restores: (() => void)[] = [];
 /** Defines what jsdom lacks (or overrides it) until the test ends. */

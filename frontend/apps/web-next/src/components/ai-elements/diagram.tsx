@@ -1,11 +1,9 @@
-"use client";
-
 import { Button } from "@astryxdesign/core/Button";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { Layout, LayoutContent } from "@astryxdesign/core/Layout";
 import { createMermaidPlugin } from "@streamdown/mermaid";
 import { Maximize2 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useTheme } from "next-themes";
 import { useContext, useMemo, useState } from "react";
 import { CodeBlock, Streamdown, StreamdownContext, type CustomRendererProps } from "streamdown";

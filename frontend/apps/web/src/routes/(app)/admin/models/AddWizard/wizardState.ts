@@ -32,6 +32,9 @@ export interface WizardModelDraft {
   costPerImage?: number | null;
   defaultSize?: ImageSize;
   defaultQuality?: ImageQuality;
+  /** Rerank models only. */
+  candidateFactor?: number;
+  maxCandidates?: number;
   securityClassification?: SecurityClassification | null;
 }
 

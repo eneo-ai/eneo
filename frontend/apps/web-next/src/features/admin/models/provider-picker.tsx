@@ -1,18 +1,24 @@
-"use client";
-
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { TextInput } from "@/components/astryx/text-input";
 import { ToggleButton } from "@astryxdesign/core/ToggleButton";
 import { Token } from "@astryxdesign/core/Token";
 import { Search, Server, Star } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useMemo, useState } from "react";
 import { ProviderLogo } from "@/components/ai-elements/provider-logo";
+import { matchesSearch } from "@/lib/search";
 import type { ProviderOption } from "./model-providers";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
-type CapabilityFilter = "all" | "embedding" | "transcription" | "image";
+type CapabilityFilter = "all" | "embedding" | "transcription" | "image" | "rerank";
 
-const CAPABILITY_FILTERS: CapabilityFilter[] = ["all", "embedding", "transcription", "image"];
+const CAPABILITY_FILTERS: CapabilityFilter[] = [
+  "all",
+  "embedding",
+  "transcription",
+  "image",
+  "rerank"
+];
 
 function filterLabel(t: (key: string) => string, filter: CapabilityFilter): string {
   switch (filter) {
@@ -22,6 +28,8 @@ function filterLabel(t: (key: string) => string, filter: CapabilityFilter): stri
       return t("provider_capability_speech");
     case "image":
       return t("provider_capability_image");
+    case "rerank":
+      return t("admin_model_type_rerank");
     default:
       return t("all_providers");
   }
@@ -34,6 +42,7 @@ function ModeTokens({ modes }: { modes: string[] }) {
   if (modes.includes("embedding")) labels.push(t("provider_capability_embeddings"));
   if (modes.includes("transcription")) labels.push(t("provider_capability_speech"));
   if (modes.includes("image")) labels.push(t("provider_capability_image"));
+  if (modes.includes("rerank")) labels.push(t("admin_model_type_rerank"));
   return (
     <ul className="flex flex-wrap gap-1">
       {labels.map((label) => (
@@ -111,14 +120,10 @@ export function ProviderPicker({
   const [selfHostedOnly, setSelfHostedOnly] = useState(false);
 
   const filtered = useMemo(() => {
-    const query = search.trim().toLowerCase();
     return options.filter((option) => {
       if (capability !== "all" && !option.modes.includes(capability)) return false;
       if (selfHostedOnly && !option.selfHosted) return false;
-      if (query && !option.name.toLowerCase().includes(query) && !option.type.includes(query)) {
-        return false;
-      }
-      return true;
+      return matchesSearch([option.name, option.type], search);
     });
   }, [options, search, capability, selfHostedOnly]);
 
@@ -132,6 +137,7 @@ export function ProviderPicker({
         isLabelHidden
         placeholder={t("search_providers")}
         startIcon={Search}
+        {...KEYBOARD.search}
         value={search}
         onChange={setSearch}
         hasClear

@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { ChevronDown, FlaskConical } from "@lucide/svelte";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import FlaskConical from "@lucide/svelte/icons/flask-conical";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import * as Select from "$lib/components/ui/select/index.js";

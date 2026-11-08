@@ -28,9 +28,9 @@ graph LR
     B -->|Push| C[Build :develop image]
     C -->|Image Update| D[Deploy to Dev]
     B -->|Create branch| E[release/v1.8]
-    E -->|Tag v1.8.0-rc.1| F[Build :v1.8.0-rc.1 image]
+    E -->|Tag v1.8.0-rc.1| F[Build :1.8.0-rc.1 image]
     F -->|Deploy| G[Test Environment]
-    E -->|Tag v1.8.0| H[Build :v1.8.0 image]
+    E -->|Tag v1.8.0| H[Build :1.8.0 image]
     H -->|Deploy| I[Production]
 ```
 
@@ -47,8 +47,8 @@ Backflow (patches):
 | Environment | Purpose | Branch/Tag | Image Tag | Deployment Method |
 |------------|---------|------------|-----------|-------------------|
 | **Development** | Latest features, may be unstable | `develop` | `:develop` | Auto (on image update) |
-| **Test** | Pre-production testing via RC tags | `v*-rc.*` tags on `release/v1.X` | `:v1.8.0-rc.1` | Manual deploy |
-| **Production** | Live system | `v*` tags on `release/v1.X` | `:v1.8.0` | Manual deploy |
+| **Test** | Pre-production testing via RC tags | `v*-rc.*` tags on `release/v1.X` | `:1.8.0-rc.1` | Manual deploy |
+| **Production** | Live system | `v*` tags on `release/v1.X` | `:1.8.0` | Manual deploy |
 
 ## Branch Strategy
 
@@ -57,14 +57,15 @@ Backflow (patches):
 #### `develop`
 - Integration branch for new features
 - Always deployable to dev environment
-- Protected: requires PR with approval
+- Protected: accepts only pull requests that a member of `@eneo-ai/core-maintainers` adds to the merge queue, with all required checks green
 
 #### `release/v1.X`
 - Created from `develop` when ready to release or stabilize a minor version
 - Persistent home for all patches to that minor version
 - All version tags (`v1.X.Y`) live here
-- Test via RC tags (`:v1.8.0-rc.1`) before creating the final release
+- Test via RC tags (`:1.8.0-rc.1`) before creating the final release
 - **Never merged back** — fixes flow to `develop` via cherry-pick only
+- Protected: only members of `@eneo-ai/core-maintainers` can create, push to or delete release branches and create `v*` tags, so the release steps below require Core Maintainer access. See [Governance and Roles](../frontend/apps/docs-site/src/content/contributing/governance.mdx)
 
 ### Supporting Branches
 
@@ -121,27 +122,114 @@ Once merged to develop:
 
 Every release goes through at least one RC tag for testing. See [Release Stabilization (RC Process)](#release-stabilization-rc-process) for the full flow.
 
-Before tagging, make sure the user-facing release notes are on the release branch: `frontend/packages/whats-new/releases.json` must have an entry for the version with `date` set, reviewed by the release owner. The entry is drafted from the `## User-facing` sections of merged PRs — see [`frontend/packages/whats-new/PLAYBOOK.md`](../frontend/packages/whats-new/PLAYBOOK.md). It ships inside the frontend image as the in-app **What's new** page and is published on docs.eneo.ai; the GitHub release notes below remain the developer/operator-facing changelog.
+Once the RC is stable, run **Actions → Prepare and Publish Release → Run workflow**
+on `develop`, entering only the final version without `v`, for example `2.4.0`.
 
-Run the tag rule locally before creating the release, so a missing date is caught before a GitHub release exists whose image build then fails:
+1. The controller uses `release_notes.py finalize` to date the existing notes
+   and validate them. The first preparation uses the Stockholm calendar date;
+   retries preserve that date. It opens a labelled PR to `release/v2.4`.
+2. Review and merge that PR through the normal repository rules. It changes
+   only `releases.json` and `.github/release-request.json`. The request records
+   the version and preparation base commit; a hotfix with no separate news
+   still gets a reviewable request.
+3. Successful **push CI on the merged commit** creates a draft GitHub release
+   and a create-only tag at that exact commit. A changed release-branch head
+   stops tagging and requires a fresh preparation and review.
+4. The existing image workflow builds, validates and attests the images, smoke
+   tests the complete bundle and attaches the bundle and SBOMs to the draft.
+5. Only success of that entire workflow allows the trusted controller to
+   verify the bundle's attestation, source commit and version, the derived
+   deployment environment and every SBOM asset against its signed checksum
+   inventory, then publish the release. It promotes `latest` if this is the newest **published** final
+   release, and opens a history PR to `develop` using `release_notes.py port`.
+6. Review and merge the history PR. Shipped entries move out of `next` while
+   later features stay upcoming; aliases, permissions and translations survive.
 
-```bash
-python3 scripts/check_whats_new.py --repo-root . --release-tag vX.Y.Z
-```
+`releases.json` remains the single source of news and dates for the app and
+documentation. The request file contains no duplicate date or news. GitHub's
+generated release changelog remains developer/operator-facing. Dates record
+the first preparation, not the time of an eventual retry or publication.
 
-Once the RC is stable, create the final release via GitHub UI:
+#### Release App setup (once)
 
-1. Go to **Releases** → **Draft a new release**
-2. Click **Choose a tag** → type `v1.8.0` → select **Create new tag**
-3. Set **Target** to `release/v1.8`
-4. Set **Release title** to `v1.8.0`
-5. Write release notes (features, bug fixes, breaking changes)
-6. Leave **Set as pre-release** unchecked
-7. Click **Publish release**
+Managed publication is off until repository variable `RELEASE_MANAGED` is
+`true`. Before that, final tags created in the Releases UI build and promote
+exactly as before, and **Prepare and Publish Release** stops with a message
+naming this section. Complete the steps in order; only the last one changes
+behaviour:
 
-GitHub Actions will automatically build production images:
-- `ghcr.io/eneo-ai/eneo-backend:v1.8.0`
-- `ghcr.io/eneo-ai/eneo-frontend:v1.8.0`
+1. An organisation owner creates a GitHub App and installs it on this
+   repository only, with **Contents, Pull requests and Issues: read/write** and
+   **Actions and Attestations: read**. Contents permits the preparation branch,
+   tag and release; Issues permits the required PR labels.
+2. Configure repository variable `RELEASE_APP_CLIENT_ID` and repository secret
+   `RELEASE_APP_PRIVATE_KEY`. The private key is never checked into the repository.
+3. Adjust the `v*` tag rules as described below so the App may create tags.
+4. Set repository variable `RELEASE_MANAGED` to `true`. From then on, a final
+   tag without a reviewed request fails its image build, and the controller
+   drives every final release. Setting it back stops automatic transitions
+   and leaves managed finals as drafts for recovery.
+
+The ordinary job token retains only repository read access and package write
+access for alias promotion.
+
+Allow this App to **create** `v*` tags in the repository tag rules. Keep tag
+updates/deletions protected and retain all PR, CI and merge-queue rules. The
+controller never merges its PRs and never force-updates or deletes a tag.
+Do not grant it a general branch-protection bypass or administrator access.
+If creation and tag immutability currently share one ruleset, separate the
+creation restriction first: allow the App to bypass only tag creation,
+and keep it out of the update/deletion ruleset's bypass list.
+
+Use an App token because PR and tag events must trigger downstream checks and
+image workflows; the ordinary `GITHUB_TOKEN` does not drive this complete
+event chain. See [GitHub's event-triggering guidance](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow).
+Tokens are minted for one job and revoked by the pinned token action on exit.
+Privileged jobs always execute controller code from `develop`, never scripts
+from a PR, release checkout, artifact or event-supplied ref.
+
+#### Recovery and existing release lines
+
+| State | Recovery |
+| --- | --- |
+| Open preparation PR | Rerun preparation with the same version. Reuse its PR, commit and date. |
+| Branch created but PR creation failed | Rerun preparation or reconciliation. A branch that no PR references is reused when its content matches and replaced otherwise. |
+| Merged PR, CI still running or failed | Fix the CI failure. A successful push-CI event resumes tagging. Rerunning preparation also checks CI. |
+| Release branch advanced before tagging | Prepare the same version again. A new base commit produces a new request PR for review, and the earlier open preparation PR is closed with a comment naming it. |
+| Checker or schema differs from `develop` | Backport `scripts/check_whats_new.py` and `releases.schema.json` to the release branch, then prepare again. Preparation and the tag build must validate the notes with identical rules. |
+| Draft created, tag creation failed | Fix App/tag permissions and rerun the failed controller job or preparation. The same draft and commit are reused. |
+| Images, smoke tests or SBOM generation failed | Rerun failed jobs in **Build and Push Docker Images**. The release stays a draft and its `latest` aliases are not promoted. |
+| A develop publication failed or never moved `:develop` | Rerun **all jobs** of that commit's **Build and Push Docker Images** run. It keeps the run's commit and ref, checks again, and moves the alias only if no newer commit is already published. |
+| Publication, alias promotion or history PR failed | Rerun the failed **Prepare and Publish Release** reconciliation. It revalidates the tag and bundle, preserves publication metadata, reuses an open history PR and recreates an interrupted history branch from the current `develop`. |
+| Existing tag names another commit | Stop. The controller refuses to replace it; use a new version. |
+
+Publication transitions and image builds use queued concurrency so a newer
+event does not replace a pending release. Different commits publish side by
+side; writes of one version's image tags and release assets wait for each
+other, and every alias move (`develop`, a branch's alias, `latest`) and the
+release controller hold one lock. GitHub permits up to 100 pending runs per
+concurrency group; if that limit is reached, rerun a canceled event.
+
+A develop publication reuses the merge queue's CI when the queue's run on that
+exact commit passed the full suite and left its validation receipt; a fresh
+security check still runs, and the published images are still scanned and
+smoke tested. Otherwise, and for tags and manual runs, the full CI runs in the
+publication.
+
+This flow applies to release branches carrying the managed-publication changes
+in `build_and_push_images.yml` and the release scripts, including the existing
+`cut`/`finalize`/`port` tooling. Backport the complete automation and release-note
+tooling changes, with their checker, schema and tests, before preparing an older
+release line. Already shipped tags
+without a request keep their existing publication behavior; their tag-local
+workflows are never rewritten. RC publication is unchanged. Do not manually
+publish a managed draft or create its final tag in the Releases UI.
+
+GitHub Actions will automatically build production images (the tag's version
+without its `v`):
+- `ghcr.io/eneo-ai/eneo-backend:1.8.0`
+- `ghcr.io/eneo-ai/eneo-frontend:1.8.0`
+- `ghcr.io/eneo-ai/eneo-tool-runtime:1.8.0`
 
 Deploy to production by updating your deployment config to point at the new version tag.
 
@@ -171,8 +259,12 @@ develop ──► create release/v1.8
 ```bash
 git checkout develop && git pull
 git checkout -b release/v1.8
+python3 scripts/release_notes.py cut 1.8   # the "next" What's new block becomes 1.8.0
+git commit -am "docs(whats-new): name the release notes for v1.8.0"
 git push origin release/v1.8
 ```
+
+CI rejects a `next` block on a release branch and an undated release block on `develop`, so the cut cannot be forgotten and notes for an unreleased version cannot land on `develop` under a version number.
 
 **2. Create the first RC via GitHub UI:**
 
@@ -367,13 +459,30 @@ This applies to all fixes on release branches — hotfixes, RC stabilization fix
 
 ### Image Tagging Strategy
 
+Every published version is one commit's backend, frontend and tool-runtime
+images, recorded with their digests in the release bundle (`release.json`,
+`release.env`). A version tag is the release version without its `v`, or a
+branch's name followed by the commit's first 12 hex characters. Only
+`v`-prefixed tags are releases.
+
 | Source | Docker Tags | Purpose |
 |--------|------------|---------|
-| `develop` branch | `:develop`, `:develop-{sha}` | Development testing |
-| `v*-rc/beta` tags | `:v1.8.0-rc.1` (no `:latest`) | Test environment / pre-release testing |
-| `v*` tags (stable) | `:v1.8.0`, `:latest` (if highest version) | Production releases |
+| `develop` branch | `:develop`, `:develop-<12-hex sha>` (for example `:develop-0575bbaa925b`) | Development testing |
+| Branch dispatch (`workflow_dispatch`) | `:<branch>`, `:<branch>-<12-hex sha>` (`/` becomes `-`; a branch cannot publish `:latest` or `:develop`) | Feature testing |
+| `v*-rc/beta` tags | `:1.8.0-rc.1` (no `:latest`) | Test environment / pre-release testing |
+| `v*` tags (stable) | `:1.8.0`, `:latest` (if highest version) | Production releases |
 
-**How `:latest` is decided:** Evaluated at tag-push time by comparing the new tag against all existing stable tags (`v*` excluding pre-releases like `-rc`, `-beta`) via semver sort. Only the highest stable version wins `:latest`.
+**How `:develop` (and a branch's alias) moves:** only forward. After a commit's
+images pass CI, the scans and the bundle smoke test, its bundled digests
+become the alias if the commit is on the branch and every component's alias
+names that commit, an older one, or nothing yet. A commit that finishes after
+a newer one leaves the alias alone, a failed newest commit leaves it on the
+last good one, and a rerun completes a move that stopped part-way. The three
+component aliases are written one after another, so a reader that follows
+aliases can briefly see a mix; deploy a complete bundle (`release.env`) to get
+one tested combination.
+
+**How `:latest` is decided:** Evaluated once the tag's publication, including its SBOM, has succeeded, by comparing the new tag against all existing stable tags (`v*` excluding pre-releases like `-rc`, `-beta`) via semver sort. Only the highest stable version wins `:latest`.
 
 Consequences to be aware of:
 - Patching an older release (e.g. tagging `v1.7.4` while `v1.8.0` exists) will NOT overwrite `:latest` — the older patch correctly stays out of `:latest`.
@@ -385,15 +494,15 @@ Consequences to be aware of:
 
 ```bash
 # Backend Images
-ghcr.io/eneo-ai/eneo-backend:develop      # Latest from develop
-ghcr.io/eneo-ai/eneo-backend:v1.8.0-rc.1  # RC for testing
-ghcr.io/eneo-ai/eneo-backend:v1.8.0       # Specific release
+ghcr.io/eneo-ai/eneo-backend:develop      # Newest published develop commit
+ghcr.io/eneo-ai/eneo-backend:1.8.0-rc.1  # RC for testing
+ghcr.io/eneo-ai/eneo-backend:1.8.0       # Specific release
 ghcr.io/eneo-ai/eneo-backend:latest       # Highest stable release
 
 # Frontend Images
-ghcr.io/eneo-ai/eneo-frontend:develop      # Latest from develop
-ghcr.io/eneo-ai/eneo-frontend:v1.8.0-rc.1  # RC for testing
-ghcr.io/eneo-ai/eneo-frontend:v1.8.0       # Specific release
+ghcr.io/eneo-ai/eneo-frontend:develop      # Newest published develop commit
+ghcr.io/eneo-ai/eneo-frontend:1.8.0-rc.1  # RC for testing
+ghcr.io/eneo-ai/eneo-frontend:1.8.0       # Specific release
 ghcr.io/eneo-ai/eneo-frontend:latest       # Highest stable release
 ```
 
@@ -416,7 +525,7 @@ move at release time.
 **A:** For any change that adds functionality, fixes a bug, or modifies behavior. Even small changes should go through a PR for code review.
 
 ### Q: Can I push directly to develop or release branches?
-**A:** No. All long-lived branches are protected and require pull requests with approvals.
+**A:** No. `develop` only accepts pull requests through the merge queue, and only Core Maintainers can push to release branches. See [Governance and Roles](../frontend/apps/docs-site/src/content/contributing/governance.mdx).
 
 ### Q: Where and how do I create version tags?
 **A:** Always on a `release/v1.X` branch. Use **GitHub Releases** (not the CLI) to create tags — this gives you release notes, pre-release marking, and a clean audit trail. See [Quick Command Reference](#creating-tags-github-ui).

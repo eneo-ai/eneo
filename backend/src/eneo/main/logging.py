@@ -181,6 +181,9 @@ for logger_name in sqlalchemy_loggers:
 
 # noqa Copied from https://dev.to/taikedz/simple-python-logging-and-a-digression-on-dependencies-trust-and-copypasting-code-229o
 class SimpleLogger(logging.Logger):
+    # Logger creates this cache, but its type stub does not expose it.
+    _cache: dict[int, bool]
+
     FORMAT_STRING = "%(asctime)s | %(levelname)s | %(name)s : %(message)s"
     ERROR = logging.ERROR
     WARN = logging.WARN
@@ -222,7 +225,26 @@ class SimpleLogger(logging.Logger):
         for filepath in file_list:
             _add_stream(logging.FileHandler, filename=filepath)
 
+    @override
+    def setLevel(self, level: int | str) -> None:
+        super().setLevel(level)
+        # These loggers are constructed outside the logging manager's registry,
+        # so its level-change invalidation does not reach their cached decisions.
+        self._cache.clear()
+
 
 def get_logger(module_name: str):
     # If we don't add a handler manually one will be created for us
     return SimpleLogger(name=module_name, level=get_loglevel())
+
+
+def redact_values(text: str, *values: str, placeholder: str = "[REDACTED]") -> str:
+    """Replace every occurrence of each non-empty ``value`` in ``text``.
+
+    For log fields built from exception text that may quote a submitted
+    secret. Longer values go first so a value containing another is replaced
+    whole.
+    """
+    for value in sorted({value for value in values if value}, key=len, reverse=True):
+        text = text.replace(value, placeholder)
+    return text

@@ -448,6 +448,7 @@ async def test_restore_copies_tenant_history_into_the_next_revision():
         content_digest=source.content_digest,
         created_by_user_id=service.user.id,
         expected_current_revision_id=reviewed_current_revision_id,
+        restore_reference_revision_id=source.id,
     )
 
 

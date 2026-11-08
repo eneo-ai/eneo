@@ -1,16 +1,14 @@
 import { m } from "$lib/paraglide/messages";
 import type { EntryArea, EntryType } from "@eneo/whats-new";
 import type { Component } from "svelte";
-import {
-  BookOpen,
-  Bot,
-  LayoutGrid,
-  Layers,
-  MessageSquare,
-  Settings,
-  Sparkles,
-  User
-} from "@lucide/svelte";
+import BookOpen from "@lucide/svelte/icons/book-open";
+import Bot from "@lucide/svelte/icons/bot";
+import LayoutGrid from "@lucide/svelte/icons/layout-grid";
+import Layers from "@lucide/svelte/icons/layers";
+import MessageSquare from "@lucide/svelte/icons/message-square";
+import Settings from "@lucide/svelte/icons/settings";
+import Sparkles from "@lucide/svelte/icons/sparkles";
+import User from "@lucide/svelte/icons/user";
 
 // Both maps are typed exhaustively against the package's unions, and
 // labels.test.ts asserts they cover the schema's runtime vocabularies, so a

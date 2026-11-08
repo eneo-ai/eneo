@@ -3,6 +3,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Optional
 
 from eneo.ai_models.ai_model import AIModel
+from eneo.rerank_models.domain.rerank_spec import (
+    DEFAULT_CANDIDATE_FACTOR,
+    DEFAULT_MAX_CANDIDATES,
+)
 from eneo.security_classifications.domain.entities.security_classification import (
     SecurityClassification,
 )
@@ -39,6 +43,8 @@ class RerankModel(AIModel):
         provider_id: Optional[UUID] = None,
         provider_name: Optional[str] = None,
         provider_type: Optional[str] = None,
+        candidate_factor: int = DEFAULT_CANDIDATE_FACTOR,
+        max_candidates: int = DEFAULT_MAX_CANDIDATES,
     ):
         super().__init__(
             user=user,
@@ -64,6 +70,8 @@ class RerankModel(AIModel):
         self.provider_id = provider_id
         self.provider_name = provider_name
         self.provider_type = provider_type
+        self.candidate_factor = candidate_factor
+        self.max_candidates = max_candidates
 
     @classmethod
     def create_from_db(
@@ -97,4 +105,6 @@ class RerankModel(AIModel):
             provider_id=rerank_model_db.provider_id,
             provider_name=provider_name,
             provider_type=provider_type,
+            candidate_factor=rerank_model_db.candidate_factor,
+            max_candidates=rerank_model_db.max_candidates,
         )

@@ -13,12 +13,14 @@
 # testing
 /coverage
 
-# next.js
-/.next/
 /out/
 
 # production
 /build
+
+# Vite build output and TanStack Router generator scratch
+/dist
+/.tanstack/
 
 # misc
 .DS_Store
@@ -34,17 +36,16 @@ yarn-error.log*
 .env*
 !.env.example
 
-# vercel
-.vercel
 
 # typescript
 *.tsbuildinfo
-next-env.d.ts
 
 # Playwright
 /playwright/.auth/
 /test-results/
+/test-results-fastapi/
 /playwright-report/
+/playwright-report-fastapi/
 /blob-report/
 /playwright/.cache/
 

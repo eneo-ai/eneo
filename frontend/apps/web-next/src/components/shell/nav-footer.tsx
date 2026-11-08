@@ -1,31 +1,15 @@
-"use client";
-
-import { SideNavItem } from "@astryxdesign/core/SideNav";
-import { Building2, CircleHelp, ExternalLink, Shield } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { SideNavItem, useSideNavRenderMode } from "@astryxdesign/core/SideNav";
+import { CircleHelp, ExternalLink, Shield } from "lucide-react";
+import { useTranslations } from "use-intl";
 import type { ComponentProps } from "react";
 import { useAppContext } from "@/components/providers/app-context";
 import { cn } from "@/lib/utils";
-import { useNavTarget } from "./nav-data";
 import { NAV_ITEM_CLASSES, SECONDARY_LINK_CLASSES } from "./nav-styles";
-import { ProfileMenu } from "./profile-menu";
+import { useTouchTablet } from "@/lib/hooks/use-media-match";
+import { ProfileLink, ProfileMenu } from "./profile-menu";
 import type { NavVariant } from "./routes";
 
-function OrganizationItem() {
-  const t = useTranslations();
-  // Not current while "Senaste" marks the conversation open in its chat.
-  const isCurrent = useNavTarget().kind === "organization";
-  return (
-    <SideNavItem
-      label={t("organization")}
-      icon={Building2}
-      href="/spaces/organization/knowledge"
-      isSelected={isCurrent}
-    />
-  );
-}
-
-/** A plain anchor to another site, in a new tab (SideNavItem's own link is next/link). */
+/** A plain anchor to another site, in a new tab (SideNavItem's own link uses the app router). */
 function ExternalNavLink({ children, ...props }: ComponentProps<"a">) {
   return (
     <a {...props} target="_blank" rel="noopener noreferrer">
@@ -53,24 +37,29 @@ function HelpCenterItem({ href }: { href: string }) {
   );
 }
 
-/** "Organisation" and "Administration" (admins), the help centre, then the profile button. */
+/**
+ * The help centre, as at the foot of Svelte's sidebar. In the phone's drawer
+ * also "Administration" (admins) and a link to Konto (decision 22); in a
+ * tablet's SideNav those and the profile's menu. With a mouse the top bar
+ * carries them; Organisation sits with the areas (main-nav.tsx).
+ */
 export function NavFooter({ variant }: { variant: NavVariant }) {
   const t = useTranslations();
   const { can, links } = useAppContext();
   const isAdmin = can("admin");
+  const isInDrawer = useSideNavRenderMode() === "drawer-content";
+  // A tablet has no top bar: its SideNav carries them, and the profile's menu.
+  const tablet = useTouchTablet();
 
   return (
     <div className={cn("flex flex-col gap-0.5", NAV_ITEM_CLASSES, SECONDARY_LINK_CLASSES)}>
-      {variant === "main" && isAdmin ? (
-        <>
-          <OrganizationItem />
-          <SideNavItem label={t("shell_administration")} icon={Shield} href="/admin" />
-        </>
+      {(isInDrawer || tablet) && variant === "main" && isAdmin ? (
+        <SideNavItem label={t("shell_administration")} icon={Shield} href="/admin" />
       ) : null}
       {links.helpCenter ? <HelpCenterItem href={links.helpCenter} /> : null}
-      <div className="mt-1.5">
-        <ProfileMenu />
-      </div>
+      {isInDrawer || tablet ? (
+        <div className="mt-1.5">{isInDrawer ? <ProfileLink /> : <ProfileMenu />}</div>
+      ) : null}
     </div>
   );
 }

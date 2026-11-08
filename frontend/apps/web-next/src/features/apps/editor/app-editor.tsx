@@ -1,5 +1,3 @@
-"use client";
-
 import { useSuspenseQuery } from "@tanstack/react-query";
 import {
   BookOpenCheck,
@@ -12,20 +10,27 @@ import {
   Sparkles,
   TextCursorInput
 } from "lucide-react";
-import Link from "next/link";
-import { useTranslations } from "next-intl";
+import Link from "@/lib/link";
+import { useTranslations } from "use-intl";
 import { SaveStatusProvider } from "@/components/composites/save-status";
 import {
   SectionedSettings,
   type SettingsSection
 } from "@/components/composites/sectioned-settings";
+import { Button as AstryxButton } from "@astryxdesign/core/Button";
 import { Button } from "@/components/ui/button";
 import { browserApi } from "@/lib/api/browser";
 import { ResourceApiKeysSection } from "@/features/api-keys/resource-api-keys-section";
-import { EditorHeader, useCreatedAnnouncement } from "@/features/spaces/editor-header";
+import { editorSummaries } from "@/features/spaces/editor-summaries";
+import {
+  EditorHeader,
+  useCreatedAnnouncement,
+  useEditorPhoneIndex
+} from "@/features/spaces/editor-header";
 import { useJustCreated } from "@/features/spaces/just-created";
 import { useSpace } from "@/features/spaces/use-space";
 import { SkillBindingsSection } from "@/features/skills/skill-bindings-section";
+import { useCanAttachSkills } from "@/features/skills/use-can-attach-skills";
 import { appQueryOptions } from "../apps";
 import { AttachmentsSection } from "./attachments-section";
 import { AiSection } from "./ai-section";
@@ -44,32 +49,48 @@ import { useUpdateApp } from "./use-app";
  */
 export function AppEditor({ appId }: { appId: string }) {
   const t = useTranslations();
-  const { routeId, can } = useSpace();
+  const { routeId } = useSpace();
+  const canAttachSkills = useCanAttachSkills();
   const { data: app } = useSuspenseQuery(appQueryOptions(browserApi, appId));
   const update = useUpdateApp(appId);
   const created = useJustCreated("app", appId);
   useCreatedAnnouncement(created, t("app_created_announcement"));
+  const summary = editorSummaries(t);
+  const content = t("editor_group_content");
+  const model = t("editor_group_model");
+  const access = t("editor_group_access");
 
   const sections: SettingsSection[] = [
     {
       id: "general",
       label: t("general"),
       icon: SlidersHorizontal,
+      group: content,
+      summary: summary.description(app.description),
       node: <GeneralSection app={app} focusName={created} />
     },
-    { id: "input", label: t("input"), icon: TextCursorInput, node: <InputSection app={app} /> },
+    {
+      id: "input",
+      label: t("input"),
+      icon: TextCursorInput,
+      group: content,
+      node: <InputSection app={app} />
+    },
     {
       id: "instructions",
       label: t("instructions"),
       icon: MessageSquare,
+      group: content,
+      summary: summary.instructions(app.prompt?.text),
       node: <InstructionsSection app={app} />
     },
-    ...(can("read", "skill")
+    ...(canAttachSkills
       ? [
           {
             id: "skills",
             label: t("skills"),
             icon: BookOpenCheck,
+            group: content,
             node: (
               <SkillBindingsSection
                 resource="app"
@@ -85,49 +106,78 @@ export function AppEditor({ appId }: { appId: string }) {
       id: "attachments",
       label: t("attachments"),
       icon: Paperclip,
+      group: content,
+      summary: summary.files(app.attachments.length),
       node: <AttachmentsSection app={app} />
     },
-    { id: "ai", label: t("ai_settings"), icon: Sparkles, node: <AiSection app={app} /> },
+    {
+      id: "ai",
+      label: t("ai_settings"),
+      icon: Sparkles,
+      group: model,
+      summary: summary.model(app.completion_model),
+      node: <AiSection app={app} />
+    },
     {
       id: "security",
       label: t("security_and_privacy"),
       icon: ShieldCheck,
+      group: access,
+      summary: summary.retention(app.data_retention_days),
       node: <SecuritySection app={app} />
     },
-    {
-      id: "api-keys",
-      label: t("api_keys"),
-      icon: KeyRound,
-      node: <ResourceApiKeysSection scopeType="app" scopeId={app.id} resourceName={app.name} />
-    },
+    ...((app.permissions ?? []).includes("edit")
+      ? [
+          {
+            id: "api-keys",
+            label: t("api_keys"),
+            icon: KeyRound,
+            group: access,
+            node: (
+              <ResourceApiKeysSection scopeType="app" scopeId={app.id} resourceName={app.name} />
+            )
+          }
+        ]
+      : []),
     ...((app.permissions ?? []).includes("publish")
       ? [
           {
             id: "publishing",
             label: t("publishing"),
             icon: Send,
+            group: access,
+            summary: summary.publishing(app.published),
             node: <PublishingSection app={app} />
           }
         ]
       : [])
   ];
 
+  const done = (
+    <Button asChild variant="outline" size="sm">
+      <Link href={`/spaces/${routeId}/apps/${app.id}`}>{t("done")}</Link>
+    </Button>
+  );
+  const phone = useEditorPhoneIndex({
+    section: "apps",
+    name: app.name,
+    actions: (
+      <AstryxButton
+        href={`/spaces/${routeId}/apps/${app.id}`}
+        variant="secondary"
+        label={t("done")}
+      />
+    ),
+    created
+  });
+
   return (
     <SaveStatusProvider>
       <SectionedSettings
         navigationLabel={t("editor_sections_label")}
         sections={sections}
-        header={
-          <EditorHeader
-            section="apps"
-            name={app.name}
-            actions={
-              <Button asChild variant="outline" size="sm">
-                <Link href={`/spaces/${routeId}/apps/${app.id}`}>{t("done")}</Link>
-              </Button>
-            }
-          />
-        }
+        phone={phone}
+        header={<EditorHeader section="apps" name={app.name} actions={done} />}
       />
     </SaveStatusProvider>
   );

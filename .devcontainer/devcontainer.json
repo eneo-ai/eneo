@@ -7,16 +7,16 @@
 	"workspaceFolder": "/workspace",
 	"forwardPorts": [
 		3000, // Frontend
+		3101, // React beta (apps/web-next, Vite)
 		8123
 	],
 	"features": {
-		"ghcr.io/devcontainers/features/node:1": { "version": "22" },
 		"ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
 			"version": "latest",
 			"moby": false
 		},
-		// Installs a prebuilt Node 22 (apps/web-next runs Next.js, whose CLI
-		// requires Node >= 20.9). The feature reuses the base image's nvm at
+		// Installs a prebuilt Node 22 (apps/web-next builds with Vite, which
+		// requires Node 20.19+ or 22.12+). The feature reuses the base image's nvm at
 		// /usr/local/share/nvm and adds node to containerEnv PATH, so the
 		// remoteEnv PATH below picks it up. Avoids the source-compile fallback
 		// that `nvm install 22` in post-create hit when the binary download failed.

@@ -1,30 +1,71 @@
-"use client";
-
+import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
+import { Button as ActionButton } from "@astryxdesign/core/Button";
+import { saveUrl } from "@/features/files/signed-file-url";
 import { Spinner } from "@astryxdesign/core/Spinner";
 import { ImagePlus, Trash2 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { API_BASE, apiFetch } from "@/lib/api/base";
 import { browserApi } from "@/lib/api/browser";
-import { unwrap } from "@/lib/api/errors";
 import { toast } from "@/lib/toast";
+import { iconUrl } from "./icon-url";
 
-async function uploadIcon(file: File): Promise<{ id: string }> {
+/** Uploads an image to the icons endpoint; the caller stores the id on its resource. */
+export async function uploadIcon(file: File): Promise<{ id: string }> {
   const form = new FormData();
   form.append("file", file);
-  const response = await fetch("/api/eneo/api/v1/icons/", { method: "POST", body: form });
-  if (!response.ok) throw new Error(`icon upload failed: ${response.status}`);
+  const url = `${API_BASE}/api/v1/icons/`;
+  const response = await apiFetch(url, { method: "POST", body: form });
+  if (!response.ok) {
+    throw new Error(`icon upload failed: ${response.status}`);
+  }
   return (await response.json()) as { id: string };
 }
 
-/** Icon uploads are served through the auth-injecting proxy. */
-export function iconUrl(iconId: string | null | undefined): string | null {
-  return iconId ? `/api/eneo/api/v1/icons/${iconId}/` : null;
+/** Deletes an upload nothing shows (an id that could not be saved); failures are ignored. */
+export function releaseIcon(iconId: string): Promise<void> {
+  return browserApi
+    .DELETE("/api/v1/icons/{id}/", { params: { path: { id: iconId } } })
+    .then(() => undefined)
+    .catch(() => {});
+}
+
+export { iconUrl } from "./icon-url";
+
+const MAX_ICON_BYTES = 256 * 1024;
+const ICON_TYPES = ["image/png", "image/jpeg", "image/webp"];
+
+function IconPreview({ url }: { url: string }) {
+  const t = useTranslations();
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        className="focus-visible:outline-ring size-full focus-visible:outline-2 focus-visible:-outline-offset-2"
+        aria-label={t("upload_view_avatar")}
+        onClick={() => setOpen(true)}
+      >
+        <img src={url} alt="" className="size-full object-cover" />
+      </button>
+      <Dialog isOpen={open} onOpenChange={setOpen} width={560}>
+        <DialogHeader title={t("upload_avatar_alt")} onOpenChange={setOpen} />
+        <img
+          src={url}
+          alt={t("upload_avatar_preview_alt")}
+          className="rounded-ax-inner mx-auto my-4 h-64 max-h-[60dvh] w-full object-contain"
+        />
+        <ActionButton label={t("download")} onClick={() => saveUrl(url, "icon")} />
+      </Dialog>
+    </>
+  );
 }
 
 /**
  * Avatar upload/remove against the icons endpoint; `onSave` persists the new
- * icon id on the owning resource (assistant, group chat, ...).
+ * icon id on the owning resource (assistant, group chat, ...), and the server
+ * deletes the icon that id replaced.
  */
 export function IconField({
   iconId,
@@ -44,11 +85,22 @@ export function IconField({
 
   async function replaceIcon(file: File) {
     if (busy) return;
+    if (!ICON_TYPES.includes(file.type)) {
+      toast.error(t("avatar_invalid_type"));
+      return;
+    }
+    if (file.size > MAX_ICON_BYTES) {
+      toast.error(t("avatar_too_large"));
+      return;
+    }
     setBusy("upload");
+    let uploaded: string | undefined;
     try {
-      const uploaded = await uploadIcon(file);
-      await onSave(uploaded.id);
+      uploaded = (await uploadIcon(file)).id;
+      await onSave(uploaded);
     } catch {
+      // Nothing shows an upload whose id could not be saved, and nothing else would delete it.
+      if (uploaded) await releaseIcon(uploaded);
       toast.error(t("avatar_upload_failed"));
     } finally {
       setBusy(null);
@@ -59,11 +111,6 @@ export function IconField({
     if (busy) return;
     setBusy("remove");
     try {
-      if (iconId) {
-        await unwrap(
-          browserApi.DELETE("/api/v1/icons/{id}/", { params: { path: { id: iconId } } })
-        );
-      }
       await onSave(null);
       // Delete goes with the icon: focus moves to Upload instead of the page.
       uploadButton.current?.focus();
@@ -80,9 +127,7 @@ export function IconField({
         {busy ? (
           <Spinner />
         ) : icon ? (
-          // Auth-proxied backend upload; next/image cannot optimize it.
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={icon} alt="" className="size-full object-cover" />
+          <IconPreview key={icon} url={icon} />
         ) : (
           <ImagePlus className="size-6" />
         )}
@@ -91,7 +136,7 @@ export function IconField({
         ref={fileInput}
         type="file"
         aria-label={t("upload")}
-        accept="image/png,image/jpeg,image/webp"
+        accept={ICON_TYPES.join(",")}
         className="hidden"
         onChange={(event) => {
           const file = event.target.files?.[0];

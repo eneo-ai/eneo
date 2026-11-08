@@ -4,7 +4,8 @@ Without a spec the search is the code that shipped before: one repository
 call with the caller's limit, ``min_score`` and ``autocut`` as before. With a
 spec the vector search fetches K candidates, the reranker scores the spec's
 query against each candidate's text, and all K come back in reranker order
-carrying reranker scores. A reranker failure falls back to the old result.
+carrying reranker scores, followed by any requested chunks beyond K. A
+reranker failure falls back to the old result.
 """
 
 import asyncio
@@ -131,11 +132,11 @@ class TestWithSpec:
             ("a", 0.2),
         ]
 
-    async def test_the_reranker_sees_only_the_capped_candidates(self):
-        """The newer retrieval version asks for hundreds of chunks; the search
-        still covers them (for the fallback) but the reranker scores K."""
-        datastore = _datastore(VECTOR_ORDER)
-        reranker = FakeReranker({"a": 1, "b": 1, "c": 1})
+    async def test_chunks_beyond_the_cap_follow_unsorted(self):
+        """The newer retrieval version asks for hundreds of chunks; the reranker
+        scores K and the rest follow in vector order, never ranked above them."""
+        datastore = _datastore(VECTOR_ORDER + [_chunk("d", 0.6)])
+        reranker = FakeReranker({"a": 0.3, "b": 0.7})
 
         result = await datastore.semantic_search(
             "q",
@@ -149,7 +150,12 @@ class TestWithSpec:
 
         assert datastore.chunk_repo.semantic_search.await_args.kwargs["limit"] == 320
         assert reranker.calls == [("q", ["a", "b"])]
-        assert [c.text for c in result] == ["a", "b"]
+        assert [(c.text, c.score) for c in result] == [
+            ("b", 0.7),
+            ("a", 0.3),
+            ("c", 0.3),
+            ("d", 0.3),
+        ]
 
     async def test_autocut_is_not_applied_with_a_spec(self):
         datastore = _datastore(VECTOR_ORDER)

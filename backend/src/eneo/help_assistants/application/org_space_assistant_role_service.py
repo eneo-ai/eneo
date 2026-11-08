@@ -224,7 +224,9 @@ class OrgSpaceAssistantRoleService:
             )
 
         template = get_template(kind)
-        system_user_id = await self._resolve_system_user_id()
+        system_user_id = await self.users_repo.get_or_create_system_user_id_for_tenant(
+            tenant_id=self.user.tenant_id
+        )
 
         completion_model = (
             await self.completion_model_crud_service.get_default_completion_model()
@@ -378,17 +380,6 @@ class OrgSpaceAssistantRoleService:
         org_space = await self.space_service.get_or_create_tenant_space()
         assert org_space.id is not None
         return org_space.id
-
-    async def _resolve_system_user_id(self) -> UUID:
-        system_user_id = await self.users_repo.get_system_user_id_for_tenant(
-            tenant_id=self.user.tenant_id
-        )
-        if system_user_id is None:
-            raise BadRequestException(
-                "Tenant is missing its system user; the help-assistant "
-                "infrastructure migration has not run for this tenant."
-            )
-        return system_user_id
 
     async def _load_assistant(self, assistant_id: UUID) -> Assistant:
         assistant, _ = await self.assistant_service.get_assistant(

@@ -1,5 +1,3 @@
-"use client";
-
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { Layout, LayoutContent } from "@astryxdesign/core/Layout";
 import { ProgressBar } from "@astryxdesign/core/ProgressBar";
@@ -15,7 +13,8 @@ import {
   Paperclip,
   X
 } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { queryOptions, useQuery } from "@tanstack/react-query";
+import { useLocale, useTranslations } from "use-intl";
 import { useEffect, useRef, useState } from "react";
 import { useReturnFocus } from "@/components/ui/dialog-focus";
 import { browserApi } from "@/lib/api/browser";
@@ -34,29 +33,46 @@ export function FileKindIcon({ mimetype, className }: { mimetype: string; classN
   return <File aria-hidden className={className} />;
 }
 
-/** Resolves a short-lived inline signed URL for a backend file on mount. */
+/**
+ * A file's inline signed URL, shared by every view of it: the URL lives an
+ * hour (`signedFileUrl`), so a thumbnail, its preview and the next visit to
+ * the conversation reuse one URL, and the browser's copy of the image,
+ * instead of signing and downloading it again.
+ */
+function signedUrlQuery(fileId: string) {
+  return queryOptions({
+    queryKey: ["files", fileId, "signed-url"],
+    queryFn: () => signedFileUrl(browserApi, fileId, "inline"),
+    // A new view renews it well before the hour is up. A view still open past
+    // the hour gets a new one through `resign` when its image fails to load.
+    staleTime: 50 * 60_000,
+    gcTime: 55 * 60_000,
+    // A loaded image keeps its bytes; only a new view needs a newer URL.
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false
+  });
+}
+
+/**
+ * Resolves a short-lived inline signed URL for a backend file. `resign` is
+ * for an `<img>`'s `onError`: a URL that no longer loads is signed again,
+ * once per file, so a file that fails with its new URL too is not signed for
+ * good.
+ */
 export function useSignedUrl(fileId: string) {
-  const [result, setResult] = useState<{
-    fileId: string;
-    url: string | null;
-    error: boolean;
-  } | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    signedFileUrl(browserApi, fileId, "inline")
-      .then((url) => {
-        if (active) setResult({ fileId, url, error: false });
-      })
-      .catch(() => {
-        if (active) setResult({ fileId, url: null, error: true });
-      });
-    return () => {
-      active = false;
-    };
-  }, [fileId]);
-
-  return result?.fileId === fileId ? result : { fileId, url: null, error: false };
+  const query = useQuery(signedUrlQuery(fileId));
+  const [resigned, setResigned] = useState<string | null>(null);
+  return {
+    url: query.data ?? null,
+    // A failed renewal keeps the URL it had, which may still load.
+    error: query.isError && !query.data,
+    resign: () => {
+      if (!query.data || resigned === fileId) return;
+      setResigned(fileId);
+      // Joins a signing already under way, such as another view's `resign`.
+      void query.refetch({ cancelRefetch: false });
+    }
+  };
 }
 
 /** Native link preserves the backend's slash-sensitive download path. */
@@ -67,7 +83,7 @@ function DownloadPreviewLink({ url }: { url: string }) {
       href={url}
       target="_blank"
       rel="noreferrer"
-      className="bg-primary text-primary-foreground hover:bg-primary/90 focus-visible:outline-ring inline-flex min-h-9 items-center gap-2 rounded-md px-4 py-2 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11"
+      className="bg-primary text-primary-foreground hover:bg-ax-hover-overlay focus-visible:outline-ring inline-flex min-h-9 items-center gap-2 rounded-md px-4 py-2 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11"
     >
       <Download aria-hidden="true" className="size-4" />
       {t("download")}
@@ -134,7 +150,8 @@ function PdfPreview({ url, name }: { url: string; name: string }) {
 /**
  * Preview of a single attachment in an Astryx Dialog: images render inline,
  * PDFs in an iframe, everything else falls back to a download link. `url` may
- * be null while a signed URL is still resolving.
+ * be null while a signed URL is still resolving; `onImageError` is
+ * `useSignedUrl`'s `resign`.
  */
 export function AttachmentPreviewDialog({
   open,
@@ -142,7 +159,8 @@ export function AttachmentPreviewDialog({
   name,
   mimetype,
   url,
-  error = false
+  error = false,
+  onImageError
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -150,6 +168,7 @@ export function AttachmentPreviewDialog({
   mimetype: string;
   url: string | null;
   error?: boolean;
+  onImageError?: () => void;
 }) {
   const t = useTranslations();
   const noTrigger = useRef<HTMLElement>(null);
@@ -172,10 +191,10 @@ export function AttachmentPreviewDialog({
               ) : !url ? (
                 <Spinner size="lg" aria-label={t("loading")} />
               ) : isImage ? (
-                // eslint-disable-next-line @next/next/no-img-element -- signed/object URL
                 <img
                   src={url}
                   alt={name}
+                  onError={onImageError}
                   className="rounded-ax-element max-h-[70dvh] max-w-full object-contain"
                 />
               ) : isPdf ? (
@@ -286,13 +305,15 @@ function AttachmentChip({
   const body = (
     <>
       <FileTypeTile mimetype={item.mimetype} size="sm" uploading={item.uploading} />
-      <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold">{item.name}</span>
+      <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold pointer-coarse:break-words pointer-coarse:whitespace-normal">
+        {item.name}
+      </span>
       <span className="text-ax-text-secondary shrink-0 text-[11.5px] tabular-nums">{detail}</span>
     </>
   );
   return (
     <div
-      className="border-ax-border bg-ax-surface rounded-ax-element flex h-8 max-w-full min-w-0 items-center gap-1 border ps-1 pe-0.5 pointer-coarse:h-11"
+      className="border-ax-border bg-ax-surface rounded-ax-element flex h-8 max-w-full min-w-0 items-center gap-1 border ps-1 pe-0.5 pointer-coarse:h-auto pointer-coarse:min-h-11"
       title={item.name}
     >
       {item.previewUrl ? (

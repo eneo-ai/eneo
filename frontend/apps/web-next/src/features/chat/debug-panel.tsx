@@ -1,5 +1,3 @@
-"use client";
-
 import { Badge } from "@astryxdesign/core/Badge";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
@@ -7,7 +5,7 @@ import { useAnnounce } from "@astryxdesign/core/hooks";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, ChevronUp, RotateCcw } from "lucide-react";
-import { useFormatter, useTranslations } from "next-intl";
+import { useFormatter, useTranslations } from "use-intl";
 import { useEffect, useRef } from "react";
 import { ClientTime } from "@/components/composites/client-time";
 import { QueryStateBoundary } from "@/components/composites/query-state";
@@ -237,7 +235,10 @@ function TurnDiagnostics({
       <KnowledgeSection knowledge={details.knowledge} />
       <FilesSection files={details.files} />
       {diagnostics.skill_activation ? (
-        <SkillActivationSection evidence={diagnostics.skill_activation} />
+        <SkillActivationSection
+          evidence={diagnostics.skill_activation}
+          toolCalls={message.tool_calls ?? []}
+        />
       ) : (
         <section
           aria-label={t("chat_debug_legacy_skills_title")}

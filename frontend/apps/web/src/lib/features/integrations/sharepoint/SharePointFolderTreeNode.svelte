@@ -1,15 +1,13 @@
 <script lang="ts">
-  import {
-    ChevronRight,
-    File,
-    FileHeadphone,
-    FileImage,
-    FileText,
-    Folder,
-    FolderOpen,
-    LoaderCircle,
-    RefreshCw
-  } from "@lucide/svelte";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
+  import File from "@lucide/svelte/icons/file";
+  import FileHeadphone from "@lucide/svelte/icons/file-headphone";
+  import FileImage from "@lucide/svelte/icons/file-image";
+  import FileText from "@lucide/svelte/icons/file-text";
+  import Folder from "@lucide/svelte/icons/folder";
+  import FolderOpen from "@lucide/svelte/icons/folder-open";
+  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
+  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import { m } from "$lib/paraglide/messages";

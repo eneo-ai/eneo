@@ -13,9 +13,25 @@ import pytest
 from pydantic import ValidationError
 
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
-from eneo.assistants.api.assistant_models import AssistantBase, AssistantUpdatePublic
+from eneo.assistants.api.assistant_models import (
+    AssistantBase,
+    AssistantCreatePublic,
+    AssistantUpdatePublic,
+)
 from eneo.data_retention.constants import MAX_RETENTION_DAYS, MIN_RETENTION_DAYS
 from eneo.skills.presentation.skill_models import AssistantSkillBindingInput
+
+
+@pytest.mark.parametrize(
+    "field", ["completion_model", "completion_model_kwargs", "logging_enabled"]
+)
+def test_supported_update_fields_do_not_inherit_create_deprecation(field: str):
+    create = AssistantCreatePublic.model_json_schema()["properties"][field]
+    update = AssistantUpdatePublic.model_json_schema()["properties"][field]
+
+    assert create["deprecated"] is True
+    assert not update.get("deprecated", False)
+    assert "ignored" not in update.get("description", "")
 
 
 def test_assistant_base_coerces_db_null_to_default_kwargs():

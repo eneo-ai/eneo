@@ -666,12 +666,12 @@ async def _no_overdue() -> RetentionOverdue:
             None,
             False,
             True,
-            "degraded",
+            "disabled",
             {"disabled", "no_execution"},
             False,
         ),
         # The worker skipped it, whatever the API process's setting says.
-        (0, _SKIPPED, _OFF, None, True, False, "degraded", {"disabled"}, False),
+        (0, _SKIPPED, _OFF, None, True, False, "disabled", {"disabled"}, False),
         # The worker ran it although the API process has it turned off.
         (0, _OK, None, None, False, False, "healthy", set(), False),
         (0, _OK, None, None, True, False, "healthy", set(), False),
@@ -821,10 +821,15 @@ async def test_retention_health_reports_observation_gaps(
             now=_NOW,
             lease_stale_after=timedelta(hours=1),
         )
-    assert health.status is RetentionHealthStatus(expected)
+    # A task the operator switched off leaves the overall status out.
+    assert health.status is (
+        RetentionHealthStatus.HEALTHY
+        if expected == "disabled"
+        else RetentionHealthStatus(expected)
+    )
     assert len(health.tasks) == (2 if sibling_ran else 1)
     task = health.tasks[0]
-    assert task.name == _TASK and task.status == health.status
+    assert task.name == _TASK and task.status is RetentionHealthStatus(expected)
     assert {
         flag
         for flag in (

@@ -1,6 +1,4 @@
-"use client";
-
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId } from "react";
 import { useClientTimeText } from "@/components/composites/client-time";
 import { StatusLabel, type StatusTone } from "@/components/composites/status-label";
@@ -31,7 +29,7 @@ const STATUS: Record<
 /**
  * Whether the hourly scheduler ran recently and admitted every due website:
  * its state, when it last ran and what it did, with what to do when it is
- * not fine. The time shows after hydration (ClientTime).
+ * not fine. ClientTime uses the viewer's time zone.
  */
 export function SchedulerHealth({ scheduler }: { scheduler: CrawlerSchedulerHealth }) {
   const t = useTranslations();
@@ -47,9 +45,12 @@ export function SchedulerHealth({ scheduler }: { scheduler: CrawlerSchedulerHeal
         <StatusLabel status={status.tone} label={t(status.labelKey)} />
         {scheduler.status !== "unknown" ? (
           <>
-            <span className="text-ax-text-secondary">
-              {t("admin_crawler_scheduler_last_run", { time: lastRun ?? "—" })}
-            </span>
+            {/* A scheduler that never ran has no last run; its status already says so. */}
+            {lastRun ? (
+              <span className="text-ax-text-secondary">
+                {t("admin_crawler_scheduler_last_run", { time: lastRun })}
+              </span>
+            ) : null}
             {hasCounts ? (
               <span className="text-ax-text-secondary tabular-nums">
                 {t("admin_crawler_scheduler_counts", {

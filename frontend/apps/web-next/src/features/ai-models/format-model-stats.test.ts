@@ -66,6 +66,16 @@ describe("getDeprecationStatus", () => {
       date: "2026-06-01"
     });
   });
+
+  it("warns of a coming deprecation only from six months before it", () => {
+    const status = (date: string, today: string) =>
+      getDeprecationStatus({ deprecation_date: date }, today).kind;
+    expect(status("2026-07-02", "2026-01-01")).toBe("active");
+    expect(status("2026-07-01", "2026-01-01")).toBe("retiring");
+    // A day the month six months earlier lacks starts the warning on its last day.
+    expect(status("2026-08-31", "2026-02-27")).toBe("active");
+    expect(status("2026-08-31", "2026-02-28")).toBe("retiring");
+  });
 });
 
 describe("sortModels", () => {

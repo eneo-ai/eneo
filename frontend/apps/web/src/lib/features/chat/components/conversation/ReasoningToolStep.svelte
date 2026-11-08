@@ -7,7 +7,12 @@
 -->
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
-  import { Check, X, LoaderCircle, ChevronRight, RotateCcw, Hourglass } from "@lucide/svelte";
+  import Check from "@lucide/svelte/icons/check";
+  import X from "@lucide/svelte/icons/x";
+  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
+  import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
+  import Hourglass from "@lucide/svelte/icons/hourglass";
   import ToolCallDetailsPanel from "./ToolCallDetailsPanel.svelte";
   import type { ToolStepStatus as Status } from "../../toolStepStatus";
 

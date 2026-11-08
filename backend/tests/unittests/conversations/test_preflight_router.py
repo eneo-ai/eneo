@@ -8,11 +8,6 @@ import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from eneo.audit.infrastructure.rate_limiting import (
-    RateLimitExceededError,
-    RateLimitResult,
-    RateLimitServiceUnavailableError,
-)
 from eneo.conversations.application.conversation_service import ConversationService
 from eneo.conversations.conversation_models import (
     PreflightRequest,
@@ -20,6 +15,11 @@ from eneo.conversations.conversation_models import (
 )
 from eneo.conversations.conversations_router import preflight_tokens
 from eneo.questions.question import ToolAssistant, UseTools
+from eneo.redis.rate_limit import (
+    RateLimitExceededError,
+    RateLimitResult,
+    RateLimitServiceUnavailableError,
+)
 
 
 def _make_request() -> Request:
@@ -178,6 +178,7 @@ async def test_preflight_router_raises_429_on_rate_limit():
                 current_count=601,
                 max_requests=600,
                 window_seconds=60,
+                retry_after_seconds=23,
             )
         )
     )
@@ -200,7 +201,7 @@ async def test_preflight_router_raises_429_on_rate_limit():
 
     assert exc_info.value.status_code == 429
     assert exc_info.value.headers is not None
-    assert exc_info.value.headers["Retry-After"] == "60"
+    assert exc_info.value.headers["Retry-After"] == "23"
     service.preflight_tokens.assert_not_awaited()
 
 

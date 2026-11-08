@@ -6,7 +6,7 @@
 <script lang="ts">
   import type { Role } from "@eneo/eneo-js";
   import { invalidate } from "$app/navigation";
-  import { Search } from "@lucide/svelte";
+  import Search from "@lucide/svelte/icons/search";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import { Page } from "$lib/components/layout";
   import { toast } from "$lib/components/toast";

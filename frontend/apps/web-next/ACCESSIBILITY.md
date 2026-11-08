@@ -67,8 +67,8 @@ says "Radix" it means the legacy shadcn primitives in `src/components/ui`.
 - One `h1` per page, from `PageHeader`. Section headings follow in order (`h2`,
   then `h3`); pick the level for the outline and style with props or classes.
   `EmptyState` takes `headingLevel`.
-- Every route has a unique, translated title: `generateMetadata` from
-  `pageTitle("key")` (`src/lib/page-metadata.ts`) gives "Titel · Eneo".
+- Every route has a unique, translated title: `head: routeTitle("key")`
+  (`src/lib/route-head.ts`) gives "Titel · Eneo".
 - More than one `<nav>` on a page: give each a translated `aria-label`.
 - Lists are `<ul>`/`<ol>`, tables are `<table>` with `<th scope>`, never a grid
   of divs that looks like a table.
@@ -103,7 +103,17 @@ says "Radix" it means the legacy shadcn primitives in `src/components/ui`.
   docked chat composer, toolbars, toasts, cookie-style banners. Give the scroll
   container padding for them (`scroll-pt-*`, `scroll-pb-*` equal to the sticky
   element's height) so Tab and `focus()` scroll the element into the visible
-  part. Check by tabbing through a long list with the sticky UI present.
+  part. Check by tabbing through a long list with the sticky UI present. A
+  table's pinned column is sticky UI too: the Table wrapper moves a control
+  that takes focus under it out beside it. CSS cannot: the browser counts a
+  control under the pinned column as visible, so `scroll-margin` never
+  applies, and `scroll-padding` also moved the table when a pinned control
+  took focus.
+- A non-modal sheet over the page owns what it covers. The chat's activity
+  sheet (where the side panel cannot sit beside the answer) hides the dock
+  under it, pads the conversation's end and `scroll-padding` by its height so
+  the answer can be read and focused above it, and makes the rest it covers
+  `inert` (`ConversationLayout`'s `sheetOver`).
 - Toasts move themselves instead: while they would cover the focused element
   they rise just above it (`src/components/ui/toast-lift.ts`). A docked group
   that should stay clear as a whole while focus is anywhere in it (the chat
@@ -130,7 +140,7 @@ says "Radix" it means the legacy shadcn primitives in `src/components/ui`.
     (`pointer-coarse:min-h-11`).
 - axe's `target-size` rule in `tests/a11y.spec.ts` checks the 24 px minimum on
   real pages. It does not check the 44 px touch standard: that comes from the
-  theme overrides and `globals.css` (guarded by `src/app/globals-css.test.ts`)
+  theme overrides and `globals.css` (guarded by `src/styles/globals-css.test.ts`)
   and is checked by hand at phone width in the manual protocol.
 
 ### 5. Colour and contrast (1.4.1, 1.4.3, 1.4.11)
@@ -141,22 +151,30 @@ says "Radix" it means the legacy shadcn primitives in `src/components/ui`.
 - Text: `text-ax-text`, `-secondary` and `-tertiary` pass on every surface
   (`bg-ax-body`, `-surface`, `-card`, `-popover`, `-muted`, `-sunken`) and
   secondary also on hover, selected and pressed rows. Tertiary is not for
-  pressed states or hover/selected rows on the body background (the sidebar);
+  pressed or stacked states (selected and hovered), muted fills, or
+  hover/selected rows on the body, muted or sunken background (the sidebar);
   use secondary there. `text-ax-text-disabled` is only for disabled controls.
 - Don't lighten text or icons with opacity (`opacity-60`, `text-ax-text/70`);
   the test can't see alpha modifiers. Use the next token instead.
+  `src/test/a11y-source-guards.test.ts` fails on a new one; the few that stay
+  are listed there with the reason.
 - Form-control boundaries (inputs, selects, checkboxes, radios, switch tracks)
   use `border-ax-border-control` (3:1). Astryx controls and shadcn
   `border-input` get it from the theme. `border-ax-border` and
   `border-ax-border-strong` are decorative: dividers and container edges,
-  never the only boundary of a control.
+  never the only boundary of a control. A field sits on its row's plain
+  surface, never on a pressed, stacked or status tint: the border drops below
+  3:1 there.
 - Icons that carry meaning use `--color-icon-*` / `text-ax-*` status tokens;
   status dots come from `StatusLabel` / Astryx `StatusDot`.
 - Colour is never the only signal: statuses have text (`StatusLabel`), links
   in running text are underlined, errors have text and an icon, selection has
   a check mark or shape, charts have labels or a table.
-- Adding a colour token, or using one on a new surface? Add the pair to the
-  contrast test. Never lower a threshold; change the token.
+- The contrast test crosses every foreground token (found by name) with every
+  surface and state stack, so a new token is checked without a new pair. A
+  combination the app never paints goes in `src/theme/contrast-exemptions.ts`
+  with the reason; the test fails on an entry that is no longer needed. Never
+  lower a threshold; change the token.
 
 ### 6. Zoom, reflow and text spacing (1.3.4, 1.4.4, 1.4.10, 1.4.12)
 
@@ -176,6 +194,11 @@ says "Radix" it means the legacy shadcn primitives in `src/components/ui`.
 
 - `prefers-reduced-motion` is honoured app-wide (`globals.css`); don't defeat it
   with `!important` animations. Motion is decoration, never the message.
+- With reduced motion nothing moves or changes size. The one thing allowed is
+  an opacity-only fade of at most 200 ms: Astryx plays one on touch for its
+  layers, the SideNav rail and what a disclosure moves as it opens or closes,
+  and with a mouse changes at once.
+  `tests/motion.spec.ts` measures both.
 - Anything that moves, blinks or auto-updates for more than 5 seconds can be
   paused. Nothing flashes more than three times per second.
 
@@ -183,14 +206,22 @@ says "Radix" it means the legacy shadcn primitives in `src/components/ui`.
 
 - Every control has a visible label that is its accessible name (Astryx
   `label` prop, or `<Label htmlFor>`). The accessible name starts with the
-  visible text (2.5.3). A placeholder is a hint, never the label; controls
+  visible text (2.5.3): prefer naming a control by what it shows, with
+  `sr-only` words around it, over an `aria-label`; an `aria-label` holds the
+  shown words in their order, and words in separate spans have a space between
+  them. The page scans run axe's `label-content-name-mismatch`
+  (`AXE_PAGE_RULES` in `src/test/wcag.ts`); component tests use
+  `expectNameToHoldVisibleText` from `src/test/axe.ts`, since jsdom cannot run
+  that rule. A placeholder is a hint, never the label; controls
   without a visible label (search, the chat composer) get a translated
   `aria-label`.
 - Related controls are grouped: `<fieldset>` + `<legend>` or `role="group"`
   with `aria-labelledby` (radio groups, checkbox lists).
 - Instructions and formats come before the field (`description`,
-  `aria-describedby`). Required fields say so in text, not only with `*` or
-  colour.
+  `aria-describedby`). Required is the default and unmarked; an optional field
+  says "Valfritt" in its label: Astryx `isOptional` inside
+  `<FormLayout defaultOptionality="required">`, which also gives every other
+  field `aria-required`. Nothing is marked only with `*` or colour.
 - Personal data fields have `autoComplete` tokens (`email`, `name`,
   `username`, `current-password`, `new-password`, `one-time-code`; 1.3.5).
 - Errors (3.3.1, 3.3.3): on submit, show the error as text at the field (Astryx
@@ -225,7 +256,9 @@ says "Radix" it means the legacy shadcn primitives in `src/components/ui`.
   the file picker), reorderable lists have move up/down actions, resizable
   panels have buttons or keyboard resizing.
 - No path-based or multi-finger gestures without a single-tap alternative.
-  Actions fire on release (native buttons do this).
+  Actions fire on release (native buttons do this, and Astryx menus open and
+  pick on release too; `src/test/a11y-source-guards.test.ts` keeps out the
+  legacy Radix menu, which opened on press).
 
 ### 10. Status messages (4.1.3)
 
@@ -235,6 +268,9 @@ says "Radix" it means the legacy shadcn primitives in `src/components/ui`.
   element) or a toast from `@/lib/toast`. While a modal is open, the Toaster
   moves the live regions into it, because everything outside a modal is hidden
   from screen readers.
+- An `EmptyState` that appears after load reads itself out. Where a search
+  result count already says "Inga träffar", the empty state under it takes
+  `isAnnounced={false}`, so the result is read once.
 - Urgent errors that block the task use `role="alert"`, sparingly. Loading
   uses `LoadingState` (a `role="status"` region); don't announce every spinner.
 - Toasts come only from `@/lib/toast` (`no-restricted-imports` blocks `sonner`
@@ -263,9 +299,15 @@ says "Radix" it means the legacy shadcn primitives in `src/components/ui`.
   (start at `h3`).
 - Follow new tokens with scrolling only while the user is at the bottom; never
   move focus into new content. "Scroll to latest" is a named button.
-- The composer has a persistent translated accessible name, and the keyboard
-  hint (Enter sends, Shift+Enter adds a line) is visible or in its
-  description.
+- The composer has a persistent translated accessible name that starts with
+  the words of its placeholder ("Fråga {namn}"). Where the primary pointer is
+  a mouse or trackpad, Return sends and Shift+Return adds a line; on a touch
+  screen Return adds a line, so a half-written question is never sent by a
+  tap. ⌘ or Ctrl+Return and Send always send, and Return that commits an input
+  method's word never does. The hint is in the field's description, and the
+  keys show beside Send where there is a mouse or trackpad. Send is never disabled: an
+  empty draft or a full context is explained at the field (`aria-describedby`,
+  `aria-invalid`), announced with `useAnnounce`, and focus stays in the field.
 
 ### 11. Images and icons (1.1.1, 4.1.2)
 
@@ -281,9 +323,9 @@ says "Radix" it means the legacy shadcn primitives in `src/components/ui`.
 
 ### 12. Language (3.1.1, 3.1.2)
 
-- `<html lang>` follows the next-intl locale (root layout). All UI text,
+- `<html lang>` follows the use-intl locale (`src/main.tsx`). All UI text,
   including accessible names, alt text, titles and placeholders, comes from
-  next-intl (`eneo/no-hardcoded-text`, `eneo/no-literal-accessible-name`).
+  use-intl (`eneo/no-hardcoded-text`, `eneo/no-literal-accessible-name`).
   Swedish is the default; add every key to `sv` and `en`.
 - Text in another language than the page gets `lang`: language names in the
   language picker, quoted foreign text, and model output when its language is
@@ -294,7 +336,9 @@ says "Radix" it means the legacy shadcn primitives in `src/components/ui`.
 
 - Navigation, the profile menu and help (help center, support contact, the
   accessibility statement) sit in the same place and order on every page. The
-  shell owns them; screens don't add their own variants.
+  shell owns them; screens don't add their own variants. On a phone (below
+  768 px, or turned sideways) the drawer's profile row opens Konto, which holds what the profile menu holds
+  (decision 22): the same row, in the same place, on every page.
 - The same function has the same name and icon everywhere.
 
 ### 14. Dialogs, menus and popovers (1.4.13, 2.1.2, 2.4.3, 4.1.2)
@@ -305,24 +349,44 @@ says "Radix" it means the legacy shadcn primitives in `src/components/ui`.
   The legacy shadcn `Dialog` and `AlertDialog` in `src/components/ui` keep
   their API but render Astryx Dialog, and return focus to the menu button
   when a menu item opened them; the legacy Radix popups inside them (Select,
-  DropdownMenu, Popover, Tooltip) portal into the dialog. Toasts shown while
+  Popover, Tooltip) portal into the dialog. Toasts shown while
   any modal is open appear inside it, so they stay visible and announced.
 - Let the dialog place initial focus: the title (alert dialogs: Cancel). No
   `autoFocus`; it runs before `showModal()` and does nothing.
-- Menus are non-modal, the legacy shadcn `DropdownMenu` included (a modal
-  Radix menu hides the page with `aria-hidden`, which strips Astryx buttons of
-  their names). Menus that select something use radio or checkbox items so
-  the state is announced (see `ThemeSwitcher`).
+- Menus are Astryx `DropdownMenu` or `MoreMenu`: non-modal, opened on
+  release, with Enter, Space or ArrowDown, and Escape closes one back onto its
+  button. Menus that select something use radio or checkbox items so the
+  state is announced (see `ThemeSwitcher`).
 - Tooltips only repeat or supplement; essential information is never only in
   a tooltip. Hover and focus content can be dismissed with Esc and hovered.
 
 ### 15. Time limits and session expiry (2.2.1)
 
-- A password session ends when its token expires. Before any timeout that can
-  hit a user who is working, warn at least 20 seconds ahead and offer to
-  continue; where continuing is impossible, keep unsaved input (drafts) and
-  return the user to the same place after signing in (`next`).
+- A browser session ends when its token expires (`JWT_EXPIRY_TIME`; the
+  default 24 hours is beyond the 20 hours WCAG exempts, shorter deployments
+  are covered too). The session check names the seconds left
+  (`Eneo-Session-Expires-In`) and the seconds the session was issued for
+  (`Eneo-Session-Lifetime`), and `BrowserSessionBoundary` opens
+  `SessionExpiryDialog` **two minutes** before the end (WCAG asks for at least
+  20 seconds; two minutes is the UK government pattern). A session issued for
+  less than four minutes is warned for the last half of it, never less than
+  20 seconds, so staying signed in leaves time to work before the next
+  warning. A page opened with less than that left warns at once; a server
+  that does not name the lifetime gets the two minutes.
+- The dialog is a `purpose="form"` Astryx `Dialog`. Focus starts on
+  "Fortsätt vara inloggad" (the one thing to do, an exception to rule 14's
+  title focus), and Esc does the same. Staying renews the session
+  (`POST /api/v1/auth/session/extend/`, audited) as often as needed, up to 30
+  days after sign-in; other tabs follow the renewal. The visible countdown is
+  `aria-hidden`; `useAnnounce` says the time left at 60, 30 and 10 seconds.
+- If the time runs out, the page stays: the dialog says so and offers "Logga
+  in igen", back to the same page (`next`); Esc puts it away so the page can
+  be read and copied. Chat drafts are in `sessionStorage` and survive sign-in.
+  A request refused with 401 still goes to sign-in with `next` at once.
 - No other time limits on reading or acting.
+- Checked by `src/components/providers/session-expiry.test.tsx`,
+  `src/lib/api/refusal.test.ts`, `tests/session-expiry.spec.ts` and the open
+  dialog's scan in `tests/a11y.spec.ts`.
 
 ### 16. Name, role, value (4.1.2)
 
@@ -332,23 +396,52 @@ says "Radix" it means the legacy shadcn primitives in `src/components/ui`.
 - Ids are unique (`useId`), and `aria-*` references point at existing elements.
 - Don't add ARIA that native HTML already provides.
 
+## Phones and tablets (WCAG2Mobile)
+
+[Guidance on Applying WCAG 2.2 to Mobile Applications](https://www.w3.org/TR/wcag2mobile-22/)
+(WCAG2Mobile, a W3C draft note) is written for native apps. web-next is web
+content in a mobile browser, so WCAG 2.2 applies to it as it stands; the note
+is our list of what changes on a touch device. Where we stand on it:
+
+| Criterion                          | On a phone or tablet                                                   | Here                                                                                                                                                                       |
+| ---------------------------------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1.3.4 Orientation                  | All four orientations work, none is locked                             | No lock in the manifest or code; the contract checks phones turned (667 × 300, 844 × 390); at 844 × 390 a turned phone keeps its own layout (`tests/phone-turned.spec.ts`) |
+| 1.4.4 Resize text, 1.4.10 Reflow   | Larger system text, 320 px wide                                        | `tests/responsive-text-size.spec.ts` (200% text), the contract at 320 px                                                                                                   |
+| 1.4.12 Text spacing                | The reader's own line, letter, word and paragraph spacing              | `tests/responsive-text-size.spec.ts` applies the 1.4.12 values to every screen                                                                                             |
+| 2.4.11 Focus not obscured          | A bar fixed to the screen must not hide the focused control            | `DockedActions` publishes its height and the panel reserves it; toasts lift clear (rule 3)                                                                                 |
+| 2.5.1, 2.5.7 Gestures and dragging | Every swipe, pinch or drag has a single tap alternative                | Rule 9; no multi-finger or path gesture exists                                                                                                                             |
+| 2.5.2 Pointer cancellation         | An action runs on release, so a finger can slide off                   | Native buttons, links and Astryx menus; the few `pointerdown` listeners only track state (a drag handle starts a drag, keys too)                                           |
+| 2.5.3 Label in name                | Voice Control says what the control shows                              | Rule 8: the visible label is in the accessible name; the page scans run `label-content-name-mismatch`                                                                      |
+| 2.5.4 Motion actuation             | Nothing runs on shake or tilt                                          | No device-motion API is used; one that is added needs a button and a way to turn it off                                                                                    |
+| 2.5.8 Target size                  | 24 px is the AA floor                                                  | axe checks 24 px; we hold 44 px on a coarse pointer, measured by the contract                                                                                              |
+| 1.3.5, 3.3.7, 3.3.8 Forms          | Typing is costly: input purpose, autofill, paste and password managers | `autocomplete`, `inputMode` and `enterKeyHint` on the fields that take typed input (`KEYBOARD` presets); paste is not blocked (rule 8)                                     |
+| 4.1.3 Status messages              | A screen reader hears results without focus moving                     | Rule 10                                                                                                                                                                    |
+
+What stays with a person on a device: VoiceOver and TalkBack, Voice Control and
+Switch Control, the on-screen keyboard, and a real thumb (the manual protocol,
+below).
+
 ## How it is enforced
 
 Run from `frontend/apps/web-next`.
 
-| Check                                                | Catches                                                                       | Runs in                                          |
-| ---------------------------------------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------ |
-| ESLint `jsx-a11y` (strict set)                       | Static markup errors: click handlers on divs, autofocus, invalid ARIA, labels | `bun run lint`, CI "Frontend (web-next)"         |
-| ESLint `eneo/no-literal-accessible-name`             | Literal `aria-label`, `alt`, `title`, `placeholder`, Astryx `label`/`tooltip` | `bun run lint`, CI "Frontend (web-next)"         |
-| ESLint `eneo/no-weak-focus-indicator`                | Translucent focus rings (`ring-ring/50`), `outline-none` without replacement  | `bun run lint`, CI "Frontend (web-next)"         |
-| ESLint `eneo/no-busy-disabled-button`                | Controls that disable themselves while busy (focus drops to the page)         | `bun run lint`, CI "Frontend (web-next)"         |
-| ESLint `no-restricted-imports` (`sonner`)            | Toasts that bypass `@/lib/toast` (and its no-timeout rule for errors)         | `bun run lint`, CI "Frontend (web-next)"         |
-| ESLint `eneo/no-raw-color`, `eneo/no-hardcoded-text` | Raw colours, untranslated text                                                | `bun run lint`, CI "Frontend (web-next)"         |
-| `src/theme/eneo-theme.contrast.test.ts`              | Token pairs below 4.5:1 (text) or 3:1 (non-text), light and dark              | `bun run test`, CI "Frontend (web-next)"         |
-| Vitest + axe (`src/test/axe.ts`)                     | Component markup: names, roles, ARIA, labels, lists, landmarks                | `bun run test`, CI "Frontend (web-next)"         |
-| Playwright + axe (`tests/a11y.spec.ts`)              | Real pages in light and dark mode, incl. contrast and target size; skip link  | `bun run test:e2e`, CI "Frontend E2E (web-next)" |
-| Playwright CSP fixture (`tests/csp.ts`)              | Any `securitypolicyviolation` on a page an e2e test visits                    | `bun run test:e2e`, CI "Frontend E2E (web-next)" |
-| [Manual protocol](#manual-test-protocol)             | Everything else: focus order, announcements, zoom, reading experience         | Every PR that changes UI                         |
+| Check                                                | Catches                                                                                        | Runs in                                          |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| ESLint `jsx-a11y` (strict set)                       | Static markup errors: click handlers on divs, autofocus, invalid ARIA, labels                  | `bun run lint`, CI "Frontend (web-next)"         |
+| ESLint `eneo/no-literal-accessible-name`             | Literal `aria-label`, `alt`, `title`, `placeholder`, Astryx `label`/`tooltip`                  | `bun run lint`, CI "Frontend (web-next)"         |
+| ESLint `eneo/no-weak-focus-indicator`                | Translucent focus rings (`ring-ring/50`), `outline-none` without replacement                   | `bun run lint`, CI "Frontend (web-next)"         |
+| ESLint `eneo/no-busy-disabled-button`                | Controls that disable themselves while busy (focus drops to the page)                          | `bun run lint`, CI "Frontend (web-next)"         |
+| ESLint `no-restricted-imports` (`sonner`)            | Toasts that bypass `@/lib/toast` (and its no-timeout rule for errors)                          | `bun run lint`, CI "Frontend (web-next)"         |
+| ESLint `eneo/no-raw-color`, `eneo/no-hardcoded-text` | Raw colours, untranslated text                                                                 | `bun run lint`, CI "Frontend (web-next)"         |
+| `src/theme/eneo-theme.contrast.test.ts`              | Any token on any surface and state stack below 4.5:1 (text) or 3:1 (non-text), light and dark  | `bun run test`, CI "Frontend (web-next)"         |
+| `src/test/a11y-source-guards.test.ts`                | Text dimmed with `opacity-*` or a `text-*/NN` alpha the token test cannot see                  | `bun run test`, CI "Frontend (web-next)"         |
+| Vitest + axe (`src/test/axe.ts`)                     | Component markup: names, roles, ARIA, labels, lists, landmarks                                 | `bun run test`, CI "Frontend (web-next)"         |
+| Playwright + axe (`tests/a11y.spec.ts`)              | Real pages in light and dark mode, incl. contrast and target size; skip link                   | `bun run test:e2e`, CI "Frontend E2E (web-next)" |
+| `tests/contrast-incomplete.baseline.json`            | More text whose contrast axe could not judge (gradients, images, overlap) per scan than before | `bun run test:e2e`, CI "Frontend E2E (web-next)" |
+| `tests/contrast-probe.ts` (UI probe)                 | Text and controls under 4.5:1 or 3:1 where axe gives up, with hover, pressed and focus forced  | `bun run test:e2e`, CI "Frontend E2E (web-next)" |
+| `tests/selected-probe.ts` (UI probe)                 | A selected plate darker than its track in dark mode (colour-only cues: review)                 | `bun run test:e2e`, CI "Frontend E2E (web-next)" |
+| Playwright CSP fixture (`tests/csp.ts`)              | Any `securitypolicyviolation` on a page an e2e test visits                                     | `bun run test:e2e`, CI "Frontend E2E (web-next)" |
+| [Manual protocol](#manual-test-protocol)             | Everything else: focus order, announcements, zoom, reading experience                          | Every PR that changes UI                         |
 
 Both axe checks use the WCAG 2.2 A/AA tags from `src/test/wcag.ts`. Automated
 tools find only part of the problems; the manual protocol is not optional.
@@ -403,12 +496,20 @@ column that collapsed to its padding, which axe does not check (rule 6). It
 covers the public pages, the chat
 (start state, a docked conversation, the activity panel and sheet), the shell
 (catalog, collapsed rail, drawer, profile menu, ⌘K palette), spaces
-(overview, knowledge, websites, a collection, a create dialog) and admin, on
-desktop and at 390 × 844 with touch. One route is skipped with the reason in
+(overview, knowledge, websites, a collection, a create dialog; a space and the
+organisation space on a phone and an iPad either way) and admin, on desktop
+and at 390 × 844 with touch. One route is skipped with the reason in
 the spec: `/deactivated` (needs a suspended tenant). Add a route when you add
 a screen. Every e2e spec imports `test`/`expect` from `tests/csp.ts`, so a CSP
 violation fails the run. Locally, run it against a dev server with a seeded
 backend (see `playwright.config.ts`); in CI it runs on the isolated e2e stack.
+
+`tests/a11y-routes.spec.ts` runs axe on every route of the responsive route
+list (phone and iPad, both colour modes), `tests/keyboard-focus.spec.ts` walks
+the first 30 Tab stops of each (the skip link first; every stop must look
+different focused than blurred, 2.4.7), and `tests/responsive-text-size.spec.ts`
+checks 200% text and the 1.4.12 text spacing. A screen added to
+`tests/responsive-routes.ts` is covered by all of them.
 
 ## Manual test protocol
 
@@ -435,9 +536,42 @@ mode:
 6. **Forced colours.** Windows contrast themes, or Chrome DevTools → Rendering
    → "Emulate CSS forced-colors: active": focus, control borders, icons and
    selected states stay visible. A state shown only as a background tint needs
-   a `forced-colors:` fallback (border or outline).
+   a `forced-colors:` fallback (border or outline). `tests/forced-colors.spec.ts`
+   finds the mechanical case on every route: a control whose fill becomes the
+   page's colour and that has no border, and a legacy switch with no visible
+   state. Fix it once in `globals.css` section 10, not per page.
 
 Write what you checked in the PR's **Accessibility** section.
+
+### Real-device pass (about 30 minutes, before a release that changes touch layouts)
+
+The simulator and emulator cannot run VoiceOver or TalkBack, and a headless browser cannot
+show what a screen reader says. Use one iPhone (VoiceOver) and one Android phone (TalkBack),
+in Swedish, signed in to a test tenant with a space that has an assistant, an app, a
+knowledge collection and a flow.
+
+1. **Start.** Chat start screen: swipe right through everything. Order matches the picture,
+   every control says what it is ("Skicka, knapp"), the composer says it is a text field.
+2. **Navigate by headings** (VoiceOver rotor → Headings; TalkBack → Headings): a space, an
+   assistant editor and Settings each have one h1 and sensible h2s; no screen has two h1s.
+3. **A pushed screen.** Open an assistant editor from a list: the Back link reads "Tillbaka
+   till ...", focus lands on the new screen's heading, Back returns focus to the row.
+4. **A form dialog.** Create a space: the dialog is announced, focus is inside, swiping does
+   not reach the page behind, a required field says it is required, an error is read when
+   it appears (leave the name empty and submit), Cancel returns focus to the opener.
+5. **A bottom bar.** Anywhere with a docked action: it is reachable after the content, it is
+   not read twice, and the last row of the page is not hidden behind it.
+6. **A picker and a menu.** Open a model picker and a "More actions" menu: options are read
+   with their state ("vald"), Escape/Back closes them, focus returns.
+7. **Turn the phone** with a dialog open and something typed (sideways and back): the dialog
+   is still there, text and focus are kept, nothing is announced twice.
+8. **Text size.** Settings → Larger Text / Font size to the largest: the chat start, a
+   list, a settings index and a dialog still show every control; nothing is cut off.
+9. **Flows.** Start a run with the microphone: the permission prompt, "Spela in", pause and
+   resume are named, and the clock is not read every second. Review a run: Godkänn/Avvisa
+   are reachable at 320 px wide.
+10. **Write what you heard** in the PR's **Accessibility** section: device, OS version,
+    screen reader and anything that was announced wrongly, twice or not at all.
 
 ## Exceptions
 
@@ -468,5 +602,6 @@ that organisation's service.
 
 web-next links to it when `ACCESSIBILITY_STATEMENT_URL` is set (see
 [README](README.md#environment)): "Tillgänglighetsredogörelse" on the login
-page and in the profile menu. When the navigation changes, the link moves with
-it and stays in the same place on every page.
+page and in the profile menu, and on a phone on Konto, which the drawer's
+profile row opens. When the navigation changes, the link moves with it and
+stays in the same place on every page.

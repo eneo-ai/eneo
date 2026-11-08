@@ -227,12 +227,12 @@ async def test_reloading_chat_after_write_refreshes_a_retained_orm_identity(pers
         session = AsyncMock()
         session.execute.side_effect = sync_session.execute
         persisted.space_repo.session = session
-        old_rows = await persisted.space_repo._get_group_chats(persisted.space_id)
+        old_rows = await persisted.space_repo._get_group_chats([persisted.space_id])
         assert len(old_rows[0].group_chat_assistants) == 2
         await persisted.chat_repo.update(
             persisted.chat_id, persisted.space_id, members={}
         )
-        new_rows = await persisted.space_repo._get_group_chats(persisted.space_id)
+        new_rows = await persisted.space_repo._get_group_chats([persisted.space_id])
         assert new_rows[0] is old_rows[0]
         assert new_rows[0].group_chat_assistants == []
 

@@ -168,6 +168,8 @@ const onTintOverFill = (fg: string, tint: string, fill: string, min: number): Pa
 });
 
 const STATUS = ["success", "warning", "error"] as const;
+// Astryx status roles: the fills (status dots, badges) and their text roles.
+const STATUS_ROLES = ["info", ...STATUS] as const;
 // Eneo categorical hues plus the Neutral cyan/gray that Badge variants use.
 const HUES = ["blue", "teal", "purple", "orange", "pink", "green", "yellow", "red", "cyan", "gray"];
 
@@ -178,7 +180,8 @@ const GROUPS: Record<string, Pair[]> = {
       "--color-text-secondary",
       "--eneo-color-text-tertiary",
       "--color-text-accent",
-      ...STATUS.map((status) => `--color-${status}`)
+      ...STATUS.map((status) => `--color-${status}`),
+      ...STATUS_ROLES.map((status) => `--color-text-${status}`)
     ],
     ALL_SURFACES,
     TEXT
@@ -193,11 +196,7 @@ const GROUPS: Record<string, Pair[]> = {
   ],
   "on-colours on their fills (1.4.3)": [
     onFill("--color-on-accent", "--color-accent", TEXT),
-    ...STATUS.flatMap((status) => [
-      onFill(`--color-on-${status}`, `--color-${status}`, TEXT),
-      onFill(`--color-on-${status}`, `--astryx-theme-neutral-color-status-fill-${status}`, TEXT)
-    ]),
-    onFill("--color-on-accent", "--astryx-theme-neutral-color-status-fill-accent", TEXT)
+    ...STATUS_ROLES.map((status) => onFill(`--color-on-${status}`, `--color-${status}`, TEXT))
   ],
   // Legacy shadcn Button/Badge fills hover with the overlay painted over the
   // fill (bg-ax-hover-overlay, globals.css), never a faded fill: a 90% accent
@@ -210,6 +209,9 @@ const GROUPS: Record<string, Pair[]> = {
   "status and accent text on their muted fills (1.4.3)": [
     ...STATUS.flatMap((status) =>
       onTint(`--color-${status}`, `--color-${status}-muted`, RAISED, TEXT)
+    ),
+    ...STATUS_ROLES.flatMap((status) =>
+      onTint(`--color-on-${status}-muted`, `--color-${status}-muted`, RAISED, TEXT)
     ),
     ...onTint("--color-text-accent", "--color-accent-muted", RAISED, TEXT),
     ...onTint("--color-text-primary", "--color-accent-muted", RAISED, TEXT)
@@ -233,9 +235,7 @@ const GROUPS: Record<string, Pair[]> = {
     [
       "--color-icon-primary",
       "--color-icon-secondary",
-      ...(["accent", ...STATUS] as const).map(
-        (status) => `--astryx-theme-neutral-color-status-fill-${status}`
-      )
+      ...STATUS_ROLES.map((status) => `--color-${status}`)
     ],
     ALL_SURFACES,
     NON_TEXT
@@ -286,8 +286,46 @@ describe("form controls use the 3:1 control border", () => {
   });
 
   it("shadcn --input (border-input, the unchecked switch track)", () => {
-    const css = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
+    const css = readFileSync(new URL("../styles/globals.css", import.meta.url), "utf8");
     expect(css).toMatch(/--input:\s*var\(--eneo-color-border-control\);/);
+  });
+});
+
+// Segmented controls and the legacy tabs: the selected option is a plate on a
+// track (--color-neutral over the host). It is raised in both modes, lighter
+// than the track as the white plate is in light mode; in dark mode its 1px edge
+// (3:1) is what identifies it, and light mode marks it by the label's colour
+// and weight, as it always has.
+describe("selected segment (1.4.3, 1.4.11)", () => {
+  const PLATE = "--eneo-color-segment-selected";
+  const EDGE = "--eneo-color-segment-selected-edge";
+  const HOSTS: Surface[] = [...RAISED, "muted"];
+  const DARK = MODES[1];
+  const track = (host: Surface, mode: Mode) => over(color(SELECTED, mode), surface(host, mode));
+  const plate = (host: Surface, mode: Mode) => over(color(PLATE, mode), track(host, mode));
+
+  it.each(MODES)("labels read on the plate and on the track, $name mode", (mode) => {
+    for (const host of HOSTS) {
+      expect(
+        contrastRatio(color("--color-text-primary", mode), plate(host, mode))
+      ).toBeGreaterThanOrEqual(TEXT);
+      expect(
+        contrastRatio(color("--color-text-secondary", mode), track(host, mode))
+      ).toBeGreaterThanOrEqual(TEXT);
+    }
+  });
+
+  it.each(HOSTS)("is raised in dark mode, edged at 3:1 against the track, on %s", (host) => {
+    expect(luminance(plate(host, DARK))).toBeGreaterThan(luminance(track(host, DARK)));
+    expect(contrastRatio(color(EDGE, DARK), track(host, DARK))).toBeGreaterThanOrEqual(NON_TEXT);
+  });
+
+  it("is what the Astryx segmented control draws (the legacy tabs: tabs.test.tsx)", () => {
+    const item = (eneoTheme.components as Record<string, { selected?: Record<string, string> }>)[
+      "segmented-control-item"
+    ];
+    expect(item?.selected?.backgroundColor).toBe(`var(${PLATE})`);
+    expect(item?.selected?.boxShadow).toBe(`inset 0 0 0 1px var(${EDGE})`);
   });
 });
 

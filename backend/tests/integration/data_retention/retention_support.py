@@ -3,6 +3,7 @@
 from datetime import datetime
 from uuid import UUID
 
+import pytest
 from dependency_injector import providers
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from eneo.audit.domain.action_types import ActionType
 from eneo.data_retention.application.retention_runner import RetentionRunReport
 from eneo.data_retention.domain.retention import RetentionErrorCode
+from eneo.data_retention.infrastructure import retention_worker
 from eneo.data_retention.infrastructure.retention_worker import retention_runner
 from eneo.database.tables.audit_log_table import AuditLog
 from eneo.main.config import Settings, get_settings
@@ -43,6 +45,20 @@ async def run_registered_retention(
     session.expunge_all()
     await session.begin()
     return report
+
+
+async def run_nightly_retention(
+    monkeypatch: pytest.MonkeyPatch, worker_settings: Settings
+) -> None:
+    """Run the general worker's retention cron as ARQ calls it, in a worker
+    process configured by `worker_settings`; the API process keeps its own."""
+    from eneo.worker.arq import worker
+
+    monkeypatch.setattr(retention_worker, "get_settings", lambda: worker_settings)
+    [cron] = [
+        job for job in worker.cron_jobs if job.coroutine.__name__ == "run_retention"
+    ]
+    await cron.coroutine({})
 
 
 async def step_batches(

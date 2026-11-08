@@ -17,8 +17,9 @@ class SemanticSearchRequest(BaseModel):
     rerank: bool = Field(
         default=False,
         description="Rerank the candidates with the installation's default rerank "
-        "model. Reranked results carry the reranker's scores and autocut_cutoff "
-        "is ignored; without a usable rerank model the search runs as without "
+        "model. Reranked results carry the reranker's scores, chunks beyond the "
+        "model's max_candidates follow in vector order, and autocut_cutoff is "
+        "ignored; without a usable rerank model the search runs as without "
         "this flag.",
     )
 

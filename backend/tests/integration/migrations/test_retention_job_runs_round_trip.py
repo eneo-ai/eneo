@@ -20,7 +20,7 @@ from eneo.database.tables.sessions_table import Sessions
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
-PRE_REVISION = "202610011100"
+PRE_REVISION = "202611031206"
 REVISION = "202610071400"
 _TABLES = (RetentionJobRuns, Files, Questions, AppRuns, Sessions, InfoBlobReferences)
 _ADOPTER_INDEXES = frozenset(
@@ -139,10 +139,44 @@ def _tables(conn) -> set[str]:
         return {row[0] for row in cursor.fetchall()}
 
 
+def _stamp(conn) -> list[str]:
+    with conn.cursor() as cursor:
+        cursor.execute("SELECT version_num FROM alembic_version")
+        return [row[0] for row in cursor.fetchall()]
+
+
+def _other_schema(conn) -> set[tuple[str, str, str]]:
+    """Every column, index and constraint this revision does not own."""
+    owned = {"retention_job_runs", *_ADOPTER_INDEXES, *_OLD_INDEXES}
+    with conn.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT table_name, column_name,
+                   concat_ws(' ', data_type, is_nullable, column_default)
+            FROM information_schema.columns WHERE table_schema = 'public'
+            UNION ALL
+            SELECT tablename, indexname, indexdef
+            FROM pg_indexes WHERE schemaname = 'public'
+            UNION ALL
+            SELECT conrelid::regclass::text, conname, pg_get_constraintdef(oid)
+            FROM pg_constraint WHERE connamespace = 'public'::regnamespace
+            """
+        )
+        return {
+            row
+            for row in cursor.fetchall()
+            if row[0] not in owned and row[1] not in owned
+        }
+
+
 def test_downgrade_removes_them_and_upgrade_restores_them(round_trip_db):
     """Kills an incomplete upgrade, a mismatched index, a downgrade leaving the
-    table, or an error code the migrated CHECK refuses."""
+    table, an error code the migrated CHECK refuses, a downgrade that steps
+    past its parent or changes schema the revision does not own, or an
+    upgrade that does not restore the stamp."""
     conn, cfg, engine = round_trip_db
+    other = _other_schema(conn)
+    assert _stamp(conn) == [REVISION]
     assert _tables(conn) == {"retention_job_runs"}
     assert _actual(engine) == _declared()
     assert _actual(engine, frozenset(_OLD_INDEXES)) == {}
@@ -159,6 +193,8 @@ def test_downgrade_removes_them_and_upgrade_restores_them(round_trip_db):
     assert all(f"'{code.value}'" in error_codes for code in RetentionErrorCode)
 
     command.downgrade(cfg, PRE_REVISION)
+    assert _stamp(conn) == [PRE_REVISION]
+    assert _other_schema(conn) == other
     assert _tables(conn) == set()
     assert _actual(engine) == {}
     assert _actual(engine, frozenset(_OLD_INDEXES)) == {
@@ -166,6 +202,9 @@ def test_downgrade_removes_them_and_upgrade_restores_them(round_trip_db):
     }
 
     command.upgrade(cfg, REVISION)
+    assert _stamp(conn) == [REVISION]
+    assert _other_schema(conn) == other
+    assert _tables(conn) == {"retention_job_runs"}
     assert _actual(engine) == _declared()
     assert _actual(engine, frozenset(_OLD_INDEXES)) == {}
 

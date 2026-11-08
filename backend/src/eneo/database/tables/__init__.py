@@ -13,6 +13,7 @@ _TABLE_MODULES = (
     "eneo.database.tables.app_template_table",
     "eneo.database.tables.assistant_table",
     "eneo.database.tables.assistant_template_table",
+    "eneo.database.tables.browser_sessions_table",
     "eneo.database.tables.collections_table",
     "eneo.database.tables.completion_model_migration_history_table",
     "eneo.database.tables.feature_flag_table",
@@ -56,6 +57,9 @@ _TABLE_MODULES = (
     "eneo.database.tables.websites_spaces_table",
     "eneo.database.tables.websites_table",
     "eneo.database.tables.whats_new_table",
+    "eneo.database.tables.widget_templates_table",
+    "eneo.database.tables.widget_usage_table",
+    "eneo.database.tables.widgets_table",
     "eneo.database.tables.workflow_tables",
 )
 

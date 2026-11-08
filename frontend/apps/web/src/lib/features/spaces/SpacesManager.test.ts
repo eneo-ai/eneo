@@ -108,6 +108,53 @@ describe("SpacesManager.updateDefaultAssistant", () => {
   });
 });
 
+describe("SpacesManager.updateDefaultAssistantSkills", () => {
+  const skillBindings = [
+    { skill_id: "skill-1", skill_revision_id: "revision-1", activation_mode: "always" as const }
+  ];
+
+  it("saves the person's Skills after a pending model switch, and a send waits for both", async () => {
+    const calls: { args: unknown; done: Deferred<Record<string, unknown>> }[] = [];
+    const m = manager((args) => {
+      const done = deferred<Record<string, unknown>>();
+      calls.push({ args, done });
+      return done.promise;
+    });
+    const buildBindings = vi.fn(async () => skillBindings);
+
+    void m.updateDefaultAssistant({ completionModel: { id: "model-b" } });
+    const saved = m.updateDefaultAssistantSkills({ id: "assistant-1" }, buildBindings);
+    let settled = false;
+    void m.awaitDefaultAssistantUpdates().then(() => (settled = true));
+    await Promise.resolve();
+    expect(calls).toHaveLength(1);
+    // The list is built when its turn comes, from what is saved by then.
+    expect(buildBindings).not.toHaveBeenCalled();
+
+    calls[0].done.resolve({ id: "assistant-1", completion_model: modelB });
+    await vi.waitFor(() => expect(calls).toHaveLength(2));
+    expect(calls[1].args).toEqual({
+      assistant: { id: "assistant-1" },
+      update: { skill_bindings: skillBindings }
+    });
+    expect(settled).toBe(false);
+
+    calls[1].done.resolve({ id: "assistant-1", completion_model: modelB, name: "Saved" });
+    await saved;
+    await vi.waitFor(() => expect(settled).toBe(true));
+    expect(get(m.state.currentSpace).default_assistant).toMatchObject({ name: "Saved" });
+  });
+
+  it("rejects to the caller, which owns the rollback, and still settles the queue", async () => {
+    const m = manager(() => Promise.reject(new Error("refused")));
+
+    await expect(
+      m.updateDefaultAssistantSkills({ id: "assistant-1" }, async () => skillBindings)
+    ).rejects.toThrow("refused");
+    await m.awaitDefaultAssistantUpdates();
+  });
+});
+
 describe("SpacesManager.organizationSpaceId", () => {
   it("uses the current-space contract without needing organization membership and follows navigation", () => {
     const currentSpace = {

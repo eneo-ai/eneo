@@ -50,6 +50,7 @@ from eneo.mcp_servers.domain.capabilities import (
 from eneo.prompts.api.prompt_models import PromptCreate, PromptPublic
 from eneo.questions.question import ToolAssistant, UseTools
 from eneo.sessions.session import SessionInDB
+from eneo.skills.domain.skill import MAX_SKILL_ATTACHMENT_LIMIT
 from eneo.skills.presentation.skill_models import AssistantSkillBindingInput
 from eneo.users.user import UserSparse
 from eneo.websites.presentation.website_models import WebsitePublic
@@ -286,6 +287,9 @@ class AssistantUpdatePublic(AssistantCreatePublic):
         ),
     )
     prompt: Optional[PromptCreate] = None
+    completion_model: Optional[ModelId] = None
+    completion_model_kwargs: Optional[ModelKwargs] = None
+    logging_enabled: Optional[bool] = None
     attachments: Optional[list[AssistantAttachmentInput]] = None
     groups: Optional[list[ModelId]] = None  # type: ignore[assignment]
     websites: Optional[list[ModelId]] = None  # type: ignore[assignment]
@@ -356,7 +360,9 @@ class AssistantUpdatePublic(AssistantCreatePublic):
             "classification. Set to null to search in vector order only."
         ),
     )
-    skill_bindings: Optional[list[AssistantSkillBindingInput]] = None
+    skill_bindings: Optional[list[AssistantSkillBindingInput]] = Field(
+        default=None, max_length=MAX_SKILL_ATTACHMENT_LIMIT
+    )
 
 
 class AssistantCreate(AssistantBase):
@@ -436,6 +442,16 @@ class AssistantSparse(ResourcePermissionsMixin, AssistantBase, InDB):
     completion_model_id: Optional[UUID] = Field(
         default=None,
         description="ID of the completion model, or None if not configured",
+    )
+
+
+class AssistantWidgetStatus(BaseModel):
+    serves_active_widget: bool = Field(
+        description=(
+            "Whether an active web widget publishes this assistant to visitors. "
+            "Visitors get the assistant as configured, so changes to its MCP "
+            "servers and capabilities reach them immediately."
+        )
     )
 
 

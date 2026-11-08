@@ -16,6 +16,7 @@ from eneo.database import database
 from eneo.database.database import DatabaseSessionManager
 from eneo.main.config import Settings, get_settings
 from eneo.main.retention_tasks import (
+    EXISTING_WITHOUT_CHOICE,
     RetentionHealthCache,
     _read_retention_health,
     retention_task_registrations,
@@ -27,6 +28,54 @@ def test_retention_cron_is_registered():
     from eneo.worker.arq import worker
 
     assert "run_retention" in {job.coroutine.__name__ for job in worker.cron_jobs}
+
+
+def test_registered_tasks_replace_the_removal_crons():
+    """Mutants: a cron that deleted conversations, empty sessions or unused files
+    runs again beside the task that replaced it; the widget's own nightly job,
+    which the engine leaves widget conversations to, is dropped."""
+    from eneo.worker.arq import worker
+
+    crons = {job.coroutine.__name__ for job in worker.cron_jobs}
+    registered = {
+        registration.name
+        for registration in retention_task_registrations(get_settings())
+    }
+
+    assert crons.isdisjoint(
+        {"cleanup_old_data", "purge_old_conversations", "delete_unused_files"}
+    )
+    assert "purge_widget_sessions" in crons
+    assert registered == {
+        "conversations.history",
+        "sessions.empty",
+        "files.unused",
+        "retention.jobs",
+    }
+
+
+def test_only_listed_removals_run_without_a_choice():
+    """Mutants: a new task is on by default without being listed among the
+    removals that run without a choice; a listed removal loses its operator
+    switch, or its default changes."""
+    defaults = Settings.model_fields
+    on_by_default = {
+        registration.name
+        for registration in retention_task_registrations(get_settings())
+        if registration.enabled
+    }
+
+    # Conversation history removes only what an assistant, app, space or
+    # organisation period selects; with none set it keeps everything.
+    assert on_by_default == {"conversations.history", *EXISTING_WITHOUT_CHOICE}
+    for task, switch in EXISTING_WITHOUT_CHOICE.items():
+        assert defaults[switch].default is True
+        switched_off = get_settings().model_copy(update={switch: False})
+        assert [
+            registration.enabled
+            for registration in retention_task_registrations(switched_off)
+            if registration.name == task
+        ] == [False]
 
 
 def test_registrations_match_their_tasks():
