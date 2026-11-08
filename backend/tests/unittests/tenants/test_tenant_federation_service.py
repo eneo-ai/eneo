@@ -11,7 +11,11 @@ from eneo.main.config import Settings
 from eneo.tenants.masking import looks_masked
 from eneo.tenants.tenant import TenantInDB, TenantState
 from eneo.tenants.tenant_federation_service import (
+    PatchFederationRequest,
+    SetFederationRequest,
     TenantAdminFederationPatch,
+    _build_full_federation_config,
+    _merge_federation_config,
     build_admin_view,
     federation_changes,
     federation_revision,
@@ -134,6 +138,8 @@ class TestTenantAdminPatch:
             "email_claim",
             "claims_mapping",
             "token_endpoint_auth_method",
+            "signing_algorithms",
+            "email_verified_claims",
             "tenant_id",
         ],
     )
@@ -256,3 +262,70 @@ class TestAdminView:
         assert view.configured is False
         assert view.revision is None
         assert view.client_secret_set is False
+
+
+class TestOperatorProviderKeys:
+    """The operator may name the provider's signing algorithms and the claims
+    that say an email is verified; absent keys keep the built-in defaults."""
+
+    BODY = {
+        "provider": "example",
+        "discovery_endpoint": "https://idp.example/.well-known/openid-configuration",
+        "client_id": "eneo-client",
+        "client_secret": "operator-secret",
+    }
+
+    def _put(self, **keys: object) -> dict[str, object]:
+        return _build_full_federation_config(
+            SetFederationRequest.model_validate({**self.BODY, **keys}),
+            encrypted_secret=CIPHERTEXT,
+            discovery_metadata={},
+        )
+
+    def test_absent_keys_are_not_stored(self):
+        config = self._put()
+
+        assert "signing_algorithms" not in config
+        assert "email_verified_claims" not in config
+
+    def test_given_keys_are_stored(self):
+        config = self._put(
+            signing_algorithms=["ES256", "RS256"],
+            email_verified_claims=["email_verified"],
+        )
+
+        assert config["signing_algorithms"] == ["ES256", "RS256"]
+        assert config["email_verified_claims"] == ["email_verified"]
+
+    @pytest.mark.parametrize(
+        "keys",
+        [
+            {"signing_algorithms": []},
+            {"signing_algorithms": ["HS256"]},
+            {"signing_algorithms": ["none"]},
+            {"signing_algorithms": ["RS256", "HS256"]},
+            {"email_verified_claims": []},
+            {"email_verified_claims": [""]},
+        ],
+    )
+    def test_refuses_keys_that_weaken_or_empty_the_check(self, keys: dict[str, object]):
+        with pytest.raises(ValidationError):
+            SetFederationRequest.model_validate({**self.BODY, **keys})
+
+    def test_patch_sets_and_null_clears(self):
+        stored = _config(signing_algorithms=["RS256"])
+
+        def patch(**keys: object) -> dict[str, object]:
+            request = PatchFederationRequest.model_validate(keys)
+            return _merge_federation_config(
+                stored,
+                request.model_dump(exclude_unset=True),
+                encrypted_secret=None,
+                discovery_metadata=None,
+            )
+
+        assert patch(email_verified_claims=["xms_edov"])["email_verified_claims"] == [
+            "xms_edov"
+        ]
+        assert "signing_algorithms" not in patch(signing_algorithms=None)
+        assert patch(client_id="other")["signing_algorithms"] == ["RS256"]

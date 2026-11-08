@@ -39,6 +39,8 @@ from eneo.authentication.login_attempts import (
     clear_login_attempts,
     count_login_attempt,
 )
+from eneo.authentication.oidc.profile import SIGNING_ALGORITHM_ALLOWLIST
+from eneo.authentication.oidc_resource_server import get_federation_signing_key
 from eneo.main import config
 from eneo.main.aiohttp_client import aiohttp_client
 from eneo.main.config import serialize_origin, validate_public_origin
@@ -617,7 +619,12 @@ async def login_with_mobilityguard(
 
     token_endpoint = endpoints["token_endpoint"]
     jwks_endpoint = endpoints["jwks_uri"]
-    signing_algos = endpoints["id_token_signing_alg_values_supported"]
+    # The same floor as every other sign-in: never a symmetric algorithm or none.
+    signing_algos = [
+        algorithm
+        for algorithm in endpoints["id_token_signing_alg_values_supported"]
+        if algorithm in SIGNING_ALGORITHM_ALLOWLIST
+    ]
 
     # Exchange code for a token
     token_exchange_start = time.time()
@@ -730,8 +737,17 @@ async def login_with_mobilityguard(
     )
 
     try:
-        jwks_client = jwt.PyJWKClient(jwks_endpoint)
-        signing_key = jwks_client.get_signing_key_from_jwt(id_token)
+        # The shared async cache, as for every other sign-in: a blocking
+        # download here would stall the event loop for all requests.
+        kid = jwt.get_unverified_header(id_token).get("kid")
+        if not isinstance(kid, str) or not kid:
+            raise ValueError("ID token names no signing key")
+        signing_key = await get_federation_signing_key(
+            issuer=endpoints.get("issuer") or "",
+            jwks_uri=jwks_endpoint,
+            kid=kid,
+            ttl_seconds=settings.oidc_jwks_cache_ttl_seconds,
+        )
         jwks_time = time.time() - jwks_start
 
         logger.debug(
@@ -771,6 +787,7 @@ async def login_with_mobilityguard(
             access_token=access_token,
             key=signing_key,
             signing_algos=signing_algos,
+            issuer=endpoints.get("issuer"),
             correlation_id=correlation_id,  # Pass correlation ID to service
         )
         service_time = time.time() - service_start

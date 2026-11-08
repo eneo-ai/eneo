@@ -19,6 +19,14 @@ from eneo.users.user_repo import UsersRepository
 from eneo.users.user_service import UserService
 from tests.fixtures import TEST_TENANT, TEST_USER
 
+ISSUER = "https://idp.example.org"
+
+
+def identity_of(claims: dict[str, object], **mapping: str) -> FederatedIdentity:
+    return FederatedIdentity.from_claims(
+        claims, issuer=ISSUER, client_id="client", **mapping
+    )
+
 
 class UsersInMemory:
     def __init__(self, tenant: TenantInDB, users: Sequence[UserInDB] = ()):
@@ -131,7 +139,7 @@ async def sign_in(
     )
     if entrypoint == "federation":
         user, created = await service.resolve_federated_user(
-            identity=FederatedIdentity.from_claims(claims),
+            identity=identity_of(claims),
             tenant_id=tenant.id,
             allowed_domains=domains,
             correlation_id="admission-test",
@@ -153,6 +161,7 @@ async def sign_in(
             access_token="access-token",
             key=SimpleNamespace(key="signing-key"),
             signing_algos=["RS256"],
+            issuer=ISSUER,
             correlation_id="admission-test",
         )
         assert token == AccessToken(access_token=str(user.id), token_type="bearer")
@@ -174,6 +183,7 @@ def existing_user(tenant: TenantInDB, **updates: object) -> UserInDB:
 
 
 CLAIMS: dict[str, object] = {
+    "iss": ISSUER,
     "sub": "subject",
     "email": "user@example.com",
     "email_verified": True,
@@ -307,9 +317,7 @@ async def test_jit_rejects_a_negative_or_missing_entra_domain_verification(
 
 def test_entra_domain_verification_does_not_override_an_explicit_negative():
     with pytest.raises(ValueError, match="not verified"):
-        FederatedIdentity.from_claims(
-            {**CLAIMS, "email_verified": False, "xms_edov": True}
-        )
+        identity_of({**CLAIMS, "email_verified": False, "xms_edov": True})
 
 
 @pytest.mark.parametrize("email_verified", ["false", "0", 0, "", "yes", 2, "true1"])
@@ -319,7 +327,7 @@ async def test_entra_domain_verification_is_only_a_fallback_for_a_missing_claim(
     """A sent email_verified keeps its own verdict; xms_edov never overrides
     a negative or unrecognised value, only fills in for an absent one."""
     claims = {**CLAIMS, "email_verified": email_verified, "xms_edov": True}
-    assert FederatedIdentity.from_claims(claims).email_verified is False
+    assert identity_of(claims).email_verified is False
     users = UsersInMemory(tenant)
     with pytest.raises(FederatedLoginDenied, match="verified email"):
         await sign_in(monkeypatch, tenant, users, claims, ["example.com"], entrypoint)
@@ -327,9 +335,7 @@ async def test_entra_domain_verification_is_only_a_fallback_for_a_missing_claim(
 
 
 def test_entra_domain_verification_fills_in_for_a_null_claim():
-    identity = FederatedIdentity.from_claims(
-        {**CLAIMS, "email_verified": None, "xms_edov": True}
-    )
+    identity = identity_of({**CLAIMS, "email_verified": None, "xms_edov": True})
     assert identity.email_verified is True
 
 
@@ -367,7 +373,12 @@ async def test_existing_scim_member_can_sign_in_without_jit_requirements(
     tenant.provisioning = False
     member = existing_user(tenant)
     users = UsersInMemory(tenant, [member])
-    claims = {"sub": "subject", "email": member.email, "email_verified": verified}
+    claims = {
+        "iss": ISSUER,
+        "sub": "subject",
+        "email": member.email,
+        "email_verified": verified,
+    }
     user, created, audit = await sign_in(
         monkeypatch, tenant, users, claims, [], entrypoint
     )
@@ -438,9 +449,10 @@ async def test_inactive_tenant_cannot_admit_users(
 def test_verification_must_cover_the_selected_email(
     mapped_email, verified, verification_claim
 ):
-    claims = {"sub": "subject", "email": CLAIMS["email"], "mail": mapped_email}
+    claims = {**CLAIMS, "mail": mapped_email}
+    claims.pop("email_verified")
     claims[verification_claim] = verified
-    identity = FederatedIdentity.from_claims(claims, email_claim="mail")
+    identity = identity_of(claims, email_claim="mail")
     assert identity.email_verified is (mapped_email == CLAIMS["email"])
 
 
@@ -460,8 +472,9 @@ async def test_explicitly_unverified_email_is_rejected_before_account_admission(
 
 
 def test_custom_directory_claim_is_not_rejected_by_unrelated_email_verification():
-    identity = FederatedIdentity.from_claims(
+    identity = identity_of(
         {
+            "sub": "subject",
             "email": "unverified@external.example",
             "email_verified": False,
             "upn": "employee@municipality.example",
@@ -475,7 +488,7 @@ def test_custom_directory_claim_is_not_rejected_by_unrelated_email_verification(
 @pytest.mark.parametrize("email", [None, 123, "", "invalid", "user@", "@example.com"])
 def test_invalid_email_is_rejected_before_account_admission(email):
     with pytest.raises(ValueError):
-        FederatedIdentity.from_claims({"email": email, "email_verified": True})
+        identity_of({"email": email, "email_verified": True})
 
 
 def test_global_oidc_domain_configuration_is_resolved(test_settings, monkeypatch):

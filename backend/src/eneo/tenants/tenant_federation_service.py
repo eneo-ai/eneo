@@ -28,6 +28,10 @@ from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.oidc.profile import (
+    DEFAULT_SCOPES,
+    SIGNING_ALGORITHM_ALLOWLIST,
+)
 from eneo.main.config import (
     Settings,
     get_settings,
@@ -49,7 +53,6 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-DEFAULT_FEDERATION_SCOPES = ["openid", "email", "profile"]
 DEFAULT_CLAIMS_MAPPING = {
     "email": "email",
     "username": "sub",
@@ -117,6 +120,23 @@ class FederationRequestBase(BaseModel):
         ),
         examples=[["https://qwerty.sundsvall.se/api/eneo/login/callback"]],
     )
+    signing_algorithms: list[str] | None = Field(
+        None,
+        description=(
+            "ID token signing algorithms to accept. Omitted: the ones the "
+            "provider's discovery lists, else RS256. Symmetric algorithms and "
+            "'none' are refused."
+        ),
+        examples=[["RS256", "ES256"]],
+    )
+    email_verified_claims: list[str] | None = Field(
+        None,
+        description=(
+            "Claims that say the email is verified, in order; the first one "
+            "present decides. Omitted: ['email_verified', 'xms_edov']."
+        ),
+        examples=[["email_verified"]],
+    )
 
     @field_validator("client_secret")
     @classmethod
@@ -155,6 +175,31 @@ class FederationRequestBase(BaseModel):
             return None
         validated = [validate_redirect_uri(uri) for uri in value]
         return [uri for uri in validated if uri is not None]
+
+    @field_validator("signing_algorithms")
+    @classmethod
+    def validate_signing_algorithms(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        refused = sorted(set(value) - SIGNING_ALGORITHM_ALLOWLIST)
+        if not value or refused:
+            raise ValueError(
+                "signing_algorithms must name at least one of "
+                f"{sorted(SIGNING_ALGORITHM_ALLOWLIST)}"
+            )
+        return list(dict.fromkeys(value))
+
+    @field_validator("email_verified_claims")
+    @classmethod
+    def validate_email_verified_claims(
+        cls, value: list[str] | None
+    ) -> list[str] | None:
+        if value is None:
+            return None
+        claims = [claim.strip() for claim in value]
+        if not claims or not all(claims):
+            raise ValueError("email_verified_claims must name at least one claim")
+        return claims
 
 
 class SetFederationRequest(FederationRequestBase):
@@ -420,7 +465,7 @@ def build_admin_view(
         allowed_domains=_texts(config.get("allowed_domains")),
         redirect_uris=redirect_uris,
         redirect_uris_problem=redirect_problem,
-        scopes=_texts(config.get("scopes", DEFAULT_FEDERATION_SCOPES)),
+        scopes=_texts(config.get("scopes", list(DEFAULT_SCOPES))),
         token_endpoint_auth_method=_text(config.get("token_endpoint_auth_method")),
         revision=federation_revision(config),
         configured_at=secret_updated_at or tenant.updated_at,
@@ -578,7 +623,7 @@ def _build_full_federation_config(
         "discovery_endpoint": request.discovery_endpoint,
         "client_id": request.client_id,
         "client_secret": encrypted_secret,
-        "scopes": DEFAULT_FEDERATION_SCOPES.copy(),
+        "scopes": list(DEFAULT_SCOPES),
         "allowed_domains": request.allowed_domains,
         "claims_mapping": DEFAULT_CLAIMS_MAPPING.copy(),
         "encrypted_at": datetime.now(timezone.utc).isoformat(),
@@ -593,6 +638,13 @@ def _build_full_federation_config(
 
     if request.additional_redirect_uris is not None:
         federation_config["additional_redirect_uris"] = request.additional_redirect_uris
+
+    # Stored only when given: an absent key keeps the built-in default.
+    if request.signing_algorithms is not None:
+        federation_config["signing_algorithms"] = request.signing_algorithms
+
+    if request.email_verified_claims is not None:
+        federation_config["email_verified_claims"] = request.email_verified_claims
 
     return federation_config
 
@@ -618,6 +670,8 @@ def _merge_federation_config(
         "canonical_public_origin",
         "redirect_path",
         "additional_redirect_uris",
+        "signing_algorithms",
+        "email_verified_claims",
     ):
         if field not in updates:
             continue
@@ -634,7 +688,7 @@ def _merge_federation_config(
     if discovery_metadata is not None:
         merged.update(discovery_metadata)
 
-    merged.setdefault("scopes", DEFAULT_FEDERATION_SCOPES.copy())
+    merged.setdefault("scopes", list(DEFAULT_SCOPES))
     merged.setdefault("claims_mapping", DEFAULT_CLAIMS_MAPPING.copy())
     merged.setdefault("allowed_domains", [])
 

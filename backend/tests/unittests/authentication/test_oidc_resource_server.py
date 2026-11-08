@@ -530,3 +530,22 @@ async def test_idp_access_token_must_include_expiry(setup):
     )
     with pytest.raises(AuthenticationException):
         await setup.service.authenticate(token=token)
+
+
+@pytest.mark.asyncio
+async def test_the_token_identity_reaches_account_admission(setup, monkeypatch):
+    seen = []
+    admit = UserService.resolve_federated_user
+
+    async def spy(self, *, identity, **kwargs):
+        seen.append(identity)
+        return await admit(self, identity=identity, **kwargs)
+
+    monkeypatch.setattr(UserService, "resolve_federated_user", spy)
+
+    await setup.service.authenticate(token=_make_idp_token(setup.private_pem, "kid-a"))
+
+    (identity,) = seen
+    assert (identity.issuer, identity.subject) == (ISSUER, "idp-subject-id")
+    # The API audience does not say which client signed the person in.
+    assert identity.client_id is None

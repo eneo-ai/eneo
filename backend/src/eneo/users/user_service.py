@@ -591,6 +591,7 @@ class UserService:
         access_token: str,
         key: jwt.PyJWK,
         signing_algos: list[str],
+        issuer: str | None,
         correlation_id: str | None = None,
     ):
         correlation_id = correlation_id or "no-correlation-id"
@@ -624,7 +625,13 @@ class UserService:
 
             if not isinstance(payload.get("sub"), str) or not payload["sub"]:
                 raise ValueError("ID token is missing its subject")
-            identity = FederatedIdentity.from_claims(payload)
+            # A provider may sign for many customers with one key set, so a
+            # valid signature does not prove the token is from this provider.
+            if not issuer or payload.get("iss") != issuer:
+                raise ValueError("ID token is not from the configured issuer")
+            identity = FederatedIdentity.from_claims(
+                payload, issuer=issuer, client_id=client_id
+            )
 
         except jwt.ExpiredSignatureError as e:
             logger.error(
@@ -831,8 +838,12 @@ class UserService:
             token, auth_service=self.auth_service, correlation_id=correlation_id
         )
 
+        settings = get_settings()
         try:
-            identity = FederatedIdentity.from_claims(payload)
+            # validate_idp_access_token checked iss against this setting.
+            identity = FederatedIdentity.from_claims(
+                payload, issuer=cast(str, settings.oidc_accepted_issuer)
+            )
         except ValueError as exc:
             logger.warning(
                 "IdP access token has no usable email claim",
@@ -853,7 +864,7 @@ class UserService:
         federation_config = tenant.federation_config or {}
         allowed_domains = (
             cast("list[str] | None", federation_config.get("allowed_domains"))
-            or get_settings().oidc_allowed_domains
+            or settings.oidc_allowed_domains
         )
 
         try:

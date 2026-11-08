@@ -56,6 +56,7 @@ from eneo.authentication.federation_router import (
     auth_callback,
     initiate_auth,
 )
+from eneo.authentication.oidc.errors import OidcSignInError
 from eneo.main.config import (
     LOOPBACK_HOSTS,
     get_settings,
@@ -333,8 +334,9 @@ def _http_federation_failure(
     *,
     next_path: str | None = None,
     raw_detail: str | None = None,
+    detail_code: str | None = None,
 ) -> RedirectResponse:
-    code = {403: "access_denied", 401: "unauthorized"}.get(
+    code = detail_code or {403: "access_denied", 401: "unauthorized"}.get(
         status_code, f"http_{status_code}"
     )
     return _federation_failure(
@@ -401,6 +403,8 @@ async def initiate_browser_federation(
             return _http_federation_failure(
                 exc.status_code, (exc.headers or {}).get("X-Correlation-ID")
             )
+        except OidcSignInError as exc:
+            return _federation_failure(exc.code, ensure_correlation_id())
         response = RedirectResponse(
             result.authorization_url,
             status_code=303,
@@ -421,6 +425,8 @@ async def initiate_browser_federation(
 class _CallbackFailure:
     next_path: str | None = None
     public_detail: str | None = None
+    # A typed sign-in refusal's string code, which names it better than its status.
+    detail_code: str | None = None
 
 
 class _BrowserCallbackRoute(APIRoute):
@@ -453,6 +459,7 @@ class _BrowserCallbackRoute(APIRoute):
                         headers.get("X-Correlation-ID"),
                         next_path=diagnostics.next_path,
                         raw_detail=diagnostics.public_detail,
+                        detail_code=diagnostics.detail_code,
                     )
                     message = {
                         "type": "http.response.start",
@@ -531,6 +538,7 @@ async def complete_browser_federation(
     code: str | None = None,
     state: str | None = None,
     error: str | None = None,
+    iss: str | None = None,
 ) -> Response:
     settings = get_settings()
     transaction = transaction_cookie(request, settings)
@@ -574,11 +582,16 @@ async def complete_browser_federation(
     if not code:
         return _federation_failure("no_code_received", next_path=diagnostics.next_path)
     try:
-        token = await auth_callback(CallbackRequest(code=code, state=state), container)
+        token = await auth_callback(
+            CallbackRequest(code=code, state=state, iss=iss), container
+        )
     except HTTPException as exc:
         diagnostics.public_detail = exc.detail
         # The function-scoped transaction must roll back before the ASGI owner
         # turns the public HTTP failure into a redirect.
+        raise
+    except OidcSignInError as exc:
+        diagnostics.detail_code = exc.code
         raise
     session_token = await container.browser_session_service().start(
         token["access_token"], replacing=session_cookie(request, settings)

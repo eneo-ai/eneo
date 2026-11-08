@@ -1,6 +1,7 @@
 import os
 from typing import TYPE_CHECKING, Optional, cast
 
+from eneo.authentication.oidc.profile import DEFAULT_SCOPES
 from eneo.main.config import (
     Settings,
     get_settings,
@@ -391,7 +392,7 @@ class CredentialResolver:
                     "client_secret": self.settings.oidc_client_secret,
                     "tenant_id": self.settings.oidc_tenant_id,
                     "allowed_domains": self.settings.oidc_allowed_domains,
-                    "scopes": ["openid", "email", "profile"],
+                    "scopes": list(DEFAULT_SCOPES),
                 }
 
                 logger.info(

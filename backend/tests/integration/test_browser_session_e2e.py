@@ -45,7 +45,7 @@ from eneo.server.dependencies.container import get_user_from_websocket
 from eneo.server.websockets import websocket_router
 from eneo.users.user import UserState
 from tests.integration.test_federation_tenant_admin import (
-    _discovery,
+    SECRET,
     _idp,
     _register,
 )
@@ -596,26 +596,17 @@ async def test_a_session_that_cannot_be_recorded_sends_no_cookie(
 async def federated_callback(
     client,
     super_admin_token,
-    oidc_mock,
-    jwks_mock,
+    fake_idp,
     db_container,
     test_tenant,
-    monkeypatch,
 ):
     """Run one browser SSO sign-in of test@example.com; returns the callback."""
     idp = _idp("browser")
-    oidc_mock(
-        discovery=_discovery(idp),
-        tokens={
-            (idp["token_endpoint"], code): {"id_token": "id", "access_token": "at"}
-            for code in ("code-1", "code-2")
-        },
-    )
-    jwks_mock()
-    monkeypatch.setattr(
-        AuthService,
-        "get_payload_from_openid_jwt",
-        lambda self, **kwargs: {"email": "test@example.com", "email_verified": True},
+    provider = fake_idp(
+        issuer=idp["issuer"],
+        client_id="operator-client",
+        client_secret=SECRET,
+        token_claims={"email": "test@example.com"},
     )
     await _register(
         client,
@@ -627,18 +618,20 @@ async def federated_callback(
     async with db_container() as container:
         slug = await container.tenant_repo().generate_slug_for_tenant(test_tenant.id)
 
-    async def callback(code: str):
+    async def callback():
         initiated = await client.get(
             "/api/v1/auth/browser/initiate",
             params={"tenant": slug, "next": "/dashboard"},
             headers=SAME_ORIGIN,
         )
         assert initiated.status_code == 303, initiated.text
-        [state] = parse_qs(urlsplit(initiated.headers["location"]).query)["state"]
+        location = initiated.headers["location"]
+        [state] = parse_qs(urlsplit(location).query)["state"]
+        answer = provider.authorize(location)
         [txn] = initiated.headers.get_list("set-cookie")
         return await client.get(
             "/login/callback",
-            params={"code": code, "state": state},
+            params={"code": answer.code, "state": state},
             headers={"Cookie": txn.split(";", 1)[0], "Sec-Fetch-Site": "cross-site"},
         )
 
@@ -663,8 +656,8 @@ async def test_federated_browser_sign_in_records_a_session(
     federated_callback,
     test_tenant,
 ):
-    async def sign_in(code: str) -> dict:
-        callback = await federated_callback(code)
+    async def sign_in() -> dict:
+        callback = await federated_callback()
         assert callback.status_code == 303, callback.text
         assert callback.headers["location"] == "/dashboard"
         [session] = _session_cookies(callback)
@@ -675,8 +668,8 @@ async def test_federated_browser_sign_in_records_a_session(
         assert me.status_code == 200, me.text
         return _claims(token)
 
-    first = await sign_in("code-1")
-    second = await sign_in("code-2")
+    first = await sign_in()
+    second = await sign_in()
 
     assert first["sid"] != second["sid"]
     assert first["auth_method"] is None
@@ -694,7 +687,7 @@ async def test_a_federated_session_that_cannot_be_recorded_sends_no_cookie(
     federated_callback,
     monkeypatch,
 ):
-    [session] = _session_cookies(await federated_callback("code-1"))
+    [session] = _session_cookies(await federated_callback())
     taken = _claims(session.removeprefix(f"{SESSION}=").split(";", 1)[0])
     # The next insert collides with the row above.
     monkeypatch.setattr(
@@ -703,7 +696,7 @@ async def test_a_federated_session_that_cannot_be_recorded_sends_no_cookie(
         SimpleNamespace(token_urlsafe=lambda _: taken["sid"]),
     )
 
-    refused = await federated_callback("code-2")
+    refused = await federated_callback()
 
     # The sign-in failure page, without a session cookie.
     assert refused.status_code == 303, refused.text

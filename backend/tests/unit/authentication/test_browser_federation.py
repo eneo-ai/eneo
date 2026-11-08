@@ -24,6 +24,7 @@ from eneo.main.config import Settings, get_settings, set_settings
 from eneo.main.container.container import Container
 from eneo.server.endpoint_routes import endpoint_routes
 from eneo.server.main import get_application
+from tests.fake_oidc_provider import FakeOidcProvider, install
 from tests.unit.browser_session_test_utils import expected_set_cookie
 
 INITIATE = "/api/v1/auth/browser/initiate"
@@ -122,6 +123,18 @@ def federation(monkeypatch: pytest.MonkeyPatch) -> Iterator[Federation]:
         yield Federation(client, initiate, callback, token, start, session_token)
     finally:
         client.close()
+
+
+def _provider(monkeypatch: pytest.MonkeyPatch) -> FakeOidcProvider:
+    from tests.unittests.authentication.test_federation_router import (
+        PROVIDER_ISSUER,
+    )
+
+    provider = FakeOidcProvider(
+        issuer=PROVIDER_ISSUER, client_id="client", client_secret="secret"
+    )
+    install(monkeypatch, provider)
+    return provider
 
 
 def detail_code(response) -> str:
@@ -574,7 +587,9 @@ async def test_real_federation_admits_one_callback_and_fails_closed(
     )
 
     callback, container = await _single_use_callback(
-        monkeypatch, FailingStateRedis() if redis_failure else InterleavingRedis()
+        monkeypatch,
+        _provider(monkeypatch),
+        FailingStateRedis() if redis_failure else InterleavingRedis(),
     )
     browser_settings.jwt_secret = federation_router.get_settings().jwt_secret
     payload = jwt.decode(
@@ -617,10 +632,13 @@ async def test_real_federation_admits_one_callback_and_fails_closed(
         assert sum(r.headers["location"] == "/dashboard" for r in responses) == (
             0 if redis_failure else 1
         )
+        refusal = (
+            "oidc_login_unavailable" if redis_failure else "oidc_transaction_invalid"
+        )
         for response in responses:
             assert response.status_code == 303
             if response.headers["location"] != "/dashboard":
-                assert detail_code(response) == "http_400"
+                assert detail_code(response) == refusal
                 assert not any(
                     cookie.startswith("__Host-eneo_web=")
                     for cookie in response.headers.get_list("set-cookie")
@@ -630,7 +648,7 @@ async def test_real_federation_admits_one_callback_and_fails_closed(
             ) in response.headers.get_list("set-cookie")
         # Replaying after both responses cannot issue another session either.
         replay = await attempt()
-        assert detail_code(replay) == "http_400"
+        assert detail_code(replay) == refusal
 
 
 @pytest.mark.asyncio
@@ -642,25 +660,18 @@ async def test_real_initiate_writes_state_only_for_registered_callback(
 
     from eneo.authentication import federation_router
     from tests.unittests.authentication.test_federation_router import (
-        FakeAioHttpClient,
         FakeRedis,
-        FakeResponse,
         _single_use_callback,
     )
 
     redis = FakeRedis()
-    _, container = await _single_use_callback(monkeypatch, redis)
+    _, container = await _single_use_callback(
+        monkeypatch, _provider(monkeypatch), redis
+    )
     redis._store.clear()
     tenant = container._tenant_repo._tenant
     tenant.federation_config["additional_redirect_uris"] = (
         ["https://beta.example.se" + registered_path] if registered_path else []
-    )
-    monkeypatch.setattr(
-        federation_router,
-        "aiohttp_client",
-        lambda: FakeAioHttpClient(
-            FakeResponse({"authorization_endpoint": "https://idp.example/authorize"})
-        ),
     )
     app = get_application()
     for route in endpoint_routes(app.routes):

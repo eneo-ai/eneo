@@ -11,6 +11,11 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 
 from eneo.authentication.browser_session import SessionGenerationMismatchError
+from eneo.authentication.oidc.errors import (
+    OidcLoginUnavailableError,
+    OidcResponseNotVerifiedError,
+    OidcTransactionInvalidError,
+)
 from eneo.files.file_models import (
     FileInUseError,
     FileOriginalNotFoundError,
@@ -273,6 +278,14 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
         401,
         None,
         ErrorCodes.SESSION_GENERATION_MISMATCH,
+    ),
+    # --- OIDC sign-in ---
+    OidcLoginUnavailableError: (503, None, ErrorCodes.OIDC_LOGIN_UNAVAILABLE),
+    OidcTransactionInvalidError: (400, None, ErrorCodes.OIDC_TRANSACTION_INVALID),
+    OidcResponseNotVerifiedError: (
+        401,
+        None,
+        ErrorCodes.OIDC_RESPONSE_NOT_VERIFIED,
     ),
     # --- Integrations: the string ``code`` tells the cases apart ---
     SharePointCredentialsInvalidError: (400, None, ErrorCodes.BAD_REQUEST),

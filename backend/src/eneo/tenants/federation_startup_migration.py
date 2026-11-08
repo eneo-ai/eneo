@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from eneo.authentication.oidc.profile import DEFAULT_SCOPES
 from eneo.database.database import sessionmanager
 from eneo.main.config import (
     Settings,
@@ -134,7 +135,7 @@ class FederationStartupMigrationService:
             "discovery_endpoint": self.settings.oidc_discovery_endpoint,
             "client_id": self.settings.oidc_client_id,
             "client_secret": encrypted_secret,
-            "scopes": ["openid", "email", "profile"],
+            "scopes": list(DEFAULT_SCOPES),
             "encrypted_at": now,
         }
         if self.settings.oidc_tenant_id:
