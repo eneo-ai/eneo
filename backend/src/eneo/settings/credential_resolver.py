@@ -5,6 +5,7 @@ from eneo.authentication.oidc.profile import DEFAULT_SCOPES
 from eneo.main.config import (
     Settings,
     get_settings,
+    has_env_oidc_client,
     validate_redirect_path,
     validate_redirect_uri,
 )
@@ -381,10 +382,7 @@ class CredentialResolver:
         # SINGLE-TENANT MODE (federation_enabled=false):
         # ONLY use environment variables, never check database
         if not self.settings.federation_enabled:
-            if (
-                self.settings.oidc_discovery_endpoint
-                and self.settings.oidc_client_secret
-            ):
+            if has_env_oidc_client(self.settings):
                 config = {
                     "provider": "default",
                     "discovery_endpoint": self.settings.oidc_discovery_endpoint,

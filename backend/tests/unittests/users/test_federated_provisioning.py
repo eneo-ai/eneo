@@ -531,6 +531,7 @@ def test_global_oidc_domain_configuration_is_resolved(test_settings, monkeypatch
         **test_settings.model_dump(exclude={"oidc_allowed_domains"}),
     )
     settings.oidc_discovery_endpoint = "https://idp.example.com/discovery"
+    settings.oidc_client_id = "client"
     settings.oidc_client_secret = "secret"
     assert settings.oidc_allowed_domains == ["example.com"]
     config = CredentialResolver(settings=settings).get_federation_config()
