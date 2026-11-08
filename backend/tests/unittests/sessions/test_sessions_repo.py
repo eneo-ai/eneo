@@ -50,6 +50,7 @@ async def test_update_hydrates_info_blob_availability(monkeypatch):
     monkeypatch.setattr(SessionInDB, "model_validate", lambda row: row)
     repo = SessionRepository(AsyncMock())
     repo.session.scalar = AsyncMock(return_value=updated)
+    repo.session.scalars = AsyncMock(return_value=[updated.id])
 
     result = await repo.update(SessionUpdate(id=updated.id, name="renamed"))
 

@@ -205,6 +205,61 @@ async def test_a_source_removed_while_the_turns_load_refuses_the_read(
     assert loaded is None
 
 
+async def _read_copy(container, copy: Copy, reader: str, tenant_id: UUID) -> bool:
+    """Whether ``reader`` returned the copy."""
+    if reader == "session":
+        return await container.session_repo().get(copy.copy_session) is not None
+    sessions = await container.analysis_repo().get_assistant_sessions_since(
+        assistant_id=copy.copy_assistant,
+        from_date=datetime.now(timezone.utc) - timedelta(days=1),
+        to_date=datetime.now(timezone.utc) + timedelta(days=1),
+        tenant_id=tenant_id,
+    )
+    return copy.copy_session in {session.id for session in sessions}
+
+
+@pytest.mark.parametrize("reader", ["session", "insights"])
+async def test_a_copy_removed_after_its_turns_load_refuses_the_read(
+    db_container, admin_user: UserInDB, copy: Copy, reader: str
+):
+    """Mutant: the check after the turns asks which copies still exist and are
+    invalid, so a copy whose source and session both went after its turns were
+    loaded is returned with them. The removal commits before that check."""
+    seen = {"turns": False, "removed": False}
+
+    async def remove_source_and_copy() -> None:
+        async with sessionmanager.session() as other, other.begin():
+            await other.execute(
+                sa.delete(Questions).where(
+                    Questions.id.in_([copy.source_question, *copy.copy_questions])
+                )
+            )
+            await other.execute(
+                sa.delete(Sessions).where(Sessions.id == copy.copy_session)
+            )
+
+    def before_the_check(_conn, _cursor, statement: str, *_: object) -> None:
+        if "FROM questions \nWHERE questions.session_id IN" in statement:
+            seen["turns"] = True
+        elif (
+            seen["turns"] and not seen["removed"] and "content_derivations" in statement
+        ):
+            seen["removed"] = True
+            await_only(remove_source_and_copy())
+
+    async with db_container() as container:
+        bind = container.session().sync_session.bind
+        assert bind is not None
+        sa.event.listen(bind.engine, "before_cursor_execute", before_the_check)
+        try:
+            returned = await _read_copy(container, copy, reader, admin_user.tenant_id)
+        finally:
+            sa.event.remove(bind.engine, "before_cursor_execute", before_the_check)
+
+    assert seen["removed"], "no copy check ran after the turns were loaded"
+    assert not returned
+
+
 async def test_another_principal_learns_nothing_about_a_removed_source(
     client: AsyncClient,
     owner_token: str,

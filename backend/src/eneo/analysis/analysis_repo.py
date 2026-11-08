@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute, aliased, selectinload
 
 from eneo.analysis.analysis import MessageFeedbackCounts
-from eneo.data_retention.derivations import copy_session_valid, removed_copies
+from eneo.data_retention.derivations import copy_session_valid, readable_sessions
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.group_chats_table import GroupChatsTable
 from eneo.database.tables.help_assistant_runs_table import HelpAssistantRuns
@@ -148,10 +148,10 @@ class AnalysisRepository:
             loader=self.file_content_loader,
         )
         # The turns came after the session rows' check: ask again, last.
-        removed = await removed_copies(
+        readable = await readable_sessions(
             self.session, [session.id for session in sessions]
         )
-        return [session for session in sessions if session.id not in removed]
+        return [session for session in sessions if session.id in readable]
 
     async def _get_count(
         self, table: type, tenant_id: UUID | None = None

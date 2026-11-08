@@ -13,7 +13,7 @@ from eneo.actors.actors.space_actor import SpaceAccessFacts, SpaceRoleFact
 from eneo.data_retention.derivations import (
     copy_session_valid,
     is_removed_copy,
-    removed_copies,
+    readable_sessions,
 )
 from eneo.database.database import AsyncSession
 from eneo.database.repositories.base import BaseRepositoryDelegate
@@ -101,7 +101,7 @@ class RecentSessionRow(NamedTuple):
 def session_turn_options() -> list[Any]:
     """Load a session's turns with what each of them shows. They come in
     statements after the session row, so a read hydrating them asks
-    ``removed_copies`` last."""
+    ``readable_sessions`` last."""
     return [
         selectinload(Sessions.questions).options(
             selectinload(Questions.info_blob_references)
@@ -134,14 +134,14 @@ class SessionRepository:
         self,
         sessions: list[SessionInDB],
     ) -> list[SessionInDB]:
-        """The sessions with what their turns show, without a copy whose source
-        was removed while they were read: the statement that read or changed
-        the session row checked it, the later statements did not."""
+        """The sessions with what their turns show, without one that became a
+        copy of a removed source, or went, while they were read: the statement
+        that read or changed the session row checked it, later ones did not."""
         await self._attach_turn_details(sessions)
-        removed = await removed_copies(
+        readable = await readable_sessions(
             self.session, [session.id for session in sessions]
         )
-        return [session for session in sessions if session.id not in removed]
+        return [session for session in sessions if session.id in readable]
 
     async def _attach_turn_details(self, sessions: list[SessionInDB]) -> None:
         info_blobs = [
@@ -959,4 +959,7 @@ class SessionRepository:
         )
         deleted = await self.delegate.delete(id)
         await delete_unused_root_files(self.session, file_ids)
-        return await self._hydrate_optional(deleted)
+        if deleted is not None:
+            # Gone now, so no longer readable; its turns went with it.
+            await self._attach_turn_details([deleted])
+        return deleted

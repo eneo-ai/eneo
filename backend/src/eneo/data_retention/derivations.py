@@ -76,21 +76,22 @@ def copy_session_valid(
     return ~probe(ContentDerivations.copy_session_id == session_id, source_removed())
 
 
-async def removed_copies(
-    session: AsyncSession, copy_session_ids: Collection[UUID]
+async def readable_sessions(
+    session: AsyncSession, session_ids: Collection[UUID]
 ) -> frozenset[UUID]:
-    """Which of these existing sessions are copies whose source was removed.
+    """Which of these sessions still exist and are no copy of a removed source.
 
-    A read whose content takes several statements asks after the last one:
-    a removal committed while it read is then seen, and the read refused.
+    A read whose content takes several statements asks after the last one and
+    returns only these: a source or the session itself removed while it read
+    is then seen, and the read refused.
     """
-    if not copy_session_ids:
+    if not session_ids:
         return frozenset()
     return frozenset(
         await session.scalars(
             sa.select(Sessions.id).where(
-                uuid_in(Sessions.id, sorted(set(copy_session_ids))),
-                ~copy_session_valid(Sessions.id.expression),
+                uuid_in(Sessions.id, sorted(set(session_ids))),
+                copy_session_valid(Sessions.id.expression),
             )
         )
     )
@@ -98,7 +99,13 @@ async def removed_copies(
 
 async def is_removed_copy(session: AsyncSession, copy_session_id: UUID) -> bool:
     """Whether an existing session is a copy whose source was removed."""
-    return copy_session_id in await removed_copies(session, (copy_session_id,))
+    return bool(
+        await session.scalar(
+            sa.select(~copy_session_valid(Sessions.id.expression)).where(
+                Sessions.id == copy_session_id
+            )
+        )
+    )
 
 
 async def register_derivations(
