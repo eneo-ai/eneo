@@ -2,7 +2,8 @@
 
 A tenant admin can switch off audit categories, single actions and the whole
 audit log; none of those may hide a change to how the organisation signs in, a
-browser session renewing itself, or which account a sign-in identity reaches.
+browser session renewing itself, which account a sign-in identity reaches,
+or an admin re-opening that.
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -20,6 +21,8 @@ ALWAYS = [
     ActionType.SESSION_EXTENDED,
     ActionType.IDENTITY_BOUND,
     ActionType.IDENTITY_CONFLICT,
+    ActionType.IDENTITY_REBINDING_UPDATED,
+    ActionType.IDENTITY_MIGRATION_WINDOW_UPDATED,
 ]
 
 

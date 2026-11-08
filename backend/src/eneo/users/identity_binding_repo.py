@@ -46,6 +46,28 @@ class IdentityBinding:
     created_at: datetime
 
 
+@dataclass(frozen=True)
+class IdentityMigrationWindow:
+    id: UUID
+    from_issuer: str
+    from_audience: str
+    to_issuer: str
+    to_audience: str
+    closes_at: datetime
+    created_at: datetime
+
+
+_WINDOW_COLUMNS = (
+    IdentityMigrationWindows.id,
+    IdentityMigrationWindows.from_issuer,
+    IdentityMigrationWindows.from_audience,
+    IdentityMigrationWindows.to_issuer,
+    IdentityMigrationWindows.to_audience,
+    IdentityMigrationWindows.closes_at,
+    IdentityMigrationWindows.created_at,
+)
+
+
 class IdentityBindingRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -169,3 +191,73 @@ class IdentityBindingRepository:
             .where(Users.id == user_id, Users.identity_rebinding_until.is_not(None))
             .values(identity_rebinding_until=None)
         )
+
+    async def rebinding_until(self, user_id: UUID) -> datetime | None:
+        """The stored end of the account's allowance, even if it has passed."""
+        return await self.session.scalar(
+            sa.select(Users.identity_rebinding_until).where(Users.id == user_id)
+        )
+
+    async def set_rebinding(self, user_id: UUID, until: datetime | None) -> None:
+        await self.session.execute(
+            sa.update(Users)
+            .where(Users.id == user_id)
+            .values(identity_rebinding_until=until)
+        )
+
+    async def list_open_windows(self, tenant_id: UUID) -> list[IdentityMigrationWindow]:
+        rows = await self.session.execute(
+            sa.select(*_WINDOW_COLUMNS)
+            .where(
+                IdentityMigrationWindows.tenant_id == tenant_id,
+                IdentityMigrationWindows.closes_at > sa.func.now(),
+            )
+            .order_by(IdentityMigrationWindows.created_at)
+        )
+        return [IdentityMigrationWindow(*row) for row in rows]
+
+    async def add_window(
+        self,
+        *,
+        tenant_id: UUID,
+        from_issuer: str,
+        from_audience: str,
+        to_issuer: str,
+        to_audience: str,
+        closes_at: datetime,
+        created_by: UUID,
+    ) -> IdentityMigrationWindow:
+        row = (
+            await self.session.execute(
+                sa.insert(IdentityMigrationWindows)
+                .values(
+                    tenant_id=tenant_id,
+                    from_issuer=from_issuer,
+                    from_audience=from_audience,
+                    to_issuer=to_issuer,
+                    to_audience=to_audience,
+                    closes_at=closes_at,
+                    created_by=created_by,
+                )
+                .returning(*_WINDOW_COLUMNS)
+            )
+        ).one()
+        return IdentityMigrationWindow(*row)
+
+    async def close_window(
+        self, *, tenant_id: UUID, window_id: UUID
+    ) -> IdentityMigrationWindow | None:
+        """Close an open window now; None when no open one has this id."""
+        row = (
+            await self.session.execute(
+                sa.update(IdentityMigrationWindows)
+                .where(
+                    IdentityMigrationWindows.id == window_id,
+                    IdentityMigrationWindows.tenant_id == tenant_id,
+                    IdentityMigrationWindows.closes_at > sa.func.now(),
+                )
+                .values(closes_at=sa.func.now())
+                .returning(*_WINDOW_COLUMNS)
+            )
+        ).one_or_none()
+        return IdentityMigrationWindow(*row) if row is not None else None

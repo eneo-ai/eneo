@@ -1522,6 +1522,8 @@ class Container(containers.DeclarativeContainer):
         user_repo=user_repo,
         tenant_service=tenant_service,
         user_service=user_service,
+        identity_binding_repo=identity_binding_repo,
+        audit_service=audit_service,
         api_key_scope_revoker=api_key_scope_revoker,
     )
     service_service = providers.Factory(
