@@ -61,6 +61,7 @@ export function loginDiagnosticMessageKey(diagnostics: LoginDiagnostics): string
   if (code === "invalid_login_attempt" || code === "oidc_transaction_invalid")
     return "oidc_error_attempt_rejected";
   if (code === "oidc_login_unavailable") return "oidc_error_login_unavailable";
+  if (code === "identity_conflict") return "oidc_error_identity_conflict";
   if (code === "identity_provider_error") return "authentication_service_error";
   if (code === "no_code_received" || code === "no_state_received")
     return "authentication_incomplete";

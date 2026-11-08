@@ -13,6 +13,8 @@ export const LoginErrorCode = {
   UNAUTHORIZED: "Authentication could not be verified.",
   LOGIN_UNAVAILABLE: "Sign-in is temporarily unavailable. Please try again in a moment.",
   ATTEMPT_EXPIRED: "The sign-in attempt has expired. Please start the sign-in again.",
+  IDENTITY_CONFLICT:
+    "This account is already linked to another sign-in. Please contact your administrator.",
   CALLBACK_FAILED: "Authentication callback failed. Please try again."
 } as const;
 

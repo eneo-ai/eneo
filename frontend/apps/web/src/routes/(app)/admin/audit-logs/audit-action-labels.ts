@@ -41,6 +41,22 @@ const ACTION_MESSAGES = {
     name: m.audit_action_session_extended,
     description: m.audit_action_session_extended_description
   },
+  identity_bound: {
+    name: m.audit_action_identity_bound,
+    description: m.audit_action_identity_bound_description
+  },
+  identity_conflict: {
+    name: m.audit_action_identity_conflict,
+    description: m.audit_action_identity_conflict_description
+  },
+  identity_rebinding_updated: {
+    name: m.audit_action_identity_rebinding_updated,
+    description: m.audit_action_identity_rebinding_updated_description
+  },
+  identity_migration_window_updated: {
+    name: m.audit_action_identity_migration_window_updated,
+    description: m.audit_action_identity_migration_window_updated_description
+  },
   role_created: {
     name: m.audit_action_role_created,
     description: m.audit_action_role_created_description

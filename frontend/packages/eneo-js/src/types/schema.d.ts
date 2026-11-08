@@ -2606,6 +2606,94 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/users/{username}/identity": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get a user's sign-in identities
+     * @description The identity provider identities bound to the account (issuer, audience, subject) and its open re-binding allowance, if any. A bound account signs in only with its identities; its email binds no other.
+     */
+    get: operations["get_user_identity_api_v1_admin_users__username__identity_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/users/{username}/identity/rebinding": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Allow a user to bind a new sign-in identity
+     * @description Until `allowed_until` (at most 30 days ahead), the account's next sign-in by email binds the identity it presents, replacing the account's subject under that issuer and audience. Single use: the allowance closes with that sign-in. It never takes an identity another account holds. Audited.
+     */
+    put: operations["allow_user_identity_rebinding_api_v1_admin_users__username__identity_rebinding_put"];
+    post?: never;
+    /**
+     * Withdraw a user's sign-in re-binding
+     * @description Closes the account's re-binding allowance. Audited.
+     */
+    delete: operations["withdraw_user_identity_rebinding_api_v1_admin_users__username__identity_rebinding_delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/identity-migration-windows": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List open identity migration windows
+     * @description The organisation's migration windows that are still open.
+     */
+    get: operations["list_identity_migration_windows_api_v1_admin_identity_migration_windows_get"];
+    put?: never;
+    /**
+     * Open an identity migration window
+     * @description Until `closes_at` (at most 30 days ahead), an account bound under the from issuer and audience also binds under the to pair by its email. The from binding stays, so the first entry point keeps signing in. Use it before a client change or when adding an entry point. Audited.
+     */
+    post: operations["open_identity_migration_window_api_v1_admin_identity_migration_windows_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/identity-migration-windows/{id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Close an identity migration window
+     * @description Closes an open window now. Audited.
+     */
+    delete: operations["close_identity_migration_window_api_v1_admin_identity_migration_windows__id__delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/predefined-roles/": {
     parameters: {
       query?: never;
@@ -10117,6 +10205,19 @@ export interface components {
       frontend_state: string;
     };
     /**
+     * AccountIdentity
+     * @description The provider identities that sign in to one account.
+     */
+    AccountIdentity: {
+      /** Bindings */
+      bindings: components["schemas"]["IdentityBindingPublic"][];
+      /**
+       * Rebinding Allowed Until
+       * @description While set, the account's next sign-in by email binds the identity it presents, replacing the account's subject under that issuer and audience if it has one. Single use.
+       */
+      rebinding_allowed_until: string | null;
+    };
+    /**
      * ActionConfig
      * @description Configuration for a single action type.
      *
@@ -10234,6 +10335,10 @@ export interface components {
       | "password_change_failed"
       | "sessions_invalidated"
       | "session_extended"
+      | "identity_bound"
+      | "identity_conflict"
+      | "identity_rebinding_updated"
+      | "identity_migration_window_updated"
       | "assistant_created"
       | "assistant_deleted"
       | "assistant_updated"
@@ -15266,6 +15371,7 @@ export interface components {
       | 9079
       | 9080
       | 9081
+      | 9082
       | 9085
       | 9090;
     /**
@@ -16022,6 +16128,79 @@ export interface components {
        * Format: uuid
        */
       id: string;
+    };
+    /** IdentityBindingPublic */
+    IdentityBindingPublic: {
+      /** Issuer */
+      issuer: string;
+      /**
+       * Audience
+       * @description The client id of a browser sign-in, or the accepted API audience of a provider's access token.
+       */
+      audience: string;
+      /** Subject */
+      subject: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+    };
+    /**
+     * IdentityMigrationWindowCreate
+     * @description While open, an account bound under the from pair also binds under the
+     *     to pair by its email. Its from binding stays.
+     */
+    IdentityMigrationWindowCreate: {
+      /** From Issuer */
+      from_issuer: string;
+      /** From Audience */
+      from_audience: string;
+      /** To Issuer */
+      to_issuer: string;
+      /** To Audience */
+      to_audience: string;
+      /**
+       * Closes At
+       * Format: date-time
+       * @description When the window closes: in the future, at most 30 days ahead.
+       */
+      closes_at: string;
+    };
+    /** IdentityMigrationWindowPublic */
+    IdentityMigrationWindowPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** From Issuer */
+      from_issuer: string;
+      /** From Audience */
+      from_audience: string;
+      /** To Issuer */
+      to_issuer: string;
+      /** To Audience */
+      to_audience: string;
+      /**
+       * Closes At
+       * Format: date-time
+       */
+      closes_at: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+    };
+    /** IdentityRebindingAllowance */
+    IdentityRebindingAllowance: {
+      /**
+       * Allowed Until
+       * Format: date-time
+       * @description When the allowance ends: in the future, at most 30 days ahead.
+       */
+      allowed_until: string;
     };
     /** ImageModelPublic */
     ImageModelPublic: {
@@ -37563,6 +37742,331 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+    };
+  };
+  get_user_identity_api_v1_admin_users__username__identity_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        username: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AccountIdentity"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  allow_user_identity_rebinding_api_v1_admin_users__username__identity_rebinding_put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        username: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["IdentityRebindingAllowance"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AccountIdentity"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  withdraw_user_identity_rebinding_api_v1_admin_users__username__identity_rebinding_delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        username: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AccountIdentity"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_identity_migration_windows_api_v1_admin_identity_migration_windows_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["IdentityMigrationWindowPublic"][];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  open_identity_migration_window_api_v1_admin_identity_migration_windows_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["IdentityMigrationWindowCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["IdentityMigrationWindowPublic"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  close_identity_migration_window_api_v1_admin_identity_migration_windows__id__delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["IdentityMigrationWindowPublic"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
       };
     };
   };
