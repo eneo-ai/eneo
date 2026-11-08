@@ -18,6 +18,11 @@ let replies: Map<string, unknown>;
 let fetcher: ReturnType<typeof vi.fn<typeof fetch>>;
 let createAppRouter: typeof import("@/router").createAppRouter;
 
+// The first load of the app's route graph takes seconds on a busy runner. File
+// collection has no timeout, so pay it here; each beforeEach then only
+// re-evaluates the graph for its fresh module registry.
+await import("@/router");
+
 beforeEach(async () => {
   vi.resetModules();
   vi.clearAllMocks();

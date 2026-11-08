@@ -1,25 +1,21 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { appSources } from "./app-sources";
 
 const appDir = path.resolve(import.meta.dirname, "../..");
-const srcDir = path.join(appDir, "src");
 
-function sources(directory: string): string[] {
-  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
-    const file = path.join(directory, entry.name);
-    if (entry.isDirectory()) return sources(file);
-    return /\.(tsx?|css)$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name) ? [file] : [];
-  });
-}
-
-/** Where a pattern occurs in the app's own source (tests excluded), with the matched text. */
-function matches(pattern: RegExp): { at: string; file: string; text: string }[] {
-  return sources(srcDir).flatMap((file) => {
-    const source = readFileSync(file, "utf8");
+/**
+ * Where a pattern occurs in the app's own source (tests excluded), with the matched text.
+ * `anchor`, a cheap pattern that every match of `pattern` also matches, skips the files
+ * that cannot match before the costlier pattern scans them.
+ */
+function matches(pattern: RegExp, anchor?: RegExp): { at: string; file: string; text: string }[] {
+  return appSources.flatMap(({ file, text: source }) => {
+    if (anchor && !anchor.test(source)) return [];
     return [...source.matchAll(pattern)].map((match) => ({
-      at: `${path.relative(appDir, file)}:${source.slice(0, match.index).split("\n").length}`,
-      file: path.relative(appDir, file),
+      at: `src/${file}:${source.slice(0, match.index).split("\n").length}`,
+      file: `src/${file}`,
       text: match[0]
     }));
   });
@@ -48,8 +44,8 @@ const DIMMED_TEXT_ALLOWED: Record<string, string> = {
 };
 
 /** Matches that are neither allowed nor hidden behind a disabled state, and allowances never used. */
-function dimmedText(pattern: RegExp, kind: RegExp) {
-  const found = matches(pattern).filter(({ text }) => !/disabled/.test(text));
+function dimmedText(pattern: RegExp, kind: RegExp, anchor: RegExp = kind) {
+  const found = matches(pattern, anchor).filter(({ text }) => !/disabled/.test(text));
   const key = ({ file, text }: { file: string; text: string }) =>
     `${file} ${text.slice(text.search(kind))}`;
   const used = new Set<string>();
@@ -111,10 +107,12 @@ describe("accessibility source guards", () => {
   });
 
   it("never gives a text colour utility an alpha (1.4.3)", () => {
-    // text-sm/6 is a size with its line height, not a colour.
+    // text-sm/6 is a size with its line height, not a colour. Nearly every file has a
+    // text- class, so the anchor is the utility with its alpha, without the variants.
     const { unexplained, unused } = dimmedText(
       /[^\s"'`{}]*\btext-(?!(?:xs|sm|base|lg|\d*xl)\/)[a-z][\w-]*\/(\d+|\[[^\]]+\])/g,
-      /text-/
+      /text-/,
+      /\btext-[a-z][\w-]*\/(?:\d|\[)/
     );
     expect(unexplained).toEqual([]);
     expect(unused).toEqual([]);
