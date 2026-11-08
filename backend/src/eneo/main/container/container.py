@@ -1734,7 +1734,6 @@ class Container(containers.DeclarativeContainer):
         group_chat_service=group_chat_service,
         session_service=session_service,
         completion_service=completion_service,
-        space_service=space_service,
         file_service=file_service,
     )
     recent_conversations_service = providers.Factory(

@@ -206,10 +206,11 @@ function UserMessage({
 
 /**
  * A question sent but not yet issued: its attachments are still uploading, or
- * it waits for a partner save. It stands in the conversation like any
- * question, mirroring the uploads' progress, until the request is issued and
- * the stored message takes its place. Its files are not controls until then:
- * the stored message replaces them, and a focused one would take the focus with it.
+ * it waits for saves and the conversation's choices. It stands in the
+ * conversation like any question, mirroring the uploads' progress, until the
+ * request is issued and the stored message takes its place. Its files are not
+ * controls until then: the stored message replaces them, and a focused one
+ * would take the focus with it.
  */
 export function PendingQuestion({
   text,

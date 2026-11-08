@@ -120,13 +120,30 @@ const api = vi.hoisted(() => ({
       return { data: { items: [], next_cursor: null }, response: new Response() };
     }
   ),
-  POST: vi.fn(async (path: string, init?: { params?: { path?: { session_id?: string } } }) => {
-    if (path.endsWith("/title/")) {
-      spies.titled.push(init?.params?.path?.session_id ?? "");
-      return { data: { name: "Gräns för direktupphandling" }, response: new Response() };
+  POST: vi.fn(
+    async (
+      path: string,
+      init?: { params?: { path?: { session_id?: string } }; body?: { session_id?: string } }
+    ) => {
+      if (path.endsWith("/settings/resolve/"))
+        return {
+          data: {
+            revision: init?.body?.session_id ? 1 : 0,
+            settings: { require_tool_approval: false },
+            supports_tool_calling: true,
+            mcp_servers: [],
+            capabilities: [],
+            effective_model: { id: "m", name: "claude-haiku", nickname: "Claude Haiku 4.5" }
+          },
+          response: new Response()
+        };
+      if (path.endsWith("/title/")) {
+        spies.titled.push(init?.params?.path?.session_id ?? "");
+        return { data: { name: "Gräns för direktupphandling" }, response: new Response() };
+      }
+      return { data: {}, response: new Response() };
     }
-    return { data: {}, response: new Response() };
-  }),
+  ),
   PATCH: vi.fn(),
   DELETE: vi.fn(async () => ({ data: null, response: new Response(null, { status: 204 }) }))
 }));
@@ -181,8 +198,14 @@ function composer() {
   return screen.getByRole("textbox", { name: /^Fråga / }) as HTMLTextAreaElement;
 }
 
-/** Types a question and sends it with Ctrl+Return in the composer, as a keyboard user does. */
-function askWithKeyboard(question: string) {
+/**
+ * Types a question and sends it with Ctrl+Return in the composer, as a keyboard user does,
+ * once the conversation's choices are in (until then Send holds the question back).
+ */
+async function askWithKeyboard(question: string) {
+  await waitFor(() =>
+    expect(document.querySelector('fieldset[aria-busy="false"]:not([disabled])')).not.toBeNull()
+  );
   const textarea = composer();
   textarea.focus();
   fireEvent.change(textarea, { target: { value: question } });
@@ -194,7 +217,12 @@ function answer(stream: ReadableStreamDefaultController<Chunk>, sessionId: strin
   const chunks: Chunk[] = [
     {
       type: "data-session",
-      data: { session_id: sessionId, files: [], web_search_references: [] }
+      data: {
+        session_id: sessionId,
+        settings: { revision: 1, settings: { require_tool_approval: false } },
+        files: [],
+        web_search_references: []
+      }
     },
     { type: "text-start", id: "t" },
     { type: "text-delta", id: "t", delta: text },
@@ -569,7 +597,7 @@ describe("ChatPage Felsökning", () => {
 describe("ChatPage while an answer streams", () => {
   it("keeps an answer that finishes after the user left it out of the next conversation", async () => {
     renderPage(null);
-    askWithKeyboard("Vilken gräns gäller?");
+    await askWithKeyboard("Vilken gräns gäller?");
     await screen.findByRole("log", { name: "Konversation" });
     await waitFor(() => expect(spies.streams).toHaveLength(1));
 
@@ -602,7 +630,7 @@ describe("ChatPage while an answer streams", () => {
 
   it("keeps Insights selected when the first session id arrives in the background", async () => {
     renderPage(null, { ...partner, insightEnabled: true, permissions: ["insight_view"] });
-    askWithKeyboard("Vilken gräns gäller?");
+    await askWithKeyboard("Vilken gräns gäller?");
     await waitFor(() => expect(spies.streams).toHaveLength(1));
     fireEvent.click(screen.getByRole("tab", { name: "Insikter" }));
     expect(await screen.findByText("Totala konversationer")).toBeTruthy();
@@ -621,7 +649,7 @@ describe("ChatPage while an answer streams", () => {
 
   it("keeps this visit's turns when switching to Insikter and back", async () => {
     renderPage(null, { ...partner, insightEnabled: true, permissions: ["insight_view"] });
-    askWithKeyboard("Vilken gräns gäller?");
+    await askWithKeyboard("Vilken gräns gäller?");
     await waitFor(() => expect(spies.streams).toHaveLength(1));
     await act(async () => answer(spies.streams[0]!, "session-1", "Gränsen är 700 000 kr."));
     const log = await screen.findByRole("log", { name: "Konversation" });
@@ -655,7 +683,7 @@ describe("ChatPage while an answer streams", () => {
     "preserves the draft after a late context rejection (newer draft: %s)",
     async (newerDraft) => {
       renderPage(null);
-      askWithKeyboard("Vilken gräns gäller?");
+      await askWithKeyboard("Vilken gräns gäller?");
       await waitFor(() => expect(spies.streams).toHaveLength(1));
       const stream = spies.streams[0]!;
       await act(async () =>
@@ -682,7 +710,7 @@ describe("ChatPage while an answer streams", () => {
     const failure = deferred();
     spies.failAfter = failure.promise;
     renderPage(null);
-    askWithKeyboard("Vilken gräns gäller?");
+    await askWithKeyboard("Vilken gräns gäller?");
     await screen.findByRole("log", { name: "Konversation" });
     // The docked composer took over, focus followed it.
     await waitFor(() => expect(document.activeElement).toBe(composer()));

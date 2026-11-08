@@ -1,7 +1,8 @@
 /**
  * Settings of the chat partner that are saved while the user chats (the
- * personal assistant's model, reasoning effort and own Skills, picked in the
- * composer). The backend resolves them from the stored assistant when a
+ * personal assistant's own Skills, picked in the composer; the model and
+ * reasoning effort belong to the conversation's settings). The backend
+ * resolves them from the stored assistant when a
  * question arrives, so a question sent right after a switch must wait for
  * that write to land. Saves run one at a time, in the order they were made,
  * so a quick A → B → C never lets an older write land last (the Svelte app's

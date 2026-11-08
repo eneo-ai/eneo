@@ -215,6 +215,26 @@ describe("Composer", () => {
     expect(textarea.value).toBe("Lång fråga");
   });
 
+  it("keeps the caller's reason at the field only while it holds", () => {
+    const { rerender } = renderComposer({ initial: "Fråga", sendBlocked: "Sparar…" });
+    const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+    fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
+    expect(textarea.getAttribute("aria-invalid")).toBe("true");
+
+    rerender(<Harness initial="Fråga" sendBlocked="Inställningarna kunde inte sparas." />);
+    expect(descriptionOf(textarea)).toContain("Inställningarna kunde inte sparas.");
+    expect(descriptionOf(textarea)).not.toContain("Sparar…");
+
+    rerender(<Harness initial="Fråga" sendBlocked={null} />);
+    expect(textarea.getAttribute("aria-invalid")).toBeNull();
+    expect(descriptionOf(textarea)).not.toContain("Inställningarna kunde inte sparas.");
+
+    // A later reason is the user's to meet on their next try, not before.
+    rerender(<Harness initial="Fråga" sendBlocked="Sparar…" />);
+    expect(textarea.getAttribute("aria-invalid")).toBeNull();
+    expect(descriptionOf(textarea)).not.toContain("Sparar…");
+  });
+
   it("says from the start that nobody can answer, and does not send, with the draft kept", async () => {
     const onSubmit = vi.fn();
     const { container } = renderComposer({

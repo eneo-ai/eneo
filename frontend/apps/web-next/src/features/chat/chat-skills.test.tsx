@@ -2,16 +2,19 @@
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Schema } from "@/lib/api/models";
+import type { ChatPartner } from "@/lib/chat/types";
 import { expectNameToHoldVisibleText, expectNoAxeViolations } from "@/test/axe";
-import { renderInApp, testAppContext } from "@/test/render";
+import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
 import { setViewport } from "@/test/setup-dom";
+import { personalChatSkillsConfigurationQueryOptions } from "@/features/skills/personal-chat-skills";
 import { ChatSkills } from "./chat-skills";
+import { ConversationSettingsProvider, useConversationSettings } from "./conversation-settings";
 import { awaitPartnerUpdates, hasPendingPartnerUpdates } from "./partner-updates";
 
 type Configuration = Schema<"AssistantSkillConfigurationPublic">;
 type Summary = Schema<"AssistantSkillBindingSummary">;
 
-const api = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn() }));
+const api = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn(), PATCH: vi.fn() }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 vi.mock("@/features/spaces/use-space", () => ({
   useSpace: () => ({
@@ -94,7 +97,7 @@ let releaseSave: (() => void) | null = null;
 type SentBinding = { skill_id: string; skill_revision_id: string; activation_mode?: string };
 type Request = {
   params?: { query?: { limit?: number; cursor?: string | null; q?: string } };
-  body?: { skill_bindings?: SentBinding[] };
+  body?: { skill_bindings?: SentBinding[]; conversation_model_id?: string };
 };
 
 /** Saves the sent list as the server does: it becomes the personal chat's bindings. */
@@ -257,6 +260,140 @@ describe("ChatSkills", () => {
     expect(hasPendingPartnerUpdates()).toBe(false);
     expect(within(notesMode).getByRole("radio", { name: "Vid behov", checked: true })).toBeTruthy();
     expect(within(popover).getByText("2 alltid · 1 vid behov")).toBeTruthy();
+  });
+
+  it("reads and saves own skills against the conversation's model", async () => {
+    let resolveSettings!: (resolution: unknown) => void;
+    const settings = new Promise((resolve) => (resolveSettings = resolve));
+    api.POST.mockImplementation((path: string, init?: Request) =>
+      path === "/api/v1/conversations/settings/resolve/" ? settings : saveOnServer(init)
+    );
+    const configurationReads = () =>
+      api.GET.mock.calls.filter(
+        ([path]) =>
+          path === "/api/v1/spaces/{space_id}/assistants/{assistant_id}/skills/configuration/"
+      );
+    renderInApp(
+      <ConversationSettingsProvider
+        partner={{ type: "default-assistant", id: "assistant-1" } as ChatPartner}
+        initialSessionId="session-1"
+      >
+        <ChatSkills />
+      </ConversationSettingsProvider>,
+      { appContext: testAppContext({ permissions: [...OWN_AND_CHAT] as never }) }
+    );
+
+    expect(await screen.findByRole("button", { name: "Skills" })).toBeTruthy();
+    // Not judged against the assistant's model while the conversation's loads.
+    expect(configurationReads()).toHaveLength(0);
+
+    resolveSettings(
+      ok({ revision: 1, settings: {}, effective_model: { id: "conversation-model" } })
+    );
+    const popover = await openSkills();
+    expect(configurationReads()[0]?.[1]).toMatchObject({
+      params: { query: { conversation_model_id: "conversation-model" } }
+    });
+    const notesMode = within(popover).getByRole("radiogroup", {
+      name: "Läge för Mötesanteckningar"
+    });
+    fireEvent.click(within(notesMode).getByRole("radio", { name: "Alltid" }));
+    await waitFor(() =>
+      expect(api.POST).toHaveBeenCalledWith(
+        "/api/v1/assistants/{id}/",
+        expect.objectContaining({
+          body: expect.objectContaining({ conversation_model_id: "conversation-model" })
+        })
+      )
+    );
+  });
+
+  it("never shows the assistant's configuration as the conversation's while its model loads", async () => {
+    api.POST.mockImplementation((path: string, init?: Request) =>
+      path === "/api/v1/conversations/settings/resolve/"
+        ? new Promise(() => {})
+        : saveOnServer(init)
+    );
+    // The personal chat's page has read it against the assistant's model, and
+    // as an assistant without a model would have it.
+    const queryClient = testQueryClient();
+    for (const modelId of ["model-1", null]) {
+      queryClient.setQueryData(
+        personalChatSkillsConfigurationQueryOptions({
+          spaceId: "personal-space",
+          assistantId: "assistant-1",
+          modelId
+        }).queryKey,
+        configuration
+      );
+    }
+    renderInApp(
+      <ConversationSettingsProvider
+        partner={{ type: "default-assistant", id: "assistant-1" } as ChatPartner}
+        initialSessionId="session-1"
+      >
+        <ChatSkills />
+      </ConversationSettingsProvider>,
+      { appContext: testAppContext({ permissions: [...OWN_AND_CHAT] as never }), queryClient }
+    );
+
+    expect(await screen.findByRole("button", { name: "Skills" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /aktiva/ })).toBeNull();
+  });
+
+  it("judges a change made while a model switch is saved against the model that won", async () => {
+    let model = "conversation-model";
+    let landSwitch!: () => void;
+    api.POST.mockImplementation((path: string, init?: Request) =>
+      path === "/api/v1/conversations/settings/resolve/"
+        ? ok({
+            revision: 1,
+            settings: { completion_model_id: model },
+            effective_model: { id: model }
+          })
+        : saveOnServer(init)
+    );
+    api.PATCH.mockImplementation(
+      (_path: string, init?: { body?: { settings?: unknown } }) =>
+        new Promise((resolve) => {
+          landSwitch = () => resolve(ok({ revision: 2, settings: init?.body?.settings }));
+        })
+    );
+    const skillSaves = () =>
+      api.POST.mock.calls.filter(([path]) => path === "/api/v1/assistants/{id}/");
+    let settings!: ReturnType<typeof useConversationSettings>;
+    function Probe() {
+      settings = useConversationSettings();
+      return null;
+    }
+    renderInApp(
+      <ConversationSettingsProvider
+        partner={{ type: "default-assistant", id: "assistant-1" } as ChatPartner}
+        initialSessionId="session-1"
+      >
+        <Probe />
+        <ChatSkills />
+      </ConversationSettingsProvider>,
+      { appContext: testAppContext({ permissions: [...OWN_AND_CHAT] as never }) }
+    );
+    const popover = await openSkills();
+
+    act(() => void settings.update({ completion_model_id: "other-model" }));
+    await waitFor(() => expect(api.PATCH).toHaveBeenCalled());
+    const notesMode = within(popover).getByRole("radiogroup", {
+      name: "Läge för Mötesanteckningar"
+    });
+    fireEvent.click(within(notesMode).getByRole("radio", { name: "Alltid" }));
+    await act(async () => {});
+    // Neither read nor sent before the switch has landed.
+    expect(skillSaves()).toHaveLength(0);
+
+    model = "other-model";
+    await act(async () => landSwitch());
+    await waitFor(() => expect(skillSaves()).toHaveLength(1));
+    expect(skillSaves()[0]?.[1]).toMatchObject({
+      body: { conversation_model_id: "other-model" }
+    });
   });
 
   it("leaves a skill out of the list when it is turned off", async () => {

@@ -1,11 +1,16 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { queuePartnerUpdate } from "@/features/chat/partner-updates";
 import { makeQueryClient } from "@/lib/api/query";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
 import { SpaceChat } from "@/features/spaces/chat/space-chat.client";
 
 const route = vi.hoisted(() => ({
+  unavailableModel: false,
+  lockedModel: false,
+  /** A second model to switch to, beside the assistant's own. */
+  otherModel: false,
   space: {
     id: "space-1",
     name: "Upphandling",
@@ -14,14 +19,75 @@ const route = vi.hoisted(() => ({
     security_classification: null,
     default_assistant: null as unknown,
     completion_models: []
-  }
+  },
+  /** The conversation detail GET answers with a saved conversation. */
+  savedSession: false
 }));
+const forbidden = vi.hoisted(
+  () => async (path: string, init?: { params?: { path?: { session_id?: string } } }) => {
+    if (path === "/api/v1/conversations/{session_id}/" && route.savedSession)
+      return {
+        data: {
+          id: init?.params?.path?.session_id,
+          name: "Samtal om gränser",
+          feedback: null,
+          messages: [
+            {
+              id: "m-1",
+              question: "Vilken gräns gäller?",
+              answer: "Gränsen är 700 000 kr.",
+              references: [],
+              files: [],
+              generated_files: [],
+              tools: { assistants: [] },
+              feedback: null
+            }
+          ]
+        },
+        response: new Response()
+      };
+    return {
+      data: undefined,
+      error: { message: "Forbidden" },
+      response: new Response(null, { status: 403 })
+    };
+  }
+);
+const answer = vi.hoisted(
+  () => async (path: string, init?: { body?: unknown; signal?: AbortSignal }) => ({
+    data: path.includes("settings/resolve")
+      ? {
+          revision: (init?.body as { session_id?: string })?.session_id ? 1 : 0,
+          settings: {
+            completion_model_id: route.unavailableModel ? "removed" : "model-1",
+            ...(init?.body as { settings?: object })?.settings
+          },
+          reasoning_effort_options: (
+            route.space.default_assistant as typeof personalSpace.default_assistant | null
+          )?.effective_config.reasoning_effort_user_configurable
+            ? ["low", "medium", "high"]
+            : [],
+          default_reasoning_effort: "medium",
+          available_models: route.otherModel ? [reasoningModel, otherModel] : [reasoningModel],
+          effective_model:
+            (init?.body as { settings?: { completion_model_id?: string } })?.settings
+              ?.completion_model_id === "model-2"
+              ? otherModel
+              : reasoningModel,
+          model_unavailable: route.unavailableModel,
+          model_locked: route.lockedModel
+        }
+      : init?.body,
+    response: new Response()
+  })
+);
 const api = vi.hoisted(() => ({
   GET: vi.fn(),
-  POST: vi.fn(async (_path: string, init?: { body?: unknown; signal?: AbortSignal }) => ({
-    data: init?.body,
+  PATCH: vi.fn(async (_path: string, init: { body: { settings: object } }) => ({
+    data: { revision: 2, settings: init.body.settings },
     response: new Response()
-  }))
+  })),
+  POST: vi.fn(answer)
 }));
 
 /** A personal space whose assistant runs a model that offers reasoning levels. */
@@ -35,6 +101,14 @@ const reasoningModel = {
   supported_model_kwargs: {
     reasoning_effort: { supported: true, control: "select", options: ["low", "medium", "high"] }
   }
+};
+const otherModel = {
+  id: "model-2",
+  name: "claude-sonnet",
+  nickname: "Claude Sonnet",
+  org: "Anthropic",
+  max_input_tokens: 200000,
+  reasoning: false
 };
 const personalSpace = {
   ...route.space,
@@ -70,21 +144,20 @@ vi.mock("@/features/spaces/use-space", () => ({
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 
 beforeEach(() => {
-  api.GET.mockImplementation(async () => ({
-    data: undefined,
-    error: { message: "Forbidden" },
-    response: new Response(null, { status: 403 })
-  }));
+  localStorage.clear();
+  api.GET.mockImplementation(forbidden);
 });
 
 afterEach(() => {
   cleanup();
   api.GET.mockClear();
   api.POST.mockReset();
-  api.POST.mockImplementation(async (_path, init) => ({
-    data: init?.body,
-    response: new Response()
-  }));
+  api.POST.mockImplementation(answer);
+  api.PATCH.mockClear();
+  route.unavailableModel = false;
+  route.lockedModel = false;
+  route.otherModel = false;
+  route.savedSession = false;
   route.space.personal = false;
   route.space.completion_models = [];
   route.space.default_assistant = null;
@@ -98,6 +171,29 @@ function renderRoute(url = "/spaces/space-1/chat", permissions: string[] = []) {
 }
 
 describe("SpaceChat", () => {
+  it("keeps the picker usable when the saved model is unavailable and only one replacement remains", async () => {
+    Object.assign(route.space, personalSpace);
+    route.unavailableModel = true;
+    renderRoute("/spaces/personal/chat");
+    await screen.findByText("Den sparade modellen är inte tillgänglig");
+    const picker = await screen.findByRole("button", { name: /^Chattmodell:/ });
+    fireEvent.click(picker);
+    const option = await screen.findByRole("option", { name: /GPT-5/ });
+    route.unavailableModel = false;
+    fireEvent.click(option);
+    await waitFor(() =>
+      expect(api.POST).toHaveBeenCalledWith("/api/v1/conversations/settings/resolve/", {
+        body: {
+          assistant_id: "assistant-1",
+          settings: { completion_model_id: "model-1", reasoning_effort: null }
+        }
+      })
+    );
+    await waitFor(() =>
+      expect(screen.queryByText("Den sparade modellen är inte tillgänglig")).toBeNull()
+    );
+  });
+
   it("offers a retry when an assistant in the space can't be loaded", async () => {
     renderRoute("/spaces/space-1/chat?type=assistant&id=assistant-9");
     expect(await screen.findByText("Det gick inte att öppna chatten")).toBeTruthy();
@@ -208,6 +304,7 @@ describe("SpaceChat", () => {
             resolve: (data) => resolve({ data, response: new Response() })
           });
         });
+      if (path === "/api/v1/conversations/settings/resolve/") return answer(path, init);
       bindings = [];
       return { data: init?.body, response: new Response() };
     });
@@ -263,7 +360,7 @@ describe("SpaceChat", () => {
     expect(screen.queryByRole("textbox")).toBeNull();
   });
 
-  it("lets the personal assistant's reasoning effort be picked beside the model and saves it on the assistant", async () => {
+  it("lets the personal assistant's reasoning effort be picked beside the model and keeps it in the conversation draft", async () => {
     Object.assign(route.space, personalSpace);
     renderRoute("/spaces/personal/chat");
 
@@ -274,9 +371,11 @@ describe("SpaceChat", () => {
     fireEvent.click(await screen.findByRole("option", { name: "Hög" }));
 
     await waitFor(() =>
-      expect(api.POST).toHaveBeenCalledWith("/api/v1/assistants/{id}/", {
-        params: { path: { id: "assistant-1" } },
-        body: { completion_model_kwargs: { reasoning_effort: "high" } }
+      expect(api.POST).toHaveBeenCalledWith("/api/v1/conversations/settings/resolve/", {
+        body: {
+          assistant_id: "assistant-1",
+          settings: { completion_model_id: "model-1", reasoning_effort: "high" }
+        }
       })
     );
   });
@@ -290,6 +389,122 @@ describe("SpaceChat", () => {
       .getByRole("textbox", { name: "Fråga Personlig assistent" })
       .closest("[data-clear-of-toasts]") as HTMLElement;
     expect(within(composer).getByRole("button", { name: /^Skills/ })).toBe(skills);
+  });
+
+  it("shows the model the policy pins as a read-only field instead of a picker", async () => {
+    Object.assign(route.space, personalSpace);
+    route.lockedModel = true;
+    renderRoute("/spaces/personal/chat");
+    const field = await screen.findByRole("combobox", { name: "Chattmodell" });
+    expect(field.getAttribute("aria-readonly")).toBe("true");
+    expect(field.textContent).toContain("GPT-5");
+    const description = field
+      .getAttribute("aria-describedby")!
+      .split(" ")
+      .map((id) => document.getElementById(id)?.textContent)
+      .join(" ");
+    expect(description).toContain("Låst av administratör");
+    expect(screen.queryByRole("button", { name: /^Chattmodell:/ })).toBeNull();
+  });
+
+  it("starts a new conversation with the picked model from the model-change dialog", async () => {
+    Object.assign(route.space, personalSpace);
+    route.otherModel = true;
+    route.savedSession = true;
+    window.history.replaceState(null, "", "/spaces/space-1/chat?session_id=s-1");
+    renderRoute("/spaces/personal/chat?session_id=s-1");
+    const log = await screen.findByRole("log", { name: "Konversation" });
+    expect(within(log).getByText("Gränsen är 700 000 kr.")).toBeTruthy();
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Chattmodell: GPT-5/ }));
+    fireEvent.click(await screen.findByRole("option", { name: /Claude Sonnet/ }));
+    const dialog = await screen.findByRole("dialog", {
+      name: "Byta modell i den här konversationen?"
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Starta ny konversation" }));
+
+    await waitFor(() => expect(log.isConnected).toBe(false));
+    expect(window.location.pathname + window.location.search).toBe("/spaces/space-1/chat");
+    // The saved conversation keeps its model; the draft starts with the picked one.
+    expect(api.PATCH).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(api.POST).toHaveBeenCalledWith("/api/v1/conversations/settings/resolve/", {
+        body: {
+          assistant_id: "assistant-1",
+          settings: expect.objectContaining({
+            completion_model_id: "model-2",
+            reasoning_effort: null
+          })
+        }
+      })
+    );
+    expect(await screen.findByRole("button", { name: /^Chattmodell: Claude Sonnet/ })).toBeTruthy();
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("textbox", { name: "Fråga Personlig assistent" })
+      )
+    );
+  });
+
+  it("holds the model and reasoning still while a question waits for a Skills save", async () => {
+    Object.assign(route.space, personalSpace);
+    renderRoute("/spaces/personal/chat");
+    await screen.findByRole("combobox", { name: "Resonemangsnivå: Medel" });
+    // Read anew: the waiting question takes the view from the start state to the conversation.
+    const held = () => [
+      screen.getByRole("button", { name: /^Chattmodell: GPT-5/ }).getAttribute("aria-disabled") ===
+        "true",
+      screen.getByRole("combobox", { name: "Resonemangsnivå: Medel" }).closest("fieldset")!.disabled
+    ];
+    expect(held()).toEqual([false, false]);
+    let saved!: () => void;
+    void queuePartnerUpdate(() => new Promise<void>((resolve) => (saved = resolve)));
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Fråga Personlig assistent" }), {
+      target: { value: "Skicka när Skills är sparade" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
+
+    // The waiting question already carries the conversation's settings revision.
+    expect(held()).toEqual([true, true]);
+    await act(async () => {
+      await Promise.resolve();
+      saved();
+    });
+  });
+
+  it("keeps the next conversation's model when leaving an unsent question is cancelled", async () => {
+    Object.assign(route.space, personalSpace);
+    route.otherModel = true;
+    route.savedSession = true;
+    window.history.replaceState(null, "", "/spaces/space-1/chat?session_id=s-1");
+    renderRoute("/spaces/personal/chat?session_id=s-1");
+    const log = await screen.findByRole("log", { name: "Konversation" });
+    fireEvent.change(screen.getByRole("textbox", { name: "Fråga Personlig assistent" }), {
+      target: { value: "Unsent follow-up" }
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Chattmodell: GPT-5/ }));
+    fireEvent.click(await screen.findByRole("option", { name: /Claude Sonnet/ }));
+    const dialog = await screen.findByRole("dialog", {
+      name: "Byta modell i den här konversationen?"
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Starta ny konversation" }));
+    const leave = await screen.findByRole("alertdialog", { name: "Lämna chatten?" });
+    fireEvent.click(within(leave).getByRole("button", { name: "Avbryt" }));
+
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(log.isConnected).toBe(true);
+    // Focus goes back to the picker the change started from (WCAG 2.4.3).
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("button", { name: /^Chattmodell: GPT-5/ })
+      )
+    );
+    const stored = Array.from({ length: localStorage.length }, (_, index) =>
+      localStorage.getItem(localStorage.key(index)!)
+    ).join();
+    expect(stored).not.toContain("model-2");
   });
 
   it("shows no reasoning picker when the policy keeps the level fixed", async () => {

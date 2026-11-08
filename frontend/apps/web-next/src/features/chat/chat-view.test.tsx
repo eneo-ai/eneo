@@ -56,7 +56,24 @@ const api = vi.hoisted(() => ({
     }
     return { data: undefined, error: { message: "unexpected" }, response: new Response() };
   }),
-  POST: vi.fn(async () => ({ data: undefined, response: new Response() })),
+  POST: vi.fn(
+    async (
+      path: string,
+      init?: { body?: { session_id?: string } }
+    ): Promise<{ data: unknown; response: Response }> => ({
+      data: path.endsWith("/settings/resolve/")
+        ? {
+            revision: init?.body?.session_id ? 1 : 0,
+            settings: {},
+            supports_tool_calling: true,
+            settings_compatible: true,
+            mcp_servers: [],
+            capabilities: []
+          }
+        : undefined,
+      response: new Response()
+    })
+  ),
   PUT: vi.fn(async (_path: string, init: { body: unknown }) => ({
     data: init.body,
     response: new Response()
@@ -81,6 +98,9 @@ vi.mock("sonner", async (importOriginal) => {
 
 afterEach(() => {
   cleanup();
+  // Unmounting saves the composer's draft for its conversation; without this
+  // the next test of the same conversation starts with a typed question.
+  sessionStorage.clear();
   vi.clearAllMocks();
   recents.items = [];
   recents.fail = false;
@@ -151,6 +171,15 @@ function Harness({
     </div>
   );
 }
+
+/**
+ * Sends wait for the conversation's choices. Send is never disabled, so the
+ * tools fieldset tells: it is enabled and idle once the choices have loaded.
+ */
+const settingsLoaded = () =>
+  waitFor(() =>
+    expect(document.querySelector('fieldset[aria-busy="false"]:not([disabled])')).not.toBeNull()
+  );
 
 /** Lays out the region around the conversation and its side panel, as a browser measures it. */
 function layOutConversation(width: number) {
@@ -321,6 +350,7 @@ describe("ChatView start state where the composer is docked: phones and touch sc
     renderInApp(<Harness partner={personal} />);
     const textarea = screen.getByRole("textbox", { name: "Fråga Personlig assistent" });
     fireEvent.change(textarea, { target: { value: "Gör en plan för flytten" } });
+    await settingsLoaded();
     fireEvent.keyDown(textarea, { key: "Enter", ctrlKey: true });
     await screen.findByRole("log", { name: "Konversation" });
     expect(document.activeElement).toBe(
@@ -333,6 +363,7 @@ describe("ChatView start state where the composer is docked: phones and touch sc
     renderInApp(<Harness partner={personal} />);
     const textarea = screen.getByRole("textbox", { name: "Fråga Personlig assistent" });
     fireEvent.change(textarea, { target: { value: "Vilken gräns gäller?" } });
+    await settingsLoaded();
     // Safari does not focus a tapped button: focus has left the field.
     textarea.blur();
     fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
@@ -392,20 +423,24 @@ describe("ChatView composer drafts", () => {
     expect(unloadAsks()).toBe(false);
   });
 
-  it("keeps asking after Send while the question waits for a model switch to be saved", async () => {
+  it("keeps asking after Send while the question waits for a Skills change to be saved", async () => {
     sessionStorage.clear();
     renderInApp(<Harness partner={assistant} />);
-    // A model or reasoning switch made in the composer is saved before the question goes.
+    // A partner change made in the composer (the personal chat's Skills) is saved
+    // before the question goes.
     let saved!: () => void;
     void queuePartnerUpdate(() => new Promise<void>((resolve) => (saved = resolve)));
 
     fireEvent.change(screen.getByRole("textbox", { name: "Fråga Upphandlingsassistenten" }), {
       target: { value: "Skicka när modellen är sparad" }
     });
+    await settingsLoaded();
     fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
 
     // The composer is empty and nothing has left yet: a reload would end the question.
     expect(unloadAsks()).toBe(true);
+    // The question already carries the settings revision: the tools hold still.
+    expect(document.querySelector("fieldset[aria-busy]")?.hasAttribute("disabled")).toBe(true);
 
     // Saved: the question goes (and, with no transport in jsdom, comes back to the composer).
     await act(async () => {
@@ -550,6 +585,263 @@ describe("ChatView tool approval (decision 26)", () => {
 });
 
 describe("ChatView conversation", () => {
+  it("shows readable history and an announced explanation when saved settings are unsupported", async () => {
+    api.POST.mockResolvedValueOnce({
+      data: {
+        revision: 2,
+        settings: {},
+        supports_tool_calling: true,
+        settings_compatible: false,
+        mcp_servers: [],
+        capabilities: []
+      },
+      response: new Response()
+    });
+    renderInApp(<Harness partner={assistant} messages={history} sessionId="session-1" />);
+    const notice = await screen.findByText(
+      /Den här appversionen stöder inte alla sparade inställningar/
+    );
+    expect(spies.announce).toHaveBeenCalledWith(notice.textContent);
+    expect(screen.getByText("Direktupphandlingsgränsen är 700 000 kr.")).toBeTruthy();
+    const field = screen.getByRole("textbox", { name: /^Fråga / }) as HTMLTextAreaElement;
+    fireEvent.change(field, { target: { value: "Fortsätt" } });
+    fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
+    // The question stays, and the field says why.
+    expect(field.value).toBe("Fortsätt");
+    expect(field.getAttribute("aria-invalid")).toBe("true");
+    expect(api.PATCH).not.toHaveBeenCalled();
+    const reload = screen.getByRole("button", { name: "Läs in sparade val" });
+    reload.focus();
+    fireEvent.click(reload);
+    await waitFor(() => expect(notice.isConnected).toBe(false));
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole("textbox", { name: /^Fråga / }))
+    );
+    await settingsLoaded();
+  });
+  /** A saved conversation whose only tool is one MCP server, on. */
+  const withServer = (selected: boolean) => ({
+    data: {
+      revision: 2,
+      settings: {
+        require_tool_approval: true,
+        mcp_server_states: selected ? {} : { diarium: false }
+      },
+      supports_tool_calling: true,
+      settings_compatible: true,
+      mcp_servers: [{ id: "diarium", name: "Diarium", available: true, selected, reason: null }],
+      capabilities: []
+    },
+    response: new Response()
+  });
+
+  it("keeps a tool switch enabled and focused while its change saves", async () => {
+    api.POST.mockResolvedValueOnce(withServer(true)).mockResolvedValueOnce(withServer(false));
+    const save = deferred<{ data: unknown; response: Response }>();
+    api.PATCH.mockReturnValueOnce(save.promise);
+    renderInApp(<Harness partner={assistant} messages={history} sessionId="session-1" />);
+    const trigger = await screen.findByRole("button", { name: "Verktyg: 1 av 1 aktiva" });
+    fireEvent.click(trigger);
+    const popover = await screen.findByRole("dialog", { name: "Verktyg" });
+    const diarium = within(popover).getByRole("switch", { name: "Diarium" });
+    diarium.focus();
+    fireEvent.click(diarium);
+    // The composer shell's click-to-focus must not take the switch's focus.
+    expect(document.activeElement).toBe(diarium);
+    await waitFor(() => expect(api.PATCH).toHaveBeenCalledTimes(1));
+    expect(trigger.closest("fieldset")?.getAttribute("aria-busy")).toBe("true");
+    expect(trigger.hasAttribute("disabled")).toBe(false);
+    expect(diarium.hasAttribute("disabled")).toBe(false);
+    expect(document.activeElement).toBe(diarium);
+
+    await act(async () =>
+      save.resolve({
+        data: { revision: 3, settings: withServer(false).data.settings },
+        response: new Response()
+      })
+    );
+    await waitFor(() =>
+      expect(trigger.closest("fieldset")?.getAttribute("aria-busy")).toBe("false")
+    );
+    expect(document.activeElement).toBe(diarium);
+    expect((diarium as HTMLInputElement).checked).toBe(false);
+  });
+
+  it("explains a change made in another tab with the backend's own message", async () => {
+    api.POST.mockResolvedValueOnce(withServer(true));
+    api.PATCH.mockResolvedValueOnce({
+      data: undefined,
+      error: { message: "Conflict", eneo_error_code: 9065 },
+      response: new Response(null, { status: 409 })
+    });
+    renderInApp(<Harness partner={assistant} messages={history} sessionId="session-1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Verktyg: 1 av 1 aktiva" }));
+    const popover = await screen.findByRole("dialog", { name: "Verktyg" });
+    fireEvent.click(within(popover).getByRole("switch", { name: "Diarium" }));
+    const notice = await screen.findByText(
+      "Valen för den här konversationen ändrades någon annanstans, till exempel i en annan flik. Läs in de sparade valen och försök igen."
+    );
+    expect(spies.announce).toHaveBeenCalledWith(notice.textContent);
+    expect(screen.queryByText("Inställningarna kunde inte sparas eller hämtas.")).toBeNull();
+    expect(screen.getByRole("button", { name: "Läs in sparade val" })).toBeTruthy();
+  });
+
+  it("keeps the saved choices when a change would pause own skills, and the conversation goes on", async () => {
+    api.POST.mockResolvedValueOnce(withServer(true)).mockResolvedValue(withServer(true));
+    api.PATCH.mockResolvedValueOnce({
+      data: undefined,
+      error: {
+        message: "Would pause own Skills",
+        eneo_error_code: 9080,
+        details: { reason: "on_demand_unavailable", detail: "model_lacks_tool_calling" }
+      },
+      response: new Response(null, { status: 400 })
+    });
+    renderInApp(<Harness partner={assistant} messages={history} sessionId="session-1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Verktyg: 1 av 1 aktiva" }));
+    const popover = await screen.findByRole("dialog", { name: "Verktyg" });
+    fireEvent.click(within(popover).getByRole("switch", { name: "Diarium" }));
+    const notice = await screen.findByText(
+      "Modellen byttes inte: dina egna skills skulle då pausas i den här konversationen. Modellen kan inte använda skills vid behov. Välj Alltid eller en annan modell."
+    );
+    expect(spies.announce).toHaveBeenCalledWith(notice.textContent);
+    // Nothing was saved, so there is nothing to reload.
+    expect(screen.queryByRole("button", { name: "Läs in sparade val" })).toBeNull();
+    expect(
+      (within(popover).getByRole("switch", { name: "Diarium" }) as HTMLInputElement).checked
+    ).toBe(true);
+
+    const field = screen.getByRole("textbox", { name: /^Fråga / }) as HTMLTextAreaElement;
+    fireEvent.change(field, { target: { value: "Fortsätt" } });
+    fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
+    await waitFor(() =>
+      expect(spies.announce).toHaveBeenCalledWith("Assistenten skriver ett svar")
+    );
+  });
+
+  it("lets a question go while the conversation's choices load and sends it once they are in", async () => {
+    const load = deferred<{ data: unknown; response: Response }>();
+    api.POST.mockReturnValueOnce(load.promise);
+    renderInApp(<Harness partner={assistant} messages={history} sessionId="session-1" />);
+    const field = screen.getByRole("textbox", { name: /^Fråga / }) as HTMLTextAreaElement;
+    fireEvent.change(field, { target: { value: "Fortsätt" } });
+    fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
+    // The question left the composer and waits for the choices, unrefused.
+    expect(field.value).toBe("");
+    expect(field.getAttribute("aria-invalid")).not.toBe("true");
+    expect(spies.announce).not.toHaveBeenCalled();
+
+    await act(async () => load.resolve(withServer(true)));
+    await waitFor(() =>
+      expect(spies.announce).toHaveBeenCalledWith("Assistenten skriver ett svar")
+    );
+  });
+
+  /** How many questions went out: each request is announced as it goes. */
+  const requestsSent = () =>
+    spies.announce.mock.calls.filter(([message]) => message === "Assistenten skriver ett svar")
+      .length;
+  const flush = () => act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+
+  it("sends one question at a time while the conversation's choices load", async () => {
+    const load = deferred<{ data: unknown; response: Response }>();
+    api.POST.mockReturnValueOnce(load.promise);
+    renderInApp(<Harness partner={assistant} messages={history} sessionId="session-1" />);
+    const field = screen.getByRole("textbox", { name: /^Fråga / }) as HTMLTextAreaElement;
+    fireEvent.change(field, { target: { value: "Första frågan" } });
+    fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
+
+    // The first question waits for the choices: a second stays in the composer.
+    fireEvent.change(field, { target: { value: "Andra frågan" } });
+    fireEvent.keyDown(field, { key: "Enter", ctrlKey: true });
+    expect(field.value).toBe("Andra frågan");
+
+    await act(async () => load.resolve(withServer(true)));
+    await waitFor(() => expect(requestsSent()).toBe(1));
+    await flush();
+    expect(requestsSent()).toBe(1);
+  });
+
+  it("leaves the focus where the user went when a waiting question is taken back", async () => {
+    const load = deferred<{ data: unknown; error?: unknown; response: Response }>();
+    api.POST.mockReturnValueOnce(load.promise);
+    renderInApp(<Harness partner={assistant} messages={history} sessionId="session-1" />);
+    const field = screen.getByRole("textbox", { name: /^Fråga / }) as HTMLTextAreaElement;
+    field.focus();
+    fireEvent.change(field, { target: { value: "Fortsätt" } });
+    fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
+    // While it waits, the user works elsewhere on the page.
+    const elsewhere = document.body.appendChild(document.createElement("button"));
+    elsewhere.focus();
+
+    try {
+      await act(async () =>
+        load.resolve({
+          data: undefined,
+          error: { message: "Gone" },
+          response: new Response(null, { status: 500 })
+        })
+      );
+      await waitFor(() => expect(field.value).toBe("Fortsätt"));
+      expect(document.activeElement).toBe(elsewhere);
+      expect(requestsSent()).toBe(0);
+      expect(spies.announce).toHaveBeenCalledWith(
+        "Inställningarna kunde inte sparas eller hämtas."
+      );
+    } finally {
+      elsewhere.remove();
+    }
+  });
+
+  it("takes a question waiting for the conversation's choices back when it is stopped", async () => {
+    const load = deferred<{ data: unknown; response: Response }>();
+    api.POST.mockReturnValueOnce(load.promise);
+    renderInApp(<Harness partner={assistant} messages={history} sessionId="session-1" />);
+    const field = screen.getByRole("textbox", { name: /^Fråga / }) as HTMLTextAreaElement;
+    fireEvent.change(field, { target: { value: "Skicka när valen är inlästa" } });
+    fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
+    expect(field.value).toBe("");
+
+    fireEvent.click(screen.getByRole("button", { name: "Stoppa generering" }));
+    expect(field.value).toBe("Skicka när valen är inlästa");
+    expect(screen.getByRole("button", { name: "Skicka meddelande" })).toBeTruthy();
+
+    // Read after the stop: nothing goes out.
+    await act(async () => load.resolve(withServer(true)));
+    await flush();
+    expect(requestsSent()).toBe(0);
+  });
+
+  it("lets a question go while saved choices are read again, instead of refusing it with the old notice", async () => {
+    api.POST.mockResolvedValueOnce(withServer(true));
+    api.PATCH.mockResolvedValueOnce({
+      data: undefined,
+      error: { message: "Conflict", eneo_error_code: 9065 },
+      response: new Response(null, { status: 409 })
+    });
+    renderInApp(<Harness partner={assistant} messages={history} sessionId="session-1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Verktyg: 1 av 1 aktiva" }));
+    const popover = await screen.findByRole("dialog", { name: "Verktyg" });
+    fireEvent.click(within(popover).getByRole("switch", { name: "Diarium" }));
+    const conflict =
+      "Valen för den här konversationen ändrades någon annanstans, till exempel i en annan flik. Läs in de sparade valen och försök igen.";
+    await screen.findByText(conflict);
+
+    const reload = deferred<{ data: unknown; response: Response }>();
+    api.POST.mockReturnValueOnce(reload.promise);
+    fireEvent.click(screen.getByRole("button", { name: "Läs in sparade val" }));
+    const field = screen.getByRole("textbox", { name: /^Fråga / }) as HTMLTextAreaElement;
+    fireEvent.change(field, { target: { value: "Fortsätt" } });
+    fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
+    // It waits for the read rather than being refused by what it may replace.
+    expect(field.value).toBe("");
+    expect(field.getAttribute("aria-invalid")).not.toBe("true");
+    expect(spies.announce.mock.calls.filter(([text]) => text === conflict)).toHaveLength(1);
+
+    await act(async () => reload.resolve(withServer(false)));
+    await waitFor(() => expect(requestsSent()).toBe(1));
+  });
+
   it("names the message list and keeps it out of live announcements", () => {
     renderInApp(<Harness partner={assistant} messages={history} sessionId="session-1" />);
     const log = screen.getByRole("log", { name: "Konversation" });

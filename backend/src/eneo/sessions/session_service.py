@@ -24,8 +24,13 @@ from eneo.main.exceptions import (
 from eneo.main.logging import get_logger
 from eneo.questions.question import MessageFeedback, QuestionAdd, ToolCallInfo
 from eneo.questions.questions_repo import QuestionRepository
+from eneo.sessions.conversation_settings import (
+    ConversationSettings,
+    ConversationSettingsState,
+)
 from eneo.sessions.session import (
     SessionAdd,
+    SessionContext,
     SessionFeedback,
     SessionInDB,
     SessionMetadataPublic,
@@ -279,13 +284,10 @@ class SessionService:
             return None, key.id, None, None
         return self.user.id, None, None, None
 
-    def _is_owner(self, session: SessionInDB | SessionOwnership) -> bool:
-        """Match the session's principal against the current request's principal.
-
-        Every branch requires a non-None match; we never treat NULL == NULL
-        as a match (defends against the synthetic-user/no-user trap where two
-        unrelated NULL fields would otherwise compare equal).
-        """
+    def _is_owner(
+        self, session: SessionInDB | SessionOwnership | SessionContext
+    ) -> bool:
+        """Match only non-null principals, including the widget's visitor identity."""
         user_id, api_key_id, widget_id, visitor_id = self._principal_columns()
         if widget_id is not None:
             return session.widget_id == widget_id and session.visitor_id == visitor_id
@@ -297,24 +299,19 @@ class SessionService:
 
     def _check_owned(
         self,
-        owner: SessionOwnership | None,
+        owner: SessionOwnership | SessionContext | None,
         assistant_id: UUID | None = None,
         group_chat_id: UUID | None = None,
-    ) -> SessionOwnership:
+    ) -> None:
         if owner is None:
             raise NotFoundException("Session not found")
-
         if not self._is_owner(owner):
             raise UnauthorizedException("Session belongs to other principal")
-
-        # Handle cross-endpoint access attempt
         if assistant_id is not None and owner.group_chat_id is not None:
             raise BadRequestException(
                 "Cannot access a group chat session through the assistant endpoint. "
                 "Use the conversation endpoints instead."
             )
-
-        # Verify the session belongs to the specified assistant/group chat
         if (
             assistant_id is not None
             and owner.assistant_id is not None
@@ -323,8 +320,6 @@ class SessionService:
             raise NotFoundException("Session belongs to another assistant")
         if group_chat_id is not None and owner.group_chat_id != group_chat_id:
             raise NotFoundException("Session belongs to another group chat")
-
-        return owner
 
     def _check_exists_and_belongs_to_user(
         self,
@@ -356,7 +351,6 @@ class SessionService:
         group_chat_id: UUID | None = None,
     ) -> SessionInDB:
         session = await self.session_repo.get(id=id)
-
         return self._check_exists_and_belongs_to_user(
             session, assistant_id=assistant_id, group_chat_id=group_chat_id
         )
@@ -367,13 +361,24 @@ class SessionService:
         assistant_id: UUID | None = None,
         group_chat_id: UUID | None = None,
     ) -> SessionOwnership:
-        """``get_session_by_uuid`` for callers that need only the owner and chat
-        partner: the same refusals, without reading the turns."""
-        return self._check_owned(
-            await self.session_repo.get_ownership(id),
-            assistant_id=assistant_id,
-            group_chat_id=group_chat_id,
+        """The owner and chat partner, with the same refusals and no turns."""
+        owner = await self.session_repo.get_ownership(id)
+        self._check_owned(owner, assistant_id=assistant_id, group_chat_id=group_chat_id)
+        assert owner is not None
+        return owner
+
+    async def get_context(
+        self,
+        id: UUID,
+        assistant_id: UUID | None = None,
+        group_chat_id: UUID | None = None,
+    ) -> SessionContext:
+        session = await self.session_repo.get_context(id, tenant_id=self.user.tenant_id)
+        self._check_owned(
+            session, assistant_id=assistant_id, group_chat_id=group_chat_id
         )
+        assert session is not None
+        return session
 
     async def get_tool_call_result(
         self,
@@ -407,6 +412,17 @@ class SessionService:
             previous=previous,
             name_filter=name_filter,
         )
+
+    async def update_settings(
+        self, id: UUID, settings: ConversationSettings, expected_revision: int
+    ) -> ConversationSettingsState:
+        await self.get_context(id)
+        # A short transaction avoids holding the parent row lock while a
+        # streaming turn commits its question in a separate transaction.
+        async with sessionmanager.session() as db_session, db_session.begin():
+            return await self._session_repository(db_session).update_settings(
+                id, settings, expected_revision
+            )
 
     async def update_session(self, session_update: SessionUpdate) -> SessionInDB:
         session = await self.session_repo.update(session_update)
@@ -510,6 +526,7 @@ class SessionService:
         self,
         *,
         name: str,
+        settings: ConversationSettingsState | None = None,
         question: str,
         files: Sequence[File] | None = None,
         session_assistant_id: UUID | None = None,
@@ -525,6 +542,7 @@ class SessionService:
             assistant_id=session_assistant_id,
             group_chat_id=group_chat_id,
         )
+        session_add.settings = settings
         async with self._placeholder_transaction() as db_session:
             session_record = await self._session_repository(db_session).add(session_add)
             question_add = self._build_question_placeholder(

@@ -5,6 +5,7 @@ Space, actor policy, context building and the model adapter remain real.
 """
 
 import asyncio
+import copy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, Mock
@@ -28,6 +29,7 @@ from eneo.completion_models.infrastructure.context_builder import ContextBuilder
 from eneo.embedding_models.domain.embedding_model import EmbeddingModel
 from eneo.governance_policy.domain.policy_resolver import EffectiveConfig
 from eneo.main.exceptions import (
+    BadRequestException,
     SecurityClassificationMismatchException,
     UnauthorizedException,
 )
@@ -39,6 +41,10 @@ from eneo.security_classifications.domain.entities.security_classification impor
     SecurityClassification,
 )
 from eneo.services.service import DatastoreResult
+from eneo.sessions.conversation_settings import (
+    ConversationSettings,
+    ConversationSettingsState,
+)
 from eneo.sessions.session import SessionInDB
 from eneo.skills.domain.personal_chat_skill_layers import plan_personal_chat_turn
 from eneo.skills.domain.skill import (
@@ -186,6 +192,8 @@ def turn(monkeypatch: pytest.MonkeyPatch) -> TurnFixture:
     )
     history.create_question_placeholder = AsyncMock(return_value=(uuid4(), now))
     history.get_session_by_uuid = AsyncMock(return_value=session)
+    # ask() reads the saved settings from the session's metadata only.
+    history.get_context = AsyncMock(return_value=session)
     history.complete_question_with_answer = AsyncMock()
     requests: list[dict[str, object]] = []
 
@@ -515,6 +523,83 @@ async def test_tool_opt_out_and_classification_filter_survive_preparation(
     assert turn.history.mock_calls == []
 
 
+@pytest.mark.parametrize("former", [False, True])
+@pytest.mark.parametrize("as_tool", [False, True])
+async def test_helper_followup_is_rejected_before_reading_saved_settings(
+    turn: TurnFixture, former: bool, as_tool: bool
+):
+    helper_id = uuid4() if as_tool else turn.assistant.id
+    turn.service.org_space_assistant_role_repo.exists_active_for_assistant.side_effect = (
+        lambda id: id == helper_id and not former
+    )
+    turn.service.help_assistant_assignment_history_repo.exists_for_assistant.side_effect = (
+        lambda id: id == helper_id and former
+    )
+    with pytest.raises(UnauthorizedException, match="helper"):
+        await turn.service.ask(
+            question="Follow up",
+            assistant_id=turn.assistant.id,
+            tool_assistant_id=helper_id if as_tool else None,
+            session_id=turn.session.id,
+        )
+    assert turn.history.mock_calls == []
+    assert turn.requests == []
+
+
+async def test_saved_tool_opt_out_survives_preparation(turn: TurnFixture):
+    server = MCPServer(
+        id=uuid4(),
+        tenant_id=turn.user.tenant_id,
+        name="Optional",
+        http_url="https://tools.example/mcp",
+        security_classification=turn.space.security_classification,
+    )
+    turn.assistant.mcp_servers = [server]
+    prepared = await turn.service._prepare_turn(
+        question="Check the purchase",
+        assistant_id=turn.assistant.id,
+        conversation_settings=ConversationSettingsState(
+            revision=2,
+            settings=ConversationSettings(mcp_server_states={server.id: False}),
+        ),
+    )
+    assert prepared.mcp_servers_override == []
+    assert turn.assistant.mcp_servers == [server]
+    assert turn.requests == []
+    assert turn.history.mock_calls == []
+
+
+async def test_saved_approval_rejects_non_streaming_before_inference(turn: TurnFixture):
+    turn.session.settings = ConversationSettingsState(
+        revision=2, settings=ConversationSettings(require_tool_approval=True)
+    )
+    with pytest.raises(BadRequestException, match="Tool approval requires streaming"):
+        await turn.service.ask(
+            question="Check the purchase",
+            assistant_id=turn.assistant.id,
+            session_id=turn.session.id,
+        )
+    assert turn.requests == []
+    turn.history.create_question_placeholder.assert_not_called()
+    turn.history.create_session_with_question_placeholder.assert_not_called()
+
+
+async def test_turn_response_keeps_starting_settings_snapshot(turn: TurnFixture):
+    initial = ConversationSettingsState(revision=2, settings=ConversationSettings())
+    turn.session.settings = initial.with_settings(
+        ConversationSettings(require_tool_approval=True)
+    )
+    response = await turn.service.ask(
+        question="Check the purchase",
+        assistant_id=turn.assistant.id,
+        session_id=turn.session.id,
+        conversation_settings=initial,
+    )
+    assert response.answer == "Check the policy."
+    assert response.session.settings == initial
+    assert len(turn.requests) == 1
+
+
 async def test_active_provider_work_is_cancelled_with_the_ask(turn: TurnFixture):
     started, stopped = asyncio.Event(), asyncio.Event()
 
@@ -543,3 +628,38 @@ async def test_active_provider_work_is_cancelled_with_the_ask(turn: TurnFixture)
             if not task.done():
                 task.cancel()
             await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_conversation_model_rechecks_the_assistants_baseline_before_history(
+    turn: TurnFixture,
+):
+    large = turn.assistant.completion_model
+    assert large is not None
+    small = copy.copy(large)
+    small.id, small.nickname, small.max_input_tokens = uuid4(), "Small model", 64
+    turn.space.completion_models = [large, small]
+    turn.space.user_id = turn.user.id
+    turn.space.default_assistant = turn.assistant
+    turn.user.roles[0].permissions.append(Permission.PERSONAL_CHAT)
+    turn.assistant.prompt.text = "Use the procurement policy. " * 40
+    saved = ConversationSettingsState(
+        revision=2, settings=ConversationSettings(completion_model_id=small.id)
+    )
+    with pytest.raises(BadRequestException, match="context"):
+        await turn.service.ask(
+            question="Check the purchase",
+            assistant_id=turn.assistant.id,
+            conversation_settings=saved,
+        )
+    assert turn.requests == []
+    turn.history.create_session_with_question_placeholder.assert_not_called()
+
+    # The same prompt still fits the assistant's own model.
+    response = await turn.service.ask(
+        question="Check the purchase",
+        assistant_id=turn.assistant.id,
+        conversation_settings=ConversationSettingsState(
+            revision=2, settings=ConversationSettings(completion_model_id=large.id)
+        ),
+    )
+    assert response.completion_model.id == large.id

@@ -50,21 +50,55 @@ the message array. `transport.ts` builds the body from the last user
 message's text parts (joined with `\n`) and the per-send options
 `sendMessage(…, { body })` provides.
 
-| Field                     | Type                                       | Notes                                                                                       |
-| ------------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------- |
-| `question`                | `string`                                   | The user's text.                                                                            |
-| `stream`                  | `true`                                     | Always `true` on this path.                                                                 |
-| `files`                   | `{ id: string }[]`                         | Uploaded attachment ids (defaults to `[]`).                                                 |
-| `session_id`              | `string \| null`                           | Continue a conversation.                                                                    |
-| `assistant_id`            | `string \| null`                           | Start one with an assistant (also the personal/default assistant).                          |
-| `group_chat_id`           | `string \| null`                           | Start one with a group chat.                                                                |
-| `tools`                   | `{ assistants: { id, handle }[] } \| null` | @mention of a group-chat member.                                                            |
-| `disabled_capabilities`   | `CapabilityPurpose[]`                      | Capabilities the user turned off for this message.                                          |
-| `disabled_mcp_server_ids` | `string[]`                                 | MCP servers the user turned off; can never enable one.                                      |
-| `require_tool_approval`   | `boolean`                                  | Ask before running MCP tools. Requires `stream: true`; rejected with `400` for group chats. |
+| Field                     | Type                                       | Notes                                                                                      |
+| ------------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------ |
+| `question`                | `string`                                   | The user's text.                                                                           |
+| `stream`                  | `true`                                     | Always `true` on this path.                                                                |
+| `files`                   | `{ id: string }[]`                         | Uploaded attachment ids (defaults to `[]`).                                                |
+| `session_id`              | `string \| null`                           | Continue a conversation.                                                                   |
+| `assistant_id`            | `string \| null`                           | Start one with an assistant (also the personal/default assistant).                         |
+| `group_chat_id`           | `string \| null`                           | Start one with a group chat.                                                               |
+| `tools`                   | `{ assistants: { id, handle }[] } \| null` | @mention of a group-chat member.                                                           |
+| `settings`                | `ConversationSettings`                     | A new draft's choices, sent with its first question; never for a saved conversation.       |
+| `settings_revision`       | `number`                                   | The saved choices a turn in a saved conversation uses; another revision returns `409`.     |
+| `disabled_capabilities`   | `CapabilityPurpose[]`                      | A per-turn restriction; narrows the saved choices for this message.                        |
+| `disabled_mcp_server_ids` | `string[]`                                 | API per-turn restriction, not sent by web-next (servers are saved choices); never enables. |
+| `require_tool_approval`   | `boolean`                                  | API per-turn field, not sent by web-next (see [Tool approval](#tool-approval)).            |
 
 Exactly one of `session_id`, `assistant_id`, `group_chat_id` identifies the
 target (backend `ConversationRequest`).
+
+## Saved choices and current policy
+
+The canonical [conversation settings API contract](https://docs.eneo.ai/dev/docs/api#conversation-settings)
+separates assistant policy, saved conversation choices and per-turn restrictions.
+`ConversationSettingsProvider` owns the mounted conversation's revision and
+lifecycle. Tool controls render the backend's `selected` and `available` fields;
+they do not compute policy defaults. `settings_compatible: false` keeps history
+readable while disabling edits, sends and automatic interactive-tool execution.
+The backend enforces the same compatibility boundary independently.
+
+The transport's `disabled_capabilities` is still useful for a per-turn feature
+restriction; it only narrows the saved and allowed set.
+New options belong in the typed backend contract and generated types before a
+client control is added. Both frontends use the same resolution response.
+
+Both clients use `@eneo/eneo-js/conversations/draft-preferences` for browser-local
+start choices, scoped by tenant, user and partner. These seed only new drafts;
+saved and legacy conversations still read their state/defaults from the server.
+Storage clearing or failure returns new drafts to current defaults. A remembered
+model no longer available falls back to current defaults only for new drafts.
+
+New drafts send `settings`; existing conversations send `settings_revision`.
+Both preflight and answer use the same snapshot. Choices are loaded through
+`POST /api/v1/conversations/settings/resolve/` and saved through
+`PATCH /api/v1/conversations/{session_id}/settings/` with `expected_revision`.
+The resolution includes the current catalog of allowed models, the effective model and
+reasoning level, and an explicit unavailable-model state. HTTP 409 requires
+reloading the saved choices; clients never overwrite another tab automatically.
+A personal-chat model change that would pause the user's own Skills running in
+the conversation is refused with `400` and code `9080`; nothing is saved, the
+chat says why and the conversation goes on.
 
 ## Stream parts
 
@@ -92,6 +126,7 @@ transient, so it lands in `message.parts` (first part of every live answer).
   "type": "data-session",
   "data": {
     "session_id": "<uuid>",
+    "settings": {/* ConversationSettingsState: revision and saved choices */},
     "completion_model": {/* CompletionModelPublic (OpenAPI), or null */},
     "files": [/* FilePublic[] — the question's uploaded attachments */],
     "web_search_references": [],
@@ -102,7 +137,7 @@ transient, so it lands in `message.parts` (first part of every live answer).
 ```
 
 The client reads `session_id` (to continue the conversation and to enable
-title generation), `answering_assistant`, and `completion_model.{id,name,nickname,token_limit}`.
+title generation), `settings` (the authoritative revision for subsequent saves and turns), `answering_assistant`, and `completion_model.{id,name,nickname,token_limit}`.
 
 ### Text and reasoning
 
@@ -400,8 +435,11 @@ Approval is an Eneo flow over the open stream; the SDK's tool-approval
 machinery is not involved. `useChat` sees only `data-tool-approval` parts
 and ordinary tool parts.
 
-1. The request carries `require_tool_approval: true` (and `stream: true`;
-   group chats are rejected with `400`).
+1. Approval applies when the conversation's saved
+   `settings.require_tool_approval` is true or the request asks for it with
+   `require_tool_approval: true` (an API per-turn field web-next does not
+   send). This path always has `stream: true`; group chats are rejected with
+   `400`.
 2. When the model calls MCP tools that need approval the backend registers
    an `approval_id` (uuid, Redis, TTL `mcp_tool_approval_ttl_seconds`, 305 s
    by default) and emits `data-tool-approval` with `status: "pending"`,

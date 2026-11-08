@@ -56,6 +56,18 @@ it("keeps a document after a failed save and cancelled navigation, then leaves a
   });
   const toastError = vi.spyOn(toast, "error");
   post.mockImplementation(async (path: string) => {
+    if (path === "/api/v1/conversations/settings/resolve/")
+      return {
+        data: {
+          revision: 1,
+          settings: {},
+          supports_tool_calling: true,
+          settings_compatible: true,
+          mcp_servers: [],
+          capabilities: []
+        },
+        response: new Response()
+      };
     if (path === "/api/v1/files/{id}/original/signed-url/")
       return {
         data: { url: "https://example.test/api/v1/files/file-1/original/download/?token=fixture" },
@@ -128,9 +140,20 @@ it("keeps a document after a failed save and cancelled navigation, then leaves a
   expect(screen.queryByRole("alertdialog")).toBeNull();
 });
 
-it("asks before leaving while a question waits for a model save, and sends nothing once it has left", async () => {
-  post.mockImplementation(async () => ({ data: undefined, response: new Response() }));
-  // A model or reasoning switch made in the composer is saved before the question goes.
+it("asks before leaving while a question waits for a Skills save, and sends nothing once it has left", async () => {
+  post.mockImplementation(async () => ({
+    data: {
+      revision: 1,
+      settings: {},
+      effective_model: { id: "model-1", name: "gpt-4o" },
+      supports_tool_calling: true,
+      settings_compatible: true,
+      mcp_servers: [],
+      capabilities: []
+    },
+    response: new Response()
+  }));
+  // A Skills change made in the composer is saved before the question goes.
   let saved!: () => void;
   const saving = new Promise<void>((resolve) => (saved = resolve));
   const save = queuePartnerUpdate(() => saving);
@@ -142,6 +165,9 @@ it("asks before leaving while a question waits for a model save, and sends nothi
         createRoute({ getParentRoute: () => root, path: "/done", component: () => <h1>Done</h1> })
       ]
     });
+    await waitFor(() =>
+      expect(document.querySelector('fieldset[aria-busy="false"]:not([disabled])')).not.toBeNull()
+    );
     const field = screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Fråga Assistant" });
     fireEvent.change(field, { target: { value: "Skicka när modellen är sparad" } });
     fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
