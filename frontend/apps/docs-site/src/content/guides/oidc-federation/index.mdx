@@ -232,6 +232,7 @@ When the identity cannot be bound, the sign-in is refused. The login page says t
 | `duplicate_email` | Several accounts have the email, in different letter case | Leave one account with the address |
 | `duplicate_subject` | The subject is bound to two accounts under different audiences | Find which account is the person's from the accounts the audit entry names |
 | `identity_taken` | Another account took the identity while this sign-in waited | Signing in again reaches the account that holds it; check that it is the person's |
+| `account_changed` | While this sign-in waited for the account, it was re-bound or its email changed, and the account found next changed as well | Signing in again decides on the accounts as they are now |
 
 Each refusal writes an `identity_conflict` entry to the [audit log](/guides/audit-logging#sign-in-identity-actions) with the reason, the identity and the accounts involved, and a backend log warning `identity_conflict` with the same fields and the correlation ID. Neither carries the email or a token.
 

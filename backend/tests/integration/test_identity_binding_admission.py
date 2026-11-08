@@ -644,6 +644,24 @@ async def _wait_for_lock_waiters(count: int) -> None:
             await asyncio.sleep(0.02)
 
 
+async def _wait_for_waiters_on(session: Any) -> None:
+    """Until a backend waits for a lock this session holds."""
+    pid = await session.scalar(sa.text("SELECT pg_backend_pid()"))
+    async with asyncio.timeout(10):
+        while True:
+            async with sessionmanager.session() as probe, probe.begin():
+                waiting = await probe.scalar(
+                    sa.text(
+                        "SELECT count(*) FROM pg_stat_activity "
+                        "WHERE :pid = ANY(pg_blocking_pids(pid))"
+                    ),
+                    {"pid": pid},
+                )
+            if waiting:
+                return
+            await asyncio.sleep(0.02)
+
+
 async def _race(statement: Any, *sign_ins: Awaitable[UserInDB]) -> list[Any]:
     """Start the sign-ins while ``statement`` holds its row lock; commit it
     once they all wait on that lock."""
@@ -707,6 +725,85 @@ async def test_one_subject_signing_in_under_two_audiences_at_once_binds_one_acco
     assert len(owners) == 1, owners
     assert [getattr(result, "id", result) for result in results] == [*owners] * 2
     assert await _bindings(*owners) == {("client-a", "person-a"), ("api-a", "person-a")}
+
+
+def _retire(account: UUID, subject: str) -> Any:
+    """What a re-binding by window or allowance commits: the account's
+    subject replaced under its pair."""
+    return (
+        sa.update(IdentityBindings)
+        .where(IdentityBindings.user_id == account)
+        .values(subject=subject)
+    )
+
+
+async def test_a_subject_retired_during_the_lock_wait_is_not_added_again(
+    sign_in, enqueued
+):
+    account = await _user_id()
+    await sign_in("person-a", "client-a")
+
+    async with sessionmanager.session() as session, session.begin():
+        await session.execute(_lock(account))
+        waiting = asyncio.ensure_future(sign_in("person-a", "api-a"))
+        await _wait_for_lock_waiters(1)
+        await session.execute(_retire(account, "person-b"))
+    # Decided again: the email finds the account, now bound under another pair.
+    with pytest.raises(IdentityConflictError) as refused:
+        await waiting
+
+    assert refused.value.reason == "account_bound"
+    assert await _bindings(account) == {("client-a", "person-b")}
+
+
+async def test_an_email_changed_during_the_lock_wait_binds_nothing(sign_in):
+    account = await _user_id()
+
+    async with sessionmanager.session() as session, session.begin():
+        await session.execute(_lock(account))
+        waiting = asyncio.ensure_future(sign_in("person-a"))
+        await _wait_for_lock_waiters(1)
+        await session.execute(
+            sa.update(Users)
+            .where(Users.id == account)
+            .values(email="renamed@example.com")
+        )
+    with pytest.raises(FederatedLoginDenied, match="User not found"):
+        await waiting
+
+    assert await _bindings() == set()
+
+
+async def test_an_account_that_changes_again_during_the_second_wait_is_refused(
+    sign_in, test_tenant, enqueued
+):
+    first = await _user_id()
+    second = await _add_user(test_tenant.id, "second@example.com")
+    await sign_in("person-a", "client-a")
+
+    async with sessionmanager.session() as hold_second, hold_second.begin():
+        await hold_second.execute(_lock(second))
+        async with sessionmanager.session() as hold_first, hold_first.begin():
+            await hold_first.execute(_lock(first))
+            waiting = asyncio.ensure_future(
+                sign_in("person-a", "api-a", email="second@example.com")
+            )
+            await _wait_for_lock_waiters(1)
+            await hold_first.execute(_retire(first, "person-b"))
+        # Decided again, by the email: now it waits for the second account.
+        await _wait_for_waiters_on(hold_second)
+        await hold_second.execute(
+            sa.update(Users)
+            .where(Users.id == second)
+            .values(email="renamed@example.com")
+        )
+    with pytest.raises(IdentityConflictError) as refused:
+        await waiting
+
+    assert refused.value.reason == "account_changed"
+    assert await _bindings(first) == {("client-a", "person-b")}
+    assert await _bindings(second) == set()
+    assert [c["account_ids"] for c in _conflicts(enqueued)] == [[str(second)]]
 
 
 @pytest.mark.parametrize(

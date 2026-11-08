@@ -70,7 +70,7 @@ from eneo.main.request_context import get_request_context
 from eneo.roles.permissions import Permission
 from eneo.settings.settings import SettingsUpsert
 from eneo.settings.settings_repo import SettingsRepository
-from eneo.tenants.tenant import TenantState
+from eneo.tenants.tenant import TenantInDB, TenantState
 from eneo.tenants.tenant_repo import TenantRepository
 from eneo.users.identity_binding_repo import (
     IdentityBindingRepository,
@@ -108,6 +108,15 @@ logger = get_logger(__name__)
 _INACTIVE_OR_REMOVED = (
     "User is inactive or has been removed. Contact your administrator."
 )
+
+
+class _AccountChanged(Exception):
+    """The account was chosen by evidence (the subject it holds, the email
+    that names it) that changed while the sign-in waited for its row lock."""
+
+    def __init__(self, user_id: UUID) -> None:
+        super().__init__(str(user_id))
+        self.user_id = user_id
 
 
 def _permission_allows(key: ApiKeyV2InDB, required: ApiKeyPermission) -> bool:
@@ -504,7 +513,37 @@ class UserService:
                     "Contact your administrator to add your domain."
                 )
 
-        bindings = self.identity_binding_repo
+        try:
+            return await self._admit_identity(
+                identity, tenant, allowed_domains, correlation_id
+            )
+        except _AccountChanged:
+            # The account changed while this sign-in waited for it: decide
+            # once more on the current rows, under the locks already held.
+            pass
+        try:
+            return await self._admit_identity(
+                identity, tenant, allowed_domains, correlation_id
+            )
+        except _AccountChanged as changed:
+            await self._refuse_identity(
+                "account_changed",
+                identity,
+                tenant_id,
+                [changed.user_id],
+                correlation_id,
+            )
+
+    async def _admit_identity(
+        self,
+        identity: FederatedIdentity,
+        tenant: TenantInDB,
+        allowed_domains: Sequence[str],
+        correlation_id: str,
+    ) -> tuple[UserInDB, bool]:
+        """The binding, then the same subject, then the email, then JIT."""
+        tenant_id = tenant.id
+        bindings = cast(IdentityBindingRepository, self.identity_binding_repo)
         holder_id = await bindings.holder(
             tenant_id=tenant_id,
             issuer=identity.issuer,
@@ -674,7 +713,9 @@ class UserService:
 
         The lock orders the decision with every other sign-in to the account
         and with SCIM or admin deactivation: a waiter whose account was
-        removed meanwhile gets no row. An account already bound takes a new
+        removed meanwhile gets no row, and one whose account no longer holds
+        the subject, or whose email no longer names it, raises
+        ``_AccountChanged`` for the caller to decide again. An account already bound takes a new
         identity only where an admin opened the way. Found by its email: a
         migration window from one of its pairs adds the new pair, and a
         re-binding allowance adds the pair or replaces the subject under it,
@@ -690,6 +731,24 @@ class UserService:
             raise FederatedLoginDenied(_INACTIVE_OR_REMOVED)
         pair = (identity.issuer, identity.audience)
         bound = await bindings.of_user(user.id)
+        # The account was chosen before this lock was granted; a sign-in that
+        # held it may have re-bound the account, or SCIM changed its email.
+        if (
+            found_by == "same_subject"
+            and not any(
+                (binding.issuer, binding.subject_claim, binding.subject)
+                == (identity.issuer, identity.subject_claim, identity.subject)
+                for binding in bound
+            )
+        ) or (
+            found_by == "email"
+            and [
+                named.id
+                for named in await self.repo.get_users_by_email(identity.email, limit=2)
+            ]
+            != [user.id]
+        ):
+            raise _AccountChanged(user.id)
         same_pair = next(
             (
                 binding
