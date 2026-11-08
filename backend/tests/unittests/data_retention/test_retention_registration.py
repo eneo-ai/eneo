@@ -25,6 +25,7 @@ from eneo.database.database import DatabaseSessionManager
 from eneo.main.config import Settings, get_settings
 from eneo.main.retention_tasks import (
     EXISTING_WITHOUT_CHOICE,
+    FOLLOWS_A_REMOVAL,
     RetentionHealthCache,
     _read_retention_health,
     retention_task_registrations,
@@ -56,6 +57,7 @@ def test_registered_tasks_replace_the_removal_crons():
     assert "purge_widget_sessions" in crons
     assert registered == {
         "conversations.history",
+        "conversations.derived_copies",
         "sessions.empty",
         "files.unused",
         "retention.jobs",
@@ -64,8 +66,8 @@ def test_registered_tasks_replace_the_removal_crons():
 
 def test_only_listed_removals_run_without_a_choice():
     """Mutants: a new task is on by default without being listed among the
-    removals that run without a choice; a listed removal loses its operator
-    switch, or its default changes."""
+    removals that run without a choice or follow a removal; a listed removal
+    loses its operator switch, or its default changes."""
     defaults = Settings.model_fields
     on_by_default = {
         registration.name
@@ -75,8 +77,12 @@ def test_only_listed_removals_run_without_a_choice():
 
     # Conversation history removes only what an assistant, app, space or
     # organisation period selects; with none set it keeps everything.
-    assert on_by_default == {"conversations.history", *EXISTING_WITHOUT_CHOICE}
-    for task, switch in EXISTING_WITHOUT_CHOICE.items():
+    assert on_by_default == {
+        "conversations.history",
+        *EXISTING_WITHOUT_CHOICE,
+        *FOLLOWS_A_REMOVAL,
+    }
+    for task, switch in {**EXISTING_WITHOUT_CHOICE, **FOLLOWS_A_REMOVAL}.items():
         assert defaults[switch].default is True
         switched_off = get_settings().model_copy(update={switch: False})
         assert [
@@ -95,6 +101,7 @@ def _violations(**changes: object) -> list[str]:
             for registration in retention_task_registrations(get_settings())
         ],
         "existing_without_choice": EXISTING_WITHOUT_CHOICE,
+        "follows_a_removal": FOLLOWS_A_REMOVAL,
         "settings": Settings.model_fields,
     }
     declared.update(changes)
@@ -112,8 +119,8 @@ def test_the_registration_check_fails_on_each_omission():
     """Mutants, one per check: a rule without a disposition; a disposition
     outside the vocabulary; a rule whose task is not registered; a task that
     is neither a rule's nor listed; a listed task that is not registered; a
-    listed switch that is no setting; a rule's task also listed as running
-    without a choice."""
+    listed switch that is no setting, for either list; a rule's task also
+    listed as running without a choice; a task in both lists."""
     registered = [
         registration.name
         for registration in retention_task_registrations(get_settings())
@@ -141,6 +148,17 @@ def test_the_registration_check_fails_on_each_omission():
             "existing_without_choice": {
                 **EXISTING_WITHOUT_CHOICE,
                 "sessions.empty": "retention_no_such_switch",
+            },
+        },
+        "switch of a following removal that is no setting": {
+            "follows_a_removal": {
+                "conversations.derived_copies": "retention_no_such_switch",
+            },
+        },
+        "task in both lists": {
+            "existing_without_choice": {
+                **EXISTING_WITHOUT_CHOICE,
+                **FOLLOWS_A_REMOVAL,
             },
         },
         "rule task listed as without a choice": {

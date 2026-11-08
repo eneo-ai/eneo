@@ -53,6 +53,7 @@ class _Pages:
 
     roots: list[_Root]
     kind: ConversationRootKind = ConversationRootKind.QUESTION
+    examined_key: str = "owners_examined"
     # Owners with a policy, with or without due roots.
     owners: list[UUID] = field(default_factory=lambda: [_OWNER])
     now: list[float] = field(default_factory=lambda: [0.0])
@@ -99,8 +100,9 @@ class _Pages:
         return ConversationPage(
             roots=tuple(after),
             locked_ids=tuple(root.id for root in after),
-            owners_probed=len(page),
-            last_owner=page[-1] if page else None,
+            examined=len(page),
+            done=past_owner(page[-1]) if page else None,
+            complete=len(page) < limit,
         )
 
     async def cascade_cost(self, identifier: UUID, ceiling: int) -> int:

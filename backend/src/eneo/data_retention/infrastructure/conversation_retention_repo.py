@@ -49,6 +49,7 @@ class ConversationRetentionRepository:
     ) -> None:
         self.session = session
         self.kind = kind
+        self.examined_key = "owners_examined"
         self.now = now
         self.unit = ConversationUnitRepository(session, kind=kind, now=now)
         self.records: type[Questions] | type[AppRuns]
@@ -297,7 +298,7 @@ class ConversationRetentionRepository:
         owner_ids = await self._owner_page(cursor, limit)
         if not owner_ids:
             return ConversationPage(
-                roots=(), locked_ids=(), owners_probed=0, last_owner=None
+                roots=(), locked_ids=(), examined=0, done=None, complete=True
             )
         rows = (
             (await self.session.execute(self._lock_statement(owner_ids, cursor, limit)))
@@ -312,8 +313,9 @@ class ConversationRetentionRepository:
             locked_ids=tuple(
                 locked for *_, locked, _passed in rows if locked is not None
             ),
-            owners_probed=len(owner_ids),
-            last_owner=owner_ids[-1],
+            examined=len(owner_ids),
+            done=past_owner(owner_ids[-1]),
+            complete=len(owner_ids) < limit,
             passed_ids=tuple(identifier for identifier, *_, passed in rows if passed),
         )
 

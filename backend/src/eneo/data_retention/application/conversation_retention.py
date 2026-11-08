@@ -72,8 +72,9 @@ ConversationUnitBlock = ConversationBlockReason | FileRetentionReason
 class ConversationDeletion:
     id: UUID
     tenant_id: UUID
-    # The level whose period removed it.
-    source: PolicyLevel
+    # The level whose period removed it; None when no period did (a copy of a
+    # removed conversation).
+    source: PolicyLevel | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,18 +108,21 @@ def is_past_owner(cursor: RetentionKeyset) -> bool:
 
 @dataclass(frozen=True, slots=True)
 class ConversationPage:
-    """Due roots of one owner page, in (owner, created_at, id) order.
+    """Selected roots of one discovery page, in keyset order.
 
-    `owners_probed` owners (at most the page limit, the last `last_owner`) were
-    read in id order after the cursor, and their roots up to the same limit.
+    `examined` discovery rows (owners or edges, at most the page limit) were
+    read after the cursor, and the roots they select up to the same limit.
+    `done` is the cursor once every root is visited, None when discovery found
+    nothing; `complete` says the discovery window reached the end of its keys.
     `passed_ids` are roots another task owns (a widget conversation's
     questions): read and charged with the page, never locked or deleted.
     """
 
     roots: Sequence[RetentionKeyset]
     locked_ids: Sequence[UUID]
-    owners_probed: int
-    last_owner: UUID | None
+    examined: int
+    done: RetentionKeyset | None
+    complete: bool
     passed_ids: Sequence[UUID] = ()
 
 
@@ -126,11 +130,16 @@ class ConversationPageRepository(Protocol):
     @property
     def kind(self) -> ConversationRootKind: ...
 
+    @property
+    def examined_key(self) -> str:
+        """The observation count of the discovery rows a page examined."""
+        ...
+
     async def lock_due_page(
         self, cursor: RetentionKeyset | None, limit: int
     ) -> ConversationPage:
-        """At most `limit` owners after `cursor`, then at most `limit` of their
-        due roots after it, locked; a past-owner cursor starts at the next owner."""
+        """At most `limit` discovery rows after `cursor`, then at most `limit`
+        of the roots they select after it, locked."""
         ...
 
     async def cascade_cost(self, identifier: UUID, ceiling: int) -> int:
@@ -206,14 +215,14 @@ async def run_conversation_page(
 ) -> RetentionStepResult:
     """Lock one page of due roots and delete those that fit, in keyset order.
 
-    Charges: one row per probed owner and per locked, attempted or passed root
-    (discovery), the child rows each proof examined, then one row for the root
+    Charges: one row per examined discovery row and per locked, attempted or
+    passed root (discovery), the child rows each proof examined, then one row for the root
     DELETE plus the emptied session and the Files work.
     A root whose children exceed a fully funded unit is blocked and passed; one
     that only lacks the chunk's remaining allowance is retried in a fresh chunk.
     The cursor is the last visited root; once every root of a page that did not
-    fill its limit is visited, every owner probed is done, so the cursor passes
-    the last one, and a short owner page also ends the pass.
+    fill its limit is visited, every examined row is done, so the cursor moves
+    to the page's `done`, and a complete page also ends the pass.
     Roots after the first are admitted for `gather_seconds` from the call, and
     never at or after the execution deadline: the page's root locks are held
     until the chunk commits, so a user deleting a paged chat waits at most
@@ -237,13 +246,13 @@ async def run_conversation_page(
     )
     page = await repository.lock_due_page(batch.cursor, page_size)
     roots = page.roots
-    if page.last_owner is None:
+    if page.done is None:
         return out.result(rows=0, exhausted=True, cursor=batch.cursor)
 
     locked = frozenset(page.locked_ids)
     passed = frozenset(page.passed_ids)
-    rows = page.owners_probed + len(roots)
-    out.add(None, "owners_examined", page.owners_probed)
+    rows = page.examined + len(roots)
+    out.add(None, repository.examined_key, page.examined)
     files = 0
     cursor = batch.cursor
     visited = 0
@@ -307,7 +316,10 @@ async def run_conversation_page(
             out.blocked[unit.block.key] += 1
         if unit.deletion is not None:
             out.add(unit.deletion.tenant_id, repository.kind.deleted_key)
-            out.add(unit.deletion.tenant_id, f"by_{unit.deletion.source.value}_rule")
+            if unit.deletion.source is not None:
+                out.add(
+                    unit.deletion.tenant_id, f"by_{unit.deletion.source.value}_rule"
+                )
             out.add(unit.deletion.tenant_id, "sessions_deleted", unit.sessions_deleted)
             out.add(unit.deletion.tenant_id, "files_deleted", unit.files_deleted)
             for reason, count in unit.file_outcomes.items():
@@ -316,15 +328,15 @@ async def run_conversation_page(
         visited += 1
     if visited:
         estimate.unit_rows = -(-rows // visited)
-    # A root window short of its limit holds every due root of the probed
-    # owners; once all of them are visited those owners are done.
+    # A root window short of its limit holds every selected root of the
+    # examined rows; once all of them are visited those rows are done.
     owners_done = visited == len(roots) and len(roots) < page_size
     if owners_done:
-        cursor = past_owner(page.last_owner)
+        cursor = page.done
     return out.result(
         rows=rows,
         files=files,
-        exhausted=owners_done and page.owners_probed < page_size,
+        exhausted=owners_done and page.complete,
         deferred=deferred,
         cursor=cursor,
     )

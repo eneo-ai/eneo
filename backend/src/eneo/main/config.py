@@ -508,6 +508,7 @@ class Settings(BaseSettings):
     retention_empty_sessions_enabled: bool = True
     retention_unused_files_enabled: bool = True
     retention_job_history_enabled: bool = True
+    retention_derived_copies_enabled: bool = True
     retention_overdue_window_days: int = Field(default=1, ge=1, le=365)
     retention_overdue_max_rows: int = Field(default=1000, gt=0)
     retention_max_rows_per_run: int = Field(default=50_000, gt=0)

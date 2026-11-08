@@ -24,13 +24,15 @@ def retention_registration_violations(
     rules: Mapping[str, RuleTask | RuleExemption],
     registered: Iterable[str],
     existing_without_choice: Mapping[str, str],
+    follows_a_removal: Mapping[str, str],
     settings: Collection[str],
 ) -> list[str]:
     """Every way the declared removals and the registered tasks disagree.
 
     Each rule has a task or an exemption; each registered task removes a rule's
-    roots or is listed among the removals that run without a choice, with a
-    setting that switches it off. Empty when the declaration is complete.
+    roots or is listed, with a setting that switches it off, among the removals
+    that run without a choice or those that follow a removal already made.
+    Empty when the declaration is complete.
     """
     rule_names = set(vocabulary)
     declared = set(rules)
@@ -40,7 +42,10 @@ def retention_registration_violations(
         for disposition in rules.values()
         if isinstance(disposition, RuleTask)
     }
-    listed = set(existing_without_choice)
+    without_choice = set(existing_without_choice)
+    following = set(follows_a_removal)
+    listed = without_choice | following
+    switches = {**existing_without_choice, **follows_a_removal}
     return [
         *(
             f"Rule {rule} has no task or exemption."
@@ -68,8 +73,12 @@ def retention_registration_violations(
             for task in sorted(rule_tasks & listed)
         ),
         *(
+            f"Task {task} is listed both as existing and as following a removal."
+            for task in sorted(without_choice & following)
+        ),
+        *(
             f"The switch {switch} of {task} is not a setting."
-            for task, switch in sorted(existing_without_choice.items())
+            for task, switch in sorted(switches.items())
             if switch not in settings
         ),
     ]
