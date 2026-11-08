@@ -281,10 +281,8 @@ binding. Viewing the login page and a failed initiation do not replace an attemp
 starting authentication again does. After deploying this change, attempts started
 with an older cookie format must restart login.
 
-The legacy Zitadel and MobilityGuard flows continue to use their existing local
-PKCE verifier cookies and send no nonce. The MobilityGuard backend route checks
-the ID token's signature, `aud` and expiry, and that `iss` equals the issuer in
-the provider's discovery document.
+The legacy Zitadel flow continues to use its existing local PKCE verifier
+cookie and sends no nonce.
 
 ### Sign-in Transaction
 
@@ -485,7 +483,7 @@ Only the email claim is used. The claim name comes from `claims_mapping.email` (
 
 A missing claim is rejected with `401 Email claim not found in ID token`; a malformed address with `401 Email claim from identity provider is invalid. Contact your administrator.`
 
-When `email_verified` is the claim that decides, an explicit boolean `false` for the standard `email` claim is rejected before account lookup or JIT provisioning. The federation callback returns `401 Email is not verified by the identity provider`; global MobilityGuard login also rejects the token. A missing flag remains accepted for existing active members when enterprise IdPs issue administrator-controlled directory addresses without this claim. JIT creation still requires verified email, as described below.
+When `email_verified` is the claim that decides, an explicit boolean `false` for the standard `email` claim is rejected before account lookup or JIT provisioning. The federation callback returns `401 Email is not verified by the identity provider`. A missing flag remains accepted for existing active members when enterprise IdPs issue administrator-controlled directory addresses without this claim. JIT creation still requires verified email, as described below.
 
 Eneo still links accounts by email, so the configured IdP must control who can claim that address. If `claims_mapping.email` uses a different claim, such as `upn`, the standard `email_verified` flag does not describe that claim and is not applied to it. Administrators must choose a claim controlled by their organization's directory. This check does not introduce an issuer/subject account binding.
 
@@ -501,7 +499,7 @@ Global OIDC uses `OIDC_ALLOWED_DOMAINS` (JSON array, default `[]`); per-tenant f
 
 ### JIT Provisioning
 
-`UserService.resolve_federated_user` is the single admission owner for the federation callback and the global OIDC/MobilityGuard login endpoint. It reuses the active account in the configured tenant, rejects inactive accounts and cross-tenant matches, and checks for removed rows before considering account creation. The removed-account lookup is tenant-scoped and tests for existence because several historical rows can share an email.
+`UserService.resolve_federated_user` is the single admission owner for every OIDC sign-in, with per-tenant federation or the global `OIDC_*` settings. It reuses the active account in the configured tenant, rejects inactive accounts and cross-tenant matches, and checks for removed rows before considering account creation. The removed-account lookup is tenant-scoped and tests for existence because several historical rows can share an email.
 
 | Account state | Result |
 |---|---|
@@ -514,7 +512,7 @@ Global OIDC uses `OIDC_ALLOWED_DOMAINS` (JSON array, default `[]`); per-tenant f
 
 Provisioning is a per-tenant flag set through the sysadmin API (`POST /api/v1/sysadmin/tenants/{id}/`). Keep it `false` when SCIM manages membership. A SCIM token does not implicitly change this setting. SCIM or an administrator can restore an account; login cannot.
 
-New accounts use `state=ACTIVE`, the email local part as username (falling back to the full email, then no username, on collisions), and the tenant's default role. Without a default role they have no roles and a warning is logged. Both paths write `USER_CREATED` with actor `SYSTEM` and `provisioning_method: jit_federation`; audit-log failure does not prevent account creation.
+New accounts use `state=ACTIVE`, the email local part as username (falling back to the full email, then no username, on collisions), and the tenant's default role. Without a default role they have no roles and a warning is logged. Creation writes `USER_CREATED` with actor `SYSTEM` and `provisioning_method: jit_federation`; audit-log failure does not prevent account creation.
 
 ---
 
@@ -522,7 +520,7 @@ New accounts use `state=ACTIVE`, the email local part as username (falling back 
 
 The signing key is looked up by the token's `kid` among the signing keys in the provider's JWKS (`use` is `sig` or absent; a key marked `enc` is never used). The key set is cached per `jwks_uri`, shared by every issuer that uses that address, for `oidc_jwks_cache_ttl_seconds` (default one hour) and fetched again, at a limited rate, when a token names an unknown `kid`. The discovery document is cached per URL for the same time, and concurrent sign-ins share one fetch. When it cannot be fetched, sign-in fails rather than falling back to stored values, and the URL is tried again at most every 30 seconds.
 
-The MobilityGuard backend route uses the same cache. A JWKS fetch or key lookup failure is reported as `401 Failed to validate ID token signature`, and on the MobilityGuard route, as before, as `502 Failed to verify OIDC token signature`.
+A JWKS fetch or key lookup failure is reported as `401 Failed to validate ID token signature`.
 
 ---
 

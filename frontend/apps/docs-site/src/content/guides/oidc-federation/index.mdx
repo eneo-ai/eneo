@@ -102,7 +102,7 @@ What Eneo expects from any OIDC provider on the generic sign-in (`/api/v1/auth/i
 
 A response that fails any check ends the sign-in with `401` (`oidc_response_not_verified`); nothing falls back to a weaker check.
 
-The provider-bound MobilityGuard and Zitadel logins in the Svelte frontend keep their own requests: they send PKCE but no `nonce`. The MobilityGuard backend route checks the signature, `aud`, expiry and that `iss` equals the issuer in the provider's discovery document.
+The provider-bound Zitadel login in the Svelte frontend keeps its own requests: it sends PKCE but no `nonce`.
 
 **Optional provider settings.** Set them through the [federation API](/guides/oidc-federation/multi-tenant#configure-the-tenant-via-api), which also serves a single-tenant setup made through the API. Leave them out to keep the defaults.
 
@@ -116,9 +116,38 @@ The provider-bound MobilityGuard and Zitadel logins in the Svelte frontend keep 
 - Redis is required for sign-in.
 - The ID token's `iss` must equal the issuer in the provider's discovery document. If your discovery URL is a shared one whose issuer contains a placeholder (for example `{tenantid}`), switch to your organisation's own discovery URL before upgrading (`discovery_endpoint` in the federation config, or `OIDC_DISCOVERY_ENDPOINT`). Otherwise every sign-in fails with `oidc_response_not_verified` (`issuer_mismatch`).
 - PKCE (`S256`) and `nonce` are always sent. A provider that ignores PKCE keeps working.
-- The MobilityGuard backend route now refuses an ID token whose `iss` is missing or differs from the issuer in the provider's discovery document, with `401` `OIDC authentication failed` (the backend logs `ID token is not from the configured issuer`). A correctly configured provider signs in as before.
 - A sign-in started before the upgrade must be started again.
 - Upgrade the frontend together with the backend: the older frontend does not forward the provider's `iss` parameter.
+
+### Migrate from the MobilityGuard settings
+
+Eneo has no sign-in of its own for MobilityGuard any more. MobilityGuard signs people in through the OIDC settings, like every other provider. A client that posted codes to `POST /api/v1/users/login/openid-connect/mobilityguard/` now gets `404`, whatever the variables are called; it must sign in through `/api/v1/auth/initiate` and `/api/v1/auth/callback` instead. Rename or remove the old variables:
+
+| Old variable | Where | Use instead |
+|--------------|-------|-------------|
+| `MOBILITYGUARD_DISCOVERY_ENDPOINT` | backend | `OIDC_DISCOVERY_ENDPOINT` |
+| `MOBILITYGUARD_CLIENT_ID` | backend | `OIDC_CLIENT_ID` |
+| `MOBILITYGUARD_CLIENT_SECRET` | backend | `OIDC_CLIENT_SECRET` |
+| `MOBILITYGUARD_TENANT_ID` | backend | `OIDC_TENANT_ID` |
+| `MOBILITY_GUARD_AUTH` | frontend | Nothing: the backend reads the authorization endpoint from discovery |
+| `MOBILITYGUARD_CLIENT_ID` | frontend | Nothing: the backend's `OIDC_CLIENT_ID` is used |
+
+The backend does not start while a `MOBILITYGUARD_*` variable is set without its `OIDC_*` name. Its log names the variable to use, for example:
+
+```text
+MOBILITYGUARD_CLIENT_ID is no longer read. Rename it to OIDC_CLIENT_ID.
+```
+
+When both names are set, the `OIDC_*` value is used and the backend logs a warning to remove the old one. The frontend logs a warning at startup while `MOBILITY_GUARD_AUTH` or `MOBILITYGUARD_CLIENT_ID` is set.
+
+At the provider, check these differences from the old sign-in:
+
+- The redirect URI stays `{PUBLIC_ORIGIN}/login/callback`, from the backend's `PUBLIC_ORIGIN`. If people reach Eneo at more than one address, the old sign-in could follow one of the organisation's allowed origins; the OIDC settings always use `PUBLIC_ORIGIN`.
+- Eneo asks for the scopes `openid`, `email` and `profile`; the old sign-in asked for `openid` and `email`.
+- Eneo sends the client secret in the request body (`client_secret_post`), or with HTTP Basic when the provider's discovery lists `client_secret_basic` and not `client_secret_post`. The old sign-in always used HTTP Basic.
+- Eneo sends a `nonce`, and the ID token must carry it back (see the contract above). The old sign-in sent none.
+
+**How to check.** Open the login page and sign in. If the page says "Signing in through your organisation is not available right now. Contact your administrator.", the frontend still has `MOBILITY_GUARD_AUTH` while the backend reports no OIDC sign-in: check that the backend has the `OIDC_*` variables and has started. A sign-in begun on the old MobilityGuard link before the upgrade ends on the login page; start it again.
 
 ---
 

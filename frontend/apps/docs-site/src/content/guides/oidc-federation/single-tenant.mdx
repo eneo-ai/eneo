@@ -127,7 +127,8 @@ OIDC_DISCOVERY_ENDPOINT=https://login.microsoftonline.com/{tenant-id}/v2.0/.well
 OIDC_CLIENT_ID=your-client-id
 OIDC_CLIENT_SECRET=your-client-secret
 
-# Eneo tenant ID (not the IdP's tenant ID), required by the global login endpoint
+# Optional: Eneo tenant ID (not the IdP's tenant ID) for access tokens accepted
+# with OIDC_RESOURCE_SERVER_ENABLED; without it, the first active tenant.
 # Find it with GET /api/v1/sysadmin/tenants/ using the super admin API key
 OIDC_TENANT_ID=your-eneo-tenant-uuid
 
@@ -161,7 +162,7 @@ To update your OIDC settings:
 If you need to change settings without restarting, use the [API configuration](#api-configuration) instead.
 
 <Callout type="info">
-  Set `OIDC_ALLOWED_DOMAINS` to a JSON array such as `["your-company.com"]` to restrict global OIDC logins by email domain. The default `[]` applies no domain filter to existing active members of `OIDC_TENANT_ID`, but prevents creation of new accounts through JIT.
+  Set `OIDC_ALLOWED_DOMAINS` to a JSON array such as `["your-company.com"]` to restrict global OIDC logins by email domain. The default `[]` applies no domain filter to existing active members, but prevents creation of new accounts through JIT.
 </Callout>
 
 ---
