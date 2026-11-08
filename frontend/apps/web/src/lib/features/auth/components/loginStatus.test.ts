@@ -36,15 +36,6 @@ describe("resolveLoginStatus", () => {
     });
   });
 
-  test("keeps the legacy IdP reasons list", () => {
-    expect(resolveLoginStatus("mobilityguard_login_error")).toMatchObject({
-      tone: "error",
-      title: "authentication_failed",
-      reasons: ["invalid_credentials", "account_restrictions", "system_configuration_issues"],
-      footer: "try_again_contact_admin"
-    });
-  });
-
   test("treats unknown codes containing 'error' as a generic failure", () => {
     expect(resolveLoginStatus("some_new_error")).toMatchObject({
       tone: "error",

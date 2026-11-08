@@ -4,6 +4,10 @@ Set up OIDC authentication where each tenant (organization, municipality, compan
 
 import { Callout, Steps, Tabs } from 'nextra/components'
 
+<Callout type="warning">
+  Single-tenant is the recommended setup. Support for several organisations in one installation will be phased out and is basic only. It does not guarantee that the organisations' data is kept apart, because they share the same database.
+</Callout>
+
 ---
 
 ## Overview
@@ -315,7 +319,7 @@ The user authenticated successfully with the IdP but doesn't exist in Eneo and t
 
 ### "Authorization session is invalid or has expired"
 
-The sign-in's one-time transaction was not found or no longer fits the configuration (`400`, code `oidc_transaction_invalid`): the callback was replayed, the sign-in was started before an upgrade, Redis was restarted or evicted the key mid-flow, or the provider's issuer changed during the sign-in (the backend logs `oidc_transaction_refused` with `issuer_changed`). A state older than 10 minutes is rejected earlier with `400 Authorization session expired. Please try logging in again.`
+The sign-in's one-time transaction was not found or no longer fits the configuration (`400`, code `oidc_transaction_invalid`): the callback was replayed, Redis was restarted or evicted the key mid-flow, or the provider's issuer changed during the sign-in (the backend logs `oidc_transaction_refused` with `issuer_changed`). A state older than 10 minutes is rejected earlier with `400 Authorization session expired. Please try logging in again.`, and a sign-in started before an upgrade with `400 Invalid state parameter`.
 
 **Fix:** Start the sign-in flow again. If it recurs, check the Redis logs and the `oidc_state_ttl_seconds` setting.
 
@@ -333,6 +337,12 @@ redis-cli ping
 The provider's response failed a check of the [provider contract](/guides/oidc-federation#provider-contract) (`401`, code `oidc_response_not_verified`). The backend logs `oidc_response_refused` with the reason, for example `issuer_mismatch`, `nonce_mismatch` or `algorithm_not_allowed`.
 
 **Fix:** Search the logs for the correlation ID. For `issuer_mismatch`, compare the ID token's `iss` with the `issuer` in the provider's discovery document: a placeholder such as `{tenantid}` there means the discovery URL is a shared one, so set `discovery_endpoint` to your organisation's own. Otherwise check the token's `aud` against the configured `client_id`, the provider's signing algorithm against `signing_algorithms`, and that the server clocks agree.
+
+### "The provider signs with no algorithm Eneo accepts"
+
+Sign-in answers `500` when none of the algorithms Eneo would accept for this provider is allowed: the configured `signing_algorithms`, else the provider's `id_token_signing_alg_values_supported`, else `RS256`. Only the algorithms in the [provider contract](/guides/oidc-federation#provider-contract) are allowed.
+
+**Fix:** Set `signing_algorithms` through the federation API to an allowed algorithm the provider signs with, or have the provider sign with one.
 
 ### Debug mode
 

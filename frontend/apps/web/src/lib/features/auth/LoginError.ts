@@ -16,7 +16,7 @@ export const LoginErrorCode = {
   CALLBACK_FAILED: "Authentication callback failed. Please try again."
 } as const;
 
-export const providers = ["zitadel", "mobilityguard", "oidc"] as const;
+export const providers = ["zitadel", "oidc"] as const;
 
 /** The typed refusal code in a backend error body (`{ message, code }`). */
 export function backendErrorCode(body: unknown): string | undefined {

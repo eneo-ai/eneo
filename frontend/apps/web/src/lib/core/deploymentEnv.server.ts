@@ -9,12 +9,17 @@
 const UPGRADE_GUIDE_URL = "https://docs.eneo.ai/v2.2/guides/upgrade-2-2-0";
 const DEPLOYMENT_GUIDE_URL =
   "https://docs.eneo.ai/v2.2/guides/deployment#environment-configuration";
+const OIDC_MIGRATION_GUIDE_URL =
+  "https://docs.eneo.ai/guides/oidc-federation#migrate-from-the-mobilityguard-settings";
 
 const RENAMED_VARIABLES = [
   { removed: "INTRIC_BACKEND_URL", replacement: "ENEO_BACKEND_URL" },
   { removed: "INTRIC_BACKEND_SERVER_URL", replacement: "ENEO_BACKEND_SERVER_URL" },
   { removed: "PUBLIC_INTRIC_BACKEND_URL", replacement: "PUBLIC_ENEO_BACKEND_URL" }
 ] as const;
+
+/** Fed the removed MobilityGuard login; sign-in now uses the backend's OIDC_* settings. */
+const REMOVED_SIGN_IN_VARIABLES = ["MOBILITY_GUARD_AUTH", "MOBILITYGUARD_CLIENT_ID"] as const;
 
 type Env = Record<string, string | undefined>;
 
@@ -36,6 +41,13 @@ export function inspectDeploymentEnv(env: Env): { errors: string[]; warnings: st
         `${removed} is no longer read (removed in Eneo 2.2). Rename it to ${replacement}. See ${UPGRADE_GUIDE_URL}`
       );
     }
+  }
+
+  for (const name of REMOVED_SIGN_IN_VARIABLES) {
+    if (!isSet(env, name)) continue;
+    warnings.push(
+      `${name} is no longer used for sign-in. Set the OIDC_* variables in the backend and remove ${name}. See ${OIDC_MIGRATION_GUIDE_URL}`
+    );
   }
 
   if (!isSet(env, "ENEO_BACKEND_URL") && !isSet(env, "INTRIC_BACKEND_URL")) {

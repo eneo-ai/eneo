@@ -101,11 +101,12 @@ OIDC_DISCOVERY_ENDPOINT=
 OIDC_CLIENT_ID=
 OIDC_CLIENT_SECRET=
 
-# Eneo tenant ID required by the global OIDC/MobilityGuard login endpoint.
+# Eneo tenant ID for access tokens accepted with OIDC_RESOURCE_SERVER_ENABLED;
+# without it, the first active tenant.
 OIDC_TENANT_ID=
 
 # Global OIDC email-domain restriction, as a JSON array.
-# [] allows existing members of OIDC_TENANT_ID to sign in without a domain filter.
+# [] allows existing members to sign in without a domain filter.
 # JIT additionally requires tenant.provisioning=true and email_verified=true.
 # To admit new members through JIT, configure e.g. ["your-company.com"].
 OIDC_ALLOWED_DOMAINS=[]
@@ -568,6 +569,8 @@ OTEL_DEPLOYMENT_ENVIRONMENT=production
 # ----------------------------------------------------------------------------
 # DEPRECATED: MobilityGuard and Zitadel variables are no longer used.
 # Use OIDC_DISCOVERY_ENDPOINT, OIDC_CLIENT_ID, and OIDC_CLIENT_SECRET above.
+# Eneo does not start while a MOBILITYGUARD_* variable is set without its
+# OIDC_* name.
 # ----------------------------------------------------------------------------
 
 # Extra, exact integration callback URLs for parallel frontends (JSON array).

@@ -112,13 +112,9 @@
       activeTenantSlug !== null
   );
 
-  const hasExternalLogin = $derived(
-    Boolean(data.mobilityguardLink || data.hasSingleTenantOidc || oidcErrorCode)
-  );
+  const hasExternalLogin = $derived(Boolean(data.hasSingleTenantOidc || oidcErrorCode));
   const showCredentialsForm = $derived(
-    Boolean(showUsernameAndPassword) ||
-      federationError !== null ||
-      (!data.mobilityguardLink && !data.hasSingleTenantOidc)
+    Boolean(showUsernameAndPassword) || federationError !== null || !data.hasSingleTenantOidc
   );
 
   // Determine which loading message to display
@@ -251,7 +247,7 @@
       }
     }
 
-    if (!data.zitadelLink && !data.mobilityguardLink) {
+    if (!data.zitadelLink) {
       await loadTenantsAndMaybeShow();
     }
 
@@ -492,6 +488,12 @@
       {:else}
         <LoginStatusAlert {message} />
 
+        {#if data.organisationSignInUnavailable}
+          <AuthAlert tone="warning">
+            <p>{m.login_organisation_sign_in_unavailable()}</p>
+          </AuthAlert>
+        {/if}
+
         {#if federationError}
           <AuthAlert tone="error" title={m.failed_to_login()}>
             <p>{federationError}</p>
@@ -600,8 +602,6 @@
             <Button type="button" size="lg" class="w-full" onclick={() => beginOidcLogin()}
               >{m.login()}</Button
             >
-          {:else if data.mobilityguardLink}
-            <Button size="lg" class="w-full" href={data.mobilityguardLink}>{m.login()}</Button>
           {/if}
         </form>
       {/if}

@@ -6,10 +6,6 @@ import {
   type LoginStateParam
 } from "$lib/features/auth/auth.server.js";
 import { LoginError } from "$lib/features/auth/LoginError.js";
-import {
-  clearMobilityguardCookie,
-  loginWithMobilityguard
-} from "$lib/features/auth/mobilityguard.server";
 import { clearZitadelCookie, loginWithZitadel } from "$lib/features/auth/zitadel.server";
 import { loginWithOidc } from "$lib/features/auth/oidc.server";
 import { redirect } from "@sveltejs/kit";
@@ -22,10 +18,10 @@ export const load = (async (event) => {
   const error = event.url.searchParams.get("error");
   const errorDescription = event.url.searchParams.get("error_description");
   const decodedState = decodeState<LoginStateParam>(state);
-  const isLegacyLogin =
-    decodedState?.loginMethod === "mobilityguard" || decodedState?.loginMethod === "zitadel";
-  // Legacy providers bind the browser with their existing local PKCE cookies.
-  // Generic OIDC must consume its own binding before exchanging any code.
+  const isLegacyLogin = decodedState?.loginMethod === "zitadel";
+  // Zitadel binds the browser with its existing local PKCE cookie. Every other
+  // state, a stale one from a removed provider included, must consume the
+  // OIDC binding before any code is exchanged.
   const oidcAttempt = isLegacyLogin ? null : await consumeOidcLoginAttempt(event.cookies, state);
   const rememberedLoginDestination =
     oidcAttempt?.status === "matched" ? oidcAttempt.destination : null;
@@ -115,21 +111,7 @@ export const load = (async (event) => {
   let loginError: LoginError | null = null;
 
   try {
-    if (decodedState?.loginMethod === "mobilityguard") {
-      const startTime = Date.now();
-      success = await loginWithMobilityguard(code);
-      const duration = Date.now() - startTime;
-
-      console.debug("[OIDC Callback] Login attempt completed", {
-        success,
-        durationMs: duration
-      });
-
-      if (!success) {
-        errorDetails =
-          "Authentication failed. Please check your credentials and try again. If the problem persists, contact your administrator.";
-      }
-    } else if (decodedState?.loginMethod === "zitadel") {
+    if (decodedState?.loginMethod === "zitadel") {
       success = await loginWithZitadel(code);
     } else {
       // Generic OIDC flow (single-tenant or new backend-first flow)
@@ -176,7 +158,6 @@ export const load = (async (event) => {
     }
   } finally {
     // Clean up legacy auth cookies (backward compatibility)
-    clearMobilityguardCookie(event.cookies);
     clearZitadelCookie(event.cookies);
   }
 

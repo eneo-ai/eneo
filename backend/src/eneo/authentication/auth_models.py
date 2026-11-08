@@ -826,13 +826,3 @@ class FederatedIdentity(BaseModel):
             raise ValueError(
                 "Email claim from identity provider is invalid. Contact your administrator."
             ) from exc
-
-
-class OpenIdConnectLogin(BaseModel):
-    code: str
-    code_verifier: str
-    redirect_uri: str
-    client_id: str
-    grant_type: str = "authorization_code"
-    scope: str = "openid"
-    nonce: Optional[str] = None

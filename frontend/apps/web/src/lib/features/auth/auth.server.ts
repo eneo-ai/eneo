@@ -132,7 +132,7 @@ async function generateCodeChallenge(verifier: string) {
 }
 
 // Helpers for state shared by every login provider.
-type LoginMethod = "zitadel" | "mobilityguard" | "oidc";
+type LoginMethod = "zitadel" | "oidc";
 
 export type LoginStateParam = {
   loginMethod: LoginMethod;

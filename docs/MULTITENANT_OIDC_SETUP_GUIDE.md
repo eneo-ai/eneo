@@ -116,12 +116,12 @@ Ask the user for the `correlationId` surfaced in the UI. Filter server logs:
 journalctl -u backend.service -o cat | jq 'select(.correlation_id=="fa4fdb8fdbeee426")'
 ```
 
-| Breadcrumb (log message)           | Typical cause                                | Next action                                             |
-|------------------------------------|-----------------------------------------------|---------------------------------------------------------|
-| `callback.domain_rejected`         | Email domain not in tenant `allowed_domains`  | Add domain or ask user to use approved account          |
-| `callback.user_missing`            | Email not found in tenant user table          | Invite/import the user for that tenant                  |
-| `callback.user_tenant_mismatch`    | User exists but belongs to another tenant     | Move user to correct tenant or adjust login link        |
-| `oidc_transaction_store_failed`    | Redis missing or failing; sign-in answers `503` | Check Redis health, then start the sign-in again      |
+| Breadcrumb (log message)                    | Typical cause                                                                                                   | Next action                                                |
+| ------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `callback.user_denied` (debug logging only) | Admission refused; `reason` says why: domain not allowed, no account, inactive account or one in another tenant | Add the domain, provision the user, or move the account    |
+| `oidc_response_refused`                     | Provider response failed a check; `reason` names it, for example `issuer_mismatch`                              | Compare the provider's settings with the provider contract |
+| `oidc_transaction_refused`                  | Provider's issuer changed during the sign-in (`issuer_changed`)                                                 | Check the discovery URL, then start the sign-in again      |
+| `oidc_transaction_store_failed`             | Redis missing or failing; sign-in answers `503`                                                                 | Check Redis health, then start the sign-in again           |
 
 Turn off logging once the incident is resolved:
 ```bash

@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Optional, cast
 from uuid import UUID
 
 import idna
-import jwt
 import sqlalchemy as sa
 from fastapi import HTTPException
 from starlette.requests import Request
@@ -585,138 +584,6 @@ class UserService:
                 )
         return user, True
 
-    async def login_with_mobilityguard(
-        self,
-        id_token: str,
-        access_token: str,
-        key: jwt.PyJWK,
-        signing_algos: list[str],
-        issuer: str | None,
-        correlation_id: str | None = None,
-    ):
-        correlation_id = correlation_id or "no-correlation-id"
-
-        logger.debug(
-            "Starting OIDC user service login",
-            extra={
-                "correlation_id": correlation_id,
-                "client_id": get_settings().oidc_client_id,
-                "signing_algos": signing_algos,
-                "has_tenant_id": bool(get_settings().oidc_tenant_id),
-            },
-        )
-
-        try:
-            client_id = get_settings().oidc_client_id
-            if client_id is None:
-                raise AuthenticationException(
-                    "System configuration error: OIDC client ID not configured"
-                )
-
-            payload = self.auth_service.get_payload_from_openid_jwt(
-                id_token=id_token,
-                access_token=access_token,
-                key=key.key,
-                signing_algos=signing_algos,
-                client_id=client_id,
-                options={"verify_iat": False},
-                correlation_id=correlation_id,
-            )
-
-            if not isinstance(payload.get("sub"), str) or not payload["sub"]:
-                raise ValueError("ID token is missing its subject")
-            # A provider may sign for many customers with one key set, so a
-            # valid signature does not prove the token is from this provider.
-            if not issuer or payload.get("iss") != issuer:
-                raise ValueError("ID token is not from the configured issuer")
-            identity = FederatedIdentity.from_claims(
-                payload, issuer=issuer, client_id=client_id
-            )
-
-        except jwt.ExpiredSignatureError as e:
-            logger.error(
-                "JWT token has expired",
-                extra={
-                    "correlation_id": correlation_id,
-                    "error": str(e),
-                },
-            )
-            raise AuthenticationException("Token has expired")
-        except jwt.InvalidAudienceError as e:
-            logger.error(
-                "JWT audience validation failed",
-                extra={
-                    "correlation_id": correlation_id,
-                    "error": str(e),
-                    "expected_audience": get_settings().oidc_client_id,
-                },
-            )
-            raise AuthenticationException("Invalid token audience")
-        except jwt.InvalidTokenError as e:
-            logger.error(
-                "JWT token validation failed",
-                extra={
-                    "correlation_id": correlation_id,
-                    "error_type": type(e).__name__,
-                    "error": str(e),
-                },
-            )
-            raise AuthenticationException("Invalid token")
-        except Exception as e:
-            logger.error(
-                "Failed to extract user info from JWT",
-                extra={
-                    "correlation_id": correlation_id,
-                    "error_type": type(e).__name__,
-                    "error": str(e),
-                    "client_id": get_settings().oidc_client_id,
-                },
-            )
-            raise AuthenticationException("Failed to validate token")
-
-        # Look up user in database
-        logger.info(
-            "OIDC: Resolving tenant membership",
-            extra={"correlation_id": correlation_id},
-        )
-
-        settings = get_settings()
-        if not settings.oidc_tenant_id:
-            raise AuthenticationException("OIDC tenant ID is not configured")
-        try:
-            tenant_id = UUID(settings.oidc_tenant_id)
-        except ValueError as exc:
-            raise AuthenticationException("Invalid OIDC tenant ID") from exc
-
-        user_in_db, was_federated = await self.resolve_federated_user(
-            identity=identity,
-            tenant_id=tenant_id,
-            allowed_domains=settings.oidc_allowed_domains,
-            correlation_id=correlation_id,
-        )
-
-        # Create access token
-        issued_token = self.auth_service.create_access_token_for_user(user=user_in_db)
-
-        logger.info(
-            "OIDC login completed successfully",
-            extra={
-                "correlation_id": correlation_id,
-                "user_id": str(user_in_db.id),
-                "email": user_in_db.email,
-                "was_federated": was_federated,
-            },
-        )
-
-        return (
-            AccessToken(
-                access_token=issued_token,
-                token_type="bearer",
-            ),
-            was_federated,
-            user_in_db,
-        )
-
     async def register(self, new_user: UserAddSuperAdmin):
         await self._validate_email(new_user.email)
         await self._validate_username(new_user.username)
@@ -883,9 +750,8 @@ class UserService:
     async def _resolve_tenant_for_idp_access_token(self, correlation_id: str):
         """Pick the tenant IdP-token users belong to.
 
-        ``OIDC_TENANT_ID`` wins when configured (same setting the global OIDC
-        login uses for user creation); otherwise the first active tenant —
-        resource-server mode targets single-tenant deployments.
+        ``OIDC_TENANT_ID`` wins when configured; otherwise the first active
+        tenant — resource-server mode targets single-tenant deployments.
         """
         settings = get_settings()
 

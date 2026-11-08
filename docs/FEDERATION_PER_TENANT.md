@@ -76,7 +76,7 @@ After registration, an organisation's own admins can change the provider label, 
 ---
 
 ## 5. Migration Notes (From Single-Tenant)
-- Legacy `MOBILITYGUARD_*` env vars are still read; on startup they populate the generic `OIDC_*` settings. Plan to migrate before v3.0.
+- `MOBILITYGUARD_*` env vars are no longer read. The backend does not start while one is set without its `OIDC_*` name; see [Migrate from the MobilityGuard settings](https://docs.eneo.ai/guides/oidc-federation#migrate-from-the-mobilityguard-settings).
 - Tenants without federation continue to use the global IdP.
 - Frontend detects `FEDERATION_PER_TENANT_ENABLED` and shows the selector automatically; no manual UI work required.
 

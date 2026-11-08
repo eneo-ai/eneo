@@ -1,17 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  clearMobilityguardCookie: vi.fn(),
   clearZitadelCookie: vi.fn(),
-  loginWithMobilityguard: vi.fn(),
   loginWithOidc: vi.fn(),
   loginWithZitadel: vi.fn()
 }));
 
-vi.mock("$lib/features/auth/mobilityguard.server", () => ({
-  clearMobilityguardCookie: mocks.clearMobilityguardCookie,
-  loginWithMobilityguard: mocks.loginWithMobilityguard
-}));
 vi.mock("$lib/features/auth/oidc.server", () => ({
   loginWithOidc: mocks.loginWithOidc
 }));
@@ -204,12 +198,9 @@ describe("generic OIDC browser-bound callback", () => {
     expect(mocks.loginWithOidc).not.toHaveBeenCalled();
   });
 
-  test.each([
-    ["mobilityguard", mocks.loginWithMobilityguard],
-    ["zitadel", mocks.loginWithZitadel]
-  ])("%s retains its existing local PKCE login path", async (loginMethod, login) => {
-    const state = JSON.stringify({ loginMethod, next: "/spaces" });
-    login.mockResolvedValue(true);
+  test("zitadel retains its existing local PKCE login path", async () => {
+    const state = JSON.stringify({ loginMethod: "zitadel", next: "/spaces" });
+    mocks.loginWithZitadel.mockResolvedValue(true);
     await expect(
       loginCallbackLoad(
         callbackEvent(
@@ -217,8 +208,21 @@ describe("generic OIDC browser-bound callback", () => {
         ) as never
       )
     ).rejects.toMatchObject({ location: "/spaces" });
-    expect(login).toHaveBeenCalledWith("legacy-code");
+    expect(mocks.loginWithZitadel).toHaveBeenCalledWith("legacy-code");
     expect(mocks.loginWithOidc).not.toHaveBeenCalled();
+  });
+
+  test("a sign-in begun on the removed MobilityGuard link is refused before any exchange", async () => {
+    // A browser can still hold a provider redirect from before the upgrade.
+    const state = JSON.stringify({ loginMethod: "mobilityguard", next: "/spaces" });
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    await expect(
+      loginCallbackLoad(
+        callbackEvent(`/login/callback?code=stale-code&state=${encodeURIComponent(state)}`) as never
+      )
+    ).rejects.toMatchObject({ location: "/login?message=oidc_attempt_rejected" });
+    expect(mocks.loginWithOidc).not.toHaveBeenCalled();
+    expect(mocks.loginWithZitadel).not.toHaveBeenCalled();
   });
 
   test("an IdP error consumes the cookie and carries only the safe local resume to login", async () => {

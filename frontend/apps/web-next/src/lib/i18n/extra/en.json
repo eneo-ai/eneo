@@ -1490,6 +1490,8 @@
   "sync_skipped": "Sync skipped",
   "synced_with_warnings": "Synced with warnings",
   "login_too_many_attempts_later": "Too many failed login attempts. Try again later.",
+  "invalid_credentials": "Invalid credentials",
+  "authentication_service_error": "The authentication service encountered an issue. Please try again.",
   "provider_form_api_key_masked": "That looks like the key's masked display value. Enter the actual API key.",
   "conversation_retention_space_admin_only": "Only space administrators can change retention.",
   "websites_bulk_actions": "Actions for selected websites",

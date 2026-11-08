@@ -34,11 +34,12 @@ Use environment variables to configure OIDC. This is the default mode (`FEDERATI
 - Admin access to your Identity Provider
 - Access to your Eneo backend `.env` file
 - HTTPS enabled on your Eneo domain (`PUBLIC_ORIGIN` must be `https://`, except `http://localhost` for development)
+- Redis running (each sign-in is a one-time transaction stored there; without it, sign-in is refused)
 
 <Steps>
 ### Register your application in the IdP
 
-Register Eneo as a confidential web application and set the redirect URI to your Eneo origin plus `/login/callback`:
+Register Eneo as a confidential web application and set the redirect URI to your Eneo origin plus `/login/callback`. The [provider contract](/guides/oidc-federation#provider-contract) lists what Eneo sends and checks:
 
 ```
 https://your-domain.com/login/callback
@@ -127,7 +128,8 @@ OIDC_DISCOVERY_ENDPOINT=https://login.microsoftonline.com/{tenant-id}/v2.0/.well
 OIDC_CLIENT_ID=your-client-id
 OIDC_CLIENT_SECRET=your-client-secret
 
-# Eneo tenant ID (not the IdP's tenant ID), required by the global login endpoint
+# Optional: Eneo tenant ID (not the IdP's tenant ID) for access tokens accepted
+# with OIDC_RESOURCE_SERVER_ENABLED; without it, the first active tenant.
 # Find it with GET /api/v1/sysadmin/tenants/ using the super admin API key
 OIDC_TENANT_ID=your-eneo-tenant-uuid
 
@@ -161,7 +163,7 @@ To update your OIDC settings:
 If you need to change settings without restarting, use the [API configuration](#api-configuration) instead.
 
 <Callout type="info">
-  Set `OIDC_ALLOWED_DOMAINS` to a JSON array such as `["your-company.com"]` to restrict global OIDC logins by email domain. The default `[]` applies no domain filter to existing active members of `OIDC_TENANT_ID`, but prevents creation of new accounts through JIT.
+  Set `OIDC_ALLOWED_DOMAINS` to a JSON array such as `["your-company.com"]` to restrict global OIDC logins by email domain. The default `[]` applies no domain filter to existing active members, but prevents creation of new accounts through JIT.
 </Callout>
 
 ---
@@ -340,6 +342,8 @@ For push-based provisioning from your directory (deactivation, groups), see [SCI
 | `canonical_public_origin` | No | Origin used for the redirect URI; falls back to `PUBLIC_ORIGIN` |
 | `redirect_path` | No | Callback path (default: `/login/callback`) |
 | `additional_redirect_uris` | No | Extra fully-qualified callback URLs, each also registered in the IdP |
+| `signing_algorithms` | No | ID token algorithms to accept; default from discovery, else `RS256`. See the [provider contract](/guides/oidc-federation#provider-contract) |
+| `email_verified_claims` | No | Claims that say the email is verified, in order; default `["email_verified", "xms_edov"]` |
 
 Scopes are fixed to `openid email profile`.
 
@@ -388,6 +392,14 @@ The ID token has no `email` claim (`401`). On Azure Entra ID this happens when t
 Token exchange fails with `401 Failed to exchange authorization code for tokens`.
 
 **Fix:** Verify that the client ID and secret match the IdP registration and that the secret has not expired. The IdP's own error response is written to the backend log.
+
+### Sign-in refused with a code
+
+The refusals with a code are the same for one organisation as for several:
+
+- `oidc_transaction_invalid`: [Authorization session is invalid or has expired](/guides/oidc-federation/multi-tenant#authorization-session-is-invalid-or-has-expired)
+- `oidc_login_unavailable`: [Sign-in is temporarily unavailable](/guides/oidc-federation/multi-tenant#sign-in-is-temporarily-unavailable)
+- `oidc_response_not_verified`: [The sign-in response could not be verified](/guides/oidc-federation/multi-tenant#the-sign-in-response-could-not-be-verified), including an issuer with a placeholder such as `{tenantid}`
 
 ### Debug mode
 

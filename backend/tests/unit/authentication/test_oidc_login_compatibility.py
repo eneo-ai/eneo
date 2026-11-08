@@ -1,9 +1,8 @@
 """Existing OIDC setups keep signing in, out and creating accounts.
 
 Each entry point runs against a fake provider that signs real ID tokens: the
-generic login in database federation mode and in environment-only mode, the
-browser cookie login, and the provider-bound route the Svelte MobilityGuard
-login calls. Signing out of a browser session is pinned in
+generic login in database federation mode and in environment-only mode, and
+the browser cookie login. Signing out of a browser session is pinned in
 test_browser_session_router.py; the Svelte logout never calls the backend.
 """
 
@@ -308,53 +307,11 @@ async def test_browser_login_sets_the_session_cookie(monkeypatch):
     )
 
 
-@pytest.mark.parametrize("case", ["member", "jit", "unverified"])
-async def test_the_provider_bound_route_keeps_signing_in(monkeypatch, case):
-    """The route the Svelte MobilityGuard login posts its code and verifier to."""
-    from starlette.requests import Request
+def test_sign_in_has_one_entry_point():
+    """The provider-bound code exchange is gone; /auth/* is the only sign-in."""
+    from eneo.server.main import app
 
-    from eneo.authentication.auth_models import OpenIdConnectLogin
-    from eneo.users import user_router, user_service
+    paths = app.openapi()["paths"]
 
-    provider = FakeOidcProvider()
-    login = Login(
-        monkeypatch,
-        provider,
-        db_mode=False,
-        existing_email="user@example.com" if case == "member" else None,
-    )
-    login.settings.oidc_tenant_id = str(login.tenant.id)
-    monkeypatch.setattr(user_router.config, "get_settings", lambda: login.settings)
-    monkeypatch.setattr(user_service, "get_settings", lambda: login.settings)
-    claims: dict[str, Any] = {}
-    if case == "jit":
-        claims = {"email": "new.person@example.com"}
-    elif case == "unverified":
-        claims = {"email": "new.person@example.com", "email_verified": False}
-    code = provider.issue_code(
-        client_id=provider.client_id, redirect_uri=REDIRECT_URI, **claims
-    )
-    body = OpenIdConnectLogin(
-        code=code,
-        code_verifier="frontend-pkce-verifier",
-        client_id=provider.client_id,
-        redirect_uri=REDIRECT_URI,
-    )
-    request = Request({"type": "http", "headers": []})
-
-    with pytest.warns(DeprecationWarning, match="BasicAuth is deprecated"):
-        if case == "unverified":
-            with pytest.raises(HTTPException) as refused:
-                await user_router.login_with_mobilityguard(
-                    request, body, login.container
-                )
-            assert refused.value.status_code == 401
-            assert login.users._created_user is None
-            return
-        token = await user_router.login_with_mobilityguard(
-            request, body, login.container
-        )
-
-    assert token.access_token
-    assert (login.users._created_user is not None) is (case == "jit")
-    assert provider.token_requests[0]["code_verifier"] == "frontend-pkce-verifier"
+    assert "/api/v1/users/login/openid-connect/mobilityguard/" not in paths
+    assert {"/api/v1/auth/initiate", "/api/v1/auth/callback"} <= paths.keys()
