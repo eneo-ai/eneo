@@ -146,5 +146,6 @@ owner Assistant follow no policy and are not removed; that is unchanged.
 - The organisation's conversation period becomes visible and editable in the
   administration pages of both apps, with the number of conversations a save
   makes due shown before saving.
-- Copies of another conversation's content, and consultations of other
-  Assistants, join the conversation history rule with their own steps.
+- Consultations of other Assistants join the conversation history rule with
+  their own steps. Copies of another conversation's content follow their
+  source's removal instead ([Copies of another conversation's content](derived-copies.md)).

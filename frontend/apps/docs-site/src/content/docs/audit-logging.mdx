@@ -231,7 +231,7 @@ stops the process at start with the reason.
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `RETENTION_CRON_HOUR` / `RETENTION_CRON_MINUTE` | `3` / `30` | Daily start time in the worker's time zone (UTC in the shipped image) |
-| `RETENTION_CONVERSATIONS_HISTORY_ENABLED` / `RETENTION_EMPTY_SESSIONS_ENABLED` / `RETENTION_UNUSED_FILES_ENABLED` / `RETENTION_JOB_HISTORY_ENABLED` | `true` | Per-task switches; a task turned off records a skipped execution and an audit event |
+| `RETENTION_CONVERSATIONS_HISTORY_ENABLED` / `RETENTION_DERIVED_COPIES_ENABLED` / `RETENTION_EMPTY_SESSIONS_ENABLED` / `RETENTION_UNUSED_FILES_ENABLED` / `RETENTION_JOB_HISTORY_ENABLED` | `true` | Per-task switches; a task turned off records a skipped execution and an audit event |
 | `RETENTION_MAX_ROWS_PER_RUN` | `50000` | Rows charged per execution of the session, file and job tasks; each task has its own budget |
 | `RETENTION_CONVERSATIONS_MAX_ROWS_PER_RUN` | `250000` | Rows charged per execution of the conversation task |
 | `RETENTION_MAX_FILES_PER_RUN` | `10000` | File rows deleted per execution, including derived files |
@@ -265,14 +265,53 @@ can switch each one off:
 | `files.unused` | Upload families nothing uses, older than `RETENTION_UNUSED_FILE_GRACE_HOURS` | `RETENTION_UNUSED_FILES_ENABLED` |
 | `retention.jobs` | Retention execution records past the audit retention period | `RETENTION_JOB_HISTORY_ENABLED` |
 
+`conversations.derived_copies` also runs without a choice: it follows a removal
+already made (see [Copies of removed conversations](#copies-of-removed-conversations)).
+
 A task added later is off by default unless it removes only what such a period
-selects or is added to this list; a test fails until it is declared one or the other.
+selects, is added to this list or follows a removal already made; a test fails
+until it is declared one of these.
 Web widget conversations are not an engine task: the widget's own nightly job removes
 them by each widget's retention.
 
 Outside the engine, the audit log also runs without a choice: it keeps 365 days unless
 an administrator changes the period on the audit log page (see
 [Audit log retention](#audit-log-retention)).
+
+#### Copies of removed conversations
+
+A feature that stores content copied from another conversation records, before it
+returns that content, which questions the copy came from. No feature in this release
+records copies yet, so the rules below apply as soon as one does. For such a copy:
+
+1. It is due by its own conversation period, and at the latest when the first
+   question it was copied from is removed, by a user, with its Assistant or by
+   retention.
+2. From the moment that removal commits, Eneo's conversation reads no longer return
+   the copy, whether or not the task below runs. Its detail, tool result, title,
+   document, Assistant session, helper run, insight and message logging routes answer
+   `410` with code `derived_source_removed` (`9085`) to a caller who passed the usual
+   access checks; anyone else gets the usual refusal. Lists, counts, recent
+   conversations, exports and insights leave it out, and a follow-up question finds no
+   conversation.
+3. The task `conversations.derived_copies` removes its questions, their Files and the
+   session, within the conversation budgets, and then the records of where the copy
+   came from. A copy left without questions is removed once it is a day old, so a
+   feature that is still writing it is not cut short.
+
+| Task | Removes | Switch |
+| --- | --- | --- |
+| `conversations.derived_copies` | Copies whose source question was removed: step `copies` (questions, Files, the emptied session), step `edges` (the records of removed copies, copies left without questions) | `RETENTION_DERIVED_COPIES_ENABLED` |
+
+Switching the task off keeps such copies stored but still unreadable. These copies are
+outside the rules: a document or export a user downloaded, content sent to a model
+provider or another external service, and text added to a knowledge base, which stays
+until it is removed there. An insights job keeps its question and its answer, which
+may quote conversations, in its job record for at most 24 hours.
+
+Background jobs carry ids only: an App run reads its prompt from the stored run and an
+insights job its question from the job record, and these jobs and the audit job keep
+no result after they finish. Jobs queued before an upgrade still run.
 
 #### Health
 
