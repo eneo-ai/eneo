@@ -1,5 +1,5 @@
 import { isRedirect, type Cookies } from "@sveltejs/kit";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, onTestFinished, test, vi } from "vitest";
 import { encodeState } from "$lib/features/auth/auth.server";
 
 const state = vi.hoisted(() => ({ env: {} as Record<string, string> }));
@@ -211,7 +211,8 @@ describe("ending the Eneo session before the cookies", () => {
 
     expect(event.fetch).toHaveBeenCalledExactlyOnceWith(SIGN_OUT, {
       method: "POST",
-      headers: { Authorization: `Bearer ${SESSION_TOKEN}` }
+      headers: { Authorization: `Bearer ${SESSION_TOKEN}` },
+      signal: expect.any(AbortSignal)
     });
     expect(cookiesWhenSignedOut?.get("auth")).toBe(SESSION_TOKEN);
     expect(isRedirect(result)).toBe(true);
@@ -219,11 +220,24 @@ describe("ending the Eneo session before the cookies", () => {
   });
 
   test.each(
-    ACTIONS.flatMap((action) => [[action, "503"] as const, [action, "unreachable"] as const])
+    ACTIONS.flatMap((action) =>
+      (["503", "unreachable", "stalled"] as const).map((failure) => [action, failure] as const)
+    )
   )("%s keeps every cookie when the backend cannot confirm (%s)", async (action, failure) => {
     const { event, values, run } = signOut(action, SESSION_TOKEN);
-    vi.mocked(event.fetch).mockImplementation(async () => {
+    // The action's deadline, fired by hand: a stalled transport answers only
+    // when it is aborted.
+    const deadline = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(deadline.signal);
+    onTestFinished(() => timeout.mockRestore());
+    vi.mocked(event.fetch).mockImplementation(async (_url, init) => {
       if (failure === "unreachable") throw new TypeError("fetch failed");
+      if (failure === "stalled") {
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+          deadline.abort(new DOMException("The operation timed out.", "TimeoutError"));
+        });
+      }
       return Response.json({ code: "sign_out_unavailable" }, { status: 503 });
     });
     const before = new Map(values);
@@ -235,6 +249,8 @@ describe("ending the Eneo session before the cookies", () => {
       data: { signOutFailed: action, message: action === "logout" ? "expired" : "logout" }
     });
     expect(values).toEqual(before);
+    // Longer than the backend's own five seconds to confirm the deletion.
+    if (failure === "stalled") expect(timeout).toHaveBeenCalledWith(10_000);
   });
 
   // Tokens without an Eneo session (a provider's ID token may carry an OIDC

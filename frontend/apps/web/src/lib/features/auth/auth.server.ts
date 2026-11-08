@@ -87,11 +87,15 @@ export const clearFrontendCookies = (event: RequestEvent) => {
   });
 };
 
+/** Longer than the backend's own 5 seconds to confirm the deletion, so a
+ * stalled connection cannot hold the logout: it counts as unconfirmed. */
+const SIGN_OUT_DEADLINE_MS = 10_000;
+
 /**
  * End the Eneo session the `auth` cookie's token names, before its cookies
  * are cleared, so a copy of the token stops working too. Returns false when
- * the backend could not confirm it (503, unreachable): the caller keeps the
- * cookies, as the handle for a retry.
+ * the backend could not confirm it (503, unreachable, no answer within the
+ * deadline): the caller keeps the cookies, as the handle for a retry.
  *
  * Only a token Eneo issued for a session names one. Its claims are read
  * without verification, only to choose this path; the backend verifies the
@@ -104,7 +108,8 @@ export async function endEneoSession(event: RequestEvent): Promise<boolean> {
   try {
     const response = await event.fetch(`${getBackendUrl()}/api/v1/users/logout/`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${token}` }
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(SIGN_OUT_DEADLINE_MS)
     });
     if (!response.ok) console.error("Sign-out not confirmed. Status: %s", response.status);
     return response.ok;
