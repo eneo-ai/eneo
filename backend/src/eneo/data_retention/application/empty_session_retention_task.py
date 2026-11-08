@@ -6,7 +6,7 @@ were emptied by other paths, or were held by a live chat when their last
 question went. Its own task, not a step of conversation history: every session
 older than the grace period is scanned, a standing population rather than a due
 backlog, and sharing a budget with due history would let that scan spend it
-first.
+first. Widget sessions are left to widget retention and each widget's period.
 """
 
 from collections.abc import Sequence

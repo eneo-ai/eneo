@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
 from eneo.data_retention.domain.retention import RetentionKeyset
-from eneo.data_retention.infrastructure.retention_sql import uuid_in
+from eneo.data_retention.infrastructure.retention_sql import outside_widgets, uuid_in
 from eneo.database.tables.help_assistant_runs_table import HelpAssistantRuns
 from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
@@ -38,7 +38,7 @@ class EmptySessionRepository:
         self, cursor: RetentionKeyset | None, limit: int
     ) -> Sequence[RetentionKeyset]:
         statement = sa.select(Sessions.id, Sessions.created_at).where(
-            Sessions.created_at < self.now - self.grace
+            Sessions.created_at < self.now - self.grace, outside_widgets()
         )
         if cursor is not None:
             statement = statement.where(
@@ -58,6 +58,7 @@ class EmptySessionRepository:
                 uuid_in(Sessions.id, ids),
                 Sessions.created_at < self.now - self.grace,
                 self._unreferenced(),
+                outside_widgets(),
             )
             .with_for_update(of=Sessions, skip_locked=True)
         )
@@ -70,6 +71,7 @@ class EmptySessionRepository:
                 uuid_in(Sessions.id, ids),
                 Sessions.created_at < self.now - self.grace,
                 self._unreferenced(),
+                outside_widgets(),
             )
             .returning(Sessions.id)
         )

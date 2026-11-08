@@ -39,7 +39,10 @@ from eneo.data_retention.infrastructure.conversation_retention_policy import (
 from eneo.data_retention.infrastructure.empty_session_repo import (
     EmptySessionRepository,
 )
-from eneo.data_retention.infrastructure.retention_sql import uuid_in
+from eneo.data_retention.infrastructure.retention_sql import (
+    question_outside_widgets,
+    uuid_in,
+)
 from eneo.database.tables.app_table import AppRuns, AppRunsFiles, Apps
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.audit_retention_policy_table import AuditRetentionPolicy
@@ -118,6 +121,9 @@ class ConversationRetentionRepository:
         self.file_owner_id: ColumnElement[UUID]
         # The session a root belongs to, removed with its last question.
         self.root_session: ColumnElement[UUID | None] | None
+        # Every query that selects roots applies it: discovery, the overdue
+        # walk and the fresh check inside the delete.
+        self.outside_widgets: ColumnElement[bool]
         if kind is ConversationRootKind.QUESTION:
             self.records = Questions
             self.owner = Assistants
@@ -126,6 +132,7 @@ class ConversationRetentionRepository:
             self.file_owner_id = QuestionsFiles.question_id.expression
             self.children = QUESTION_CHILDREN
             self.root_session = Questions.session_id.expression
+            self.outside_widgets = question_outside_widgets()
         else:
             self.records = AppRuns
             self.owner = Apps
@@ -134,6 +141,8 @@ class ConversationRetentionRepository:
             self.file_owner_id = AppRunsFiles.app_run_id.expression
             self.children = APP_RUN_CHILDREN
             self.root_session = None
+            # App runs have no session, so no widget conversation.
+            self.outside_widgets = sa.true()
         self.policy = conversation_retention_policy(
             self.owner.data_retention_days.expression
         )
@@ -155,6 +164,7 @@ class ConversationRetentionRepository:
             .where(
                 self.policy.days.is_not(None),
                 self.records.created_at < self.cutoff,
+                self.outside_widgets,
             )
         )
 
@@ -227,6 +237,7 @@ class ConversationRetentionRepository:
         ).where(
             self.owner_fk == owners.c.id,
             self.records.created_at < owners.c.cutoff,
+            self.outside_widgets,
         )
         if cursor is not None and not is_past_owner(cursor):
             # Keep the current owner's time bound usable as an index condition.
