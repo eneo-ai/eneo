@@ -35,4 +35,7 @@ class AppRunPublic(AppRunSparse):
 class AppRunParams(ResourceTaskParams):
     app_id: UUID
     file_ids: list[UUID]
-    text: str | None
+    # Jobs queued by earlier releases still carry the prompt. The worker
+    # ignores it and reads the prompt from the stored App run, so the queue
+    # never holds a copy of it.
+    text: str | None = None

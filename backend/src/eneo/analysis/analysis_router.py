@@ -547,7 +547,6 @@ async def ask_unified_questions_about_questions(
             job_id=new_job_id,
             params=AnalyzeConversationInsightsTask(
                 user_id=user_id,
-                question=ask_analysis.question,
                 from_date=from_date.isoformat(),
                 to_date=to_date.isoformat(),
                 include_followups=include_followups,
