@@ -83,9 +83,13 @@ stays outside this record.
    SQL expression shared by discovery, the fresh re-check and the overdue
    report. Web widget conversations follow their widget's period, held to the
    tenant's widget policy as it stands that night, and only the widget's own
-   nightly job removes them. The engine leaves them alone: one predicate (no
-   widget owns the session) keeps them out of history discovery, the fresh
-   re-check inside the delete, the overdue report and the empty-session sweep.
+   nightly job removes them. The engine leaves them alone, with one predicate
+   (no widget owns the session): the fresh re-check inside the history delete
+   refuses a widget question; history discovery and the overdue report read
+   widget questions inside their bounded window, charge them and pass them, so
+   a widget backlog within an owner's period never becomes one unbounded read;
+   the empty-session sweep leaves widget sessions out of its window, its lock
+   and its delete.
    The rows a deletion cascades to are derived from the schema metadata (every
    foreign key to the root with `ON DELETE CASCADE`); a key without it fails
    at import. Files owns reference truth: every foreign key
@@ -212,8 +216,9 @@ member of the population per pass, so a pass takes about population divided
 by the task's row budget nights and `partial` is its normal outcome. The
 overdue snapshot runs after the budget, once per execution, in discovery-sized
 owner pages; it stops at `RETENTION_OVERDUE_MAX_ROWS` overdue rows, or after
-reading as many owner rows per stream as the conversation row budget, and
-then reports itself incomplete. The execution record keeps
+a fixed number of pages per stream (the conversation row budget in owner
+pages; a page full of roots continues inside its owner), and then reports
+itself incomplete. The execution record keeps
 counts, blocked reasons, cursors and the snapshot for operators.
 
 Two clocks are in use, both UTC: chat history and sessions compare their age

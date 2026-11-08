@@ -8,6 +8,11 @@ prefixes, then create the new bookkeeping table transactionally. An interrupted
 online build retries invalid indexes; offline SQL assumes no invalid leftovers.
 No product data or foreign keys change. Downgrade restores the prefix indexes
 and removes execution history and cursors, so later executions start new passes.
+
+This revision first followed 202610161000. A database migrated on that chain
+records it as applied, so `alembic upgrade head` would skip the revisions now
+before it. Downgrade such a database to 202610161000 with the code it was
+migrated with, then upgrade.
 """
 
 from collections.abc import Sequence
