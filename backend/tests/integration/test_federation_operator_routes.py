@@ -111,7 +111,12 @@ async def test_put_get_patch_test_delete_answer_as_before(
         "client_id": f"client-{slug}",
         "scopes": ["openid", "email", "profile"],
         "allowed_domains": [f"{slug}.gov"],
-        "claims_mapping": {"email": "email", "username": "sub", "name": "name"},
+        "claims_mapping": {
+            "email": "email",
+            "subject": "sub",
+            "username": "sub",
+            "name": "name",
+        },
         "issuer": idp["issuer"],
         "authorization_endpoint": idp["authorization_endpoint"],
         "token_endpoint": idp["token_endpoint"],

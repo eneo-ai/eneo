@@ -131,6 +131,8 @@ CATEGORY_MAPPINGS = {
     ActionType.PASSWORD_CHANGE_FAILED.value: "security_events",
     ActionType.SESSIONS_INVALIDATED.value: "security_events",
     ActionType.SESSION_EXTENDED.value: "security_events",
+    ActionType.IDENTITY_BOUND.value: "security_events",
+    ActionType.IDENTITY_CONFLICT.value: "security_events",
     # File Operations (6 actions)
     ActionType.FILE_UPLOADED.value: "file_operations",
     ActionType.FILE_DELETED.value: "file_operations",

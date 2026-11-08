@@ -19,14 +19,17 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import HTTPException
 
+from eneo.audit.domain.action_types import ActionType
 from eneo.authentication import auth_service as auth_service_module
 from eneo.authentication import oidc_resource_server
 from eneo.authentication.auth_service import AuthService
 from eneo.main.exceptions import AuthenticationException, UniqueException
 from eneo.tenants.tenant import TenantInDB, TenantState
 from eneo.users import user_service as user_service_module
+from eneo.users.identity_binding_repo import IdentityConflictError
 from eneo.users.user import UserInDB
 from eneo.users.user_service import UserService
+from tests.identity_bindings_in_memory import IdentityBindingsInMemory
 
 ISSUER = "https://idp.example.com"
 AUDIENCE = "eneo-backend"
@@ -56,6 +59,7 @@ def _make_idp_token(
     email_verified: bool | None = True,
     exp_offset: int = 3600,
     algorithm: str = "RS256",
+    **claims: object,
 ) -> str:
     now = int(time.time())
     payload = {
@@ -64,6 +68,7 @@ def _make_idp_token(
         "sub": "idp-subject-id",
         "iat": now - 5,
         "exp": now + exp_offset,
+        **claims,
     }
     if email is not None:
         payload["email"] = email
@@ -144,6 +149,16 @@ class UserRepoStub:
     async def get_user_by_email(self, email: str):
         return self.users_by_email.get(email.lower())
 
+    async def get_users_by_email(self, email: str, *, limit: int):
+        user = await self.get_user_by_email(email)
+        return [user] if user else []
+
+    async def get_user_by_id(self, user_id, with_deleted: bool = False):  # noqa: ARG002
+        return next((u for u in self.users_by_email.values() if u.id == user_id), None)
+
+    async def get_user_by_id_for_update(self, user_id):
+        return await self.get_user_by_id(user_id)
+
     async def get_user_by_id_and_tenant_id(self, user_id, tenant_id):
         for user in self.users_by_email.values():
             if user.id == user_id and user.tenant_id == tenant_id:
@@ -208,6 +223,12 @@ class AuditServiceStub:
     async def log(self, **kwargs):
         self.logged_events.append(kwargs)
 
+    async def log_async(self, **kwargs):
+        self.logged_events.append(kwargs)
+
+    def of(self, action: ActionType) -> list[dict]:
+        return [event for event in self.logged_events if event["action"] == action]
+
 
 def _make_settings(**overrides) -> SimpleNamespace:
     defaults = dict(
@@ -236,6 +257,7 @@ def _make_user_service(user_repo, tenant_repo, audit_service) -> UserService:
         settings_repo=MagicMock(),
         tenant_repo=tenant_repo,
         info_blob_repo=MagicMock(),
+        identity_binding_repo=IdentityBindingsInMemory(),
     )
 
 
@@ -386,8 +408,7 @@ async def test_provisioning_on_creates_user_with_audit_row(monkeypatch, idp_key)
     assert user.email == "new@example.com"
     assert user.tenant_id == tenant.id
     assert user_repo.add_calls == 1
-    assert len(audit_service.logged_events) == 1
-    event = audit_service.logged_events[0]
+    [event] = audit_service.of(ActionType.USER_CREATED)
     assert event["metadata"]["provisioning_method"] == "jit_federation"
     assert event["tenant_id"] == tenant.id
 
@@ -422,7 +443,9 @@ async def test_concurrent_first_requests_create_one_user_one_audit_row(
     assert len(user_repo.users_by_email) == 1
     # ...both raced into the insert, and exactly one audit row was emitted.
     assert user_repo.add_calls == 2
-    assert len(audit_service.logged_events) == 1
+    assert len(audit_service.of(ActionType.USER_CREATED)) == 1
+    # The losing request finds the identity already bound to that user.
+    assert len(audit_service.of(ActionType.IDENTITY_BOUND)) == 1
 
 
 @pytest.mark.asyncio
@@ -548,6 +571,71 @@ async def test_the_token_identity_reaches_account_admission(setup, monkeypatch):
     await setup.service.authenticate(token=_make_idp_token(setup.private_pem, "kid-a"))
 
     (identity,) = seen
-    assert (identity.issuer, identity.subject) == (ISSUER, "idp-subject-id")
-    # The API audience does not say which client signed the person in.
-    assert identity.client_id is None
+    # The key a binding holds: the subject belongs to the accepted API audience.
+    assert (identity.issuer, identity.audience, identity.subject) == (
+        ISSUER,
+        AUDIENCE,
+        "idp-subject-id",
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_tenant_subject_claim_names_the_token_identity(setup, monkeypatch):
+    seen = []
+    admit = UserService.resolve_federated_user
+
+    async def spy(self, *, identity, **kwargs):
+        seen.append(identity)
+        return await admit(self, identity=identity, **kwargs)
+
+    monkeypatch.setattr(UserService, "resolve_federated_user", spy)
+    setup.tenant.federation_config = {
+        "claims_mapping": {"email": "email", "subject": "oid"}
+    }
+
+    await setup.service.authenticate(
+        token=_make_idp_token(setup.private_pem, "kid-a", oid="person-1")
+    )
+
+    (identity,) = seen
+    assert identity.subject == "person-1"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "mapping, claims",
+    [
+        ({"subject": "oid"}, {}),
+        ({"subject": "oid"}, {"oid": 7}),
+        ({"subject": "email"}, {}),
+    ],
+    ids=["claim-missing", "claim-not-text", "subject-is-the-email-claim"],
+)
+async def test_an_unusable_subject_claim_is_a_credentials_failure(
+    setup, mapping, claims
+):
+    setup.tenant.federation_config = {"claims_mapping": mapping}
+
+    with pytest.raises(AuthenticationException):
+        await setup.service.authenticate(
+            token=_make_idp_token(setup.private_pem, "kid-a", **claims)
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_conflicting_identity_is_refused_typed(setup):
+    await setup.service.identity_binding_repo.bind(
+        tenant_id=setup.tenant.id,
+        user_id=setup.user.id,
+        issuer=ISSUER,
+        audience=AUDIENCE,
+        subject="another-subject",
+    )
+
+    with pytest.raises(IdentityConflictError):
+        await setup.service.authenticate(
+            token=_make_idp_token(setup.private_pem, "kid-a")
+        )
+
+    [conflict] = setup.audit_service.of(ActionType.IDENTITY_CONFLICT)
+    assert conflict["metadata"]["reason"] == "subject_mismatch"

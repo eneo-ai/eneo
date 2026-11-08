@@ -1,0 +1,391 @@
+"""Account binding at each federated entry point, with PostgreSQL and Redis.
+
+The generic callback (``POST /auth/callback``), the browser-session callback
+(``GET /login/callback``) and the resource server (a provider's access token
+as Bearer) take one admission decision: a bound identity reaches its account,
+and an email binds only an account that has no binding yet. The provider is
+tests/fake_oidc_provider.py, so every token is really signed and verified.
+"""
+
+import json
+from collections.abc import AsyncIterator, Awaitable, Callable
+from typing import Any
+from urllib.parse import parse_qs, urlsplit
+from uuid import UUID, uuid4
+
+import pytest
+import sqlalchemy as sa
+
+from eneo.audit.application import audit_service as audit_service_module
+from eneo.audit.application.audit_worker_task import log_audit_event_task
+from eneo.database.database import sessionmanager
+from eneo.database.tables.audit_log_table import AuditLog
+from eneo.database.tables.browser_sessions_table import BrowserSessions
+from eneo.database.tables.identity_bindings_table import IdentityBindings
+from eneo.database.tables.users_table import Users
+from eneo.main.config import get_settings, set_settings
+from eneo.users.identity_binding_repo import IdentityConflictError
+from tests.fake_oidc_provider import FakeOidcProvider
+from tests.integration.test_federation_tenant_admin import (
+    SECRET,
+    _idp,
+    _register,
+    _store,
+    _stored,
+)
+
+pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
+
+EMAIL = "test@example.com"
+CLIENT = "operator-client"
+API = "eneo-api"
+SIGNED_IN = "signed_in"
+ENTRY_POINTS = ["generic", "browser", "api"]
+
+
+@pytest.fixture
+def enqueued(monkeypatch) -> list[dict[str, Any]]:
+    """Audit events sent to the worker; the queue itself is not running."""
+    events: list[dict[str, Any]] = []
+
+    async def enqueue(task, job_id, params):  # noqa: ARG001
+        events.append(params)
+
+    monkeypatch.setattr(audit_service_module.job_manager, "enqueue", enqueue)
+    return events
+
+
+@pytest.fixture
+async def provider(
+    client, super_admin_token, fake_idp, test_tenant
+) -> AsyncIterator[FakeOidcProvider]:
+    idp = _idp("binding")
+    provider = fake_idp(
+        issuer=idp["issuer"],
+        client_id=CLIENT,
+        client_secret=SECRET,
+        other_clients={"client-b": SECRET},
+        token_claims={"email": EMAIL},
+    )
+    await _register(
+        client,
+        super_admin_token,
+        test_tenant.id,
+        idp,
+        canonical_public_origin="https://test.local",
+    )
+    # Browser sessions, as in production, and resource-server mode for the
+    # same provider on its own API audience.
+    current = get_settings()
+    set_settings(
+        current.model_copy(
+            update={
+                "browser_session_enabled": True,
+                "environment": "production",
+                "oidc_resource_server_enabled": True,
+                "oidc_accepted_issuer": provider.issuer,
+                "oidc_accepted_audience": API,
+                "oidc_tenant_id": str(test_tenant.id),
+            }
+        )
+    )
+    try:
+        yield provider
+    finally:
+        set_settings(current)
+
+
+SignIn = Callable[..., Awaitable[str]]
+
+
+@pytest.fixture
+async def sign_in(
+    client,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    provider,
+    db_container,
+    test_tenant,
+) -> SignIn:
+    """Sign in through one entry point; returns ``SIGNED_IN`` or the typed
+    refusal's code, after checking the refusal has that entry point's shape."""
+    async with db_container() as container:
+        slug = await container.tenant_repo().generate_slug_for_tenant(test_tenant.id)
+
+    async def generic(**claims: Any) -> str:
+        initiated = await client.get("/api/v1/auth/initiate", params={"tenant": slug})
+        assert initiated.status_code == 200, initiated.text
+        answer = provider.authorize(initiated.json()["authorization_url"], **claims)
+        response = await client.post(
+            "/api/v1/auth/callback",
+            json={"code": answer.code, "state": initiated.json()["state"]},
+        )
+        if response.status_code == 200:
+            return SIGNED_IN
+        assert response.status_code == 403, response.text
+        body = response.json()
+        assert body["eneo_error_code"] == 9082
+        assert "reason" not in json.dumps(body)
+        return body["code"]
+
+    async def browser(**claims: Any) -> str:
+        initiated = await client.get(
+            "/api/v1/auth/browser/initiate",
+            params={"tenant": slug, "next": "/dashboard"},
+            headers={"Sec-Fetch-Site": "same-origin"},
+        )
+        assert initiated.status_code == 303, initiated.text
+        location = initiated.headers["location"]
+        [state] = parse_qs(urlsplit(location).query)["state"]
+        answer = provider.authorize(location, **claims)
+        [txn] = initiated.headers.get_list("set-cookie")
+        response = await client.get(
+            "/login/callback",
+            params={"code": answer.code, "state": state},
+            headers={"Cookie": txn.split(";", 1)[0], "Sec-Fetch-Site": "cross-site"},
+        )
+        assert response.status_code == 303, response.text
+        target = urlsplit(response.headers["location"])
+        if target.path == "/dashboard":
+            return SIGNED_IN
+        query = parse_qs(target.query)
+        assert (target.path, query["message"]) == ("/login", ["oidc_callback_failed"])
+        return query["detailCode"][0]
+
+    async def api(client_id: str = CLIENT, **claims: Any) -> str:
+        token = provider.access_token(
+            audience=API, client_id=client_id, email=EMAIL, **claims
+        )
+        # The service, not GET /users/me/: a first request that binds writes,
+        # and the safe-method tripwire is about cookies, which this is not.
+        async with db_container() as container:
+            try:
+                await container.user_service().authenticate(token=token)
+            except IdentityConflictError as exc:
+                return exc.code
+        return SIGNED_IN
+
+    entry_points = {"generic": generic, "browser": browser, "api": api}
+
+    async def _sign_in(entry: str, subject: str | None = None, **kwargs: Any) -> str:
+        claims = {"sub": subject} if subject is not None else {}
+        return await entry_points[entry](**claims, **kwargs)
+
+    return _sign_in
+
+
+def _audience(entry: str) -> str:
+    return API if entry == "api" else CLIENT
+
+
+async def _account() -> UUID:
+    async with sessionmanager.session() as session, session.begin():
+        found = await session.scalar(sa.select(Users.id).where(Users.email == EMAIL))
+        assert found is not None
+        return found
+
+
+async def _bindings() -> set[tuple[UUID, str, str]]:
+    async with sessionmanager.session() as session, session.begin():
+        rows = await session.execute(
+            sa.select(
+                IdentityBindings.user_id,
+                IdentityBindings.audience,
+                IdentityBindings.subject,
+            )
+        )
+        return set(rows.tuples())
+
+
+async def _rows() -> dict[str, int]:
+    """How many rows a sign-in may write: accounts, bindings, sessions."""
+    async with sessionmanager.session() as session, session.begin():
+        return {
+            table.__tablename__: await session.scalar(
+                sa.select(sa.func.count()).select_from(table)
+            )
+            for table in (Users, IdentityBindings, BrowserSessions)
+        }
+
+
+async def _bound_methods(user_id: UUID) -> list[str]:
+    async with sessionmanager.session() as session, session.begin():
+        rows = await session.scalars(
+            sa.select(AuditLog)
+            .where(AuditLog.action == "identity_bound", AuditLog.entity_id == user_id)
+            .order_by(AuditLog.timestamp)
+        )
+        return [row.log_metadata["method"] for row in rows]
+
+
+def _conflicts(enqueued: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [event for event in enqueued if event["action"] == "identity_conflict"]
+
+
+@pytest.mark.parametrize("entry", ENTRY_POINTS)
+async def test_an_unbound_account_is_bound_by_its_email(sign_in, provider, entry):
+    account = await _account()
+
+    assert await sign_in(entry, "person-a") == SIGNED_IN
+    assert await sign_in(entry, "person-a") == SIGNED_IN
+
+    assert await _bindings() == {(account, _audience(entry), "person-a")}
+    assert await _bound_methods(account) == ["email_match"]
+
+
+@pytest.mark.parametrize("entry", ENTRY_POINTS)
+async def test_another_subject_under_the_bound_pair_is_refused_and_writes_nothing(
+    sign_in, provider, enqueued, entry
+):
+    account = await _account()
+    assert await sign_in(entry, "person-a") == SIGNED_IN
+    before = await _rows()
+
+    assert await sign_in(entry, "someone-else") == "identity_conflict"
+
+    assert await _rows() == before
+    assert await _bindings() == {(account, _audience(entry), "person-a")}
+    [conflict] = _conflicts(enqueued)
+    assert conflict["outcome"] == "failure"
+    assert conflict["error_message"] == "subject_mismatch"
+    assert conflict["metadata"] | {"correlation_id": None} == {
+        "reason": "subject_mismatch",
+        "issuer": provider.issuer,
+        "audience": _audience(entry),
+        "subject": "someone-else",
+        "account_ids": [str(account)],
+        "correlation_id": None,
+    }
+    assert EMAIL not in json.dumps(conflict)
+
+
+@pytest.mark.parametrize("entry", ENTRY_POINTS)
+async def test_a_bound_account_takes_no_new_pair_by_email(
+    sign_in, provider, enqueued, test_tenant, entry
+):
+    account = await _account()
+    async with sessionmanager.session() as session, session.begin():
+        await session.execute(
+            sa.insert(IdentityBindings).values(
+                tenant_id=test_tenant.id,
+                user_id=account,
+                issuer=provider.issuer,
+                audience="retired-client",
+                subject="person-old",
+            )
+        )
+
+    assert await sign_in(entry, "person-new") == "identity_conflict"
+
+    assert await _bindings() == {(account, "retired-client", "person-old")}
+    assert [c["error_message"] for c in _conflicts(enqueued)] == ["account_bound"]
+
+
+@pytest.mark.parametrize("queue", ["up", "down"])
+async def test_a_recycled_email_after_a_client_change_is_refused_and_audited(
+    sign_in, provider, enqueued, test_tenant, monkeypatch, queue
+):
+    account = await _account()
+    assert await sign_in("generic", "person-a") == SIGNED_IN
+    # The organisation moves to another client at the same provider; there
+    # the address now belongs to someone else.
+    await _store(
+        test_tenant.id, {**await _stored(test_tenant.id), "client_id": "client-b"}
+    )
+    if queue == "down":
+
+        async def unreachable(*args: Any) -> None:
+            raise ConnectionError("queue unreachable")
+
+        monkeypatch.setattr(audit_service_module.job_manager, "enqueue", unreachable)
+    before = await _rows()
+
+    # The refusal does not depend on the audit reaching the queue.
+    assert await sign_in("generic", "someone-else") == "identity_conflict"
+
+    assert await _rows() == before
+    assert await _bindings() == {(account, CLIENT, "person-a")}
+    if queue == "down":
+        return
+    # The sign-in rolled back; the worker still records the refusal.
+    [conflict] = _conflicts(enqueued)
+    async with sessionmanager.session() as session, session.begin():
+        await log_audit_event_task(
+            job_id=str(uuid4()), params=conflict, session=session
+        )
+    async with sessionmanager.session() as session, session.begin():
+        [row] = await session.execute(
+            sa.select(
+                AuditLog.tenant_id,
+                AuditLog.entity_id,
+                AuditLog.actor_type,
+                AuditLog.log_metadata,
+            ).where(AuditLog.action == "identity_conflict")
+        )
+    tenant_id, entity_id, actor_type, metadata = row
+    assert (tenant_id, entity_id, actor_type) == (test_tenant.id, account, "system")
+    assert (metadata["reason"], metadata["audience"]) == ("account_bound", "client-b")
+
+
+async def test_the_resource_server_answers_a_conflict_with_a_typed_403(
+    client, sign_in, provider, enqueued
+):
+    assert await sign_in("api", "person-a") == SIGNED_IN
+    token = provider.access_token(audience=API, client_id=CLIENT, email=EMAIL, sub="x")
+
+    response = await client.get(
+        "/api/v1/users/me/", headers={"Authorization": f"Bearer {token}"}
+    )
+
+    assert response.status_code == 403, response.text
+    body = response.json()
+    assert (body["code"], body["eneo_error_code"]) == ("identity_conflict", 9082)
+
+
+@pytest.mark.parametrize("first, second", [("browser", "api"), ("api", "browser")])
+async def test_a_stable_id_claim_binds_one_account_across_audiences(
+    sign_in, provider, test_tenant, first, second
+):
+    """A provider with a different ``sub`` per client names the person in a
+    stable claim; mapped as the subject, it binds every audience."""
+    provider.pairwise_subjects = True
+    stored = await _stored(test_tenant.id)
+    await _store(
+        test_tenant.id,
+        {**stored, "claims_mapping": {"email": "email", "subject": "oid"}},
+    )
+    account = await _account()
+
+    # The API token comes from another client, with another ``sub``.
+    clients: dict[str, dict[str, str]] = {
+        "browser": {},
+        "api": {"client_id": "mobile-app"},
+    }
+    assert await sign_in(first, **clients[first]) == SIGNED_IN
+    assert await sign_in(second, **clients[second]) == SIGNED_IN
+
+    assert await _bindings() == {
+        (account, CLIENT, "person-0001"),
+        (account, API, "person-0001"),
+    }
+    assert await _bound_methods(account) == ["email_match", "same_subject"]
+
+
+async def test_pairwise_subjects_under_the_default_claim_bind_each_client_apart(
+    sign_in, provider, enqueued
+):
+    """Under ``sub`` each client is another subject: an API token issued to
+    the signing-in client is the same person, one issued to another client
+    is not, and the API audience keeps one subject."""
+    provider.pairwise_subjects = True
+    account = await _account()
+
+    assert await sign_in("browser") == SIGNED_IN
+    assert await sign_in("api", client_id=CLIENT) == SIGNED_IN
+    assert await sign_in("api", client_id="mobile-app") == "identity_conflict"
+
+    assert await _bindings() == {
+        (account, CLIENT, provider.subject_for(CLIENT)),
+        (account, API, provider.subject_for(CLIENT)),
+    }
+    assert [c["error_message"] for c in _conflicts(enqueued)] == ["subject_mismatch"]

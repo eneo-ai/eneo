@@ -95,6 +95,7 @@ from eneo.skills.domain.skill import (
     SkillRuntimePolicyChangedError,
     SkillSlugConflictError,
 )
+from eneo.users.identity_binding_repo import IdentityConflictError
 from eneo.users.password import (
     CurrentPasswordIncorrectError,
     LocalPasswordChangeUnavailableError,
@@ -288,6 +289,7 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
         None,
         ErrorCodes.OIDC_RESPONSE_NOT_VERIFIED,
     ),
+    IdentityConflictError: (403, None, ErrorCodes.IDENTITY_CONFLICT),
     # --- Integrations: the string ``code`` tells the cases apart ---
     SharePointCredentialsInvalidError: (400, None, ErrorCodes.BAD_REQUEST),
     OAuthCodeRejectedError: (400, None, ErrorCodes.BAD_REQUEST),

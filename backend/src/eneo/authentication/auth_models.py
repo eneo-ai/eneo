@@ -786,14 +786,19 @@ DEFAULT_EMAIL_VERIFIED_CLAIMS = ("email_verified", "xms_edov")
 
 
 class FederatedIdentity(BaseModel):
-    """Email identity extracted only after the OIDC token has been validated."""
+    """Email identity extracted only after the OIDC token has been validated.
+
+    Issuer, audience and subject are the key an account is bound to
+    (``identity_bindings``).
+    """
 
     model_config = ConfigDict(frozen=True)
 
     issuer: str = Field(min_length=1)
-    # Only from a verified ID token's aud/azp; an IdP access token leaves it
-    # unset, because the API audience does not name the signing-in client.
-    client_id: str | None = Field(default=None, min_length=1)
+    # The verified audience the subject belongs to: the client id of a browser
+    # sign-in's ID token (aud/azp), or the accepted API audience of a
+    # provider's access token. Never invented for a path that proves neither.
+    audience: str = Field(min_length=1)
     subject: str = Field(min_length=1)
     email: EmailStr
     email_verified: bool = Field(strict=True)
@@ -804,7 +809,10 @@ class FederatedIdentity(BaseModel):
         claims: Mapping[str, object],
         *,
         issuer: str,
-        client_id: str | None = None,
+        audience: str,
+        # The claim that names the person: ``sub`` unless the provider's
+        # claims mapping names a stable id claim instead.
+        subject_claim: str = "sub",
         email_claim: str = "email",
         email_verified_claims: Sequence[str] = DEFAULT_EMAIL_VERIFIED_CLAIMS,
     ) -> "FederatedIdentity":
@@ -824,13 +832,13 @@ class FederatedIdentity(BaseModel):
         verdict = claims[deciding] if deciding is not None else None
         if email_claim == "email" and deciding == "email_verified" and verdict is False:
             raise ValueError("Email is not verified by the identity provider")
-        subject = claims.get("sub")
+        subject = claims.get(subject_claim)
         if not isinstance(subject, str) or not subject:
             raise ValueError("ID token is missing its subject")
         try:
             return cls(
                 issuer=issuer,
-                client_id=client_id,
+                audience=audience,
                 subject=subject,
                 email=email,
                 # The verification claims verify the standard email, not an

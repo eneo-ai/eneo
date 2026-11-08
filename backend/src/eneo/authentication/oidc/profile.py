@@ -75,6 +75,8 @@ class OidcProfile:
     signing_algorithms: tuple[str, ...]
     scopes: tuple[str, ...]
     email_claim: str
+    # The claim whose value is the subject an account is bound to.
+    subject_claim: str
     email_verified_claims: tuple[str, ...]
     # RFC 9207: the provider puts its issuer in every authorization response.
     iss_parameter_supported: bool
@@ -165,6 +167,27 @@ def _texts(value: object, key: str) -> tuple[str, ...] | None:
     return tuple(cast(list[str], value))
 
 
+def _mapped_claim(mapping: object, key: str) -> str | None:
+    if not isinstance(mapping, Mapping):
+        return None
+    return _text(cast(Mapping[str, object], mapping).get(key))
+
+
+def subject_claim(mapping: object, *, email_claim: str) -> str:
+    """The claim a claims mapping names for the subject, else ``sub``.
+
+    A provider whose ``sub`` differs per client can name a stable id claim
+    instead. It must not be the email claim: an address can be reassigned,
+    and the subject is what keeps a reassigned address out of the account.
+    """
+    claim = _mapped_claim(mapping, "subject") or "sub"
+    if claim == email_claim:
+        raise OidcProviderError(
+            "The claims mapping names the email claim as the subject claim"
+        )
+    return claim
+
+
 def _token_auth_method(
     config: Mapping[str, object], discovery: Mapping[str, object]
 ) -> str:
@@ -230,11 +253,7 @@ def build_profile(
     if client_id is None or client_secret is None:
         raise OidcProviderError("The OIDC client is not configured")
     mapping = config.get("claims_mapping")
-    email_claim = (
-        _text(cast(Mapping[str, object], mapping).get("email"))
-        if isinstance(mapping, Mapping)
-        else None
-    )
+    email_claim = _mapped_claim(mapping, "email") or "email"
     issuer = resolve("issuer", "Failed to resolve the provider's issuer")
     if is_templated_issuer(issuer):
         raise OidcProviderError(TEMPLATED_ISSUER_GUIDANCE)
@@ -250,7 +269,8 @@ def build_profile(
         jwks_uri=resolve("jwks_uri", "Failed to resolve JWKS URI"),
         signing_algorithms=_signing_algorithms(config, discovery),
         scopes=_texts(config.get("scopes"), "scopes") or DEFAULT_SCOPES,
-        email_claim=email_claim or "email",
+        email_claim=email_claim,
+        subject_claim=subject_claim(mapping, email_claim=email_claim),
         email_verified_claims=_texts(
             config.get("email_verified_claims"), "email_verified_claims"
         )

@@ -1,0 +1,87 @@
+from datetime import datetime
+from typing import Optional
+from uuid import UUID
+
+from sqlalchemy import (
+    TIMESTAMP,
+    CheckConstraint,
+    ForeignKey,
+    Index,
+    UniqueConstraint,
+)
+from sqlalchemy.orm import Mapped, mapped_column
+
+from eneo.database.tables.base_class import BaseWithTableName, CreatedAtMixin, IdMixin
+from eneo.database.tables.tenant_table import Tenants
+from eneo.database.tables.users_table import Users
+
+
+class IdentityBindings(IdMixin, CreatedAtMixin, BaseWithTableName):
+    """Which account a provider's subject signs in to.
+
+    The key is the issuer, the verified audience the subject belongs to (the
+    client id of a browser sign-in's ID token, or the accepted API audience of
+    a provider's access token) and the subject, within one tenant. A sign-in
+    that presents a bound key reaches its account without its email being
+    consulted. A removed account keeps its bindings: SCIM reactivation reuses
+    the row, so the identity stays reserved for it.
+    """
+
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Users.id, ondelete="CASCADE"), nullable=False
+    )
+    issuer: Mapped[str] = mapped_column(nullable=False)
+    audience: Mapped[str] = mapped_column(nullable=False)
+    subject: Mapped[str] = mapped_column(nullable=False)
+
+    __table_args__ = (
+        # One account per identity. Subject before audience, so the same
+        # index also finds a subject under any audience of its issuer.
+        UniqueConstraint(
+            "tenant_id",
+            "issuer",
+            "subject",
+            "audience",
+            name="identity_bindings_identity_key",
+        ),
+        # One subject per issuer and audience for an account; also serves
+        # the lookups by account and the cascade when it is deleted.
+        UniqueConstraint(
+            "user_id", "issuer", "audience", name="identity_bindings_account_key"
+        ),
+    )
+
+
+class IdentityMigrationWindows(IdMixin, CreatedAtMixin, BaseWithTableName):
+    """While open, an account bound under the from pair may also be bound
+    under the to pair by its email. The from binding stays."""
+
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"), nullable=False
+    )
+    from_issuer: Mapped[str] = mapped_column(nullable=False)
+    from_audience: Mapped[str] = mapped_column(nullable=False)
+    to_issuer: Mapped[str] = mapped_column(nullable=False)
+    to_audience: Mapped[str] = mapped_column(nullable=False)
+    closes_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False
+    )
+    created_by: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Users.id, ondelete="SET NULL")
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "from_issuer <> to_issuer OR from_audience <> to_audience",
+            name="identity_migration_windows_pairs_differ",
+        ),
+        Index(
+            "ix_identity_migration_windows_target",
+            "tenant_id",
+            "to_issuer",
+            "to_audience",
+        ),
+    )

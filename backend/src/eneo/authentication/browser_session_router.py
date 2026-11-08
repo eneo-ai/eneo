@@ -70,6 +70,7 @@ from eneo.main.request_context import ensure_correlation_id
 from eneo.server.dependencies.container import get_container
 from eneo.server.exception_handlers import http_exception_response
 from eneo.server.protocol import responses
+from eneo.users.identity_binding_repo import IdentityConflictError
 from eneo.users.password_lifecycle import PASSWORD_AUTH_METHOD
 from eneo.users.user import UserInDB
 from eneo.users.user_router import login_with_password
@@ -598,7 +599,7 @@ async def complete_browser_federation(
         # The function-scoped transaction must roll back before the ASGI owner
         # turns the public HTTP failure into a redirect.
         raise
-    except OidcSignInError as exc:
+    except (OidcSignInError, IdentityConflictError) as exc:
         diagnostics.detail_code = exc.code
         raise
     session_token = await container.browser_session_service().start(

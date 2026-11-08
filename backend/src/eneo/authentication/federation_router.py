@@ -43,6 +43,7 @@ from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 from eneo.settings.credential_resolver import CredentialResolver
 from eneo.tenants.tenant import TenantInDB, TenantState
+from eneo.users.identity_binding_repo import IdentityConflictError
 
 logger = get_logger(__name__)
 
@@ -54,6 +55,7 @@ router = APIRouter(
 
 class OIDCClaimsMapping(TypedDict):
     email: str
+    subject: NotRequired[str]
 
 
 class FederationConfig(TypedDict):
@@ -941,6 +943,8 @@ async def federated_sign_in(
         HTTPException 401: The verified token carries no usable email
         OidcResponseNotVerifiedError (401): The provider's response failed a check
         HTTPException 403: Email domain not allowed for tenant or user not found
+        IdentityConflictError (403): The identity cannot be bound to the account
+            its email names
         OidcLoginUnavailableError (503): The transaction store is unavailable
     """
     settings = get_settings()
@@ -1110,6 +1114,16 @@ async def federated_sign_in(
                 allowed_domains=federation_config.get("allowed_domains") or [],
                 correlation_id=correlation_id,
             )
+        except IdentityConflictError as exc:
+            await _log_oidc_debug(
+                redis_client=redis_client,
+                correlation_id=correlation_id,
+                event="callback.identity_conflict",
+                tenant_slug=tenant_slug,
+                reason=exc.reason,
+            )
+            # Typed: 403 with its code, for the login pages to explain.
+            raise
         except FederatedLoginDenied as exc:
             await _log_oidc_debug(
                 redis_client=redis_client,
@@ -1162,7 +1176,7 @@ async def federated_sign_in(
             access_token=access_token_response,
             frontend_state=state_payload["frontend_state"],
         )
-    except (HTTPException, OidcSignInError):
+    except (HTTPException, OidcSignInError, IdentityConflictError):
         # Re-raise HTTP and typed sign-in refusals with correlation_id already set
         raise
     except Exception as e:

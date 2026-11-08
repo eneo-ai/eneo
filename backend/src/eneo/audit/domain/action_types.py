@@ -46,6 +46,9 @@ class ActionType(str, Enum):
     PASSWORD_CHANGE_FAILED = "password_change_failed"
     SESSIONS_INVALIDATED = "sessions_invalidated"
     SESSION_EXTENDED = "session_extended"
+    # Which account a federated sign-in identity reaches (identity_bindings).
+    IDENTITY_BOUND = "identity_bound"
+    IDENTITY_CONFLICT = "identity_conflict"
 
     # User Actions (Priority 2)
     ASSISTANT_CREATED = "assistant_created"
@@ -206,7 +209,13 @@ class ActionType(str, Enum):
 
 # Logged whatever the tenant's audit configuration says: a tenant admin can
 # switch off categories, actions and the whole audit log, and none of those may
-# hide a change to how the organisation signs in or a session renewing itself.
+# hide a change to how the organisation signs in, a session renewing itself, or
+# which account a sign-in identity reaches.
 ALWAYS_AUDITED_ACTIONS: frozenset[ActionType] = frozenset(
-    {ActionType.FEDERATION_UPDATED, ActionType.SESSION_EXTENDED}
+    {
+        ActionType.FEDERATION_UPDATED,
+        ActionType.SESSION_EXTENDED,
+        ActionType.IDENTITY_BOUND,
+        ActionType.IDENTITY_CONFLICT,
+    }
 )

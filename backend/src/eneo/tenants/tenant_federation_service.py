@@ -57,6 +57,9 @@ logger = get_logger(__name__)
 
 DEFAULT_CLAIMS_MAPPING = {
     "email": "email",
+    # The claim an account is bound to (identity_bindings). An existing
+    # mapping without the key means "sub" as well.
+    "subject": "sub",
     "username": "sub",
     "name": "name",
 }

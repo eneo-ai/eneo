@@ -2,7 +2,7 @@ import random
 from collections.abc import Sequence
 from datetime import datetime, timezone
 from enum import Enum
-from typing import TYPE_CHECKING, Optional, cast
+from typing import TYPE_CHECKING, Literal, NoReturn, Optional, cast
 from uuid import UUID
 
 import idna
@@ -39,6 +39,7 @@ from eneo.authentication.auth_models import (
 )
 from eneo.authentication.auth_service import INTERNAL_MCP_AUDIENCE, AuthService
 from eneo.authentication.endpoint_access import authorize_user
+from eneo.authentication.oidc.profile import OidcProviderError, subject_claim
 from eneo.database.tables.app_table import AppRuns, Apps
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.collections_table import CollectionsTable
@@ -71,6 +72,10 @@ from eneo.settings.settings import SettingsUpsert
 from eneo.settings.settings_repo import SettingsRepository
 from eneo.tenants.tenant import TenantState
 from eneo.tenants.tenant_repo import TenantRepository
+from eneo.users.identity_binding_repo import (
+    IdentityBindingRepository,
+    IdentityConflictError,
+)
 from eneo.users.password import (
     CurrentPasswordIncorrectError,
     LocalPasswordChangeUnavailableError,
@@ -97,6 +102,12 @@ if TYPE_CHECKING:
 
 
 logger = get_logger(__name__)
+
+# Removed and inactive accounts are refused alike, so a refusal does not say
+# which of the two an account is.
+_INACTIVE_OR_REMOVED = (
+    "User is inactive or has been removed. Contact your administrator."
+)
 
 
 def _permission_allows(key: ApiKeyV2InDB, required: ApiKeyPermission) -> bool:
@@ -283,6 +294,7 @@ class UserService:
         feature_flag_service: Optional["FeatureFlagService"] = None,
         session: Optional["AsyncSession"] = None,
         browser_session_service: Optional["BrowserSessionService"] = None,
+        identity_binding_repo: Optional[IdentityBindingRepository] = None,
     ):
         super().__init__()
         self.repo = user_repo
@@ -299,6 +311,8 @@ class UserService:
         self._session = session
         # Without it, a browser session's token is refused.
         self.browser_session_service = browser_session_service
+        # Without it, no federated sign-in is admitted.
+        self.identity_binding_repo = identity_binding_repo
 
     async def _validate_email(self, email: str | None):
         if email is None:
@@ -450,11 +464,19 @@ class UserService:
         allowed_domains: Sequence[str],
         correlation_id: str,
     ) -> tuple[UserInDB, bool]:
-        """Resolve an active tenant member, or admit a new one under JIT policy.
+        """Resolve the account a verified identity signs in to, or admit a new
+        one under JIT policy.
 
-        Both OIDC entry points use this decision. SCIM/admin own reactivation;
-        signing in must never undo deprovisioning or switch tenant membership.
+        Every OIDC entry point uses this decision. The identity's binding
+        (issuer, audience, subject) decides first and the email is not
+        consulted: the email binds only an account that has no binding yet,
+        or one an admin opened (a migration window, a re-binding allowance),
+        so an address reassigned at the provider cannot take over the account
+        it used to name. SCIM/admin own reactivation; signing in must never
+        undo deprovisioning or switch tenant membership.
         """
+        if self.identity_binding_repo is None:
+            raise RuntimeError("Federated sign-in needs the identity binding store")
         tenant = await self.tenant_repo.get(tenant_id)
         if tenant is None or tenant.state != TenantState.ACTIVE:
             raise FederatedLoginDenied(
@@ -482,20 +504,57 @@ class UserService:
                     "Contact your administrator to add your domain."
                 )
 
-        user = await self.repo.get_user_by_email(identity.email)
-        if user is not None:
-            if user.tenant_id != tenant_id:
+        bindings = self.identity_binding_repo
+        holder_id = await bindings.holder(
+            tenant_id=tenant_id,
+            issuer=identity.issuer,
+            audience=identity.audience,
+            subject=identity.subject,
+        )
+        if holder_id is not None:
+            # No lock: a resource server takes this path on every request. A
+            # removed account keeps its identity reserved: SCIM reactivation
+            # reuses the row, and nothing moves a binding off it.
+            user = await self.repo.get_user_by_id(holder_id)
+            if user is None or user.state != UserState.ACTIVE:
+                raise FederatedLoginDenied(_INACTIVE_OR_REMOVED)
+            return user, False
+
+        # OIDC never reassigns a subject within an issuer, so the subject
+        # bound under another audience is the same person, whatever the email.
+        holders = await bindings.holders_of_subject(
+            tenant_id=tenant_id, issuer=identity.issuer, subject=identity.subject
+        )
+        if len(holders) > 1:
+            await self._refuse_identity(
+                "duplicate_subject", identity, tenant_id, holders, correlation_id
+            )
+        if holders:
+            user = await self._bind_identity(
+                identity, tenant_id, holders[0], "same_subject", correlation_id
+            )
+            return user, False
+
+        users = await self.repo.get_users_by_email(identity.email, limit=2)
+        if len(users) > 1:
+            # Case variants of one address: the email names no single account.
+            await self._refuse_identity(
+                "duplicate_email",
+                identity,
+                tenant_id,
+                [user.id for user in users],
+                correlation_id,
+            )
+        if users:
+            if users[0].tenant_id != tenant_id:
                 raise FederatedLoginDenied("Access denied for this organization.")
-            if user.state != UserState.ACTIVE or user.deleted_at is not None:
-                raise FederatedLoginDenied(
-                    "User is inactive or has been removed. Contact your administrator."
-                )
+            user = await self._bind_identity(
+                identity, tenant_id, users[0].id, "email", correlation_id
+            )
             return user, False
 
         if await self.repo.has_removed_user_by_email(identity.email, tenant_id):
-            raise FederatedLoginDenied(
-                "User is inactive or has been removed. Contact your administrator."
-            )
+            raise FederatedLoginDenied(_INACTIVE_OR_REMOVED)
         if not tenant.provisioning:
             raise FederatedLoginDenied(
                 "User not found. Provision the account through SCIM or contact your administrator for access."
@@ -539,8 +598,9 @@ class UserService:
                 )
             )
         except UniqueException:
-            # A concurrent first sign-in created the row between the lookup
-            # and the insert. Admit that row under the same membership checks.
+            # A concurrent first sign-in or SCIM created the row between the
+            # lookup and the insert. Admit that row under the same membership
+            # checks, and bind it like any account found by its email.
             user = await self.repo.get_user_by_email(identity.email)
             if (
                 user is None
@@ -549,6 +609,9 @@ class UserService:
                 or user.deleted_at is not None
             ):
                 raise FederatedLoginDenied("Access denied for this organization.")
+            user = await self._bind_identity(
+                identity, tenant_id, user.id, "email", correlation_id
+            )
             return user, False
         logger.info(
             "JIT provisioning: Created user",
@@ -582,7 +645,163 @@ class UserService:
                     extra={"user_id": str(user.id), "correlation_id": correlation_id},
                     exc_info=True,
                 )
+        user = await self._bind_identity(
+            identity, tenant_id, user.id, "jit", correlation_id
+        )
         return user, True
+
+    async def _bind_identity(
+        self,
+        identity: FederatedIdentity,
+        tenant_id: UUID,
+        user_id: UUID,
+        found_by: Literal["same_subject", "email", "jit"],
+        correlation_id: str,
+    ) -> UserInDB:
+        """Bind the identity to this account, deciding under its row lock.
+
+        The lock orders the decision with every other sign-in to the account
+        and with SCIM or admin deactivation: a waiter whose account was
+        removed meanwhile gets no row. An account already bound takes a new
+        identity only when found by its email and an admin opened the way: a
+        migration window from one of its pairs adds the new pair; a re-binding
+        allowance adds it or replaces the subject under it, and is used up.
+        """
+        bindings = cast(IdentityBindingRepository, self.identity_binding_repo)
+        user = await self.repo.get_user_by_id_for_update(user_id)
+        if user is None or user.state != UserState.ACTIVE:
+            raise FederatedLoginDenied(_INACTIVE_OR_REMOVED)
+        pair = (identity.issuer, identity.audience)
+        bound = await bindings.of_user(user.id)
+        same_pair = next(
+            (
+                binding
+                for binding in bound
+                if (binding.issuer, binding.audience) == pair
+            ),
+            None,
+        )
+        details: dict[str, str] = {}
+        if same_pair is not None:
+            if same_pair.subject == identity.subject:
+                # Bound by a sign-in that held the lock before this one.
+                return user
+            if found_by != "email" or not await bindings.rebinding_open(user.id):
+                await self._refuse_identity(
+                    "subject_mismatch", identity, tenant_id, [user.id], correlation_id
+                )
+            await bindings.unbind(
+                user_id=user.id, issuer=identity.issuer, audience=identity.audience
+            )
+            method = "admin_allowance"
+            details["replaced_subject"] = same_pair.subject
+        elif bound and found_by == "email":
+            window_id = await bindings.open_window(
+                tenant_id=tenant_id,
+                to_issuer=identity.issuer,
+                to_audience=identity.audience,
+                from_pairs=[(binding.issuer, binding.audience) for binding in bound],
+            )
+            if window_id is not None:
+                method = "migration_window"
+                details["window_id"] = str(window_id)
+            elif await bindings.rebinding_open(user.id):
+                method = "admin_allowance"
+            else:
+                await self._refuse_identity(
+                    "account_bound", identity, tenant_id, [user.id], correlation_id
+                )
+        else:
+            method = "email_match" if found_by == "email" else found_by
+        key = {
+            "issuer": identity.issuer,
+            "audience": identity.audience,
+            "subject": identity.subject,
+        }
+        if not await bindings.bind(tenant_id=tenant_id, user_id=user.id, **key):
+            # This account's lock is held, so another account took the
+            # identity after it was looked up.
+            holder = await bindings.holder(tenant_id=tenant_id, **key)
+            await self._refuse_identity(
+                "identity_taken",
+                identity,
+                tenant_id,
+                [user.id] + ([holder] if holder is not None else []),
+                correlation_id,
+            )
+        if found_by == "email":
+            await bindings.close_rebinding(user.id)
+        if self.audit_service is not None:
+            # In the sign-in's transaction: rolls back with it.
+            await self.audit_service.log(
+                tenant_id=tenant_id,
+                actor_id=None,
+                actor_type=ActorType.SYSTEM,
+                action=ActionType.IDENTITY_BOUND,
+                entity_type=EntityType.USER,
+                entity_id=user.id,
+                description=f"Sign-in identity bound to the account ({method})",
+                metadata={
+                    **key,
+                    "method": method,
+                    **details,
+                    "correlation_id": correlation_id,
+                },
+                required=True,
+            )
+        return user
+
+    async def _refuse_identity(
+        self,
+        reason: str,
+        identity: FederatedIdentity,
+        tenant_id: UUID,
+        account_ids: Sequence[UUID],
+        correlation_id: str,
+    ) -> NoReturn:
+        """Refuse a sign-in whose identity cannot be bound, logged and audited.
+
+        The audit goes through the worker queue, so it outlives the sign-in's
+        rollback; when the queue is unreachable the log event remains. Neither
+        names the email or carries a token.
+        """
+        fields: dict[str, object] = {
+            "reason": reason,
+            "issuer": identity.issuer,
+            "audience": identity.audience,
+            "subject": identity.subject,
+            "account_ids": [str(account_id) for account_id in account_ids],
+        }
+        logger.warning(
+            "identity_conflict",
+            extra={
+                **fields,
+                "tenant_id": str(tenant_id),
+                "correlation_id": correlation_id,
+            },
+        )
+        if self.audit_service is not None:
+            try:
+                await self.audit_service.log_async(
+                    tenant_id=tenant_id,
+                    actor_id=None,
+                    actor_type=ActorType.SYSTEM,
+                    action=ActionType.IDENTITY_CONFLICT,
+                    entity_type=EntityType.USER,
+                    entity_id=account_ids[0],
+                    description="Sign-in refused: its identity cannot be bound to the account",
+                    metadata={**fields, "correlation_id": correlation_id},
+                    outcome=Outcome.FAILURE,
+                    error_message=reason,
+                )
+            except Exception:
+                # The refusal never depends on its audit.
+                logger.warning(
+                    "identity_conflict_audit_not_sent",
+                    extra={"reason": reason, "correlation_id": correlation_id},
+                    exc_info=True,
+                )
+        raise IdentityConflictError(reason)
 
     async def register(self, new_user: UserAddSuperAdmin):
         await self._validate_email(new_user.email)
@@ -686,7 +905,7 @@ class UserService:
         return await self._get_user_from_payload(payload)
 
     async def _get_user_from_idp_access_token(self, token: str) -> "UserInDB":
-        """Validate an IdP access token and resolve the user by email claim.
+        """Validate an IdP access token and resolve the account it signs in to.
 
         Admission (allowed domains, JIT provisioning, tenant membership) is
         the same ``resolve_federated_user`` decision the OIDC federation
@@ -706,14 +925,25 @@ class UserService:
         )
 
         settings = get_settings()
+        tenant = await self._resolve_tenant_for_idp_access_token(correlation_id)
+
+        # Resource-server mode is configured globally, like the global OIDC
+        # login: the tenant's federation config wins, the settings fill in.
+        federation_config = tenant.federation_config or {}
         try:
-            # validate_idp_access_token checked iss against this setting.
+            # validate_idp_access_token checked iss and aud against these
+            # settings. The subject claim is the tenant's, as at sign-in.
             identity = FederatedIdentity.from_claims(
-                payload, issuer=cast(str, settings.oidc_accepted_issuer)
+                payload,
+                issuer=cast(str, settings.oidc_accepted_issuer),
+                audience=cast(str, settings.oidc_accepted_audience),
+                subject_claim=subject_claim(
+                    federation_config.get("claims_mapping"), email_claim="email"
+                ),
             )
-        except ValueError as exc:
+        except (ValueError, OidcProviderError) as exc:
             logger.warning(
-                "IdP access token has no usable email claim",
+                "IdP access token has no usable email or subject claim",
                 extra={
                     "correlation_id": correlation_id,
                     "payload_keys": list(payload.keys()),
@@ -724,11 +954,6 @@ class UserService:
                 "Could not validate token credentials."
             ) from exc
 
-        tenant = await self._resolve_tenant_for_idp_access_token(correlation_id)
-
-        # Resource-server mode is configured globally, like the global OIDC
-        # login: the tenant's federation config wins, the settings fill in.
-        federation_config = tenant.federation_config or {}
         allowed_domains = (
             cast("list[str] | None", federation_config.get("allowed_domains"))
             or settings.oidc_allowed_domains
@@ -741,6 +966,9 @@ class UserService:
                 allowed_domains=allowed_domains,
                 correlation_id=correlation_id,
             )
+        except IdentityConflictError:
+            # Typed, as the federation callbacks answer it (403, its code).
+            raise
         except FederatedLoginDenied as exc:
             # The token is valid; the identity is not admitted. 403, as the
             # federation callback answers, not a credentials failure.

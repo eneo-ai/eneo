@@ -17,6 +17,7 @@ import jwt
 import pytest
 from fastapi import HTTPException, Response
 
+from eneo.audit.domain.action_types import ActionType
 from eneo.authentication import federation_router
 from eneo.authentication.auth_service import AuthService
 from eneo.authentication.browser_session_service import BrowserSessionService
@@ -166,7 +167,9 @@ async def test_first_sign_in_creates_the_account_once(monkeypatch, db_mode):
     assert created.email == "new.person@example.com"
     assert created.tenant_id == login.tenant.id
     assert [
-        event["metadata"]["provisioning_method"] for event in login.audit.logged_events
+        event["metadata"]["provisioning_method"]
+        for event in login.audit.logged_events
+        if event["action"] == ActionType.USER_CREATED
     ] == ["jit_federation"]
 
 
