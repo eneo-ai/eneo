@@ -35,6 +35,7 @@ function initAssistantEditor(data: {
       enabled_capabilities: [],
       document_template: { mode: "default", template_id: null } as Assistant["document_template"],
       mcp_tools: [],
+      specialists: [] as NonNullable<Assistant["specialists"]>,
       rerank_model_id: null as string | null
     },
     updateResource: async (resource, changes) => {
@@ -62,6 +63,7 @@ function initAssistantEditor(data: {
       document_template: { mode: true, template_id: true },
       mcp_servers: ["id"],
       mcp_tools: ["tool_id", "is_enabled"] as unknown as true,
+      specialists: ["id", "user_description"],
       skill_bindings: ["skill_id", "skill_revision_id", "activation_mode"],
       attachments: ["id", "inline_text"],
       data_retention_days: true,

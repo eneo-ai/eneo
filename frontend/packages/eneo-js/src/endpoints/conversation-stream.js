@@ -13,7 +13,7 @@ import { EneoError } from "../client/client.js";
  * @property {(data: import("../types/resources").SSE.Text) => void} [onText]
  * @property {(data: import("../types/resources").SSE.Reasoning) => void} [onReasoning]
  * @property {(data: import("../types/resources").SSE.Files) => void} [onImage]
- * @property {(data: import("../types/resources").SSE.TokenUsage) => void} [onEneoEvent]
+ * @property {(data: import("../types/resources").SSE.TokenUsage | import("../types/resources").SSE.Consultation) => void} [onEneoEvent]
  * @property {(data: import("../types/resources").SSE.ToolCall) => void} [onToolCall]
  * @property {(data: import("../types/resources").SSE.ToolCallDelta) => void} [onToolCallDelta]
  * @property {(data: import("../types/resources").SSE.ToolApprovalRequired) => void} [onToolApprovalRequired]
@@ -76,6 +76,17 @@ export async function readConversationStream(client, endpoint, args, callbacks, 
               callbacks?.onImage?.(data);
               break;
 
+            case "consultation": {
+              const consultations = new Map(
+                (response.consultations ?? []).map((item) => [item.id, item])
+              );
+              for (const item of data.consultations) consultations.set(item.id, item);
+              response.consultations = [...consultations.values()].sort(
+                (a, b) => a.ordinal - b.ordinal
+              );
+              callbacks?.onEneoEvent?.(data);
+              break;
+            }
             case "token_usage":
               callbacks?.onEneoEvent?.(data);
               break;

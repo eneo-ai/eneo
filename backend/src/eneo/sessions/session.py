@@ -10,6 +10,7 @@ from eneo.files.file_models import FilePublic
 from eneo.info_blobs.info_blob import InfoBlobAskAssistantPublic
 from eneo.main.models import DateTimeModelMixin, InDB
 from eneo.questions.question import (
+    ConsultationInfo,
     McpToolReferencePublic,
     Message,
     Question,
@@ -100,6 +101,9 @@ class AskChatResponse(BaseModel):
     generated_files: list[FilePublic]
     references: list[InfoBlobAskAssistantPublic]
     tools: UseTools
+    consultations: list[ConsultationInfo] = Field(
+        default_factory=list[ConsultationInfo]
+    )
     mcp_tool_references: list[McpToolReferencePublic] = []
 
 
@@ -119,6 +123,7 @@ class EneoEventType(str, Enum):
     TOOL_APPROVAL_REQUIRED = "tool_approval_required"
     TOOL_APPROVAL_TIMEOUT = "tool_approval_timeout"
     TOKEN_USAGE = "token_usage"
+    CONSULTATION = "consultation"
 
 
 class SSEBase(BaseModel):
@@ -141,6 +146,11 @@ class SSEFiles(SSEBase):
     # The tool call that produced the file, when one did; history carries the
     # same link as `generated_file_ids` on the tool call.
     tool_call_id: Optional[str] = None
+
+
+class SSEConsultation(SSEBase):
+    eneo_event_type: EneoEventType = EneoEventType.CONSULTATION
+    consultations: list[ConsultationInfo]
 
 
 class SSEToolCall(SSEBase):
@@ -298,6 +308,7 @@ class ToolApprovalResponse(BaseModel):
 
 # Add the SSE models here in order to include them in the openapi schema
 SSE_MODELS = [
+    SSEConsultation,
     SSEText,
     SSEReasoning,
     SSEToolCall,

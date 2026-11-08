@@ -5,11 +5,11 @@ from sqlalchemy import func, select, union_all
 from eneo.database.tables.ai_models_table import CompletionModels
 from eneo.database.tables.app_table import AppRuns
 from eneo.database.tables.model_providers_table import ModelProviders
-from eneo.database.tables.questions_table import Questions
 from eneo.token_usage.domain.token_usage_models import (
     ModelTokenUsage,
     TokenUsageSummary,
 )
+from eneo.token_usage.infrastructure.question_usage import question_usage_rows
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -44,31 +44,33 @@ class TokenUsageAnalyzer:
             A TokenUsageSummary with token usage per model
         """
 
+        usage = question_usage_rows(tenant_id, start_date, end_date)
+
         # Get token usage from questions (chat messages)
         questions_query = (
             select(
-                Questions.completion_model_id.label("model_id"),
+                usage.c.completion_model_id.label("model_id"),
                 CompletionModels.name.label("model_name"),
                 CompletionModels.nickname.label("model_nickname"),
                 CompletionModels.org.label("model_org"),
                 ModelProviders.name.label("model_provider"),
-                func.sum(Questions.num_tokens_question).label("input_tokens"),
-                func.sum(Questions.num_tokens_answer).label("output_tokens"),
-                func.count(Questions.id).label("request_count"),
+                func.sum(usage.c.num_tokens_question).label("input_tokens"),
+                func.sum(usage.c.num_tokens_answer).label("output_tokens"),
+                func.count(usage.c.id).label("request_count"),
             )
             .join(
                 CompletionModels,
-                Questions.completion_model_id == CompletionModels.id,
+                usage.c.completion_model_id == CompletionModels.id,
             )
             .outerjoin(
                 ModelProviders,
                 CompletionModels.provider_id == ModelProviders.id,
             )
-            .where(Questions.tenant_id == tenant_id)
-            .where(Questions.created_at >= start_date)
-            .where(Questions.created_at <= end_date)
+            .where(usage.c.tenant_id == tenant_id)
+            .where(usage.c.created_at >= start_date)
+            .where(usage.c.created_at <= end_date)
             .group_by(
-                Questions.completion_model_id,
+                usage.c.completion_model_id,
                 CompletionModels.name,
                 CompletionModels.nickname,
                 CompletionModels.org,

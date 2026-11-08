@@ -23,7 +23,7 @@ END = datetime(2026, 10, 1)
 
 
 @pytest.fixture
-def analyzer():
+def analyzer(monkeypatch):
     engine = sa.create_engine("sqlite+pysqlite:///:memory:")
     metadata = sa.MetaData()
     # Only the columns read by this aggregate are needed; no application server,
@@ -66,6 +66,14 @@ def analyzer():
             )
             columns.append(sa.Column(name, column_type))
         tables[model] = sa.Table(model.__tablename__, metadata, *columns)
+    # Pagination/search is tested against pre-expanded usage rows. PostgreSQL's
+    # consultation JSON projection has its own integration contract test.
+    monkeypatch.setattr(
+        "eneo.token_usage.infrastructure.user_token_usage_analyzer.question_usage_rows",
+        lambda tenant_id, start, end: sa.select(tables[Questions]).subquery(
+            "question_usage"
+        ),
+    )
     metadata.create_all(engine)
     with engine.begin() as connection:
         for index in range(31):

@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING, cast
 from eneo.assistants.api.assistant_models import (
     AssistantAttachmentPublic,
     AssistantPublic,
+    AssistantSpecialistPublic,
     AssistantType,
     DefaultAssistant,
     EffectiveConfigPublic,
@@ -181,6 +182,15 @@ class AssistantAssembler:
                 for tool_assistant in assistant.tool_assistants
             ]
         )
+        specialists = [
+            AssistantSpecialistPublic(
+                id=specialist.id,
+                handle=specialist.name,
+                default_description=specialist.default_description,
+                user_description=specialist.user_description,
+            )
+            for specialist in assistant.specialists
+        ]
 
         groups = [
             CollectionPublic.from_domain(collection=group)
@@ -258,6 +268,7 @@ class AssistantAssembler:
             logging_enabled=assistant.logging_enabled,
             published=assistant.published,
             tools=tools,
+            specialists=specialists,
             permissions=permissions,
             description=assistant.description,
             insight_enabled=assistant.insight_enabled,
