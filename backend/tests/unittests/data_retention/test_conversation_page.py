@@ -31,8 +31,8 @@ from eneo.data_retention.application.conversation_retention import (
     run_conversation_page,
 )
 from eneo.data_retention.application.retention_runner import RetentionBatch
-from eneo.data_retention.domain.conversation_policy import ConversationPolicySource
 from eneo.data_retention.domain.retention import RetentionKeyset
+from eneo.policy_levels import PolicyLevel
 
 _STARTED = datetime(2026, 1, 1, tzinfo=timezone.utc)
 _OWNER = UUID(int=1)
@@ -127,7 +127,7 @@ class _Pages:
             rows=root.unit_rows,
             files=0,
             deletion=ConversationDeletion(
-                id=identifier, tenant_id=uuid4(), source=ConversationPolicySource.SPACE
+                id=identifier, tenant_id=uuid4(), source=PolicyLevel.SPACE
             ),
         )
 

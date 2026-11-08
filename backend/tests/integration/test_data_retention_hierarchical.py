@@ -17,6 +17,7 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.data_retention.domain.retention import RetentionOverdue
+from eneo.data_retention.domain.rules import RetentionRule, resolve_period
 from eneo.database.tables.app_table import AppRuns, Apps
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.audit_retention_policy_table import AuditRetentionPolicy
@@ -24,6 +25,7 @@ from eneo.database.tables.files_table import Files
 from eneo.database.tables.questions_table import Questions, QuestionsFiles
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces
+from eneo.policy_levels import PolicyLevel
 from tests.integration.data_retention.retention_support import (
     run_registered_retention,
     step_batches,
@@ -372,11 +374,13 @@ async def test_every_combination_of_levels_selects_by_the_nearest_choice(
     """Every combination of the three levels and the organisation switch,
     for questions and App runs: the nearest chosen period wins, a longer inner
     period overrides a shorter outer one, nothing is removed without a choice,
-    and each removal is counted under the level that chose it.
+    and each removal is counted under the level that chose it. The SQL removes
+    exactly what the kernel resolves, and both match today's rule written out.
 
     Mutants: the strictest period wins instead of the nearest; the switch is
     ignored; the space value is skipped when the owner has none; a removal is
-    counted under another level."""
+    counted under another level; the SQL resolves the levels in another order
+    than the rule declares."""
     ids = (test_space.id, test_assistant.id, test_app.id)
     space_id, assistant_id, app_id = ids
     tenant_id, user_id = test_tenant.id, admin_user.id
@@ -437,6 +441,17 @@ async def test_every_combination_of_levels_selects_by_the_nearest_choice(
                 report = await run_registered_retention(retention_session)
 
                 days, level = _expected_period(organization, space_days, own_days)
+                resolved = resolve_period(
+                    RetentionRule.CONVERSATION_HISTORY,
+                    {
+                        PolicyLevel.ORGANIZATION: organization[1]
+                        if organization is not None and organization[0]
+                        else None,
+                        PolicyLevel.SPACE: space_days,
+                        PolicyLevel.ASSISTANT_OR_APP: own_days,
+                    },
+                )
+                assert (resolved.value, resolved.origin) == (days, level), case
                 due = [days is not None and age > days for age in ages]
                 removed_questions = [
                     await retention_session.get(Questions, question) is None
