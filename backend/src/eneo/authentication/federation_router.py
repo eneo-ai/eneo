@@ -569,10 +569,28 @@ async def initiate_auth(
         ),
     ] = None,
 ) -> InitiateAuthResponse:
-    """
-    Get authorization URL for tenant's identity provider.
+    """Get the authorization URL for the tenant's identity provider."""
+    return await initiate_federated_sign_in(
+        response,
+        container,
+        tenant=tenant,
+        state=state,
+        redirect_uri_param=redirect_uri_param,
+    )
 
-    This endpoint:
+
+async def initiate_federated_sign_in(
+    response: Response,
+    container: Container,
+    *,
+    tenant: str | None,
+    state: str | None,
+    redirect_uri_param: str | None,
+) -> InitiateAuthResponse:
+    """
+    Start a sign-in at the tenant's identity provider: the shared initiation core.
+
+    This function:
     1. Looks up tenant by slug (or uses first active tenant in single-tenant mode)
     2. Resolves tenant's federation config (tenant-specific or global)
     3. Computes redirect_uri server-side from canonical_public_origin

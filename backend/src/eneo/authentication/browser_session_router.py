@@ -54,7 +54,7 @@ from eneo.authentication.endpoint_access import (
 from eneo.authentication.federation_router import (
     CallbackRequest,
     federated_sign_in,
-    initiate_auth,
+    initiate_federated_sign_in,
 )
 from eneo.authentication.oidc.errors import OidcSignInError
 from eneo.main.config import (
@@ -388,9 +388,9 @@ async def initiate_browser_federation(
     for path in ("/login/callback", "/auth/callback"):
         metadata = Response()
         try:
-            result = await initiate_auth(
-                response=metadata,
-                container=container,
+            result = await initiate_federated_sign_in(
+                metadata,
+                container,
                 tenant=tenant,
                 state=binding,
                 redirect_uri_param=origin + path,

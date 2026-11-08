@@ -107,7 +107,7 @@ def federation(monkeypatch: pytest.MonkeyPatch) -> Iterator[Federation]:
         return_value={"access_token": token, "frontend_state": "ignored"}
     )
     start = AsyncMock(return_value=session_token)
-    monkeypatch.setattr(routes, "initiate_auth", initiate, raising=False)
+    monkeypatch.setattr(routes, "initiate_federated_sign_in", initiate, raising=False)
     monkeypatch.setattr(routes, "federated_sign_in", callback, raising=False)
     monkeypatch.setattr(BrowserSessionService, "start", start)
     app = get_application()
