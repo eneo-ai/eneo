@@ -51,7 +51,15 @@ listed function registers, and that every function calling
 A copy is invalid once one of its edges points at a question that no longer
 exists. `copy_session_valid` is part of the statement that reads the content,
 so a removal that committed before the statement's snapshot makes the copy
-unreadable to that statement; there is no separate check to race.
+unreadable to that statement; there is no separate check to race. A session
+read loads its turns in statements after the session row, so after its last
+statement it asks once more (`removed_copies`), for all its sessions at once:
+a removal committed while it read refuses the read. That is one statement per
+read that loads turns, one index probe for a conversation that is no copy; a
+check on each turn's row would instead probe every edge of a copy once per
+turn. Renaming a conversation and leaving feedback on it change the session
+with the check in the `UPDATE`, so an invalid copy is neither changed nor
+returned.
 
 Each existence check is fenced with `OFFSET 0`, which keeps it a probe per
 row. Without the fence PostgreSQL 13 and 16 flatten the check into a join
@@ -60,11 +68,11 @@ probe per conversation it already considers, plus one per edge of each copy
 among them.
 
 A caller first passes the usual ownership and partner checks, so anyone else
-learns nothing about a removal. Then a detail, tool result, title, document,
-Assistant session, helper run, insight or message logging read answers `410`
-with `derived_source_removed` (`9085`). Lists, counts, recent conversations,
-exports and insights leave the copy out; a follow-up question finds no
-conversation.
+learns nothing about a removal. Then a detail, tool result, title, rename,
+feedback, document, Assistant session, helper run, insight or message logging
+route answers `410` with `derived_source_removed` (`9085`). Lists, counts,
+recent conversations, exports and insights leave the copy out; a follow-up
+question finds no conversation.
 
 ### The task removes what is left
 
@@ -77,22 +85,29 @@ stored and still unreadable.
   window is bounded by the rows it returns. The questions of each invalid copy
   go through the shared conversation unit, with their Files, within the
   conversation budgets; the unit releases the session with its last question.
-  The fresh check inside each `DELETE` keeps a question only while its copy is
-  still invalid and outside a widget.
+  The fresh check inside each `DELETE` keeps a question outside a widget. It
+  does not read the copy's edges again: a copy found invalid stays invalid,
+  because question ids never return and an edge goes only with its copy
+  session. A test pins that only registration adds edges and only step
+  `edges` deletes them, for copy sessions that are gone. Reading them again
+  would cost each `DELETE` work that grows with the copy's sources, outside
+  the row budgets.
 - Step `edges` deletes the edges of copy sessions that are gone and releases
   an invalid copy left without questions once it is a day old
   (`COPY_IN_FLIGHT_MARGIN`): a producer creates the session before it writes
   the copy's questions. The copy is unreadable meanwhile.
 - A source removed behind the cursor is found on the next sweep.
 
-Registration holds the copy session and locks no question; the task locks
+Registration holds the copy session `FOR KEY SHARE` and locks no question, so
+ordinary updates of the session, such as a rename, go on; the task locks
 questions with `SKIP LOCKED` and skips a session it cannot lock. Neither
 waits for the other.
 
 ### Holds
 
 Holds are not part of this record. A hold that keeps a copy stored becomes
-one more condition in the task's fresh check.
+one more condition in the task's fresh check: unlike invalidity, a hold can
+be placed after discovery.
 
 ### Measurement
 
@@ -102,20 +117,24 @@ Seeded PostgreSQL 13 and 16 with 20,000 conversations of one user,
 Median of five warm runs in milliseconds, with the same statement without the
 check in brackets, on a shared development machine:
 
-| Read | PostgreSQL 13 | PostgreSQL 16 |
+| Statement | PostgreSQL 13 | PostgreSQL 16 |
 | --- | --- | --- |
-| Detail of a valid copy with 5,000 edges | 6.7 (0.01) | 6.1 (0.01) |
-| An Assistant's list page of 50 | 11.1 (0.5) | 10.7 (0.8) |
-| Its total count | 7.8 (0.03) | 7.8 (0.03) |
-| Recent conversations of that user | 129.8 (24.2) | 123.3 (26.0) |
-| Detail of the copy after one source was removed | 7.2 | 4.9 |
-| Copies window of 500 edges, without and with an invalid copy | 1.2, 1.1 | 0.8, 0.8 |
-| No copies stored: list page, total, recent | 1.1, 0.04, 58.0 (0.3, 0.02, 24.6) | 1.0, 0.03, 30.0 (0.6, 0.02, 26.6) |
+| Detail of a valid copy with 5,000 edges: session row, check after the turns | 7.6, 8.0 (0.01, 0.003) | 7.7, 7.6 (0.02, 0.004) |
+| An Assistant's list page of 50 | 11.8 (1.3) | 11.6 (0.8) |
+| Its total count | 10.8 (0.08) | 8.7 (0.03) |
+| Recent conversations of that user | 149.8 (27.9) | 132.4 (28.1) |
+| Detail of the copy after one source was removed | 7.6 | 7.4 |
+| Copies window of 500 edges without an invalid copy | 1.4 | 1.3 |
+| Copies window with an invalid copy: edges, then its questions | 0.3, 0.06 | 0.3, 0.07 |
+| Removal of one question of that copy | 0.06 (8.1 with the edge check) | 0.07 (7.2 with the edge check) |
+| No copies stored: list page, total, recent | 1.2, 0.05, 66.6 (0.8, 0.03, 27.6) | 1.1, 0.04, 32.4 (0.7, 0.02, 28.4) |
 
 The cost follows the edges of the copies a read considers: the recent list
-above reads all 2,000 copies of its user. Before the fence the same list page
-took 43 and 66 ms, its total 7 and 78 ms, and the copies window 3 and 97 ms,
-because the check hashed all 200,000 questions.
+above reads all 2,000 copies of its user. The statement that loads the turns
+carries no check; checked on each turn, the turns of the same copy took 43 ms
+on PostgreSQL 16. Before the fence the same list page took 43 and 66 ms, its
+total 7 and 78 ms, and the copies window 3 and 97 ms, because the check hashed
+all 200,000 questions.
 
 ## Alternatives rejected
 
