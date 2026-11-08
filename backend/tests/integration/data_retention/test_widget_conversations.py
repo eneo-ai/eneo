@@ -10,15 +10,24 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
 import pytest
+import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from eneo.audit.domain.action_types import ActionType
+from eneo.data_retention.application.conversation_history_retention_task import (
+    CONVERSATION_HISTORY_TASK,
+)
 from eneo.data_retention.application.conversation_retention import (
     ConversationRootKind,
 )
 from eneo.data_retention.application.empty_session_retention_task import (
     EMPTY_SESSIONS_TASK,
 )
-from eneo.data_retention.domain.retention import RetentionKeyset
+from eneo.data_retention.domain.retention import (
+    RetentionErrorCode,
+    RetentionJobOutcome,
+    RetentionKeyset,
+)
 from eneo.data_retention.infrastructure.conversation_retention_repo import (
     ConversationRetentionRepository,
 )
@@ -26,13 +35,18 @@ from eneo.data_retention.infrastructure.empty_session_repo import (
     EmptySessionRepository,
 )
 from eneo.database.tables.assistant_table import Assistants
+from eneo.database.tables.audit_log_table import AuditLog
 from eneo.database.tables.questions_table import Questions
+from eneo.database.tables.retention_tables import RetentionJobRuns
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.widgets_table import Widgets
 from eneo.main.config import get_settings
 from eneo.widgets.domain.widget import generate_public_id
-from tests.integration.data_retention.retention_support import run_registered_retention
+from tests.integration.data_retention.retention_support import (
+    run_nightly_retention,
+    run_registered_retention,
+)
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.integration]
 
@@ -182,6 +196,50 @@ async def test_history_leaves_a_widget_conversation_its_assistant_rule_expired(
 
     assert report.counts["questions.questions_deleted"] == 1
     assert await retention_session.get(Questions, conversations.user_question) is None
+    assert await retention_session.get(Questions, conversations.widget_question)
+    assert await retention_session.get(Sessions, conversations.widget_session)
+
+
+async def test_the_nightly_cron_keeps_history_while_off_and_then_passes_widgets(
+    monkeypatch: pytest.MonkeyPatch,
+    retention_session: AsyncSession,
+    conversations: Conversations,
+):
+    """Mutants: the worker runs conversation history while its setting turns it
+    off, or skips it without an execution row and audit event; once on again it
+    takes the widget conversation with the user's."""
+    history_off = get_settings().model_copy(
+        update={"retention_conversations_history_enabled": False}
+    )
+
+    await run_nightly_retention(monkeypatch, history_off)
+
+    retention_session.expunge_all()
+    runs = await retention_session.execute(
+        sa.select(RetentionJobRuns.outcome, RetentionJobRuns.error_code).where(
+            RetentionJobRuns.task == CONVERSATION_HISTORY_TASK
+        )
+    )
+    assert runs.tuples().all() == [
+        (
+            RetentionJobOutcome.SKIPPED.value,
+            RetentionErrorCode.DISABLED_BY_DEPLOYMENT_SETTING.value,
+        )
+    ]
+    skips = await retention_session.scalars(
+        sa.select(AuditLog.log_metadata["task"].astext).where(
+            AuditLog.action == ActionType.DATA_RETENTION_SKIPPED.value
+        )
+    )
+    assert skips.all() == [CONVERSATION_HISTORY_TASK]
+    assert await retention_session.get(Questions, conversations.user_question)
+    assert await retention_session.get(Questions, conversations.widget_question)
+
+    await run_nightly_retention(monkeypatch, get_settings())
+
+    retention_session.expunge_all()
+    assert await retention_session.get(Questions, conversations.user_question) is None
+    assert await retention_session.get(Sessions, conversations.user_session) is None
     assert await retention_session.get(Questions, conversations.widget_question)
     assert await retention_session.get(Sessions, conversations.widget_session)
 
