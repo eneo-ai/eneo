@@ -16,6 +16,8 @@ vi.mock("./auth.server", () => ({
 import { LoginError } from "./LoginError";
 import { loginWithOidc } from "./oidc.server";
 
+const VERIFIER = "binding-verifier".padEnd(43, "0");
+
 function refusal(status: number, code: string, message: string) {
   return vi.fn().mockResolvedValue(
     new Response(JSON.stringify({ message, eneo_error_code: 9000, code }), {
@@ -43,7 +45,7 @@ describe("loginWithOidc", () => {
       )
     );
 
-    const result = await loginWithOidc("code", "signed-backend-state", fetchFn);
+    const result = await loginWithOidc("code", "signed-backend-state", VERIFIER, fetchFn);
 
     expect(result).toEqual({ frontendState });
     expect(mocks.setFrontendAuthCookie).toHaveBeenCalledWith({
@@ -53,7 +55,8 @@ describe("loginWithOidc", () => {
     const [, request] = fetchFn.mock.calls[0];
     expect(JSON.parse(request.body)).toEqual({
       code: "code",
-      state: "signed-backend-state"
+      state: "signed-backend-state",
+      binding_verifier: VERIFIER
     });
   });
 
@@ -65,7 +68,7 @@ describe("loginWithOidc", () => {
       })
     );
 
-    await expect(loginWithOidc("code", "state", fetchFn)).resolves.toEqual({
+    await expect(loginWithOidc("code", "state", VERIFIER, fetchFn)).resolves.toEqual({
       frontendState: ""
     });
   });
@@ -77,13 +80,14 @@ describe("loginWithOidc", () => {
         new Response(JSON.stringify({ access_token: "eneo-token" }), { status: 200 })
       );
 
-    await loginWithOidc("code", "state", fetchFn, "https://idp.example");
+    await loginWithOidc("code", "state", VERIFIER, fetchFn, "https://idp.example");
 
     const [, request] = fetchFn.mock.calls[0];
     expect(JSON.parse(request.body)).toEqual({
       code: "code",
       state: "state",
-      iss: "https://idp.example"
+      iss: "https://idp.example",
+      binding_verifier: VERIFIER
     });
   });
 
@@ -93,9 +97,12 @@ describe("loginWithOidc", () => {
     [401, "oidc_response_not_verified", "UNAUTHORIZED"]
   ])("a typed %i refusal (%s) becomes %s", async (status, code, loginErrorCode) => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const error = await loginWithOidc("code", "state", refusal(status, code, "Refused.")).catch(
-      (caught: unknown) => caught
-    );
+    const error = await loginWithOidc(
+      "code",
+      "state",
+      VERIFIER,
+      refusal(status, code, "Refused.")
+    ).catch((caught: unknown) => caught);
 
     expect(error).toBeInstanceOf(LoginError);
     expect(error).toMatchObject({

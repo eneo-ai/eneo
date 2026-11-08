@@ -113,11 +113,17 @@ export const load = (async (event) => {
   try {
     if (decodedState?.loginMethod === "zitadel") {
       success = await loginWithZitadel(code);
-    } else {
+    } else if (oidcAttempt?.status === "matched") {
       // Generic OIDC flow (single-tenant or new backend-first flow)
       // loginMethod is undefined when using backend-generated state JWT
       console.debug("[OIDC Callback] Using generic OIDC flow (backend-first)");
-      const oidcResult = await loginWithOidc(code, state, event.fetch, iss);
+      const oidcResult = await loginWithOidc(
+        code,
+        state,
+        oidcAttempt.bindingVerifier,
+        event.fetch,
+        iss
+      );
       success = oidcResult !== null;
       if (oidcResult !== null) {
         redirectUrl =

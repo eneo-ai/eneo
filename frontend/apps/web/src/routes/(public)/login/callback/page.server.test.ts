@@ -22,6 +22,7 @@ import { DEFAULT_LANDING_PAGE } from "$lib/core/constants";
 const RESUME_COOKIE = "oidc-login-resume";
 const ATTEMPT_ID = "11111111-1111-4111-8111-111111111111";
 const OTHER_ATTEMPT_ID = "22222222-2222-4222-8222-222222222222";
+const VERIFIER = "binding-verifier".padEnd(43, "0");
 
 function frontendState(destination: string | null, attemptId = ATTEMPT_ID): string {
   return JSON.stringify({ loginMethod: "oidc", next: destination, attemptId });
@@ -42,7 +43,10 @@ function cookieJar(
 ) {
   const values = new Map<string, string>([["auth", "existing-session"]]);
   if (destination !== undefined) {
-    values.set(RESUME_COOKIE, JSON.stringify({ attemptId, destination, expiresAt }));
+    values.set(
+      RESUME_COOKIE,
+      JSON.stringify({ attemptId, destination, expiresAt, bindingVerifier: VERIFIER })
+    );
   }
   return {
     get: vi.fn((name: string) => values.get(name)),
@@ -90,6 +94,7 @@ describe("generic OIDC browser-bound callback", () => {
     expect(mocks.loginWithOidc).toHaveBeenCalledWith(
       "authorization-code",
       signedState,
+      VERIFIER,
       expect.any(Function),
       null
     );
@@ -123,6 +128,22 @@ describe("generic OIDC browser-bound callback", () => {
       () => {
         const cookies = cookieJar();
         cookies.set(RESUME_COOKIE, JSON.stringify({ attemptId: ATTEMPT_ID, destination: "/" }));
+        cookies.set.mockClear();
+        return cookies;
+      }
+    ],
+    [
+      "cookie without a binding verifier",
+      () => {
+        const cookies = cookieJar();
+        cookies.set(
+          RESUME_COOKIE,
+          JSON.stringify({
+            attemptId: ATTEMPT_ID,
+            destination: null,
+            expiresAt: Math.floor(Date.now() / 1000) + 600
+          })
+        );
         cookies.set.mockClear();
         return cookies;
       }
@@ -299,6 +320,7 @@ describe("generic OIDC browser-bound callback", () => {
     expect(mocks.loginWithOidc).toHaveBeenCalledWith(
       "authorization-code",
       callbackState(state),
+      VERIFIER,
       expect.any(Function),
       "https://idp.example"
     );

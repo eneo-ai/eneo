@@ -1,4 +1,5 @@
 import { DEFAULT_LANDING_PAGE } from "$lib/core/constants";
+import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -82,6 +83,7 @@ async function initiate(event: ReturnType<typeof loginEvent>, ttl = 600) {
       { status: 200, headers: { "Content-Type": "application/json" } }
     );
   });
+  // The redirect is exactly the backend's authorization URL, nothing added.
   await expect(actions.oidc!(event as never)).rejects.toMatchObject({
     status: 303,
     location: "https://idp.example/authorize"
@@ -314,6 +316,13 @@ describe("login resume", () => {
       const result = await initiate(event);
       const initiateUrl = new URL(String(event.fetch.mock.calls[0][0]));
       expect(initiateUrl.pathname).toBe("/api/v1/auth/initiate");
+      // Only the S256 hash leaves the server; the secret stays in the HttpOnly cookie.
+      const { bindingVerifier } = JSON.parse(event.cookies.get(ATTEMPT_COOKIE) ?? "{}");
+      expect(bindingVerifier).toMatch(/^[A-Za-z0-9_-]{43}$/);
+      expect(initiateUrl.searchParams.get("binding_challenge")).toBe(
+        createHash("sha256").update(bindingVerifier).digest("base64url")
+      );
+      expect(initiateUrl.href).not.toContain(bindingVerifier);
       expect(initiateUrl.searchParams.get("tenant")).toBe(tenant);
       expect(initiateUrl.searchParams.get("state")).toBe(result.frontendState);
       const frontendState = JSON.parse(result.frontendState);
@@ -331,7 +340,8 @@ describe("login resume", () => {
       expect(attempt).toEqual({
         attemptId: frontendState.attemptId,
         destination,
-        expiresAt: expect.any(Number)
+        expiresAt: expect.any(Number),
+        bindingVerifier
       });
     }
   );
@@ -347,7 +357,8 @@ describe("login resume", () => {
     expect(attempt).toEqual({
       attemptId: frontendState.attemptId,
       destination: null,
-      expiresAt: expect.any(Number)
+      expiresAt: expect.any(Number),
+      bindingVerifier: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/)
     });
     expect(event.cookies.set).toHaveBeenCalledWith(
       ATTEMPT_COOKIE,
@@ -374,6 +385,7 @@ describe("login resume", () => {
     now += 11 * 60 * 1000;
 
     const result = await initiate(event);
+    const { bindingVerifier } = JSON.parse(event.cookies.get(ATTEMPT_COOKIE) ?? "{}");
     now += 9 * 60 * 1000;
     mocks.loginWithOidc.mockResolvedValue({ frontendState: result.frontendState });
     const url = new URL("https://eneo.example/login/callback");
@@ -383,7 +395,13 @@ describe("login resume", () => {
       status: 302,
       location: DEFAULT_LANDING_PAGE
     });
-    expect(mocks.loginWithOidc).toHaveBeenCalledWith("new-code", result.state, event.fetch, null);
+    expect(mocks.loginWithOidc).toHaveBeenCalledWith(
+      "new-code",
+      result.state,
+      bindingVerifier,
+      event.fetch,
+      null
+    );
   });
 
   test.each(["mismatch", "no-code", "no-state", "provider-error"])(
