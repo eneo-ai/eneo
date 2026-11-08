@@ -115,7 +115,7 @@ never a cookie.
 
 | Answer | Meaning |
 |--------|---------|
-| `204` | The session has ended. Also for a token that names no session (an API key, a provider token, a token issued before sessions); an expired token can still end its session |
+| `204` | No session remains that this token can use: its session has ended, or it named none to end (no or an invalid token, a token without a session such as one issued before sessions, a provider token, or a token expired for longer than it was valid). A token without a session is not revoked and works until it expires. A token expired for less than that still ends its session |
 | `503` `sign_out_unavailable` | The end is not confirmed: the session may already have ended, or the token may still work. Keep the token and retry; once the session has ended, a retry answers `204` |
 
 #### Backend browser sessions

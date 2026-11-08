@@ -217,7 +217,7 @@ A removed or deactivated account keeps its identity: no other account can take i
 
 The subject claim is `claims_mapping.subject` in the provider config, `sub` by default. It must be an immutable id that the provider never gives to another person, and never the email claim: Eneo refuses that configuration. Some providers issue a different `sub` for each client (Microsoft Entra ID, for example, whose `oid` claim is the stable one). With such a provider, a stable id claim must be the subject claim before people sign in, or every new client ID and every API audience looks like a new person.
 
-Set it with `subject_claim` in the federation `PUT` or `PATCH` (`/api/v1/sysadmin/tenants/{tenant_id}/federation`, with the super API key), or as an administrator with `PATCH /api/v1/admin/federation`. A `PUT` without it stores `sub`, a `PATCH` without it keeps the stored claim, and the email claim is refused with `422` (`federation_subject_claim_is_email_claim`). Both `GET` answers show it, and a change is audited as `federation_updated`. Configuration by environment variables always uses `sub`.
+Set it with `subject_claim` in the federation `PUT` or `PATCH` (`/api/v1/sysadmin/tenants/{tenant_id}/federation`, with the super API key), or as an administrator with `PATCH /api/v1/admin/federation`. A `PUT` writes the whole configuration, so a `PUT` without it stores `sub`: send the current claim to keep it. A `PATCH` without it keeps the stored claim. The email claim is refused with `422` (`federation_subject_claim_is_email_claim`). Both `GET` answers show it, and a change is audited as `federation_updated`. Configuration by environment variables always uses `sub`.
 
 Changing the subject claim once people are bound changes every subject under the issuer, for every audience. A binding names the claim it was made under and never matches a sign-in under another claim, even with the same value, since the new claim's values may belong to other people. After the change, a person's sign-in finds the account by its email, and the old binding under the pair refuses it unless a window replaces it. Before you change it, open a migration window from each issuer and audience people use to itself, for example one for the browser client and one for the API audience: a pair without its own window is refused `subject_mismatch`.
 
@@ -268,6 +268,7 @@ The endpoints, under `/api/v1/admin`:
 
 - Existing accounts have no binding; each one is bound by its email on its next sign-in.
 - Before you change the client ID with a provider that issues a subject per client, open a migration window from the old pair to the new one; before you change the subject claim, one from each pair to itself.
+- An ordinary upgrade keeps everyone's current session. Rolling the session and binding migrations back and upgrading again gives every session a new id, so people sign in again. The rollback also drops every binding, migration window and re-binding allowance: after the next upgrade, each account is bound by its email on its next sign-in, as after the first upgrade.
 - There is no administration screen for bindings yet: use the API above.
 
 ---

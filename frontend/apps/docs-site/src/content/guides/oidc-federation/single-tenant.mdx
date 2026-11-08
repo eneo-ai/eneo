@@ -344,7 +344,7 @@ For push-based provisioning from your directory (deactivation, groups), see [SCI
 | `additional_redirect_uris` | No | Extra fully-qualified callback URLs, each also registered in the IdP |
 | `signing_algorithms` | No | ID token algorithms to accept; default from discovery, else `RS256`. See the [provider contract](/guides/oidc-federation#provider-contract) |
 | `email_verified_claims` | No | Claims that say the email is verified, in order; default `["email_verified", "xms_edov"]` |
-| `subject_claim` | No | The claim an account is bound to (default `sub`); see [The subject claim](/guides/oidc-federation#the-subject-claim) |
+| `subject_claim` | No | The claim an account is bound to. Without it a `PUT` stores `sub`, so send the current claim to keep it; see [The subject claim](/guides/oidc-federation#the-subject-claim) |
 
 Scopes are fixed to `openid email profile`.
 
