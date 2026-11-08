@@ -567,10 +567,11 @@ OTEL_SERVICE_VERSION=unknown
 OTEL_DEPLOYMENT_ENVIRONMENT=production
 
 # ----------------------------------------------------------------------------
-# DEPRECATED: MobilityGuard and Zitadel variables are no longer used.
+# DEPRECATED: MobilityGuard variables are no longer used.
 # Use OIDC_DISCOVERY_ENDPOINT, OIDC_CLIENT_ID, and OIDC_CLIENT_SECRET above.
 # Eneo does not start while a MOBILITYGUARD_* variable is set without its
-# OIDC_* name.
+# OIDC_* name. The same OIDC_* settings replace the frontend's deprecated
+# ZITADEL_* sign-in, which the next release removes.
 # ----------------------------------------------------------------------------
 
 # Extra, exact integration callback URLs for parallel frontends (JSON array).
