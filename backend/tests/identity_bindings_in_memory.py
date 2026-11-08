@@ -41,6 +41,11 @@ class IdentityBindingsInMemory:
             None,
         )
 
+    async def lock_subject(
+        self, *, tenant_id: UUID, issuer: str, subject_claim: str, subject: str
+    ) -> None:
+        return None
+
     async def holders_of_subject(
         self, *, tenant_id: UUID, issuer: str, subject_claim: str, subject: str
     ) -> list[UUID]:

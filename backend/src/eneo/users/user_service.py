@@ -521,6 +521,14 @@ class UserService:
                 raise FederatedLoginDenied(_INACTIVE_OR_REMOVED)
             return user, False
 
+        # The first binding of a subject: serialized per subject before the
+        # lookup by subject, and always before the account's row lock.
+        await bindings.lock_subject(
+            tenant_id=tenant_id,
+            issuer=identity.issuer,
+            subject_claim=identity.subject_claim,
+            subject=identity.subject,
+        )
         # OIDC never reassigns a subject within an issuer, so the subject
         # bound under another audience is the same person, whatever the email.
         holders = await bindings.holders_of_subject(

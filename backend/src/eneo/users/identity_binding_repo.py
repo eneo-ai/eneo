@@ -6,6 +6,7 @@ subject) and per (account, issuer, audience). Inserts never raise on a lost race
 nothing and the caller re-reads.
 """
 
+import json
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
@@ -91,6 +92,24 @@ class IdentityBindingRepository:
                 IdentityBindings.subject == subject,
                 IdentityBindings.audience == audience,
             )
+        )
+
+    async def lock_subject(
+        self, *, tenant_id: UUID, issuer: str, subject_claim: str, subject: str
+    ) -> None:
+        """Hold this subject's admission lock until the transaction ends.
+
+        Two first sign-ins of one subject under two audiences would each find
+        it unbound and bind it to the account its email names. Admission, the
+        only writer of bindings, takes this lock before it looks the subject
+        up and before any account lock, so the later one sees the binding.
+        """
+        identity = json.dumps(
+            ["identity_binding", str(tenant_id), issuer, subject_claim, subject]
+        )
+        await self.session.execute(
+            sa.text("SELECT pg_advisory_xact_lock(hashtextextended(:identity, 0))"),
+            {"identity": identity},
         )
 
     async def holders_of_subject(

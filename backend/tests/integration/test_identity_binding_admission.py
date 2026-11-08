@@ -687,6 +687,28 @@ async def test_two_subjects_for_one_unbound_account_at_once_admit_one(
     assert [c["reason"] for c in _conflicts(enqueued)] == ["subject_mismatch"]
 
 
+async def test_one_subject_signing_in_under_two_audiences_at_once_binds_one_account(
+    sign_in, test_tenant
+):
+    """Both first sign-ins see the subject unbound, and their emails name two
+    accounts. The later one must see the earlier one's binding and join its
+    account as the same subject, as it would one after the other."""
+    first = await _user_id()
+    second = await _add_user(test_tenant.id, "second@example.com")
+    both = sa.select(Users.id).where(Users.id.in_([first, second])).with_for_update()
+
+    results = await _race(
+        both,
+        sign_in("person-a", "client-a"),
+        sign_in("person-a", "api-a", email="second@example.com"),
+    )
+
+    owners = {account for account, _, _ in await _claimed_bindings()}
+    assert len(owners) == 1, owners
+    assert [getattr(result, "id", result) for result in results] == [*owners] * 2
+    assert await _bindings(*owners) == {("client-a", "person-a"), ("api-a", "person-a")}
+
+
 @pytest.mark.parametrize(
     "state, removed",
     [(UserState.DELETED, True), (UserState.INACTIVE, False)],
