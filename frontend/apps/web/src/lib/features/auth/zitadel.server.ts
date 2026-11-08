@@ -1,5 +1,6 @@
 /**
- * Login via Zitadel. This is the preferred login method. It requires a Zitadel instance to be configured.
+ * Login via Zitadel, turned on by ZITADEL_INSTANCE_URL and ZITADEL_PROJECT_CLIENT_ID.
+ * Deprecated and removed in the next release: Zitadel signs in through the OIDC settings.
  */
 import { dev } from "$app/environment";
 import { env } from "$env/dynamic/private";
