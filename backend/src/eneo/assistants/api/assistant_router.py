@@ -1244,7 +1244,8 @@ async def leave_feedback(
             session_id=session_id, assistant_id=id, feedback=feedback
         )
     except NotFoundException:
-        # The partner was authorized above and the owner inside leave_feedback.
+        # The partner was authorized above; the owner check comes first.
+        await session_service.get_session_ownership(session_id, assistant_id=id)
         await session_service.refuse_removed_copy(session_id)
         raise
 

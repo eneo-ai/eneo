@@ -237,8 +237,9 @@ async def test_an_owner_without_partner_access_gets_the_authorization_refusal(
     retention_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """Mutant: ownership alone reveals the removal status, although the
-    owner's access to the chat partner was revoked."""
+    """Mutants: ownership alone reveals the removal status, although the
+    owner's access to the chat partner was revoked; a route of another
+    Assistant explains the copy instead of refusing a session not its own."""
     await remove_by_user(client, owner_token, copy, retention_session)
     original = AssistantService.get_assistant
 
@@ -251,9 +252,23 @@ async def test_an_owner_without_partner_access_gets_the_authorization_refusal(
     detail = await client.get(
         f"/api/v1/conversations/{copy.copy_session}/", headers=auth(owner_token)
     )
+    # Another Assistant the owner may still use is not the copy's partner.
+    through_another = f"/api/v1/assistants/{copy.source_assistant}/sessions/"
+    other_detail = await client.get(
+        f"{through_another}{copy.copy_session}/", headers=auth(owner_token)
+    )
+    other_feedback = await client.post(
+        f"{through_another}{copy.copy_session}/feedback/",
+        json={"value": 1},
+        headers=auth(owner_token),
+    )
 
     assert detail.status_code == 403, detail.text
     assert detail.json().get("code") != "derived_source_removed"
+    assert other_detail.status_code == other_feedback.status_code == 404, (
+        other_detail.text,
+        other_feedback.text,
+    )
 
 
 async def test_follow_ups_and_other_content_readers_refuse_the_copy(
