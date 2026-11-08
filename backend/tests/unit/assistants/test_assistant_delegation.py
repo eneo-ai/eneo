@@ -4,6 +4,7 @@ import asyncio
 import copy
 import dataclasses
 import json
+import logging
 from collections.abc import AsyncGenerator
 from functools import partial
 from types import SimpleNamespace
@@ -14,6 +15,7 @@ from uuid import UUID, uuid4
 import litellm
 import pytest
 
+import eneo.assistants.assistant_service as assistant_service_module
 from eneo.ai_models.completion_models.completion_model import (
     Completion,
     ResponseType,
@@ -541,7 +543,11 @@ def specialist_plan(turn: TurnFixture, monkeypatch: pytest.MonkeyPatch, speciali
     )
 
 
-async def test_a_widget_visitor_is_answered_by_the_assistant_alone(turn: TurnFixture):
+async def test_a_widget_visitor_is_answered_by_the_assistant_alone(
+    turn: TurnFixture,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+):
     """Each consultation is authorized against the asker's user row, which a
     widget visitor does not have; the widget's assistant answers without its
     specialists instead of failing."""
@@ -570,13 +576,18 @@ async def test_a_widget_visitor_is_answered_by_the_assistant_alone(turn: TurnFix
 
     turn.provider.side_effect = answer
 
-    async with turn.service.repo.session.begin():
-        reply = await turn.service.ask(
-            question="Which policy applies?",
-            assistant_id=turn.assistant.id,
-            stream=True,
-            version=2,
-        )
+    # The module's logger is not in the logging registry; a standard one is.
+    monkeypatch.setattr(
+        assistant_service_module, "logger", logging.getLogger("test.assistant_service")
+    )
+    with caplog.at_level(logging.INFO, logger="test.assistant_service"):
+        async with turn.service.repo.session.begin():
+            reply = await turn.service.ask(
+                question="Which policy applies?",
+                assistant_id=turn.assistant.id,
+                stream=True,
+                version=2,
+            )
     events = [event async for event in reply.answer]
 
     assert [
@@ -586,6 +597,18 @@ async def test_a_widget_visitor_is_answered_by_the_assistant_alone(turn: TurnFix
     ] == []
     assert "".join(event.text or "" for event in events) == "Check the policy."
     assert offered == [None]
+    # Skipping the specialists is logged, so an operator can see why.
+    [skipped] = [
+        record
+        for record in caplog.records
+        if record.getMessage()
+        == "Answered a widget visitor without consulting specialists"
+    ]
+    assert (
+        getattr(skipped, "widget_id"),
+        getattr(skipped, "assistant_id"),
+        getattr(skipped, "specialist_count"),
+    ) == (str(widget.id), str(turn.assistant.id), 1)
 
 
 @pytest.mark.parametrize(

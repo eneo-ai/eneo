@@ -4512,21 +4512,30 @@ class AssistantService:
         if (
             delegation_plan is None
             and tool_assistant_id is None
-            and self.user.active_widget is None
             and assistant_to_ask.specialists
             and effective_completion_model.supports_tool_calling
         ):
-            assert prepared.space.id is not None
-            delegation_plan = AssistantDelegationPlan(
-                space_id=prepared.space.id,
-                orchestrator_id=assistant_to_ask.id,
-                candidates=tuple(
-                    AssistantCandidate(
-                        specialist.id, specialist.name, specialist.description
-                    )
-                    for specialist in assistant_to_ask.specialists
-                ),
-            )
+            if self.user.active_widget is not None:
+                logger.info(
+                    "Answered a widget visitor without consulting specialists",
+                    extra={
+                        "widget_id": str(self.user.active_widget.widget_id),
+                        "assistant_id": str(assistant_to_ask.id),
+                        "specialist_count": len(assistant_to_ask.specialists),
+                    },
+                )
+            else:
+                assert prepared.space.id is not None
+                delegation_plan = AssistantDelegationPlan(
+                    space_id=prepared.space.id,
+                    orchestrator_id=assistant_to_ask.id,
+                    candidates=tuple(
+                        AssistantCandidate(
+                            specialist.id, specialist.name, specialist.description
+                        )
+                        for specialist in assistant_to_ask.specialists
+                    ),
+                )
         if delegation_plan is not None and self.user.active_api_key is not None:
             raise BadRequestException(
                 "Consulting specialists currently requires an interactive user session.",
