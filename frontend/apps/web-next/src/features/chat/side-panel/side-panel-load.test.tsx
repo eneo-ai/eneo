@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen } from "@testing-library/react";
 import { useState, useSyncExternalStore } from "react";
-import { afterEach, beforeAll, expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { renderInApp } from "@/test/render";
 import { observedElements, reportResize } from "@/test/setup-dom";
 import { SidePanel } from "./side-panel";
@@ -27,10 +27,9 @@ vi.mock("@/features/workspace/preview/load-preview", () => ({
 }));
 
 // Transforming the real panel (the editor stack) can take over a second on a
-// cold cache; do it once up front so the tests time the panel, not the build.
-beforeAll(async () => {
-  await vi.importActual("./file-panel");
-});
+// cold cache, and far longer on a busy runner. File collection has no timeout,
+// so do it there once; the tests then time the panel, not the build.
+await vi.importActual("./file-panel");
 
 afterEach(cleanup);
 
