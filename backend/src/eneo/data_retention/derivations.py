@@ -96,7 +96,7 @@ async def register_derivations(
     Runs in its own short transaction and returns only once it committed, so
     the producer may let the content go. The copy session must already be
     committed: it is held FOR KEY SHARE, so it cannot be deleted while its
-    edges are written. Any failure, including an unknown
+    edges are written, and ordinary updates of it go on meanwhile. Any failure, including an unknown
     commit outcome, raises DerivationRegistrationError; the producer then
     returns no copied content. A source removed before this commits leaves a
     dangling edge, which makes the copy invalid at once.
@@ -109,7 +109,7 @@ async def register_derivations(
             held = await session.scalar(
                 sa.select(Sessions.id)
                 .where(Sessions.id == copy_session_id)
-                .with_for_update(key_share=True)
+                .with_for_update(read=True, key_share=True)
             )
             if held is None:
                 raise DerivationRegistrationError("The copy session does not exist.")

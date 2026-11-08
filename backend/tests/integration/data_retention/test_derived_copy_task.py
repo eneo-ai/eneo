@@ -36,6 +36,7 @@ from tests.integration.data_retention.copy_support import (
 from tests.integration.data_retention.retention_support import (
     run_registered_retention,
 )
+from tests.integration.flows.statement_capture_support import capture_queries
 
 pytestmark = pytest.mark.integration
 
@@ -247,26 +248,39 @@ async def test_a_source_removed_behind_the_cursor_is_found_on_the_next_sweep(
 async def test_registration_and_removal_wait_on_no_lock_of_the_other(
     db_container, admin_user, copy: Copy, retention_session: AsyncSession
 ):
-    """Mutants: a registration waits for the task's question locks; the task
-    waits for, or deadlocks with, a registration holding the copy session."""
+    """Mutants: a registration waits for the task's question locks or for an
+    ordinary update of the copy session (it takes more than a key share); the
+    task waits for, or deadlocks with, a registration holding the session."""
     _, [another_source] = await conversation(
         db_container, admin_user, assistant_id=copy.source_assistant, turns=1
     )
-    # The task holds the copy's questions; a registration locks no question.
+    async with db_container() as container:
+        bind = container.session().sync_session.bind
+    assert bind is not None
+    # The task holds the copy's questions and the owner renames the copy; a
+    # registration locks no question and only shares the session's key.
     async with sessionmanager.session() as task, task.begin():
         await task.execute(
             sa.select(Questions.id)
             .where(Questions.session_id == copy.copy_session)
             .with_for_update()
         )
-        await asyncio.wait_for(
-            register_derivations(
-                copy_session_id=copy.copy_session,
-                source_question_ids=[another_source],
-            ),
-            timeout=10,
+        await task.execute(
+            sa.update(Sessions)
+            .where(Sessions.id == copy.copy_session)
+            .values(name="renamed meanwhile")
         )
+        with capture_queries(bind.engine) as queries:
+            await asyncio.wait_for(
+                register_derivations(
+                    copy_session_id=copy.copy_session,
+                    source_question_ids=[another_source],
+                ),
+                timeout=10,
+            )
     assert await _edges(retention_session, copy.copy_session) == 2
+    locks = [query.sql for query in queries if " FOR " in query.sql]
+    assert len(locks) == 1 and locks[0].endswith(" FOR KEY SHARE"), locks
 
     await retention_session.execute(
         sa.delete(Questions).where(Questions.id == copy.source_question)
@@ -277,7 +291,7 @@ async def test_registration_and_removal_wait_on_no_lock_of_the_other(
         await registration.execute(
             sa.select(Sessions.id)
             .where(Sessions.id == copy.copy_session)
-            .with_for_update(key_share=True)
+            .with_for_update(read=True, key_share=True)
         )
         report = await asyncio.wait_for(_run(retention_session), timeout=60)
     assert report.counts["copies.questions_deleted"] == 2
