@@ -6,12 +6,15 @@ its last question, and finally the copy's edges.
 """
 
 import asyncio
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 import pytest
 import sqlalchemy as sa
 from httpx import AsyncClient
+from sqlalchemy.engine import Engine
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.data_retention.application.derived_copy_retention_task import (
@@ -69,6 +72,22 @@ async def _edges(session: AsyncSession, copy_session: UUID) -> int:
     )
 
 
+@contextmanager
+def _question_deletes(engine: Engine) -> Iterator[list[str]]:
+    """Every DELETE of a question that ``engine`` sends inside the block."""
+    deletes: list[str] = []
+
+    def record(_connection, _cursor, statement: str, *_: object) -> None:
+        if statement.lstrip().startswith("DELETE FROM questions"):
+            deletes.append(statement)
+
+    sa.event.listen(engine, "before_cursor_execute", record)
+    try:
+        yield deletes
+    finally:
+        sa.event.remove(engine, "before_cursor_execute", record)
+
+
 async def _add_turn(
     db_container, owner: UserInDB, copy_session: UUID, **values
 ) -> UUID:
@@ -103,8 +122,8 @@ async def _add_turn(
 async def test_a_copy_whose_sources_exist_is_kept(
     copy: Copy, retention_session: AsyncSession
 ):
-    """Mutant: discovery treats every copy as invalid, whatever its sources
-    (the fresh check would keep it, but each run would lock and retry it)."""
+    """Mutant: discovery treats every copy as invalid, whatever its sources;
+    the DELETE then removes it, since a copy found invalid stays invalid."""
     report = await _run(retention_session)
 
     assert report.counts.get("copies.questions_deleted", 0) == 0
@@ -124,7 +143,9 @@ async def test_an_invalid_copy_goes_with_its_files_session_and_edges(
 ):
     """Mutants: discovery joins an owner and misses a question without one; the
     unit keeps the copy's Files or its emptied session; the edges of a removed
-    copy stay; the copy of a source that still exists goes too."""
+    copy stay; the copy of a source that still exists goes too; each question's
+    DELETE reads the copy's edges again, work that grows with its sources and
+    that no budget charges."""
     ownerless = await _add_turn(db_container, admin_user, copy.copy_session)
     with_file = await _add_turn(
         db_container,
@@ -142,9 +163,15 @@ async def test_an_invalid_copy_goes_with_its_files_session_and_edges(
         source_question_ids=[copy.copy_questions[0]],
     )
     await remove_by_user(client, owner_token, copy, retention_session)
+    async with db_container() as container:
+        bind = container.session().sync_session.bind
+    assert bind is not None
 
-    report = await _run(retention_session)
+    with _question_deletes(bind.engine) as deletes:
+        report = await _run(retention_session)
 
+    assert len(deletes) == 4
+    assert [sql for sql in deletes if "content_derivations" in sql] == []
     assert report.counts["copies.questions_deleted"] == 4
     assert report.counts["copies.sessions_deleted"] == 1
     assert report.counts["copies.files_deleted"] == 1

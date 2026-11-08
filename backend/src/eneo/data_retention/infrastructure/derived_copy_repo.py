@@ -1,10 +1,10 @@
-"""Discovery and the fresh check for copies whose source was removed.
+"""Discovery and removal of copies whose source was removed.
 
 A copy session is invalid once one of its edges points at a question that no
-longer exists. Question ids never return, so it stays invalid. Discovery walks
-the edges in the order of their unique index, which bounds every window by the
-rows it returns; the bounded removal of each question is the shared
-conversation unit's.
+longer exists. Question ids never return and an edge goes only with its copy
+session, so it stays invalid. Discovery walks the edges in the order of their
+unique index, which bounds every window by the rows it returns; the bounded
+removal of each question is the shared conversation unit's.
 """
 
 from collections.abc import Sequence
@@ -26,7 +26,6 @@ from eneo.data_retention.application.conversation_retention import (
 )
 from eneo.data_retention.application.retention_runner import RetentionContractError
 from eneo.data_retention.derivations import (
-    copy_session_valid,
     probe,
     source_removed,
 )
@@ -243,11 +242,11 @@ class DerivedCopyRepository:
     def _still_selected(self, identifier: UUID) -> list[ColumnElement[bool]]:
         # Each condition keeps the question selected inside the DELETE's
         # snapshot; another reason to keep a question is one more condition.
-        return [
-            Questions.id == identifier,
-            ~question_in_widget(),
-            ~copy_session_valid(Questions.session_id.expression),
-        ]
+        # Its copy is not checked again: a copy found invalid stays invalid,
+        # since an edge goes only with its copy session (a test pins this)
+        # and a question id never returns. Rereading the edges would cost
+        # work per DELETE that grows with the copy's sources.
+        return [Questions.id == identifier, ~question_in_widget()]
 
     async def delete_if_still_removed(
         self, identifier: UUID

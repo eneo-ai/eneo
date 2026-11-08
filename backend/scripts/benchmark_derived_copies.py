@@ -1,13 +1,15 @@
-"""Measure the copy check in conversation reads and the copies window.
+"""Measure the copy check in conversation reads, the copies window and removal.
 
 Seeds disposable PostgreSQL (both supported major versions) with conversations,
 copies with skewed edge counts and their sources, then runs the repositories'
 own statements and records EXPLAIN (ANALYZE, BUFFERS) of every statement that
-reads the edges: the median of five warm runs without per-node timing, the
-same read without the check, and from one timed plan how much the check's own
-subplans took. Last, the reads with no copies stored, as in an installation
-where no feature stores copies. Requires development dependencies and Docker.
-No application database is used.
+reads the edges, selects the window's questions or removes a question: the
+median of five warm runs without per-node timing, the same read without the
+check, and from one timed plan how much the check's own subplans took. The
+removal of one question of the largest copy is measured as it is and with the
+edge check it no longer repeats. Last, the reads with no copies stored, as in
+an installation where no feature stores copies. Requires development
+dependencies and Docker. No application database is used.
 
 uv run python scripts/benchmark_derived_copies.py --output /tmp/copies-benchmark.json
 """
@@ -33,7 +35,13 @@ from alembic.config import Config
 
 # The application module defines every model the repositories hydrate.
 import eneo.server.main  # noqa: F401  # isort: skip
-from eneo.data_retention.infrastructure.derived_copy_repo import DerivedCopyRepository
+from eneo.data_retention.derivations import copy_session_valid
+from eneo.data_retention.infrastructure.derived_copy_repo import (
+    DerivedCopyRepository,
+    edge_position,
+)
+from eneo.data_retention.infrastructure.retention_sql import question_in_widget
+from eneo.database.tables.questions_table import Questions
 from eneo.sessions.sessions_repo import SessionRepository
 
 IMAGES = ("pgvector/pgvector:pg13", "pgvector/pgvector:pg16")
@@ -104,16 +112,22 @@ _READ_CHECK = re.compile(
 )
 
 
+# Statements worth a plan: those that read the edges, the window's selection
+# and lock of the invalid copies' questions, and the removal of a question.
+_MEASURED = ("content_derivations", "copy_window", "DELETE FROM questions")
+
+
 async def _explained(
     engine: Any, call: Callable[[AsyncSession], Awaitable[object]]
 ) -> list[dict[str, object]]:
-    """Run `call`, then EXPLAIN ANALYZE each statement it sent that reads the
-    edges, once cold and WARM_RUNS times warm, with the same parameters,
-    rolled back."""
+    """Run `call`, then EXPLAIN ANALYZE each measured statement it sent, once
+    cold and WARM_RUNS times warm, with the same parameters, rolled back."""
     captured: list[Statement] = []
 
     def record(_conn, _cursor, statement, parameters, _context, _many) -> None:
-        if "content_derivations" in statement and not statement.startswith("EXPLAIN"):
+        if not statement.startswith("EXPLAIN") and any(
+            part in statement for part in _MEASURED
+        ):
             captured.append((statement, parameters))
 
     sa.event.listen(engine.sync_engine, "before_cursor_execute", record)
@@ -252,6 +266,50 @@ async def _measure(url: str) -> dict[str, object]:
                 ),
                 {"copy": copy_session},
             )
+            # The task's cursor before the removed edge, half a window back.
+            before_removed = (
+                await connection.execute(
+                    sa.text(
+                        "SELECT source_question_id FROM content_derivations "
+                        "WHERE copy_session_id = :copy "
+                        "ORDER BY source_question_id DESC OFFSET :back LIMIT 1"
+                    ),
+                    {"copy": copy_session, "back": WINDOW // 2},
+                )
+            ).scalar_one()
+            copy_question = (
+                await connection.execute(
+                    sa.text(
+                        "SELECT id FROM questions WHERE session_id = :copy "
+                        "ORDER BY created_at, id LIMIT 1"
+                    ),
+                    {"copy": copy_session},
+                )
+            ).scalar_one()
+
+        async def window(session: AsyncSession) -> object:
+            page = await DerivedCopyRepository(session, now=_now()).lock_due_page(
+                edge_position(copy_session, before_removed), WINDOW
+            )
+            assert page.roots, "the window selected no question of an invalid copy"
+            return page
+
+        async def removal(session: AsyncSession) -> object:
+            removed = await DerivedCopyRepository(
+                session, now=_now()
+            ).delete_if_still_removed(copy_question)
+            assert removed is not None, "the question of an invalid copy stayed"
+            return removed
+
+        async def removal_rereading_edges(session: AsyncSession) -> object:
+            return await session.execute(
+                sa.delete(Questions).where(
+                    Questions.id == copy_question,
+                    ~question_in_widget(),
+                    ~copy_session_valid(Questions.session_id.expression),
+                )
+            )
+
         invalid: dict[str, Callable[[AsyncSession], Awaitable[object]]] = {
             "invalid copy detail (largest copy)": lambda s: SessionRepository(s).get(
                 copy_session
@@ -259,9 +317,9 @@ async def _measure(url: str) -> dict[str, object]:
             "invalid copy check after the miss": lambda s: SessionRepository(
                 s
             ).is_removed_copy(copy_session),
-            "copies window with an invalid copy": lambda s: DerivedCopyRepository(
-                s, now=_now()
-            ).lock_due_page(None, WINDOW),
+            "copies window with an invalid copy": window,
+            "removal of one question of the largest copy": removal,
+            "the same removal rereading the copy's edges": removal_rereading_edges,
         }
         for name, call in invalid.items():
             results[name] = await _explained(engine, call)
