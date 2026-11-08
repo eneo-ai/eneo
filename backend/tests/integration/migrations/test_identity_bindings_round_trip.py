@@ -67,6 +67,11 @@ def _schema(database_url: str) -> dict[str, object]:
                 tuple(constraint["column_names"])
                 for constraint in inspector.get_unique_constraints("identity_bindings")
             )
+            schema["created_at_default"] = next(
+                column["default"]
+                for column in inspector.get_columns("identity_bindings")
+                if column["name"] == "created_at"
+            )
         return schema
     finally:
         engine.dispose()
@@ -107,6 +112,7 @@ def test_bindings_and_rebinding_round_trip_keeping_accounts() -> None:
                     ("tenant_id", "issuer", "subject_claim", "subject", "audience"),
                     ("user_id", "issuer", "audience"),
                 ],
+                "created_at_default": "clock_timestamp()",
             }
             # Existing accounts start unbound, with no allowance open.
             with conn.cursor() as cursor:

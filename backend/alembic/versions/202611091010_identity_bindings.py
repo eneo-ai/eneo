@@ -67,7 +67,14 @@ def upgrade() -> None:
         sa.Column("audience", sa.String(), nullable=False),
         sa.Column("subject_claim", sa.String(), nullable=False),
         sa.Column("subject", sa.String(), nullable=False),
-        _created_at(),
+        sa.Column(
+            "created_at",
+            sa.TIMESTAMP(timezone=True),
+            # The insert's own time: a binding written after a window opened
+            # is newer than the window, however long its transaction waited.
+            server_default=sa.func.clock_timestamp(),
+            nullable=False,
+        ),
         sa.UniqueConstraint(
             "tenant_id",
             "issuer",

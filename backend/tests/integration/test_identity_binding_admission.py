@@ -26,7 +26,10 @@ from eneo.database.tables.identity_bindings_table import (
 from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import Users
 from eneo.main.exceptions import FederatedLoginDenied
-from eneo.users.identity_binding_repo import IdentityConflictError
+from eneo.users.identity_binding_repo import (
+    IdentityBindingRepository,
+    IdentityConflictError,
+)
 from eneo.users.user import UserInDB, UserState
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
@@ -804,6 +807,61 @@ async def test_an_account_that_changes_again_during_the_second_wait_is_refused(
     assert await _bindings(first) == {("client-a", "person-b")}
     assert await _bindings(second) == set()
     assert [c["account_ids"] for c in _conflicts(enqueued)] == [[str(second)]]
+
+
+async def test_a_window_opened_during_the_lock_wait_moves_the_account_once(
+    sign_in, test_tenant, enqueued
+):
+    """The sign-in's transaction began before the window opened; the binding
+    it writes is still newer than the window, so the window cannot move the
+    account a second time."""
+    account = await _user_id()
+    await sign_in("person-a")
+
+    async with sessionmanager.session() as session, session.begin():
+        await session.execute(_lock(account))
+        waiting = asyncio.ensure_future(sign_in("person-b"))
+        await _wait_for_lock_waiters(1)
+        await _open_window(test_tenant.id, "client-a", "client-a", timedelta(days=1))
+    assert (await waiting).id == account
+
+    with pytest.raises(IdentityConflictError):
+        await sign_in("person-c")
+    assert await _bindings(account) == {("client-a", "person-b")}
+    assert [c["reason"] for c in _conflicts(enqueued)] == ["subject_mismatch"]
+
+
+@pytest.mark.parametrize(
+    "ends", ["window_expires", "window_is_closed", "allowance_expires"]
+)
+async def test_a_way_that_ends_during_the_lock_wait_replaces_nothing(
+    sign_in, test_tenant, enqueued, ends
+):
+    account = await _user_id()
+    await sign_in("person-a")
+    lasts = timedelta(seconds=1) if ends.endswith("expires") else timedelta(days=1)
+    if ends == "allowance_expires":
+        await _allow_rebinding(account, lasts)
+    else:
+        window = await _open_window(test_tenant.id, "client-a", "client-a", lasts)
+
+    async with sessionmanager.session() as session, session.begin():
+        await session.execute(_lock(account))
+        waiting = asyncio.ensure_future(sign_in("person-b"))
+        await _wait_for_lock_waiters(1)
+        if ends == "window_is_closed":
+            async with sessionmanager.session() as admin, admin.begin():
+                closed = await IdentityBindingRepository(admin).close_window(
+                    tenant_id=test_tenant.id, window_id=window
+                )
+                assert closed is not None
+        else:
+            await asyncio.sleep(lasts.total_seconds() + 0.2)
+    with pytest.raises(IdentityConflictError):
+        await waiting
+
+    assert await _bindings(account) == {("client-a", "person-a")}
+    assert [c["reason"] for c in _conflicts(enqueued)] == ["subject_mismatch"]
 
 
 @pytest.mark.parametrize(

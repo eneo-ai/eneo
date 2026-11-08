@@ -238,7 +238,7 @@ Each refusal writes an `identity_conflict` entry to the [audit log](/guides/audi
 
 ### Re-opening a binding
 
-Two administrator tools let the email bind an account that is already bound. Both are audited, need the admin permission in an interactive session (an API key cannot use them) and end at most 30 days ahead: while they are open, an address reassigned at the provider could reach a bound account, and the limit keeps that exposure short. Neither ever takes an identity another account holds.
+Two administrator tools let the email bind an account that is already bound. Both are audited, need the admin permission in an interactive session (an API key cannot use them) and end at most 30 days ahead: while they are open, an address reassigned at the provider could reach a bound account, and the limit keeps that exposure short. Neither ever takes an identity another account holds. Both are judged when the sign-in decides, not when it started: a sign-in that was still waiting for the account when one ended does not use it.
 
 | | Re-binding allowance | Migration window |
 |-|----------------------|------------------|

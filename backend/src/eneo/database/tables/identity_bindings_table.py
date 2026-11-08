@@ -7,6 +7,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     UniqueConstraint,
+    func,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -15,7 +16,7 @@ from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import Users
 
 
-class IdentityBindings(IdMixin, CreatedAtMixin, BaseWithTableName):
+class IdentityBindings(IdMixin, BaseWithTableName):
     """Which account a provider's subject signs in to.
 
     The key is the issuer, the verified audience the subject belongs to (the
@@ -38,6 +39,14 @@ class IdentityBindings(IdMixin, CreatedAtMixin, BaseWithTableName):
     audience: Mapped[str] = mapped_column(nullable=False)
     subject_claim: Mapped[str] = mapped_column(nullable=False)
     subject: Mapped[str] = mapped_column(nullable=False)
+    # The time of the insert, not of its transaction: a sign-in that waited
+    # for its account's lock while a window opened writes a binding newer
+    # than the window, so the window cannot replace it again.
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        server_default=func.clock_timestamp(),
+        nullable=False,
+    )
 
     __table_args__ = (
         # One account per identity. Subject before audience, so the same

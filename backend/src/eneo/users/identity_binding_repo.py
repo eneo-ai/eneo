@@ -188,7 +188,12 @@ class IdentityBindingRepository:
         opened_after: datetime | None = None,
     ) -> UUID | None:
         """An open window from one of these pairs to the given one, opened
-        after ``opened_after`` when given."""
+        after ``opened_after`` when given.
+
+        Open at this statement, not at the transaction's start: a sign-in that
+        waited for its account's lock must not pass a window that closed or
+        expired meanwhile. The same holds for the allowance below.
+        """
         pairs = list(from_pairs)
         if not pairs:
             return None
@@ -196,7 +201,7 @@ class IdentityBindingRepository:
             IdentityMigrationWindows.tenant_id == tenant_id,
             IdentityMigrationWindows.to_issuer == to_issuer,
             IdentityMigrationWindows.to_audience == to_audience,
-            IdentityMigrationWindows.closes_at > sa.func.now(),
+            IdentityMigrationWindows.closes_at > sa.func.clock_timestamp(),
             sa.tuple_(
                 IdentityMigrationWindows.from_issuer,
                 IdentityMigrationWindows.from_audience,
@@ -212,9 +217,9 @@ class IdentityBindingRepository:
         """Whether an admin's re-binding allowance for the account is open."""
         return bool(
             await self.session.scalar(
-                sa.select(Users.identity_rebinding_until > sa.func.now()).where(
-                    Users.id == user_id
-                )
+                sa.select(
+                    Users.identity_rebinding_until > sa.func.clock_timestamp()
+                ).where(Users.id == user_id)
             )
         )
 
@@ -287,9 +292,9 @@ class IdentityBindingRepository:
                 .where(
                     IdentityMigrationWindows.id == window_id,
                     IdentityMigrationWindows.tenant_id == tenant_id,
-                    IdentityMigrationWindows.closes_at > sa.func.now(),
+                    IdentityMigrationWindows.closes_at > sa.func.clock_timestamp(),
                 )
-                .values(closes_at=sa.func.now())
+                .values(closes_at=sa.func.clock_timestamp())
                 .returning(*_WINDOW_COLUMNS)
             )
         ).one_or_none()
