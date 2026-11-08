@@ -14,6 +14,7 @@ import pytest
 import sqlalchemy as sa
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.util import await_only
 
 from eneo.assistants.assistant_service import AssistantService
 from eneo.data_retention.derivations import (
@@ -22,6 +23,7 @@ from eneo.data_retention.derivations import (
     register_derivations,
 )
 from eneo.database.database import sessionmanager
+from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.retention_tables import ContentDerivations
 from eneo.database.tables.sessions_table import Sessions
 from eneo.main.exceptions import ErrorCodes, NotFoundException, UnauthorizedException
@@ -136,6 +138,42 @@ async def test_a_removed_source_makes_the_copy_unreadable_at_once(
     assert str(copy.copy_session) not in await _recent(client, owner_token)
     # The copy's rows are still there: only the read refuses them.
     assert await retention_session.get(Sessions, copy.copy_session) is not None
+
+
+async def test_a_source_removed_while_the_turns_load_hides_them(
+    db_container, copy: Copy
+):
+    """Mutant: the statement that loads a conversation's turns skips the copy
+    check, so a source removed after the session row was read still shows
+    the copy's turns. The removal commits between the two statements."""
+    removed: list[str] = []
+
+    async def remove_source() -> None:
+        async with sessionmanager.session() as other, other.begin():
+            await other.execute(
+                sa.delete(Questions).where(Questions.id == copy.source_question)
+            )
+
+    def between_statements(_conn, _cursor, statement: str, *_: object) -> None:
+        if (
+            not removed
+            and "FROM questions \nWHERE questions.session_id IN" in statement
+        ):
+            removed.append(statement)
+            await_only(remove_source())
+
+    async with db_container() as container:
+        bind = container.session().sync_session.bind
+        assert bind is not None
+        sa.event.listen(bind.engine, "before_cursor_execute", between_statements)
+        try:
+            loaded = await container.session_repo().get(copy.copy_session)
+        finally:
+            sa.event.remove(bind.engine, "before_cursor_execute", between_statements)
+
+    assert removed, "the turns were not loaded in a statement of their own"
+    assert loaded is not None
+    assert loaded.questions == []
 
 
 async def test_another_principal_learns_nothing_about_a_removed_source(

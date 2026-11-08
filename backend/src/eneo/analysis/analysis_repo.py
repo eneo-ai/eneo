@@ -11,12 +11,9 @@ from eneo.data_retention.derivations import copy_session_valid
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.group_chats_table import GroupChatsTable
 from eneo.database.tables.help_assistant_runs_table import HelpAssistantRuns
-from eneo.database.tables.info_blobs_table import InfoBlobs
 from eneo.database.tables.questions_table import (
-    InfoBlobReferences,
     QuestionFeedback,
     Questions,
-    QuestionsFiles,
 )
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.users_table import Users
@@ -24,6 +21,7 @@ from eneo.files.file_content_loader import FileContentLoader
 from eneo.info_blobs.info_blob_repo import InfoBlobRepository
 from eneo.questions.question_file_projection import attach_question_files
 from eneo.sessions.session import SessionInDB
+from eneo.sessions.sessions_repo import session_turn_options
 
 
 def _hour_bucket(
@@ -244,46 +242,7 @@ class AnalysisRepository:
         if to_date is not None:
             stmt = stmt.where(Sessions.created_at <= to_date)
 
-        stmt = (
-            stmt.order_by(Sessions.created_at)
-            .options(
-                selectinload(Sessions.questions)
-                .selectinload(Questions.info_blob_references)
-                .selectinload(InfoBlobReferences.info_blob)
-                .selectinload(InfoBlobs.group)
-            )
-            .options(
-                selectinload(Sessions.questions)
-                .selectinload(Questions.info_blob_references)
-                .selectinload(InfoBlobReferences.info_blob)
-                .selectinload(InfoBlobs.website)
-            )
-            .options(
-                selectinload(Sessions.questions).selectinload(Questions.logging_details)
-            )
-            .options(selectinload(Sessions.questions).selectinload(Questions.assistant))
-            .options(
-                selectinload(Sessions.questions).selectinload(
-                    Questions.completion_model
-                )
-            )
-            .options(
-                selectinload(Sessions.questions)
-                .selectinload(Questions.questions_files)
-                .selectinload(QuestionsFiles.file)
-            )
-            .options(
-                selectinload(Sessions.questions).selectinload(
-                    Questions.completion_model
-                )
-            )
-            .options(selectinload(Sessions.assistant).selectinload(Assistants.user))
-            .options(
-                selectinload(Sessions.questions).selectinload(
-                    Questions.mcp_tool_references
-                )
-            )
-        )
+        stmt = stmt.order_by(Sessions.created_at).options(*session_turn_options())
 
         sessions = await self.session.scalars(stmt)
         return await self._hydrate_sessions(
@@ -314,40 +273,8 @@ class AnalysisRepository:
         if to_date is not None:
             stmt = stmt.where(Sessions.created_at <= to_date)
 
-        stmt = (
-            stmt.order_by(Sessions.created_at)
-            .options(
-                selectinload(Sessions.questions)
-                .selectinload(Questions.info_blob_references)
-                .selectinload(InfoBlobReferences.info_blob)
-                .selectinload(InfoBlobs.group)
-            )
-            .options(
-                selectinload(Sessions.questions)
-                .selectinload(Questions.info_blob_references)
-                .selectinload(InfoBlobReferences.info_blob)
-                .selectinload(InfoBlobs.website)
-            )
-            .options(
-                selectinload(Sessions.questions).selectinload(Questions.logging_details)
-            )
-            .options(selectinload(Sessions.questions).selectinload(Questions.assistant))
-            .options(
-                selectinload(Sessions.questions).selectinload(
-                    Questions.completion_model
-                )
-            )
-            .options(
-                selectinload(Sessions.questions)
-                .selectinload(Questions.questions_files)
-                .selectinload(QuestionsFiles.file)
-            )
-            .options(selectinload(Sessions.group_chat))
-            .options(
-                selectinload(Sessions.questions).selectinload(
-                    Questions.mcp_tool_references
-                )
-            )
+        stmt = stmt.order_by(Sessions.created_at).options(
+            *session_turn_options(), selectinload(Sessions.group_chat)
         )
 
         sessions = await self.session.scalars(stmt)

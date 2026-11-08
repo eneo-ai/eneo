@@ -94,6 +94,30 @@ class RecentSessionRow(NamedTuple):
     group_chat_id: UUID | None
 
 
+def session_turn_options() -> list[Any]:
+    """Load a session's turns with what each of them shows.
+
+    The statement that reads the turns leaves out a copy whose source was
+    removed, so a removal committed after the session row was read still
+    hides them. What the turns show is loaded by the ids of the turns it read.
+    """
+    return [
+        selectinload(
+            Sessions.questions.and_(copy_session_valid(Questions.session_id.expression))
+        ).options(
+            selectinload(Questions.info_blob_references)
+            .selectinload(InfoBlobReferences.info_blob)
+            .options(selectinload(InfoBlobs.group), selectinload(InfoBlobs.website)),
+            selectinload(Questions.logging_details),
+            selectinload(Questions.assistant),
+            selectinload(Questions.completion_model),
+            selectinload(Questions.questions_files).selectinload(QuestionsFiles.file),
+            selectinload(Questions.mcp_tool_references),
+        ),
+        selectinload(Sessions.assistant).selectinload(Assistants.user),
+    ]
+
+
 class SessionRepository:
     def __init__(
         self,
@@ -151,27 +175,7 @@ class SessionRepository:
 
     @staticmethod
     def _options() -> list[Any]:
-        return [
-            selectinload(Sessions.questions)
-            .selectinload(Questions.info_blob_references)
-            .selectinload(InfoBlobReferences.info_blob)
-            .selectinload(InfoBlobs.group),
-            selectinload(Sessions.questions)
-            .selectinload(Questions.info_blob_references)
-            .selectinload(InfoBlobReferences.info_blob)
-            .selectinload(InfoBlobs.website),
-            selectinload(Sessions.questions).selectinload(Questions.logging_details),
-            selectinload(Sessions.questions).selectinload(Questions.assistant),
-            selectinload(Sessions.questions).selectinload(Questions.completion_model),
-            selectinload(Sessions.questions)
-            .selectinload(Questions.questions_files)
-            .selectinload(QuestionsFiles.file),
-            selectinload(Sessions.questions).selectinload(Questions.questions_files),
-            selectinload(Sessions.questions).selectinload(
-                Questions.mcp_tool_references
-            ),
-            selectinload(Sessions.assistant).selectinload(Assistants.user),
-        ]
+        return session_turn_options()
 
     def _add_options(
         self, stmt: sa.Select[Any] | sa.Insert | sa.Update
