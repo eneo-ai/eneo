@@ -82,6 +82,7 @@ class IdentityBindingsInMemory:
         to_issuer: str,
         to_audience: str,
         from_pairs: Iterable[tuple[str, str]],
+        opened_after: datetime | None = None,
     ) -> UUID | None:
         return None
 

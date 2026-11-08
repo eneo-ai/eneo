@@ -154,25 +154,27 @@ class IdentityBindingRepository:
         to_issuer: str,
         to_audience: str,
         from_pairs: Iterable[tuple[str, str]],
+        opened_after: datetime | None = None,
     ) -> UUID | None:
-        """An open window from one of these pairs to the given one."""
+        """An open window from one of these pairs to the given one, opened
+        after ``opened_after`` when given."""
         pairs = list(from_pairs)
         if not pairs:
             return None
+        query = sa.select(IdentityMigrationWindows.id).where(
+            IdentityMigrationWindows.tenant_id == tenant_id,
+            IdentityMigrationWindows.to_issuer == to_issuer,
+            IdentityMigrationWindows.to_audience == to_audience,
+            IdentityMigrationWindows.closes_at > sa.func.now(),
+            sa.tuple_(
+                IdentityMigrationWindows.from_issuer,
+                IdentityMigrationWindows.from_audience,
+            ).in_(pairs),
+        )
+        if opened_after is not None:
+            query = query.where(IdentityMigrationWindows.created_at > opened_after)
         return await self.session.scalar(
-            sa.select(IdentityMigrationWindows.id)
-            .where(
-                IdentityMigrationWindows.tenant_id == tenant_id,
-                IdentityMigrationWindows.to_issuer == to_issuer,
-                IdentityMigrationWindows.to_audience == to_audience,
-                IdentityMigrationWindows.closes_at > sa.func.now(),
-                sa.tuple_(
-                    IdentityMigrationWindows.from_issuer,
-                    IdentityMigrationWindows.from_audience,
-                ).in_(pairs),
-            )
-            .order_by(IdentityMigrationWindows.created_at)
-            .limit(1)
+            query.order_by(IdentityMigrationWindows.created_at).limit(1)
         )
 
     async def rebinding_open(self, user_id: UUID) -> bool:

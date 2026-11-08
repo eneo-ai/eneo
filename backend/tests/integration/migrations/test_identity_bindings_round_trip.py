@@ -121,14 +121,13 @@ def test_bindings_and_rebinding_round_trip_keeping_accounts() -> None:
                     " VALUES (%s, %s, 'https://idp', 'client', 'subject')",
                     (str(tenant_id), str(user_id)),
                 )
-            with pytest.raises(psycopg2.errors.CheckViolation):
-                with conn.cursor() as cursor:
-                    cursor.execute(
-                        "INSERT INTO identity_migration_windows (tenant_id,"
-                        " from_issuer, from_audience, to_issuer, to_audience,"
-                        " closes_at) VALUES (%s, 'i', 'a', 'i', 'a', now())",
-                        (str(tenant_id),),
-                    )
+                # A window may lead to its own pair (a new subject claim).
+                cursor.execute(
+                    "INSERT INTO identity_migration_windows (tenant_id,"
+                    " from_issuer, from_audience, to_issuer, to_audience,"
+                    " closes_at) VALUES (%s, 'i', 'a', 'i', 'a', now())",
+                    (str(tenant_id),),
+                )
 
             command.downgrade(config, PRE_REVISION)
             assert _schema(database_url) == {"tables": set(), "rebinding_column": False}

@@ -93,10 +93,6 @@ def upgrade() -> None:
             nullable=True,
         ),
         _created_at(),
-        sa.CheckConstraint(
-            "from_issuer <> to_issuer OR from_audience <> to_audience",
-            name="identity_migration_windows_pairs_differ",
-        ),
     )
     op.create_index(
         "ix_identity_migration_windows_target",

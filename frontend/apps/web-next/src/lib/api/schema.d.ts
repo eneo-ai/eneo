@@ -2665,7 +2665,7 @@ export interface paths {
     put?: never;
     /**
      * Open an identity migration window
-     * @description Until `closes_at` (at most 30 days ahead), an account bound under the from issuer and audience also binds under the to pair by its email. The from binding stays, so the first entry point keeps signing in. Use it before a client change or when adding an entry point. Audited.
+     * @description Until `closes_at` (at most 30 days ahead), an account bound under the from issuer and audience also binds under the to pair by its email. The from binding stays, so the first entry point keeps signing in. Use it before a client change or when adding an entry point. A window from a pair to itself is for a change of subject claim: an account bound there before the window opened has its subject replaced once. Audited.
      */
     post: operations["open_identity_migration_window_api_v1_admin_identity_migration_windows_post"];
     delete?: never;
@@ -16149,7 +16149,9 @@ export interface components {
     /**
      * IdentityMigrationWindowCreate
      * @description While open, an account bound under the from pair also binds under the
-     *     to pair by its email. Its from binding stays.
+     *     to pair by its email. Its from binding stays. A window from a pair to
+     *     itself is for a change of subject claim: an account bound there before
+     *     the window opened has its subject replaced once, by email.
      */
     IdentityMigrationWindowCreate: {
       /** From Issuer */

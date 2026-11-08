@@ -4,7 +4,6 @@ from uuid import UUID
 
 from sqlalchemy import (
     TIMESTAMP,
-    CheckConstraint,
     ForeignKey,
     Index,
     UniqueConstraint,
@@ -57,7 +56,12 @@ class IdentityBindings(IdMixin, CreatedAtMixin, BaseWithTableName):
 
 class IdentityMigrationWindows(IdMixin, CreatedAtMixin, BaseWithTableName):
     """While open, an account bound under the from pair may also be bound
-    under the to pair by its email. The from binding stays."""
+    under the to pair by its email. The from binding stays.
+
+    A window from a pair to itself is for a change of subject claim: each
+    account bound under the pair before the window opened may have its
+    subject there replaced once, by email.
+    """
 
     tenant_id: Mapped[UUID] = mapped_column(
         ForeignKey(Tenants.id, ondelete="CASCADE"), nullable=False
@@ -74,10 +78,6 @@ class IdentityMigrationWindows(IdMixin, CreatedAtMixin, BaseWithTableName):
     )
 
     __table_args__ = (
-        CheckConstraint(
-            "from_issuer <> to_issuer OR from_audience <> to_audience",
-            name="identity_migration_windows_pairs_differ",
-        ),
         Index(
             "ix_identity_migration_windows_target",
             "tenant_id",

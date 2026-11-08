@@ -664,8 +664,10 @@ class UserService:
         and with SCIM or admin deactivation: a waiter whose account was
         removed meanwhile gets no row. An account already bound takes a new
         identity only when found by its email and an admin opened the way: a
-        migration window from one of its pairs adds the new pair; a re-binding
-        allowance adds it or replaces the subject under it, and is used up.
+        migration window from one of its pairs adds the new pair; a window
+        from the pair to itself, opened after the account was bound there,
+        replaces the subject under it (a change of subject claim); a re-binding
+        allowance adds the pair or replaces the subject under it, and is used up.
         """
         bindings = cast(IdentityBindingRepository, self.identity_binding_repo)
         user = await self.repo.get_user_by_id_for_update(user_id)
@@ -686,14 +688,31 @@ class UserService:
             if same_pair.subject == identity.subject:
                 # Bound by a sign-in that held the lock before this one.
                 return user
-            if found_by != "email" or not await bindings.rebinding_open(user.id):
+            # Only a window opened after this binding replaces it, so each
+            # account moves once however long the window stays open.
+            window_id = (
+                await bindings.open_window(
+                    tenant_id=tenant_id,
+                    to_issuer=identity.issuer,
+                    to_audience=identity.audience,
+                    from_pairs=[pair],
+                    opened_after=same_pair.created_at,
+                )
+                if found_by == "email"
+                else None
+            )
+            if window_id is not None:
+                method = "migration_window"
+                details["window_id"] = str(window_id)
+            elif found_by == "email" and await bindings.rebinding_open(user.id):
+                method = "admin_allowance"
+            else:
                 await self._refuse_identity(
                     "subject_mismatch", identity, tenant_id, [user.id], correlation_id
                 )
             await bindings.unbind(
                 user_id=user.id, issuer=identity.issuer, audience=identity.audience
             )
-            method = "admin_allowance"
             details["replaced_subject"] = same_pair.subject
         elif bound and found_by == "email":
             window_id = await bindings.open_window(

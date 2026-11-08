@@ -330,23 +330,31 @@ async def test_an_expired_window_is_not_listed_and_admits_nobody(
     assert response.status_code == 404
 
 
-async def test_a_window_leads_from_one_pair_to_another(client: AsyncClient, admin):
-    same = {"issuer": ISSUER, "audience": "client-a"}
+async def test_a_window_may_lead_to_its_own_pair(
+    client: AsyncClient, admin, admin_user, sign_in, test_tenant
+):
+    """For a change of subject claim: the issuer and audience stay, every
+    subject under them changes."""
+    _, anna = await _person(test_tenant.id, "anna")
+    account = await sign_in(anna, "anna-sub")
 
     response = await client.post(
         WINDOWS,
         json={
-            "from_issuer": same["issuer"],
-            "from_audience": same["audience"],
-            "to_issuer": same["issuer"],
-            "to_audience": same["audience"],
+            "from_issuer": ISSUER,
+            "from_audience": "client-a",
+            "to_issuer": ISSUER,
+            "to_audience": "client-a",
             "closes_at": _ahead(timedelta(days=1)),
         },
         headers=admin,
     )
 
-    assert response.status_code == 422
-    assert await _audits("identity_migration_window_updated") == []
+    assert response.status_code == 201, response.text
+    assert await sign_in(anna, "anna-stable-id") == account
+    assert await _subjects(anna) == {("client-a", "anna-stable-id")}
+    [audit] = await _audits("identity_migration_window_updated")
+    assert audit["actor_id"] == admin_user.id
 
 
 async def test_an_unknown_account_has_no_identity(client: AsyncClient, admin):

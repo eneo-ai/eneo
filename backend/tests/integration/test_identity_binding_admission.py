@@ -366,6 +366,110 @@ async def test_a_window_that_is_closed_or_from_another_pair_binds_nothing(
     assert [c["reason"] for c in _conflicts(enqueued)] == ["account_bound"]
 
 
+async def test_a_window_to_the_same_pair_replaces_the_subject_once(
+    sign_in, test_tenant, enqueued
+):
+    """The provider now names people by another claim: every subject under
+    the pair changes, and the window moves each account to its new one."""
+    account = await _user_id()
+    await sign_in("person-a")
+    window = await _open_window(
+        test_tenant.id, "client-a", "client-a", timedelta(days=1)
+    )
+
+    assert (await sign_in("person-b")).id == account
+
+    assert await _bindings(account) == {("client-a", "person-b")}
+    bound = (await _bound_audits(account))[-1]
+    assert {
+        key: bound[key]
+        for key in ("method", "window_id", "subject", "replaced_subject")
+    } == {
+        "method": "migration_window",
+        "window_id": str(window),
+        "subject": "person-b",
+        "replaced_subject": "person-a",
+    }
+    # Once per account: the replaced binding is newer than the window.
+    with pytest.raises(IdentityConflictError):
+        await sign_in("person-c")
+    assert await _bindings(account) == {("client-a", "person-b")}
+    assert [c["reason"] for c in _conflicts(enqueued)] == ["subject_mismatch"]
+
+
+@pytest.mark.parametrize("closed", ["closed", "expired"])
+async def test_a_same_pair_window_no_longer_open_replaces_nothing(
+    sign_in, test_tenant, enqueued, closed
+):
+    await sign_in("person-a")
+    window = await _open_window(
+        test_tenant.id,
+        "client-a",
+        "client-a",
+        timedelta(days=1) if closed == "closed" else timedelta(seconds=-1),
+    )
+    if closed == "closed":
+        await _execute(
+            sa.update(IdentityMigrationWindows)
+            .where(IdentityMigrationWindows.id == window)
+            .values(closes_at=sa.func.now())
+        )
+
+    with pytest.raises(IdentityConflictError):
+        await sign_in("person-b")
+
+    assert await _bindings() == {("client-a", "person-a")}
+    assert [c["reason"] for c in _conflicts(enqueued)] == ["subject_mismatch"]
+
+
+async def test_a_same_pair_window_never_takes_another_accounts_identity(
+    sign_in, test_tenant
+):
+    account = await _user_id()
+    holder = await _add_user(test_tenant.id, "holder@example.com")
+    await sign_in("person-a")
+    await _bind(test_tenant.id, holder, "person-h", "client-a")
+    await _open_window(test_tenant.id, "client-a", "client-a", timedelta(days=1))
+
+    # The presented identity is bound: it reaches its holder, whatever the email.
+    assert (await sign_in("person-h")).id == holder
+
+    assert await _bindings(account) == {("client-a", "person-a")}
+    assert await _bindings(holder) == {("client-a", "person-h")}
+
+
+async def test_a_same_pair_window_loses_a_key_taken_while_it_waited(
+    sign_in, test_tenant, enqueued
+):
+    account = await _user_id()
+    holder = await _add_user(test_tenant.id, "holder@example.com")
+    await sign_in("person-a")
+    await _open_window(test_tenant.id, "client-a", "client-a", timedelta(days=1))
+
+    # The account's lock is held while another account takes the new key.
+    async with sessionmanager.session() as session, session.begin():
+        await session.execute(_lock(account))
+        waiting = asyncio.ensure_future(sign_in("person-b"))
+        await _wait_for_lock_waiters(1)
+        await session.execute(
+            sa.insert(IdentityBindings).values(
+                tenant_id=test_tenant.id,
+                user_id=holder,
+                issuer=ISSUER,
+                audience="client-a",
+                subject="person-b",
+            )
+        )
+    with pytest.raises(IdentityConflictError) as refused:
+        await waiting
+
+    assert refused.value.reason == "identity_taken"
+    assert await _bindings(account) == {("client-a", "person-a")}
+    assert [c["account_ids"] for c in _conflicts(enqueued)] == [
+        [str(account), str(holder)]
+    ]
+
+
 async def test_a_rebinding_allowance_replaces_the_subject_once(sign_in, enqueued):
     account = await _user_id()
     await sign_in("person-a")
