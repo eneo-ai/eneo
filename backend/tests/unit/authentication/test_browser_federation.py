@@ -108,7 +108,7 @@ def federation(monkeypatch: pytest.MonkeyPatch) -> Iterator[Federation]:
     )
     start = AsyncMock(return_value=session_token)
     monkeypatch.setattr(routes, "initiate_auth", initiate, raising=False)
-    monkeypatch.setattr(routes, "auth_callback", callback, raising=False)
+    monkeypatch.setattr(routes, "federated_sign_in", callback, raising=False)
     monkeypatch.setattr(BrowserSessionService, "start", start)
     app = get_application()
     for route in endpoint_routes(app.routes):

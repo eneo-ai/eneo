@@ -53,7 +53,7 @@ from eneo.authentication.endpoint_access import (
 )
 from eneo.authentication.federation_router import (
     CallbackRequest,
-    auth_callback,
+    federated_sign_in,
     initiate_auth,
 )
 from eneo.authentication.oidc.errors import OidcSignInError
@@ -582,7 +582,7 @@ async def complete_browser_federation(
     if not code:
         return _federation_failure("no_code_received", next_path=diagnostics.next_path)
     try:
-        token = await auth_callback(
+        token = await federated_sign_in(
             CallbackRequest(code=code, state=state, iss=iss), container
         )
     except HTTPException as exc:

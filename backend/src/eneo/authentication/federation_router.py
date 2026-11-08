@@ -847,10 +847,20 @@ async def auth_callback(
     callback: CallbackRequest,
     container: Annotated[Container, Depends(get_container())],
 ) -> AccessTokenResponse:
-    """
-    Handle OIDC callback after user authenticates with IdP.
+    """Handle the OIDC callback after the user authenticated with the IdP."""
+    return await federated_sign_in(callback, container)
 
-    This endpoint:
+
+async def federated_sign_in(
+    callback: CallbackRequest, container: Container
+) -> AccessTokenResponse:
+    """
+    Verify a provider's callback and admit its user: the shared sign-in core.
+
+    Starts no session. Each route that hands the token out decides which
+    session it gets (``BrowserSessionService.start``).
+
+    This function:
     1. Validates signed state (JWT with tenant context)
     2. Takes the single-use sign-in transaction the state names
     3. Exchanges the code with the PKCE verifier and verifies the ID token
