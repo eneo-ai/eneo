@@ -15,7 +15,7 @@ import { Callout, Cards } from 'nextra/components'
   >
     **One organization, one identity provider.**
 
-    All users authenticate against the same IdP (Azure Entra ID, Keycloak, Auth0, MobilityGuard, …). Configure it with environment variables or through the sysadmin API.
+    All users authenticate against the same IdP (Azure Entra ID, Keycloak, Auth0, MobilityGuard, …). Store its settings in Eneo (recommended), or keep them in the server configuration.
   </Cards.Card>
 </Cards>
 
@@ -25,8 +25,9 @@ import { Callout, Cards } from 'nextra/components'
 
 | Scenario | Recommended Setup |
 |----------|-------------------|
-| Single organization deployment | [Single-Tenant](/guides/oidc-federation/single-tenant) |
-| Want to change OIDC settings without restarting, or restrict logins by email domain | [Single-Tenant via the API](/guides/oidc-federation/single-tenant#api-configuration) |
+| New single-organization deployment | [Single-Tenant with the settings stored in Eneo](/guides/oidc-federation/single-tenant#api-configuration): administrators change the client ID, client secret and allowed email domains in Eneo, without a restart |
+| Identity provider managed as configuration code | [Single-Tenant in the server configuration](/guides/oidc-federation/single-tenant#environment-variable-configuration) (`OIDC_*` variables) |
+| Existing deployment with `OIDC_*` variables | Nothing changes on upgrade; to let administrators change the settings, [move them into Eneo](/guides/oidc-federation/single-tenant#move-the-settings-into-eneo) |
 | Several organisations | Single-tenant is recommended: one installation per organisation, each with its own IdP. Several organisations in one installation ([Multi-Tenant](/guides/oidc-federation/multi-tenant)) have basic support only, will be phased out and have no guaranteed data separation, because they share the same database |
 
 ---
@@ -177,6 +178,8 @@ Eneo asks for the scopes `openid`, `email` and `profile`, and sends a `nonce` an
 | `ZITADEL_PROJECT_CLIENT_ID` | frontend | `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET` in the backend, from the application in step 1 |
 
 See [Single-Tenant Setup](/guides/oidc-federation/single-tenant#configure-backend-environment-variables) for the other backend variables. Set `OIDC_ALLOWED_DOMAINS` if people are to be created at their first sign-in (see below).
+
+With the settings stored in Eneo (`FEDERATION_ENABLED=true`), the backend ignores these variables. Register the same discovery URL, client ID, secret and allowed domains through the [sysadmin API](/guides/oidc-federation/single-tenant#configure-via-api) instead. The allowed domains below are then the stored list, which administrators [change in Eneo](/guides/oidc-federation/single-tenant#change-the-settings-in-eneo).
 
 **3. Remove both `ZITADEL_*` variables from the frontend and restart it.** While they are set, the login page still sends people to the Zitadel sign-in, even when the OIDC settings are in place.
 
