@@ -14,9 +14,6 @@ from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 from eneo.data_retention.infrastructure import (
     data_retention_worker,
 )
-from eneo.data_retention.infrastructure.data_retention_service import (
-    DataRetentionService,
-)
 from eneo.database.tables.assistant_table import Assistants, AssistantsFiles
 from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
 from eneo.database.tables.files_table import Files
@@ -68,6 +65,7 @@ from eneo.flows.infrastructure import (
 from eneo.flows.infrastructure.flow_provider_call_repo import (
     FlowProviderCallRepository,
 )
+from eneo.flows.infrastructure.flow_retention_repo import FlowRetentionRepository
 from eneo.flows.infrastructure.flow_run_audit_outbox_repo import (
     FlowRunAuditOutboxRepository,
 )
@@ -198,8 +196,8 @@ async def _create_durable_file(
 @pytest.fixture
 async def flow_retention_service(
     async_session: AsyncSession,
-) -> DataRetentionService:
-    return DataRetentionService(async_session)
+) -> FlowRetentionRepository:
+    return FlowRetentionRepository(async_session)
 
 
 @pytest.fixture
@@ -1230,7 +1228,7 @@ async def test_purge_soft_deleted_flow_template_assets_reclaims_unpinned_blob(
     test_tenant,
     admin_user,
     flow_retention_space: Spaces,
-    flow_retention_service: DataRetentionService,
+    flow_retention_service: FlowRetentionRepository,
 ):
     fixture = await _create_flow_template_asset_fixture(
         async_session,
@@ -1261,7 +1259,7 @@ async def test_purge_soft_deleted_flow_template_assets_keeps_active_asset_blob(
     test_tenant,
     admin_user,
     flow_retention_space: Spaces,
-    flow_retention_service: DataRetentionService,
+    flow_retention_service: FlowRetentionRepository,
 ):
     fixture = await _create_flow_template_asset_fixture(
         async_session,
@@ -1288,7 +1286,7 @@ async def test_purge_soft_deleted_flow_template_assets_keeps_non_current_version
     test_tenant,
     admin_user,
     flow_retention_space: Spaces,
-    flow_retention_service: DataRetentionService,
+    flow_retention_service: FlowRetentionRepository,
 ):
     fixture = await _create_flow_template_asset_fixture(
         async_session,
@@ -1341,7 +1339,7 @@ async def test_purge_soft_deleted_flow_template_assets_counts_unknown_schema_ski
     test_tenant,
     admin_user,
     flow_retention_space: Spaces,
-    flow_retention_service: DataRetentionService,
+    flow_retention_service: FlowRetentionRepository,
 ):
     fixture = await _create_flow_template_asset_fixture(
         async_session,
@@ -1378,7 +1376,7 @@ async def test_flow_run_history_purge_preserves_canonical_audit(
     admin_user,
     flow_retention_space: Spaces,
     flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
+    flow_retention_service: FlowRetentionRepository,
 ):
     fixture = await _create_flow_runtime_fixture(
         async_session,
@@ -1482,7 +1480,7 @@ async def test_abandoned_upload_purge_reclaims_only_past_horizon_uploads(
     test_tenant,
     admin_user,
     flow_retention_space: Spaces,
-    flow_retention_service: DataRetentionService,
+    flow_retention_service: FlowRetentionRepository,
 ):
     now = datetime.now(timezone.utc)
     abandoned = await _create_unbound_runtime_upload_fixture(
@@ -1624,7 +1622,7 @@ async def test_flow_run_history_purge_reclaims_runtime_source_after_final_refere
     admin_user,
     flow_retention_space: Spaces,
     flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
+    flow_retention_service: FlowRetentionRepository,
     monkeypatch: pytest.MonkeyPatch,
 ):
     monkeypatch.setattr(
@@ -1751,7 +1749,7 @@ async def test_flow_run_history_purge_keeps_runtime_source_with_another_owner(
     admin_user,
     flow_retention_space: Spaces,
     flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
+    flow_retention_service: FlowRetentionRepository,
 ):
     fixture = await _create_flow_runtime_fixture(
         async_session,
@@ -1802,7 +1800,7 @@ async def test_flow_run_history_purge_keeps_runtime_source_with_derived_child(
     admin_user,
     flow_retention_space: Spaces,
     flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
+    flow_retention_service: FlowRetentionRepository,
 ):
     fixture = await _create_flow_runtime_fixture(
         async_session,
@@ -1995,7 +1993,7 @@ async def test_flow_run_history_purge_keeps_run_with_pending_webhook(
     admin_user,
     flow_retention_space: Spaces,
     flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
+    flow_retention_service: FlowRetentionRepository,
     claim_expiry_offset_seconds: int | None,
 ):
     fixture = await _create_flow_runtime_fixture(
@@ -2061,7 +2059,7 @@ async def test_flow_run_history_purge_removes_run_with_dead_lettered_webhook(
     admin_user,
     flow_retention_space: Spaces,
     flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
+    flow_retention_service: FlowRetentionRepository,
 ):
     fixture = await _create_flow_runtime_fixture(
         async_session,
@@ -2107,7 +2105,7 @@ async def test_flow_run_history_purge_keeps_generated_file_shared_with_retained_
     admin_user,
     flow_retention_space: Spaces,
     flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
+    flow_retention_service: FlowRetentionRepository,
 ):
     fixture = await _create_flow_runtime_fixture(
         async_session,
@@ -2144,7 +2142,7 @@ async def test_flow_run_history_purge_keeps_generated_file_with_derived_child(
     admin_user,
     flow_retention_space: Spaces,
     flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
+    flow_retention_service: FlowRetentionRepository,
 ):
     fixture = await _create_flow_runtime_fixture(
         async_session,
@@ -2188,7 +2186,7 @@ async def test_flow_run_history_purge_uses_flow_override_instead_of_space_policy
     admin_user,
     flow_retention_space: Spaces,
     flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
+    flow_retention_service: FlowRetentionRepository,
 ):
     flow_retention_space.flow_run_history_retention_mode = "preserve"
     flow_retention_space.flow_run_history_retention_days = 1
@@ -2229,7 +2227,7 @@ async def test_flow_run_history_purge_uses_space_policy_when_flow_inherits(
     admin_user,
     flow_retention_space: Spaces,
     flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
+    flow_retention_service: FlowRetentionRepository,
 ):
     flow_retention_space.flow_run_history_retention_mode = "preserve"
     flow_retention_space.flow_run_history_retention_days = 1
@@ -2260,7 +2258,7 @@ async def test_flow_run_history_purge_uses_space_retention_one_day_boundary(
     admin_user,
     flow_retention_space: Spaces,
     flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
+    flow_retention_service: FlowRetentionRepository,
 ):
     now = datetime(2026, 6, 10, 12, 0, tzinfo=timezone.utc)
     flow_retention_space.flow_run_history_retention_mode = "preserve"
@@ -2317,7 +2315,7 @@ async def test_flow_run_history_purge_skips_old_non_terminal_runs(
     admin_user,
     flow_retention_space: Spaces,
     flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
+    flow_retention_service: FlowRetentionRepository,
     status: FlowRunStatus,
 ):
     fixture = await _create_flow_runtime_fixture(
@@ -2371,7 +2369,7 @@ async def test_flow_run_history_purge_keeps_runs_without_retention_policy(
     admin_user,
     flow_retention_space: Spaces,
     flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
+    flow_retention_service: FlowRetentionRepository,
 ):
     fixture = await _create_flow_runtime_fixture(
         async_session,
@@ -2407,7 +2405,7 @@ async def test_flow_run_history_purge_skips_runs_with_undelivered_audit_outbox(
     admin_user,
     flow_retention_space: Spaces,
     flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
+    flow_retention_service: FlowRetentionRepository,
     delivery_status: str,
 ):
     fixture = await _create_flow_runtime_fixture(
@@ -2452,7 +2450,7 @@ async def test_successful_audit_outbox_redrive_delivery_permits_existing_purge_p
     admin_user,
     flow_retention_space: Spaces,
     flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
+    flow_retention_service: FlowRetentionRepository,
 ):
     fixture = await _create_flow_runtime_fixture(
         async_session,
@@ -2504,7 +2502,7 @@ async def test_purge_old_flow_run_history_batch_drains_only_eligible_runs(
     admin_user,
     flow_retention_space: Spaces,
     flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
+    flow_retention_service: FlowRetentionRepository,
 ):
     purge_first = await _create_flow_runtime_fixture(
         async_session,
@@ -2580,7 +2578,7 @@ async def test_flow_run_history_blocked_counts_use_audit_webhook_precedence(
     admin_user,
     flow_retention_space: Spaces,
     flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
+    flow_retention_service: FlowRetentionRepository,
 ):
     audit_blocked = await _create_flow_runtime_fixture(
         async_session,
@@ -2641,7 +2639,7 @@ async def test_flow_run_history_purge_removes_run_for_soft_deleted_flow(
     admin_user,
     flow_retention_space: Spaces,
     flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
+    flow_retention_service: FlowRetentionRepository,
 ):
     fixture = await _create_flow_runtime_fixture(
         async_session,
@@ -2677,7 +2675,7 @@ async def test_debug_evidence_redaction_precedes_later_flow_purge(
     admin_user,
     flow_retention_space: Spaces,
     flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
+    flow_retention_service: FlowRetentionRepository,
 ):
     fixture = await _create_flow_runtime_fixture(
         async_session,
@@ -2730,7 +2728,7 @@ async def test_debug_evidence_redaction_skips_a_run_under_a_legal_hold(
     admin_user,
     flow_retention_space: Spaces,
     flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
+    flow_retention_service: FlowRetentionRepository,
 ):
     fixtures = [
         await _create_flow_runtime_fixture(
@@ -2780,7 +2778,7 @@ async def test_debug_evidence_redacts_attempt_payloads_without_provenance(
     admin_user,
     flow_retention_space: Spaces,
     flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
+    flow_retention_service: FlowRetentionRepository,
 ):
     fixture = await _create_flow_runtime_fixture(
         async_session,
@@ -2821,7 +2819,7 @@ async def test_debug_evidence_redaction_leaves_no_model_listed_as_used(
     admin_user,
     flow_retention_space: Spaces,
     flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
+    flow_retention_service: FlowRetentionRepository,
 ):
     fixture = await _create_flow_runtime_fixture(
         async_session,
@@ -2892,7 +2890,7 @@ async def test_debug_evidence_does_not_reuse_flow_run_history_policy(
     admin_user,
     flow_retention_space: Spaces,
     flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
+    flow_retention_service: FlowRetentionRepository,
 ):
     fixture = await _create_flow_runtime_fixture(
         async_session,
@@ -2935,7 +2933,7 @@ async def test_delete_old_delivered_flow_audit_outbox_rows_follows_audit_log_lif
     admin_user,
     flow_retention_space: Spaces,
     flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
+    flow_retention_service: FlowRetentionRepository,
 ):
     async def create_outbox_row(*, delivery_status: str, with_audit_log: bool):
         fixture = await _create_flow_runtime_fixture(
@@ -3007,10 +3005,10 @@ async def test_delete_old_delivered_flow_audit_outbox_rows_uses_retention_batche
     admin_user,
     flow_retention_space: Spaces,
     flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
+    flow_retention_service: FlowRetentionRepository,
 ):
     monkeypatch.setattr(
-        "eneo.data_retention.infrastructure.data_retention_service.RETENTION_BATCH_SIZE",
+        "eneo.flows.infrastructure.flow_retention_repo.RETENTION_BATCH_SIZE",
         2,
     )
     outbox_ids = []

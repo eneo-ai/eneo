@@ -33,6 +33,9 @@ FLOW_API_ROOT = FLOW_SOURCE_ROOT / "api"
 FLOW_TASKS_PATH = FLOW_RUNTIME_ROOT / "tasks.py"
 FLOW_API_PACKAGES = {"api"}
 DATA_RETENTION_ROOT = BACKEND_ROOT / "src" / "eneo" / "data_retention"
+FLOW_RETENTION_REPO_PATH = (
+    FLOW_SOURCE_ROOT / "infrastructure" / "flow_retention_repo.py"
+)
 PYRIGHT_REPORT_UNKNOWN_MEMBER_IGNORE_RE = re.compile(
     r"#\s*pyright\s*:\s*ignore\s*\[\s*[^\]]*\breportUnknownMemberType\b[^\]]*\]"
 )
@@ -168,6 +171,11 @@ def _data_retention_python_files() -> list[Path]:
         for path in DATA_RETENTION_ROOT.rglob("*.py")
         if "__pycache__" not in path.parts
     ]
+
+
+def _retention_python_files() -> list[Path]:
+    """Shared retention code plus the Flows module that owns Flow removals."""
+    return [*_data_retention_python_files(), FLOW_RETENTION_REPO_PATH]
 
 
 def _relative_runtime_path(path: Path) -> str:
@@ -945,9 +953,34 @@ def test_flow_outbox_delivery_status_literals_use_canonical_vocabulary():
     )
 
 
-def test_data_retention_does_not_null_files_content_directly():
+def test_data_retention_does_not_import_flow_modules():
+    """Flows owns its removals; shared retention code must not reach into Flows."""
     offenders: list[str] = []
     for path in _data_retention_python_files():
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                modules = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module is not None:
+                modules = [node.module]
+            else:
+                continue
+            offenders.extend(
+                f"{path.relative_to(BACKEND_ROOT).as_posix()}:{node.lineno}:{module}"
+                for module in modules
+                if module in {"eneo.flows", "eneo.database.tables.flow_tables"}
+                or module.startswith("eneo.flows.")
+            )
+
+    assert offenders == [], (
+        "Flow retention belongs in eneo.flows, not in eneo.data_retention: "
+        + ", ".join(offenders)
+    )
+
+
+def test_data_retention_does_not_null_files_content_directly():
+    offenders: list[str] = []
+    for path in _retention_python_files():
         tree = ast.parse(path.read_text(), filename=str(path))
         offenders.extend(
             _files_content_nulling_update_offenders(
@@ -961,7 +994,7 @@ def test_data_retention_does_not_null_files_content_directly():
 
 def test_data_retention_does_not_schedule_generated_artifact_cleanup():
     offenders: list[str] = []
-    for path in _data_retention_python_files():
+    for path in _retention_python_files():
         tree = ast.parse(path.read_text(), filename=str(path))
         offenders.extend(
             _generated_artifact_retention_schedule_offenders(

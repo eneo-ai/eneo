@@ -19,6 +19,7 @@ from eneo.database.tables.flow_tables import (
 )
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
+from eneo.flows.infrastructure.flow_retention_repo import FlowRetentionRepository
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
@@ -771,11 +772,11 @@ async def test_review_required_run_is_listed_but_never_selected_for_purge(
     assert oversized_cursor.status_code == 422, oversized_cursor.text
 
     async with db_container() as container:
-        purge_result = (
-            await container.data_retention_service().purge_old_flow_run_history_batch(
-                now=datetime.now(timezone.utc),
-                limit=10,
-            )
+        purge_result = await FlowRetentionRepository(
+            container.session()
+        ).purge_old_flow_run_history_batch(
+            now=datetime.now(timezone.utc),
+            limit=10,
         )
         assert purge_result.counts.flow_runs_considered == 0
         assert await container.session().get(FlowRuns, first_run_id) is not None

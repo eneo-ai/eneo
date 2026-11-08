@@ -1469,7 +1469,6 @@ class Container(containers.DeclarativeContainer):
         feature_flag_service=feature_flag_service,
         tenant_repo=tenant_repo,
         audit_service=audit_service,
-        data_retention_service=data_retention_service,
         skill_repo=skill_repo,
         upload_admission=upload_admission,
     )

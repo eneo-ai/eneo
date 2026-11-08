@@ -152,10 +152,6 @@ class MockAuditService:
         pass
 
 
-class MockDataRetentionService:
-    pass
-
-
 def _assert_extra_forbidden(model: type[BaseModel], payload: dict[str, object]) -> None:
     with pytest.raises(ValidationError) as exc_info:
         model.model_validate({**payload, "unexpected": True})
@@ -262,7 +258,6 @@ async def test_get_settings_if_settings():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=MockTenantRepo(),
         audit_service=MockAuditService(),
-        data_retention_service=MockDataRetentionService(),
         skill_repo=MagicMock(),
     )
 
@@ -285,7 +280,6 @@ async def test_update_settings():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=MockTenantRepo(),
         audit_service=MockAuditService(),
-        data_retention_service=MockDataRetentionService(),
         skill_repo=MagicMock(),
     )
 
@@ -311,7 +305,6 @@ async def test_update_settings_creates_row_when_missing():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=MockTenantRepo(),
         audit_service=MockAuditService(),
-        data_retention_service=MockDataRetentionService(),
         skill_repo=MagicMock(),
     )
 
@@ -347,7 +340,6 @@ async def test_get_flow_input_limits_ignores_retired_tenant_sizes():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=MockAuditService(),
-        data_retention_service=MockDataRetentionService(),
         skill_repo=MagicMock(),
         upload_admission=_upload_admission(),
     )
@@ -382,7 +374,6 @@ async def test_get_flow_input_limits_resolves_stored_null_counts_to_defaults():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=MockAuditService(),
-        data_retention_service=MockDataRetentionService(),
         skill_repo=MagicMock(),
         upload_admission=_upload_admission(),
     )
@@ -419,7 +410,6 @@ async def test_get_flow_input_limits_resolved_returns_domain_limits():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=MockAuditService(),
-        data_retention_service=MockDataRetentionService(),
         skill_repo=MagicMock(),
         upload_admission=_upload_admission(),
     )
@@ -456,7 +446,6 @@ async def test_get_mapped_execution_policy_resolved_returns_domain_policy():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=MockAuditService(),
-        data_retention_service=MockDataRetentionService(),
         skill_repo=MagicMock(),
     )
 
@@ -476,7 +465,6 @@ def _mapped_policy_service(tenant_repo: MockTenantRepo) -> SettingService:
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=MockAuditService(),
-        data_retention_service=MockDataRetentionService(),
         skill_repo=MagicMock(),
     )
 
@@ -586,7 +574,6 @@ async def test_flows_respect_large_admin_storage_policy():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=MockTenantRepo(),
         audit_service=MockAuditService(),
-        data_retention_service=MockDataRetentionService(),
         skill_repo=MagicMock(),
         upload_admission=_upload_admission(
             file_maximum_bytes=10 * 1024**3,
@@ -626,7 +613,6 @@ async def test_restore_audits_the_actual_policy_transition():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=RecordingAuditService(),
-        data_retention_service=MockDataRetentionService(),
         skill_repo=MagicMock(),
     )
 
@@ -681,7 +667,6 @@ async def test_update_flow_input_limits_persists_and_audits():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=audit_service,
-        data_retention_service=MockDataRetentionService(),
         skill_repo=MagicMock(),
         upload_admission=_upload_admission(
             file_maximum_bytes=10_000_000,
@@ -725,7 +710,6 @@ async def test_update_flow_input_limits_scrubs_unknown_top_level_flow_settings()
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=MockAuditService(),
-        data_retention_service=MockDataRetentionService(),
         skill_repo=MagicMock(),
         upload_admission=_upload_admission(),
     )
@@ -759,7 +743,6 @@ async def test_update_flow_input_limits_null_clears_nullable_overrides():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=MockAuditService(),
-        data_retention_service=MockDataRetentionService(),
         skill_repo=MagicMock(),
         upload_admission=_upload_admission(),
     )
@@ -787,7 +770,6 @@ async def test_update_flow_input_limits_rejects_empty_patch():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=MockAuditService(),
-        data_retention_service=MockDataRetentionService(),
         skill_repo=MagicMock(),
     )
 
@@ -819,7 +801,6 @@ async def test_get_flow_document_render_limits_reads_tenant_override():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=MockAuditService(),
-        data_retention_service=MockDataRetentionService(),
         skill_repo=MagicMock(),
     )
 
@@ -847,7 +828,6 @@ async def test_update_flow_document_render_limits_persists_and_audits():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=audit_service,
-        data_retention_service=MockDataRetentionService(),
         skill_repo=MagicMock(),
     )
 
@@ -885,7 +865,6 @@ async def test_update_flow_document_render_limits_null_clears_override():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=MockAuditService(),
-        data_retention_service=MockDataRetentionService(),
         skill_repo=MagicMock(),
     )
 
@@ -906,7 +885,6 @@ async def test_update_flow_document_render_limits_rejects_empty_patch():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=MockTenantRepo(),
         audit_service=MockAuditService(),
-        data_retention_service=MockDataRetentionService(),
         skill_repo=MagicMock(),
     )
 
@@ -943,7 +921,6 @@ async def test_get_flow_evidence_policy_reads_tenant_override():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=MockAuditService(),
-        data_retention_service=MockDataRetentionService(),
         skill_repo=MagicMock(),
     )
 
@@ -972,7 +949,6 @@ async def test_update_flow_evidence_policy_persists_and_audits():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=audit_service,
-        data_retention_service=MockDataRetentionService(),
         skill_repo=MagicMock(),
     )
 
@@ -1009,7 +985,6 @@ async def test_update_flow_evidence_policy_rejects_empty_patch():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=MockAuditService(),
-        data_retention_service=MockDataRetentionService(),
         skill_repo=MagicMock(),
     )
 
@@ -1042,7 +1017,6 @@ async def test_get_flow_evidence_policy_requires_admin_permission():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=MockAuditService(),
-        data_retention_service=MockDataRetentionService(),
         skill_repo=MagicMock(),
     )
 
@@ -1083,7 +1057,6 @@ async def test_get_flow_runtime_policy_reads_tenant_override(monkeypatch):
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=MockAuditService(),
-        data_retention_service=MockDataRetentionService(),
         skill_repo=MagicMock(),
     )
 
@@ -1133,7 +1106,6 @@ async def test_update_flow_runtime_policy_persists_and_audits(monkeypatch):
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=audit_service,
-        data_retention_service=MockDataRetentionService(),
         skill_repo=MagicMock(),
     )
 
@@ -1181,7 +1153,6 @@ def _runtime_policy_service(monkeypatch, *, capacity=8, flow_settings=None):
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=audit_service,
-        data_retention_service=MockDataRetentionService(),
         skill_repo=MagicMock(),
     )
     return service, tenant_repo, calls
@@ -1328,7 +1299,6 @@ async def test_get_flow_retention_policy_reads_tenant_override():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=MockAuditService(),
-        data_retention_service=MockDataRetentionService(),
         skill_repo=MagicMock(),
     )
 
@@ -1355,7 +1325,6 @@ async def test_update_flow_retention_policy_persists_and_audits():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=audit_service,
-        data_retention_service=MockDataRetentionService(),
         skill_repo=MagicMock(),
     )
 
@@ -1397,7 +1366,6 @@ async def test_update_flow_retention_policy_can_clear_override():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=MockAuditService(),
-        data_retention_service=MockDataRetentionService(),
         skill_repo=MagicMock(),
     )
 
@@ -1429,7 +1397,6 @@ async def test_update_flow_retention_policy_rejects_stored_unknown_keys():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=MockAuditService(),
-        data_retention_service=MockDataRetentionService(),
         skill_repo=MagicMock(),
     )
 
@@ -1463,7 +1430,6 @@ async def test_update_flow_runtime_policy_scrubs_stale_retention_policy_keys():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=MockAuditService(),
-        data_retention_service=MockDataRetentionService(),
         skill_repo=MagicMock(),
     )
 
@@ -1490,7 +1456,6 @@ async def test_update_flow_retention_policy_rejects_empty_patch():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=MockAuditService(),
-        data_retention_service=MockDataRetentionService(),
         skill_repo=MagicMock(),
     )
 
@@ -1511,7 +1476,6 @@ async def test_settings_project_object_content_as_a_read_only_capability():
         ai_models_service=MockRepo(),
         feature_flag_service=MockFeatureFlagService(),
         audit_service=MockAuditService(),
-        data_retention_service=MockDataRetentionService(),
         skill_repo=MagicMock(),
         object_content=runtime,
     )
@@ -1541,7 +1505,6 @@ def _flow_limits_service(tenant_repo: "MockTenantRepo") -> SettingService:
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=tenant_repo,
         audit_service=MockAuditService(),
-        data_retention_service=MockDataRetentionService(),
         skill_repo=MagicMock(),
         upload_admission=_upload_admission(),
     )
@@ -1612,7 +1575,6 @@ async def test_whats_new_toggle_reads_the_tenant_flag_and_writes_it():
         feature_flag_service=flags,
         tenant_repo=MockTenantRepo(),
         audit_service=MockAuditService(),
-        data_retention_service=MockDataRetentionService(),
         skill_repo=MagicMock(),
         upload_admission=_upload_admission(),
     )

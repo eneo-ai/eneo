@@ -33,9 +33,6 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from eneo.data_retention.infrastructure.data_retention_service import (
-    RETENTION_BATCH_SIZE,
-)
 from eneo.database.tables.flow_tables import FlowRuns
 from eneo.files.file_models import FileType
 from eneo.files.file_service import FileService
@@ -69,6 +66,7 @@ from eneo.flows.flow_runtime_upload_repo import FlowRuntimeUploadRepository
 from eneo.flows.infrastructure.flow_provider_call_repo import (
     FlowProviderCallRepository,
 )
+from eneo.flows.infrastructure.flow_retention_repo import RETENTION_BATCH_SIZE
 from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository, PreseedStep
 from eneo.flows.infrastructure.flow_run_step_input_file_rows import (
     build_step_input_file_rows,

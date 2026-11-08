@@ -32,6 +32,7 @@ from eneo.database.tables.questions_table import Questions, QuestionsFiles
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
+from eneo.flows.infrastructure.flow_retention_repo import FlowRetentionRepository
 
 
 @pytest.fixture
@@ -559,7 +560,9 @@ async def test_space_conversation_and_app_retention_does_not_activate_flow_delet
     flow_candidates = list(
         (
             await async_session.scalars(
-                retention_service._build_due_flow_run_history_purge_query(now=anchor)
+                FlowRetentionRepository(
+                    async_session
+                )._build_due_flow_run_history_purge_query(now=anchor)
             )
         ).all()
     )

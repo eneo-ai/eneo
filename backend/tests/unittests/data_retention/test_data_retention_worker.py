@@ -3,7 +3,6 @@ from __future__ import annotations
 import contextlib
 import inspect
 from collections.abc import AsyncIterator
-from typing import Never
 
 import pytest
 
@@ -43,7 +42,6 @@ class _SessionProvider:
 class _DataRetentionService:
     def __init__(self, *, app_runs_error: Exception | None = None) -> None:
         self.app_runs_error = app_runs_error
-        self.flow_destructive_calls: list[str] = []
 
     async def delete_old_questions(self, *, commit_each_batch: bool = False) -> int:
         assert commit_each_batch
@@ -59,34 +57,6 @@ class _DataRetentionService:
         assert commit_each_batch
         return 5
 
-    def _reject_flow_destructive_call(self, name: str) -> Never:
-        self.flow_destructive_calls.append(name)
-        raise AssertionError(f"Scheduled cleanup called {name}")
-
-    async def purge_old_flow_run_history_batch(self, **_: object) -> Never:
-        self._reject_flow_destructive_call("purge_old_flow_run_history_batch")
-
-    async def count_blocked_flow_run_history_purge_candidates(
-        self, **_: object
-    ) -> Never:
-        self._reject_flow_destructive_call(
-            "count_blocked_flow_run_history_purge_candidates"
-        )
-
-    async def purge_abandoned_flow_runtime_uploads(self, **_: object) -> Never:
-        self._reject_flow_destructive_call("purge_abandoned_flow_runtime_uploads")
-
-    async def purge_soft_deleted_flow_template_assets(self, **_: object) -> Never:
-        self._reject_flow_destructive_call("purge_soft_deleted_flow_template_assets")
-
-    async def redact_old_flow_debug_evidence(self, **_: object) -> Never:
-        self._reject_flow_destructive_call("redact_old_flow_debug_evidence")
-
-    async def delete_old_delivered_flow_audit_outbox_rows(self) -> Never:
-        self._reject_flow_destructive_call(
-            "delete_old_delivered_flow_audit_outbox_rows"
-        )
-
 
 class _Container:
     def __init__(self, service: _DataRetentionService | None = None) -> None:
@@ -98,7 +68,7 @@ class _Container:
 
 
 @pytest.mark.asyncio
-async def test_cleanup_old_data_deletes_by_policy_and_leaves_flow_history(
+async def test_cleanup_old_data_deletes_by_policy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session = _Session()
@@ -112,7 +82,6 @@ async def test_cleanup_old_data_deletes_by_policy_and_leaves_flow_history(
     )
     cleanup_old_data = inspect.unwrap(data_retention_worker.cleanup_old_data)
     container = _Container()
-    service = container._service
 
     result = await cleanup_old_data(container=container)
 
@@ -123,7 +92,6 @@ async def test_cleanup_old_data_deletes_by_policy_and_leaves_flow_history(
         "sessions": 5,
         "total": 10,
     }
-    assert service.flow_destructive_calls == []
     assert container.session.reset_count == 1
 
 
@@ -155,5 +123,4 @@ async def test_cleanup_old_data_keeps_non_flow_partial_success(
         "total": 7,
     }
     assert "sensitive value" not in "\n".join(result["errors"])
-    assert service.flow_destructive_calls == []
     assert container.session.reset_count == 1

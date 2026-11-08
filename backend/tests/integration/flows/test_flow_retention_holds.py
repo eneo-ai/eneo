@@ -17,10 +17,7 @@ import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-from eneo.data_retention.infrastructure import data_retention_service, gallring_lock
-from eneo.data_retention.infrastructure.data_retention_service import (
-    DataRetentionService,
-)
+from eneo.data_retention.infrastructure import gallring_lock
 from eneo.database.tables.audit_log_table import AuditLog
 from eneo.database.tables.flow_tables import (
     FlowRetentionHolds,
@@ -37,6 +34,8 @@ from eneo.flows.domain.flow_run_retention_policy import (
     FlowRunRetentionMode,
     FlowRunRetentionPolicy,
 )
+from eneo.flows.infrastructure import flow_retention_repo
+from eneo.flows.infrastructure.flow_retention_repo import FlowRetentionRepository
 from eneo.flows.infrastructure.flow_run_history_purge_repo import (
     FlowRunHistoryPurgeRepository,
 )
@@ -333,7 +332,9 @@ async def test_purge_recheck_honours_a_hold_committed_after_selection(
         session = purging.session()
         selected = list(
             await session.scalars(
-                DataRetentionService(session)._build_flow_run_history_purge_batch_query(
+                FlowRetentionRepository(
+                    session
+                )._build_flow_run_history_purge_batch_query(
                     now=datetime.now(timezone.utc), limit=10, flow_id=flow_id
                 )
             )
@@ -1133,7 +1134,7 @@ async def test_purge_preview_counts_held_runs_apart_from_real_blockers(
         )
     await _place(client, admin_token, flow_id=flow_id)
     monkeypatch.setattr(
-        data_retention_service, "FLOW_RUN_HISTORY_PURGE_DIAGNOSTIC_WINDOW", 1
+        flow_retention_repo, "FLOW_RUN_HISTORY_PURGE_DIAGNOSTIC_WINDOW", 1
     )
 
     response = await client.post(
