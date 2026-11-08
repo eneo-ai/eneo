@@ -92,20 +92,41 @@ _RAW_EDGE_WRITE = re.compile(
 )
 
 
-def _edge_uses(function: FunctionNode) -> set[str]:
+def _table_names(tree: ast.AST) -> set[str]:
+    """The names the edges table goes by in a module: its own and any alias it
+    is imported as."""
+    return {_EDGE_TABLE} | {
+        alias.asname
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+        for alias in node.names
+        if alias.name == _EDGE_TABLE and alias.asname
+    }
+
+
+def _is_table(node: ast.expr, names: set[str]) -> bool:
+    if isinstance(node, ast.Attribute) and node.attr == "__table__":
+        node = node.value
+    return isinstance(node, ast.Name) and node.id in names
+
+
+def _edge_uses(function: FunctionNode, names: set[str]) -> set[str]:
     """What this function does with the edges table itself rather than with its
-    columns: the statement or call it passes the table to, or "construct" for
-    a new ORM instance. A column read such as ``ContentDerivations.id`` is no
-    use; an ORM load or instance is, since it could change an edge unseen."""
+    columns: the call it passes the table to, the table's own method it calls,
+    or "construct" for a new ORM instance. A column read such as
+    ``ContentDerivations.id`` is no use; an ORM load or instance is, since it
+    could change an edge unseen."""
     uses: set[str] = set()
     for node in ast.walk(function):
         if not isinstance(node, ast.Call):
             continue
-        if isinstance(node.func, ast.Name) and node.func.id == _EDGE_TABLE:
+        if _is_table(node.func, names):
             uses.add("construct")
+        elif isinstance(node.func, ast.Attribute) and _is_table(node.func.value, names):
+            uses.add(node.func.attr.lower())
         elif any(
-            isinstance(argument, ast.Name) and argument.id == _EDGE_TABLE
-            for argument in node.args
+            _is_table(argument, names)
+            for argument in (*node.args, *(keyword.value for keyword in node.keywords))
         ):
             uses.add(
                 str(
@@ -128,8 +149,10 @@ def test_edges_are_only_added_and_only_removed_with_their_session():
         module = ".".join(
             ("eneo", *path.relative_to(SOURCE_ROOT).with_suffix("").parts)
         )
-        for function in _functions(ast.parse(source)):
-            if found := _edge_uses(function):
+        tree = ast.parse(source)
+        names = _table_names(tree)
+        for function in _functions(tree):
+            if found := _edge_uses(function, names):
                 uses[f"{module}:{function.name}"] = found
 
     assert uses == {
@@ -140,21 +163,31 @@ def test_edges_are_only_added_and_only_removed_with_their_session():
 
 
 def test_the_edge_check_sees_each_kind_of_use():
-    """Mutant: the detector misses a use, so the check above passes vacuously."""
+    """Mutant: the detector misses a use, so the check above passes vacuously.
+    It reads the usual forms, not every way Python could reach the table."""
     tree = ast.parse(
+        "from eneo.database.tables.retention_tables import ContentDerivations as Edge\n"
         "def add():\n    insert(ContentDerivations).values(x)\n"
         "def change():\n    sa.Update(ContentDerivations).values(x)\n"
         "def remove():\n    sa.delete(ContentDerivations).where(x)\n"
+        "def by_keyword():\n    sa.update(table=ContentDerivations).values(x)\n"
+        "def by_table():\n    ContentDerivations.__table__.delete().where(x)\n"
+        "def by_alias():\n    sa.update(Edge).values(x)\n"
         "def load():\n    session.get(ContentDerivations, x)\n"
         "def make():\n    session.add(ContentDerivations(copy_session_id=x))\n"
-        "def columns():\n    sa.select(ContentDerivations.id)\n"
+        "def columns():\n    sa.select(ContentDerivations.id).where(\n"
+        "        ContentDerivations.copy_session_id.in_(x))\n"
         "def other():\n    sa.delete(Questions).where(x)\n"
     )
-    found = {node.name: _edge_uses(node) for node in _functions(tree)}
+    names = _table_names(tree)
+    found = {node.name: _edge_uses(node, names) for node in _functions(tree)}
     assert found == {
         "add": {"insert"},
         "change": {"update"},
         "remove": {"delete"},
+        "by_keyword": {"update"},
+        "by_table": {"delete"},
+        "by_alias": {"update"},
         "load": {"get"},
         "make": {"construct"},
         "columns": set(),

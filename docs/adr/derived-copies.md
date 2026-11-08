@@ -53,8 +53,9 @@ exists. `copy_session_valid` is part of the statement that reads the content,
 so a removal that committed before the statement's snapshot makes the copy
 unreadable to that statement; there is no separate check to race. A session
 read loads its turns in statements after the session row, so after its last
-statement it asks once more (`removed_copies`), for all its sessions at once:
-a removal committed while it read refuses the read. That is one statement per
+statement it asks once more which of its sessions still exist and are readable
+(`readable_sessions`), for all of them at once: a source or the conversation
+itself removed while it read refuses the read. That is one statement per
 read that loads turns, one index probe for a conversation that is no copy; a
 check on each turn's row would instead probe every edge of a copy once per
 turn. Renaming a conversation and leaving feedback on it change the session
@@ -88,8 +89,9 @@ stored and still unreadable.
   The fresh check inside each `DELETE` keeps a question outside a widget. It
   does not read the copy's edges again: a copy found invalid stays invalid,
   because question ids never return and an edge goes only with its copy
-  session. A test pins that only registration adds edges and only step
-  `edges` deletes them, for copy sessions that are gone. Reading them again
+  session. A test checks the source for other uses of the edges table: only
+  registration adds edges and only step `edges` deletes them, for copy
+  sessions that are gone. Reading them again
   would cost each `DELETE` work that grows with the copy's sources, outside
   the row budgets.
 - Step `edges` deletes the edges of copy sessions that are gone and releases
