@@ -34,11 +34,12 @@ Use environment variables to configure OIDC. This is the default mode (`FEDERATI
 - Admin access to your Identity Provider
 - Access to your Eneo backend `.env` file
 - HTTPS enabled on your Eneo domain (`PUBLIC_ORIGIN` must be `https://`, except `http://localhost` for development)
+- Redis running (each sign-in is a one-time transaction stored there; without it, sign-in is refused)
 
 <Steps>
 ### Register your application in the IdP
 
-Register Eneo as a confidential web application and set the redirect URI to your Eneo origin plus `/login/callback`:
+Register Eneo as a confidential web application and set the redirect URI to your Eneo origin plus `/login/callback`. The [provider contract](/guides/oidc-federation#provider-contract) lists what Eneo sends and checks:
 
 ```
 https://your-domain.com/login/callback
@@ -341,6 +342,8 @@ For push-based provisioning from your directory (deactivation, groups), see [SCI
 | `canonical_public_origin` | No | Origin used for the redirect URI; falls back to `PUBLIC_ORIGIN` |
 | `redirect_path` | No | Callback path (default: `/login/callback`) |
 | `additional_redirect_uris` | No | Extra fully-qualified callback URLs, each also registered in the IdP |
+| `signing_algorithms` | No | ID token algorithms to accept; default from discovery, else `RS256`. See the [provider contract](/guides/oidc-federation#provider-contract) |
+| `email_verified_claims` | No | Claims that say the email is verified, in order; default `["email_verified", "xms_edov"]` |
 
 Scopes are fixed to `openid email profile`.
 
@@ -389,6 +392,14 @@ The ID token has no `email` claim (`401`). On Azure Entra ID this happens when t
 Token exchange fails with `401 Failed to exchange authorization code for tokens`.
 
 **Fix:** Verify that the client ID and secret match the IdP registration and that the secret has not expired. The IdP's own error response is written to the backend log.
+
+### Sign-in refused with a code
+
+The refusals with a code are the same for one organisation as for several:
+
+- `oidc_transaction_invalid`: [Authorization session is invalid or has expired](/guides/oidc-federation/multi-tenant#authorization-session-is-invalid-or-has-expired)
+- `oidc_login_unavailable`: [Sign-in is temporarily unavailable](/guides/oidc-federation/multi-tenant#sign-in-is-temporarily-unavailable)
+- `oidc_response_not_verified`: [The sign-in response could not be verified](/guides/oidc-federation/multi-tenant#the-sign-in-response-could-not-be-verified), including an issuer with a placeholder such as `{tenantid}`
 
 ### Debug mode
 

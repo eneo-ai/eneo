@@ -293,31 +293,16 @@ The callback takes the transaction with `GETDEL`, so exactly one callback can us
 | Situation | Behaviour |
 |-----------|-----------|
 | Transaction present | Taken and removed; its tenant must match the state's, otherwise `400 Authorization state mismatch detected. Please restart the sign-in flow.` |
-| Transaction missing or unreadable (expired, already used, Redis restarted, or started before an upgrade), or the provider's issuer changed since the sign-in started | `400` `oidc_transaction_invalid`: "Authorization session is invalid or has expired. Please restart the sign-in flow." |
+| Transaction missing or unreadable (expired, already used, Redis restarted), or the provider's issuer changed since the sign-in started | `400` `oidc_transaction_invalid`: "Authorization session is invalid or has expired. Please restart the sign-in flow." |
 | Redis unavailable, or no answer within 2 seconds | `503` `oidc_login_unavailable` at initiation or callback. A callback whose read got no answer counts the transaction as used, so the sign-in must be started again |
 
-None of these refusals writes a session or a user row.
+A state from before an upgrade is refused earlier with `400 Invalid state parameter`. None of these refusals writes a session or a user row.
 
 ### Redirect URI Grace Period
 
 When tenant federation configuration changes (e.g., updating `canonical_public_origin`), users mid-authentication could encounter redirect URI mismatches. The grace period mechanism prevents failed logins during configuration updates.
 
-**How it works:**
-
-```python
-# federation_router.py
-grace_period = min(
-    settings.oidc_redirect_grace_period_seconds,
-    settings.oidc_state_ttl_seconds,
-)
-
-if redirect_mismatch:
-    if not settings.strict_oidc_redirect_validation:
-        allow_redirect_mismatch = True
-    else:
-        # grace-period checks, see table below
-        ...
-```
+**How it works:** `_require_registered_redirect_uri` in `federation_router.py` checks the stored `redirect_uri`, and `_changed_during_sign_in` decides whether the grace period applies. The grace period is the smaller of `oidc_redirect_grace_period_seconds` and `oidc_state_ttl_seconds`.
 
 The `redirect_uri` stored in the transaction is first checked for well-formedness and then compared with the tenant's currently configured redirect URIs (canonical plus `additional_redirect_uris`). On a mismatch:
 
@@ -340,20 +325,7 @@ Otherwise the callback fails with `400 Redirect URI mismatch - authentication fl
 
 ### Token Auth Method Selection
 
-The backend automatically selects the token endpoint authentication method from IdP discovery:
-
-```python
-# federation_router.py
-def _select_auth_method(methods: list[str] | None) -> str | None:
-    if not methods:
-        return None
-    normalized = [str(m).lower() for m in methods if m]
-    if "client_secret_post" in normalized:
-        return "client_secret_post"
-    if "client_secret_basic" in normalized:
-        return "client_secret_basic"
-    return normalized[0]
-```
+At sign-in, `_token_auth_method` in `authentication/oidc/profile.py` selects the token endpoint authentication method. When a federation config is saved, `_select_token_auth_method` in `tenants/tenant_federation_service.py` stores one from discovery.
 
 **Selection priority:**
 
@@ -423,11 +395,15 @@ Federation config is stored in the `federation_config` JSONB column of the `tena
 | `canonical_public_origin` | request (optional) | Tenant's access URL, falls back to `PUBLIC_ORIGIN` |
 | `redirect_path` | request (optional) | Defaults to `/login/callback` |
 | `additional_redirect_uris` | request (optional) | Extra fully-qualified redirect URIs accepted at callback |
+| `signing_algorithms` | request (optional) | ID token algorithms to accept; default from discovery, else `RS256` |
+| `email_verified_claims` | request (optional) | Claims that say the email is verified, in order; default `["email_verified", "xms_edov"]` |
 | `issuer`, `authorization_endpoint`, `token_endpoint`, `userinfo_endpoint`, `jwks_uri` | discovery | Resolved at PUT/PATCH time |
 | `token_endpoint_auth_method`, `token_endpoint_auth_methods_supported` | discovery | See [Token Auth Method Selection](#token-auth-method-selection) |
 | `scopes` | default | `["openid", "email", "profile"]` (not configurable via the API) |
 | `claims_mapping` | default | `{"email": "email", "username": "sub", "name": "name"}`; only `email` is read at login |
 | `encrypted_at` | server | Timestamp of the last secret encryption |
+
+A `PATCH` that sets `canonical_public_origin`, `redirect_path`, `additional_redirect_uris`, `signing_algorithms` or `email_verified_claims` to `null` removes the key, which restores its default. A `GET` returns `null` for a key that is not stored.
 
 ### Secret Encryption
 
@@ -479,7 +455,7 @@ The verification claims and their order come from the provider's `email_verified
 
 ### User Claims Extracted
 
-Only the email claim is used. The claim name comes from `claims_mapping.email` (default `email`); the ID token's `sub` is logged for diagnostics but not persisted:
+Only the email claim is used. The claim name comes from `claims_mapping.email` (default `email`); the ID token's `sub` is logged for diagnostics but not persisted.
 
 A missing claim is rejected with `401 Email claim not found in ID token`; a malformed address with `401 Email claim from identity provider is invalid. Contact your administrator.`
 
@@ -631,7 +607,7 @@ A refused or failed sign-in is logged whether or not debug logging is on: `oidc_
     **Required permissions:** `openid`, `profile`, `email`, `User.Read`
 
     **Common issues:**
-    - Multi-tenant apps: Use `organizations` or `common` instead of specific tenant ID
+    - Use your organisation's own discovery URL, as above, never `common`, `organizations` or `consumers`: their issuer contains a placeholder, so every sign-in fails with `issuer_mismatch`. See [Upgrading](/guides/oidc-federation#upgrading)
     - Missing email: Ensure `email` scope and user has email set in Azure AD
     - JIT refused with "requires a verified email address": add `xms_edov` as an optional ID-token claim; Entra ID does not send `email_verified` for organisational accounts
   </Tabs.Tab>
@@ -672,4 +648,14 @@ These endpoints do NOT require authentication:
 | `GET` | `/api/v1/auth/federation-status` | Tells the login page which mode is active (`has_single_tenant_federation`, `has_multi_tenant_federation`, `has_global_oidc_config`, `tenant_count`) |
 | `GET` | `/api/v1/auth/tenants` | List active tenants with a slug for the selector |
 | `GET` | `/api/v1/auth/initiate` | Initiate OIDC authentication (`tenant`, `state`, optional `redirect_uri` query parameters) |
-| `POST` | `/api/v1/auth/callback` | Handle OIDC callback (`code`, `state`) and issue the Eneo session token |
+| `POST` | `/api/v1/auth/callback` | Handle OIDC callback (`code`, `state`, optional `iss`) and issue the Eneo session token |
+
+`/auth/initiate` and `/auth/callback` refuse with a typed code in the error body:
+
+| Status | `code` | `eneo_error_code` | Meaning |
+|--------|--------|-------------------|---------|
+| `503` | `oidc_login_unavailable` | `9077` | Redis could not store or return the sign-in transaction |
+| `400` | `oidc_transaction_invalid` | `9078` | The sign-in transaction is missing, used or no longer fits the provider |
+| `401` | `oidc_response_not_verified` | `9079` | The provider's response failed a check of the provider contract |
+
+Other refusals are plain `400` answers without a code: `Invalid state parameter`, `Authorization session expired. Please try logging in again.`, `Authorization state mismatch detected. Please restart the sign-in flow.` and the redirect URI mismatch.
