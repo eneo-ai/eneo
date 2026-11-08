@@ -947,7 +947,9 @@ class SessionRepository:
         Questions and their file links cascade with the session, but the
         ``files`` rows do not. Uploads and tool-generated images that only
         this conversation used are deleted with it; a File still used by
-        another conversation, Assistant, App or App run is kept.
+        another conversation, Assistant, App or App run is kept. A copy of
+        removed content comes back without its name and feedback, which no
+        read returns either.
         """
         file_ids = list(
             await self.session.scalars(
@@ -959,7 +961,12 @@ class SessionRepository:
         )
         deleted = await self.delegate.delete(id)
         await delete_unused_root_files(self.session, file_ids)
-        if deleted is not None:
-            # Gone now, so no longer readable; its turns went with it.
-            await self._attach_turn_details([deleted])
+        if deleted is None:
+            return None
+        # Gone now, so no longer readable; its turns went with it.
+        await self._attach_turn_details([deleted])
+        if await is_removed_copy(self.session, id):
+            return deleted.model_copy(
+                update={"name": "", "feedback_value": None, "feedback_text": None}
+            )
         return deleted

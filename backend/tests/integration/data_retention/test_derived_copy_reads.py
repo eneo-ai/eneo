@@ -424,6 +424,40 @@ async def test_a_key_scoped_to_the_copys_assistant_gets_the_explanation(
     assert other.json().get("code") != "derived_source_removed"
 
 
+async def test_deleting_a_copy_through_its_assistant_returns_none_of_its_content(
+    client: AsyncClient,
+    owner_token: str,
+    copy: Copy,
+    retention_session: AsyncSession,
+):
+    """Mutant: the Assistant's delete answers with the copy as it was stored,
+    so the title and feedback that every read refuses come back in the
+    response. The copy is deleted all the same."""
+    conversation = f"/api/v1/conversations/{copy.copy_session}/"
+    renamed = await client.patch(
+        f"{conversation}name/", json={"name": "title-marker"}, headers=auth(owner_token)
+    )
+    assert renamed.status_code == 200, renamed.text
+    rated = await client.post(
+        f"{conversation}feedback/",
+        json={"value": 1, "text": "feedback-marker"},
+        headers=auth(owner_token),
+    )
+    assert rated.status_code == 200, rated.text
+    await remove_by_user(client, owner_token, copy, retention_session)
+
+    deleted = await client.delete(
+        f"/api/v1/assistants/{copy.copy_assistant}/sessions/{copy.copy_session}/",
+        headers=auth(owner_token),
+    )
+
+    assert deleted.status_code == 200, deleted.text
+    assert "marker" not in deleted.text
+    assert deleted.json()["id"] == str(copy.copy_session)
+    gone = await client.get(conversation, headers=auth(owner_token))
+    assert gone.status_code == 404, gone.text
+
+
 async def test_follow_ups_and_other_content_readers_refuse_the_copy(
     client: AsyncClient,
     db_container,

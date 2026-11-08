@@ -98,12 +98,14 @@ async def readable_sessions(
 
 
 async def is_removed_copy(session: AsyncSession, copy_session_id: UUID) -> bool:
-    """Whether an existing session is a copy whose source was removed."""
+    """Whether the session is a copy whose source was removed.
+
+    Reads the edges alone, so it also answers for a session deleted earlier in
+    the same transaction.
+    """
     return bool(
         await session.scalar(
-            sa.select(~copy_session_valid(Sessions.id.expression)).where(
-                Sessions.id == copy_session_id
-            )
+            sa.select(~copy_session_valid(sa.literal(copy_session_id, sa.Uuid)))
         )
     )
 
