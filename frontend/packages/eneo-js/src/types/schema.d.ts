@@ -5178,7 +5178,7 @@ export interface paths {
     post?: never;
     /**
      * Delete icon
-     * @description Delete an icon of the caller's tenant that no assistant, app, space or group chat shows. Remove the icon from its resource with that resource's update first; an icon still in use is refused with 409 (`eneo_error_code` 9075).
+     * @description Delete an icon of the caller's tenant that no assistant, app or space shows. Remove the icon from its resource with that resource's update first; an icon still in use is refused with 409 (`eneo_error_code` 9075).
      */
     delete: operations["delete_icon_api_v1_icons__id___delete"];
     options?: never;

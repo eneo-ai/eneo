@@ -98,8 +98,8 @@ export function filterSessions<T extends SessionRow>(
 }
 
 /**
- * "Konversationer" (decision 29): one panel, scoped to this assistant or
- * group chat, or to all of them ("Den här assistenten | Alla"), with a title
+ * "Konversationer" (decision 29): one panel, scoped to this assistant or to
+ * all of them ("Den här assistenten | Alla"), with a title
  * search at the top and the rows grouped by date (Idag, Igår, …). This
  * assistant's list is complete: "Visa fler" appends the next page and moves
  * focus to the first row it added. "Alla" lists the latest conversations

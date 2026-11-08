@@ -2,7 +2,7 @@ import { useTranslations } from "use-intl";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 
 /**
- * Publish/unpublish confirmation shared by assistants, group chats and apps.
+ * Publish/unpublish confirmation shared by assistants and apps.
  * Ported from the Svelte PublishingDialog.
  */
 export function PublishDialog({

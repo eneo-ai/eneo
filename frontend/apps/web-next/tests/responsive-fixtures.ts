@@ -6,7 +6,7 @@ import { ROUTES, type Fixtures } from "./responsive-routes";
 
 /**
  * What the screens that need a record are opened with: a shared space with an
- * assistant, an app and a run, plus a group chat, a website and a collection.
+ * assistant, an app and a run, plus a website and a collection.
  * Created once per run; ROUTES (tests/responsive-routes.ts) points at them.
  */
 export async function createFixtures(
