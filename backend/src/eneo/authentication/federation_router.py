@@ -36,6 +36,7 @@ from eneo.main.config import Settings, get_settings, validate_redirect_uri
 from eneo.main.container.container import Container
 from eneo.main.exceptions import FederatedLoginDenied
 from eneo.main.logging import get_logger
+from eneo.main.models import GeneralError
 from eneo.main.request_context import ensure_correlation_id, set_request_context
 from eneo.observability.debug_toggle import is_debug_enabled
 from eneo.observability.redaction import sanitize_payload
@@ -885,12 +886,23 @@ async def initiate_federated_sign_in(
             "description": (
                 "Invalid or expired state, or a binding_verifier that does not "
                 "match the sign-in (oidc_transaction_invalid)"
-            )
+            ),
+            "model": GeneralError,
         },
-        401: {"description": "Token validation failed"},
-        403: {"description": "Domain not allowed, inactive tenant, or user missing"},
-        404: {"description": "Tenant or user not found"},
-        503: {"description": "Sign-in store unavailable (oidc_login_unavailable)"},
+        401: {"description": "Token validation failed", "model": GeneralError},
+        403: {
+            "description": (
+                "Domain not allowed, inactive tenant or user missing; or "
+                "`identity_conflict` (9082): the account is bound to another "
+                "sign-in identity"
+            ),
+            "model": GeneralError,
+        },
+        404: {"description": "Tenant or user not found", "model": GeneralError},
+        503: {
+            "description": "Sign-in store unavailable (oidc_login_unavailable)",
+            "model": GeneralError,
+        },
     },
 )
 @endpoint_access(

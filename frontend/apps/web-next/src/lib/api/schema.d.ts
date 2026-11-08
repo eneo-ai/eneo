@@ -544,7 +544,7 @@ export interface paths {
     put?: never;
     /**
      * Sign Out
-     * @description End the Eneo session the Bearer token names: a copy of the token stops working at once. A token that names no session, or is not Eneo's, has none to end and also answers 204. 503 `sign_out_unavailable` means the end is not confirmed: the session may already have ended, or the token may still work. Keep the token and retry; once the session has ended, a retry answers 204.
+     * @description End the Eneo session the Bearer token names: a copy of the token stops working at once. 204 means no session remains that this token can use, also when it named none to end: no or an invalid token, a token without a session, a provider token, or one expired for longer than it was valid. A token without a session is not revoked and works until it expires. 503 `sign_out_unavailable` means the end is not confirmed: the session may already have ended, or the token may still work. Keep the token and retry; once the session has ended, a retry answers 204.
      */
     post: operations["Sign_out_api_v1_users_logout__post"];
     delete?: never;
@@ -20332,7 +20332,7 @@ export interface components {
       email_verified_claims?: string[] | null;
       /**
        * Subject Claim
-       * @description The token claim an account is bound to, stored as claims_mapping.subject: an immutable id the provider never gives to another person, never the email claim. Omitted: unchanged, or 'sub' when the provider is first registered. Changing it after people are bound needs a migration window from each issuer and audience to itself first.
+       * @description The token claim an account is bound to, stored as claims_mapping.subject: an immutable id the provider never gives to another person, never the email claim. Changing it after people are bound needs a migration window from each issuer and audience to itself first. Omitted, the stored claim is kept.
        * @example oid
        */
       subject_claim?: string | null;
@@ -22000,7 +22000,7 @@ export interface components {
       email_verified_claims?: string[] | null;
       /**
        * Subject Claim
-       * @description The token claim an account is bound to, stored as claims_mapping.subject: an immutable id the provider never gives to another person, never the email claim. Omitted: unchanged, or 'sub' when the provider is first registered. Changing it after people are bound needs a migration window from each issuer and audience to itself first.
+       * @description The token claim an account is bound to, stored as claims_mapping.subject: an immutable id the provider never gives to another person, never the email claim. Changing it after people are bound needs a migration window from each issuer and audience to itself first. Omitted, PUT stores 'sub': send the current claim to keep it.
        * @example oid
        */
       subject_claim?: string | null;
@@ -23868,7 +23868,7 @@ export interface components {
       allowed_domains?: string[];
       /**
        * Subject Claim
-       * @description The token claim an account is bound to, stored as claims_mapping.subject: an immutable id the provider never gives to another person, never the email claim. Omitted: unchanged, or 'sub' when the provider is first registered. Changing it after people are bound needs a migration window from each issuer and audience to itself first.
+       * @description The token claim an account is bound to, stored as claims_mapping.subject: an immutable id the provider never gives to another person, never the email claim. Changing it after people are bound needs a migration window from each issuer and audience to itself first. Omitted, the stored claim is kept.
        * @example oid
        */
       subject_claim?: string;
@@ -61493,28 +61493,36 @@ export interface operations {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Token validation failed */
       401: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
-      /** @description Domain not allowed, inactive tenant, or user missing */
+      /** @description Domain not allowed, inactive tenant or user missing; or `identity_conflict` (9082): the account is bound to another sign-in identity */
       403: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Tenant or user not found */
       404: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Validation Error */
       422: {
@@ -61530,7 +61538,9 @@ export interface operations {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
     };
   };

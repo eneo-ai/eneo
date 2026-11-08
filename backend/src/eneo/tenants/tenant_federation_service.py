@@ -72,13 +72,17 @@ _DOMAIN_PATTERN = re.compile(r"^[a-z0-9]+([\-\.]{1}[a-z0-9]+)*\.[a-z]{2,}$")
 _OPERATOR_ACTOR = {"type": "sysadmin", "via": "eneo_super_api_key"}
 
 
-_SUBJECT_CLAIM_DESCRIPTION = (
+_SUBJECT_CLAIM = (
     "The token claim an account is bound to, stored as claims_mapping.subject: "
     "an immutable id the provider never gives to another person, never the email "
-    "claim. Omitted: unchanged, or 'sub' when the provider is first registered. "
-    "Changing it after people are bound needs a migration window from each "
-    "issuer and audience to itself first."
+    "claim. Changing it after people are bound needs a migration window from each "
+    "issuer and audience to itself first. "
 )
+# PUT writes a whole new mapping; PATCH merges into the stored one.
+_SUBJECT_CLAIM_PUT_DESCRIPTION = (
+    _SUBJECT_CLAIM + "Omitted, PUT stores 'sub': send the current claim to keep it."
+)
+_SUBJECT_CLAIM_PATCH_DESCRIPTION = _SUBJECT_CLAIM + "Omitted, the stored claim is kept."
 
 
 def _validate_claim_name(value: str | None) -> str | None:
@@ -186,7 +190,10 @@ class FederationRequestBase(BaseModel):
         examples=[["email_verified"]],
     )
     subject_claim: str | None = Field(
-        None, max_length=255, description=_SUBJECT_CLAIM_DESCRIPTION, examples=["oid"]
+        None,
+        max_length=255,
+        description=_SUBJECT_CLAIM_PATCH_DESCRIPTION,
+        examples=["oid"],
     )
 
     @field_validator("subject_claim")
@@ -281,6 +288,12 @@ class SetFederationRequest(FederationRequestBase):
         description="Email domains allowed for this tenant (e.g., ['stockholm.se'])",
         examples=[["stockholm.se", "stockholm.gov.se"]],
     )
+    subject_claim: str | None = Field(
+        None,
+        max_length=255,
+        description=_SUBJECT_CLAIM_PUT_DESCRIPTION,
+        examples=["oid"],
+    )
 
 
 class PatchFederationRequest(FederationRequestBase):
@@ -351,7 +364,9 @@ class TenantAdminFederationPatch(BaseModel):
     )
     subject_claim: (
         Annotated[str, Field(min_length=1, max_length=255)] | SkipJsonSchema[None]
-    ) = Field(default=None, description=_SUBJECT_CLAIM_DESCRIPTION, examples=["oid"])
+    ) = Field(
+        default=None, description=_SUBJECT_CLAIM_PATCH_DESCRIPTION, examples=["oid"]
+    )
 
     @field_validator("subject_claim")
     @classmethod
