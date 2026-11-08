@@ -35,7 +35,6 @@ def _client(*, permissions: list[Permission], tenant: Any) -> TestClient:
         feature_flag_service=MagicMock(),
         tenant_repo=SimpleNamespace(tenant=tenant),
         audit_service=MagicMock(),
-        data_retention_service=MagicMock(),
         skill_repo=MagicMock(),
     )
     container = MagicMock()
