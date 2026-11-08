@@ -559,15 +559,6 @@ class CompletionService:
                 f"[MCP] Proxy created with {mcp_proxy.get_tool_count()} tools from {len(mcp_servers)} server(s)"
             )
 
-        extra_tools = (
-            mcp_proxy.get_tools_for_llm()
-            if mcp_proxy and model.supports_tool_calling
-            else []
-        )
-        delegation = current_assistant_delegation()
-        if delegation is not None:
-            extra_tools.append(function_definition_to_tool(delegation.tool_definition))
-
         try:
             if skill_runtime is not None and skill_runtime.has_tool_references:
                 if mcp_proxy is not None and model.supports_tool_calling:
@@ -577,6 +568,18 @@ class CompletionService:
                     if mcp_proxy is not None and model.supports_tool_calling
                     else (),
                     rendered_prompt=prompt,
+                )
+            # Read after the reference identities are switched on, so the
+            # budget counts the definitions the model is given.
+            extra_tools = (
+                mcp_proxy.get_tools_for_llm()
+                if mcp_proxy and model.supports_tool_calling
+                else []
+            )
+            delegation = current_assistant_delegation()
+            if delegation is not None:
+                extra_tools.append(
+                    function_definition_to_tool(delegation.tool_definition)
                 )
             context = self.context_builder.build_context(
                 input_str=text_input,
