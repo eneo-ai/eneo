@@ -104,9 +104,9 @@ authenticates, as the cookie or as Bearer, only while the session exists.
   deactivation they close at the next check; the socket closes with code 1008
   and the client does not reconnect with that token.
 - **Expired sessions** admit nothing; a nightly job deletes them.
-- **No session**: provider access tokens, API keys, system tokens, internal
-  MCP and module tokens, and the provider-bound MobilityGuard login. They work
-  as before, and sign-out does not affect them.
+- **No session**: provider access tokens, API keys, system tokens, and
+  internal MCP and module tokens. They work as before, and sign-out does not
+  affect them.
 
 An API client that signs in with `POST /api/v1/users/login/token/` holds a
 session token as well. `POST /api/v1/users/logout/`, with that token as

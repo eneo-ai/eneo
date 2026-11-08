@@ -7,9 +7,9 @@ admits such a token, as the cookie or as Bearer, only while the row exists,
 matches the token's user, tenant and ``session_ref`` and is unexpired.
 Sign-out deletes the row, so a copied token stops working at once. Every
 sign-in a person makes starts one (the cookie and token logins, password or
-OIDC). Tokens without ``sid`` (API, module and MCP tokens, the provider-bound
-login's, and tokens issued before sign-ins started sessions) are not browser
-sessions and keep their own lifetime.
+OIDC). Tokens without ``sid`` (API, module and MCP tokens, and tokens
+issued before sign-ins started sessions) are not browser sessions and keep
+their own lifetime.
 
 The rows live in PostgreSQL, not Redis: a revoked session must stay revoked
 after a crash, and restoring a Redis snapshot can bring a deleted key back.
