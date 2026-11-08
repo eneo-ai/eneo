@@ -58,9 +58,10 @@ statement it asks once more which of its sessions still exist and are readable
 itself removed while it read refuses the read. That is one statement per
 read that loads turns, one index probe for a conversation that is no copy; a
 check on each turn's row would instead probe every edge of a copy once per
-turn. Renaming a conversation and leaving feedback on it change the session
-with the check in the `UPDATE`, so an invalid copy is neither changed nor
-returned.
+turn. A question read (message logging, insights, export) asks the same
+after the question's details, files and references load. Renaming a
+conversation and leaving feedback on it change the session with the check in
+the `UPDATE`, so an invalid copy is neither changed nor returned.
 
 Each existence check is fenced with `OFFSET 0`, which keeps it a probe per
 row. Without the fence PostgreSQL 13 and 16 flatten the check into a join
@@ -69,11 +70,15 @@ probe per conversation it already considers, plus one per edge of each copy
 among them.
 
 A caller first passes the usual ownership and partner checks, so anyone else
-learns nothing about a removal. Then a detail, tool result, title, rename,
-feedback, document, Assistant session, helper run, insight or message logging
-route answers `410` with `derived_source_removed` (`9085`). Lists, counts,
-recent conversations, exports and insights leave the copy out; a follow-up
-question finds no conversation.
+learns nothing about a removal; an API key's scope is checked on the same
+owner and partner facts, not on the turns. Then a detail, tool result, title,
+rename, conversation feedback, document, Assistant session, helper run,
+insight or message logging route answers `410` with `derived_source_removed`
+(`9085`). Conversation lists and their totals, recent conversations, exports
+and insights leave the copy out; aggregate insight statistics count it until
+it is removed. A follow-up question finds no conversation. Deleting the copy
+works as for any conversation, and the Assistant session delete answers
+without its name and feedback.
 
 ### The task removes what is left
 
@@ -155,9 +160,10 @@ all 200,000 questions.
   nothing.
 - A copy has no detail or tool result after its source is removed: `410`
   where it was readable, absent from lists.
-- Background jobs carry ids only: an App run reads its prompt from the stored
-  run, an insights job its question from the job record, and these jobs and
-  the audit job keep no result.
+- App run and insights jobs no longer carry their prompt or question: an App
+  run reads its prompt from the stored run, an insights job its question from
+  its job record. These jobs and audit jobs keep no result; an audit job
+  still carries its event's details until the event is written.
 
 ## Follow-ups
 
