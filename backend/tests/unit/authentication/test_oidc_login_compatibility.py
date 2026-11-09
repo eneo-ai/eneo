@@ -215,7 +215,7 @@ async def test_the_callback_route_hands_out_a_session_and_the_frontend_state(
 ):
     login = Login(monkeypatch, FakeOidcProvider(), existing_email="user@example.com")
     sessions = AsyncMock(spec=BrowserSessionService)
-    sessions.start.side_effect = lambda issued: f"{issued}.session"
+    sessions.start.return_value = "session-token"
     login.container.browser_session_service = lambda: sessions
 
     started = await login.initiate(frontend_state='{"next":"/spaces"}')
@@ -224,10 +224,11 @@ async def test_the_callback_route_hands_out_a_session_and_the_frontend_state(
         CallbackRequest(code=answer.code, state=started.state), login.container
     )
 
-    [(issued,), _] = sessions.start.await_args
-    assert login.signed_in_user({"access_token": issued})
+    # A provider sign-in starts a session that is no password session.
+    [(user,), started_with] = sessions.start.await_args
+    assert (user.email, started_with) == ("user@example.com", {"auth_method": None})
     assert result == {
-        "access_token": f"{issued}.session",
+        "access_token": "session-token",
         "frontend_state": '{"next":"/spaces"}',
     }
 
@@ -269,7 +270,13 @@ async def test_browser_login_sets_the_session_cookie(monkeypatch):
         )
     )
     sessions = AsyncMock(spec=BrowserSessionService)
-    sessions.start.side_effect = lambda issued, replacing=None: issued
+    sessions.start.side_effect = (
+        lambda user,
+        auth_method,
+        replacing=None: AuthService().create_access_token_for_user(
+            user, auth_method=auth_method
+        )
+    )
     login.container.browser_session_service = lambda: sessions
     app = get_application()
     for route in endpoint_routes(app.routes):

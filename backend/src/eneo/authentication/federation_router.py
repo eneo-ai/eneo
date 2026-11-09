@@ -4,7 +4,7 @@ import asyncio
 import secrets
 from collections.abc import Mapping
 from datetime import datetime, timezone
-from typing import Annotated, Any, Optional, cast
+from typing import Annotated, Any, NamedTuple, Optional, cast
 from uuid import UUID
 
 import jwt as pyjwt
@@ -56,6 +56,7 @@ from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 from eneo.tenants.tenant import TenantInDB, TenantState
 from eneo.users.identity_binding_repo import IdentityConflictError
+from eneo.users.user import UserInDB
 
 logger = get_logger(__name__)
 
@@ -78,6 +79,13 @@ class OIDCStatePayload(TypedDict):
 
 class AccessTokenResponse(TypedDict):
     access_token: str
+    frontend_state: str
+
+
+class FederatedSignIn(NamedTuple):
+    """A verified callback's admitted user, and the state its page sent."""
+
+    user: UserInDB
     frontend_state: str
 
 
@@ -899,20 +907,20 @@ async def auth_callback(
     # ends every copy of it.
     return AccessTokenResponse(
         access_token=await container.browser_session_service().start(
-            signed_in["access_token"]
+            signed_in.user, auth_method=None
         ),
-        frontend_state=signed_in["frontend_state"],
+        frontend_state=signed_in.frontend_state,
     )
 
 
 async def federated_sign_in(
     callback: CallbackRequest, container: Container, *, channel: OidcChannel
-) -> AccessTokenResponse:
+) -> FederatedSignIn:
     """
     Verify a provider's callback and admit its user: the shared sign-in core.
 
-    Starts no session. Each route that hands the token out decides which
-    session it gets (``BrowserSessionService.start``).
+    Starts no session and mints no token. Each route starts the user's
+    session (``BrowserSessionService.start``) and hands its token out.
 
     This function:
     1. Validates signed state (JWT with tenant context)
@@ -922,7 +930,7 @@ async def federated_sign_in(
        (signature, issuer, audience, freshness, nonce)
     4. Validates email domain against tenant's allowed_domains
     5. Resolves an active tenant member or provisions under the shared JIT policy
-    6. Issues Eneo JWT token
+    6. Returns the admitted user and the page's frontend state
 
     Raises:
         HTTPException 400: Invalid state or code
@@ -1136,11 +1144,6 @@ async def federated_sign_in(
                 email=email,
             )
 
-        # Create JWT token for existing user
-        access_token_response = container.auth_service().create_access_token_for_user(
-            user
-        )
-
         logger.info(
             f"Federated login successful for {email} on tenant {tenant_slug}",
             extra={
@@ -1161,10 +1164,7 @@ async def federated_sign_in(
             user_id=str(user.id),
         )
 
-        return AccessTokenResponse(
-            access_token=access_token_response,
-            frontend_state=state_payload["frontend_state"],
-        )
+        return FederatedSignIn(user, state_payload["frontend_state"])
     except (HTTPException, OidcSignInError, IdentityConflictError):
         # Re-raise HTTP and typed sign-in refusals with correlation_id already set
         raise

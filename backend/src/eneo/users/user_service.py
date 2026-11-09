@@ -86,7 +86,6 @@ from eneo.users.password import (
     PasswordReuseError,
     validate_new_local_password,
 )
-from eneo.users.password_lifecycle import PASSWORD_AUTH_METHOD
 from eneo.users.user import (
     PropUserInvite,
     UserAdd,
@@ -346,7 +345,7 @@ class UserService:
         password: str,
         correlation_id: str | None = None,
         source_ip: str | None = None,
-    ):
+    ) -> "UserInDB":
         """
         Authenticate user with username/password.
 
@@ -360,7 +359,7 @@ class UserService:
             source_ip: Client IP address for security logging
 
         Returns:
-            AccessToken with JWT bearer token
+            The admitted user; the caller starts its session.
 
         Raises:
             AuthenticationException: On authentication failure (generic message)
@@ -455,12 +454,7 @@ class UserService:
             },
         )
 
-        return AccessToken(
-            access_token=self.auth_service.create_access_token_for_user(
-                user=user, auth_method=PASSWORD_AUTH_METHOD
-            ),
-            token_type="bearer",
-        )
+        return user
 
     async def resolve_federated_user(
         self,

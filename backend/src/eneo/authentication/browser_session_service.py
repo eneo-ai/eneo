@@ -33,7 +33,7 @@ import secrets
 import time
 from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import sqlalchemy as sa
 from dependency_injector import providers
@@ -130,17 +130,28 @@ class BrowserSessionService:
         self.auth_service = auth_service
         self.audit_service = audit_service
 
-    async def start(self, token: str, replacing: str | None = None) -> str:
-        """Record a browser session for the token a sign-in just issued.
+    async def start(
+        self,
+        user: "UserInDB",
+        *,
+        auth_method: Literal["password"] | None,
+        replacing: str | None = None,
+    ) -> str:
+        """Start a browser session for ``user``, whom a sign-in just admitted.
 
-        Returns the token the session cookie carries: the same claims and
-        expiry with a new ``sid`` and the new row's stable id as
-        ``session_ref``. Runs in the sign-in's transaction, so the cookie is
-        sent only once the row is committed. The session ``replacing`` (the
-        cookie the browser signed in with) names is deleted too: the new
-        cookie replaces it, so it would otherwise stay valid with nobody
-        holding it. Expired rows are left to ``delete_expired``.
+        Returns the session's token: ``user``'s claims, ``auth_method``
+        (``"password"`` for a password sign-in, for the password lifecycle
+        gate), a new ``sid`` and the new row's stable id as ``session_ref``.
+        Every token that names a session is minted here or by ``renew``.
+        Runs in the sign-in's transaction, so the token is handed out only
+        once the row is committed. The session ``replacing`` (the cookie the
+        browser signed in with) names is deleted too: the new cookie replaces
+        it, so it would otherwise stay valid with nobody holding it. Expired
+        rows are left to ``delete_expired``.
         """
+        token = self.auth_service.create_access_token_for_user(
+            user, auth_method=auth_method
+        )
         payload = self._verified_payload(token)
         replaced = self._named_session(replacing) if replacing else None
         if replaced is not None:

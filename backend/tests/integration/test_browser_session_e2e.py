@@ -1640,6 +1640,83 @@ async def test_a_renewal_keeps_every_claim_its_sign_in_set(
         }
 
 
+# What every sign-in route has always issued: the identity, a session, and
+# auth_method, "password" only for a password sign-in.
+SIGN_IN_CLAIMS = {
+    "iss",
+    "aud",
+    "iat",
+    "exp",
+    "token_version",
+    "user_id",
+    "tenant_id",
+    "sub",
+    "username",
+    "credential_version",
+    "auth_method",
+    "sid",
+    "session_ref",
+}
+
+
+def _assert_sign_in_claims(token: str, email: str, auth_method: str | None) -> None:
+    claims = _claims(token)
+    assert claims.keys() == SIGN_IN_CLAIMS
+    assert (claims["token_version"], claims["sub"], claims["auth_method"]) == (
+        2,
+        email,
+        auth_method,
+    )
+    # A full token lifetime, counted from an iat two seconds early.
+    lifetime = claims["exp"] - claims["iat"]
+    assert abs(lifetime - (get_settings().jwt_expiry_time * 60 + 2)) <= 1
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_password_sign_ins_issue_the_claims_they_always_issued(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+):
+    email = await _create_local_user(client, super_admin_token)
+    bearer = await _login(client, TOKEN_LOGIN, email, PASSWORD)
+    cookie = await _login(client, SESSION_LOGIN, email, PASSWORD)
+
+    for token in (bearer.json()["access_token"], _session_token(cookie)):
+        _assert_sign_in_claims(token, email, "password")
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_token_callback_issues_the_claims_it_always_issued(
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+    token_callback,
+):
+    callback = await token_callback()
+
+    assert callback.status_code == 200, callback.text
+    _assert_sign_in_claims(callback.json()["access_token"], "test@example.com", None)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_browser_callback_issues_the_claims_it_always_issued(
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+    federated_callback,
+):
+    [cookie] = _session_cookies(await federated_callback())
+
+    token = cookie.removeprefix(f"{SESSION}=").split(";", 1)[0]
+    _assert_sign_in_claims(token, "test@example.com", None)
+
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_only_a_usable_browser_session_can_extend_itself(

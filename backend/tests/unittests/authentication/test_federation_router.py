@@ -141,16 +141,32 @@ class AuthServiceStub:
     def get_payload_from_openid_jwt(self, **kwargs):  # noqa: ARG002
         return self.claims
 
-    def create_access_token_for_user(self, user: UserInDB):  # noqa: ARG002
+    def create_access_token_for_user(
+        self,
+        user: UserInDB,  # noqa: ARG002
+        auth_method: str | None = None,  # noqa: ARG002
+    ):
         return "access-token"
 
 
 class _SessionsHandBack:
-    """The callback route starts a browser session for the token it hands
-    out; these tests check the sign-in, so the token comes back unchanged."""
+    """The callback route starts a browser session for the user it admits;
+    these tests check the sign-in, so the token is what the auth service
+    mints for that user."""
 
-    async def start(self, access_token: str) -> str:
-        return access_token
+    def __init__(self, auth_service):
+        self.auth_service = auth_service
+
+    async def start(
+        self,
+        user: UserInDB,
+        *,
+        auth_method: str | None,
+        replacing: str | None = None,  # noqa: ARG002
+    ) -> str:
+        return self.auth_service.create_access_token_for_user(
+            user, auth_method=auth_method
+        )
 
 
 class MockContainer:
@@ -171,7 +187,7 @@ class MockContainer:
         self._identity_bindings = IdentityBindingsInMemory()
 
     def browser_session_service(self):
-        return _SessionsHandBack()
+        return _SessionsHandBack(self._auth_service)
 
     def tenant_repo(self):
         return self._tenant_repo
@@ -885,7 +901,7 @@ class MockContainerForJIT:
         self._allowed_origin_repo = allowed_origin_repo
 
     def browser_session_service(self):
-        return _SessionsHandBack()
+        return _SessionsHandBack(self._auth_service)
 
     def tenant_repo(self):
         return self._tenant_repo
