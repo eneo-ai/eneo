@@ -41,6 +41,7 @@ from eneo.main.config import (
 from eneo.main.container.container import Container
 from eneo.main.exceptions import FederatedLoginDenied
 from eneo.main.logging import get_logger
+from eneo.main.models import GeneralError
 from eneo.main.request_context import ensure_correlation_id, set_request_context
 from eneo.observability.debug_toggle import is_debug_enabled
 from eneo.observability.redaction import sanitize_payload
@@ -48,6 +49,7 @@ from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 from eneo.settings.credential_resolver import CredentialResolver
 from eneo.tenants.tenant import TenantInDB, TenantState
+from eneo.users.identity_binding_repo import IdentityConflictError
 
 logger = get_logger(__name__)
 
@@ -59,6 +61,7 @@ router = APIRouter(
 
 class OIDCClaimsMapping(TypedDict):
     email: str
+    subject: NotRequired[str]
 
 
 class FederationConfig(TypedDict):
@@ -887,12 +890,23 @@ async def initiate_federated_sign_in(
             "description": (
                 "Invalid or expired state, or a binding_verifier that does not "
                 "match the sign-in (oidc_transaction_invalid)"
-            )
+            ),
+            "model": GeneralError,
         },
-        401: {"description": "Token validation failed"},
-        403: {"description": "Domain not allowed, inactive tenant, or user missing"},
-        404: {"description": "Tenant or user not found"},
-        503: {"description": "Sign-in store unavailable (oidc_login_unavailable)"},
+        401: {"description": "Token validation failed", "model": GeneralError},
+        403: {
+            "description": (
+                "Domain not allowed, inactive tenant or user missing; or "
+                "`identity_conflict` (9082): the account is bound to another "
+                "sign-in identity"
+            ),
+            "model": GeneralError,
+        },
+        404: {"description": "Tenant or user not found", "model": GeneralError},
+        503: {
+            "description": "Sign-in store unavailable (oidc_login_unavailable)",
+            "model": GeneralError,
+        },
     },
 )
 @endpoint_access(
@@ -902,10 +916,22 @@ async def initiate_federated_sign_in(
 )
 async def auth_callback(
     callback: CallbackRequest,
-    container: Annotated[Container, Depends(get_container())],
+    # The session (and an account the sign-in created) commits before the
+    # token leaves, so its first request is admitted.
+    container: Annotated[
+        Container, Depends(get_container(transaction_scope="function"))
+    ],
 ) -> AccessTokenResponse:
     """Handle the OIDC callback after the user authenticated with the IdP."""
-    return await federated_sign_in(callback, container, channel="api")
+    signed_in = await federated_sign_in(callback, container, channel="api")
+    # The token names its session, so signing out (POST /users/logout/)
+    # ends every copy of it.
+    return AccessTokenResponse(
+        access_token=await container.browser_session_service().start(
+            signed_in["access_token"]
+        ),
+        frontend_state=signed_in["frontend_state"],
+    )
 
 
 async def federated_sign_in(
@@ -933,6 +959,8 @@ async def federated_sign_in(
         HTTPException 401: The verified token carries no usable email
         OidcResponseNotVerifiedError (401): The provider's response failed a check
         HTTPException 403: Email domain not allowed for tenant or user not found
+        IdentityConflictError (403): The identity cannot be bound to the account
+            its email names
         OidcLoginUnavailableError (503): The transaction store is unavailable
     """
     settings = get_settings()
@@ -1087,12 +1115,12 @@ async def federated_sign_in(
             ) from exc
 
         email = identity.email
-        set_request_context(user_email=email)
+        # Not the address itself: the sign-in may still be refused, and a
+        # refused one logs no email. callback.success carries it.
         await _log_oidc_debug(
             redis_client=redis_client,
             correlation_id=correlation_id,
             event="callback.email_extracted",
-            email=email,
             email_claim=profile.email_claim,
         )
         try:
@@ -1102,6 +1130,16 @@ async def federated_sign_in(
                 allowed_domains=federation_config.get("allowed_domains") or [],
                 correlation_id=correlation_id,
             )
+        except IdentityConflictError as exc:
+            await _log_oidc_debug(
+                redis_client=redis_client,
+                correlation_id=correlation_id,
+                event="callback.identity_conflict",
+                tenant_slug=tenant_slug,
+                reason=exc.reason,
+            )
+            # Typed: 403 with its code, for the login pages to explain.
+            raise
         except FederatedLoginDenied as exc:
             await _log_oidc_debug(
                 redis_client=redis_client,
@@ -1115,6 +1153,11 @@ async def federated_sign_in(
                 detail=str(exc),
                 headers={"X-Correlation-ID": correlation_id},
             ) from exc
+
+        # Only an admitted sign-in puts its email in the request's log context,
+        # so a refused one (an identity conflict, a denied account) logs none,
+        # like the provider-response refusals before it.
+        set_request_context(user_email=email)
 
         if created:
             await _log_oidc_debug(
@@ -1154,7 +1197,7 @@ async def federated_sign_in(
             access_token=access_token_response,
             frontend_state=state_payload["frontend_state"],
         )
-    except (HTTPException, OidcSignInError):
+    except (HTTPException, OidcSignInError, IdentityConflictError):
         # Re-raise HTTP and typed sign-in refusals with correlation_id already set
         raise
     except Exception as e:

@@ -19,13 +19,13 @@ import jwt
 import pytest
 import sqlalchemy as sa
 from dependency_injector import providers
-from fastapi import WebSocketException
+from fastapi import WebSocketDisconnect, WebSocketException
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
-from starlette.status import WS_1008_POLICY_VIOLATION
+from starlette.status import WS_1008_POLICY_VIOLATION, WS_1013_TRY_AGAIN_LATER
 
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 from eneo.authentication import browser_session_service
@@ -36,6 +36,7 @@ from eneo.authentication.login_attempts import LOGIN_ATTEMPT_LIMIT
 from eneo.database.database import SafeAsyncSession, sessionmanager
 from eneo.database.tables.audit_log_table import AuditLog
 from eneo.database.tables.browser_sessions_table import BrowserSessions
+from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import Users
 from eneo.jobs.job_events import job_updates_channel
 from eneo.main.config import Settings, get_settings, set_settings
@@ -43,6 +44,8 @@ from eneo.main.container.container import Container
 from eneo.main.exceptions import AuthenticationException
 from eneo.server.dependencies.container import get_user_from_websocket
 from eneo.server.websockets import websocket_router
+from eneo.server.websockets.websocket_manager import websocket_manager
+from eneo.tenants.tenant import TenantState, TenantUpdate
 from eneo.users.user import UserState
 from tests.integration.test_federation_tenant_admin import (
     SECRET,
@@ -59,6 +62,7 @@ SAME_ORIGIN = {"Sec-Fetch-Site": "same-origin"}
 SESSION_LOGIN = "/api/v1/auth/session/password/"
 PROBE = "/api/v1/auth/session/"
 TOKEN_LOGIN = "/api/v1/users/login/token/"
+BEARER_LOGOUT = "/api/v1/users/logout/"
 FORM = {"Content-Type": "application/x-www-form-urlencoded"}
 TICKETS = "/api/v1/module-auth/tickets/"
 TICKET = {"module_key": "no-such-module", "redirect_uri": "https://m.example/cb"}
@@ -159,6 +163,17 @@ async def _rows(user_id: str) -> dict[str, tuple[UUID, UUID, datetime]]:
 async def _execute(statement) -> None:
     async with sessionmanager.session() as session, session.begin():
         await session.execute(statement)
+
+
+async def _refs(user_id: str) -> dict[str, UUID]:
+    """The stable id of each of the user's sessions, by sid."""
+    async with sessionmanager.session() as session, session.begin():
+        rows = await session.execute(
+            sa.select(BrowserSessions.sid, BrowserSessions.id).where(
+                BrowserSessions.user_id == UUID(user_id)
+            )
+        )
+        return dict(rows.tuples().all())
 
 
 @pytest.mark.integration
@@ -361,7 +376,7 @@ async def test_cross_site_form_cannot_sign_the_browser_in(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_bearer_login_is_unchanged(
+async def test_the_token_login_hands_out_its_session_as_bearer(
     client,
     super_admin_token,
     patch_auth_service_jwt,
@@ -373,12 +388,18 @@ async def test_bearer_login_is_unchanged(
     login = await _login(client, TOKEN_LOGIN, email, PASSWORD)
     assert login.status_code == 200, login.text
     assert login.headers.get_list("set-cookie") == []
-    bearer = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    assert login.json().keys() == {"access_token", "token_type"}
+    token = login.json()["access_token"]
+    claims = _claims(token)
+    # Recorded before the token was sent, so its first request is admitted.
+    assert await _refs(claims["user_id"]) == {
+        claims["sid"]: UUID(claims["session_ref"])
+    }
 
-    me = await client.get("/api/v1/users/me/", headers=bearer)
+    me = await client.get("/api/v1/users/me/", headers=_bearer(token))
     assert me.status_code == 200
     assert GENERATION not in me.headers
-    probe = await client.get("/api/v1/auth/session/", headers=bearer)
+    probe = await client.get(PROBE, headers=_bearer(token))
     assert probe.status_code == 401
 
 
@@ -432,7 +453,7 @@ async def test_session_login_does_not_reveal_which_names_exist(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_each_browser_sign_in_records_its_own_session(
+async def test_each_password_sign_in_records_its_own_session(
     client,
     super_admin_token,
     patch_auth_service_jwt,
@@ -446,22 +467,28 @@ async def test_each_browser_sign_in_records_its_own_session(
         for _ in range(2)
     ]
     issued = await _login(client, TOKEN_LOGIN, email, PASSWORD)
-    ordinary = _claims(issued.json()["access_token"])
+    bearer = _claims(issued.json()["access_token"])
+    signed_in = (first, second, bearer)
 
-    # The token login keeps its contract; a browser sign-in adds only sid.
-    assert "sid" not in ordinary
-    for browser in (first, second):
-        assert browser.keys() - ordinary.keys() == {"sid"}
-        assert browser["auth_method"] == ordinary["auth_method"] == "password"
-    assert first["sid"] != second["sid"]
+    # The cookie and the token login name their session the same way: its
+    # sid and its row's stable id.
+    assert {"sid", "session_ref"} <= bearer.keys()
+    for claims in signed_in:
+        assert claims.keys() == bearer.keys()
+        assert claims["auth_method"] == "password"
+    assert len({claims["sid"] for claims in signed_in}) == 3
+    assert len({claims["session_ref"] for claims in signed_in}) == 3
     rows = await _rows(first["user_id"])
-    assert rows.keys() == {first["sid"], second["sid"]}
-    for browser in (first, second):
-        assert rows[browser["sid"]] == (
-            UUID(browser["user_id"]),
-            UUID(browser["tenant_id"]),
-            datetime.fromtimestamp(browser["exp"], timezone.utc),
+    assert rows.keys() == {claims["sid"] for claims in signed_in}
+    for claims in signed_in:
+        assert rows[claims["sid"]] == (
+            UUID(claims["user_id"]),
+            UUID(claims["tenant_id"]),
+            datetime.fromtimestamp(claims["exp"], timezone.utc),
         )
+    assert await _refs(first["user_id"]) == {
+        claims["sid"]: UUID(claims["session_ref"]) for claims in signed_in
+    }
 
 
 @pytest.mark.integration
@@ -529,7 +556,52 @@ async def test_a_present_sid_must_name_a_session(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_sign_in_deletes_the_users_expired_sessions(
+async def test_a_session_token_names_its_own_row(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+):
+    email = await _create_local_user(client, super_admin_token)
+    token = _session_token(await _login(client, SESSION_LOGIN, email, PASSWORD))
+    other = _claims(
+        _session_token(await _login(client, SESSION_LOGIN, email, PASSWORD))
+    )
+    claims = _claims(token)
+
+    # Signed with the real key: a sid with another session's stable id, or
+    # with an id no session has, names no session.
+    for ref in (other["session_ref"], str(uuid4())):
+        refused = await client.get(
+            "/api/v1/users/me/",
+            headers=_bearer(_signed(claims | {"session_ref": ref})),
+        )
+        assert refused.status_code == 401, refused.text
+
+    # A token issued before sessions had a stable id carries the sid alone.
+    # It is still admitted, keeps its generation, and its renewal stays the
+    # same session without gaining an id.
+    issued_before = _signed(
+        {name: value for name, value in claims.items() if name != "session_ref"}
+    )
+    me = await client.get("/api/v1/users/me/", headers=_cookie(issued_before))
+    assert me.status_code == 200, me.text
+    assert me.headers[GENERATION] == session_generation(issued_before)
+    extended = await client.post(EXTEND, headers=_cookie(issued_before))
+    assert extended.status_code == 200, extended.text
+    renewed = _session_token(extended)
+    assert "session_ref" not in _claims(renewed)
+    assert _claims(renewed)["sid"] == claims["sid"]
+    assert extended.json()["generation"] == session_generation(issued_before)
+    assert (
+        await client.get("/api/v1/users/me/", headers=_cookie(renewed))
+    ).status_code == 200
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_expired_sessions_stay_until_the_nightly_delete(
     client,
     super_admin_token,
     patch_auth_service_jwt,
@@ -553,12 +625,27 @@ async def test_sign_in_deletes_the_users_expired_sessions(
             .values(expires_at=past)
         )
 
-    latest = await _login(client, SESSION_LOGIN, email, PASSWORD)
-    latest_sid = _claims(_session_token(latest))["sid"]
+    # Signing in again leaves the expired rows: one job deletes them.
+    latest_sid = _claims(
+        _session_token(await _login(client, SESSION_LOGIN, email, PASSWORD))
+    )["sid"]
+    assert (await _rows(expired["user_id"])).keys() == {
+        expired["sid"],
+        live["sid"],
+        latest_sid,
+    }
+
+    from eneo.worker.arq import worker
+
+    [nightly] = [
+        job
+        for job in worker.cron_jobs
+        if job.coroutine.__name__ == "delete_expired_browser_sessions"
+    ]
+    assert await nightly.coroutine({}) == 2
 
     assert (await _rows(expired["user_id"])).keys() == {live["sid"], latest_sid}
-    # Only the signing-in user's rows: another user's go at their next sign-in.
-    assert (await _rows(others["user_id"])).keys() == {others["sid"]}
+    assert await _rows(others["user_id"]) == {}
 
 
 @pytest.mark.integration
@@ -674,7 +761,7 @@ async def test_federated_browser_sign_in_records_a_session(
     assert first["sid"] != second["sid"]
     assert first["auth_method"] is None
     rows = await _rows(first["user_id"])
-    assert {first["sid"], second["sid"]} <= rows.keys()
+    assert rows.keys() == {first["sid"], second["sid"]}
     assert rows[first["sid"]][:2] == (UUID(first["user_id"]), test_tenant.id)
 
 
@@ -705,6 +792,132 @@ async def test_a_federated_session_that_cannot_be_recorded_sends_no_cookie(
     assert parse_qs(failure.query)["message"] == ["oidc_callback_failed"]
     assert _session_cookies(refused) == []
     assert (await _rows(taken["user_id"])).keys() == {taken["sid"]}
+
+
+@pytest.fixture
+async def token_callback(
+    client,
+    super_admin_token,
+    fake_idp,
+    db_container,
+    test_tenant,
+):
+    """Run sign-ins through ``POST /auth/callback``, the OIDC login whose
+    client keeps the token; returns a function that runs one."""
+    idp = _idp("token")
+    provider = fake_idp(
+        issuer=idp["issuer"],
+        client_id="operator-client",
+        client_secret=SECRET,
+        token_claims={"email": "test@example.com"},
+    )
+    await _register(client, super_admin_token, test_tenant.id, idp)
+    async with db_container() as container:
+        slug = await container.tenant_repo().generate_slug_for_tenant(test_tenant.id)
+
+    async def callback(http: AsyncClient = client, **claims: Any):
+        initiated = await http.get("/api/v1/auth/initiate", params={"tenant": slug})
+        assert initiated.status_code == 200, initiated.text
+        answer = provider.authorize(initiated.json()["authorization_url"], **claims)
+        return await http.post(
+            "/api/v1/auth/callback",
+            json={"code": answer.code, "state": initiated.json()["state"]},
+        )
+
+    return callback
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_the_token_callback_records_a_session(
+    client,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+    token_callback,
+    test_tenant,
+):
+    signed_in = []
+    for _ in range(2):
+        callback = await token_callback()
+        assert callback.status_code == 200, callback.text
+        assert callback.json().keys() == {"access_token", "frontend_state"}
+        assert callback.headers.get_list("set-cookie") == []
+        token = callback.json()["access_token"]
+        me = await client.get("/api/v1/users/me/", headers=_bearer(token))
+        assert me.status_code == 200, me.text
+        signed_in.append(_claims(token))
+
+    first, second = signed_in
+    assert first["sid"] != second["sid"]
+    assert await _refs(first["user_id"]) == {
+        claims["sid"]: UUID(claims["session_ref"]) for claims in signed_in
+    }
+    rows = await _rows(first["user_id"])
+    assert rows[first["sid"]][:2] == (UUID(first["user_id"]), test_tenant.id)
+
+
+@contextlib.asynccontextmanager
+async def _session_commit_fails() -> AsyncIterator[None]:
+    """The commit of a transaction that recorded a session fails."""
+
+    def recording(connection, cursor, statement, *args) -> None:
+        if statement.startswith("INSERT INTO browser_sessions"):
+            connection.info["recorded_browser_session"] = True
+
+    def unavailable(connection) -> None:
+        if connection.info.pop("recorded_browser_session", False):
+            raise OperationalError("COMMIT", {}, ConnectionError("store unavailable"))
+
+    event.listen(Engine, "before_cursor_execute", recording)
+    event.listen(Engine, "commit", unavailable)
+    try:
+        yield
+    finally:
+        event.remove(Engine, "before_cursor_execute", recording)
+        event.remove(Engine, "commit", unavailable)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sign_in", ["password", "oidc"])
+async def test_a_token_sign_in_that_cannot_commit_sends_no_token(
+    raw_client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+    token_callback,
+    db_container,
+    test_tenant,
+    sign_in,
+):
+    # The token leaves only once its session (and an account the sign-in
+    # created) is committed: a token sent before a failed commit would name
+    # a session that does not exist.
+    if sign_in == "password":
+        email = await _create_local_user(raw_client, super_admin_token)
+    else:
+        email = f"new-{uuid4().hex[:8]}@example.com"
+        async with db_container() as container:
+            await container.tenant_repo().update_tenant(
+                TenantUpdate(id=test_tenant.id, provisioning=True)
+            )
+
+    async with _session_commit_fails():
+        if sign_in == "password":
+            refused = await _login(raw_client, TOKEN_LOGIN, email, PASSWORD)
+        else:
+            refused = await token_callback(raw_client, email=email)
+
+    assert refused.status_code == 500, refused.text
+    assert "access_token" not in refused.text
+    async with sessionmanager.session() as session, session.begin():
+        assert await session.scalar(sa.select(sa.func.count(BrowserSessions.id))) == 0
+        users = await session.scalar(
+            sa.select(sa.func.count(Users.id)).where(Users.email == email)
+        )
+    assert users == (1 if sign_in == "password" else 0)
 
 
 async def _sign_out(client, token: str):
@@ -838,6 +1051,80 @@ async def test_sign_out_that_the_store_cannot_confirm_keeps_the_session(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_bearer_sign_out_ends_the_session_and_every_copy(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+):
+    email = await _create_local_user(client, super_admin_token)
+    token, elsewhere = [
+        (await _login(client, TOKEN_LOGIN, email, PASSWORD)).json()["access_token"]
+        for _ in range(2)
+    ]
+
+    def me(credential: str):
+        return client.get("/api/v1/users/me/", headers=_bearer(credential))
+
+    assert (await me(token)).status_code == 200
+    signed_out = await client.post(BEARER_LOGOUT, headers=_bearer(token))
+
+    assert signed_out.status_code == 204, signed_out.text
+    assert signed_out.headers.get_list("set-cookie") == []
+    # A copy of the token made before sign-out no longer works.
+    assert (await me(token)).status_code == 401
+    assert (await me(elsewhere)).status_code == 200
+    # A retry, as after a lost answer, still succeeds.
+    retried = await client.post(BEARER_LOGOUT, headers=_bearer(token))
+    assert retried.status_code == 204, retried.text
+    # A token that names no session has none to end.
+    sessionless = _signed(
+        {
+            name: value
+            for name, value in _claims(elsewhere).items()
+            if name not in ("sid", "session_ref")
+        }
+    )
+    for other in (sessionless, "not-a-token"):
+        ended = await client.post(BEARER_LOGOUT, headers=_bearer(other))
+        assert ended.status_code == 204, ended.text
+    assert (await me(elsewhere)).status_code == 200
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_bearer_sign_out_the_store_cannot_confirm_keeps_the_session(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+    monkeypatch,
+):
+    monkeypatch.setattr(browser_session_service, "STORE_DEADLINE_SECONDS", 1.0)
+    email = await _create_local_user(client, super_admin_token)
+    token = (await _login(client, TOKEN_LOGIN, email, PASSWORD)).json()["access_token"]
+    claims = _claims(token)
+
+    async with _commit_fails(claims["sid"]):
+        refused = await client.post(BEARER_LOGOUT, headers=_bearer(token))
+
+    assert refused.status_code == 503, refused.text
+    assert refused.json()["code"] == "sign_out_unavailable"
+    assert claims["sid"] in await _rows(claims["user_id"])
+    assert (
+        await client.get("/api/v1/users/me/", headers=_bearer(token))
+    ).status_code == 200
+
+    assert (await client.post(BEARER_LOGOUT, headers=_bearer(token))).status_code == 204
+    assert (
+        await client.get("/api/v1/users/me/", headers=_bearer(token))
+    ).status_code == 401
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_signing_in_while_signing_out_keeps_the_new_session(
     client,
     super_admin_token,
@@ -867,31 +1154,191 @@ async def test_signing_in_while_signing_out_keeps_the_new_session(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_a_browser_session_cannot_open_a_websocket(
+class _Socket:
+    """What ``/ws`` uses of a WebSocket: the messages its client sends (None
+    when the client leaves) and the code the server closed it with."""
+
+    def __init__(self, *messages: dict | None) -> None:
+        self.scope: dict[str, Any] = {
+            "type": "websocket",
+            "endpoint": websocket_router.connect,
+        }
+        self.incoming: asyncio.Queue[dict | None] = asyncio.Queue()
+        for message in messages:
+            self.incoming.put_nowait(message)
+        self.closed: asyncio.Future[int] = asyncio.get_running_loop().create_future()
+
+    async def accept(self, subprotocol: str | None = None) -> None:
+        pass
+
+    async def receive_json(self) -> dict:
+        message = await self.incoming.get()
+        if message is None:
+            raise WebSocketDisconnect(1000)
+        return message
+
+    async def send_text(self, data: str) -> None:
+        pass
+
+    async def close(self, code: int = 1000, reason: str | None = None) -> None:
+        self.closed.set_result(code)
+
+    @property
+    def subscribed(self) -> bool:
+        return any(
+            self in channel.websockets
+            for channel in websocket_manager.channels.values()
+        )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_socket_closes_when_its_session_ends(
     client,
     super_admin_token,
     patch_auth_service_jwt,
     mock_transcription_models,
     browser_session_on,
+    monkeypatch,
 ):
-    # A socket keeps its user after sign-out; web-next opens none. The token
-    # login's Bearer token, which Svelte uses, still opens one.
+    # A socket keeps its user for as long as it is open, so one opened with a
+    # session's token must close when the session ends, not keep receiving
+    # the user's updates.
+    monkeypatch.setattr(browser_session_service, "RECHECK_SECONDS", 0.5)
     email = await _create_local_user(client, super_admin_token)
-    session = _session_token(await _login(client, SESSION_LOGIN, email, PASSWORD))
-    bearer = (await _login(client, TOKEN_LOGIN, email, PASSWORD)).json()["access_token"]
-    websocket = SimpleNamespace(scope={"endpoint": websocket_router.connect})
+    token = (await _login(client, TOKEN_LOGIN, email, PASSWORD)).json()["access_token"]
+    sessionless = _signed(
+        {
+            name: value
+            for name, value in _claims(token).items()
+            if name not in ("sid", "session_ref")
+        }
+    )
+    subscribe = {"type": "subscribe", "data": {"channel": "app_run_updates"}}
+    sockets = {"session": _Socket(subscribe), "sessionless": _Socket(subscribe)}
+    tasks = {}
+    for name, credential in (("session", token), ("sessionless", sessionless)):
+        user = await get_user_from_websocket(
+            websocket=sockets[name], token=credential, session=None
+        )
+        assert user.email == email
+        tasks[name] = asyncio.create_task(websocket_router.connect(sockets[name], user))
+    try:
+        async with asyncio.timeout(5):
+            while not all(socket.subscribed for socket in sockets.values()):
+                await asyncio.sleep(0.05)
 
-    user = await get_user_from_websocket(
-        websocket=websocket, token=bearer, session=None
-    )
-    assert user.email == email
-    with pytest.raises(WebSocketException) as refused:
-        await get_user_from_websocket(websocket=websocket, token=session, session=None)
-    assert refused.value.code == WS_1008_POLICY_VIOLATION
-    still_in = await client.get(
-        "/api/v1/users/me/", headers=SAME_ORIGIN | {"Cookie": f"{SESSION}={session}"}
-    )
-    assert still_in.status_code == 200
+        signed_out = await client.post(BEARER_LOGOUT, headers=_bearer(token))
+        assert signed_out.status_code == 204, signed_out.text
+
+        async with asyncio.timeout(5):
+            assert await sockets["session"].closed == WS_1008_POLICY_VIOLATION
+            await tasks["session"]
+        assert not sockets["session"].subscribed
+        # A token without a session keeps its socket until the client leaves.
+        assert sockets["sessionless"].subscribed
+        assert not sockets["sessionless"].closed.done()
+        sockets["sessionless"].incoming.put_nowait(None)
+        async with asyncio.timeout(5):
+            await tasks["sessionless"]
+        assert not sockets["sessionless"].subscribed
+    finally:
+        for task in tasks.values():
+            task.cancel()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "refusal", ["account deactivated", "tenant suspended", "password change required"]
+)
+async def test_a_socket_whose_check_is_refused_closes_for_good(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+    monkeypatch,
+    refusal,
+):
+    # Each of these refuses a new request with the socket's token, so the
+    # check is answered: the socket closes with 1008, which the client takes
+    # as final, not with the retry code of a check that got no answer.
+    monkeypatch.setattr(browser_session_service, "RECHECK_SECONDS", 0.5)
+    email = await _create_local_user(client, super_admin_token)
+    token = (await _login(client, TOKEN_LOGIN, email, PASSWORD)).json()["access_token"]
+    socket = _Socket({"type": "subscribe", "data": {"channel": "app_run_updates"}})
+    user = await get_user_from_websocket(websocket=socket, token=token, session=None)
+    task = asyncio.create_task(websocket_router.connect(socket, user))
+    try:
+        async with asyncio.timeout(5):
+            while not socket.subscribed:
+                await asyncio.sleep(0.05)
+
+        if refusal == "account deactivated":
+            change = (
+                sa.update(Users)
+                .where(Users.email == email)
+                .values(state=UserState.INACTIVE.value)
+            )
+        elif refusal == "tenant suspended":
+            change = (
+                sa.update(Tenants)
+                .where(Tenants.id == user.tenant_id)
+                .values(state=TenantState.SUSPENDED.value)
+            )
+        else:
+            change = (
+                sa.update(Users)
+                .where(Users.email == email)
+                .values(password_change_required=True)
+            )
+        await _execute(change)
+
+        async with asyncio.timeout(5):
+            assert await socket.closed == WS_1008_POLICY_VIOLATION
+            await task
+        assert not socket.subscribed
+    finally:
+        task.cancel()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_socket_whose_check_gets_no_answer_closes_for_a_retry(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+    monkeypatch,
+):
+    # A check the store does not answer proves nothing about the session. The
+    # socket stops serving, but not with 1008, which the client takes as
+    # final: it reconnects through ordinary authentication once the store
+    # answers again.
+    monkeypatch.setattr(browser_session_service, "RECHECK_SECONDS", 0.5)
+    monkeypatch.setattr(browser_session_service, "STORE_DEADLINE_SECONDS", 1.0)
+    email = await _create_local_user(client, super_admin_token)
+    token = (await _login(client, TOKEN_LOGIN, email, PASSWORD)).json()["access_token"]
+    socket = _Socket({"type": "subscribe", "data": {"channel": "app_run_updates"}})
+    user = await get_user_from_websocket(websocket=socket, token=token, session=None)
+    task = asyncio.create_task(websocket_router.connect(socket, user))
+    try:
+        async with asyncio.timeout(5):
+            while not socket.subscribed:
+                await asyncio.sleep(0.05)
+        async with sessionmanager.session() as holder, holder.begin():
+            # Every read of the sessions waits behind this transaction.
+            await holder.execute(
+                sa.text("LOCK TABLE browser_sessions IN ACCESS EXCLUSIVE MODE")
+            )
+            async with asyncio.timeout(4):
+                assert await socket.closed == WS_1013_TRY_AGAIN_LATER
+                await task
+        assert not socket.subscribed
+    finally:
+        task.cancel()
 
 
 async def _subscribers(redis_client, user_id: str, count: int) -> None:
@@ -930,7 +1377,7 @@ async def test_sign_out_ends_an_open_job_event_stream(
         async with asyncio.timeout(5):
             ended = await cookie_stream
         assert ended.status_code == 200
-        # The token login's token has no browser session to end.
+        # The token login's session is another one, still signed in.
         await asyncio.sleep(1)
         assert not bearer_stream.done()
     finally:
@@ -1074,16 +1521,6 @@ async def _extension_audit_rows(user_id: str) -> list[dict[str, Any]]:
         ]
 
 
-@pytest.fixture
-async def raw_client(app) -> AsyncIterator[AsyncClient]:
-    """A client that receives the 500 instead of the server's exception."""
-    async with AsyncClient(
-        transport=ASGITransport(app=app, raise_app_exceptions=False),
-        base_url="http://test.local",
-    ) as client:
-        yield client
-
-
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_a_browser_session_extends_itself_and_is_audited(
@@ -1144,6 +1581,7 @@ async def test_a_browser_session_extends_itself_and_is_audited(
     assert claims["auth_time"] == original["iat"]
     # It is the same session: no new row, and the row now ends with it.
     assert claims["sid"] == original["sid"]
+    assert claims["session_ref"] == original["session_ref"]
     assert await _rows(original["user_id"]) == {
         original["sid"]: (
             UUID(original["user_id"]),
@@ -1172,6 +1610,34 @@ async def test_a_browser_session_extends_itself_and_is_audited(
     assert refused.status_code == 401, refused.text
     assert refused.headers.get_list("set-cookie") == []
     assert len(await _extension_audit_rows(me.json()["id"])) == 1
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_renewal_keeps_every_claim_its_sign_in_set(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+    federated_callback,
+):
+    email = await _create_local_user(client, super_admin_token)
+    password = _session_token(await _login(client, SESSION_LOGIN, email, PASSWORD))
+    [cookie] = _session_cookies(await federated_callback())
+    federated = cookie.removeprefix(f"{SESSION}=").split(";", 1)[0]
+
+    for token in (password, federated):
+        extended = await client.post(EXTEND, headers=_cookie(token))
+
+        assert extended.status_code == 200, extended.text
+        started, renewed = _claims(token), _claims(_session_token(extended))
+        # Only the times are new, and the sign-in time is kept as auth_time.
+        assert renewed == started | {
+            "iat": renewed["iat"],
+            "exp": renewed["exp"],
+            "auth_time": started["iat"],
+        }
 
 
 @pytest.mark.integration
@@ -1408,7 +1874,7 @@ async def test_signing_out_with_the_token_a_renewal_replaced_ends_the_session(
     assert signed_out.status_code == 204, signed_out.text
     me = await client.get("/api/v1/users/me/", headers=_cookie(renewed))
     assert me.status_code == 401, me.text
-    assert await _rows(claims["user_id"]) == {}
+    assert (await _rows(claims["user_id"])).keys() == {_claims(bearer)["sid"]}
 
 
 @pytest.mark.integration
@@ -1478,25 +1944,23 @@ def _payload(token: str) -> JWTPayload:
     )
 
 
-async def _issue(current: JWTPayload, seconds: float) -> str:
-    """A token for the session's user, as a renewal issues it."""
-    async with sessionmanager.session() as session, session.begin():
-        container = Container(session=providers.Object(session))
-        user = await container.user_repo().get_user_by_id_and_tenant_id(
-            current.user_id, tenant_id=current.tenant_id
-        )
-        return AuthService().create_access_token_for_user(user, expires_in=seconds / 60)
+def _signed_in_ago(token: str, seconds_left: float) -> str:
+    """The session token, signed again as if its sign-in was so long ago
+    that the session reaches its maximum age ``seconds_left`` from now."""
+    max_age = get_settings().browser_session_max_age * 60
+    return _signed(_claims(token) | {"auth_time": time.time() - max_age + seconds_left})
 
 
-async def _renew(current: JWTPayload, issued: str) -> str:
+async def _renew(token: str) -> str:
     """BrowserSessionService.renew in a database session of its own."""
+    current = _payload(token)
     async with sessionmanager.session() as session:
         container = Container(session=providers.Object(session))
         async with session.begin():
             user = await container.user_repo().get_user_by_id_and_tenant_id(
                 current.user_id, tenant_id=current.tenant_id
             )
-        return await container.browser_session_service().renew(current, issued, user)
+        return await container.browser_session_service().renew(token, user)
 
 
 async def _renewal_waits_for_the_row() -> None:
@@ -1516,7 +1980,7 @@ async def _renewal_waits_for_the_row() -> None:
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_a_renewal_issued_earlier_but_recorded_later_keeps_the_later_end(
+async def test_a_renewal_recorded_last_never_moves_the_end_earlier(
     client,
     super_admin_token,
     patch_auth_service_jwt,
@@ -1533,12 +1997,9 @@ async def test_a_renewal_issued_earlier_but_recorded_later_keeps_the_later_end(
         .where(BrowserSessions.sid == current.sid)
         .values(expires_at=datetime.now(timezone.utc) + timedelta(minutes=1))
     )
-    # Issued first, so it ends first.
-    earlier = await _issue(current, 3)
-    later = await _issue(current, 120)
-
     # The later renewal updates the row and holds it, uncommitted, in its
-    # audit write; the earlier one waits for the row, then updates it last.
+    # audit write; the earlier one, for a session at its maximum age in three
+    # seconds, waits for the row, then updates it last.
     create = AuditLogRepositoryImpl.create
     held, release = asyncio.Event(), asyncio.Event()
 
@@ -1550,7 +2011,7 @@ async def test_a_renewal_issued_earlier_but_recorded_later_keeps_the_later_end(
         return created
 
     monkeypatch.setattr(AuditLogRepositoryImpl, "create", hold_the_first)
-    later_renewal = asyncio.create_task(_renew(current, later))
+    later_renewal = asyncio.create_task(_renew(_signed_in_ago(token, 120)))
     earlier_renewal: asyncio.Task | None = None
     try:
         # A renewal that fails before its audit write must fail the test, not hang it.
@@ -1562,7 +2023,7 @@ async def test_a_renewal_issued_earlier_but_recorded_later_keeps_the_later_end(
         held_or_failed.cancel()
         if later_renewal.done():
             later_renewal.result()
-        earlier_renewal = asyncio.create_task(_renew(current, earlier))
+        earlier_renewal = asyncio.create_task(_renew(_signed_in_ago(token, 3)))
         async with asyncio.timeout(30):
             await _renewal_waits_for_the_row()
     finally:
@@ -1596,11 +2057,10 @@ async def test_a_renewal_after_sign_out_does_not_bring_the_session_back(
     email = await _create_local_user(client, super_admin_token)
     token = _session_token(await _login(client, SESSION_LOGIN, email, PASSWORD))
     current = _payload(token)
-    issued = await _issue(current, 120)
 
     assert (await _sign_out(client, token)).status_code == 204
 
     with pytest.raises(AuthenticationException):
-        await _renew(current, issued)
+        await _renew(token)
     assert await _rows(str(current.user_id)) == {}
     assert await _extension_audit_rows(str(current.user_id)) == []

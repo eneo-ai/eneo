@@ -52,7 +52,8 @@ async def test_colliding_usernames_keep_identity_and_private_resources_isolated(
                 owner, created = await container.user_service().resolve_federated_user(
                     identity=FederatedIdentity(
                         issuer="https://idp.example.org",
-                        subject=f"subject-{tenant_id}",
+                        audience="eneo-client",
+                        subject=f"subject-{email}",
                         email=email,
                         email_verified=True,
                     ),

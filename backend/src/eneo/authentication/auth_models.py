@@ -1,5 +1,6 @@
 import base64
 import binascii
+import re
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from enum import Enum
@@ -47,6 +48,8 @@ class JWTMeta(BaseModel):
 
 # A browser session id: 256 random bits, as secrets.token_urlsafe(32) writes them.
 SESSION_ID_PATTERN = r"^[A-Za-z0-9_-]{43}$"
+# A browser session's stable id, in the one form str(UUID) writes.
+SESSION_REF_PATTERN = r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 
 
 class JWTCreds(BaseModel):
@@ -64,18 +67,31 @@ class JWTCreds(BaseModel):
     sub: EmailStr
     username: Optional[str] = None
     # The server-side browser session (eneo.authentication.
-    # browser_session_service). Only a browser sign-in adds it to a token, so
-    # minting never dumps it. A present claim is a session id: null or any
+    # browser_session_service). Only starting a session adds it to a token,
+    # so minting never dumps it. A present claim is a session id: null or any
     # other value is refused, never read as a token without one.
     sid: Optional[str] = Field(
         default=None, exclude=True, strict=True, pattern=SESSION_ID_PATTERN
     )
+    # The same session's stable, non-secret id (browser_sessions.id), signed
+    # beside sid; tokens issued before it existed carry sid alone. Like sid,
+    # never dumped, and a present claim must be the form sign-in writes.
+    session_ref: Optional[UUID] = Field(default=None, exclude=True)
 
     @field_validator("sid", mode="before")
     @classmethod
     def _refuse_null_sid(cls, value: object) -> object:
         if value is None:
             raise ValueError("sid must not be null")
+        return value
+
+    @field_validator("session_ref", mode="before")
+    @classmethod
+    def _refuse_other_session_ref_forms(cls, value: object) -> object:
+        if isinstance(value, UUID):
+            return value
+        if not isinstance(value, str) or not re.fullmatch(SESSION_REF_PATTERN, value):
+            raise ValueError("session_ref must be a session id")
         return value
 
 
@@ -770,14 +786,22 @@ DEFAULT_EMAIL_VERIFIED_CLAIMS = ("email_verified", "xms_edov")
 
 
 class FederatedIdentity(BaseModel):
-    """Email identity extracted only after the OIDC token has been validated."""
+    """Email identity extracted only after the OIDC token has been validated.
+
+    Issuer, audience, subject claim and subject are the key an account is
+    bound to (``identity_bindings``).
+    """
 
     model_config = ConfigDict(frozen=True)
 
     issuer: str = Field(min_length=1)
-    # Only from a verified ID token's aud/azp; an IdP access token leaves it
-    # unset, because the API audience does not name the signing-in client.
-    client_id: str | None = Field(default=None, min_length=1)
+    # The verified audience the subject belongs to: the client id of a browser
+    # sign-in's ID token (aud/azp), or the accepted API audience of a
+    # provider's access token. Never invented for a path that proves neither.
+    audience: str = Field(min_length=1)
+    # The claim the subject was read from. Another claim's values are another
+    # namespace: the same value there may name someone else.
+    subject_claim: str = Field(default="sub", min_length=1)
     subject: str = Field(min_length=1)
     email: EmailStr
     email_verified: bool = Field(strict=True)
@@ -788,7 +812,10 @@ class FederatedIdentity(BaseModel):
         claims: Mapping[str, object],
         *,
         issuer: str,
-        client_id: str | None = None,
+        audience: str,
+        # The claim that names the person: ``sub`` unless the provider's
+        # claims mapping names a stable id claim instead.
+        subject_claim: str = "sub",
         email_claim: str = "email",
         email_verified_claims: Sequence[str] = DEFAULT_EMAIL_VERIFIED_CLAIMS,
     ) -> "FederatedIdentity":
@@ -808,13 +835,14 @@ class FederatedIdentity(BaseModel):
         verdict = claims[deciding] if deciding is not None else None
         if email_claim == "email" and deciding == "email_verified" and verdict is False:
             raise ValueError("Email is not verified by the identity provider")
-        subject = claims.get("sub")
+        subject = claims.get(subject_claim)
         if not isinstance(subject, str) or not subject:
             raise ValueError("ID token is missing its subject")
         try:
             return cls(
                 issuer=issuer,
-                client_id=client_id,
+                audience=audience,
+                subject_claim=subject_claim,
                 subject=subject,
                 email=email,
                 # The verification claims verify the standard email, not an

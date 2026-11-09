@@ -15,6 +15,7 @@ from fastapi import FastAPI, HTTPException, Response
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 
+from eneo.audit.domain.action_types import ActionType
 from eneo.authentication import federation_router
 from eneo.authentication.auth_models import FederatedIdentity
 from eneo.authentication.federation_router import CallbackRequest
@@ -36,6 +37,7 @@ from eneo.tenants.tenant import TenantInDB, TenantState
 from eneo.users.user import UserInDB
 from eneo.users.user_service import UserService
 from tests.fake_oidc_provider import DROP, FakeOidcProvider, install
+from tests.identity_bindings_in_memory import IdentityBindingsInMemory
 
 
 class DummySettings(SimpleNamespace):
@@ -114,6 +116,18 @@ class UserRepoStub:
             return self._user
         return None
 
+    async def get_users_by_email(self, email: str, *, limit: int):
+        user = await self.get_user_by_email(email)
+        return [user] if user else []
+
+    async def get_user_by_id(self, id, with_deleted: bool = False):
+        if id == self._user.id and (with_deleted or self._user.deleted_at is None):
+            return self._user
+        return None
+
+    async def get_user_by_id_for_update(self, id):
+        return await self.get_user_by_id(id)
+
 
 class AuthServiceStub:
     def __init__(self, claims: dict[str, object] | None = None):
@@ -128,6 +142,14 @@ class AuthServiceStub:
 
     def create_access_token_for_user(self, user: UserInDB):  # noqa: ARG002
         return "access-token"
+
+
+class _SessionsHandBack:
+    """The callback route starts a browser session for the token it hands
+    out; these tests check the sign-in, so the token comes back unchanged."""
+
+    async def start(self, access_token: str) -> str:
+        return access_token
 
 
 class MockContainer:
@@ -145,6 +167,10 @@ class MockContainer:
         self._auth_service = auth_service
         self._redis_client = redis_client
         self._encryption_service = encryption_service
+        self._identity_bindings = IdentityBindingsInMemory()
+
+    def browser_session_service(self):
+        return _SessionsHandBack()
 
     def tenant_repo(self):
         return self._tenant_repo
@@ -171,6 +197,7 @@ class MockContainer:
             api_key_v2_repo=None,
             settings_repo=None,
             info_blob_repo=None,
+            identity_binding_repo=self._identity_bindings,
         )
 
 
@@ -775,6 +802,23 @@ class UserRepoStubForJIT:
             return self._created_user
         return None
 
+    async def get_users_by_email(self, email: str, *, limit: int):
+        user = await self.get_user_by_email(email)
+        return [user] if user else []
+
+    async def get_user_by_id(self, id, with_deleted: bool = False):
+        for user in (self._user, self._created_user):
+            if (
+                user is not None
+                and user.id == id
+                and (with_deleted or user.deleted_at is None)
+            ):
+                return user
+        return None
+
+    async def get_user_by_id_for_update(self, id):
+        return await self.get_user_by_id(id)
+
     async def get_user_by_username(self, username: str, with_deleted: bool = False):
         for user in (self._user, self._created_user):
             if user is not None and user.username == username:
@@ -803,9 +847,15 @@ class UserRepoStubForJIT:
 class AuditServiceStub:
     def __init__(self):
         self.logged_events = []
+        # Sent to the worker: they outlive the sign-in's transaction.
+        self.enqueued_events = []
 
     async def log(self, **kwargs):
         self.logged_events.append(kwargs)
+        return None
+
+    async def log_async(self, **kwargs):
+        self.enqueued_events.append(kwargs)
         return None
 
 
@@ -826,8 +876,12 @@ class MockContainerForJIT:
         self._auth_service = auth_service
         self._redis_client = redis_client
         self._encryption_service = encryption_service
+        self._identity_bindings = IdentityBindingsInMemory()
         self._audit_service = audit_service
         self._allowed_origin_repo = allowed_origin_repo
+
+    def browser_session_service(self):
+        return _SessionsHandBack()
 
     def tenant_repo(self):
         return self._tenant_repo
@@ -854,6 +908,7 @@ class MockContainerForJIT:
             api_key_v2_repo=None,
             settings_repo=None,
             info_blob_repo=None,
+            identity_binding_repo=self._identity_bindings,
         )
 
     def audit_service(self):
@@ -1015,10 +1070,23 @@ async def test_callback_enforces_jit_admission(monkeypatch, provider, admission_
     assert user_repo._created_user.tenant_id == tenant_id
 
     # Verify audit event was logged for the correct tenant
-    assert len(audit_service.logged_events) == 1
-    audit_event = audit_service.logged_events[0]
+    [audit_event] = [
+        event
+        for event in audit_service.logged_events
+        if event["action"] == ActionType.USER_CREATED
+    ]
     assert audit_event["metadata"]["provisioning_method"] == "jit_federation"
     assert audit_event["tenant_id"] == tenant_id
+    # The new account is bound to the identity that created it.
+    [bound] = [
+        event
+        for event in audit_service.logged_events
+        if event["action"] == ActionType.IDENTITY_BOUND
+    ]
+    assert (bound["entity_id"], bound["metadata"]["method"]) == (
+        user_repo._created_user.id,
+        "jit",
+    )
 
 
 @pytest.mark.asyncio
@@ -1065,7 +1133,7 @@ async def test_jit_provisioning_does_not_reuse_a_taken_username():
     created, was_created = await container.user_service().resolve_federated_user(
         identity=FederatedIdentity(
             issuer=PROVIDER_ISSUER,
-            client_id="client",
+            audience="client",
             subject="subject",
             email="anna.svensson@ange.se",
             email_verified=True,

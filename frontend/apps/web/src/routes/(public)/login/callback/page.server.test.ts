@@ -328,7 +328,8 @@ describe("generic OIDC browser-bound callback", () => {
 
   test.each([
     ["LOGIN_UNAVAILABLE", "oidc_callback_failed", "login_unavailable"],
-    ["ATTEMPT_EXPIRED", "oidc_attempt_rejected", null]
+    ["ATTEMPT_EXPIRED", "oidc_attempt_rejected", null],
+    ["IDENTITY_CONFLICT", "oidc_callback_failed", "identity_conflict"]
   ] as const)("a %s refusal shows %s on the login page", async (code, message, detailCode) => {
     const state = frontendState(null);
     mocks.loginWithOidc.mockRejectedValue(new LoginError("oidc", code));

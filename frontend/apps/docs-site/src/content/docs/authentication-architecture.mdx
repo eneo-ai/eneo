@@ -85,6 +85,42 @@ existing session to another account, including one with the same username.
 The identity contract belongs to Eneo session tokens. Identity-provider tokens
 are validated separately during OIDC login and exchanged for an Eneo session.
 
+#### Server-side sessions
+
+Every password sign-in and every OIDC sign-in through `POST /api/v1/auth/callback`,
+in the Svelte app and in the Vite app, starts one server-side session in
+PostgreSQL. The token it hands out names that session (`sid`), and it
+authenticates, as the cookie or as Bearer, only while the session exists.
+
+- **Sign-out** ends the session, so every copy of the token stops working at
+  once. When the end cannot be confirmed within 5 seconds, sign-out answers
+  503 and clears nothing: the session may already have ended, or may still
+  work, and trying again completes the sign-out. It does not end the identity
+  provider's session.
+- **Live updates** stop with the session. The job-event stream
+  (`GET /api/v1/jobs/events/`) and the `/ws` socket check their session at
+  most 30 seconds apart while they are open, and end at the token's expiry.
+  After sign-out, a password change, signing out everywhere, the account's
+  deactivation, the organisation's suspension or a required password change
+  they close at the next check; the socket closes with code 1008
+  and the client does not reconnect with that token. A check the database
+  cannot answer closes them too, but the socket closes with code 1013, and
+  the client reconnects once sign-in can be checked again.
+- **Expired sessions** admit nothing; a nightly job deletes them.
+- **No session**: provider access tokens, API keys, system tokens, and
+  internal MCP and module tokens. They work as before, and sign-out does not
+  affect them.
+
+An API client that signs in with `POST /api/v1/users/login/token/` holds a
+session token as well. `POST /api/v1/users/logout/`, with that token as
+Bearer, ends its session. The route reads only the `Authorization` header,
+never a cookie.
+
+| Answer | Meaning |
+|--------|---------|
+| `204` | No session remains that this token can use: its session has ended, or it named none to end (no or an invalid token, a token without a session such as one issued before sessions, a provider token, or a token expired for longer than it was valid). A token without a session is not revoked and works until it expires. A token expired for less than that still ends its session |
+| `503` `sign_out_unavailable` | The end is not confirmed: the session may already have ended, or the token may still work. Keep the token and retry; once the session has ended, a retry answers `204` |
+
 #### Backend browser sessions
 
 The backend-served web app remains disabled by default. With
@@ -108,19 +144,11 @@ is present, including an expired cookie; without a cookie it still returns 204
 and clears any remaining authentication cookies.
 A document must never adopt a replacement generation to retry a refused write.
 
-Each browser sign-in also records a server-side session in PostgreSQL, which
-its token names in a `sid` claim. A token with `sid` authenticates, as the
-cookie or as Bearer, only while that session exists. Logout deletes it before
-clearing the cookie, so a copy of the cookie stops working at once; when the
-deletion cannot be confirmed within 5 seconds, logout returns 503 and keeps the
-cookie for a retry. Requests admitted before logout may finish. The job-event stream
-(`GET /api/v1/jobs/events/`) is the exception, since it stays open until the
-client leaves: for a browser session it authenticates the token again every
-30 seconds (each check waits at most 5 seconds) and ends at the token's
-expiry, so after logout, a password change, signing out everywhere or the
-account's deactivation it closes at the next check. A browser session's token cannot open a WebSocket. Logout does not
-end the identity provider's session, and a password change still ends every
-session of the user. Other Eneo tokens carry no `sid`.
+Logout (`POST /api/v1/auth/session/logout/`) ends the
+[server-side session](#server-side-sessions) before it clears the cookie, so a
+copy of the cookie stops working at once; when that cannot be confirmed, it
+returns 503 and keeps the cookie for a retry. Requests admitted before logout
+may finish. A password change still ends every session of the user.
 
 The Vite transport binds the document through `GET /api/v1/auth/session/`
 before rendering. Typed requests, raw fetches, job events and uploads share
@@ -413,7 +441,7 @@ Federation config is stored in the `federation_config` JSONB column of the `tena
 | `issuer`, `authorization_endpoint`, `token_endpoint`, `userinfo_endpoint`, `jwks_uri` | discovery | Resolved at PUT/PATCH time |
 | `token_endpoint_auth_method`, `token_endpoint_auth_methods_supported` | discovery | See [Token Auth Method Selection](#token-auth-method-selection) |
 | `scopes` | default | `["openid", "email", "profile"]` (not configurable via the API) |
-| `claims_mapping` | default | `{"email": "email", "username": "sub", "name": "name"}`; only `email` is read at login |
+| `claims_mapping` | default | `{"email": "email", "subject": "sub", "username": "sub", "name": "name"}`; only `subject` is configurable, as `subject_claim` on `PUT`, `PATCH` and the administrators' `PATCH /api/v1/admin/federation`; `email` and `subject` are read at login |
 | `encrypted_at` | server | Timestamp of the last secret encryption |
 
 A `PATCH` that sets `canonical_public_origin`, `redirect_path`, `additional_redirect_uris`, `signing_algorithms` or `email_verified_claims` to `null` removes the key, which restores its default. A `GET` returns `null` for a key that is not stored.
@@ -454,7 +482,7 @@ uv run python -m eneo.cli.generate_encryption_key
 | `azp` | Conditional | When present, must equal `client_id`; required when `aud` names several clients |
 | `exp` | **Yes** | Required; automatic PyJWT validation |
 | `iat` | **Yes** | Required; a token issued more than the clock leeway in the future is rejected as not yet valid |
-| `sub` | **Yes** | Required |
+| `sub` | **Yes** | Required; a configured subject claim (`claims_mapping.subject`) is required as well |
 | `nonce` | **Yes** | Must equal the transaction's nonce |
 | `auth_time` | Conditional | When present, a number not in the future |
 | `acr`, `amr` | Conditional | When present, text and a list of text |
@@ -468,13 +496,13 @@ The verification claims and their order come from the provider's `email_verified
 
 ### User Claims Extracted
 
-Only the email claim is used. The claim name comes from `claims_mapping.email` (default `email`); the ID token's `sub` is logged for diagnostics but not persisted.
+Two claims are used: the email claim (`claims_mapping.email`, default `email`) and the subject claim (`claims_mapping.subject`, default `sub`). The issuer, the audience, the subject claim's name and its value select the account the identity is bound to; see [Account Binding](/guides/oidc-federation#account-binding).
 
 A missing claim is rejected with `401 Email claim not found in ID token`; a malformed address with `401 Email claim from identity provider is invalid. Contact your administrator.`
 
 When `email_verified` is the claim that decides, an explicit boolean `false` for the standard `email` claim is rejected before account lookup or JIT provisioning. The federation callback returns `401 Email is not verified by the identity provider`. A missing flag remains accepted for existing active members when enterprise IdPs issue administrator-controlled directory addresses without this claim. JIT creation still requires verified email, as described below.
 
-Eneo still links accounts by email, so the configured IdP must control who can claim that address. If `claims_mapping.email` uses a different claim, such as `upn`, the standard `email_verified` flag does not describe that claim and is not applied to it. Administrators must choose a claim controlled by their organization's directory. This check does not introduce an issuer/subject account binding.
+The email binds an account to an identity on its first sign-in, so the configured IdP must control who can claim that address. If `claims_mapping.email` uses a different claim, such as `upn`, the standard `email_verified` flag does not describe that claim and is not applied to it. Administrators must choose a claim controlled by their organization's directory.
 
 ### Domain Validation
 
@@ -488,11 +516,11 @@ Global OIDC uses `OIDC_ALLOWED_DOMAINS` (JSON array, default `[]`); per-tenant f
 
 ### JIT Provisioning
 
-`UserService.resolve_federated_user` is the single admission owner for every OIDC sign-in, with per-tenant federation or the global `OIDC_*` settings. It reuses the active account in the configured tenant, rejects inactive accounts and cross-tenant matches, and checks for removed rows before considering account creation. The removed-account lookup is tenant-scoped and tests for existence because several historical rows can share an email.
+`UserService.resolve_federated_user` is the single admission owner for every OIDC sign-in, with per-tenant federation or the global `OIDC_*` settings. It signs in to the account the identity is bound to, binds an active account in the configured tenant found by email when it has no binding yet, rejects inactive accounts and cross-tenant matches, and checks for removed rows before considering account creation. The removed-account lookup is tenant-scoped and tests for existence because several historical rows can share an email.
 
 | Account state | Result |
 |---|---|
-| Existing active member of the tenant | Sign in, subject to any configured domain restriction. No new email-verification requirement is applied. |
+| Existing active member of the tenant | Sign in, subject to any configured domain restriction and to [account binding](/guides/oidc-federation#account-binding) (`403` `identity_conflict` otherwise). No new email-verification requirement is applied. |
 | Existing account in another tenant, or inactive/removed account | `403`; no account creation or reactivation. |
 | No account, `tenant.provisioning: false` (default) | `403`; provision through SCIM or administration. |
 | No account, `tenant.provisioning: true` | Creation requires a non-empty domain allowlist, a matching domain and the ID token's `email_verified: true` for the selected address. |
@@ -588,11 +616,14 @@ Enable debug logging via the observability API (`POST /api/v1/sysadmin/observabi
 
 **Callback phase:**
 - `callback.state_decoded`
-- `callback.email_extracted`
+- `callback.email_extracted` (the claim it was read from, not the address)
+- `callback.identity_conflict`
 - `callback.user_denied`
 - `callback.jit_provisioning`
 - `callback.success`
 - `callback.unexpected_error`
+
+The address appears only once the sign-in is admitted (`callback.jit_provisioning`, `callback.success`): no event of a refused sign-in carries it.
 
 A refused or failed sign-in is logged whether or not debug logging is on: `oidc_transaction_refused` and `oidc_response_refused` name the check that refused it, and `oidc_transaction_store_failed` means Redis is missing or failing.
 

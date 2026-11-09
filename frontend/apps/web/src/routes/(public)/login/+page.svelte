@@ -397,6 +397,9 @@
     if (oidcErrorDetailCode === "login_unavailable") {
       return m.oidc_error_login_unavailable();
     }
+    if (oidcErrorDetailCode === "identity_conflict") {
+      return m.oidc_error_identity_conflict();
+    }
     return m.oidc_error_generic();
   }
 </script>

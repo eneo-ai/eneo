@@ -7,6 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 from eneo.authentication import auth_service as auth_service_module
+from eneo.authentication.auth_models import JWTPayload
 from eneo.authentication.auth_service import INTERNAL_MCP_AUDIENCE, AuthService
 from eneo.internal_mcp.foundation import (
     assistant_id_from_token,
@@ -405,6 +406,7 @@ async def test_legacy_session_is_rejected_even_when_its_username_is_unique(
 
 
 SID = "s" * 43
+REF = UUID("6a1f2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d")
 
 
 def test_ordinary_tokens_name_no_browser_session(auth_service: AuthService):
@@ -413,6 +415,23 @@ def test_ordinary_tokens_name_no_browser_session(auth_service: AuthService):
 
     bound = auth_service.add_session_id(token, SID)
     assert token_claims(bound) == token_claims(token) | {"sid": SID}
+    # A session started with a stable id carries it beside the sid.
+    referenced = auth_service.add_session_id(token, SID, REF)
+    assert token_claims(referenced) == token_claims(token) | {
+        "sid": SID,
+        "session_ref": str(REF),
+    }
+
+
+def test_a_token_dump_leaves_the_session_out(auth_service: AuthService):
+    claims = token_claims(
+        auth_service.add_session_id(
+            auth_service.create_access_token_for_user(TEST_USER), SID, REF
+        )
+    )
+    payload = JWTPayload.model_validate(claims)
+    assert (payload.sid, payload.session_ref) == (SID, REF)
+    assert {"sid", "session_ref"}.isdisjoint(payload.model_dump())
 
 
 async def test_a_browser_session_token_needs_its_session(session_service):
@@ -455,8 +474,40 @@ async def test_a_present_sid_is_a_session_id(session_service, sid: object):
 
 
 @pytest.mark.parametrize(
+    "session_ref",
+    [None, "", 7, str(REF).upper(), REF.hex, f"{{{REF}}}", f"urn:uuid:{REF}"],
+    ids=repr,
+)
+async def test_a_present_session_ref_is_a_session_id(
+    session_service, session_ref: object
+):
+    # Signed with the real key: only the claim's form is wrong. Null or
+    # another spelling of the same id must not read as a token without one.
+    service, users = session_service
+    users[TEST_USER.id] = TEST_USER
+    service.browser_session_service = AsyncMock()
+    claims = token_claims(
+        service.auth_service.add_session_id(
+            service.auth_service.create_access_token_for_user(TEST_USER), SID
+        )
+    )
+    claims["session_ref"] = session_ref
+    with pytest.raises(AuthenticationException):
+        await service.authenticate(token=sign_claims(claims))
+    service.browser_session_service.admit.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
     "field",
-    ["user_id", "tenant_id", "credential_version", "token_version", "sub", "sid"],
+    [
+        "user_id",
+        "tenant_id",
+        "credential_version",
+        "token_version",
+        "sub",
+        "sid",
+        "session_ref",
+    ],
 )
 def test_extra_claims_cannot_override_session_identity(
     auth_service: AuthService, field: str

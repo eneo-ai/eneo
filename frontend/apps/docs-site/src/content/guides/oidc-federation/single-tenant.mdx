@@ -297,7 +297,7 @@ With the settings stored in Eneo, the organisation's administrators open **Admin
 Next to **Save changes** the page names the settings changed but not saved, and **Undo changes** restores the saved values. Saving asks for confirmation:
 
 - A new display name only is confirmed plainly: it appears in the [audit log](/guides/audit-logging) and does not change sign-in.
-- A new client ID, secret or domain list is flagged, because a wrong value can stop people signing in through SSO, and the confirmation says what each change does. A new client ID can cut people off from their existing accounts: Eneo finds an account by the email address the identity provider sends, so the new client must send the same email address for each person. Replacing the secret is the routine change. A new secret must already be valid at the identity provider. For the domains it names the ones added and removed: removed domains can no longer sign in, and active accounts in added ones can, and where [JIT](#user-provisioning) is on, a person there with a verified email address gets an account at first sign-in. A first list refuses everyone outside it and lets JIT create accounts inside it; an empty list checks no domain, so every active member can sign in, and JIT creates no accounts.
+- A new client ID, secret or domain list is flagged, because a wrong value can stop people signing in through SSO, and the confirmation says what each change does. If the provider gives each client its own user IDs, [open a migration window](/guides/oidc-federation#changing-the-client-id) from the old client ID to the new one before saving a new client ID; otherwise existing accounts are refused. Through the window, Eneo finds each account by the email address the new client sends. Replacing the secret is the routine change. A new secret must already be valid at the identity provider. For the domains it names the ones added and removed: removed domains can no longer sign in, and active accounts in added ones can, and where [JIT](#user-provisioning) is on, a person there with a verified email address gets an account at first sign-in. A first list refuses everyone outside it and lets JIT create accounts inside it; an empty list checks no domain, so every active member can sign in, and JIT creates no accounts.
 
 Each saved change is written to the audit log. The change applies from the next sign-in, and people already signed in stay signed in; after a change to who can sign in, the page suggests trying SSO in a private window before signing out. If another administrator saved in the meantime, the save is refused and the page offers to load their values.
 
@@ -344,7 +344,7 @@ Earlier versions of the move did not copy `OIDC_ALLOWED_DOMAINS`, so the stored 
 
 ## User Provisioning
 
-Eneo matches the signing-in user to an existing Eneo user by the `email` claim of the ID token. By default a user who does not exist is rejected with `403 User not found. Provision the account through SCIM or contact your administrator for access.`
+On the first sign-in, Eneo matches the signing-in user to an existing Eneo user by the `email` claim of the ID token and binds the account to the person's identity; after that, the identity decides and the email is not consulted (see [Account Binding](/guides/oidc-federation#account-binding)). By default a user who does not exist is rejected with `403 User not found. Provision the account through SCIM or contact your administrator for access.`
 
 For deployments using SCIM, keep tenant `provisioning` set to `false` (the default). SCIM creates and manages accounts; OIDC signs users in to their existing active account. A user whose account has not arrived through SCIM must wait for provisioning. Enabling SCIM does not automatically change the tenant's JIT setting.
 
@@ -407,6 +407,7 @@ For push-based provisioning from your directory (deactivation, groups), see [SCI
 | `additional_redirect_uris` | No | Extra fully-qualified callback URLs, each also registered in the IdP |
 | `signing_algorithms` | No | ID token algorithms to accept; default from discovery, else `RS256`. See the [provider contract](/guides/oidc-federation#provider-contract) |
 | `email_verified_claims` | No | Claims that say the email is verified, in order; default `["email_verified", "xms_edov"]` |
+| `subject_claim` | No | The claim an account is bound to. Without it a `PUT` stores `sub`, so send the current claim to keep it; see [The subject claim](/guides/oidc-federation#the-subject-claim) |
 
 Scopes are fixed to `openid email profile`.
 
@@ -449,6 +450,12 @@ JIT is enabled and the domain is allowed, but the ID token carries no accepted v
 ### "Email claim not found in ID token"
 
 The ID token has no `email` claim (`401`). On Azure Entra ID this happens when the user has no `mail` attribute or the app registration does not emit the optional `email` claim - see the checklist in [SCIM Provisioning](/guides/scim-provisioning#sign-in-prerequisites-when-paired-with-oidc).
+
+### "This account is already linked to another sign-in"
+
+The account is bound to another identity than the one this sign-in presents (`403` `identity_conflict`), for example after a client ID or subject claim change.
+
+**Fix:** Find the reason in the audit log and follow [Sign-in conflicts](/guides/oidc-federation#sign-in-conflicts).
 
 ### Invalid client
 
