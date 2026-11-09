@@ -56,12 +56,20 @@ describe("URL intake boundaries", () => {
       const probe = probeUrl(`${origin}/file.csv`, policy([{ origin, allow_private: false }]));
       await expect(probe).rejects.toMatchObject({
         code: "DOWNLOAD_DENIED",
-        message: expect.stringContaining("an address the runtime never contacts"),
+        message: expect.stringContaining("private addresses are not allowed for this origin"),
       });
       expect(connections).toBe(0);
     } finally {
       await new Promise((resolve) => server.close(resolve));
     }
+    // Multicast is never allowed; a connection attempt to it fails at once, so this cannot hang.
+    const multicast = "http://224.0.0.1";
+    await expect(
+      probeUrl(`${multicast}/file.csv`, policy([{ origin: multicast, allow_private: true }])),
+    ).rejects.toMatchObject({
+      code: "DOWNLOAD_DENIED",
+      message: expect.stringContaining("an address the runtime never contacts"),
+    });
   });
   test("allows Docker's synthetic host only with its hostname and private access", () => {
     expect(addressAllowed("0.250.250.254", true, "host.docker.internal")).toBe(true);
