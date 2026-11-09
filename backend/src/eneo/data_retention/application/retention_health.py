@@ -158,9 +158,9 @@ async def _task_health(
     limiting_settings = tuple(
         sorted(
             {
-                task.limited_by[reason]
+                setting
                 for key in blocked_reasons
-                if (reason := key.rpartition(".")[2]) in task.limited_by
+                for setting in task.limited_by.get(key.rpartition(".")[2], ())
             }
         )
     )

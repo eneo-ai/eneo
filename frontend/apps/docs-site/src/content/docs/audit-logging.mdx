@@ -168,8 +168,10 @@ and the unit is charged one row for each: in a group chat each turn follows its 
 Assistant's period, so earlier turns can be kept. The logs are never cleared in
 parts. A question whose conversation has more such logs than
 `RETENTION_CONVERSATIONS_MAX_UNIT_ROWS` allows is kept as `unit_exceeds_budget`, and
-health names `retention_conversations_max_unit_rows` in `limiting_settings`; the
-first execution after the limit is raised removes it.
+health names `retention_conversations_max_unit_rows` in `limiting_settings`. Each
+file charges at least three rows, so when three times `RETENTION_MAX_FILES_PER_RUN`
+is below the unit limit, health names `retention_max_files_per_run` as well. The
+first execution after the limits allow the question removes it.
 
 A log stored before this version can hold turns that earlier removals left in it,
 and nothing tells them apart from kept turns, so the upgrade empties every stored

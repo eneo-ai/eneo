@@ -16,9 +16,11 @@ class RetentionTaskRegistration:
     enabled: bool
     budget: RetentionBudget
     build: Callable[[AsyncSession], RetentionTask]
-    limited_by: Mapping[str, str] = field(default_factory=dict[str, str])
-    """A blocked reason, without its step, mapped to the deployment setting
-    whose limit keeps a root for that reason."""
+    limited_by: Mapping[str, tuple[str, ...]] = field(
+        default_factory=dict[str, tuple[str, ...]]
+    )
+    """A blocked reason, without its step, mapped to the deployment settings
+    whose limits can keep a root for that reason."""
 
 
 def retention_registration_violations(

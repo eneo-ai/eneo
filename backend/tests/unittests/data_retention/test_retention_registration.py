@@ -218,6 +218,31 @@ def test_registrations_match_their_tasks():
         assert registration.name == registration.build(AsyncSession()).name
 
 
+def _unit_limits(settings: Settings) -> set[tuple[str, ...]]:
+    return {
+        registration.limited_by["unit_exceeds_budget"]
+        for registration in retention_task_registrations(settings)
+        if "unit_exceeds_budget" in registration.limited_by
+    }
+
+
+def test_a_unit_kept_for_its_size_names_the_settings_that_can_hold_it():
+    """Mutant: health names only the row cap for a unit kept by a file budget
+    that funds fewer rows than that cap, so raising the named setting changes
+    nothing. Each File charges at least three rows."""
+    values = get_settings().model_dump()
+    values.update(
+        retention_max_files_per_run=50,
+        retention_max_family_rows=150,
+        retention_conversations_max_unit_rows=5000,
+    )
+    few_files = _unit_limits(Settings.model_validate(values))
+
+    assert few_files
+    assert all("retention_max_files_per_run" in limits for limits in few_files)
+    assert _unit_limits(get_settings()) == {("retention_conversations_max_unit_rows",)}
+
+
 @pytest.mark.parametrize(
     "setting,value,valid",
     [

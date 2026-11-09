@@ -64,14 +64,22 @@ FOLLOWS_A_REMOVAL: Mapping[str, str] = MappingProxyType(
     {DERIVED_COPIES_TASK: "retention_derived_copies_enabled"}
 )
 
-# A conversation's removal, its later logs included, must fit one unit.
-UNIT_BUDGET: Mapping[str, str] = MappingProxyType(
-    {
-        ConversationBlockReason.UNIT_EXCEEDS_BUDGET.key: (
-            "retention_conversations_max_unit_rows"
-        )
-    }
-)
+
+def _unit_budget(settings: Settings) -> Mapping[str, tuple[str, ...]]:
+    """A conversation's removal, its later logs included, must fit one unit.
+
+    Each File charges at least three rows, so a file budget that funds fewer
+    rows than the unit cap can keep a unit too, and raising the cap alone would
+    not admit it.
+    """
+    limits = ("retention_conversations_max_unit_rows",)
+    if (
+        settings.retention_max_files_per_run * 3
+        < settings.retention_conversations_max_unit_rows
+    ):
+        limits += ("retention_max_files_per_run",)
+    return MappingProxyType({ConversationBlockReason.UNIT_EXCEEDS_BUDGET.key: limits})
+
 
 # Records kept outside the engine, each with how it ends today, until the owner
 # decides whether retention removes them. Retention reports none of them as
@@ -96,6 +104,7 @@ def retention_task_registrations(
     settings: Settings, *, now: datetime | None = None
 ) -> tuple[RetentionTaskRegistration, ...]:
     observed_at = now if now is not None else datetime.now(timezone.utc)
+    unit_budget = _unit_budget(settings)
     budget = RetentionBudget(
         rows=settings.retention_max_rows_per_run,
         files=settings.retention_max_files_per_run,
@@ -123,7 +132,7 @@ def retention_task_registrations(
             name=CONVERSATION_HISTORY_TASK,
             enabled=settings.retention_conversations_history_enabled,
             budget=chat_budget,
-            limited_by=UNIT_BUDGET,
+            limited_by=unit_budget,
             build=lambda session: ConversationHistoryRetentionTask(
                 session,
                 allocation=allocation(),
@@ -141,7 +150,7 @@ def retention_task_registrations(
             name=DERIVED_COPIES_TASK,
             enabled=settings.retention_derived_copies_enabled,
             budget=chat_budget,
-            limited_by=UNIT_BUDGET,
+            limited_by=unit_budget,
             build=lambda session: DerivedCopyRetentionTask(
                 session,
                 allocation=allocation(),
