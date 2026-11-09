@@ -36,6 +36,9 @@ class Sessions(BasePublic):
     name: Mapped[str] = mapped_column()
     feedback_value: Mapped[Optional[int]] = mapped_column()
     feedback_text: Mapped[Optional[str]] = mapped_column()
+    # Raised by the question removal trigger: an answer generated from history
+    # read at an older revision may hold removed turns, so its log is cleared.
+    history_revision: Mapped[int] = mapped_column(server_default=sa.text("0"))
 
     # Foreign keys
     assistant_id: Mapped[Optional[UUID]] = mapped_column(

@@ -27,6 +27,7 @@ from eneo.files.file_content_loader import FileContentLoader
 from eneo.files.file_models import File
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from eneo.info_blobs.info_blob_repo import InfoBlobRepository
+from eneo.logging.logging import LoggingDetails
 from eneo.questions.question import Question, QuestionAdd
 from eneo.questions.question_file_projection import attach_question_files
 from eneo.skills.domain.skill import (
@@ -36,7 +37,6 @@ from eneo.skills.domain.skill import (
 
 if TYPE_CHECKING:
     from eneo.ai_models.completion_models.completion_model import McpToolReference
-    from eneo.logging.logging import LoggingDetails
     from eneo.questions.question import ToolCallInfo
 
 
@@ -336,11 +336,12 @@ class QuestionRepository:
         reasoning: str | None = None,
         info_blob_chunks: list[InfoBlobChunkInDBWithScore] | None = None,
         generated_files: list[File] | None = None,
-        logging_details: "LoggingDetails | None" = None,
+        logging_details: LoggingDetails | None = None,
+        history_revision: int | None = None,
         mcp_tool_references: list["McpToolReference"] | None = None,
         skill_provenance: Sequence[SkillExecutionReference] | None = None,
         skill_activation: SkillActivationEvidence | None = None,
-    ) -> None:
+    ) -> bool:
         """Update an existing placeholder Question row with the final or partial answer.
 
         Used both for normal stream completion (full answer + token counts + late-bound rows)
@@ -348,17 +349,30 @@ class QuestionRepository:
 
         tenant_id is required in the WHERE clause to defend against cross-tenant writes if a
         caller ever supplies a stale question_id.
+
+        Returns whether the question was still there; nothing is stored when it
+        was removed. A log is stored only with its question. `history_revision`
+        is the conversation's revision when the answer's history was read: if
+        it changed, a turn the answer was generated from was removed, and the
+        log is stored with its request body cleared.
         """
-        logging_details_id: object = None
         if logging_details is not None:
-            log_stmt = (  # pyright: ignore[reportUnknownVariableType]  # logging_table is imperatively mapped
-                sa.insert(logging_table)
-                .values(**logging_details.model_dump())
-                .returning(logging_table)
+            if history_revision is None:
+                raise ValueError("A logged answer needs the revision of its history")
+            # Locked before the question, in the order a conversation's DELETE
+            # takes them. The removal trigger raises the revision and so waits
+            # for this transaction, then clears the log stored here.
+            revision = await self.session.scalar(
+                sa.select(Sessions.history_revision)
+                .join(Questions, Questions.session_id == Sessions.id)
+                .where(Questions.id == question_id)
+                .where(Questions.tenant_id == tenant_id)
+                .with_for_update(read=True, of=Sessions)
             )
-            log_result = await self.session.execute(log_stmt)  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]
-            logging_row = log_result.scalar_one()  # pyright: ignore[reportUnknownVariableType]
-            logging_details_id = logging_row.id  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+            if revision is None:
+                return False
+            if revision != history_revision:
+                logging_details = LoggingDetails(model_kwargs={})
 
         update_values: dict[str, Any] = {"answer": answer}
         if num_tokens_question is not None:
@@ -380,8 +394,6 @@ class QuestionRepository:
             ]
         if reasoning is not None:
             update_values["reasoning"] = reasoning
-        if logging_details_id is not None:
-            update_values["logging_details_id"] = logging_details_id
         update_values.update(
             self._serialize_skill_runtime_state(
                 skill_provenance=skill_provenance,
@@ -394,8 +406,25 @@ class QuestionRepository:
             .where(Questions.id == question_id)
             .where(Questions.tenant_id == tenant_id)
             .values(**update_values)
+            .returning(Questions.id)
         )
-        await self.session.execute(update_stmt)
+        if (await self.session.execute(update_stmt)).one_or_none() is None:
+            return False
+
+        if logging_details is not None:
+            log_stmt = (  # pyright: ignore[reportUnknownVariableType]  # logging_table is imperatively mapped
+                sa.insert(logging_table)
+                .values(**logging_details.model_dump())
+                .returning(logging_table)
+            )
+            log_result = await self.session.execute(log_stmt)  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]
+            logging_row = log_result.scalar_one()  # pyright: ignore[reportUnknownVariableType]
+            logging_details_id = logging_row.id  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+            await self.session.execute(
+                sa.update(Questions)
+                .where(Questions.id == question_id)
+                .values(logging_details_id=logging_details_id)
+            )
 
         if info_blob_chunks:
             await self._add_references(
@@ -413,6 +442,7 @@ class QuestionRepository:
                 mcp_tool_references=mcp_tool_references,
                 question_id=question_id,
             )
+        return True
 
     @staticmethod
     def _serialize_skill_runtime_state(

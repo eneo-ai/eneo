@@ -10,11 +10,14 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from importlib import import_module
+from typing import Any
 from uuid import UUID
 
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 from sqlalchemy.sql.elements import ColumnElement
 from sqlalchemy.sql.functions import count
 
@@ -83,6 +86,41 @@ APP_RUN_CHILDREN = collect_conversation_children(
 )
 
 
+_LOGGING_TABLE = _QUESTIONS_TABLE.metadata.tables["logging"]
+
+
+def _question_log_rows(identifier: UUID) -> tuple[sa.Select[Any], ...]:
+    """The logs the question removal trigger writes for one question: its own
+    log and each later log of the conversation that still holds a request
+    body, which it clears once. A turn asked at the same instant counts as
+    later, as in the trigger. The trigger also raises the revision of the
+    question's session, a row the unit's session release already charges."""
+    removed = (
+        sa.select(Questions.session_id, Questions.created_at)
+        .where(Questions.id == identifier)
+        .subquery("removed")
+    )
+    later = aliased(Questions)
+    logs = _LOGGING_TABLE.c
+    return (
+        sa.select(Questions.logging_details_id).where(
+            Questions.id == identifier, Questions.logging_details_id.is_not(None)
+        ),
+        sa.select(logs.id)
+        .join(later, later.logging_details_id == logs.id)
+        .join(removed, later.session_id == removed.c.session_id)
+        .where(
+            later.id != identifier,
+            later.created_at >= removed.c.created_at,
+            sa.or_(
+                logs.json_body.is_not(None),
+                logs.context.is_not(None),
+                logs.model_kwargs.is_distinct_from(sa.literal({}, JSONB)),
+            ),
+        ),
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class _SessionRelease:
     rows: int
@@ -123,15 +161,14 @@ class ConversationUnitRepository:
     async def cascade_cost(self, identifier: UUID, ceiling: int) -> int:
         # One LIMIT over every child relation: the proof examines at most
         # ceiling + 1 rows, whatever the number of relations.
+        rows = [
+            sa.select(foreign_key).where(foreign_key == identifier)
+            for foreign_key in self.children
+        ]
+        if self.kind is ConversationRootKind.QUESTION:
+            rows.extend(_question_log_rows(identifier))
         children = (
-            sa.union_all(
-                *(
-                    sa.select(foreign_key).where(foreign_key == identifier)
-                    for foreign_key in self.children
-                )
-            )
-            .limit(ceiling + 1)
-            .subquery("conversation_children")
+            sa.union_all(*rows).limit(ceiling + 1).subquery("conversation_children")
         )
         return await self.session.scalar(sa.select(count()).select_from(children)) or 0
 
@@ -141,9 +178,10 @@ class ConversationUnitRepository:
         The empty-session owner's lock and DELETE apply, its no-question
         predicate repeated in the DELETE. A session a live chat holds, or that
         still has a question, is left to that owner's sweep. Charges one row for
-        the lock and proof, then the session and its UNIQUE helper row: at most
-        `EmptySessionRepository.MAX_RELEASE_ROWS`, which `delete_unit` reserves
-        first.
+        the lock and proof, which also covers the removal trigger's revision
+        update of the same row, then the session and its UNIQUE helper row: at
+        most `EmptySessionRepository.MAX_RELEASE_ROWS`, which `delete_unit`
+        reserves first.
         """
         # No grace: the session held a question that was due, so it is no new
         # chat waiting for its first question. The no-question predicate is the

@@ -260,7 +260,9 @@ async def test_history_leaves_a_held_session_to_the_sweep(
     retention_session: AsyncSession, test_tenant, admin_user, completion_model_factory
 ):
     """Mutant: the session lock waits (or fails the unit) instead of skipping, so
-    a live chat holding its session blocks the question's deletion."""
+    a live chat holding its session blocks the question's deletion. A chat
+    adding its next question holds the session's key share until it commits;
+    the removal's revision update does not wait for it, the release would."""
     old = datetime.now(timezone.utc) - timedelta(days=60)
     assistant = await _assistant(
         retention_session,
@@ -281,7 +283,9 @@ async def test_history_leaves_a_held_session_to_the_sweep(
 
     async with sessionmanager.session() as chat, chat.begin():
         await chat.execute(
-            sa.select(Sessions.id).where(Sessions.id == held_id).with_for_update()
+            sa.select(Sessions.id)
+            .where(Sessions.id == held_id)
+            .with_for_update(read=True, key_share=True)
         )
         report = await run_registered_retention(retention_session)
 

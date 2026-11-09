@@ -122,7 +122,7 @@ async def test_non_streaming_answer_hands_back_the_files_its_tools_made():
         question="Chart it",
         files=[],
         completion_model=SimpleNamespace(id=uuid4(), name="gpt-4"),  # pyright: ignore[reportArgumentType]
-        session=SimpleNamespace(id=uuid4(), questions=[]),  # pyright: ignore[reportArgumentType]
+        session=SimpleNamespace(id=uuid4(), questions=[], history_revision=0),  # pyright: ignore[reportArgumentType]
         stream=False,
         assistant_id=uuid4(),
         question_id=uuid4(),
