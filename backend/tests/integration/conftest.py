@@ -736,6 +736,16 @@ async def client(app) -> AsyncGenerator[AsyncClient, None]:
         yield client
 
 
+@pytest.fixture
+async def raw_client(app) -> AsyncGenerator[AsyncClient, None]:
+    """A client that receives the 500 instead of the server's exception."""
+    async with AsyncClient(
+        transport=ASGITransport(app=app, raise_app_exceptions=False),
+        base_url="http://test.local",
+    ) as client:
+        yield client
+
+
 # Database session fixtures
 
 

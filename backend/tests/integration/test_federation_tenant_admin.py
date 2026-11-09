@@ -9,13 +9,12 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import AsyncIterator
 from typing import Any
 from uuid import UUID
 
 import pytest
 import sqlalchemy as sa
-from httpx import ASGITransport, AsyncClient
+from httpx import AsyncClient
 from sqlalchemy import event
 from sqlalchemy.orm import Session
 
@@ -565,16 +564,6 @@ async def test_the_secret_never_reaches_the_logs(
     assert response.status_code == 200, response.text
     assert handler.lines
     assert not any(NEW_SECRET in line for line in handler.lines)
-
-
-@pytest.fixture
-async def raw_client(app) -> AsyncIterator[AsyncClient]:
-    """A client that receives the 500 instead of the server's exception."""
-    async with AsyncClient(
-        transport=ASGITransport(app=app, raise_app_exceptions=False),
-        base_url="http://test.local",
-    ) as client:
-        yield client
 
 
 async def test_a_failed_audit_write_keeps_the_old_settings(

@@ -1426,16 +1426,6 @@ async def _extension_audit_rows(user_id: str) -> list[dict[str, Any]]:
         ]
 
 
-@pytest.fixture
-async def raw_client(app) -> AsyncIterator[AsyncClient]:
-    """A client that receives the 500 instead of the server's exception."""
-    async with AsyncClient(
-        transport=ASGITransport(app=app, raise_app_exceptions=False),
-        base_url="http://test.local",
-    ) as client:
-        yield client
-
-
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_a_browser_session_extends_itself_and_is_audited(
