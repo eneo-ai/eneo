@@ -160,7 +160,8 @@ export function createEneoSocket(args, options) {
     clearTimeout(heartbeatReconnectTimeout);
     clearInterval(heartbeatInterval);
     heartbeatInterval = setInterval(() => {
-      sendMessage({ type: "ping" });
+      // A socket the server closed takes no ping; the reconnect below heals it.
+      sendMessage({ type: "ping" }).catch(() => {});
       heartbeatReconnectTimeout = setTimeout(() => {
         // Try to reconnect, should also try to heal existing subscriptions
         safelyCloseSocket();

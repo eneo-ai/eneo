@@ -84,6 +84,28 @@ test("a lost pong still reconnects", (t) => {
   assert.equal(FakeWebSocket.opened.length, 2);
 });
 
+test("a socket the server closes with 1013 reconnects and subscribes again", async (t) => {
+  /** @type {unknown[]} */
+  const unhandled = [];
+  const record = (/** @type {unknown} */ reason) => unhandled.push(reason);
+  process.on("unhandledRejection", record);
+  t.after(() => process.off("unhandledRejection", record));
+  const { client, socket } = connected(t);
+  client.subscribe("app_run_updates");
+  socket.closedByServer(1013);
+
+  mock.timers.tick(PING_INTERVAL);
+  mock.timers.tick(PONG_TIMEOUT);
+  const reopened = FakeWebSocket.opened[1];
+  reopened.open();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  // The session check got no answer: the client opens a new socket, which
+  // authenticates again, and asks for the channels it had.
+  assert.deepEqual(reopened.sent, [{ type: "subscribe", data: { channel: "app_run_updates" } }]);
+  assert.deepEqual(unhandled, []);
+});
+
 test("a disconnect after a 1008 ends the subscriptions it held", (t) => {
   const { client, socket } = connected(t);
   /** @type {unknown[]} */
