@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 from collections.abc import Generator
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 from uuid import uuid4
 
 import psycopg2
@@ -225,18 +225,26 @@ def _insert(database_url: str, rows: dict[str, tuple[ActionType, str, dict[str, 
         connection.close()
 
 
-def _stored(database_url: str) -> dict[str, tuple[str, str, str, dict[str, Any]]]:
+class _Row(NamedTuple):
+    actor_id: str
+    at: str
+    action: str
+    entity_id: str
+    tenant_id: str
+    description: str
+    metadata: dict[str, Any]
+
+
+def _stored(database_url: str) -> dict[str, _Row]:
     connection = _connect(database_url)
     try:
         with connection, connection.cursor() as cursor:
             cursor.execute(
-                "SELECT id::text, actor_id::text, timestamp::text, description, "
-                "metadata FROM audit_logs"
+                "SELECT id::text, actor_id::text, timestamp::text, action, "
+                "entity_id::text, tenant_id::text, description, metadata "
+                "FROM audit_logs"
             )
-            return {
-                row_id: (actor_id, at, description, metadata)
-                for row_id, actor_id, at, description, metadata in cursor.fetchall()
-            }
+            return {row_id: _Row(*row) for row_id, *row in cursor.fetchall()}
     finally:
         connection.close()
 
@@ -346,21 +354,27 @@ def test_names_are_removed_from_audit_rows_on_upgrade() -> None:
             if row_id <= boundary
         )
         assert any(
-            NAME in description + json.dumps(metadata)
-            for row_id, (_, _, description, metadata) in interrupted.items()
+            NAME in row.description + json.dumps(row.metadata)
+            for row_id, row in interrupted.items()
             if row_id > boundary
         )
 
         assert _stored(database_url) == after
         assert len(after) == len(written) + _FILE_ROWS
-        for row_id, (actor_id, at, description, metadata) in after.items():
-            assert NAME not in description + json.dumps(metadata)
-            assert TITLE not in json.dumps(metadata)
-            assert (actor_id, at) == before[row_id][:2]
+        for row_id, row in after.items():
+            old = before[row_id]
+            assert NAME not in row.description + json.dumps(row.metadata)
+            assert TITLE not in json.dumps(row.metadata)
+            # Who, what, when and on which object are unchanged.
+            assert row[:5] == old[:5]
             if row_id in written:
-                assert (description, metadata) == _expected(*written[row_id])
+                assert (row.description, row.metadata) == _expected(*written[row_id])
             else:
                 assert (
-                    description == FILE_DESCRIPTIONS[ActionType.FILE_SIGNED_URL_MINTED]
+                    row.description
+                    == FILE_DESCRIPTIONS[ActionType.FILE_SIGNED_URL_MINTED]
                 )
-                assert metadata["target"]["name"] == "file"
+                assert row.metadata["target"] == {
+                    "id": old.metadata["target"]["id"],
+                    "name": "file",
+                }
