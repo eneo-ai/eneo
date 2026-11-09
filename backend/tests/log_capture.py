@@ -46,14 +46,16 @@ def emitted(*loggers: logging.Logger) -> Iterator[list[logging.LogRecord]]:
             log.setLevel(levels[log])
 
 
-def logged_errors(records: list[logging.LogRecord]) -> list[logging.LogRecord]:
+def logged_errors(
+    records: list[logging.LogRecord], chain: str = CHAIN
+) -> list[logging.LogRecord]:
     """Fail if any record carries `SENTINEL` or a traceback; return those
-    that name the error chain of `chained_error`."""
+    that name `chain`, by default the chain of `chained_error`."""
     for record in records:
         assert not record.exc_info and not record.stack_info, record.getMessage()
         assert SENTINEL not in repr(record.__dict__), record.getMessage()
     return [
         record
         for record in records
-        if str(getattr(record, "error_type", "")).startswith(CHAIN)
+        if str(getattr(record, "error_type", "")).startswith(chain)
     ]
