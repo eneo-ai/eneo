@@ -204,6 +204,10 @@ class ActionType(str, Enum):
     WIDGET_ARCHIVED = "widget_archived"
     WIDGET_POLICY_UPDATED = "widget_policy_updated"
     WIDGET_BUDGET_EXHAUSTED = "widget_budget_exhausted"
+    WIDGET_PREVIEW_TOKEN_MINTED = "widget_preview_token_minted"
+    # A visitor turn ran a tool on a server outside Eneo. Logged whatever the
+    # widget's retention is: the external side effect outlives the conversation.
+    WIDGET_EXTERNAL_TOOL_CALLED = "widget_external_tool_called"
     WIDGET_TEMPLATE_CREATED = "widget_template_created"
     WIDGET_TEMPLATE_UPDATED = "widget_template_updated"
     WIDGET_TEMPLATE_DELETED = "widget_template_deleted"

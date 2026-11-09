@@ -53,6 +53,30 @@ class WidgetDetachTemplate(BaseModel):
     revision: int = Field(ge=0)
 
 
+class WidgetActivate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    external_tools_acknowledged: bool = Field(
+        default=False,
+        description=(
+            "Required true when the assistant reaches MCP servers outside Eneo"
+            " (`external_tools` on the widget) and no earlier acknowledgement"
+            " covers exactly those servers: the admin acknowledges that anonymous"
+            " visitors can make the assistant call their tools, with no approval"
+            " step. Refused with `external_tools_unacknowledged` otherwise."
+        ),
+    )
+
+
+class WidgetExternalToolServerPublic(BaseModel):
+    """An MCP server outside Eneo that the widget's assistant reaches, with
+    the tools visitors can make it call."""
+
+    id: UUID
+    name: str
+    tools: list[str]
+
+
 class WidgetTemplateLinkPublic(BaseModel):
     """The template a widget follows and which parts it governs."""
 
@@ -112,6 +136,19 @@ class WidgetPublic(BaseModel):
     template: Optional[WidgetTemplateLinkPublic] = Field(
         default=None,
         description="Set when the widget follows a template.",
+    )
+    external_tools: list[WidgetExternalToolServerPublic] = Field(
+        description=(
+            "The assistant's MCP servers outside Eneo, as a visitor turn reaches"
+            " them. Activation needs the admin's acknowledgement of this list."
+        ),
+    )
+    external_tools_acknowledged: bool = Field(
+        description=(
+            "Whether the stored acknowledgement covers exactly `external_tools`;"
+            " true when there are none. False on an active widget means the"
+            " assistant's external servers changed since activation."
+        )
     )
     created_by_user_id: Optional[UUID] = None
     activated_by_user_id: Optional[UUID] = None
@@ -233,6 +270,15 @@ class WidgetOverviewItem(BaseModel):
             " served within the policy."
         ),
     )
+    external_tools: list[str] = Field(
+        description="Names of the assistant's MCP servers outside Eneo.",
+    )
+    external_tools_acknowledged: bool = Field(
+        description=(
+            "Whether the admin's acknowledgement covers the current"
+            " `external_tools`; true when there are none."
+        ),
+    )
 
 
 class WidgetOverviewTotals(BaseModel):
@@ -287,6 +333,13 @@ class WidgetPolicyPublic(BaseModel):
     allow_bot_protection_none: bool
     min_retention_days: int
     max_retention_days: int
+    allow_external_tools: bool = Field(
+        description=(
+            "Whether widgets may publish assistants whose MCP servers run outside"
+            " Eneo. Default true; off, such widgets cannot be activated and live"
+            " ones are flagged in the overview."
+        )
+    )
 
 
 class WidgetPolicyUpdate(BaseModel):
@@ -298,3 +351,4 @@ class WidgetPolicyUpdate(BaseModel):
     allow_bot_protection_none: Optional[bool] = None
     min_retention_days: Optional[int] = Field(default=None, ge=0, le=3650)
     max_retention_days: Optional[int] = Field(default=None, ge=0, le=3650)
+    allow_external_tools: Optional[bool] = None

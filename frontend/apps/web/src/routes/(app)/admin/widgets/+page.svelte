@@ -454,6 +454,22 @@
                     onCheckedChange={(checked) => patch({ allow_bot_protection_none: checked })}
                   />
                 </Field.Field>
+                <Field.Field orientation="horizontal" class="md:col-span-3">
+                  <Field.Content>
+                    <Field.Label for="policy-allow-external-tools"
+                      >{m.widget_admin_policy_allow_external_tools()}</Field.Label
+                    >
+                    <Field.Description id="policy-allow-external-tools-help"
+                      >{m.widget_admin_policy_allow_external_tools_description()}</Field.Description
+                    >
+                  </Field.Content>
+                  <Switch
+                    id="policy-allow-external-tools"
+                    aria-describedby="policy-allow-external-tools-help"
+                    checked={policy.allow_external_tools ?? true}
+                    onCheckedChange={(checked) => patch({ allow_external_tools: checked })}
+                  />
+                </Field.Field>
               </Field.Group>
             </Card.Content>
           </Card.Root>

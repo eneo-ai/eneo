@@ -7,7 +7,12 @@
  * pasted page address is caught in the field instead of failing the save.
  */
 export const MAX_ALLOWED_ORIGINS = 20;
-const HOST = /^(\*\.)?[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*$/i;
+// A wildcard needs at least two labels after it: `*.kommun.se`, never `*.se`.
+const LABEL = "[a-z0-9](?:[a-z0-9-]*[a-z0-9])?";
+const HOST = new RegExp(
+  `^(?:\\*\\.${LABEL}\\.${LABEL}(?:\\.${LABEL})*|${LABEL}(?:\\.${LABEL})*)$`,
+  "i"
+);
 const IPV6_HOST = /^[0-9a-f:.]+$/i;
 const PORT = /^\d+$/;
 /** Whether a bracketed host is an IPv6 address, as the API's URL parser checks it.

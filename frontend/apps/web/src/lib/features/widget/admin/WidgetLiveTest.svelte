@@ -31,6 +31,8 @@
   let destroyed = false;
 
   const active = $derived(element !== null);
+  // No preview token is minted for a paused widget (the pause is the kill switch).
+  const paused = $derived(widget.status === "paused");
   // The loader build the widget page loaded; null when this installation has none.
   const release = $derived((page.data?.release ?? null) as LoaderRelease | null);
 
@@ -106,11 +108,19 @@
       {m.widget_admin_snippet_not_built()}
     </p>
   {/if}
+  {#if paused && !active}
+    <p id="widget-live-test-paused" class="text-secondary text-sm">
+      {m.widget_admin_live_test_paused()}
+    </p>
+  {/if}
   <div>
     {#if active}
       <Button variant="outline" onclick={stop}>{m.widget_admin_live_test_stop()}</Button>
     {:else}
-      <Button onclick={start} disabled={loading || !release}
+      <Button
+        onclick={start}
+        disabled={loading || !release || paused}
+        aria-describedby={paused ? "widget-live-test-paused" : undefined}
         >{m.widget_admin_live_test_start()}</Button
       >
     {/if}

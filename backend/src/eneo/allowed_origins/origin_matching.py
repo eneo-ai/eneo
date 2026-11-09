@@ -6,10 +6,15 @@ from eneo.main.config import serialize_origin
 
 # A DNS label sequence with an optional leading `*.` wildcard, ASCII only
 # (IDNs must be given in their punycode form, which is what browsers send).
+# A wildcard needs at least two labels after it: `*.kommun.se` names one
+# organisation's hosts, `*.se` would let every site in a country frame the
+# chat. The lenient form reads patterns saved before that rule.
+_LABEL = r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?"
 _HOST_RE = re.compile(
-    r"^(\*\.)?[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*$",
+    rf"^(?:\*\.{_LABEL}\.{_LABEL}(?:\.{_LABEL})*|{_LABEL}(?:\.{_LABEL})*)$",
     re.IGNORECASE,
 )
+_LENIENT_HOST_RE = re.compile(rf"^(\*\.)?{_LABEL}(?:\.{_LABEL})*$", re.IGNORECASE)
 _IPV6_HOST_RE = re.compile(r"^[0-9a-f:.]+$", re.IGNORECASE)
 
 
@@ -117,13 +122,29 @@ def origin_matches_pattern(origin: str, pattern: str) -> bool:
     return origin_host == pattern_host
 
 
-def normalize_origin_pattern(pattern: str) -> str:
+def is_too_broad_wildcard(pattern: str) -> bool:
+    """Whether a pattern's ``*.`` wildcard covers a whole top-level domain.
+
+    A pattern saved before the two-label rule may still carry one. The
+    visitor surface never honours it and the admin overview reports it.
+    """
+    host = pattern.split("://", 1)[-1].rsplit("@", 1)[-1]
+    if host.startswith("["):
+        return False
+    host = host.split(":", 1)[0]
+    return host.startswith("*.") and "." not in host[2:]
+
+
+def normalize_origin_pattern(pattern: str, *, allow_too_broad: bool = False) -> str:
     """Validate and canonicalise one allowed-origin entry.
 
     Accepts ``<scheme>://<host>[:port]`` with an http(s) scheme, where the host
     may carry a leading ``*.`` wildcard and the port may be ``*``; anything
     beyond the authority (path, query, fragment, userinfo) is rejected so a
     pasted page URL cannot silently become a pattern that never matches.
+
+    ``allow_too_broad`` reads a stored pattern whose wildcard covers a whole
+    top-level domain; saving one is refused.
     """
     value = pattern.strip().rstrip("/")
     parsed = urlparse(value)
@@ -162,7 +183,12 @@ def normalize_origin_pattern(pattern: str) -> str:
     if "[" in parsed.netloc:
         if not _IPV6_HOST_RE.match(host):
             raise ValueError(f"Invalid origin '{pattern}': malformed host.")
-    elif not _HOST_RE.match(host):
+    elif not (_LENIENT_HOST_RE if allow_too_broad else _HOST_RE).match(host):
+        if _LENIENT_HOST_RE.match(host):
+            raise ValueError(
+                f"Invalid origin '{pattern}': a wildcard needs at least two"
+                " labels after '*.', for example https://*.kommun.se."
+            )
         raise ValueError(
             f"Invalid origin '{pattern}': host may only contain letters, digits,"
             " '.', '-' and a leading '*.' wildcard."

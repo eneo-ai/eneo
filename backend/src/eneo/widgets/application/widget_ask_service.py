@@ -11,7 +11,11 @@ from zoneinfo import ZoneInfo
 
 import sqlalchemy as sa
 
-from eneo.ai_models.completion_models.completion_model import Completion
+from eneo.ai_models.completion_models.completion_model import (
+    Completion,
+    ResponseType,
+    ToolCallMetadata,
+)
 from eneo.assistants.api.assistant_models import AssistantResponse
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
@@ -62,17 +66,23 @@ class _AsyncClosable(Protocol):
 
 
 class WidgetAnswer(AsyncIterator[Completion]):
-    """Visitor stream whose settlement also works before its first read."""
+    """Visitor stream whose settlement also works before its first read.
+
+    ``observe`` sees every pipeline event before the visitor filter, for
+    records the organisation keeps of the turn (the external tool calls).
+    """
 
     def __init__(
         self,
         answer: AsyncIterator[Completion],
         view: VisitorView,
         finish: Callable[[bool], Awaitable[None]],
+        observe: Optional[Callable[[Completion], Awaitable[None]]] = None,
     ) -> None:
         self._answer = answer
         self._view = view
         self._finish = finish
+        self._observe = observe
         self._stream = self._visible()
         self._closed = False
 
@@ -86,6 +96,8 @@ class WidgetAnswer(AsyncIterator[Completion]):
         completed = False
         try:
             async for chunk in self._answer:
+                if self._observe is not None:
+                    await self._observe(chunk)
                 for visible in self._view.events(chunk):
                     yield visible
             for visible in self._view.finish():
@@ -140,6 +152,107 @@ def widget_prompt_addendum(widget: Widget) -> str:
     return f"{WIDGET_STYLE_PROMPT} " + WIDGET_PERSONA_PROMPT.format(
         name=widget.persona.name
     )
+
+
+# The statuses a call ends in once its server has run it. Pending and approval
+# events are not the call; a denied call never reached the server.
+EXECUTED_STATUSES = frozenset({"succeeded", "failed"})
+
+
+def is_external_tool_call(call: ToolCallMetadata) -> bool:
+    """Whether the call ran on a server outside Eneo.
+
+    Decided like the approval flow: by the server the call was routed to,
+    never by its display name. Eneo's own loopback servers are not external.
+    Neither is a capability provider (web search, the one capability visitors
+    get): the tenant chose it and it only reads. Everything else is one of
+    the assistant's own MCP servers, where a tool may write.
+    """
+    return call.is_internal is not True and call.purpose is None
+
+
+class ExternalToolCallAudit:
+    """One audit entry per external tool call a visitor turn ran.
+
+    Written whatever the widget's retention: the call's effect on the external
+    system outlives the conversation, and with retention 0 nothing else of
+    the turn is kept. The entry names the widget, the pseudonymous visitor,
+    the conversation and the tool. The arguments' values stay out: they are
+    the visitor's input and may carry personal data, and the external system
+    has its own record of what it received; their names go in.
+    """
+
+    def __init__(
+        self,
+        audit_service: "AuditService",
+        widget: Widget,
+        *,
+        visitor_id: UUID,
+        session_id: UUID,
+        question_id: Optional[UUID],
+    ) -> None:
+        self.audit_service = audit_service
+        self.widget = widget
+        self.visitor_id = visitor_id
+        self.session_id = session_id
+        self.question_id = question_id
+        self._logged: set[str] = set()
+
+    async def observe(self, chunk: Completion) -> None:
+        if chunk.response_type != ResponseType.TOOL_CALL:
+            return
+        for call in chunk.tool_calls_metadata or []:
+            if call.result_status not in EXECUTED_STATUSES:
+                continue
+            if not is_external_tool_call(call):
+                continue
+            # A call can be reported more than once (per round, on retry).
+            if call.tool_call_id is not None:
+                if call.tool_call_id in self._logged:
+                    continue
+                self._logged.add(call.tool_call_id)
+            try:
+                await self._log(call)
+            except Exception:
+                # The answer is already under way and the call has happened;
+                # the missing entry is the operator's problem, not the visitor's.
+                logger.exception(
+                    "Widget external tool call audit failed",
+                    extra={
+                        "widget_id": str(self.widget.id),
+                        "tool": call.mcp_tool_name or call.tool_name,
+                    },
+                )
+
+    async def _log(self, call: ToolCallMetadata) -> None:
+        assert self.widget.id is not None
+        await self.audit_service.log_async(
+            tenant_id=self.widget.tenant_id,
+            actor_id=None,
+            actor_type=ActorType.WIDGET_VISITOR,
+            action=ActionType.WIDGET_EXTERNAL_TOOL_CALLED,
+            entity_type=EntityType.WIDGET,
+            entity_id=self.widget.id,
+            description=(
+                f"Widget '{self.widget.name}': an anonymous visitor's turn ran"
+                f" tool '{call.tool_name}' on external server '{call.server_name}'"
+            ),
+            metadata={
+                "public_id": self.widget.public_id,
+                "visitor_id": str(self.visitor_id),
+                "session_id": str(self.session_id),
+                "question_id": str(self.question_id) if self.question_id else None,
+                "tool_call_id": call.tool_call_id,
+                "server_name": call.server_name,
+                "tool_name": call.tool_name,
+                "mcp_tool_name": call.mcp_tool_name,
+                "result_status": call.result_status,
+                "argument_names": sorted(call.arguments or {}),
+            },
+            # The visitor's address and browser stay out of the trail, as for
+            # every widget entry; the pseudonymous visitor id is the actor.
+            record_client=False,
+        )
 
 
 class WidgetAskService:
@@ -270,27 +383,40 @@ class WidgetAskService:
             await self._record_blocked(widget, blocked_rate=1)
             raise
 
-        if session_id is not None:
-            # Held until the answer ends (_finish) or the request fails before
-            # it: the turn count below is only exact for one follow-up at a time.
-            await self.limiter.hold_turn(widget, session_id)
+        hold: Optional[str] = None
         try:
             if session_id is not None:
+                # Ownership before the hold: the hold is keyed by the session
+                # id alone, so a visitor who knows another conversation's id
+                # must get its 404 without ever holding that conversation.
+                await self._owned_session(widget, session_id)
+                # Held until the answer ends (_finish) or the request fails
+                # before it: the turn count is only exact for one follow-up at
+                # a time, so the conversation is read again under the hold.
+                hold = await self.limiter.hold_turn(widget, session_id)
                 session = await self._owned_session(widget, session_id)
                 if len(session.questions) >= widget.limits.max_session_turns:
                     raise WidgetPublicError(
                         "This conversation has reached its length limit. Start a new one.",
                         code="session_turns_exceeded",
                     )
-            return await self._ask_admitted(widget, cleaned, session_id)
+            return await self._ask_admitted(
+                widget, cleaned, session_id, principal=principal, hold=hold
+            )
         except BaseException:
-            if session_id is not None:
+            if session_id is not None and hold is not None:
                 with finalizing("widget turn release"):
-                    await self.limiter.release_turn(widget, session_id)
+                    await self.limiter.release_turn(widget, session_id, hold)
             raise
 
     async def _ask_admitted(
-        self, widget: Widget, cleaned: str, session_id: Optional[UUID]
+        self,
+        widget: Widget,
+        cleaned: str,
+        session_id: Optional[UUID],
+        *,
+        principal: WidgetPrincipal,
+        hold: Optional[str],
     ) -> AssistantResponse:
         assert widget.id is not None
         try:
@@ -316,6 +442,17 @@ class WidgetAskService:
         answer = response.answer
         assert not isinstance(answer, str)
         visible = VisitorView(widget).response(response)
+        audit = (
+            ExternalToolCallAudit(
+                self.audit_service,
+                widget,
+                visitor_id=principal.visitor_id,
+                session_id=response.session.id,
+                question_id=response.question_id,
+            )
+            if self.audit_service is not None
+            else None
+        )
         visible.answer = WidgetAnswer(
             answer.__aiter__(),
             VisitorView(widget),
@@ -326,7 +463,9 @@ class WidgetAskService:
                 reservation,
                 completed=completed,
                 asked_in=session_id,
+                hold=hold,
             ),
+            observe=audit.observe if audit is not None else None,
         )
         return visible
 
@@ -368,9 +507,11 @@ class WidgetAskService:
         *,
         completed: bool,
         asked_in: UUID | None = None,
+        hold: Optional[str] = None,
     ) -> None:
         """Settle the budget, record usage, apply "never persist" and release
-        the conversation's turn hold (``asked_in`` is the follow-up's session).
+        the conversation's turn hold (``asked_in`` is the follow-up's session,
+        ``hold`` the marker ``hold_turn`` returned for it).
 
         Runs when the answer stream ends. The ask pipeline has by then stored
         the answer and its token counts, but only inside the request
@@ -400,7 +541,7 @@ class WidgetAskService:
                     await self.usage_repo.delete_session(session_id)
             finally:
                 if asked_in is not None:
-                    await self.limiter.release_turn(widget, asked_in)
+                    await self.limiter.release_turn(widget, asked_in, hold)
 
     @staticmethod
     async def _question_tokens(

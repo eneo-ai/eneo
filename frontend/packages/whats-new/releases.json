@@ -21,6 +21,25 @@
           }
         },
         {
+          "id": "web-widgets-external-tools",
+          "permissions": {
+            "anyOf": [
+              "widgets",
+              "admin"
+            ]
+          },
+          "type": "improved",
+          "area": "assistants",
+          "title": {
+            "en": "Widgets say when an assistant reaches outside Eneo",
+            "sv": "Widgetar visar när en assistent når utanför Eneo"
+          },
+          "body": {
+            "en": "When an assistant uses MCP servers outside Eneo, activating its widget now lists them with their tools and asks the administrator to acknowledge that anonymous visitors can make the assistant call them; the overview shows which widgets have such servers, and every such call is written to the audit log. A new policy switch lets the organisation refuse such widgets altogether. While a widget is active, its allowed websites, privacy, bot protection and template link can only be changed by an administrator; editors pause the widget first. A paused widget is no longer previewed.",
+            "sv": "När en assistent använder MCP-servrar utanför Eneo listar aktiveringen av dess widget nu servrarna med deras verktyg och ber administratören bekräfta att anonyma besökare kan få assistenten att anropa dem; översikten visar vilka widgetar som har sådana servrar, och varje sådant anrop skrivs till granskningsloggen. Ett nytt policyreglage låter organisationen avböja sådana widgetar helt. Medan en widget är aktiv kan tillåtna webbplatser, integritet, botskydd och mallkopplingen bara ändras av en administratör; redaktörer pausar widgeten först. En pausad widget förhandsgranskas inte längre."
+          }
+        },
+        {
           "id": "sharepoint-sync-status",
           "type": "improved",
           "area": "knowledge",

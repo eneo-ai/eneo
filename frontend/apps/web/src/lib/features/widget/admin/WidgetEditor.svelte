@@ -219,15 +219,15 @@
 
   const blockers = $derived(current.activation_blockers ?? []);
   // What an active widget exposes besides knowledge, as the backend serves
-  // visitors: the assistant's general MCP servers as configured, and web
-  // search only through an external provider (VISITOR_CAPABILITY_PURPOSES in
-  // assistant_service.py). Image generation never.
+  // visitors: the assistant's MCP servers outside Eneo as the API lists them
+  // (the same list the activation dialog asks the admin to acknowledge), and
+  // web search only through an external provider (VISITOR_CAPABILITY_PURPOSES
+  // in assistant_service.py). Image generation never.
   const VISITOR_CAPABILITIES: ReadonlySet<string> = new Set(["web_search"]);
-  const visitorServers = $derived(
-    (assistant.mcp_servers ?? []).filter(
-      (server) => server.purpose === "general" && server.is_enabled
-    )
-  );
+  const visitorServers = $derived(current.external_tools ?? []);
+  // The template's locks hold only while the widget follows it, so on an
+  // active widget detaching is an admin's call (the API refuses editors too).
+  const detachLocked = $derived(current.status === "active" && !isAdmin);
   const visitorCapabilities = $derived(
     (assistant.enabled_capabilities ?? [])
       .filter((purpose) => VISITOR_CAPABILITIES.has(purpose))
@@ -252,7 +252,14 @@
       autosave.reload(saved);
       completed(saved);
     }}
-    onActivate={lifecycle(eneo.widgets.activate)}
+    onActivate={async ({ externalToolsAcknowledged }) => {
+      await autosave.exclusive(() =>
+        eneo.widgets.activate({
+          id: widget.id,
+          external_tools_acknowledged: externalToolsAcknowledged
+        })
+      );
+    }}
     onPause={lifecycle(eneo.widgets.pause)}
     onArchive={async () => {
       const completed = onArchived;
@@ -478,11 +485,21 @@
                     <Button variant="outline" onclick={() => (confirmReapply = true)}>
                       {m.widget_admin_template_reapply()}
                     </Button>
-                    <Button variant="outline" onclick={() => (confirmDetach = true)}>
+                    <Button
+                      variant="outline"
+                      disabled={detachLocked}
+                      aria-describedby={detachLocked ? "widget-template-detach-locked" : undefined}
+                      onclick={() => (confirmDetach = true)}
+                    >
                       {m.widget_admin_template_detach()}
                     </Button>
                   {/if}
                 </div>
+                {#if detachLocked}
+                  <p id="widget-template-detach-locked" class="text-secondary text-sm">
+                    {m.widget_admin_template_detach_admin_only()}
+                  </p>
+                {/if}
               </Card.Content>
             </Card.Root>
           {:else if templates.length > 0 && current.status !== "archived"}
@@ -537,7 +554,7 @@
         </Tabs.Content>
 
         <Tabs.Content value="rules">
-          <WidgetRulesFields {autosave} {policy} />
+          <WidgetRulesFields {autosave} {policy} {isAdmin} />
         </Tabs.Content>
 
         <Tabs.Content value="publish" class="flex flex-col gap-6">
@@ -572,7 +589,14 @@
                 <ul class="mt-1 list-disc pl-5 text-sm">
                   <li>{m.widget_admin_visitor_access_knowledge()}</li>
                   {#each visitorServers as server (server.id)}
-                    <li>{server.name}</li>
+                    <li>
+                      {server.tools.length > 0
+                        ? m.widget_admin_visitor_access_server_tools({
+                            name: server.name,
+                            tools: server.tools.join(", ")
+                          })
+                        : server.name}
+                    </li>
                   {/each}
                   {#each visitorCapabilities as capability (capability)}
                     <li>{m.widget_admin_visitor_access_capability({ name: capability })}</li>

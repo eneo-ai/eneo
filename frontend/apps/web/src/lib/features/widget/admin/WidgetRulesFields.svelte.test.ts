@@ -45,7 +45,8 @@ const policy: WidgetPolicy = {
   max_daily_token_budget: 5000,
   min_retention_days: 7,
   max_retention_days: 90,
-  allow_bot_protection_none: false
+  allow_bot_protection_none: false,
+  allow_external_tools: true
 };
 
 type Save = (update: WidgetUpdate) => Promise<Widget>;
@@ -53,12 +54,39 @@ type Save = (update: WidgetUpdate) => Promise<Widget>;
 function setup(
   start: Widget,
   save: Save = vi.fn(async (update: WidgetUpdate) => widget(update as Partial<Widget>)),
-  rules: WidgetPolicy | null = policy
+  rules: WidgetPolicy | null = policy,
+  isAdmin = true
 ) {
   const autosave = new WidgetAutosave(start, save, { delay: 10 });
-  render(WidgetRulesFields, { autosave, policy: rules });
+  render(WidgetRulesFields, { autosave, policy: rules, isAdmin });
   return { autosave, save };
 }
+
+describe("WidgetRulesFields governed settings", () => {
+  test("an editor cannot change what the admin reviewed while the widget is active", async () => {
+    setup(widget({ status: "active" }), undefined, policy, false);
+    await expect
+      .element(page.getByRole("note"))
+      .toHaveTextContent("widget_admin_governed_while_active");
+    await expect.element(origins()).toBeDisabled();
+    await expect.element(retention()).toBeDisabled();
+    await expect.element(page.getByRole("switch")).toBeDisabled();
+    // The budget is policy-capped at run time and stays editable.
+    await expect.element(budget()).toBeEnabled();
+  });
+
+  test("an admin, or anyone on a draft, edits every rule", async () => {
+    setup(widget({ status: "active" }), undefined, policy, true);
+    await expect.element(origins()).toBeEnabled();
+    expect(page.getByRole("note").elements()).toHaveLength(0);
+  });
+
+  test("a non-admin edits the rules of a draft", async () => {
+    setup(widget(), undefined, policy, false);
+    await expect.element(origins()).toBeEnabled();
+    await expect.element(retention()).toBeEnabled();
+  });
+});
 
 const origins = () => page.getByLabelText("widget_admin_allowed_origins", { exact: true });
 const budget = () => page.getByLabelText("widget_admin_daily_budget", { exact: true });

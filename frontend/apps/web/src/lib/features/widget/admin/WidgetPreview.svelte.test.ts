@@ -54,6 +54,20 @@ function renderPreview() {
 }
 
 const frameSrc = () => document.querySelector("iframe")?.getAttribute("src") ?? "";
+
+describe("WidgetPreview of a paused widget", () => {
+  test("asks for no token and says why there is nothing to show", async () => {
+    const previewToken = vi.fn();
+    const eneo = { widgets: { previewToken } } as unknown as Eneo;
+    render(WidgetPreview, { widget: { ...widget, status: "paused" } as Widget, eneo });
+    await expect.element(page.getByText("widget_admin_preview_paused")).toBeVisible();
+    await expect
+      .element(page.getByRole("button", { name: "widget_admin_preview_reload" }))
+      .toBeDisabled();
+    expect(previewToken).not.toHaveBeenCalled();
+    expect(document.querySelector("iframe")).toBeNull();
+  });
+});
 const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
 
 describe("WidgetPreview tokens", () => {

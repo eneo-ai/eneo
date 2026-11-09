@@ -50,8 +50,17 @@ const CODE_FIELDS: Record<string, string> = {
   retention_above_policy_maximum: "privacy.retention_days",
   bot_protection_none_not_allowed: "bot_protection",
   allowed_origins_empty: "allowed_origins",
+  allowed_origin_too_broad: "allowed_origins",
   subtitle_empty: "texts.subtitle",
   subtitle_required_for_legal_texts_lock: "texts.subtitle"
+};
+
+// Where each setting a tenant admin reviewed at activation sits in the form;
+// the API names them in `admin_required_while_active`.
+const GOVERNED_FIELDS: Record<string, string> = {
+  allowed_origins: "allowed_origins",
+  privacy: "privacy.retention_days",
+  bot_protection: "bot_protection"
 };
 
 function refusedValueMessage(path: string): string {
@@ -76,6 +85,13 @@ function refusedValueMessage(path: string): string {
  */
 export function widgetFieldErrors(error: unknown): Record<string, string> {
   const fields: Record<string, string> = {};
+  const body = detail(error);
+  if (body?.code === "admin_required_while_active") {
+    for (const name of codes(body.fields)) {
+      const path = GOVERNED_FIELDS[name];
+      if (path) fields[path] ??= m.widget_admin_error_admin_required_while_active();
+    }
+  }
   for (const code of refusalCodes(error)) {
     const path = CODE_FIELDS[code];
     if (path) fields[path] ??= blockerLabel(code);
@@ -115,6 +131,12 @@ export function widgetErrorMessage(error: unknown): string | null {
       return m.widget_admin_error_template_locks({
         reasons: refusalCodes(error).map(blockerLabel).join(" ")
       });
+    case "admin_required_while_active":
+      return m.widget_admin_error_admin_required_while_active();
+    case "external_tools_unacknowledged":
+      return m.widget_admin_error_external_tools_unacknowledged();
+    case "preview_unavailable_while_paused":
+      return m.widget_admin_preview_paused();
   }
   if (error instanceof EneoError && error.status === 422) {
     if (Object.keys(widgetFieldErrors(error)).length > 0) {

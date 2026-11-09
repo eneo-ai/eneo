@@ -8,6 +8,8 @@
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
+  import { Checkbox } from "$lib/components/ui/checkbox/index.js";
+  import { Label } from "$lib/components/ui/label/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { toastError } from "$lib/core/errors";
@@ -19,7 +21,12 @@
   type Props = {
     autosave: WidgetAutosave;
     isAdmin: boolean;
-    onActivate: () => Promise<void>;
+    /**
+     * `externalToolsAcknowledged` is true only when the admin has just
+     * confirmed, in the dialog here, that anonymous visitors can make the
+     * assistant call its MCP servers outside Eneo.
+     */
+    onActivate: (options: { externalToolsAcknowledged: boolean }) => Promise<void>;
     onPause: () => Promise<void>;
     onArchive: () => Promise<void>;
     onReload: () => Promise<void>;
@@ -31,14 +38,36 @@
   const blockers = $derived(widget.activation_blockers ?? []);
   const refusals = $derived([...new Set(Object.values(autosave.refusals))]);
   const canActivate = $derived(isAdmin && blockers.length === 0 && !autosave.hasPending);
+  // The assistant's MCP servers outside Eneo, as the backend lists them, and
+  // whether the stored acknowledgement covers them. Activation stops at a
+  // dialog until the admin has read the list and said yes.
+  const externalTools = $derived(widget.external_tools ?? []);
+  const needsAcknowledgement = $derived(
+    externalTools.length > 0 && !(widget.external_tools_acknowledged ?? true)
+  );
 
   let archiveOpen = $state(false);
+  let consentOpen = $state(false);
+  let acknowledged = $state(false);
 
   const activate = createAsyncState(async () => {
     try {
       await autosave.flush();
       if (autosave.hasPending) return;
-      await onActivate();
+      if (needsAcknowledgement) {
+        acknowledged = false;
+        consentOpen = true;
+        return;
+      }
+      await onActivate({ externalToolsAcknowledged: false });
+    } catch (error) {
+      toastWidgetError(error, m.widget_admin_could_not_activate());
+    }
+  });
+  const activateAcknowledged = createAsyncState(async () => {
+    try {
+      await onActivate({ externalToolsAcknowledged: true });
+      consentOpen = false;
     } catch (error) {
       toastWidgetError(error, m.widget_admin_could_not_activate());
     }
@@ -108,12 +137,20 @@
           ? m.widget_admin_resume_admin_only()
           : null
   );
+  // An admin about to activate is told up front that a dialog follows.
+  const externalToolsNote = $derived(
+    isAdmin && blockers.length === 0 && widget.status !== "active" && needsAcknowledgement
+      ? m.widget_admin_external_tools_note()
+      : null
+  );
   const activateReasonId = $derived(
     blockers.length > 0
       ? "widget-status-blockers"
       : adminOnlyNote
         ? "widget-status-admin-only"
-        : null
+        : externalToolsNote
+          ? "widget-status-external-tools"
+          : null
   );
 </script>
 
@@ -227,8 +264,62 @@
     </div>
   {:else if adminOnlyNote}
     <p id="widget-status-admin-only" class="text-secondary text-sm">{adminOnlyNote}</p>
+  {:else if externalToolsNote}
+    <p id="widget-status-external-tools" class="text-secondary text-sm">{externalToolsNote}</p>
   {/if}
 </section>
+
+<AlertDialog.Root bind:open={consentOpen}>
+  <AlertDialog.Content>
+    <AlertDialog.Header>
+      <AlertDialog.Title>{m.widget_admin_external_tools_title()}</AlertDialog.Title>
+      <AlertDialog.Description
+        >{m.widget_admin_external_tools_description()}</AlertDialog.Description
+      >
+    </AlertDialog.Header>
+    <ul class="flex flex-col gap-2 text-sm" aria-label={m.widget_admin_external_tools_servers()}>
+      {#each externalTools as server (server.id)}
+        <li class="border-default rounded-md border px-3 py-2">
+          <p class="font-medium">{server.name}</p>
+          <p class="text-secondary">
+            {server.tools.length > 0
+              ? m.widget_admin_external_tools_tools({ tools: server.tools.join(", ") })
+              : m.widget_admin_external_tools_no_tools()}
+          </p>
+        </li>
+      {/each}
+    </ul>
+    <div class="flex items-start gap-3">
+      <Checkbox
+        id="widget-external-tools-ack"
+        class="mt-0.5"
+        bind:checked={acknowledged}
+        aria-describedby="widget-external-tools-ack-help"
+      />
+      <div class="flex flex-col gap-1">
+        <Label for="widget-external-tools-ack" class="leading-snug"
+          >{m.widget_admin_external_tools_acknowledge()}</Label
+        >
+        <p id="widget-external-tools-ack-help" class="text-secondary text-sm">
+          {m.widget_admin_external_tools_acknowledge_help()}
+        </p>
+      </div>
+    </div>
+    <AlertDialog.Footer>
+      <AlertDialog.Cancel disabled={activateAcknowledged.isLoading}>{m.cancel()}</AlertDialog.Cancel
+      >
+      <AlertDialog.Action
+        disabled={!acknowledged || activateAcknowledged.isLoading}
+        onclick={(event) => {
+          event.preventDefault();
+          void activateAcknowledged();
+        }}
+      >
+        {widget.status === "paused" ? m.widget_admin_resume() : m.widget_admin_activate()}
+      </AlertDialog.Action>
+    </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>
 
 <AlertDialog.Root bind:open={archiveOpen}>
   <AlertDialog.Content>

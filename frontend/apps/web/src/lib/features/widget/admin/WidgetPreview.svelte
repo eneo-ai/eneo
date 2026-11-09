@@ -29,6 +29,9 @@
   const appScheme = watchAppScheme();
 
   const lang = $derived(widget.language === "en" ? "en" : "sv");
+  // A pause is the kill switch: the API mints no preview token for a paused
+  // widget, so nothing is asked for and the frame says why it is empty.
+  const paused = $derived(widget.status === "paused");
   // A widget pinned to light or dark previews that way whatever the toggle says.
   const pinnedScheme = $derived(
     widget.theme.color_scheme === "light" || widget.theme.color_scheme === "dark"
@@ -64,7 +67,7 @@
       const renewIn = Math.max(minted.expires_in - 60, minted.expires_in / 2);
       renewal = setTimeout(
         () => {
-          if (widget.status !== "archived") void mint();
+          if (widget.status !== "archived" && widget.status !== "paused") void mint();
         },
         Math.min(renewIn * 1000, MAX_TIMEOUT)
       );
@@ -80,7 +83,7 @@
   // keystroke.
   let attempted: number | null = null;
   $effect(() => {
-    if (widget.status === "archived") return;
+    if (widget.status === "archived" || widget.status === "paused") return;
     const generation = widget.token_generation;
     if (tokenGeneration === generation || attempted === generation) return;
     attempted = generation;
@@ -129,7 +132,9 @@
         aria-pressed={mobile}
         onclick={() => (mobile = !mobile)}>{m.widget_admin_preview_mobile()}</Button
       >
-      <Button variant="outline" onclick={mint}>{m.widget_admin_preview_reload()}</Button>
+      <Button variant="outline" disabled={paused} onclick={mint}
+        >{m.widget_admin_preview_reload()}</Button
+      >
     </div>
   </div>
   <p class="text-secondary text-sm">
@@ -142,7 +147,9 @@
   </p>
 
   <div class="bg-secondary flex justify-center rounded-lg p-3">
-    {#if failed}
+    {#if paused}
+      <p class="text-secondary py-10 text-sm">{m.widget_admin_preview_paused()}</p>
+    {:else if failed}
       <p role="alert" class="text-negative-default py-10 text-sm">
         {m.widget_admin_preview_failed()}
       </p>

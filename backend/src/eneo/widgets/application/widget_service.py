@@ -3,7 +3,7 @@
 # Licensed under the MIT License.
 
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID, uuid4
@@ -20,17 +20,22 @@ from eneo.main.exceptions import (
     SecurityClassificationMismatchException,
     UnauthorizedException,
 )
+from eneo.mcp_servers.application.capability_resolver import general_servers_for_space
 from eneo.roles.permissions import Permission, validate_permission
 from eneo.users.user import UserInDB
 from eneo.widgets.application.visitor_token_service import VisitorTokenService
 from eneo.widgets.domain.exceptions import (
+    WidgetAdminRequiredError,
+    WidgetExternalToolsUnacknowledgedError,
     WidgetFieldLockedError,
     WidgetPolicyViolationError,
+    WidgetPreviewUnavailableError,
     WidgetRevisionConflictError,
     WidgetServingBlockedError,
     WidgetTemplateNotPublishedError,
 )
 from eneo.widgets.domain.widget import (
+    GOVERNED_FIELDS,
     LIFECYCLE_FIELDS,
     BotProtection,
     Widget,
@@ -48,6 +53,7 @@ from eneo.widgets.domain.widget_template_repo import WidgetTemplateRepo
 if TYPE_CHECKING:
     from eneo.actors.actor_manager import ActorManager
     from eneo.assistants.assistant import Assistant
+    from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
     from eneo.spaces.space import Space
     from eneo.spaces.space_repo import SpaceRepository
     from eneo.spaces.space_service import SpaceService
@@ -55,12 +61,41 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True)
+class ExternalToolServer:
+    """An MCP server outside Eneo that a visitor turn of the target reaches,
+    with the tools it exposes. What the admin acknowledges at activation."""
+
+    id: UUID
+    name: str
+    tools: list[str]
+
+    def public(self) -> dict[str, Any]:
+        return {"id": str(self.id), "name": self.name, "tools": list(self.tools)}
+
+
+@dataclass(frozen=True)
 class WidgetView:
     widget: Widget
     activation_blockers: list[str]
+    # The target's MCP servers outside Eneo, and whether the admin's stored
+    # acknowledgement covers exactly that set (true when there are none).
+    external_tools: list[ExternalToolServer]
+    external_tools_acknowledged: bool
     # The template the widget follows, when any; carries the lock groups the
     # editor must show as read-only.
     template: Optional[WidgetTemplate] = None
+    # The widget before a change, read under the same row lock as the change,
+    # so an audit entry's "old" is what the change replaced.
+    previous: Optional[Widget] = None
+
+
+@dataclass(frozen=True)
+class WidgetOverviewDetails:
+    """What the admin overview shows of a widget besides its row and usage."""
+
+    activation_blockers: list[str]
+    external_tools: list[ExternalToolServer]
+    external_tools_acknowledged: bool
 
 
 class WidgetService:
@@ -197,13 +232,60 @@ class WidgetService:
             return False
         return True
 
-    def _activation_blockers(self, space: "Space", widget: Widget) -> list[str]:
+    @staticmethod
+    def _external_tools(
+        space: "Space", target: Optional["Assistant"]
+    ) -> list[ExternalToolServer]:
+        """The target's MCP servers outside Eneo that a visitor turn reaches.
+
+        The general-purpose servers attached to the assistant within the
+        space's security classification, as AssistantService hands them to a
+        turn. Capability providers (web search) are left out: the tenant
+        chose them, they only read, and a visitor never gets any other
+        capability. Eneo's own loopback servers are not external.
+        """
+        if target is None:
+            return []
+        attached: Sequence["MCPServer"] = target.mcp_servers
+        servers = general_servers_for_space(attached, space.security_classification)
+        external: list[ExternalToolServer] = []
+        for server in servers:
+            if server.is_internal or not server.is_enabled:
+                continue
+            tools = (
+                sorted(
+                    tool.title or tool.name for tool in server.tools if tool.is_enabled
+                )
+                if server.tools_loaded
+                else []
+            )
+            external.append(ExternalToolServer(server.id, server.name, tools))
+        return sorted(external, key=lambda server: server.name.casefold())
+
+    def _activation_blockers(
+        self,
+        space: "Space",
+        widget: Widget,
+        *,
+        external: Optional[list[ExternalToolServer]] = None,
+    ) -> list[str]:
         target = self._target(space, widget)
+        if external is None:
+            external = self._external_tools(space, target)
         blockers = widget.activation_blockers(
             target_published=target is not None and bool(target.published)
         )
         if target is not None and not self._can_answer(space, target):
             blockers.append("target_cannot_answer")
+        if external and not self.get_policy().allow_external_tools:
+            blockers.append("external_tools_not_allowed")
+        if widget.is_serving and not widget.external_tools_acknowledged(
+            server.id for server in external
+        ):
+            # Live, but the assistant's external servers are not the ones the
+            # admin acknowledged: pausing and activating again asks for a
+            # new acknowledgement.
+            blockers.append("external_tools_changed_since_activation")
         # Widget visitors are viewers. Organization spaces grant viewers no
         # assistant read permission, so a widget there could never answer.
         if space.is_organization():
@@ -222,11 +304,21 @@ class WidgetService:
         space: "Space",
         widget: Widget,
         template: Optional[WidgetTemplate] = None,
+        *,
+        previous: Optional[Widget] = None,
     ) -> WidgetView:
-        blockers = self._activation_blockers(space, widget)
+        external = self._external_tools(space, self._target(space, widget))
+        blockers = self._activation_blockers(space, widget, external=external)
         blockers.extend(self.get_policy().violations(widget))
         return WidgetView(
-            widget=widget, activation_blockers=blockers, template=template
+            widget=widget,
+            activation_blockers=blockers,
+            template=template,
+            external_tools=external,
+            external_tools_acknowledged=widget.external_tools_acknowledged(
+                server.id for server in external
+            ),
+            previous=previous,
         )
 
     async def _template_of(self, widget: Widget) -> Optional[WidgetTemplate]:
@@ -234,8 +326,12 @@ class WidgetService:
             return None
         return await self.template_repo.get(widget.template_id)
 
-    async def _view_with_template(self, space: "Space", widget: Widget) -> WidgetView:
-        return self._view(space, widget, await self._template_of(widget))
+    async def _view_with_template(
+        self, space: "Space", widget: Widget, *, previous: Optional[Widget] = None
+    ) -> WidgetView:
+        return self._view(
+            space, widget, await self._template_of(widget), previous=previous
+        )
 
     # --- queries ----------------------------------------------------------
 
@@ -258,20 +354,24 @@ class WidgetService:
         space = await self._space_for_read(widget.space_id)
         return await self._view_with_template(space, widget)
 
-    async def activation_blockers_of(
+    async def overview_details_of(
         self, widgets: Sequence[Widget]
-    ) -> dict[Optional[UUID], list[str]]:
-        """The blockers of widgets from any space, for the tenant admin's
-        overview. What the assistant can do is read from its space, so each
-        space is loaded once."""
+    ) -> dict[Optional[UUID], WidgetOverviewDetails]:
+        """The blockers and external tools of widgets from any space, for the
+        tenant admin's overview. What the assistant can do is read from its
+        space, so each space is loaded once."""
         spaces: dict[UUID, "Space"] = {}
-        blockers: dict[Optional[UUID], list[str]] = {}
+        details: dict[Optional[UUID], WidgetOverviewDetails] = {}
         for widget in widgets:
             if widget.space_id not in spaces:
                 spaces[widget.space_id] = await self._space_as_admin(widget.space_id)
             view = self._view(spaces[widget.space_id], widget)
-            blockers[widget.id] = view.activation_blockers
-        return blockers
+            details[widget.id] = WidgetOverviewDetails(
+                activation_blockers=view.activation_blockers,
+                external_tools=view.external_tools,
+                external_tools_acknowledged=view.external_tools_acknowledged,
+            )
+        return details
 
     # --- commands ---------------------------------------------------------
 
@@ -385,13 +485,34 @@ class WidgetService:
         )
         return self._view(space, widget, template)
 
+    def _require_admin_while_active(
+        self, widget: Widget, changed: Iterable[str]
+    ) -> None:
+        """An active widget's governed settings are what the tenant admin
+        reviewed at activation (GOVERNED_FIELDS, and the template whose locks
+        an admin set). An editor changes them by pausing first, which also
+        makes the next activation a new review; an admin changes them live.
+        """
+        fields = sorted(changed)
+        if not fields or not widget.is_serving:
+            return
+        if Permission.ADMIN in self.user.permissions:
+            return
+        raise WidgetAdminRequiredError(fields)
+
     async def detach_template(self, widget_id: UUID, *, revision: int) -> WidgetView:
-        """Stop following the template; the widget keeps its current values."""
+        """Stop following the template; the widget keeps its current values.
+
+        The template's locks only hold while the widget follows it, so on an
+        active widget detaching is an admin's decision (_require_admin_while_active).
+        """
         validate_permission(self.user, Permission.WIDGETS)
         widget, space = await self._widget_for_change(widget_id, revision)
+        self._require_admin_while_active(widget, ["template"])
+        before = widget.model_copy(deep=True)
         widget.template_id = None
         widget = await self.repo.update(widget)
-        return await self._view_with_template(space, widget)
+        return await self._view_with_template(space, widget, previous=before)
 
     async def update_widget(self, widget_id: UUID, update: WidgetUpdate) -> WidgetView:
         validate_permission(self.user, Permission.WIDGETS)
@@ -402,6 +523,14 @@ class WidgetService:
             locked = template.published.locked_changes(widget, changes)
             if locked:
                 raise WidgetFieldLockedError(locked)
+        self._require_admin_while_active(
+            widget,
+            (
+                name
+                for name, value in changes.items()
+                if name in GOVERNED_FIELDS and value != getattr(widget, name)
+            ),
+        )
         before = widget.model_copy(deep=True)
         widget.apply_update(changes)
         self._hold_to_rules(before, widget)
@@ -416,18 +545,38 @@ class WidgetService:
         await self.icon_repo.release_replaced(
             before.persona.avatar_icon_id, widget.persona.avatar_icon_id
         )
-        return self._view(space, widget, template)
+        return self._view(space, widget, template, previous=before)
 
-    async def activate_widget(self, widget_id: UUID) -> WidgetView:
+    async def activate_widget(
+        self, widget_id: UUID, *, external_tools_acknowledged: bool = False
+    ) -> WidgetView:
+        """Put the widget online. Tenant admins only.
+
+        When the assistant reaches MCP servers outside Eneo, the admin must
+        acknowledge that anonymous visitors can make it call their tools
+        (``external_tools_acknowledged``), unless the stored acknowledgement
+        already covers exactly those servers. The acknowledgement is recorded
+        with the server ids, so a changed set asks again.
+        """
         validate_permission(self.user, Permission.ADMIN)
         widget = await self._owned_widget(widget_id)
         space = await self._space_as_admin(widget.space_id)
         violations = self.get_policy().violations(widget)
         if violations:
             raise WidgetPolicyViolationError(violations)
-        blockers = self._activation_blockers(space, widget)
+        external = self._external_tools(space, self._target(space, widget))
+        blockers = self._activation_blockers(space, widget, external=external)
         if blockers:
             raise WidgetServingBlockedError(blockers)
+        server_ids = [server.id for server in external]
+        if not widget.external_tools_acknowledged(server_ids):
+            if not external_tools_acknowledged:
+                raise WidgetExternalToolsUnacknowledgedError(
+                    [server.public() for server in external]
+                )
+            widget.acknowledge_external_tools(server_ids, by=self.user.id)
+        elif not external:
+            widget.external_tools_acknowledgement = None
         widget.activate(by=self.user.id)
         widget = await self.repo.update(widget)
         return await self._view_with_template(space, widget)
@@ -435,15 +584,19 @@ class WidgetService:
     async def preview_token(self, widget_id: UUID) -> tuple[str, int]:
         """A visitor token for the editor's live preview.
 
-        Works for draft and paused widgets, so editors can see the embed page
-        before an admin activates it. Each call is a fresh pseudonymous
-        visitor; nothing about the editor is put in the token.
+        Works for draft widgets, so editors can see the embed page before an
+        admin activates it, and for active ones. A paused widget is not
+        previewed: the pause is the kill switch and nothing admits the embed
+        page behind it. Each call is a fresh pseudonymous visitor; nothing
+        about the editor is put in the token.
         """
         validate_permission(self.user, Permission.WIDGETS)
         widget = await self._owned_widget(widget_id)
         await self._space_for_edit(widget.space_id)
         if widget.status == WidgetStatus.ARCHIVED:
             raise BadRequestException("Archived widgets cannot be previewed.")
+        if widget.status == WidgetStatus.PAUSED:
+            raise WidgetPreviewUnavailableError()
         return self.token_service.mint(widget, uuid4(), preview=True)
 
     async def pause_widget(self, widget_id: UUID) -> WidgetView:

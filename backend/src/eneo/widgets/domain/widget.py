@@ -5,7 +5,7 @@
 
 import re
 import secrets
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Annotated, Any, Optional, cast
@@ -24,7 +24,10 @@ from pydantic import (
 )
 from pydantic.json_schema import SkipJsonSchema
 
-from eneo.allowed_origins.origin_matching import normalize_origin_pattern
+from eneo.allowed_origins.origin_matching import (
+    is_too_broad_wildcard,
+    normalize_origin_pattern,
+)
 from eneo.main.exceptions import BadRequestException
 
 PUBLIC_ID_PREFIX = "wgt_"
@@ -63,12 +66,22 @@ TOKEN_GENERATION_FIELDS = frozenset(
 # they bypass the revision check: a kill switch must not lose to an autosave.
 LIFECYCLE_FIELDS = frozenset({"status", "paused_at", "token_generation"})
 
+# The settings a tenant admin reviewed at activation: where the widget may be
+# framed, what it keeps and how visitors are admitted. On an active widget
+# only an admin changes them; an editor pauses first (WidgetService).
+GOVERNED_FIELDS = frozenset({"allowed_origins", "privacy", "bot_protection"})
+
 
 # What each configuration blocker is about: the widget cannot serve while the
-# setting is empty.
+# setting is empty (or, for the wildcard check, while it is not met).
 _SERVING_REQUIREMENTS: dict[str, Callable[["Widget"], Any]] = {
     "allowed_origins_empty": lambda widget: widget.allowed_origins,
     "subtitle_empty": lambda widget: widget.texts.subtitle,
+    # A `*.se` saved before the two-label rule: the visitor surface drops it
+    # (WidgetPolicy.serving), so the widget is not framed where it was meant.
+    "allowed_origin_too_broad": lambda widget: not any(
+        is_too_broad_wildcard(origin) for origin in widget.allowed_origins
+    ),
 }
 
 
@@ -298,10 +311,33 @@ class WidgetPrivacy(BaseModel):
         return self.retention_days == 0
 
 
-def normalize_allowed_origins(origins: list[str]) -> list[str]:
+class ExternalToolsAcknowledgement(BaseModel):
+    """A tenant admin's acknowledgement, given at activation, that the
+    assistant's MCP servers outside Eneo run on anonymous visitor input.
+
+    Bound to the servers it was given for: when the assistant's set of
+    external servers changes, the acknowledgement no longer covers it and
+    the next activation asks again.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    server_ids: list[UUID]
+    acknowledged_at: datetime
+    acknowledged_by_user_id: Optional[UUID] = None
+
+    def covers(self, server_ids: Iterable[UUID]) -> bool:
+        return set(self.server_ids) == set(server_ids)
+
+
+def normalize_allowed_origins(
+    origins: list[str], *, allow_too_broad: bool = False
+) -> list[str]:
+    """Canonical, de-duplicated patterns. ``allow_too_broad`` is for reading a
+    stored list; a saved pattern must name at least two labels after ``*.``."""
     seen: list[str] = []
     for origin in origins:
-        normalized = normalize_origin_pattern(origin)
+        normalized = normalize_origin_pattern(origin, allow_too_broad=allow_too_broad)
         if normalized not in seen:
             seen.append(normalized)
     if len(seen) > MAX_ALLOWED_ORIGINS:
@@ -424,6 +460,9 @@ class Widget(BaseModel):
     # The template this widget follows; None for a stand-alone widget. Only
     # the link/detach commands change it, never a plain update.
     template_id: Optional[UUID] = None
+    # Set by activation when the assistant has external MCP servers; None
+    # when it has none or the widget was never activated with any.
+    external_tools_acknowledgement: Optional[ExternalToolsAcknowledgement] = None
     created_by_user_id: Optional[UUID] = None
     activated_by_user_id: Optional[UUID] = None
     activated_at: Optional[datetime] = None
@@ -461,7 +500,9 @@ class Widget(BaseModel):
     @field_validator("allowed_origins")
     @classmethod
     def _origins(cls, value: list[str]) -> list[str]:
-        return normalize_allowed_origins(value)
+        # Lenient: a row saved before the two-label wildcard rule must still
+        # load, so it can be shown and fixed. Saving is strict (apply_update).
+        return normalize_allowed_origins(value, allow_too_broad=True)
 
     @model_validator(mode="after")
     def _status_consistency(self) -> "Widget":
@@ -527,6 +568,33 @@ class Widget(BaseModel):
             if _SERVING_REQUIREMENTS[code](self) != _SERVING_REQUIREMENTS[code](before)
         ]
 
+    def external_tools_acknowledged(self, server_ids: Iterable[UUID]) -> bool:
+        """Whether the stored acknowledgement covers exactly these servers.
+        True when there are none: nothing is left unacknowledged."""
+        ids = list(server_ids)
+        if not ids:
+            return True
+        ack = self.external_tools_acknowledgement
+        return ack is not None and ack.covers(ids)
+
+    def acknowledge_external_tools(
+        self,
+        server_ids: Iterable[UUID],
+        *,
+        by: Optional[UUID],
+        now: Optional[datetime] = None,
+    ) -> None:
+        ids = list(server_ids)
+        self.external_tools_acknowledgement = (
+            ExternalToolsAcknowledgement(
+                server_ids=ids,
+                acknowledged_at=now or datetime.now(timezone.utc),
+                acknowledged_by_user_id=by,
+            )
+            if ids
+            else None
+        )
+
     def activate(self, *, by: UUID, now: Optional[datetime] = None) -> None:
         if self.status not in (WidgetStatus.DRAFT, WidgetStatus.PAUSED):
             raise BadRequestException(
@@ -579,8 +647,13 @@ class Widget(BaseModel):
         for field, value in changes.items():
             before = getattr(self, field)
             try:
+                if field == "allowed_origins":
+                    # The entity reads too-broad wildcards; a save refuses them.
+                    value = normalize_allowed_origins(cast(list[str], value))
                 setattr(self, field, value)
-            except ValidationError as exc:
+            except (ValidationError, ValueError) as exc:
+                if not isinstance(exc, ValidationError):
+                    raise BadRequestException(f"Invalid {field}: {exc}") from exc
                 raise BadRequestException(
                     f"Invalid {field}: {validation_messages(exc)}"
                 ) from exc

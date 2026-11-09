@@ -399,7 +399,8 @@ describe("policy autosave", () => {
     max_daily_token_budget: 1000,
     min_retention_days: 0,
     max_retention_days: 365,
-    allow_bot_protection_none: false
+    allow_bot_protection_none: false,
+    allow_external_tools: true
   } as WidgetPolicy;
 
   it("serialises saves and keeps an edit made while the first save is in flight", async () => {

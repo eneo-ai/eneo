@@ -475,14 +475,17 @@ describe("WidgetEditor", () => {
   });
 
   test("visitor access lists what visitors get and what they never get", async () => {
-    renderEditor(widget(), {
-      mcp_servers: [
-        { id: "m1", name: "Kommunens ärenden", purpose: "general", is_enabled: true },
-        { id: "m2", name: "Avstängd server", purpose: "general", is_enabled: false },
-        { id: "m3", name: "Sökleverantören", purpose: "web_search", is_enabled: true }
-      ],
-      enabled_capabilities: ["web_search", "image_generation"]
-    } as unknown as Partial<Assistant>);
+    // The servers come from the widget as the API lists them (the same list the
+    // activation dialog asks the admin to acknowledge), with their tools.
+    renderEditor(
+      widget({
+        external_tools: [{ id: "m1", name: "Kommunens ärenden", tools: ["Sök ärende"] }],
+        external_tools_acknowledged: true
+      } as unknown as Partial<Widget>),
+      {
+        enabled_capabilities: ["web_search", "image_generation"]
+      } as unknown as Partial<Assistant>
+    );
     await userEvent.click(page.getByRole("tab", { name: /widget_admin_tab_publish/ }));
     const access = page.getByRole("region", { name: "widget_admin_visitor_access" });
     await expect.element(access).toBeVisible();
@@ -493,7 +496,7 @@ describe("WidgetEditor", () => {
         .map((item) => item.textContent?.trim())
     ).toEqual([
       "widget_admin_visitor_access_knowledge",
-      "Kommunens ärenden",
+      "widget_admin_visitor_access_server_tools(Kommunens ärenden|Sök ärende)",
       "widget_admin_visitor_access_capability(web_search)"
     ]);
     await expect.element(access.getByText("widget_admin_visitor_access_never")).toBeVisible();

@@ -1,6 +1,7 @@
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from eneo.main.exceptions import BadRequestException
 from eneo.widgets.domain.widget import (
@@ -11,6 +12,7 @@ from eneo.widgets.domain.widget import (
     WidgetLimits,
     WidgetStatus,
     WidgetTexts,
+    WidgetUpdate,
     generate_public_id,
     is_public_id,
     normalize_allowed_origins,
@@ -285,3 +287,50 @@ def test_persona_is_editable_without_touching_visitor_tokens():
                 }
             }
         )
+
+
+def test_a_wildcard_over_a_top_level_domain_is_refused_when_saved_but_read_back():
+    widget = Widget.create(
+        tenant_id=uuid4(), space_id=uuid4(), target_id=uuid4(), name="w"
+    )
+    with pytest.raises(BadRequestException, match="two labels"):
+        widget.apply_update({"allowed_origins": ["https://*.se"]})
+    with pytest.raises(ValidationError, match="two labels"):
+        WidgetUpdate(revision=0, allowed_origins=["https://*.se:443"])
+    widget.apply_update({"allowed_origins": ["https://*.kommun.se"]})
+    assert widget.allowed_origins == ["https://*.kommun.se"]
+
+    # The stored row of an older save: shown, flagged, never served.
+    widget.allowed_origins = ["https://*.se", "https://www.kommun.se"]
+    assert widget.configuration_blockers() == ["allowed_origin_too_broad"]
+    assert widget.activation_blockers(target_published=True) == [
+        "allowed_origin_too_broad"
+    ]
+    fixed = widget.model_copy(deep=True)
+    fixed.apply_update({"allowed_origins": ["https://www.kommun.se"]})
+    assert fixed.blockers_introduced_since(widget) == []
+    assert widget.blockers_introduced_since(fixed) == ["allowed_origin_too_broad"]
+
+
+def test_the_acknowledgement_covers_exactly_the_servers_it_was_given():
+    widget = Widget.create(
+        tenant_id=uuid4(), space_id=uuid4(), target_id=uuid4(), name="w"
+    )
+    first, second = uuid4(), uuid4()
+    assert widget.external_tools_acknowledged([]) is True
+    assert widget.external_tools_acknowledged([first]) is False
+
+    by = uuid4()
+    widget.acknowledge_external_tools([first, second], by=by)
+    ack = widget.external_tools_acknowledgement
+    assert ack is not None
+    assert ack.acknowledged_by_user_id == by and ack.acknowledged_at is not None
+    assert widget.external_tools_acknowledged([second, first]) is True
+    assert widget.external_tools_acknowledged([first]) is False
+    assert widget.external_tools_acknowledged([first, second, uuid4()]) is False
+
+    widget.acknowledge_external_tools([], by=by)
+    assert widget.external_tools_acknowledgement is None
+    # Only activation writes it; a plain update cannot.
+    with pytest.raises(BadRequestException, match="cannot be updated"):
+        widget.apply_update({"external_tools_acknowledgement": None})

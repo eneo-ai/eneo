@@ -182,3 +182,23 @@ def test_the_editors_budget_ceiling_is_the_apis():
     ):
         schema = model.model_json_schema()["properties"][field]
         assert maximum(schema) == MAX_DAILY_TOKEN_BUDGET, (model.__name__, field)
+
+
+def test_external_servers_are_allowed_unless_the_policy_says_otherwise():
+    assert WidgetPolicy.from_tenant(None).allow_external_tools is True
+    assert (
+        WidgetPolicy.from_tenant({"allow_external_tools": False}).allow_external_tools
+        is False
+    )
+    assert WidgetPolicyUpdate(allow_external_tools=False).allow_external_tools is False
+    assert WidgetPolicyUpdate().allow_external_tools is None
+
+
+def test_serving_never_honours_a_wildcard_over_a_top_level_domain():
+    widget = _widget()
+    # A row saved before the two-label rule still loads, so it can be fixed.
+    widget.allowed_origins = ["https://*.se", "https://www.kommun.se"]
+    served = WidgetPolicy().serving(widget)
+    assert served.allowed_origins == ["https://www.kommun.se"]
+    assert widget.allowed_origins == ["https://*.se", "https://www.kommun.se"]
+    assert widget.configuration_blockers() == ["allowed_origin_too_broad"]

@@ -3752,7 +3752,7 @@ export interface paths {
     head?: never;
     /**
      * Update Widget
-     * @description Update a widget's configuration. Changes to allowed origins, limits, privacy or bot protection invalidate outstanding visitor tokens. A value outside the tenant's widget policy is refused with `widget_policy_violation` (listing `violations`); an edit that would leave an active widget unable to serve is refused with `widget_serving_blocked` (listing `blockers`).
+     * @description Update a widget's configuration. Changes to allowed origins, limits, privacy or bot protection invalidate outstanding visitor tokens. A value outside the tenant's widget policy is refused with `widget_policy_violation` (listing `violations`); an edit that would leave an active widget unable to serve is refused with `widget_serving_blocked` (listing `blockers`). On an active widget, a change to allowed origins, privacy or bot protection is for tenant admins (`admin_required_while_active`, listing `fields`); editors pause the widget first.
      */
     patch: operations["update_widget_api_v1_widgets__id___patch"];
     trace?: never;
@@ -3788,7 +3788,7 @@ export interface paths {
     put?: never;
     /**
      * Create Widget Preview Token
-     * @description Mint a visitor token for the live preview on the admin page. Admits the embed page for draft and paused widgets; each call is a fresh pseudonymous visitor.
+     * @description Mint a visitor token for the live preview on the admin page. Admits the embed page for a draft widget; refused for a paused one with `preview_unavailable_while_paused`. Each call is a fresh pseudonymous visitor and is recorded in the audit log.
      */
     post: operations["create_widget_preview_token_api_v1_widgets__id__preview_token__post"];
     delete?: never;
@@ -3808,7 +3808,7 @@ export interface paths {
     put?: never;
     /**
      * Activate Widget
-     * @description Activate a widget so it serves visitors. Tenant admins only. Fails with `widget_policy_violation` (listing `violations`) when settings are outside the tenant's widget policy and with `widget_serving_blocked` (listing `blockers`) when the configuration is incomplete.
+     * @description Activate a widget so it serves visitors. Tenant admins only. Fails with `widget_policy_violation` (listing `violations`) when settings are outside the tenant's widget policy, with `widget_serving_blocked` (listing `blockers`) when the configuration is incomplete, and with `external_tools_unacknowledged` (listing `servers`) when the assistant reaches MCP servers outside Eneo and the body does not acknowledge them.
      */
     post: operations["activate_widget_api_v1_widgets__id__activate__post"];
     delete?: never;
@@ -4070,7 +4070,7 @@ export interface paths {
     };
     /**
      * Get Widget Template
-     * @description A widget template. Tenant admins only.
+     * @description A widget template. Readable by everyone with the widgets permission, like the template list; only tenant admins change it.
      */
     get: operations["get_widget_template_api_v1_admin_widget_templates__id___get"];
     put?: never;
@@ -10469,6 +10469,8 @@ export interface components {
       | "widget_archived"
       | "widget_policy_updated"
       | "widget_budget_exhausted"
+      | "widget_preview_token_minted"
+      | "widget_external_tool_called"
       | "widget_template_created"
       | "widget_template_updated"
       | "widget_template_deleted"
@@ -10498,7 +10500,7 @@ export interface components {
      * @description Categorize who performed the action
      * @enum {string}
      */
-    ActorType: "user" | "system" | "api_key";
+    ActorType: "user" | "system" | "api_key" | "widget_visitor";
     /** AddSpaceGroupMemberRequest */
     AddSpaceGroupMemberRequest: {
       /**
@@ -26399,6 +26401,15 @@ export interface components {
        */
       version: string;
     };
+    /** WidgetActivate */
+    WidgetActivate: {
+      /**
+       * External Tools Acknowledged
+       * @description Required true when the assistant reaches MCP servers outside Eneo (`external_tools` on the widget) and no earlier acknowledgement covers exactly those servers: the admin acknowledges that anonymous visitors can make the assistant call their tools, with no approval step. Refused with `external_tools_unacknowledged` otherwise.
+       * @default false
+       */
+      external_tools_acknowledged?: boolean;
+    };
     /** WidgetAsk */
     WidgetAsk: {
       /** Question */
@@ -26464,6 +26475,22 @@ export interface components {
     WidgetDetachTemplate: {
       /** Revision */
       revision: number;
+    };
+    /**
+     * WidgetExternalToolServerPublic
+     * @description An MCP server outside Eneo that the widget's assistant reaches, with
+     *     the tools visitors can make it call.
+     */
+    WidgetExternalToolServerPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Tools */
+      tools: string[];
     };
     /**
      * WidgetFeedback
@@ -26606,6 +26633,16 @@ export interface components {
        * @description Why the widget could not be activated as configured: empty when it can. A policy violation does not stop an active widget: it is served within the policy.
        */
       activation_blockers?: string[];
+      /**
+       * External Tools
+       * @description Names of the assistant's MCP servers outside Eneo.
+       */
+      external_tools: string[];
+      /**
+       * External Tools Acknowledged
+       * @description Whether the admin's acknowledgement covers the current `external_tools`; true when there are none.
+       */
+      external_tools_acknowledged: boolean;
     };
     /** WidgetOverviewPublic */
     WidgetOverviewPublic: {
@@ -26666,6 +26703,11 @@ export interface components {
       min_retention_days: number;
       /** Max Retention Days */
       max_retention_days: number;
+      /**
+       * Allow External Tools
+       * @description Whether widgets may publish assistants whose MCP servers run outside Eneo. Default true; off, such widgets cannot be activated and live ones are flagged in the overview.
+       */
+      allow_external_tools: boolean;
     };
     /** WidgetPolicyUpdate */
     WidgetPolicyUpdate: {
@@ -26677,6 +26719,8 @@ export interface components {
       min_retention_days?: number | null;
       /** Max Retention Days */
       max_retention_days?: number | null;
+      /** Allow External Tools */
+      allow_external_tools?: boolean | null;
     };
     /**
      * WidgetPosition
@@ -26758,6 +26802,16 @@ export interface components {
       activation_blockers: string[];
       /** @description Set when the widget follows a template. */
       template?: components["schemas"]["WidgetTemplateLinkPublic"] | null;
+      /**
+       * External Tools
+       * @description The assistant's MCP servers outside Eneo, as a visitor turn reaches them. Activation needs the admin's acknowledgement of this list.
+       */
+      external_tools: components["schemas"]["WidgetExternalToolServerPublic"][];
+      /**
+       * External Tools Acknowledged
+       * @description Whether the stored acknowledgement covers exactly `external_tools`; true when there are none. False on an active widget means the assistant's external servers changed since activation.
+       */
+      external_tools_acknowledged: boolean;
       /** Created By User Id */
       created_by_user_id?: string | null;
       /** Activated By User Id */
@@ -42055,7 +42109,11 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["WidgetActivate"] | null;
+      };
+    };
     responses: {
       /** @description Successful Response */
       200: {

@@ -104,7 +104,11 @@ export default defineConfig({
           name: "server",
           environment: "node",
           include: ["src/**/*.{test,spec}.{js,ts}"],
-          exclude: ["src/**/*.svelte.{test,spec}.{js,ts}"]
+          exclude: ["src/**/*.svelte.{test,spec}.{js,ts}"],
+          // Vitest stubs stylesheet imports to "". The widget loader's
+          // stylesheet is served as a file and hash-checked against its
+          // manifest (lib/server/widget-loader.ts), so it must be the real one.
+          css: { include: [/packages\/widget-loader\/(dist|releases)\/.*\.css(\?|$)/] }
         }
       }
     ]

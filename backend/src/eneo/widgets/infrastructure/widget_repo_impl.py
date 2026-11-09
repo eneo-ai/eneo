@@ -18,6 +18,7 @@ from eneo.tenants.tenant import TenantState
 from eneo.widgets.domain.exceptions import WidgetRevisionConflictError
 from eneo.widgets.domain.widget import (
     BotProtection,
+    ExternalToolsAcknowledgement,
     Widget,
     WidgetLanguage,
     WidgetLimits,
@@ -54,6 +55,13 @@ def to_entity(row: Widgets) -> Widget:
         show_sources=row.show_sources,
         show_tool_activity=row.show_tool_activity,
         template_id=row.template_id,
+        external_tools_acknowledgement=(
+            ExternalToolsAcknowledgement.model_validate(
+                row.external_tools_acknowledgement
+            )
+            if row.external_tools_acknowledgement
+            else None
+        ),
         created_by_user_id=row.created_by_user_id,
         activated_by_user_id=row.activated_by_user_id,
         activated_at=row.activated_at,
@@ -84,6 +92,11 @@ def _to_values(widget: Widget) -> dict[str, Any]:
         "show_sources": widget.show_sources,
         "show_tool_activity": widget.show_tool_activity,
         "template_id": widget.template_id,
+        "external_tools_acknowledgement": (
+            widget.external_tools_acknowledgement.model_dump(mode="json")
+            if widget.external_tools_acknowledgement is not None
+            else None
+        ),
         "created_by_user_id": widget.created_by_user_id,
         "activated_by_user_id": widget.activated_by_user_id,
         "activated_at": widget.activated_at,

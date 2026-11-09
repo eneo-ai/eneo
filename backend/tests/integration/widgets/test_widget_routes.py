@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -37,14 +38,18 @@ async def regular_user_token(db_container, patch_auth_service_jwt):
 
 
 @pytest.fixture
-async def widget_editor_token(db_container, patch_auth_service_jwt):
-    """A user who manages widgets but is not a tenant admin."""
+async def widget_editor(db_container, patch_auth_service_jwt):
+    """A user who manages widgets but is not a tenant admin: token and id.
+
+    Managing a space's widgets needs edit rights on its assistants, which the
+    space actor grants a member only with the tenant's assistants permission.
+    """
     async with db_container() as container:
         admin = await container.user_repo().get_user_by_email("test@example.com")
         role = await container.role_repo().create_role(
             RoleCreate(
                 name=f"widget-editor-{uuid4().hex[:8]}",
-                permissions=[Permission.WIDGETS],
+                permissions=[Permission.WIDGETS, Permission.ASSISTANTS],
                 tenant_id=admin.tenant_id,
             )
         )
@@ -57,7 +62,15 @@ async def widget_editor_token(db_container, patch_auth_service_jwt):
                 roles=[ModelId(id=role.id)],
             )
         )
-        return container.auth_service().create_access_token_for_user(user)
+        return SimpleNamespace(
+            token=container.auth_service().create_access_token_for_user(user),
+            id=user.id,
+        )
+
+
+@pytest.fixture
+def widget_editor_token(widget_editor):
+    return widget_editor.token
 
 
 def _auth(token: str) -> dict[str, str]:
@@ -334,6 +347,7 @@ async def test_widget_editors_read_the_policy_but_cannot_change_it(
         "allow_bot_protection_none": False,
         "min_retention_days": 0,
         "max_retention_days": 120,
+        "allow_external_tools": True,
     }
 
     resp = await client.patch(
@@ -965,3 +979,237 @@ async def test_a_templated_persona_keeps_its_icon_for_every_follower(
         "avatar_icon_id": avatar,
         "avatar_in_launcher": False,
     }
+
+
+# --- security audit follow-ups ---------------------------------------------------
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_preview_token_is_minted_for_drafts_and_active_widgets_only(
+    client, admin_token, space_with_assistant
+):
+    space_id, assistant_id = space_with_assistant
+    resp = await client.post(
+        f"/api/v1/spaces/{space_id}/widgets/",
+        json={"target_id": assistant_id, "name": "Webbchatt"},
+        headers=_auth(admin_token),
+    )
+    widget_id = resp.json()["id"]
+
+    resp = await client.post(
+        f"/api/v1/widgets/{widget_id}/preview-token/", headers=_auth(admin_token)
+    )
+    assert resp.status_code == 200, resp.text
+    minted = resp.json()
+    assert minted["token"] and minted["public_id"].startswith("wgt_")
+    # A bearer in the admin page's DOM lives no longer than a visitor token.
+    assert 0 < minted["expires_in"] <= 900
+
+    resp = await client.patch(
+        f"/api/v1/widgets/{widget_id}/",
+        json={
+            "revision": await _revision(client, admin_token, widget_id),
+            "allowed_origins": ["https://www.kommun.se"],
+        },
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 200, resp.text
+    await _publish(client, admin_token, assistant_id)
+    resp = await client.post(
+        f"/api/v1/widgets/{widget_id}/activate/", headers=_auth(admin_token)
+    )
+    assert resp.status_code == 200, resp.text
+    resp = await client.post(
+        f"/api/v1/widgets/{widget_id}/preview-token/", headers=_auth(admin_token)
+    )
+    assert resp.status_code == 200, resp.text
+
+    resp = await client.post(
+        f"/api/v1/widgets/{widget_id}/pause/", headers=_auth(admin_token)
+    )
+    assert resp.status_code == 200, resp.text
+    resp = await client.post(
+        f"/api/v1/widgets/{widget_id}/preview-token/", headers=_auth(admin_token)
+    )
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["detail"]["code"] == "preview_unavailable_while_paused"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_activation_takes_an_acknowledgement_and_reports_external_servers(
+    client, admin_token, space_with_assistant
+):
+    space_id, assistant_id = space_with_assistant
+    resp = await client.post(
+        f"/api/v1/spaces/{space_id}/widgets/",
+        json={"target_id": assistant_id, "name": "Webbchatt"},
+        headers=_auth(admin_token),
+    )
+    widget_id = resp.json()["id"]
+    resp = await client.patch(
+        f"/api/v1/widgets/{widget_id}/",
+        json={
+            "revision": await _revision(client, admin_token, widget_id),
+            "allowed_origins": ["https://www.kommun.se"],
+        },
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 200, resp.text
+    await _publish(client, admin_token, assistant_id)
+
+    stored = (
+        await client.get(f"/api/v1/widgets/{widget_id}/", headers=_auth(admin_token))
+    ).json()
+    # An assistant without MCP servers outside Eneo: nothing to acknowledge.
+    assert stored["external_tools"] == []
+    assert stored["external_tools_acknowledged"] is True
+
+    # The body is a closed shape: a misspelt acknowledgement is refused, not ignored.
+    resp = await client.post(
+        f"/api/v1/widgets/{widget_id}/activate/",
+        json={"acknowledged": True},
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 422, resp.text
+    resp = await client.post(
+        f"/api/v1/widgets/{widget_id}/activate/",
+        json={"external_tools_acknowledged": True},
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "active"
+    assert resp.json()["external_tools"] == []
+    assert resp.json()["external_tools_acknowledged"] is True
+
+    resp = await client.get("/api/v1/admin/widgets/", headers=_auth(admin_token))
+    assert resp.status_code == 200, resp.text
+    [item] = [i for i in resp.json()["items"] if i["id"] == widget_id]
+    assert item["external_tools"] == []
+    assert item["external_tools_acknowledged"] is True
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_widget_policy_governs_servers_outside_eneo(client, admin_token):
+    resp = await client.get("/api/v1/admin/widget-policy/", headers=_auth(admin_token))
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["allow_external_tools"] is True
+    resp = await client.patch(
+        "/api/v1/admin/widget-policy/",
+        json={"allow_external_tools": False},
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["allow_external_tools"] is False
+    resp = await client.patch(
+        "/api/v1/admin/widget-policy/",
+        json={"allow_external_tools": True},
+        headers=_auth(admin_token),
+    )
+    assert resp.json()["allow_external_tools"] is True
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_wildcard_over_a_top_level_domain_is_refused(
+    client, admin_token, space_with_assistant
+):
+    space_id, assistant_id = space_with_assistant
+    resp = await client.post(
+        f"/api/v1/spaces/{space_id}/widgets/",
+        json={"target_id": assistant_id, "name": "Webbchatt"},
+        headers=_auth(admin_token),
+    )
+    widget_id = resp.json()["id"]
+    resp = await client.patch(
+        f"/api/v1/widgets/{widget_id}/",
+        json={
+            "revision": await _revision(client, admin_token, widget_id),
+            "allowed_origins": ["https://*.se"],
+        },
+        headers=_auth(admin_token),
+    )
+    # Refused before the save, at the field; the API sanitises the reason.
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"][0]["loc"] == ["body", "allowed_origins"]
+    resp = await client.patch(
+        f"/api/v1/widgets/{widget_id}/",
+        json={
+            "revision": await _revision(client, admin_token, widget_id),
+            "allowed_origins": ["https://*.kommun.se"],
+        },
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["allowed_origins"] == ["https://*.kommun.se"]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_an_editor_changes_governed_settings_only_while_the_widget_is_paused(
+    client, admin_token, widget_editor, space_with_assistant
+):
+    space_id, assistant_id = space_with_assistant
+    resp = await client.post(
+        f"/api/v1/spaces/{space_id}/members/",
+        json={"id": str(widget_editor.id), "role": "editor"},
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code in (200, 201), resp.text
+    editor = _auth(widget_editor.token)
+
+    resp = await client.post(
+        f"/api/v1/spaces/{space_id}/widgets/",
+        json={"target_id": assistant_id, "name": "Webbchatt"},
+        headers=editor,
+    )
+    assert resp.status_code == 201, resp.text
+    widget_id = resp.json()["id"]
+
+    async def patch(headers, **changes):
+        return await client.patch(
+            f"/api/v1/widgets/{widget_id}/",
+            json={
+                "revision": await _revision(client, admin_token, widget_id),
+                **changes,
+            },
+            headers=headers,
+        )
+
+    # A draft's rules are the editor's to set.
+    resp = await patch(editor, allowed_origins=["https://www.kommun.se"])
+    assert resp.status_code == 200, resp.text
+    await _publish(client, admin_token, assistant_id)
+    resp = await client.post(
+        f"/api/v1/widgets/{widget_id}/activate/", headers=_auth(admin_token)
+    )
+    assert resp.status_code == 200, resp.text
+
+    # Live, the settings the admin reviewed are the admin's.
+    resp = await patch(editor, allowed_origins=["https://*.kommun.se"])
+    assert resp.status_code == 403, resp.text
+    assert resp.json()["detail"]["code"] == "admin_required_while_active"
+    assert resp.json()["detail"]["fields"] == ["allowed_origins"]
+    resp = await patch(
+        editor, privacy={"retention_days": 7, "store_feedback_text": False}
+    )
+    assert resp.status_code == 403, resp.text
+    assert resp.json()["detail"]["fields"] == ["privacy"]
+    # The same value again is no change; the rest of the widget stays the editor's.
+    resp = await patch(
+        editor, allowed_origins=["https://www.kommun.se/"], name="Chatten"
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["name"] == "Chatten"
+    resp = await patch(_auth(admin_token), allowed_origins=["https://*.kommun.se"])
+    assert resp.status_code == 200, resp.text
+
+    # Paused, the rules are the editor's again, and the admin reviews them at
+    # the next activation.
+    resp = await client.post(f"/api/v1/widgets/{widget_id}/pause/", headers=editor)
+    assert resp.status_code == 200, resp.text
+    resp = await patch(editor, allowed_origins=["https://a.kommun.se"])
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["allowed_origins"] == ["https://a.kommun.se"]

@@ -44,6 +44,15 @@ function captureScripts(): HTMLScriptElement[] {
 
 const start = () => page.getByRole("button", { name: "widget_admin_live_test_start" });
 
+describe("WidgetLiveTest of a paused widget", () => {
+  test("cannot start and says why", async () => {
+    state.page.data.release = { version: "1.0.0", channel: "v1", integrity: "sha384-x" };
+    render(WidgetLiveTest, { widget: { ...widget, status: "paused" } as Widget, eneo });
+    await expect.element(start()).toBeDisabled();
+    await expect.element(start()).toHaveAccessibleDescription("widget_admin_live_test_paused");
+  });
+});
+
 afterEach(() => {
   vi.restoreAllMocks();
 });

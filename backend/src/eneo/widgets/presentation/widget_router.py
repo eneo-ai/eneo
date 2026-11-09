@@ -28,6 +28,7 @@ from eneo.widgets.application.widget_target_lifecycle import audit_snapshot
 from eneo.widgets.domain.widget import WidgetStatus
 from eneo.widgets.domain.widget_template import WidgetTemplate
 from eneo.widgets.presentation.widget_models import (
+    WidgetActivate,
     WidgetConflictResponse,
     WidgetCreate,
     WidgetDetachTemplate,
@@ -58,13 +59,22 @@ templates_router = APIRouter()
 admin_templates_router = APIRouter()
 overview_router = APIRouter()
 
+# Every widget admin endpoint is session-only: a widget is what the public
+# internet sees, and the policy, the templates (published onto every live
+# widget) and the overview decide or describe it. No API key, however scoped,
+# reaches any of it.
 _EDITOR_REASON = (
     "WidgetService enforces Permission.WIDGETS or ADMIN and space membership;"
     " session-only so a scoped API key cannot reach what the public internet sees."
 )
 _ADMIN_TEMPLATES_REASON = (
     "WidgetTemplateService enforces the widgets permission on reads and tenant-admin"
-    " rights on changes; followers are updated in the same transaction."
+    " rights on changes; followers are updated in the same transaction. Session-only:"
+    " a publication writes onto every live widget."
+)
+_POLICY_REASON = (
+    "WidgetService enforces the widgets permission on reads and tenant-admin rights"
+    " on changes. Session-only: the policy governs what every live widget serves."
 )
 
 _CONFLICT_RESPONSE = {
@@ -88,6 +98,7 @@ async def _audit(
     view: WidgetView,
     description: str,
     changes: dict[str, Any] | None = None,
+    extra: dict[str, Any] | None = None,
 ) -> None:
     user = container.user()
     widget = view.widget
@@ -103,9 +114,20 @@ async def _audit(
             actor=user,
             target=widget,
             changes=changes,
-            extra={"public_id": widget.public_id, "space_id": str(widget.space_id)},
+            extra={
+                "public_id": widget.public_id,
+                "space_id": str(widget.space_id),
+                **(extra or {}),
+            },
         ),
     )
+
+
+def _old_and_new(view: WidgetView) -> dict[str, Any]:
+    """Both snapshots of a change, the old one read under the change's own
+    row lock (WidgetView.previous), so it is what the change replaced."""
+    assert view.previous is not None
+    return {"old": audit_snapshot(view.previous), "new": _widget_snapshot(view)}
 
 
 @space_widgets_router.get(
@@ -225,7 +247,7 @@ async def detach_widget_template(
         action=ActionType.WIDGET_UPDATED,
         view=view,
         description=f"Detached widget '{view.widget.name}' from its template",
-        changes={"new": _widget_snapshot(view)},
+        changes=_old_and_new(view),
     )
     return assembler.from_view(view)
 
@@ -256,7 +278,10 @@ async def get_widget(id: UUID, container: _ContainerWithUser):
         " value outside the tenant's widget policy is refused with"
         " `widget_policy_violation` (listing `violations`); an edit that would"
         " leave an active widget unable to serve is refused with"
-        " `widget_serving_blocked` (listing `blockers`)."
+        " `widget_serving_blocked` (listing `blockers`). On an active widget,"
+        " a change to allowed origins, privacy or bot protection is for tenant"
+        " admins (`admin_required_while_active`, listing `fields`); editors"
+        " pause the widget first."
     ),
     responses={**responses.get_responses([400, 403, 404]), 409: _CONFLICT_RESPONSE},
 )
@@ -268,7 +293,6 @@ async def get_widget(id: UUID, container: _ContainerWithUser):
 async def update_widget(id: UUID, body: WidgetUpdate, container: _ContainerWithUser):
     service = container.widget_service()
     assembler = container.widget_assembler()
-    before = await service.get_widget(id)
     changes = body.model_dump(exclude_unset=True)
     view = await service.update_widget(id, body)
     await _audit(
@@ -276,11 +300,7 @@ async def update_widget(id: UUID, body: WidgetUpdate, container: _ContainerWithU
         action=ActionType.WIDGET_UPDATED,
         view=view,
         description=f"Updated widget '{view.widget.name}'",
-        changes={
-            "fields": sorted(changes),
-            "old": _widget_snapshot(before),
-            "new": _widget_snapshot(view),
-        },
+        changes={"fields": sorted(changes), **_old_and_new(view)},
     )
     return assembler.from_view(view)
 
@@ -332,8 +352,9 @@ async def get_widget_usage(
     response_model=WidgetPreviewToken,
     description=(
         "Mint a visitor token for the live preview on the admin page. Admits"
-        " the embed page for draft and paused widgets; each call is a fresh"
-        " pseudonymous visitor."
+        " the embed page for a draft widget; refused for a paused one with"
+        " `preview_unavailable_while_paused`. Each call is a fresh pseudonymous"
+        " visitor and is recorded in the audit log."
     ),
     responses=responses.get_responses([400, 403, 404]),
 )
@@ -346,6 +367,15 @@ async def create_widget_preview_token(id: UUID, container: _ContainerWithUser):
     service = container.widget_service()
     view = await service.get_widget(id)
     token, expires_in = await service.preview_token(id)
+    # The token itself stays out of the trail; who minted one for which
+    # widget, in which status and for how long, is what an investigation needs.
+    await _audit(
+        container,
+        action=ActionType.WIDGET_PREVIEW_TOKEN_MINTED,
+        view=view,
+        description=f"Minted a preview token for widget '{view.widget.name}'",
+        extra={"status": view.widget.status.value, "expires_in": expires_in},
+    )
     return WidgetPreviewToken(
         token=token, expires_in=expires_in, public_id=view.widget.public_id
     )
@@ -357,9 +387,11 @@ async def create_widget_preview_token(id: UUID, container: _ContainerWithUser):
     description=(
         "Activate a widget so it serves visitors. Tenant admins only. Fails"
         " with `widget_policy_violation` (listing `violations`) when settings"
-        " are outside the tenant's widget policy and with"
+        " are outside the tenant's widget policy, with"
         " `widget_serving_blocked` (listing `blockers`) when the configuration"
-        " is incomplete."
+        " is incomplete, and with `external_tools_unacknowledged` (listing"
+        " `servers`) when the assistant reaches MCP servers outside Eneo and"
+        " the body does not acknowledge them."
     ),
     responses={**responses.get_responses([400, 403, 404]), 409: _CONFLICT_RESPONSE},
 )
@@ -368,16 +400,25 @@ async def create_widget_preview_token(id: UUID, container: _ContainerWithUser):
     authorization=Permission.ADMIN,
     reason=_EDITOR_REASON,
 )
-async def activate_widget(id: UUID, container: _ContainerWithUser):
+async def activate_widget(
+    id: UUID, container: _ContainerWithUser, body: WidgetActivate | None = None
+):
     service = container.widget_service()
     assembler = container.widget_assembler()
-    view = await service.activate_widget(id)
+    acknowledged = body is not None and body.external_tools_acknowledged
+    view = await service.activate_widget(id, external_tools_acknowledged=acknowledged)
     await _audit(
         container,
         action=ActionType.WIDGET_ACTIVATED,
         view=view,
         description=f"Activated widget '{view.widget.name}'",
         changes={"new": _widget_snapshot(view)},
+        # What the admin took online: the external servers a visitor can make
+        # the assistant call, and that they acknowledged it in this request.
+        extra={
+            "external_tools": [server.public() for server in view.external_tools],
+            "external_tools_acknowledged": acknowledged,
+        },
     )
     return assembler.from_view(view)
 
@@ -446,9 +487,9 @@ async def archive_widget(id: UUID, container: _ContainerWithUser):
     responses=responses.get_responses([403]),
 )
 @endpoint_access(
-    authentication=Authentication.USER,
+    authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
-    reason="Readable by everyone with the widgets permission so editors can check their settings; WidgetService enforces it.",
+    reason=_POLICY_REASON,
 )
 async def get_widget_policy(container: _ContainerWithUser):
     service = container.widget_service()
@@ -463,9 +504,9 @@ async def get_widget_policy(container: _ContainerWithUser):
     responses=responses.get_responses([400, 403]),
 )
 @endpoint_access(
-    authentication=Authentication.USER,
+    authentication=Authentication.SESSION,
     authorization=Permission.ADMIN,
-    reason="Tenant admins set the policy guardrails every widget is held to.",
+    reason=_POLICY_REASON,
 )
 async def update_widget_policy(body: WidgetPolicyUpdate, container: _ContainerWithUser):
     service = container.widget_service()
@@ -507,9 +548,12 @@ async def update_widget_policy(body: WidgetPolicyUpdate, container: _ContainerWi
     responses=responses.get_responses([403]),
 )
 @endpoint_access(
-    authentication=Authentication.USER,
+    authentication=Authentication.SESSION,
     authorization=Permission.ADMIN,
-    reason="Tenant admins see every widget in the organisation with its usage.",
+    reason=(
+        "Tenant admins see every widget in the organisation with its usage."
+        " Session-only like the rest of the widget admin API."
+    ),
 )
 async def get_widget_overview(container: _ContainerWithUser):
     user = container.user()
@@ -518,9 +562,10 @@ async def get_widget_overview(container: _ContainerWithUser):
     rows = await container.widget_overview_repo().list_tenant(
         user.tenant_id, today=container.widget_budget().today()
     )
-    blockers = await service.activation_blockers_of([row.widget for row in rows])
+    details = await service.overview_details_of([row.widget for row in rows])
     items: list[WidgetOverviewItem] = []
     for row in rows:
+        detail = details[row.id]
         items.append(
             WidgetOverviewItem(
                 id=row.id,
@@ -545,7 +590,9 @@ async def get_widget_overview(container: _ContainerWithUser):
                 last_activity=row.last_activity,
                 daily_token_budget=policy.daily_token_budget_for(row.widget),
                 budget_used_today=row.budget_used_today,
-                activation_blockers=blockers[row.id],
+                activation_blockers=detail.activation_blockers,
+                external_tools=[server.name for server in detail.external_tools],
+                external_tools_acknowledged=detail.external_tools_acknowledged,
             )
         )
     totals = WidgetOverviewTotals(
@@ -668,7 +715,7 @@ async def list_widget_templates(container: _ContainerWithUser):
     responses=responses.get_responses([400, 403]),
 )
 @endpoint_access(
-    authentication=Authentication.USER,
+    authentication=Authentication.SESSION,
     authorization=Permission.ADMIN,
     reason=_ADMIN_TEMPLATES_REASON,
 )
@@ -691,11 +738,14 @@ async def create_widget_template(
 @admin_templates_router.get(
     "/{id}/",
     response_model=WidgetTemplatePublic,
-    description="A widget template. Tenant admins only.",
+    description=(
+        "A widget template. Readable by everyone with the widgets permission,"
+        " like the template list; only tenant admins change it."
+    ),
     responses=responses.get_responses([403, 404]),
 )
 @endpoint_access(
-    authentication=Authentication.USER,
+    authentication=Authentication.SESSION,
     authorization=Authorization.AUTHENTICATED,
     reason=_ADMIN_TEMPLATES_REASON,
 )
@@ -717,7 +767,7 @@ async def get_widget_template(id: UUID, container: _ContainerWithUser):
     responses=responses.get_responses([400, 403, 404]),
 )
 @endpoint_access(
-    authentication=Authentication.USER,
+    authentication=Authentication.SESSION,
     authorization=Permission.ADMIN,
     reason=_ADMIN_TEMPLATES_REASON,
 )
@@ -752,7 +802,7 @@ async def update_widget_template(
     responses=responses.get_responses([400, 403, 404]),
 )
 @endpoint_access(
-    authentication=Authentication.USER,
+    authentication=Authentication.SESSION,
     authorization=Permission.ADMIN,
     reason=_ADMIN_TEMPLATES_REASON,
 )
@@ -776,7 +826,13 @@ async def publish_widget_template(id: UUID, container: _ContainerWithUser):
         await _audit(
             container,
             action=ActionType.WIDGET_UPDATED,
-            view=WidgetView(widget=widget, activation_blockers=[], template=template),
+            view=WidgetView(
+                widget=widget,
+                activation_blockers=[],
+                template=template,
+                external_tools=[],
+                external_tools_acknowledged=True,
+            ),
             description=(
                 f"Template '{template.name}' was published onto widget '{widget.name}'"
             ),
@@ -803,7 +859,7 @@ async def publish_widget_template(id: UUID, container: _ContainerWithUser):
     },
 )
 @endpoint_access(
-    authentication=Authentication.USER,
+    authentication=Authentication.SESSION,
     authorization=Permission.ADMIN,
     reason=_ADMIN_TEMPLATES_REASON,
 )

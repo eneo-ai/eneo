@@ -19,11 +19,16 @@
   type Props = {
     autosave: WidgetAutosave;
     policy: WidgetPolicy | null;
+    isAdmin?: boolean;
   };
 
-  let { autosave, policy }: Props = $props();
+  let { autosave, policy, isAdmin = true }: Props = $props();
 
   const widget = $derived(autosave.widget);
+  // Allowed websites, privacy and bot protection are what a tenant admin
+  // reviewed at activation. The API refuses an editor's change to them on an
+  // active widget; the fields say so instead of failing a save.
+  const governedLocked = $derived(widget.status === "active" && !isAdmin);
 
   function limits(change: Partial<Widget["limits"]>) {
     autosave.patch({ limits: { ...widget.limits, ...change } });
@@ -169,6 +174,15 @@
 </script>
 
 <div class="grid gap-6">
+  {#if governedLocked}
+    <p
+      id="widget-rules-governed"
+      role="note"
+      class="bg-secondary text-secondary rounded-lg px-3 py-2 text-sm"
+    >
+      {m.widget_admin_governed_while_active()}
+    </p>
+  {/if}
   <Card.Root>
     <Card.Header>
       <Card.Title><h2>{m.widget_admin_placement()}</h2></Card.Title>
@@ -182,6 +196,7 @@
           rows={3}
           class="font-mono"
           placeholder={m.widget_admin_allowed_origins_placeholder()}
+          disabled={governedLocked}
           aria-invalid={!!originsProblem}
           aria-describedby={originsProblem
             ? "widget-origins-help widget-origins-error"
@@ -325,6 +340,7 @@
             id="widget-retention"
             type="number"
             class="max-w-40"
+            disabled={governedLocked}
             min={policy?.min_retention_days ?? 0}
             max={policy?.max_retention_days ?? 3650}
             value={widget.privacy.retention_days}
@@ -364,6 +380,7 @@
           <Switch
             id="widget-feedback-text"
             aria-describedby="widget-feedback-text-help"
+            disabled={governedLocked}
             checked={widget.privacy.store_feedback_text ?? false}
             onCheckedChange={(checked) => privacy({ store_feedback_text: checked })}
           />
@@ -383,6 +400,7 @@
         <Select.Root
           type="single"
           value={widget.bot_protection ?? "altcha"}
+          disabled={governedLocked}
           onValueChange={(value) =>
             autosave.patch({ bot_protection: value as NonNullable<Widget["bot_protection"]> })}
         >

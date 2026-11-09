@@ -75,15 +75,21 @@ export function initWidgets(client) {
     },
 
     /**
-     * Tenant admins only; fails with the blockers when configuration is incomplete.
-     * @param {{id: string}} widget
+     * Tenant admins only; fails with the blockers when configuration is
+     * incomplete. When the assistant reaches MCP servers outside Eneo
+     * (`external_tools`), the admin acknowledges that anonymous visitors can
+     * make it call their tools; without it the API answers
+     * `external_tools_unacknowledged`.
+     * @param {{id: string; external_tools_acknowledged?: boolean}} params
      * @returns {Promise<Widget>}
      * @throws {EneoError}
      */
-    activate: async ({ id }) => {
+    activate: async ({ id, external_tools_acknowledged = false }) => {
       const res = await client.fetch("/api/v1/widgets/{id}/activate/", {
         method: "post",
-        params: { path: { id } }
+        params: { path: { id } },
+        // @ts-ignore - requestBody is optional in schema but we always send the acknowledgement
+        requestBody: { "application/json": { external_tools_acknowledged } }
       });
       return res;
     },

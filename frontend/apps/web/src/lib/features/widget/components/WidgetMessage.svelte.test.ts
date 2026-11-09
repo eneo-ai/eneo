@@ -57,6 +57,42 @@ function renderMessage(answer = "Svaret.", showSources = true) {
   });
 }
 
+describe("WidgetMessage source links", () => {
+  test("a knowledge source links out only to an absolute web address", async () => {
+    render(WidgetMessage, {
+      message: {
+        ...message("Svaret."),
+        references: [
+          reference(WEB_ID, "Webbsida", "https://sundsvall.se/bygglov"),
+          reference("cccccccc-0000-4000-8000-000000000003", "Skript", "javascript:alert(1)"),
+          reference("dddddddd-0000-4000-8000-000000000004", "E-post", "mailto:x@example.com"),
+          reference("eeeeeeee-0000-4000-8000-000000000005", "Relativ", "/intern/sida"),
+          reference("ffffffff-0000-4000-8000-000000000006", "Protokollrelativ", "//evil.example")
+        ]
+      },
+      index: 0,
+      isLast: true,
+      isLoading: false,
+      showSources: true
+    });
+    await userEvent.click(page.getByRole("button", { name: /widget_sources_count/ }));
+    const links = page.getByRole("link").elements() as HTMLAnchorElement[];
+    expect(links.map((link) => link.getAttribute("href"))).toEqual([
+      "https://sundsvall.se/bygglov"
+    ]);
+    // The other sources are listed, as documents without a link.
+    for (const title of ["Skript", "E-post", "Relativ", "Protokollrelativ"]) {
+      await expect.element(page.getByText(title, { exact: true })).toBeVisible();
+    }
+  });
+
+  test("raw HTML in an answer is shown as text, never rendered", async () => {
+    renderMessage('Se <img src=x onerror="alert(1)"> här.');
+    await expect.element(page.getByText(/onerror/)).toBeVisible();
+    expect(document.querySelectorAll("img")).toHaveLength(0);
+  });
+});
+
 describe("WidgetMessage sources", () => {
   beforeEach(() => {
     vi.restoreAllMocks();

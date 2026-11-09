@@ -5,6 +5,7 @@
 
 from dataclasses import replace
 from typing import Any, Optional
+from uuid import UUID
 
 from eneo.ai_models.completion_models.completion_model import (
     Completion,
@@ -19,6 +20,7 @@ from eneo.assistants.reference_tags import (
     strip_inline_references,
 )
 from eneo.completion_models.domain.skill_activation import SKILL_ACTIVATION_TOOL_NAME
+from eneo.info_blobs.info_blob import InfoBlobInDB
 from eneo.internal_mcp.constants import KNOWLEDGE_SERVER_NAME
 from eneo.questions.question import (
     McpToolReferencePublic,
@@ -76,6 +78,10 @@ SHOWN_CALL_FIELDS = (
 # previous chunk plus the next one.
 _MARKER_TAIL = len('<inref id="00000000"/>') - 1
 
+# Stands in for the identifiers a knowledge reference carries but a visitor
+# has no use for; the public shape keeps its required fields.
+_NIL_UUID = UUID(int=0)
+
 
 class VisitorView:
     """What an anonymous widget visitor may see of an answer.
@@ -88,6 +94,9 @@ class VisitorView:
     Never shown: the model record, reasoning, token counts, the assistant and
     Skills behind the answer, tool results and tool ``_meta``, the raw content
     of tool resources, and any tool argument beyond the one the widget shows.
+    Of a knowledge reference only the document's id, title and address: the
+    collection, website, embedding model, size and source properties are the
+    organisation's inventory (``_visible_blob``).
     Tool calls carry only ``SHOWN_CALL_FIELDS`` and resource ``_meta`` only its
     display keys: an allowlist, so a new field is hidden until it is added.
     An error says only that the assistant cannot answer.
@@ -255,7 +264,11 @@ class VisitorView:
                     if show_sources
                     else strip_inline_references(question.answer)
                 ),
-                "info_blobs": question.info_blobs if show_sources else [],
+                "info_blobs": (
+                    [self._visible_blob(blob) for blob in question.info_blobs]
+                    if show_sources
+                    else []
+                ),
                 "mcp_tool_references": (
                     [
                         self._stored_reference(ref)
@@ -278,6 +291,27 @@ class VisitorView:
 
     def _stored_reference(self, ref: McpToolReferencePublic) -> McpToolReferencePublic:
         return ref.model_copy(update=self._reference_changes(ref.uri, ref.meta))
+
+    @staticmethod
+    def _visible_blob(blob: InfoBlobInDB) -> InfoBlobInDB:
+        """A knowledge reference as a visitor may see it: the document's id
+        (for "copy reference"), title and address. An allowlist: the rest of
+        the row is cleared, so a field added to it stays on the server."""
+        return InfoBlobInDB(
+            id=blob.id,
+            created_at=None,
+            updated_at=None,
+            url=blob.url,
+            title=blob.title,
+            embedding_model_id=_NIL_UUID,
+            user_id=_NIL_UUID,
+            tenant_id=_NIL_UUID,
+            size=0,
+            source_id=_NIL_UUID,
+            version_state="",
+            original_available=False,
+            text="",
+        )
 
     # --- shared -------------------------------------------------------------
 

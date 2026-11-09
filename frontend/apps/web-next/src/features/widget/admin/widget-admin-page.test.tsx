@@ -104,7 +104,8 @@ function showPage(
           max_daily_token_budget: 1000000,
           min_retention_days: 0,
           max_retention_days: 365,
-          allow_bot_protection_none: false
+          allow_bot_protection_none: false,
+          allow_external_tools: true
         });
       case "/api/v1/widget-templates/":
         return ok({ items: templates, count: templates.length, total_count: templates.length });
