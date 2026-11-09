@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections.abc import AsyncGenerator
 from contextlib import AsyncExitStack, asynccontextmanager
 from typing import TYPE_CHECKING, Any, cast
@@ -31,6 +32,7 @@ from eneo.main.container.container import Container
 from eneo.main.exceptions import NotFoundException
 from eneo.main.logging import get_logger
 from eneo.main.models import ChannelType
+from eneo.observability.error_log import log_error
 from eneo.observability.error_text import user_visible_error
 from eneo.redis.connection import build_redis_auth_kwargs, build_redis_url
 from eneo.worker.redis import redis_lease
@@ -250,20 +252,24 @@ async def _sync_lease(
         # the lease after setting it and relies on this order.
         try:
             await lease.aclose()
-        except Exception:
-            logger.warning(
+        except Exception as exc:
+            log_error(
+                logger,
+                logging.WARNING,
                 "Could not release the sync lease of knowledge %s",
                 knowledge_id_str,
-                exc_info=True,
+                error=exc,
             )
         try:
             await _queue_follow_up(redis_client, params.integration_knowledge_id)
-        except Exception:
-            logger.error(
+        except Exception as exc:
+            log_error(
+                logger,
+                logging.ERROR,
                 "Could not queue the follow-up sync of knowledge %s; the periodic "
                 "catch-up picks its markers up",
                 knowledge_id_str,
-                exc_info=True,
+                error=exc,
             )
         finally:
             await redis_client.close()
@@ -337,11 +343,13 @@ async def _link_subscription_if_missing(
                     knowledge.id,
                     subscription.subscription_id,
                 )
-    except Exception:
-        logger.warning(
+    except Exception as exc:
+        log_error(
+            logger,
+            logging.WARNING,
             "Could not link knowledge %s to its SharePoint subscription",
             knowledge.id,
-            exc_info=True,
+            error=exc,
         )
 
 
@@ -412,13 +420,15 @@ async def _drain_pending_delta(
             continue
         try:
             result = await _run_delta(service, params, knowledge, record_failure=False)
-        except Exception:
+        except Exception as exc:
             # The sync that owned the lease succeeded and its status stands; the
             # marker goes back for the follow-up job queued after the release.
-            logger.error(
+            log_error(
+                logger,
+                logging.ERROR,
                 "Pending delta pass failed for knowledge %s",
                 knowledge_id_str,
-                exc_info=True,
+                error=exc,
             )
             await _leave_marker_or_fail(redis_client, knowledge_id_str)
             break
@@ -501,9 +511,12 @@ async def pull_sharepoint_content(
         return DEFERRED_FULL_SYNC_RESULT
 
     except Exception as exc:
-        logger.error(
-            f"Error in full sync task for knowledge {knowledge_id_str}: {exc}",
-            exc_info=True,
+        log_error(
+            logger,
+            logging.ERROR,
+            "Full sync failed for knowledge %s",
+            knowledge_id_str,
+            error=exc,
         )
         raise IntegrationSyncError(exc) from exc
 
@@ -557,6 +570,12 @@ async def sync_sharepoint_delta(
                     return drained
         return SKIPPED_DELTA_SYNC_RESULT
 
-    except Exception as e:
-        logger.error(f"Error in sync_sharepoint_delta: {e}", exc_info=True)
-        raise IntegrationSyncError(e) from e
+    except Exception as exc:
+        log_error(
+            logger,
+            logging.ERROR,
+            "Delta sync failed for knowledge %s",
+            knowledge_id_str,
+            error=exc,
+        )
+        raise IntegrationSyncError(exc) from exc

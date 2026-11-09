@@ -1,7 +1,11 @@
 """A log describes an exception by its kinds, status code and where it was
 raised; its message, which can quote content, is never part of it."""
 
-from eneo.observability.error_log import error_facts
+import logging
+
+import pytest
+
+from eneo.observability.error_log import error_facts, log_error
 
 
 class _ProviderError(Exception):
@@ -42,3 +46,36 @@ def test_a_suppressed_context_is_left_out() -> None:
 
     assert facts["error_type"] == "KeyError"
     assert facts["error_status"] is None
+
+
+def test_a_logged_error_names_its_kinds_and_place_never_its_text(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    log = logging.getLogger("tests.error_log")
+    try:
+        _fail()
+    except RuntimeError as error:
+        with caplog.at_level(logging.WARNING, logger="tests.error_log"):
+            log_error(
+                log,
+                logging.WARNING,
+                "Could not sync knowledge %s",
+                "k-1",
+                error=error,
+                extra={"job_id": "j-1"},
+            )
+
+    [record] = caplog.records
+    assert record.levelno == logging.WARNING
+    assert record.getMessage().startswith(
+        "Could not sync knowledge k-1: RuntimeError <- _ProviderError at "
+    )
+    assert not record.exc_info and not record.stack_info
+    assert "private input" not in repr(record.__dict__)
+    assert record.__dict__["job_id"] == "j-1"
+    assert record.__dict__["error_status"] == 400
+    # The record points at the caller, not at the helper.
+    assert (
+        record.funcName
+        == "test_a_logged_error_names_its_kinds_and_place_never_its_text"
+    )

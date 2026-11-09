@@ -9,7 +9,34 @@ outlive carries these facts instead.
 
 from __future__ import annotations
 
+import logging
 import traceback
+from collections.abc import Mapping
+
+
+def log_error(
+    log: logging.Logger,
+    level: int,
+    message: str,
+    *args: object,
+    error: BaseException,
+    extra: Mapping[str, object] | None = None,
+) -> None:
+    """Log `message % args`, then the error's kinds and where it was raised.
+
+    The record carries `error_facts` and `extra`, never the error's message or
+    traceback, and points at the caller.
+    """
+    facts = error_facts(error)
+    log.log(
+        level,
+        message + ": %s at %s",
+        *args,
+        facts["error_type"],
+        facts["error_at"],
+        extra={**(extra or {}), **facts},
+        stacklevel=2,
+    )
 
 
 def error_facts(error: BaseException) -> dict[str, object]:
