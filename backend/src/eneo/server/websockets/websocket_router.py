@@ -41,8 +41,9 @@ async def connect(
     await websocket.accept(subprotocol=ENEO_SUBPROTOCOL)
     logger.debug(f"User {user.email} connected to websocket.")
 
+    session = user.credential.session if user.credential is not None else None
     try:
-        if user.browser_session is None:
+        if session is None:
             await _receive(websocket, user)
         else:
             # The socket keeps its user while it is open, so it serves a
@@ -50,7 +51,7 @@ async def connect(
             # request (sign-out, a password change, a restricted account and
             # the token's expiry end it).
             await _receive_while_admitted(
-                websocket, user, SessionWatch(user.browser_session, websocket)
+                websocket, user, SessionWatch(session, websocket)
             )
     finally:
         websocket_manager.unsubscribe_from_all_channels(websocket)

@@ -14,6 +14,7 @@ from eneo.authentication.auth_models import (
     ApiKeyOwnership,
     ApiKeyPermission,
     ApiKeyType,
+    CredentialFacts,
 )
 from eneo.authentication.auth_service import AuthService
 from eneo.main.config import get_settings
@@ -433,6 +434,7 @@ class TestModuleResourceAuthentication:
 
         assert principal.module.id == MODULE_ID
         assert principal.user.id == USER_ID
+        assert principal.user.credential == CredentialFacts(kind="derived")
         assert principal.api_key.id == SERVICE_KEY_ID
         broker.module_repo.get_module_client_config.assert_awaited_once_with(
             tenant_id=TENANT_ID,

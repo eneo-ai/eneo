@@ -9,7 +9,7 @@ import pytest
 from freezegun import freeze_time
 from pydantic import ValidationError
 
-from eneo.authentication.auth_models import ApiKeyV2InDB, JWTPayload
+from eneo.authentication.auth_models import ApiKeyV2InDB, CredentialFacts, JWTPayload
 from eneo.authentication.auth_service import AuthService
 from eneo.authentication.endpoint_access import (
     Authentication,
@@ -69,7 +69,9 @@ def password_user(
             "password": password,
             "password_change_required": change_required,
             "password_changed_at": changed_at,
-            "session_auth_method": session_auth_method,
+            "credential": CredentialFacts(
+                kind="bearer", auth_method=session_auth_method
+            ),
             "tenant": tenant_with_policy(**policy),
         }
     )
@@ -349,8 +351,8 @@ async def test_token_resolution_records_the_session_auth_method(service: UserSer
     resolved = await service._get_user_from_payload(payload)
 
     assert resolved is not None
-    assert resolved.session_auth_method == "password"
-    assert "session_auth_method" not in resolved.model_dump()
+    assert resolved.credential == CredentialFacts(kind="bearer", auth_method="password")
+    assert "credential" not in resolved.model_dump()
 
 
 # --- Access gate ------------------------------------------------------------

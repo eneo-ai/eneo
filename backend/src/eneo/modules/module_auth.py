@@ -23,6 +23,7 @@ from eneo.authentication.auth_models import (
     ApiKeyState,
     ApiKeyType,
     ApiKeyV2InDB,
+    CredentialFacts,
     JWTPayload,
     compute_effective_state,
 )
@@ -564,6 +565,9 @@ class ModuleAuthBroker:
 
         await self.user_service.validate_active_identity(
             user, correlation_id="module-resource-auth"
+        )
+        user.credential = CredentialFacts(
+            kind="derived", session_ref=claims.session_ref
         )
         return ModuleRequestPrincipal(
             module=module, user=user, api_key=api_key, access_token=access_token

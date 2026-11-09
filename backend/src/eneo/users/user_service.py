@@ -35,6 +35,7 @@ from eneo.authentication.auth_models import (
     ApiKeyScopeType,
     ApiKeyState,
     ApiKeyV2InDB,
+    CredentialFacts,
     FederatedIdentity,
     JWTPayload,
     compute_effective_state,
@@ -953,8 +954,7 @@ class UserService:
             self.auth_service.validate_local_credential_version(
                 payload.credential_version, user
             )
-            user.session_auth_method = payload.auth_method
-            user.browser_session = payload if payload.sid is not None else None
+            user.credential = CredentialFacts.of_token(payload)
         return user
 
     async def _get_user_from_token(
@@ -1094,6 +1094,7 @@ class UserService:
             # The token is valid; the identity is not admitted. 403, as the
             # federation callback answers, not a credentials failure.
             raise HTTPException(status_code=403, detail=str(exc)) from exc
+        user.credential = CredentialFacts(kind="bearer")
         return user
 
     async def _resolve_tenant_for_idp_access_token(self, correlation_id: str):
@@ -1149,6 +1150,9 @@ class UserService:
             user = await self._get_service_principal_from_token(payload)
         if user is None:
             raise AuthenticationException("No authenticated user.")
+        user.credential = CredentialFacts(
+            kind="derived", session_ref=payload.session_ref
+        )
 
         await self._check_user_and_tenant_state(
             user, correlation_id="internal-mcp-auth"
@@ -1272,6 +1276,7 @@ class UserService:
             tenant_id=key.tenant_id,
             tenant=tenant,
             active_api_key=key,
+            credential=CredentialFacts(kind="api_key"),
             roles=[synthetic_role],
             used_tokens=0,
             email_verified=True,
@@ -1365,6 +1370,7 @@ class UserService:
         # Store the authenticating API key on the user so downstream layers
         # (e.g. SpaceAssembler) can reflect effective permissions accurately.
         user.active_api_key = resolved.key
+        user.credential = CredentialFacts(kind="api_key")
 
         # A route can compose multiple authentication dependencies. They all share
         # one Request, but each dependency may own a separate database session. Do

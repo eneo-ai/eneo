@@ -7,7 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 from eneo.authentication import auth_service as auth_service_module
-from eneo.authentication.auth_models import JWTPayload
+from eneo.authentication.auth_models import CredentialFacts, JWTPayload
 from eneo.authentication.auth_service import INTERNAL_MCP_AUDIENCE, AuthService
 from eneo.internal_mcp.foundation import (
     assistant_id_from_token,
@@ -292,6 +292,10 @@ async def test_same_username_sessions_keep_their_own_identity(
             owner.tenant_id,
             owner.email,
         )
+        # A scoped MCP token is derived from the credential that minted it.
+        assert actual.credential == CredentialFacts(
+            kind="derived" if scoped_mcp else "bearer"
+        )
 
 
 async def test_session_does_not_need_a_username(session_service):
@@ -448,7 +452,7 @@ async def test_a_browser_session_token_needs_its_session(session_service):
     user = await service.authenticate(token=token)
     [payload] = sessions.admit.await_args.args
     assert (payload.sid, payload.user_id) == (SID, TEST_USER.id)
-    assert user.browser_session == payload
+    assert user.credential == CredentialFacts(kind="browser_session", session=payload)
 
     sessions.admit.side_effect = AuthenticationException("ended")
     with pytest.raises(AuthenticationException):
@@ -457,7 +461,7 @@ async def test_a_browser_session_token_needs_its_session(session_service):
     ordinary = await service.authenticate(
         token=auth.create_access_token_for_user(TEST_USER)
     )
-    assert ordinary.browser_session is None
+    assert ordinary.credential == CredentialFacts(kind="bearer")
     sessions.admit.assert_not_awaited()
 
 

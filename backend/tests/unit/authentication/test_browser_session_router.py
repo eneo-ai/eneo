@@ -27,6 +27,7 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication import browser_session
 from eneo.authentication.api_key_v2_repo import ApiKeysV2Repository
+from eneo.authentication.auth_models import CredentialFacts
 from eneo.authentication.auth_service import AuthService
 from eneo.authentication.browser_session import session_generation
 from eneo.authentication.browser_session_router import (
@@ -1101,7 +1102,9 @@ def test_extend_is_refused_exactly_as_authentication_refuses(
     elif case == "password change required":
         endpoints.user.password = "stored-password-hash"
         endpoints.user.password_change_required = True
-        endpoints.user.session_auth_method = "password"
+        endpoints.user.credential = CredentialFacts(
+            kind="browser_session", auth_method="password"
+        )
         expected = (403, ErrorCodes.PASSWORD_CHANGE_REQUIRED.value)
     elif case == "token of another user":
         # Canonical authentication resolved someone else for this cookie.
