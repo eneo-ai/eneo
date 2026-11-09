@@ -20,7 +20,11 @@ import {
   makeWebsite
 } from "../testing/space-fixture";
 
-const state = vi.hoisted(() => ({ space: null as unknown, progress: [] as unknown[] }));
+const state = vi.hoisted(() => ({
+  space: null as unknown,
+  progress: [] as unknown[],
+  flows: [] as unknown[]
+}));
 
 vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 vi.mock("@/features/spaces/use-space", () => ({
@@ -35,7 +39,13 @@ vi.mock("@/lib/api/browser", () => ({
   browserApi: {
     GET: (path: string) =>
       Promise.resolve({
-        data: { items: path.endsWith("/sync-progress/") ? state.progress : [] },
+        data: {
+          items: path.endsWith("/sync-progress/")
+            ? state.progress
+            : path === "/api/v1/flows/"
+              ? state.flows
+              : []
+        },
         response: new Response("{}")
       })
   }
@@ -49,9 +59,10 @@ import { SpaceOverview } from "@/features/spaces/overview/space-overview.client"
 afterEach(() => {
   cleanup();
   state.progress = [];
+  state.flows = [];
 });
 
-const appContext = testAppContext({
+const contextOverrides: Parameters<typeof testAppContext>[0] = {
   permissions: ["admin"],
   settings: { using_templates: true },
   limits: {
@@ -62,11 +73,17 @@ const appContext = testAppContext({
       ]
     }
   }
+};
+const appContext = testAppContext(contextOverrides);
+/** A tenant with flows switched on, for a user who may see them. */
+const flowsAppContext = testAppContext({
+  ...contextOverrides,
+  featureFlags: { federation: false, flows: true }
 });
 
-function show(space: Space) {
+function show(space: Space, { flows = false } = {}) {
   state.space = space;
-  return renderInApp(<SpaceOverview />, { appContext });
+  return renderInApp(<SpaceOverview />, { appContext: flows ? flowsAppContext : appContext });
 }
 
 const busySpace = () =>
@@ -110,6 +127,14 @@ describe("SpaceOverview", () => {
       ["Webbplatser 1", "/spaces/space-1/knowledge?tab=websites"],
       ["Medlemmar 2", "/spaces/space-1/members"]
     ]);
+  });
+
+  it("counts the flows too, after the apps, where the tenant has them", async () => {
+    state.flows = [{ id: "f1" }, { id: "f2" }];
+    show(busySpace(), { flows: true });
+    // The flows are listed separately from the space, so their count arrives a moment later.
+    await waitFor(() => expect(tiles()[2]).toEqual(["Flöden 2", "/spaces/space-1/flows"]));
+    expect(tiles()).toHaveLength(6);
   });
 
   it("shows only the tiles the user may read", () => {

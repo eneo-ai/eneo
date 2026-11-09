@@ -1,11 +1,13 @@
 import { Button } from "@astryxdesign/core/Button";
 import { ClickableCard } from "@astryxdesign/core/ClickableCard";
 import { Heading } from "@astryxdesign/core/Heading";
+import { useQuery } from "@tanstack/react-query";
 import { SquarePen } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { PageHeader } from "@/components/composites/page-header";
 import { useAppContext } from "@/components/providers/app-context";
 import { firstNameOf } from "@/features/chat/format";
+import { flowsListQueryOptions } from "@/features/flows/flows-api";
 import { useSectionHeadingLevels } from "@/features/spaces/frame/space-frame";
 import { OverviewApps } from "@/features/spaces/overview/overview-apps";
 import { OverviewAssistants } from "@/features/spaces/overview/overview-assistants";
@@ -13,12 +15,22 @@ import { OverviewKnowledge } from "@/features/spaces/overview/overview-knowledge
 import { OverviewManage } from "@/features/spaces/overview/overview-manage";
 import { AddMemberDialog } from "@/features/spaces/members/space-members";
 import { useSpace } from "@/features/spaces/use-space";
+import { browserApi } from "@/lib/api/browser";
 import { usePhoneScreen, useTouchTablet } from "@/lib/hooks/use-media-match";
 
-/** A count tile, as Svelte's OverviewTile: the label and a large number, the whole card a link. */
-function CountTile({ title, count, href }: { title: string; count: number; href: string }) {
+/**
+ * A count tile, as Svelte's OverviewTile: the label and a large number, the
+ * whole card a link. A count still being read (the flows) leaves the number
+ * out until it arrives, keeping the tile's place.
+ */
+function CountTile({ title, count, href }: { title: string; count?: number; href: string }) {
   return (
-    <ClickableCard label={`${title} ${count}`} href={href} padding={5} elevation="low">
+    <ClickableCard
+      label={count === undefined ? title : `${title} ${count}`}
+      href={href}
+      padding={5}
+      elevation="low"
+    >
       <div className="flex min-h-40 flex-col justify-between gap-6">
         <span className="font-mono text-sm uppercase">{title}</span>
         <span className="self-end text-6xl leading-none font-bold tabular-nums">{count}</span>
@@ -66,8 +78,16 @@ function OverviewLists() {
 function CountTiles() {
   const t = useTranslations();
   const { space, can, routeId } = useSpace();
+  const { featureFlags } = useAppContext();
   const base = `/spaces/${routeId}`;
   const own = (item: { space_id: string }) => item.space_id === space.id;
+  // As the Flöden tab (useSpaceSections): where the tenant has flows, counted
+  // from the same list the tab shows, since the space itself does not carry them.
+  const showsFlows = featureFlags.flows && !space.organization && can("read", "app");
+  const flows = useQuery({
+    ...flowsListQueryOptions(browserApi, space.id),
+    enabled: showsFlows
+  });
 
   const tiles = [
     can("read", "assistant") && {
@@ -80,6 +100,11 @@ function CountTiles() {
       title: t("apps"),
       count: space.applications?.apps.count ?? 0,
       href: `${base}/apps`
+    },
+    showsFlows && {
+      title: t("flows"),
+      count: flows.data?.length,
+      href: `${base}/flows`
     },
     can("read", "collection") && {
       title: t("collections"),
