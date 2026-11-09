@@ -1794,7 +1794,7 @@ async def test_flow_run_history_purge_keeps_runtime_source_with_another_owner(
 
 
 @pytest.mark.asyncio
-async def test_flow_run_history_purge_keeps_runtime_source_with_derived_child(
+async def test_flow_run_history_purge_removes_pdf_input_with_extracted_image(
     async_session: AsyncSession,
     test_tenant,
     admin_user,
@@ -1812,19 +1812,29 @@ async def test_flow_run_history_purge_keeps_runtime_source_with_derived_child(
         flow_retention_days=1,
     )
     source_file_id = fixture.runtime_input_file.id
+    # Uploading a PDF, DOCX or PPTX stores each extracted image as a child File.
+    fixture.runtime_input_file.mimetype = "application/pdf"
     child_file = await _create_durable_file(
         async_session,
         tenant_id=test_tenant.id,
         user_id=admin_user.id,
-        name="runtime-source-child.txt",
-        mimetype="text/plain",
-        file_type=FileType.TEXT,
-        payload=b"c" * 13,
-        variant=FileContentVariant.EXTRACTED_TEXT,
+        name="page-1.png",
+        mimetype="image/png",
+        file_type=FileType.IMAGE,
+        payload=b"p" * 13,
+        variant=FileContentVariant.ORIGINAL,
         created_at=datetime.now(timezone.utc),
         parent_file_id=source_file_id,
     )
     child_file_id = child_file.id
+    content_ids = set(
+        await async_session.scalars(
+            select(FileContentReferences.content_id).where(
+                FileContentReferences.file_id.in_([source_file_id, child_file_id])
+            )
+        )
+    )
+    assert len(content_ids) == 2
 
     result = await flow_retention_service.purge_old_flow_run_history_batch(
         now=datetime.now(timezone.utc),
@@ -1835,10 +1845,17 @@ async def test_flow_run_history_purge_keeps_runtime_source_with_derived_child(
     assert result.counts.flow_runs_purged == 1
     assert result.counts.flow_runtime_source_candidates == 1
     assert result.counts.flow_runtime_source_bindings_deleted == 1
-    assert result.counts.flow_runtime_source_files_deleted == 0
-    assert result.counts.flow_runtime_source_bytes_deleted == 0
-    assert await async_session.get(Files, source_file_id) is not None
-    assert await async_session.get(Files, child_file_id) is not None
+    assert result.counts.flow_runtime_source_files_deleted == 1
+    assert result.counts.flow_runtime_source_bytes_deleted == (
+        result.counts.flow_runtime_source_candidate_bytes
+    )
+    assert await async_session.get(Files, source_file_id) is None
+    assert await async_session.get(Files, child_file_id) is None
+    for content_id in content_ids:
+        content = await async_session.get(ObjectContents, content_id)
+        assert content is not None
+        assert content.state == ContentState.DELETE_PENDING.value
+        assert content.reference_count == 0
     assert not await _flow_runtime_upload_exists(
         async_session,
         file_id=source_file_id,
@@ -2136,7 +2153,7 @@ async def test_flow_run_history_purge_keeps_generated_file_shared_with_retained_
 
 
 @pytest.mark.asyncio
-async def test_flow_run_history_purge_keeps_generated_file_with_derived_child(
+async def test_flow_run_history_purge_removes_generated_file_with_derived_child(
     async_session: AsyncSession,
     test_tenant,
     admin_user,
@@ -2173,10 +2190,10 @@ async def test_flow_run_history_purge_keeps_generated_file_with_derived_child(
     await _flush_and_clear_identity_map(async_session)
 
     assert result.counts.flow_runs_purged == 1
-    assert result.counts.flow_generated_files_deleted == 0
+    assert result.counts.flow_generated_files_deleted == 1
     assert await async_session.get(FlowRuns, fixture.run.id) is None
-    assert await async_session.get(Files, fixture.generated_file.id) is not None
-    assert await async_session.get(Files, child_file.id) is not None
+    assert await async_session.get(Files, fixture.generated_file.id) is None
+    assert await async_session.get(Files, child_file.id) is None
 
 
 @pytest.mark.asyncio

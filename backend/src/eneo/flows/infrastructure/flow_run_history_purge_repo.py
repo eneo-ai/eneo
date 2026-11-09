@@ -1,24 +1,21 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from types import MappingProxyType
 from typing import cast
 from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import InstrumentedAttribute, aliased
+from sqlalchemy.orm import InstrumentedAttribute
 
 from eneo.data_retention.infrastructure.gallring_lock import (
     GallringSubject,
     acquire_shared,
 )
-from eneo.database.tables.app_table import AppRunsFiles, AppsFiles
-from eneo.database.tables.assistant_table import AssistantsFiles
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_tables import (
     FlowLiveTranscripts,
@@ -31,11 +28,10 @@ from eneo.database.tables.flow_tables import (
     FlowRuntimeUploadedFiles,
     FlowRunWebhookDeliveries,
     FlowTemplateAssets,
-    FlowVersionFileReferences,
 )
-from eneo.database.tables.questions_table import QuestionsFiles
 from eneo.database.tables.tenant_table import Tenants
 from eneo.files.file_repo import primary_file_content_size_expression
+from eneo.files.unused_file_cleanup import delete_unused_root_files
 from eneo.flows.enums import TERMINAL_FLOW_RUN_STATUS_VALUES
 from eneo.flows.infrastructure.flow_retention_hold_repo import flow_run_held_predicate
 from eneo.flows.infrastructure.flow_version_repo import (
@@ -732,32 +728,9 @@ class FlowRunHistoryPurgeRepository:
         return list(rows.all())
 
     async def _delete_unreferenced_files(self, file_ids: set[UUID]) -> set[UUID]:
-        if not file_ids:
-            return set()
-
-        locked_file_ids = await self._lock_files(file_ids, skip_locked=False)
-        if not locked_file_ids:
-            return set()
-
-        still_referenced = sa.or_(
-            *(
-                reference_exists()
-                for reference_exists in _FILE_REFERENCE_EXISTS_BY_TABLE.values()
-            )
-        )
-        deleted_file_ids = await self.session.scalars(
-            sa.delete(Files)
-            .where(
-                _uuid_is_in_batch(
-                    Files.id,
-                    locked_file_ids,
-                    parameter_name="unreferenced_file_delete_ids",
-                )
-            )
-            .where(sa.not_(still_referenced))
-            .returning(Files.id)
-        )
-        return set(deleted_file_ids.all())
+        # Files decides usage for the whole family, so a derived image or text
+        # child goes with its root unless something still uses a member.
+        return set(await delete_unused_root_files(self.session, file_ids))
 
     async def _primary_file_sizes(self, file_ids: set[UUID]) -> dict[UUID, int]:
         if not file_ids:
@@ -789,129 +762,6 @@ class FlowRunHistoryPurgeRepository:
                 f"{missing_count} File row(s) without durable primary content"
             )
         return sizes
-
-
-def _flow_template_asset_file_exists() -> sa.Exists:
-    return (
-        sa.select(sa.literal(1))
-        .select_from(FlowTemplateAssets)
-        .where(FlowTemplateAssets.file_id == Files.id)
-        .exists()
-    )
-
-
-def _flow_runtime_upload_file_exists() -> sa.Exists:
-    return (
-        sa.select(sa.literal(1))
-        .select_from(FlowRuntimeUploadedFiles)
-        .where(FlowRuntimeUploadedFiles.file_id == Files.id)
-        .exists()
-    )
-
-
-def _flow_live_transcript_file_exists() -> sa.Exists:
-    return (
-        sa.select(sa.literal(1))
-        .select_from(FlowLiveTranscripts)
-        .where(FlowLiveTranscripts.bound_file_id == Files.id)
-        .exists()
-    )
-
-
-def _flow_run_step_input_file_exists() -> sa.Exists:
-    return (
-        sa.select(sa.literal(1))
-        .select_from(FlowRunStepInputFiles)
-        .where(FlowRunStepInputFiles.file_id == Files.id)
-        .exists()
-    )
-
-
-def _flow_run_step_result_file_exists() -> sa.Exists:
-    return (
-        sa.select(sa.literal(1))
-        .select_from(FlowRunStepResultFiles)
-        .where(FlowRunStepResultFiles.file_id == Files.id)
-        .exists()
-    )
-
-
-def _app_file_exists() -> sa.Exists:
-    return (
-        sa.select(sa.literal(1))
-        .select_from(AppsFiles)
-        .where(AppsFiles.file_id == Files.id)
-        .exists()
-    )
-
-
-def _app_run_file_exists() -> sa.Exists:
-    return (
-        sa.select(sa.literal(1))
-        .select_from(AppRunsFiles)
-        .where(AppRunsFiles.file_id == Files.id)
-        .exists()
-    )
-
-
-def _question_file_exists() -> sa.Exists:
-    return (
-        sa.select(sa.literal(1))
-        .select_from(QuestionsFiles)
-        .where(QuestionsFiles.file_id == Files.id)
-        .exists()
-    )
-
-
-def _flow_version_file_exists() -> sa.Exists:
-    return (
-        sa.select(sa.literal(1))
-        .select_from(FlowVersionFileReferences)
-        .where(FlowVersionFileReferences.file_id == Files.id)
-        .exists()
-    )
-
-
-def _assistant_file_exists() -> sa.Exists:
-    return (
-        sa.select(sa.literal(1))
-        .select_from(AssistantsFiles)
-        .where(AssistantsFiles.file_id == Files.id)
-        .exists()
-    )
-
-
-def _child_file_exists() -> sa.Exists:
-    # A derived child blocks parent purge: cascading could delete a referenced child.
-    child_files = aliased(Files)
-    return (
-        sa.select(sa.literal(1))
-        .select_from(child_files)
-        .where(child_files.parent_file_id == Files.id)
-        .exists()
-    )
-
-
-_FILE_REFERENCE_EXISTS_BY_TABLE: Mapping[str, Callable[[], sa.Exists]] = (
-    MappingProxyType(
-        {
-            Files.__tablename__: _child_file_exists,
-            FlowTemplateAssets.__tablename__: _flow_template_asset_file_exists,
-            FlowVersionFileReferences.__tablename__: _flow_version_file_exists,
-            FlowRuntimeUploadedFiles.__tablename__: _flow_runtime_upload_file_exists,
-            FlowLiveTranscripts.__tablename__: _flow_live_transcript_file_exists,
-            FlowRunStepInputFiles.__tablename__: _flow_run_step_input_file_exists,
-            FlowRunStepResultFiles.__tablename__: _flow_run_step_result_file_exists,
-            AppsFiles.__tablename__: _app_file_exists,
-            AppRunsFiles.__tablename__: _app_run_file_exists,
-            QuestionsFiles.__tablename__: _question_file_exists,
-            AssistantsFiles.__tablename__: _assistant_file_exists,
-        }
-    )
-)
-FLOW_RUN_HISTORY_PURGE_FILE_REFERENCE_TABLE_NAMES = frozenset(
-    _FILE_REFERENCE_EXISTS_BY_TABLE
-)
 
 
 def _abandoned_runtime_upload_eligibility(
