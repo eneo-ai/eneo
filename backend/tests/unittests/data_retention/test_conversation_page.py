@@ -382,12 +382,11 @@ async def test_probed_owners_are_charged_and_a_full_owner_page_continues() -> No
 
 
 def test_every_history_step_goes_first_on_some_date() -> None:
-    """Mutants: a step is left out of the date rotation (app runs after
-    questions, which a standing backlog never lets run); the scan of names and
-    feedback texts goes first and spends the streams' budget."""
+    """Mutant: a step is left out of the date rotation, so a standing backlog
+    in the steps before it spends every execution's budget and it never runs."""
     allocation = _allocation(unit_rows=10, chunk_rows=30)
     orders: list[Sequence[str]] = []
-    for offset in range(2):
+    for offset in range(3):
         task = ConversationHistoryRetentionTask(
             AsyncSession(),
             allocation=allocation,
@@ -403,9 +402,12 @@ def test_every_history_step_goes_first_on_some_date() -> None:
         )
         orders.append([step.name for step in task.steps()])
 
-    assert {order[0] for order in orders} == {"questions", "app_runs"}
+    assert {order[0] for order in orders} == {
+        "questions",
+        "app_runs",
+        "names_and_feedback",
+    }
     assert all(sorted(order) == sorted(orders[0]) for order in orders)
-    assert all(order[-1] == "names_and_feedback" for order in orders)
 
 
 @dataclass

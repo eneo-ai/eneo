@@ -106,28 +106,25 @@ class ConversationHistoryRetentionTask:
         return CONVERSATION_HISTORY_TASK
 
     def steps(self) -> Sequence[RetentionStep]:
-        # A standing backlog in one stream spends the budget before the next, so
-        # each stream goes first on some date. Names and feedback texts come
-        # last: a scan of every conversation, it never spends their budget first.
-        return (
-            *rotate_retention_steps(
-                (
-                    RetentionStep(
-                        "questions",
-                        self._questions,
-                        max_batch=self.allocation.max_batch,
-                        max_files=self.allocation.unit_files,
-                    ),
-                    RetentionStep(
-                        "app_runs",
-                        self._app_runs,
-                        max_batch=self.allocation.max_batch,
-                        max_files=self.allocation.unit_files,
-                    ),
+        # A standing backlog in one step spends the budget before the next, so
+        # each step goes first on some date.
+        return rotate_retention_steps(
+            (
+                RetentionStep(
+                    "questions",
+                    self._questions,
+                    max_batch=self.allocation.max_batch,
+                    max_files=self.allocation.unit_files,
                 ),
-                execution_date=self.now.date(),
+                RetentionStep(
+                    "app_runs",
+                    self._app_runs,
+                    max_batch=self.allocation.max_batch,
+                    max_files=self.allocation.unit_files,
+                ),
+                RetentionStep("names_and_feedback", self._names, max_files=0),
             ),
-            RetentionStep("names_and_feedback", self._names, max_files=0),
+            execution_date=self.now.date(),
         )
 
     async def _questions(self, batch: RetentionBatch) -> RetentionStepResult:

@@ -1,5 +1,6 @@
 """Exercise registered tasks through their production runner and committed fixtures."""
 
+from collections.abc import Callable
 from datetime import datetime
 from uuid import UUID
 
@@ -26,7 +27,10 @@ async def run_registered_retention(
     settings: Settings | None = None,
     now: datetime | None = None,
     error_code: RetentionErrorCode | None = None,
+    clock: Callable[[], float] | None = None,
 ) -> RetentionRunReport:
+    """`clock` replaces the runner's monotonic clock, which spends the time
+    budget."""
     if session.in_transaction():
         await session.commit()
     configured = settings if settings is not None else get_settings()
@@ -35,12 +39,15 @@ async def run_registered_retention(
         for task in retention_task_registrations(configured, now=now)
         if task.name == task_name
     )
-    report = await retention_runner(
+    runner = retention_runner(
         session=session,
         container=Container(session=providers.Object(session)),
         settings=configured,
         budget=registration.budget,
-    ).run(registration.build(session))
+    )
+    if clock is not None:
+        runner.clock = clock
+    report = await runner.run(registration.build(session))
     assert report.error_code is error_code, report
     session.expunge_all()
     await session.begin()

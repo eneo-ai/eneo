@@ -9,7 +9,8 @@ whether or not the conversation's questions are still there.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+import itertools
+from datetime import datetime, time, timedelta, timezone
 from uuid import UUID, uuid4
 
 import pytest
@@ -17,6 +18,7 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.database.database import sessionmanager
+from eneo.database.tables.app_table import AppRuns, Apps
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.audit_log_table import AuditLog
 from eneo.database.tables.group_chats_table import (
@@ -27,6 +29,7 @@ from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.widgets_table import Widgets
+from eneo.main.config import get_settings
 from eneo.sessions.session import SessionFeedback, SessionUpdate
 from eneo.sessions.sessions_repo import SessionRepository
 from eneo.widgets.domain.widget import generate_public_id
@@ -553,3 +556,113 @@ async def test_a_held_conversation_keeps_its_name_and_is_reported(
 
     assert await _texts(retention_session, held) == (held_name, 1, held_feedback)
     assert report.blocked[f"{STEP}.root_locked"] == 1
+
+
+async def test_names_and_feedback_are_cleared_under_a_standing_backlog(
+    retention_session: AsyncSession, test_tenant, admin_user, completion_model_factory
+):
+    """A backlog of due questions and App runs outlasts the time budget of
+    every execution, so the step that goes first spends it. Over consecutive
+    dates names and feedback texts still get cleared, and both streams still
+    make progress.
+
+    Mutant: the names step always runs after the two streams.
+    """
+    model_id = (await completion_model_factory(retention_session, "gpt-4")).id
+    space = await _space(retention_session, tenant_id=test_tenant.id)
+    assistant = await _assistant(
+        retention_session, model_id, space=space, user_id=admin_user.id, days=30
+    )
+    app = Apps(
+        name=f"Name retention app {uuid4()}",
+        tenant_id=test_tenant.id,
+        user_id=admin_user.id,
+        space_id=space.id,
+        completion_model_id=model_id,
+        completion_model_kwargs={},
+        data_retention_days=30,
+        published=False,
+    )
+    retention_session.add(app)
+    await retention_session.flush()
+    named, _, _ = await _conversation(
+        retention_session,
+        user_id=admin_user.id,
+        assistant_id=assistant.id,
+        created_days_ago=61,
+        named_days_ago=61,
+    )
+    backlog = 8
+    for _ in range(backlog):
+        chat = Sessions(
+            user_id=admin_user.id,
+            assistant_id=assistant.id,
+            name="Backlog",
+            name_set_at=datetime.now(timezone.utc),
+            created_at=_ago(60),
+            updated_at=_ago(60),
+        )
+        retention_session.add(chat)
+        await retention_session.flush()
+        retention_session.add_all(
+            [
+                Questions(
+                    question="Question",
+                    answer="Answer",
+                    num_tokens_question=1,
+                    num_tokens_answer=1,
+                    tenant_id=test_tenant.id,
+                    assistant_id=assistant.id,
+                    session_id=chat.id,
+                    created_at=_ago(60),
+                    updated_at=_ago(60),
+                ),
+                AppRuns(
+                    tenant_id=test_tenant.id,
+                    app_id=app.id,
+                    user_id=admin_user.id,
+                    completion_model_id=model_id,
+                    input_text="Input",
+                    output_text="Output",
+                    created_at=_ago(60),
+                    updated_at=_ago(60),
+                ),
+            ]
+        )
+    await retention_session.flush()
+    # Each chunk spends one second of three: two chunks per execution.
+    settings = get_settings().model_copy(update={"retention_max_seconds_per_run": 3})
+    day = datetime.now(timezone.utc).date() + timedelta(days=1)
+
+    async def left() -> tuple[str, int, int]:
+        name = (await _texts(retention_session, named))[0]
+        questions = await retention_session.scalar(
+            sa.select(sa.func.count())
+            .select_from(Questions)
+            .where(Questions.assistant_id == assistant.id)
+        )
+        app_runs = await retention_session.scalar(
+            sa.select(sa.func.count())
+            .select_from(AppRuns)
+            .where(AppRuns.app_id == app.id)
+        )
+        return name, int(questions or 0), int(app_runs or 0)
+
+    seen: list[tuple[str, int, int]] = []
+    for offset in range(3):
+        report = await run_registered_retention(
+            retention_session,
+            settings=settings,
+            now=datetime.combine(
+                day + timedelta(days=offset), time(12), tzinfo=timezone.utc
+            ),
+            clock=itertools.count().__next__,
+        )
+        # Saturated: the budget ran out before some step was reached.
+        assert None in report.steps.values(), report.steps
+        seen.append(await left())
+
+    name, questions, app_runs = seen[-1]
+    assert name == "", seen
+    assert (await _texts(retention_session, named))[2] is None
+    assert questions < backlog and app_runs < backlog, seen
