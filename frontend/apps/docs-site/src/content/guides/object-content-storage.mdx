@@ -500,8 +500,10 @@ enabled or suspended or Object Lock is enabled. Suspending versioning does not r
 so a bucket that once had versioning cannot be used; move the content to a new
 bucket. Eneo never deletes old versions itself.
 
-When one of the three permissions above is missing, Eneo does not start and its
-log names the missing permission. A bucket that gets versioning while Eneo runs
+When the service refuses one of the three permissions above, Eneo does not start and its
+log names the bucket and the missing permission. MinIO does not enforce
+`s3:ListBucketVersions`: it lists versions without that permission, even when a
+policy denies it, so Eneo starts and the listing works. A bucket that gets versioning while Eneo runs
 is refused from the next readiness check: readiness reports
 `configuration_required` and new uploads to object storage fail. No deletion
 in it is reported as done while a version of the file remains; the deletion is

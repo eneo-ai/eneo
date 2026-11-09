@@ -335,7 +335,8 @@ class S3ObjectStore:
         )
         if versioning.get("Status") in {"Enabled", "Suspended"}:
             raise ObjectStoreKeepsVersionsError(
-                "Object content storage has versioning enabled or suspended"
+                f"Object content storage bucket {bucket!r} has versioning "
+                "enabled or suspended"
             )
         lock = await self._read_bucket_setting(
             "s3:GetBucketObjectLockConfiguration",
@@ -349,7 +350,7 @@ class S3ObjectStore:
             == "Enabled"
         ):
             raise ObjectStoreKeepsVersionsError(
-                "Object content storage has Object Lock enabled"
+                f"Object content storage bucket {bucket!r} has Object Lock enabled"
             )
         await self._read_bucket_setting(
             "s3:ListBucketVersions",
@@ -366,6 +367,7 @@ class S3ObjectStore:
         absent: frozenset[str] | set[str] = frozenset(),
     ) -> Mapping[str, object]:
         """One readiness read; an error code in `absent` reads as no setting."""
+        bucket = self._settings.bucket
         try:
             return await asyncio.to_thread(read)
         except ClientError as error:
@@ -374,12 +376,13 @@ class S3ObjectStore:
                 return {}
             if code in {"403", "AccessDenied"}:
                 raise ObjectStorePermissionError(
-                    f"Object content storage needs the {permission} permission"
+                    f"Object content storage bucket {bucket!r} needs the "
+                    f"{permission} permission"
                 ) from error
             if code in {"501", "NotImplemented"}:
                 raise ObjectStoreKeepsVersionsError(
-                    "Object content storage cannot show whether it keeps old "
-                    f"versions ({permission} is not supported)"
+                    f"Object content storage bucket {bucket!r} cannot show "
+                    f"whether it keeps old versions ({permission} is not supported)"
                 ) from error
             raise ObjectStoreUnavailableError(
                 "Object content storage is not ready"

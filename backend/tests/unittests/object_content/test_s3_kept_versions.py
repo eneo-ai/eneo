@@ -85,6 +85,17 @@ async def test_a_missing_permission_is_named(
         with pytest.raises(ObjectStorePermissionError) as refused:
             await store.check_ready()
     assert _PERMISSIONS[operation] in str(refused.value)
+    assert "eneo-content" in str(refused.value)
+
+
+async def test_a_versioned_bucket_is_refused_by_name(store: S3ObjectStore) -> None:
+    stubber = Stubber(store._readiness_client)
+    stubber.add_response("list_objects_v2", {"IsTruncated": False, "KeyCount": 0})
+    stubber.add_response("get_bucket_versioning", {"Status": "Enabled"})
+    with stubber:
+        with pytest.raises(ObjectStoreKeepsVersionsError) as refused:
+            await store.check_ready()
+    assert "eneo-content" in str(refused.value)
 
 
 async def test_a_bucket_without_versioning_or_lock_is_ready(
@@ -98,8 +109,9 @@ async def test_a_bucket_without_versioning_or_lock_is_ready(
 
 async def test_a_store_that_cannot_answer_is_refused(store: S3ObjectStore) -> None:
     with _readiness(store, failing="list_object_versions", code="NotImplemented"):
-        with pytest.raises(ObjectStoreKeepsVersionsError):
+        with pytest.raises(ObjectStoreKeepsVersionsError) as refused:
             await store.check_ready()
+    assert "eneo-content" in str(refused.value)
 
 
 async def test_a_delete_with_versions_beyond_one_page_is_unconfirmed(
