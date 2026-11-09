@@ -23070,6 +23070,8 @@ export interface components {
       summarization_records?: number | null;
       /** Summarization Rounds */
       summarization_rounds?: number | null;
+      /** @description Where and why a Word template could not be filled, for `typed_io_template_render_failed`. */
+      template_fill?: components["schemas"]["FlowRunTemplateFill"] | null;
       /**
        * Tool Call Possible
        * @description Set on an error whose code alone would be retryable: true when the run ended at or after a step whose input is a tool's answer, or had completed such a step when its dispatch failed, so a tool may have been called and may have changed something. `retryable` is then false.
@@ -26743,6 +26745,35 @@ export interface components {
        * @description When the run row last changed. It moves on every status change.
        */
       updated_at: string;
+    };
+    /** FlowRunTemplateFill */
+    FlowRunTemplateFill: {
+      /**
+       * Field
+       * @description The template field (content control tag) concerned, when one is.
+       */
+      field?: string | null;
+      /**
+       * Reason
+       * @description Why a Word template could not be filled: a field without a binding (unbound), a binding to a source that does not exist (unknown_source) or to a step that failed (source_failed), a source that produced nothing (missing_value) or structured data (not_text), content over the document limits (too_large), a template that is no longer fillable (invalid_template) or no longer stored (template_missing), content the document runtime refused (render_refused), or the runtime being unavailable (runtime_unavailable).
+       * @enum {string}
+       */
+      reason:
+        | "unbound"
+        | "unknown_source"
+        | "source_failed"
+        | "missing_value"
+        | "not_text"
+        | "too_large"
+        | "invalid_template"
+        | "template_missing"
+        | "render_refused"
+        | "runtime_unavailable";
+      /**
+       * Source Step
+       * @description The step the field reads from, when the binding names one.
+       */
+      source_step?: number | null;
     };
     /** FlowRunTokenUsagePublic */
     FlowRunTokenUsagePublic: {
