@@ -25,7 +25,12 @@ from eneo.authentication.oidc.profile import (
     OidcProviderError,
     load_profile,
 )
-from eneo.authentication.oidc.sign_in_source import redirect_uris, sign_in_config
+from eneo.authentication.oidc.sign_in_source import (
+    redirect_uris,
+    selected_config,
+    sign_in_available,
+    sign_in_config,
+)
 from eneo.authentication.oidc.transaction import (
     STORE_TIMEOUT_SECONDS,
     OidcChannel,
@@ -382,10 +387,6 @@ class FederationStatusResponse(BaseModel):
     }
 
 
-def _has_federation_config(config: dict[str, Any]) -> bool:
-    return bool(config.get("client_id") and config.get("discovery_endpoint"))
-
-
 @router.get(
     "/federation-status",
     response_model=FederationStatusResponse,
@@ -443,20 +444,21 @@ async def get_federation_status(
 
     # Single-tenant federation detection (API-configured federation in database):
     # - Exactly 1 active tenant
-    # - Has API-configured federation (non-empty federation_config JSONB)
-    # - Federation config has required fields
+    # - Its stored config names a discovery URL, a client ID and a secret
     # - Only applies when federation_enabled=true
     has_single_federation = False
     if settings.federation_enabled and tenant_count == 1:
         tenant = tenants[0]
-        if _has_federation_config(tenant.federation_config):
+        if sign_in_available(settings, tenant):
             has_single_federation = True
             logger.info(
                 "Single-tenant API federation detected",
                 extra={
                     "tenant_id": str(tenant.id),
                     "tenant_name": tenant.name,
-                    "provider": tenant.federation_config.get("provider", "unknown"),
+                    "provider": selected_config(settings, tenant).get(
+                        "provider", "unknown"
+                    ),
                 },
             )
 
@@ -493,13 +495,13 @@ async def list_tenants(
     Returns only tenants that have:
     - Active status (not deleted)
     - Slug configured (required for federation routing)
-    - Client ID and discovery endpoint when federation is enabled
+    - A discovery URL, client ID and client secret when federation is enabled
 
     Returns:
         TenantListResponse with slug, name, display_name for each tenant
     """
     tenant_repo = container.tenant_repo()
-    federation_enabled = get_settings().federation_enabled
+    settings = get_settings()
 
     # Get all active tenants
     tenants = await tenant_repo.get_all_active()
@@ -513,7 +515,7 @@ async def list_tenants(
         )
         for tenant in tenants
         if tenant.slug
-        and (not federation_enabled or _has_federation_config(tenant.federation_config))
+        and (not settings.federation_enabled or sign_in_available(settings, tenant))
     ]
 
     logger.info(f"Listed {len(tenant_list)} tenants for selector")

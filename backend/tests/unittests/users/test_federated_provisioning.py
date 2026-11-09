@@ -567,7 +567,7 @@ def test_global_oidc_domain_configuration_is_resolved(
     settings.oidc_client_id = "client"
     settings.oidc_client_secret = "secret"
     assert settings.oidc_allowed_domains == ["example.com"]
-    config = sign_in_config(settings, tenant, None)
+    config = sign_in_config(settings, tenant, EncryptionService())
     assert config["allowed_domains"] == ["example.com"]
 
 

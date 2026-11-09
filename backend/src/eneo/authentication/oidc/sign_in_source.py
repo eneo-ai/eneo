@@ -41,8 +41,20 @@ def selected_config(settings: Settings, tenant: TenantInDB) -> Mapping[str, obje
     return tenant.federation_config or {}
 
 
+def sign_in_available(settings: Settings, tenant: TenantInDB) -> bool:
+    """Whether the selected config names a discovery URL, a client ID and a
+    secret: what the status, the tenant list and sign-in all require."""
+    if not settings.federation_enabled:
+        return has_env_oidc_client(settings)
+    config = selected_config(settings, tenant)
+    return all(
+        isinstance(value := config.get(key), str) and value
+        for key in ("discovery_endpoint", "client_id", "client_secret")
+    )
+
+
 def sign_in_config(
-    settings: Settings, tenant: TenantInDB, encryption: "EncryptionService | None"
+    settings: Settings, tenant: TenantInDB, encryption: "EncryptionService"
 ) -> dict[str, object]:
     """The selected config, with its secret decrypted.
 
@@ -51,16 +63,12 @@ def sign_in_config(
     """
     config = dict(selected_config(settings, tenant))
     if not settings.federation_enabled:
-        if not has_env_oidc_client(settings):
+        if not sign_in_available(settings, tenant):
             raise ValueError(
                 "No identity provider configured. "
                 "federation_enabled is false, so only global OIDC_* environment variables are used. "
                 "Please set OIDC_DISCOVERY_ENDPOINT, OIDC_CLIENT_ID, and OIDC_CLIENT_SECRET in your .env file."
             )
-        # Env mode also accepts the stored row's extra redirect URIs.
-        stored = tenant.federation_config or {}
-        if isinstance(extra := stored.get("additional_redirect_uris"), list):
-            config["additional_redirect_uris"] = cast(list[object], extra)
         logger.info(
             "Federation config resolved from global OIDC environment variables (single-tenant mode)",
             extra={
@@ -73,7 +81,7 @@ def sign_in_config(
         )
         return config
 
-    if not config:
+    if not sign_in_available(settings, tenant):
         raise ValueError(
             f"No identity provider configured for tenant '{tenant.name}'. "
             f"federation_enabled is true - each tenant must configure their own IdP in the database. "
@@ -85,9 +93,8 @@ def sign_in_config(
         "tenant_name": tenant.name,
         "provider": config.get("provider"),
     }
-    secret = config.get("client_secret")
-    if encryption is not None and encryption.is_active() and secret:
-        secret = secret if isinstance(secret, str) else str(secret)
+    secret = cast(str, config["client_secret"])
+    if encryption.is_active():
         if not encryption.is_encrypted(secret):
             logger.error(
                 "Federation client_secret missing encryption envelope",

@@ -242,6 +242,8 @@ def _make_settings(**overrides) -> SimpleNamespace:
         oidc_accepted_audience=AUDIENCE,
         oidc_jwks_cache_ttl_seconds=3600,
         oidc_tenant_id=None,
+        # Stored mode: the tenant's config names the subject claim.
+        federation_enabled=True,
         # JIT admission requires allowed domains (resolve_federated_user).
         oidc_allowed_domains=["example.com"],
     )

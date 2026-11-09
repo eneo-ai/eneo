@@ -9,6 +9,7 @@ from eneo.authentication import federation_router as routes
 from eneo.authentication.oidc.sign_in_source import sign_in_config
 from eneo.main.config import Settings, get_settings
 from eneo.main.container.container import Container
+from eneo.settings.encryption_service import EncryptionService
 from eneo.tenants.tenant import TenantInDB
 
 
@@ -54,6 +55,7 @@ async def test_selector_filters_only_in_federation_mode(
         tenant("redirect-only", {"canonical_public_origin": "https://tenant.example"}),
         tenant("empty-client", configured_idp(client_id="")),
         tenant("empty-discovery", configured_idp(discovery_endpoint="")),
+        tenant("no-secret", configured_idp(client_secret="")),
         tenant(None, configured_idp()),
     ]
     tenants[0].display_name = "Ready organisation"
@@ -85,6 +87,9 @@ async def test_selector_filters_only_in_federation_mode(
         ({"canonical_public_origin": "https://tenant.example"}, False),
         (configured_idp(client_id=""), False),
         (configured_idp(discovery_endpoint=""), False),
+        # A hand-edited row without a secret cannot sign in, so it is not
+        # offered.
+        (configured_idp(client_secret=""), False),
     ],
 )
 async def test_single_tenant_status_uses_the_same_configuration_requirement(
@@ -172,4 +177,4 @@ async def test_env_sign_in_without_a_client_id_is_not_offered(
 
     assert status.has_global_oidc_config is False
     with pytest.raises(ValueError, match="No identity provider configured"):
-        sign_in_config(settings, tenant(None, {}), None)
+        sign_in_config(settings, tenant(None, {}), EncryptionService())

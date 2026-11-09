@@ -543,10 +543,7 @@ def build_admin_view(
     secret_updated_at = _timestamp(config.get("encrypted_at"))
     redirect_problem: Literal["unresolvable"] | None = None
     try:
-        # No encryption service: listing the URIs never decrypts the secret.
-        _, accepted = sign_in_source.redirect_uris(
-            sign_in_source.sign_in_config(settings, tenant, None), settings
-        )
+        _, accepted = sign_in_source.redirect_uris(config, settings)
         redirect_uris = list(accepted)
     except ValueError:
         redirect_uris, redirect_problem = [], "unresolvable"

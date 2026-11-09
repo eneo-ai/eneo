@@ -42,6 +42,7 @@ from eneo.authentication.auth_models import (
 from eneo.authentication.auth_service import INTERNAL_MCP_AUDIENCE, AuthService
 from eneo.authentication.endpoint_access import authorize_user
 from eneo.authentication.oidc.profile import OidcProviderError, subject_claim
+from eneo.authentication.oidc.sign_in_source import selected_config
 from eneo.database.database import sessionmanager
 from eneo.database.tables.app_table import AppRuns, Apps
 from eneo.database.tables.assistant_table import Assistants
@@ -1053,12 +1054,12 @@ class UserService:
         settings = get_settings()
         tenant = await self._resolve_tenant_for_idp_access_token(correlation_id)
 
-        # Resource-server mode is configured globally, like the global OIDC
-        # login: the tenant's federation config wins, the settings fill in.
-        federation_config = tenant.federation_config or {}
+        # The config FEDERATION_ENABLED selects, as at sign-in: in env mode
+        # the OIDC_* settings, never a stored config left on the tenant.
+        federation_config = selected_config(settings, tenant)
         try:
             # validate_idp_access_token checked iss and aud against these
-            # settings. The subject claim is the tenant's, as at sign-in.
+            # settings. The subject claim is the selected config's, as at sign-in.
             identity = FederatedIdentity.from_claims(
                 payload,
                 issuer=cast(str, settings.oidc_accepted_issuer),

@@ -429,7 +429,9 @@ def test_initiate_auth_keeps_the_request_correlation_id(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_initiate_auth_single_tenant_accepts_db_redirect_uri(monkeypatch):
+async def test_env_mode_refuses_a_redirect_uri_only_the_stored_row_lists(monkeypatch):
+    # The OIDC_* settings are the whole sign-in in env mode; a stored row
+    # left from another mode adds nothing to it.
     tenant = TenantInDB(
         id=uuid4(),
         name="SingleTenant",
@@ -463,16 +465,17 @@ async def test_initiate_auth_single_tenant_accepts_db_redirect_uri(monkeypatch):
         encryption_service=EncryptionService(None),
     )
 
-    response = await federation_router.initiate_auth(
-        response=Response(),
-        tenant=None,
-        state=None,
-        redirect_uri_param="https://external.example.com/auth/callback",
-        container=container,
-    )
+    with pytest.raises(HTTPException) as exc:
+        await federation_router.initiate_auth(
+            response=Response(),
+            tenant=None,
+            state=None,
+            redirect_uri_param="https://external.example.com/auth/callback",
+            container=container,
+        )
 
-    query = parse_qs(urlparse(response.authorization_url).query)
-    assert query["redirect_uri"] == ["https://external.example.com/auth/callback"]
+    assert exc.value.status_code == 400
+    assert "not registered" in exc.value.detail
 
 
 @pytest.mark.asyncio

@@ -253,6 +253,25 @@ class TestAdminView:
         assert view.redirect_uris == []
         assert view.redirect_uris_problem == "unresolvable"
 
+    def test_the_admin_view_lists_stored_redirect_uris_in_env_mode(
+        self, settings: Settings
+    ):
+        # The view shows the stored config, in either mode: in env mode it is
+        # what a move to stored mode would sign in with.
+        env_mode = settings.model_copy(
+            update={
+                "federation_enabled": False,
+                "oidc_discovery_endpoint": None,
+                "oidc_client_id": None,
+                "oidc_client_secret": None,
+            }
+        )
+
+        view = build_admin_view(_tenant(_config()), env_mode)
+
+        assert view.redirect_uris == ["https://org.eneo.test/login/callback"]
+        assert view.redirect_uris_problem is None
+
     @pytest.mark.parametrize(
         "config", [{}, {"canonical_public_origin": "https://org.eneo.test"}]
     )

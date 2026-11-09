@@ -733,3 +733,31 @@ async def test_pairwise_subjects_under_the_default_claim_bind_each_client_apart(
         (account, API, provider.subject_for(CLIENT)),
     }
     assert [c["error_message"] for c in _conflicts(enqueued)] == ["subject_mismatch"]
+
+
+async def test_env_mode_api_tokens_bind_under_the_env_subject_claim(
+    raw_client,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    provider,
+    test_tenant,
+    enqueued,
+):
+    # In env mode the OIDC_* settings are the sign-in: a stored config left
+    # on the tenant, here one that names another subject claim, is ignored.
+    stored = await _stored(test_tenant.id)
+    await _store(
+        test_tenant.id,
+        {**stored, "claims_mapping": {"email": "email", "subject": "oid"}},
+    )
+    set_settings(get_settings().model_copy(update={"federation_enabled": False}))
+    token = provider.access_token(
+        audience=API, client_id=CLIENT, email=EMAIL, sub="person-a", oid="person-oid"
+    )
+
+    response = await raw_client.get(
+        "/api/v1/spaces/type/personal/", headers={"Authorization": f"Bearer {token}"}
+    )
+
+    assert response.status_code == 200, response.text
+    assert await _bindings() == {(await _account(), API, "person-a")}
