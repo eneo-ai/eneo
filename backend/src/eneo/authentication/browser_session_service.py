@@ -61,13 +61,14 @@ logger = get_logger(__name__)
 
 # How often a response that stays open re-runs admission for its session.
 RECHECK_SECONDS = 30.0
-# How long sign-out or that check waits for the database, from taking a
-# connection to the commit, before it gives up (503, or the response ends).
+# How long sign-out, renewal, that check or a provider token's admission
+# (UserService) waits for the database, from taking a connection to the
+# commit, before it gives up (503, the response ends, or the request fails).
 STORE_DEADLINE_SECONDS = 5.0
 
 
 @contextlib.asynccontextmanager
-async def _store_transaction(session: AsyncSession) -> AsyncGenerator[None]:
+async def store_transaction(session: AsyncSession) -> AsyncGenerator[None]:
     """A transaction on ``session`` that ends within ``STORE_DEADLINE_SECONDS``.
 
     The database itself gives up on a statement, a lock wait included, after
@@ -233,7 +234,7 @@ class BrowserSessionService:
             self._verified_payload(renewed).exp, timezone.utc
         )
         try:
-            async with _store_transaction(self.session):
+            async with store_transaction(self.session):
                 moved = await self.session.scalar(
                     sa.update(BrowserSessions)
                     .where(
@@ -311,7 +312,7 @@ class BrowserSessionService:
         if payload is None:
             return
         try:
-            async with _store_transaction(self.session):
+            async with store_transaction(self.session):
                 await self.session.execute(
                     sa.delete(BrowserSessions).where(*_same_session(payload))
                 )
@@ -407,7 +408,7 @@ class SessionWatch:
         from eneo.main.container.request_container import request_container
 
         try:
-            async with sessionmanager.session() as session, _store_transaction(session):
+            async with sessionmanager.session() as session, store_transaction(session):
                 container = request_container(session=providers.Object(session))
                 await container.user_service().authenticate_payload(
                     self._payload, self._connection

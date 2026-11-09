@@ -1,8 +1,9 @@
+import contextlib
 import random
-from collections.abc import Sequence
+from collections.abc import AsyncGenerator, Sequence
 from datetime import datetime, timezone
 from enum import Enum
-from typing import TYPE_CHECKING, Literal, NoReturn, Optional, cast
+from typing import TYPE_CHECKING, Any, Literal, NoReturn, Optional, cast
 from uuid import UUID
 
 import idna
@@ -315,6 +316,8 @@ class UserService:
         self.browser_session_service = browser_session_service
         # Without it, no federated sign-in is admitted.
         self.identity_binding_repo = identity_binding_repo
+        # The identity conflict this service decided, once it has.
+        self.refused: IdentityConflictError | None = None
 
     async def _validate_email(self, email: str | None):
         if email is None:
@@ -825,8 +828,11 @@ class UserService:
 
         The audit goes through the worker queue, so it outlives the sign-in's
         rollback; when the queue is unreachable the log event remains. Neither
-        names the email or carries a token.
+        names the email or carries a token. The refusal is recorded as
+        ``refused`` before the audit, so an admission whose deadline ends the
+        audit still refuses with it.
         """
+        refused = self.refused = IdentityConflictError(reason)
         fields: dict[str, object] = {
             "reason": reason,
             "issuer": identity.issuer,
@@ -864,7 +870,7 @@ class UserService:
                     extra={"reason": reason, "correlation_id": correlation_id},
                     exc_info=True,
                 )
-        raise IdentityConflictError(reason)
+        raise refused
 
     async def register(self, new_user: UserAddSuperAdmin):
         await self._validate_email(new_user.email)
@@ -986,30 +992,18 @@ class UserService:
         the route's container). Those take the account admitted for the same
         token, so the request never waits for a second connection while its
         own session holds one.
+
+        The token is validated before the transaction starts, since that can
+        fetch the provider's keys. The transaction ends within the store
+        deadline, so a lock held elsewhere or a slow database fails the
+        request instead of holding it. A refusal decided before the deadline
+        still answers as that refusal when the deadline ends its audit.
         """
         state = connection.state if connection is not None else None
         admitted = getattr(state, "idp_admission", None)
         if admitted is not None and admitted[0] == token:
             return admitted[1].model_copy(deep=True)
 
-        # The container module imports this one.
-        from eneo.main.container.request_container import request_container
-
-        async with sessionmanager.session() as session, session.begin():
-            admission = request_container(session=providers.Object(session))
-            user = await admission.user_service()._get_user_from_idp_access_token(token)
-        if state is not None:
-            state.idp_admission = (token, user.model_copy(deep=True))
-        return user
-
-    async def _get_user_from_idp_access_token(self, token: str) -> "UserInDB":
-        """Validate an IdP access token and resolve the account it signs in to.
-
-        Admission (allowed domains, JIT provisioning, tenant membership) is
-        the same ``resolve_federated_user`` decision the OIDC federation
-        callback takes. Any token problem raises ``AuthenticationException``
-        (401), never a 500.
-        """
         from eneo.authentication.oidc_resource_server import (
             validate_idp_access_token,
         )
@@ -1017,11 +1011,45 @@ class UserService:
         correlation_id = (
             get_request_context().get("correlation_id") or "oidc-resource-server"
         )
-
         payload = await validate_idp_access_token(
             token, auth_service=self.auth_service, correlation_id=correlation_id
         )
+        admission: UserService | None = None
+        try:
+            async with self._admission() as admission:
+                user = await admission._get_user_from_idp_claims(
+                    payload, correlation_id
+                )
+        except TimeoutError:
+            # The deadline's own expiry; a caller's cancellation propagates.
+            if admission is not None and admission.refused is not None:
+                raise admission.refused from None
+            raise
+        if state is not None:
+            state.idp_admission = (token, user.model_copy(deep=True))
+        return user
 
+    @contextlib.asynccontextmanager
+    async def _admission(self) -> AsyncGenerator["UserService"]:
+        """A user service on a database session of its own, in a transaction
+        that ends within ``STORE_DEADLINE_SECONDS``."""
+        # The container module imports this one.
+        from eneo.authentication.browser_session_service import store_transaction
+        from eneo.main.container.request_container import request_container
+
+        async with sessionmanager.session() as session, store_transaction(session):
+            yield request_container(session=providers.Object(session)).user_service()
+
+    async def _get_user_from_idp_claims(
+        self, payload: dict[str, Any], correlation_id: str
+    ) -> "UserInDB":
+        """Resolve the account a validated IdP access token signs in to.
+
+        Admission (allowed domains, JIT provisioning, tenant membership) is
+        the same ``resolve_federated_user`` decision the OIDC federation
+        callback takes. Unusable claims raise ``AuthenticationException``
+        (401), never a 500.
+        """
         settings = get_settings()
         tenant = await self._resolve_tenant_for_idp_access_token(correlation_id)
 

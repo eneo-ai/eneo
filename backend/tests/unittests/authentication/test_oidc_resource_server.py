@@ -7,8 +7,10 @@ surface as 401-mapping exceptions, never 500s.
 """
 
 import asyncio
+import contextlib
 import json
 import time
+from collections.abc import AsyncGenerator
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 from uuid import uuid4
@@ -273,10 +275,11 @@ def admission_without_a_database(monkeypatch):
     """Admit on the service under test: these tests have no database for the
     transaction of its own, which the integration tests cover."""
 
-    async def admit(self: UserService, token: str, _connection: object) -> UserInDB:
-        return await self._get_user_from_idp_access_token(token)
+    @contextlib.asynccontextmanager
+    async def admission(self: UserService) -> AsyncGenerator[UserService]:
+        yield self
 
-    monkeypatch.setattr(UserService, "_admit_idp_access_token", admit)
+    monkeypatch.setattr(UserService, "_admission", admission)
 
 
 @pytest.fixture

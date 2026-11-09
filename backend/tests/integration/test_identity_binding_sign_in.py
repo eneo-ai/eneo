@@ -7,6 +7,7 @@ and an email binds only an account that has no binding yet. The provider is
 tests/fake_oidc_provider.py, so every token is really signed and verified.
 """
 
+import asyncio
 import contextlib
 import json
 import logging
@@ -24,6 +25,7 @@ from sqlalchemy.exc import OperationalError
 
 from eneo.audit.application import audit_service as audit_service_module
 from eneo.audit.application.audit_worker_task import log_audit_event_task
+from eneo.authentication import browser_session_service
 from eneo.database.database import sessionmanager
 from eneo.database.tables.audit_log_table import AuditLog
 from eneo.database.tables.browser_sessions_table import BrowserSessions
@@ -440,6 +442,31 @@ async def test_the_resource_server_answers_a_conflict_with_a_typed_403(
     assert (body["code"], body["eneo_error_code"]) == ("identity_conflict", 9082)
 
 
+async def test_a_refusal_whose_audit_never_ends_keeps_the_typed_403(
+    client, sign_in, provider, enqueued, monkeypatch
+):
+    # The refusal is audited through the queue during the admission, under
+    # the store deadline. A queue that never answers ends the audit at the
+    # deadline; the refusal it decided still answers.
+    monkeypatch.setattr(browser_session_service, "STORE_DEADLINE_SECONDS", 0.5)
+    assert await sign_in("api", "person-a") == SIGNED_IN
+    token = provider.access_token(audience=API, client_id=CLIENT, email=EMAIL, sub="x")
+
+    async def never(task, job_id, params):  # noqa: ARG001
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(audit_service_module.job_manager, "enqueue", never)
+    async with asyncio.timeout(10):
+        response = await client.get(
+            "/api/v1/users/me/", headers={"Authorization": f"Bearer {token}"}
+        )
+
+    assert response.status_code == 403, response.text
+    body = response.json()
+    assert (body["code"], body["eneo_error_code"]) == ("identity_conflict", 9082)
+    assert await _bindings() == {(await _account(), API, "person-a")}
+
+
 @contextlib.contextmanager
 def _binding_commit_fails() -> Iterator[None]:
     """The commit of a transaction that wrote an identity binding fails."""
@@ -483,6 +510,55 @@ async def test_a_resource_server_request_is_answered_only_once_its_binding_is_co
     admitted = await raw_client.get(personal_space, headers=bearer)
     assert admitted.status_code == 200, admitted.text
     assert await _bindings() == {(await _account(), API, "person-a")}
+
+
+async def test_a_binding_stays_when_the_request_that_made_it_fails(
+    raw_client, patch_auth_service_jwt, mock_transcription_models, provider, enqueued
+):
+    # The binding belongs to the admission, not to the route: a route that
+    # fails after authentication rolls back only its own work.
+    token = provider.access_token(
+        audience=API, client_id=CLIENT, email=EMAIL, sub="person-a"
+    )
+
+    missing = await raw_client.get(
+        f"/api/v1/spaces/{uuid4()}/", headers={"Authorization": f"Bearer {token}"}
+    )
+
+    assert missing.status_code == 404, missing.text
+    assert await _bindings() == {(await _account(), API, "person-a")}
+
+
+async def test_an_admission_gives_up_on_an_account_locked_elsewhere(
+    raw_client,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    provider,
+    enqueued,
+    monkeypatch,
+):
+    # A first binding locks its account. While another transaction holds that
+    # lock, the request fails within the store deadline instead of waiting.
+    monkeypatch.setattr(browser_session_service, "STORE_DEADLINE_SECONDS", 1.0)
+    token = provider.access_token(
+        audience=API, client_id=CLIENT, email=EMAIL, sub="person-a"
+    )
+    account = await _account()
+
+    async with sessionmanager.session() as session, session.begin():
+        await session.execute(
+            sa.select(Users.id).where(Users.id == account).with_for_update()
+        )
+        # Without a deadline the request would wait for this transaction,
+        # which waits for the request.
+        async with asyncio.timeout(10):
+            refused = await raw_client.get(
+                "/api/v1/spaces/type/personal/",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+
+    assert refused.status_code == 500, refused.text
+    assert await _bindings() == set()
 
 
 @contextlib.contextmanager
