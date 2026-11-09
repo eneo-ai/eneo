@@ -100,8 +100,9 @@ authenticates, as the cookie or as Bearer, only while the session exists.
 - **Live updates** stop with the session. The job-event stream
   (`GET /api/v1/jobs/events/`) and the `/ws` socket check their session at
   most 30 seconds apart while they are open, and end at the token's expiry.
-  After sign-out, a password change, signing out everywhere or the account's
-  deactivation they close at the next check; the socket closes with code 1008
+  After sign-out, a password change, signing out everywhere, the account's
+  deactivation, the organisation's suspension or a required password change
+  they close at the next check; the socket closes with code 1008
   and the client does not reconnect with that token. A check the database
   cannot answer closes them too, but the socket closes with code 1013, and
   the client reconnects once sign-in can be checked again.

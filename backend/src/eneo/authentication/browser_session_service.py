@@ -50,9 +50,16 @@ from eneo.database.affected_rows import affected_row_count
 from eneo.database.database import AsyncSession, sessionmanager
 from eneo.database.tables.browser_sessions_table import BrowserSessions
 from eneo.main.config import get_settings
-from eneo.main.exceptions import AuthenticationException
+from eneo.main.exceptions import (
+    AuthenticationException,
+    TenantSuspendedException,
+    UserInactiveException,
+)
 from eneo.main.logging import get_logger
-from eneo.users.password_lifecycle import PASSWORD_AUTH_METHOD
+from eneo.users.password_lifecycle import (
+    PASSWORD_AUTH_METHOD,
+    PasswordChangeRequiredError,
+)
 
 if TYPE_CHECKING:
     from eneo.audit.application.audit_service import AuditService
@@ -66,6 +73,15 @@ RECHECK_SECONDS = 30.0
 # (UserService) waits for the database, from taking a connection to the
 # commit, before it gives up (503, the response ends, or the request fails).
 STORE_DEADLINE_SECONDS = 5.0
+# What ``UserService.authenticate_payload`` raises when it refuses the token
+# for a route that streams to its own user. Any other error is a check that got
+# no answer.
+_REFUSALS = (
+    AuthenticationException,
+    UserInactiveException,
+    TenantSuspendedException,
+    PasswordChangeRequiredError,
+)
 
 
 @contextlib.asynccontextmanager
@@ -377,11 +393,12 @@ class SessionWatch:
     (``UserService.authenticate_payload``), in a database session of its own
     held only for that check, so what refuses a new request ends the response
     too: sign-out, a password change, signing out everywhere, a deactivated
-    account or a suspended tenant. In between, the answer is the clock against
-    the token's expiry. A refusal or the expiry ends the response for good. A
-    check that fails or does not finish within ``STORE_DEADLINE_SECONDS``
-    ends it too, but proves nothing about the session: ``unanswered`` says so,
-    and the client reconnects through ordinary authentication.
+    account, a suspended tenant or a required password change. In between,
+    the answer is the clock against the token's expiry. A refusal or the
+    expiry ends the response for good. A check that fails or does not finish
+    within ``STORE_DEADLINE_SECONDS`` ends it too, but proves nothing about
+    the session: ``unanswered`` says so, and the client reconnects through
+    ordinary authentication.
 
     The expiry is the admitted token's, not the row's: a renewal issues a new
     token for the session, and a response opened with the old one still ends
@@ -418,7 +435,7 @@ class SessionWatch:
                     self._payload, self._connection
                 )
             return True
-        except AuthenticationException:
+        except _REFUSALS:
             return False
         except Exception as exc:
             logger.warning(

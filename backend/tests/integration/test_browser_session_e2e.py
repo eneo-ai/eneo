@@ -36,6 +36,7 @@ from eneo.authentication.login_attempts import LOGIN_ATTEMPT_LIMIT
 from eneo.database.database import SafeAsyncSession, sessionmanager
 from eneo.database.tables.audit_log_table import AuditLog
 from eneo.database.tables.browser_sessions_table import BrowserSessions
+from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import Users
 from eneo.jobs.job_events import job_updates_channel
 from eneo.main.config import Settings, get_settings, set_settings
@@ -44,7 +45,7 @@ from eneo.main.exceptions import AuthenticationException
 from eneo.server.dependencies.container import get_user_from_websocket
 from eneo.server.websockets import websocket_router
 from eneo.server.websockets.websocket_manager import websocket_manager
-from eneo.tenants.tenant import TenantUpdate
+from eneo.tenants.tenant import TenantState, TenantUpdate
 from eneo.users.user import UserState
 from tests.integration.test_federation_tenant_admin import (
     SECRET,
@@ -1244,6 +1245,62 @@ async def test_a_socket_closes_when_its_session_ends(
     finally:
         for task in tasks.values():
             task.cancel()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "refusal", ["account deactivated", "tenant suspended", "password change required"]
+)
+async def test_a_socket_whose_check_is_refused_closes_for_good(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+    monkeypatch,
+    refusal,
+):
+    # Each of these refuses a new request with the socket's token, so the
+    # check is answered: the socket closes with 1008, which the client takes
+    # as final, not with the retry code of a check that got no answer.
+    monkeypatch.setattr(browser_session_service, "RECHECK_SECONDS", 0.5)
+    email = await _create_local_user(client, super_admin_token)
+    token = (await _login(client, TOKEN_LOGIN, email, PASSWORD)).json()["access_token"]
+    socket = _Socket({"type": "subscribe", "data": {"channel": "app_run_updates"}})
+    user = await get_user_from_websocket(websocket=socket, token=token, session=None)
+    task = asyncio.create_task(websocket_router.connect(socket, user))
+    try:
+        async with asyncio.timeout(5):
+            while not socket.subscribed:
+                await asyncio.sleep(0.05)
+
+        if refusal == "account deactivated":
+            change = (
+                sa.update(Users)
+                .where(Users.email == email)
+                .values(state=UserState.INACTIVE.value)
+            )
+        elif refusal == "tenant suspended":
+            change = (
+                sa.update(Tenants)
+                .where(Tenants.id == user.tenant_id)
+                .values(state=TenantState.SUSPENDED.value)
+            )
+        else:
+            change = (
+                sa.update(Users)
+                .where(Users.email == email)
+                .values(password_change_required=True)
+            )
+        await _execute(change)
+
+        async with asyncio.timeout(5):
+            assert await socket.closed == WS_1008_POLICY_VIOLATION
+            await task
+        assert not socket.subscribed
+    finally:
+        task.cancel()
 
 
 @pytest.mark.integration
