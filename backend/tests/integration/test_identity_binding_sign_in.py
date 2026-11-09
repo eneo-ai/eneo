@@ -7,6 +7,7 @@ and an email binds only an account that has no binding yet. The provider is
 tests/fake_oidc_provider.py, so every token is really signed and verified.
 """
 
+import contextlib
 import json
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
@@ -17,6 +18,9 @@ from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
+from sqlalchemy.exc import OperationalError
 
 from eneo.audit.application import audit_service as audit_service_module
 from eneo.audit.application.audit_worker_task import log_audit_event_task
@@ -434,6 +438,101 @@ async def test_the_resource_server_answers_a_conflict_with_a_typed_403(
     assert response.status_code == 403, response.text
     body = response.json()
     assert (body["code"], body["eneo_error_code"]) == ("identity_conflict", 9082)
+
+
+@contextlib.contextmanager
+def _binding_commit_fails() -> Iterator[None]:
+    """The commit of a transaction that wrote an identity binding fails."""
+
+    def recording(connection, cursor, statement, *args) -> None:  # noqa: ARG001
+        if statement.startswith("INSERT INTO identity_bindings"):
+            connection.info["wrote_binding"] = True
+
+    def unavailable(connection) -> None:
+        if connection.info.pop("wrote_binding", False):
+            raise OperationalError("COMMIT", {}, ConnectionError("store unavailable"))
+
+    event.listen(Engine, "before_cursor_execute", recording)
+    event.listen(Engine, "commit", unavailable)
+    try:
+        yield
+    finally:
+        event.remove(Engine, "before_cursor_execute", recording)
+        event.remove(Engine, "commit", unavailable)
+
+
+async def test_a_resource_server_request_is_answered_only_once_its_binding_is_committed(
+    raw_client, patch_auth_service_jwt, mock_transcription_models, provider, enqueued
+):
+    # A provider token's first request binds its identity. Answered before
+    # the binding is durable, a failed commit would leave the identity
+    # served as an account it does not hold, which a second identity could
+    # then bind by the same email.
+    token = provider.access_token(
+        audience=API, client_id=CLIENT, email=EMAIL, sub="person-a"
+    )
+    personal_space = "/api/v1/spaces/type/personal/"
+    bearer = {"Authorization": f"Bearer {token}"}
+
+    with _binding_commit_fails():
+        refused = await raw_client.get(personal_space, headers=bearer)
+
+    assert refused.status_code == 500, refused.text
+    assert await _bindings() == set()
+
+    admitted = await raw_client.get(personal_space, headers=bearer)
+    assert admitted.status_code == 200, admitted.text
+    assert await _bindings() == {(await _account(), API, "person-a")}
+
+
+@contextlib.contextmanager
+def _connections_held() -> Iterator[dict[str, int]]:
+    """The most database connections held at once while the block runs."""
+    assert sessionmanager._engine is not None
+    pool = sessionmanager._engine.sync_engine.pool
+    held = {"now": 0, "most": 0}
+
+    def checkout(*_args: Any) -> None:
+        held["now"] += 1
+        held["most"] = max(held["most"], held["now"])
+
+    def checkin(*_args: Any) -> None:
+        held["now"] -= 1
+
+    event.listen(pool, "checkout", checkout)
+    event.listen(pool, "checkin", checkin)
+    try:
+        yield held
+    finally:
+        event.remove(pool, "checkout", checkout)
+        event.remove(pool, "checkin", checkin)
+
+
+async def test_a_resource_server_request_holds_one_connection_at_a_time(
+    client, patch_auth_service_jwt, mock_transcription_models, provider, enqueued
+):
+    # The admission takes a connection of its own. Creating an assistant
+    # authenticates in a guard that then loads the space, and again in the
+    # route's container: asking the pool for a second connection there,
+    # while the request holds one, makes concurrent requests wait for each
+    # other until the pool times out.
+    token = provider.access_token(
+        audience=API, client_id=CLIENT, email=EMAIL, sub="person-a"
+    )
+    bearer = {"Authorization": f"Bearer {token}"}
+
+    with _connections_held() as binding:
+        space = await client.get("/api/v1/spaces/type/personal/", headers=bearer)
+    assert space.status_code == 200, space.text
+    with _connections_held() as guarded:
+        created = await client.post(
+            f"/api/v1/spaces/{space.json()['id']}/applications/assistants/",
+            json={"name": "Assistant"},
+            headers=bearer,
+        )
+    assert created.status_code == 201, created.text
+
+    assert (binding["most"], guarded["most"]) == (1, 1)
 
 
 @pytest.mark.parametrize("first, second", [("browser", "api"), ("api", "browser")])

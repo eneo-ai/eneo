@@ -268,6 +268,17 @@ def fresh_jwks_cache():
     oidc_resource_server.reset_jwks_cache()
 
 
+@pytest.fixture(autouse=True)
+def admission_without_a_database(monkeypatch):
+    """Admit on the service under test: these tests have no database for the
+    transaction of its own, which the integration tests cover."""
+
+    async def admit(self: UserService, token: str, _connection: object) -> UserInDB:
+        return await self._get_user_from_idp_access_token(token)
+
+    monkeypatch.setattr(UserService, "_admit_idp_access_token", admit)
+
+
 @pytest.fixture
 def idp_key():
     return _generate_key("kid-a")

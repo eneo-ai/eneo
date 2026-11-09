@@ -7,6 +7,7 @@ from uuid import UUID
 
 import idna
 import sqlalchemy as sa
+from dependency_injector import providers
 from fastapi import HTTPException
 from starlette.requests import HTTPConnection, Request
 
@@ -40,6 +41,7 @@ from eneo.authentication.auth_models import (
 from eneo.authentication.auth_service import INTERNAL_MCP_AUDIENCE, AuthService
 from eneo.authentication.endpoint_access import authorize_user
 from eneo.authentication.oidc.profile import OidcProviderError, subject_claim
+from eneo.database.database import sessionmanager
 from eneo.database.tables.app_table import AppRuns, Apps
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.collections_table import CollectionsTable
@@ -954,7 +956,9 @@ class UserService:
             user.browser_session = payload if payload.sid is not None else None
         return user
 
-    async def _get_user_from_token(self, token: str):
+    async def _get_user_from_token(
+        self, token: str, connection: HTTPConnection | None = None
+    ):
         settings = get_settings()
         try:
             payload = self._get_token_payload(token, aud=settings.jwt_audience)
@@ -962,8 +966,41 @@ class UserService:
             # In resource-server mode, the bearer token may be an IdP token.
             if not settings.oidc_resource_server_enabled:
                 raise
-            return await self._get_user_from_idp_access_token(token)
+            return await self._admit_idp_access_token(token, connection)
         return await self._get_user_from_payload(payload)
+
+    async def _admit_idp_access_token(
+        self, token: str, connection: HTTPConnection | None
+    ) -> "UserInDB":
+        """Admit an IdP access token once per request, in a transaction of its
+        own that commits before the request goes on.
+
+        The request's transaction commits after the response, so a first
+        binding or a JIT account written there would be served before it is
+        durable: a failed commit would leave a response for an account the
+        identity does not hold. Committed here, a failed commit fails the
+        request, and the binding's locks end before the route runs.
+
+        A request authenticates before its first query, but its dependencies
+        can authenticate again after one (a guard that loads the space, then
+        the route's container). Those take the account admitted for the same
+        token, so the request never waits for a second connection while its
+        own session holds one.
+        """
+        state = connection.state if connection is not None else None
+        admitted = getattr(state, "idp_admission", None)
+        if admitted is not None and admitted[0] == token:
+            return admitted[1].model_copy(deep=True)
+
+        # The container module imports this one.
+        from eneo.main.container.request_container import request_container
+
+        async with sessionmanager.session() as session, session.begin():
+            admission = request_container(session=providers.Object(session))
+            user = await admission.user_service()._get_user_from_idp_access_token(token)
+        if state is not None:
+            state.idp_admission = (token, user.model_copy(deep=True))
+        return user
 
     async def _get_user_from_idp_access_token(self, token: str) -> "UserInDB":
         """Validate an IdP access token and resolve the account it signs in to.
@@ -2147,7 +2184,7 @@ class UserService:
     ):
         user_in_db = None
         if token is not None:
-            user_in_db = await self._get_user_from_token(token)
+            user_in_db = await self._get_user_from_token(token, request)
 
         elif api_key is not None:
             user_in_db, _ = await self._resolve_api_key(api_key, request=request)
@@ -2271,7 +2308,7 @@ class UserService:
         assistant_space_id: UUID | None = None
         assistant_tenant_id: UUID | None = None
         if token is not None:
-            user_in_db = await self._get_user_from_token(token)
+            user_in_db = await self._get_user_from_token(token, request)
 
         elif api_key is not None:
             if assistant_id is not None:

@@ -149,7 +149,9 @@ def endpoints(
     user = make_user()
     valid_tokens: set[str] = set()
 
-    async def user_from_token(_self: UserService, token: str) -> UserInDB:
+    async def user_from_token(
+        _self: UserService, token: str, _connection: object = None
+    ) -> UserInDB:
         if token not in valid_tokens:
             raise AuthenticationException("Invalid token")
         return user
