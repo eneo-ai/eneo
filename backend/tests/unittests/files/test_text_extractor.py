@@ -10,6 +10,7 @@ Tests cover:
 - Error handling
 """
 
+import logging
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -17,6 +18,7 @@ import pytest
 from pdfminer.pdfdocument import PDFPasswordIncorrect
 from pdfminer.pdfparser import PDFSyntaxError
 
+from eneo.files import text as text_module
 from eneo.files.extraction_limits import FileExtractionLimits
 from eneo.files.text import (
     CorruptFileError,
@@ -756,6 +758,36 @@ class TestTextExtractorErrorHandling:
                 TextExtractor.extract_from_plain_text(test_file)
 
             assert "Permission denied" in exc_info.value.message
+
+    @pytest.mark.parametrize(
+        ("error", "logged"),
+        [
+            (PermissionError(13, "Permission denied", "/tmp/Utredning.txt"), "13"),
+            (OSError(5, "Input/output error", "/tmp/Utredning.txt"), "5"),
+        ],
+    )
+    def test_a_read_error_is_logged_by_type_and_errno_without_the_path(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+        error: OSError,
+        logged: str,
+    ):
+        """The error the caller gets says what failed; the log keeps the type
+        and errno to diagnose it, never the path."""
+        monkeypatch.setattr(text_module, "logger", logging.getLogger("eneo.test.text"))
+        caplog.set_level(logging.DEBUG, logger="eneo.test.text")
+        test_file = tmp_path / "Utredning.txt"
+        test_file.write_text("content")
+
+        with patch("pathlib.Path.read_text", side_effect=error):
+            with pytest.raises(ExtractionError):
+                TextExtractor.extract_from_plain_text(test_file)
+
+        assert type(error).__name__ in caplog.text
+        assert logged in caplog.text
+        assert "Utredning" not in caplog.text
 
     def test_extract_from_plain_text_handles_binary_with_replacement(self, tmp_path):
         """Should handle undecodable bytes using replacement characters."""

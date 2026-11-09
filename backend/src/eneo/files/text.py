@@ -140,6 +140,15 @@ class TextSanitizer:
         return text
 
 
+def _log_read_error(error: OSError) -> None:
+    # The error's message holds the path, so only its type and errno.
+    logger.warning(
+        "Reading a file for extraction failed (%s, errno %s)",
+        type(error).__name__,
+        error.errno,
+    )
+
+
 class TextExtractor:
     @staticmethod
     def _looks_binary(filepath: Path) -> bool:
@@ -159,9 +168,11 @@ class TextExtractor:
             return filepath.read_text("utf-8")
         except UnicodeDecodeError:
             pass
-        except PermissionError:
+        except PermissionError as e:
+            _log_read_error(e)
             raise ExtractionError("Permission denied reading the file") from None
-        except OSError:
+        except OSError as e:
+            _log_read_error(e)
             raise ExtractionError("Error reading the file") from None
 
         try:
@@ -172,7 +183,8 @@ class TextExtractor:
         # Final fallback: UTF-8 with replacement characters for undecodable bytes
         try:
             return filepath.read_text("utf-8", errors="replace")
-        except OSError:
+        except OSError as e:
+            _log_read_error(e)
             raise ExtractionError("Error reading the file") from None
 
     @staticmethod
