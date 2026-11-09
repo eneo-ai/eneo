@@ -65,10 +65,13 @@ async function resolvePinned(url: URL, config: DownloadPolicy, signal: AbortSign
       .catch(() => reject(new Error(`ENOTFOUND ${hostname}`)))
       .finally(() => signal.removeEventListener("abort", abort));
   });
-  if (
-    !addresses.length ||
-    addresses.some((a) => !addressAllowed(a.address, allowPrivate, hostname))
-  )
+  const refused = addresses.filter((a) => !addressAllowed(a.address, allowPrivate, hostname));
+  // An address that private access would admit is refused by this origin's setting, not always.
+  if (refused.length && refused.every((a) => addressAllowed(a.address, true, hostname)))
+    return denied(
+      "Its host resolves to a private address, and private addresses are not allowed for this origin.",
+    );
+  if (!addresses.length || refused.length)
     return denied(
       "Its host resolves to an address the runtime never contacts: link-local, cloud metadata, multicast or reserved. Point Eneo's file origin at the backend's private, shared (100.64.0.0/10) or public address.",
     );
