@@ -1,4 +1,5 @@
-"""Logs that no question refers to are removed on upgrade.
+"""Logs that no question refers to are removed on upgrade, and the index of
+logged turns is valid after an upgrade that follows a failed build.
 
 Before removal took a question's log with it, deleting a question left its log
 behind with the whole request body, and an answer completed after its
@@ -133,3 +134,49 @@ def test_logs_no_question_refers_to_are_removed_on_upgrade() -> None:
         command.downgrade(config, _PREVIOUS_REVISION)
         command.upgrade(config, "head")
         assert _log_ids(database_url) == {referenced_id}
+
+
+def _logged_turns_index_valid(database_url: str) -> bool | None:
+    connection = _connect(database_url)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT indisvalid FROM pg_index "
+                "WHERE indexrelid = to_regclass('ix_questions_logged_turns')"
+            )
+            row = cursor.fetchone()
+            return None if row is None else row[0]
+    finally:
+        connection.close()
+
+
+def test_an_index_a_failed_build_left_invalid_is_rebuilt_on_upgrade() -> None:
+    """A concurrent build that fails leaves the index invalid, and PostgreSQL
+    does not use it. Mutant: the rerun keeps it because it exists."""
+    postgres = PostgresContainer(
+        image=_POSTGRES_13_IMAGE,
+        username="logged_turns_migration",
+        password="logged_turns_migration_password",
+        dbname="logged_turns_migration",
+    )
+    with postgres:
+        database_url = postgres.get_connection_url()
+        config = _alembic_config(database_url)
+        command.upgrade(config, _PREVIOUS_REVISION)
+        connection = _connect(database_url)
+        try:
+            with connection, connection.cursor() as cursor:
+                cursor.execute(
+                    "CREATE INDEX ix_questions_logged_turns ON questions (session_id)"
+                )
+                cursor.execute(
+                    "UPDATE pg_index SET indisvalid = false "
+                    "WHERE indexrelid = 'ix_questions_logged_turns'::regclass"
+                )
+        finally:
+            connection.close()
+        assert _logged_turns_index_valid(database_url) is False
+
+        command.upgrade(config, "head")
+
+        assert _logged_turns_index_valid(database_url) is True

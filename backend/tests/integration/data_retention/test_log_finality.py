@@ -7,6 +7,7 @@ must not outlive the question it was written for, and a question answered
 while logging was off has no log at all.
 """
 
+import asyncio
 import json
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass, field
@@ -17,7 +18,6 @@ from uuid import UUID, uuid4
 import pytest
 import sqlalchemy as sa
 from httpx import AsyncClient
-from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.ai_models.completion_models.completion_model import (
@@ -29,7 +29,6 @@ from eneo.completion_models.infrastructure.completion_service import CompletionS
 from eneo.data_retention.application.conversation_retention import (
     ConversationRootKind,
 )
-from eneo.data_retention.application.retention_runner import is_lock_wait_timeout
 from eneo.data_retention.infrastructure.conversation_unit_repo import (
     ConversationUnitRepository,
 )
@@ -382,9 +381,10 @@ async def test_an_answer_waits_while_retention_removes_an_earlier_turn(
     monkeypatch: pytest.MonkeyPatch,
 ):
     """The unit is charged for the later logs it counted, so no answer in the
-    conversation may store a log between that count and the removal. Mutant:
-    the count leaves the conversation open, and a log stored after it is
-    cleared without being charged."""
+    conversation may store a log between that count and the removal; it waits
+    and is then stored with its log cleared. Mutants: the count leaves the
+    conversation open, and a log stored after it is cleared without being
+    charged; the waiting answer is lost."""
     removed = f"removed-{uuid4().hex}"
     assistant_id = await _insight_assistant(client, owner_token)
     [first] = await _logged_conversation(
@@ -404,43 +404,44 @@ async def test_an_answer_waits_while_retention_removes_an_earlier_turn(
             question="next question", session=conversation, assistant_id=assistant_id
         )
 
+    async def answer() -> None:
+        async with db_container() as container:
+            await container.session_service().complete_question_with_answer(
+                question_id=next_question,
+                answer="next answer",
+                num_tokens_question=1,
+                num_tokens_answer=1,
+                info_blob_chunks=[],
+                logging_details=LoggingDetails(
+                    model_kwargs={},
+                    json_body=json.dumps(
+                        [{"role": "user", "content": f"first question {removed}"}]
+                    ),
+                ),
+                history_revision=conversation.history_revision,
+            )
+
     counted = ConversationUnitRepository.cascade_cost
-    answers: list[str] = []
+    answers: list[asyncio.Task[None]] = []
 
     async def count_then_answer(
         unit: ConversationUnitRepository, identifier: UUID, ceiling: int
     ) -> int | None:
         cost = await counted(unit, identifier, ceiling)
-        try:
-            async with db_container() as container:
-                await container.session().execute(
-                    sa.text("SET LOCAL lock_timeout = '200ms'")
-                )
-                await container.session_service().complete_question_with_answer(
-                    question_id=next_question,
-                    answer="next answer",
-                    num_tokens_question=1,
-                    num_tokens_answer=1,
-                    info_blob_chunks=[],
-                    logging_details=LoggingDetails(
-                        model_kwargs={},
-                        json_body=json.dumps(
-                            [{"role": "user", "content": f"first question {removed}"}]
-                        ),
-                    ),
-                    history_revision=conversation.history_revision,
-                )
-            answers.append("stored")
-        except DBAPIError as error:
-            assert is_lock_wait_timeout(error), error
-            answers.append("waited")
+        answers.append(asyncio.create_task(answer()))
+        await asyncio.sleep(0.3)
+        assert not answers[0].done(), "the answer was stored after the count"
         return cost
 
     monkeypatch.setattr(ConversationUnitRepository, "cascade_cost", count_then_answer)
     report = await run_registered_retention(retention_session)
+    await asyncio.wait_for(answers[0], timeout=10)
 
     assert report.counts["questions.questions_deleted"] == 1
-    assert answers == ["waited"]
+    async with sessionmanager.session() as session, session.begin():
+        stored = await session.get(Questions, next_question)
+        assert stored is not None and stored.answer == "next answer"
+        assert stored.logging_details_id is not None
     assert await _logs_containing(removed) == 0
 
 

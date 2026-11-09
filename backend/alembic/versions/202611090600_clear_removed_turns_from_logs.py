@@ -7,9 +7,8 @@ per log, and raises the conversation's history revision. An answer generated
 from history read at an older revision is stored with a cleared log.
 
 An index of each conversation's logged turns keeps a removal from reading
-turns without a log. It is built concurrently; a build that fails leaves an
-invalid index, which `IF NOT EXISTS` would keep: drop it and run the upgrade
-again.
+turns without a log. It is built concurrently; a failed build leaves it
+invalid, and a rerun drops that leftover before building it again.
 
 Logs that no question refers to are removed: nothing can read or remove them
 later. Answers stopped writing such logs, so this runs once.
@@ -29,6 +28,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from time import monotonic, sleep
 
+import sqlalchemy as sa
 from sqlalchemy.exc import DBAPIError
 
 from alembic import op
@@ -107,11 +107,7 @@ _REMOVE_QUESTION_LOGS_TRIGGER = (
     """,
 )
 
-_LOGGED_TURNS_INDEX = """
-CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_questions_logged_turns
-ON questions (session_id, created_at)
-WHERE logging_details_id IS NOT NULL
-"""
+_LOGGED_TURNS_INDEX = "ix_questions_logged_turns"
 
 _ORPHAN_LOGS = """
 DELETE FROM logging
@@ -178,12 +174,34 @@ def _with_immediate_locks(locks: Sequence[str], statements: Sequence[str]) -> No
             raise
 
 
+def _build_logged_turns_index() -> None:
+    """Build the index concurrently; drop an invalid leftover of a failed
+    build first, which `IF NOT EXISTS` would keep."""
+    valid = (
+        op.get_bind()
+        .execute(
+            sa.text(
+                "SELECT indisvalid FROM pg_index WHERE indexrelid = to_regclass(:name)"
+            ),
+            {"name": _LOGGED_TURNS_INDEX},
+        )
+        .scalar()
+    )
+    if valid is False:
+        op.execute(f"DROP INDEX CONCURRENTLY {_LOGGED_TURNS_INDEX}")
+    op.execute(
+        f"CREATE INDEX CONCURRENTLY IF NOT EXISTS {_LOGGED_TURNS_INDEX} "
+        "ON questions (session_id, created_at) "
+        "WHERE logging_details_id IS NOT NULL"
+    )
+
+
 def upgrade() -> None:
     with op.get_context().autocommit_block():
         _with_immediate_locks(
             ("sessions IN ACCESS EXCLUSIVE MODE",), (_HISTORY_REVISION,)
         )
-        op.execute(_LOGGED_TURNS_INDEX)
+        _build_logged_turns_index()
         op.execute(_REMOVE_QUESTION_LOGS_FUNCTION)
         _with_immediate_locks(
             ("questions IN ACCESS EXCLUSIVE MODE",), _REMOVE_QUESTION_LOGS_TRIGGER
@@ -200,7 +218,7 @@ def downgrade() -> None:
             ("questions IN ACCESS EXCLUSIVE MODE",), _QUESTION_LOG_CLEANUP_TRIGGER
         )
         op.execute("DROP FUNCTION IF EXISTS remove_question_logs()")
-        op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix_questions_logged_turns")
+        op.execute(f"DROP INDEX CONCURRENTLY IF EXISTS {_LOGGED_TURNS_INDEX}")
         _with_immediate_locks(
             ("sessions IN ACCESS EXCLUSIVE MODE",),
             ("ALTER TABLE sessions DROP COLUMN IF EXISTS history_revision",),
