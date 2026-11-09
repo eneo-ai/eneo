@@ -101,6 +101,4 @@ async def _receive_while_admitted(
             )
         else:
             # 1008: the client must not reconnect with the same token.
-            await websocket.close(
-                code=WS_1008_POLICY_VIOLATION, reason="Session ended"
-            )
+            await websocket.close(code=WS_1008_POLICY_VIOLATION, reason="Session ended")

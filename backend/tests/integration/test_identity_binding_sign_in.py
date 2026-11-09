@@ -26,6 +26,7 @@ from sqlalchemy.exc import OperationalError
 from eneo.audit.application import audit_service as audit_service_module
 from eneo.audit.application.audit_worker_task import log_audit_event_task
 from eneo.authentication import browser_session_service
+from eneo.authentication import federation_router as federation_router_module
 from eneo.database.database import sessionmanager
 from eneo.database.tables.audit_log_table import AuditLog
 from eneo.database.tables.browser_sessions_table import BrowserSessions
@@ -274,6 +275,41 @@ async def test_a_conflict_is_logged_without_the_email(
     [line] = conflict_logs
     assert json.loads(line)["attributes"]["reason"] == "subject_mismatch"
     assert EMAIL not in line
+
+
+async def test_a_refused_callback_logs_no_email_with_oidc_diagnostics_on(
+    sign_in, provider, monkeypatch
+):
+    # Diagnostics on: no event of the refused callback carries the address,
+    # not only the conflict itself.
+    assert await sign_in("generic", "person-a") == SIGNED_IN
+
+    async def enabled(_redis_client: Any) -> bool:
+        return True
+
+    monkeypatch.setattr(federation_router_module, "is_debug_enabled", enabled)
+    lines: list[str] = []
+    formatter = OTELJSONFormatter()
+
+    class Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            lines.append(formatter.format(record))
+
+    handler = Capture(level=logging.DEBUG)
+    loggers = (federation_router_module.logger, user_service_module.logger)
+    levels = [logger.level for logger in loggers]
+    for logger in loggers:
+        logger.addHandler(handler)
+        logger.setLevel(logging.DEBUG)
+    try:
+        assert await sign_in("generic", "someone-else") == "identity_conflict"
+    finally:
+        for logger, level in zip(loggers, levels):
+            logger.removeHandler(handler)
+            logger.setLevel(level)
+
+    assert any("callback.identity_conflict" in line for line in lines)
+    assert not [line for line in lines if EMAIL in line]
 
 
 @pytest.mark.parametrize("entry", ENTRY_POINTS)

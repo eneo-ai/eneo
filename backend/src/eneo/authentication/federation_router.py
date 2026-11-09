@@ -1115,11 +1115,12 @@ async def federated_sign_in(
             ) from exc
 
         email = identity.email
+        # Not the address itself: the sign-in may still be refused, and a
+        # refused one logs no email. callback.success carries it.
         await _log_oidc_debug(
             redis_client=redis_client,
             correlation_id=correlation_id,
             event="callback.email_extracted",
-            email=email,
             email_claim=profile.email_claim,
         )
         try:

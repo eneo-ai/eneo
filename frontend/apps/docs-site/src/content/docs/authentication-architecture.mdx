@@ -613,11 +613,14 @@ Enable debug logging via the observability API (`POST /api/v1/sysadmin/observabi
 
 **Callback phase:**
 - `callback.state_decoded`
-- `callback.email_extracted`
+- `callback.email_extracted` (the claim it was read from, not the address)
+- `callback.identity_conflict`
 - `callback.user_denied`
 - `callback.jit_provisioning`
 - `callback.success`
 - `callback.unexpected_error`
+
+The address appears only once the sign-in is admitted (`callback.jit_provisioning`, `callback.success`): no event of a refused sign-in carries it.
 
 A refused or failed sign-in is logged whether or not debug logging is on: `oidc_transaction_refused` and `oidc_response_refused` name the check that refused it, and `oidc_transaction_store_failed` means Redis is missing or failing.
 
