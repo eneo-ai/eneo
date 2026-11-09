@@ -225,6 +225,20 @@ def _multipart_upload_is_live(now: datetime) -> ColumnElement[bool]:
     return or_(active_upload, active_publication)
 
 
+def _begin_inventory_cycles(
+    state: ObjectContentReconciliationState, now: datetime
+) -> None:
+    """Start both store listings, objects and multipart uploads, from the
+    beginning at `now`."""
+    state.object_cycle_id = uuid4()
+    state.object_continuation_token = None
+    state.object_cycle_started_at = now
+    state.multipart_cycle_id = uuid4()
+    state.multipart_key_marker = None
+    state.multipart_upload_id_marker = None
+    state.multipart_cycle_started_at = now
+
+
 def _retention_clear(now: datetime) -> ColumnElement[bool]:
     """Neither a minimum retention nor an active hold keeps the content."""
     active_hold = exists(
@@ -1556,14 +1570,7 @@ class ObjectContentReconciliationRepository:
         that no candidate row holds a live lease.
         """
         state = await self._state_for_update()
-        now = await self._database_now()
-        state.object_cycle_id = uuid4()
-        state.object_continuation_token = None
-        state.object_cycle_started_at = now
-        state.multipart_cycle_id = uuid4()
-        state.multipart_key_marker = None
-        state.multipart_upload_id_marker = None
-        state.multipart_cycle_started_at = now
+        _begin_inventory_cycles(state, await self._database_now())
         # The completed-cycle facts also describe the previous destination:
         # keeping them would let missing-marking consume the old bucket's
         # cutoff, and report its completion time as current, before the new
