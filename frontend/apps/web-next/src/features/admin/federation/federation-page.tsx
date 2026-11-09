@@ -2,13 +2,14 @@ import { Banner } from "@astryxdesign/core/Banner";
 import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 import { Button } from "@astryxdesign/core/Button";
 import { Heading } from "@astryxdesign/core/Heading";
+import { Link } from "@astryxdesign/core/Link";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { Text } from "@astryxdesign/core/Text";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { KeyRound } from "lucide-react";
-import { useTranslations } from "use-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { useId, useRef, useState, type SubmitEvent } from "react";
 import { TextInput } from "@/components/astryx/text-input";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
@@ -18,6 +19,7 @@ import { PageHeader } from "@/components/composites/page-header";
 import { ListError, QueryStateBoundary } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError } from "@/lib/api/errors";
+import { docsUrl } from "@/lib/docs";
 import { useSecretMutation } from "@/lib/api/use-secret-mutation";
 import { useFocusRescue } from "@/lib/focus-rescue";
 import { ClientSecretField } from "./client-secret-field";
@@ -105,6 +107,11 @@ function NotConfigured() {
       icon={<KeyRound />}
       title={t("federation_admin_not_configured_title")}
       description={t("federation_admin_not_configured_description")}
+      actions={
+        <GuideLink anchor="configure-via-api">
+          {t("federation_admin_register_guide_link")}
+        </GuideLink>
+      }
     />
   );
 }
@@ -117,7 +124,29 @@ function ManagedByOperator() {
       icon={<KeyRound />}
       title={t("federation_admin_disabled_title")}
       description={t("federation_admin_disabled_description")}
+      actions={
+        <GuideLink anchor="move-the-settings-into-eneo">
+          {t("federation_admin_guide_link")}
+        </GuideLink>
+      }
     />
+  );
+}
+
+/** A section of the single-tenant sign-in guide, in a new tab. */
+function GuideLink({ anchor, children }: { anchor: string; children: string }) {
+  const t = useTranslations();
+  const locale = useLocale();
+  return (
+    <Link
+      href={docsUrl("guides/oidc-federation/single-tenant", locale, anchor)}
+      isExternalLink
+      hasUnderline
+      newTabLabel={t("chat_opens_in_new_tab")}
+      className="inline-flex min-h-6 items-center self-start pointer-coarse:min-h-11"
+    >
+      {children}
+    </Link>
   );
 }
 

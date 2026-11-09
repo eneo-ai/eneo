@@ -87,6 +87,14 @@ describe("states", () => {
     await screen.findByText("Ingen identitetsleverantör är inkopplad");
     expect(screen.getByText(/kopplar in organisationens identitetsleverantör/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Spara ändringar" })).toBeNull();
+    const guide = screen.getByRole("link", {
+      name: new RegExp(sv.federation_admin_register_guide_link)
+    });
+    expect(guide.getAttribute("href")).toContain(
+      "/sv/guides/oidc-federation/single-tenant#configure-via-api"
+    );
+    // A stand-alone link: a touch-sized row of its own (the contract measures it on the screen).
+    expect(guide.className).toContain("pointer-coarse:min-h-11");
     await expectNoAxeViolations(container);
   });
 
@@ -102,6 +110,12 @@ describe("states", () => {
     await screen.findByText(sv.federation_admin_disabled_title);
     expect(screen.getByText(sv.federation_admin_disabled_description)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Spara ändringar" })).toBeNull();
+    const guide = screen.getByRole("link", { name: new RegExp(sv.federation_admin_guide_link) });
+    expect(guide.getAttribute("href")).toContain(
+      "/sv/guides/oidc-federation/single-tenant#move-the-settings-into-eneo"
+    );
+    expect(guide.textContent).toContain(sv.chat_opens_in_new_tab);
+    expect(guide.className).toContain("pointer-coarse:min-h-11");
     await expectNoAxeViolations(container);
   });
 });
