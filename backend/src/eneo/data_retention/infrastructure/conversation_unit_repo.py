@@ -34,6 +34,7 @@ from eneo.data_retention.infrastructure.empty_session_repo import (
 )
 from eneo.database.tables.app_table import AppRuns, AppRunsFiles
 from eneo.database.tables.questions_table import Questions, QuestionsFiles
+from eneo.database.tables.sessions_table import Sessions
 from eneo.files.file_retention import FileRetentionReason
 from eneo.files.file_usage import FileUsageRepository
 
@@ -88,18 +89,25 @@ APP_RUN_CHILDREN = collect_conversation_children(
 
 _LOGGING_TABLE = _QUESTIONS_TABLE.metadata.tables["logging"]
 
+# A session release deletes the session and its UNIQUE helper row. The proof
+# locked and charged the session row, the first row of the sweep's release.
+_RELEASE_ROWS = EmptySessionRepository.MAX_RELEASE_ROWS - 1
+
 
 def _question_log_rows(identifier: UUID) -> tuple[sa.Select[Any], ...]:
     """The logs the question removal trigger writes for one question: its own
     log and each later log of the conversation that still holds a request
     body, which it clears once. A turn asked at the same instant counts as
-    later, as in the trigger. The trigger also raises the revision of the
-    question's session, a row the unit's session release already charges."""
+    later, as in the trigger."""
     removed = (
         sa.select(Questions.session_id, Questions.created_at)
         .where(Questions.id == identifier)
         .subquery("removed")
     )
+    # ponytail: each removal reads every later logged turn of its
+    # conversation, logs an earlier removal cleared included (about 6 ms at
+    # 4,900 logged turns among 50,000 logs); unlinking cleared logs from
+    # their turns would let the index skip them.
     later = aliased(Questions)
     logs = _LOGGING_TABLE.c
     return (
@@ -112,6 +120,8 @@ def _question_log_rows(identifier: UUID) -> tuple[sa.Select[Any], ...]:
         .where(
             later.id != identifier,
             later.created_at >= removed.c.created_at,
+            # The index of logged turns leaves out turns without a log.
+            later.logging_details_id.is_not(None),
             sa.or_(
                 logs.json_body.is_not(None),
                 logs.context.is_not(None),
@@ -158,30 +168,62 @@ class ConversationUnitRepository:
             self.children = APP_RUN_CHILDREN
             self.root_session = None
 
-    async def cascade_cost(self, identifier: UUID, ceiling: int) -> int:
-        # One LIMIT over every child relation: the proof examines at most
-        # ceiling + 1 rows, whatever the number of relations.
+    async def cascade_cost(self, identifier: UUID, ceiling: int) -> int | None:
+        """The rows the root's removal writes, counting at most `ceiling + 1`,
+        or None when another transaction holds the root's session."""
+        locked = 0
         rows = [
             sa.select(foreign_key).where(foreign_key == identifier)
             for foreign_key in self.children
         ]
         if self.kind is ConversationRootKind.QUESTION:
+            held = await self._lock_session(identifier)
+            if held is None:
+                return None
+            locked = held
             rows.extend(_question_log_rows(identifier))
+        # One LIMIT over every child relation bounds the rows counted, whatever
+        # the number of relations.
         children = (
-            sa.union_all(*rows).limit(ceiling + 1).subquery("conversation_children")
+            sa.union_all(*rows)
+            .limit(ceiling + 1 - locked)
+            .subquery("conversation_children")
         )
-        return await self.session.scalar(sa.select(count()).select_from(children)) or 0
+        counted = await self.session.scalar(sa.select(count()).select_from(children))
+        return locked + (counted or 0)
+
+    async def _lock_session(self, identifier: UUID) -> int | None:
+        """Lock the question's session until the chunk commits, without
+        waiting: the rows locked, or None when another transaction holds it.
+
+        Storing an answer and deleting a conversation lock the session before
+        its questions, and discovery has locked this question, so waiting here
+        could deadlock with them. Held, the session keeps an answer in the
+        conversation from storing a log after the proof counted the logs the
+        removal clears, and the removal trigger raises the revision of a row
+        this unit already holds.
+        """
+        session_id = await self.session.scalar(
+            sa.select(Questions.session_id).where(Questions.id == identifier)
+        )
+        if session_id is None:
+            return 0
+        locked = await self.session.scalar(
+            sa.select(Sessions.id)
+            .where(Sessions.id == session_id)
+            .with_for_update(key_share=True, skip_locked=True)
+        )
+        return None if locked is None else 1
 
     async def _release_emptied_session(self, session_id: UUID) -> _SessionRelease:
         """Delete the session its last question left empty.
 
         The empty-session owner's lock and DELETE apply, its no-question
         predicate repeated in the DELETE. A session a live chat holds, or that
-        still has a question, is left to that owner's sweep. Charges one row for
-        the lock and proof, which also covers the removal trigger's revision
-        update of the same row, then the session and its UNIQUE helper row: at
-        most `EmptySessionRepository.MAX_RELEASE_ROWS`, which `delete_unit`
-        reserves first.
+        still has a question, is left to that owner's sweep. The unit's proof
+        locked and charged the session row, which the lock and proof here read
+        again; this charges the session and its UNIQUE helper row it deletes:
+        at most `_RELEASE_ROWS`, which `delete_unit` reserves first.
         """
         # No grace: the session held a question that was due, so it is no new
         # chat waiting for its first question. The no-question predicate is the
@@ -191,9 +233,9 @@ class ConversationUnitRepository:
         )
         cost = (await sessions.lock_empty((session_id,))).get(session_id)
         if cost is None:
-            return _SessionRelease(rows=1, deleted=0)
+            return _SessionRelease(rows=0, deleted=0)
         deleted = await sessions.delete_due((session_id,))
-        return _SessionRelease(rows=1 + cost, deleted=len(deleted))
+        return _SessionRelease(rows=cost, deleted=len(deleted))
 
     async def delete_unit(
         self,
@@ -235,10 +277,9 @@ class ConversationUnitRepository:
         )
         # Refuse what the remainder cannot fund before the root DELETE, so such
         # a unit writes nothing it would roll back.
-        if (
-            session_id is not None
-            and max_rows - 1 < EmptySessionRepository.MAX_RELEASE_ROWS
-        ) or (file_ids and max_files == 0):
+        if (session_id is not None and max_rows - 1 < _RELEASE_ROWS) or (
+            file_ids and max_files == 0
+        ):
             return ConversationUnitResult(rows=0, files=0, fits=False)
         # `rows` charges the statements that completed; `attempt` bounds what
         # the statement in flight may read. A lock wait's own reads are
@@ -260,7 +301,7 @@ class ConversationUnitRepository:
                     )
                 sessions_deleted = 0
                 if session_id is not None:
-                    attempt = EmptySessionRepository.MAX_RELEASE_ROWS
+                    attempt = _RELEASE_ROWS
                     released = await self._release_emptied_session(session_id)
                     rows += released.rows
                     sessions_deleted = released.deleted

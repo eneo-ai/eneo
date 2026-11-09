@@ -6,6 +6,11 @@ clears the request body of the later logs in each affected conversation, once
 per log, and raises the conversation's history revision. An answer generated
 from history read at an older revision is stored with a cleared log.
 
+An index of each conversation's logged turns keeps a removal from reading
+turns without a log. It is built concurrently; a build that fails leaves an
+invalid index, which `IF NOT EXISTS` would keep: drop it and run the upgrade
+again.
+
 Logs that no question refers to are removed: nothing can read or remove them
 later. Answers stopped writing such logs, so this runs once.
 
@@ -68,6 +73,7 @@ LANGUAGE plpgsql AS $$
             ) AS removed
             WHERE questions.session_id = removed.session_id
               AND questions.created_at >= removed.removed_from
+              AND questions.logging_details_id IS NOT NULL
               AND logging.id = questions.logging_details_id
               AND (
                   logging.json_body IS NOT NULL
@@ -100,6 +106,12 @@ _REMOVE_QUESTION_LOGS_TRIGGER = (
     EXECUTE FUNCTION remove_question_logs()
     """,
 )
+
+_LOGGED_TURNS_INDEX = """
+CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_questions_logged_turns
+ON questions (session_id, created_at)
+WHERE logging_details_id IS NOT NULL
+"""
 
 _ORPHAN_LOGS = """
 DELETE FROM logging
@@ -171,6 +183,7 @@ def upgrade() -> None:
         _with_immediate_locks(
             ("sessions IN ACCESS EXCLUSIVE MODE",), (_HISTORY_REVISION,)
         )
+        op.execute(_LOGGED_TURNS_INDEX)
         op.execute(_REMOVE_QUESTION_LOGS_FUNCTION)
         _with_immediate_locks(
             ("questions IN ACCESS EXCLUSIVE MODE",), _REMOVE_QUESTION_LOGS_TRIGGER
@@ -187,6 +200,7 @@ def downgrade() -> None:
             ("questions IN ACCESS EXCLUSIVE MODE",), _QUESTION_LOG_CLEANUP_TRIGGER
         )
         op.execute("DROP FUNCTION IF EXISTS remove_question_logs()")
+        op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix_questions_logged_turns")
         _with_immediate_locks(
             ("sessions IN ACCESS EXCLUSIVE MODE",),
             ("ALTER TABLE sessions DROP COLUMN IF EXISTS history_revision",),

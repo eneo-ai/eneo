@@ -360,8 +360,10 @@ class QuestionRepository:
             if history_revision is None:
                 raise ValueError("A logged answer needs the revision of its history")
             # Locked before the question, in the order a conversation's DELETE
-            # takes them. The removal trigger raises the revision and so waits
-            # for this transaction, then clears the log stored here.
+            # takes them; retention, which holds its question first, does not
+            # wait for it. A removal in the conversation raises the revision:
+            # it waits for this transaction and then clears the log stored
+            # here, or this one waits for it and stores the log cleared.
             revision = await self.session.scalar(
                 sa.select(Sessions.history_revision)
                 .join(Questions, Questions.session_id == Sessions.id)

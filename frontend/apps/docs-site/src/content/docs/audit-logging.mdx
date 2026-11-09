@@ -142,7 +142,7 @@ the unit locks first (the root, its session, a file family) blocks only that uni
 other candidates proceed. A lock wait on any other row (a cascaded child row, an
 object content row) ends after the lock timeout: a question or App run is then kept
 and reported as `cascade_locked` and charged the bound of the statement that waited
-(its proved cascade for the delete, three rows for the session release, the family
+(its proved cascade for the delete, two rows for the session release, the family
 limit for a file release); the chunk commits and the execution continues with the
 next chunk. The same chunk admits further units only while its gather window is
 still open, which at the default settings (a one-second window, a two-second lock

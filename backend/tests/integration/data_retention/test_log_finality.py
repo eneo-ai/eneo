@@ -17,6 +17,7 @@ from uuid import UUID, uuid4
 import pytest
 import sqlalchemy as sa
 from httpx import AsyncClient
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.ai_models.completion_models.completion_model import (
@@ -28,6 +29,7 @@ from eneo.completion_models.infrastructure.completion_service import CompletionS
 from eneo.data_retention.application.conversation_retention import (
     ConversationRootKind,
 )
+from eneo.data_retention.application.retention_runner import is_lock_wait_timeout
 from eneo.data_retention.infrastructure.conversation_unit_repo import (
     ConversationUnitRepository,
 )
@@ -176,21 +178,31 @@ async def _delete_question(question_id: UUID) -> None:
         await session.execute(sa.delete(Questions).where(Questions.id == question_id))
 
 
-async def _remove_by_retention(
+async def _make_due(
     session: AsyncSession, assistant_id: UUID, question_id: UUID
-) -> None:
+) -> UUID:
+    """Make one question due for retention; its conversation's id."""
     long_ago = datetime.now(timezone.utc) - timedelta(days=10)
     await session.execute(
         sa.update(Assistants)
         .where(Assistants.id == assistant_id)
         .values(data_retention_days=1)
     )
-    await session.execute(
+    conversation_id = await session.scalar(
         sa.update(Questions)
         .where(Questions.id == question_id)
         .values(created_at=long_ago)
+        .returning(Questions.session_id)
     )
     await session.commit()
+    assert conversation_id is not None
+    return conversation_id
+
+
+async def _remove_by_retention(
+    session: AsyncSession, assistant_id: UUID, question_id: UUID
+) -> None:
+    await _make_due(session, assistant_id, question_id)
     report = await run_registered_retention(session)
     assert report.counts["questions.questions_deleted"] == 1
 
@@ -292,10 +304,10 @@ async def test_a_question_is_charged_for_each_log_its_removal_clears(
     admin_user: UserInDB,
     owner_token: str,
 ):
-    """The retention unit pays for the logs the removal trigger writes: the
-    question's own log and each later log that still holds a request body,
-    once. Mutant: the later logs are not charged, or a cleared log is charged
-    again."""
+    """The retention unit pays for the rows the removal trigger writes: the
+    question's own log, each later log that still holds a request body, once,
+    and the conversation's row, which the proof locks. Mutant: the later logs
+    are not charged, or a cleared log is charged again."""
     assistant_id = await _insight_assistant(client, owner_token)
     first, second, _ = await _logged_conversation(
         db_container,
@@ -313,9 +325,123 @@ async def test_a_question_is_charged_for_each_log_its_removal_clears(
             )
             return await unit.cascade_cost(question_id, ceiling=100)
 
-    assert await cost(first) == 3
+    assert await cost(first) == 4
     await _delete_question(first)
-    assert await cost(second) == 1
+    assert await cost(second) == 2
+
+
+@pytest.mark.parametrize(
+    "lock",
+    [
+        pytest.param({"read": True}, id="answer being stored"),
+        pytest.param({}, id="conversation being deleted"),
+    ],
+)
+async def test_retention_does_not_wait_for_a_conversation_another_transaction_holds(
+    client: AsyncClient,
+    db_container,
+    admin_user: UserInDB,
+    owner_token: str,
+    retention_session: AsyncSession,
+    lock: dict[str, bool],
+):
+    """Storing an answer and deleting a conversation lock the conversation
+    before its questions, and retention holds the question it removes, so
+    waiting for the conversation could deadlock. The question is kept for a
+    later pass. Mutant: the removal waits for the conversation and keeps the
+    question as cascade_locked after the lock timeout, or deadlocks."""
+    assistant_id = await _insight_assistant(client, owner_token)
+    first, _ = await _logged_conversation(
+        db_container,
+        admin_user,
+        assistant_id=assistant_id,
+        turns=[("first", "first"), ("second", "second")],
+    )
+    conversation_id = await _make_due(retention_session, assistant_id, first)
+
+    async with sessionmanager.session() as other, other.begin():
+        await other.execute(
+            sa.select(Sessions.id)
+            .where(Sessions.id == conversation_id)
+            .with_for_update(**lock)
+        )
+        held = await run_registered_retention(retention_session)
+
+    assert held.blocked["questions.root_locked"] == 1
+    assert "questions.questions_deleted" not in held.counts
+    released = await run_registered_retention(retention_session)
+    assert released.counts["questions.questions_deleted"] == 1
+
+
+async def test_an_answer_waits_while_retention_removes_an_earlier_turn(
+    client: AsyncClient,
+    db_container,
+    admin_user: UserInDB,
+    owner_token: str,
+    retention_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """The unit is charged for the later logs it counted, so no answer in the
+    conversation may store a log between that count and the removal. Mutant:
+    the count leaves the conversation open, and a log stored after it is
+    cleared without being charged."""
+    removed = f"removed-{uuid4().hex}"
+    assistant_id = await _insight_assistant(client, owner_token)
+    [first] = await _logged_conversation(
+        db_container,
+        admin_user,
+        assistant_id=assistant_id,
+        turns=[(f"first question {removed}", "first answer")],
+    )
+    conversation_id = await _make_due(retention_session, assistant_id, first)
+    async with db_container() as container:
+        conversation = await container.session_repo().get(id=conversation_id)
+        assert conversation is not None
+        (
+            next_question,
+            _,
+        ) = await container.session_service().create_question_placeholder(
+            question="next question", session=conversation, assistant_id=assistant_id
+        )
+
+    counted = ConversationUnitRepository.cascade_cost
+    answers: list[str] = []
+
+    async def count_then_answer(
+        unit: ConversationUnitRepository, identifier: UUID, ceiling: int
+    ) -> int | None:
+        cost = await counted(unit, identifier, ceiling)
+        try:
+            async with db_container() as container:
+                await container.session().execute(
+                    sa.text("SET LOCAL lock_timeout = '200ms'")
+                )
+                await container.session_service().complete_question_with_answer(
+                    question_id=next_question,
+                    answer="next answer",
+                    num_tokens_question=1,
+                    num_tokens_answer=1,
+                    info_blob_chunks=[],
+                    logging_details=LoggingDetails(
+                        model_kwargs={},
+                        json_body=json.dumps(
+                            [{"role": "user", "content": f"first question {removed}"}]
+                        ),
+                    ),
+                    history_revision=conversation.history_revision,
+                )
+            answers.append("stored")
+        except DBAPIError as error:
+            assert is_lock_wait_timeout(error), error
+            answers.append("waited")
+        return cost
+
+    monkeypatch.setattr(ConversationUnitRepository, "cascade_cost", count_then_answer)
+    report = await run_registered_retention(retention_session)
+
+    assert report.counts["questions.questions_deleted"] == 1
+    assert answers == ["waited"]
+    assert await _logs_containing(removed) == 0
 
 
 @pytest.mark.parametrize("removed", [None, "conversation", "question"])

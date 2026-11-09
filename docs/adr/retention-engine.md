@@ -71,7 +71,7 @@ stays outside this record.
    (a cascaded child row, an object content row) ends after the lock timeout:
    a question or App run is then kept and reported as `cascade_locked` and
    charged the bound of the statement that waited (its proved cascade for the
-   root delete, three rows for the session release, the family cap for a File
+   root delete, two rows for the session release, the family cap for a File
    release), the chunk commits and the execution continues. The same chunk
    admits further roots only while its gather window is still open, which at
    default settings (a one-second window, a two-second lock timeout) it is
