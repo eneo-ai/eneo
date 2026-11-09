@@ -98,8 +98,9 @@ def _validate_claim_name(value: str | None) -> str | None:
 
 def _with_subject_claim(config: Mapping[str, Any], claim: str | None) -> dict[str, Any]:
     """The config's claims mapping with ``claim`` as its subject claim when
-    given. Refused (422) when it names the mapping's email claim: an address
-    can be reassigned, and the subject is what keeps it out of the account."""
+    given. Refused (422) when it names the mapping's email claim or the
+    standard ``email`` claim: an address can be reassigned, and the subject is
+    what keeps it out of the account."""
     stored = config.get("claims_mapping")
     mapping = (
         dict(cast(Mapping[str, Any], stored))

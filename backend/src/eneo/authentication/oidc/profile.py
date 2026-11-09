@@ -177,11 +177,13 @@ def subject_claim(mapping: object, *, email_claim: str) -> str:
     """The claim a claims mapping names for the subject, else ``sub``.
 
     A provider whose ``sub`` differs per client can name a stable id claim
-    instead. It must not be the email claim: an address can be reassigned,
-    and the subject is what keeps a reassigned address out of the account.
+    instead. It must not be the email claim, nor the standard ``email`` claim
+    when the mapping reads the address from another: an address can be
+    reassigned, and the subject is what keeps a reassigned address out of the
+    account.
     """
     claim = _mapped_claim(mapping, "subject") or "sub"
-    if claim == email_claim:
+    if claim in (email_claim, "email"):
         raise OidcProviderError(
             "The claims mapping names the email claim as the subject claim"
         )

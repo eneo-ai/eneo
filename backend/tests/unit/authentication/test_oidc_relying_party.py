@@ -1083,7 +1083,14 @@ class TestProfileDefaults:
         assert (profile.email_claim, profile.subject_claim) == ("upn", "oid")
 
     @pytest.mark.parametrize(
-        "mapping", [{"email": "upn", "subject": "upn"}, {"subject": "email"}]
+        "mapping",
+        [
+            {"email": "upn", "subject": "upn"},
+            {"subject": "email"},
+            # The standard email claim is an address too, wherever the
+            # mapping reads the address from.
+            {"email": "upn", "subject": "email"},
+        ],
     )
     def test_the_subject_claim_cannot_be_the_email_claim(self, mapping):
         with pytest.raises(OidcProviderError):
