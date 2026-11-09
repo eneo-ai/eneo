@@ -9,6 +9,7 @@ import hashlib
 import ipaddress
 import logging
 import re
+import shutil
 import socket
 import unicodedata
 from collections import deque
@@ -19,7 +20,7 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from itertools import islice
 from pathlib import Path
-from tempfile import TemporaryDirectory
+from tempfile import TemporaryDirectory, gettempdir
 from time import monotonic
 from typing import TypeVar
 from urllib.parse import unquote, urlsplit
@@ -79,6 +80,36 @@ _ResponseResult = TypeVar("_ResponseResult")
 _process_capacity: asyncio.Semaphore | None = None
 _process_capacity_loop: asyncio.AbstractEventLoop | None = None
 _process_capacity_limit: int | None = None
+
+
+def cleanup_orphaned_crawl_directories(temp_root: Path | None = None) -> int:
+    """Remove crawl workspaces that an earlier version left in the default
+    temporary directory.
+
+    Workspaces now live in the process's scratch directory, which goes with
+    the process. Earlier versions created them here, so a crash left the
+    downloaded files of a crawl behind; this removes them at the crawler
+    worker's start.
+    """
+    # ponytail: kept only for upgrades from versions that wrote workspaces
+    # here; remove once no supported upgrade starts from such a version.
+    root = temp_root or Path(gettempdir())
+    removed = 0
+    for path in root.glob(f"{_CRAWL_TEMP_PREFIX}*"):
+        try:
+            if path.is_symlink() or not path.is_dir():
+                continue
+            shutil.rmtree(path)
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            logger.warning(
+                "Abandoned crawler workspace could not be removed",
+                extra={"workspace": path.name, "errno": exc.errno},
+            )
+            continue
+        removed += 1
+    return removed
 
 
 @dataclass(frozen=True, slots=True)

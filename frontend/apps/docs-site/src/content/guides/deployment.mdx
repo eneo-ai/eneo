@@ -1354,7 +1354,9 @@ they are stored, audio being transcribed, crawled files) in a directory of its
 own, `eneo-scratch/proc-<id>` under `UPLOAD_TMP_DIR` (default `/tmp`), and
 removes it when it stops. A process that crashes leaves its directory; the
 next process to start on the same volume removes it once the crashed process
-is gone. Nothing else under `UPLOAD_TMP_DIR` is removed at start. The owner
+is gone. At start, the crawler worker also removes the `eneo-crawl-*`
+directories that earlier versions left in the system temporary directory;
+nothing else is removed at start. The owner
 check uses a file lock, so `UPLOAD_TMP_DIR` must be a local filesystem; a
 volume shared between hosts over a network filesystem is not supported.
 
