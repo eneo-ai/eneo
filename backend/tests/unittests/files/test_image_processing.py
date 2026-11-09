@@ -1,4 +1,5 @@
 import io
+import logging
 import struct
 import zipfile
 from pathlib import Path
@@ -7,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 from PIL import Image
 
+from eneo.files import image_processing
 from eneo.files.image_processing import (
     MAX_IMAGE_DIMENSION,
     _page_has_visual_content,
@@ -358,3 +360,54 @@ def test_extract_office_never_raises_on_garbage(tmp_path: Path):
     assert (
         extract_images_from_office(garbage, mimetype=DOCX_MIMETYPE, max_images=8) == []
     )
+
+
+_PRIVATE_MEMBER = "Utredning_om_Anna_Svensson.png"
+
+
+@pytest.fixture
+def image_log(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> pytest.LogCaptureFixture:
+    monkeypatch.setattr(
+        image_processing, "logger", logging.getLogger("eneo.test.image_processing")
+    )
+    caplog.set_level(logging.DEBUG, logger="eneo.test.image_processing")
+    return caplog
+
+
+def test_a_skipped_oversized_media_entry_is_logged_without_its_name(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    image_log: pytest.LogCaptureFixture,
+):
+    """A media entry's name is part of the document, which retention removes;
+    a log line would keep it."""
+    monkeypatch.setattr(image_processing, "_MAX_EMBEDDED_MEDIA_BYTES", 10)
+    path = _office_archive(
+        tmp_path, "word/media/", {_PRIVATE_MEMBER: _image_bytes(800, 600)}
+    )
+
+    assert extract_images_from_office(path, mimetype=DOCX_MIMETYPE, max_images=8) == []
+
+    assert image_log.records
+    assert "Anna_Svensson" not in image_log.text
+
+
+def test_a_corrupt_media_entry_is_logged_without_the_parser_text(
+    tmp_path: Path, image_log: pytest.LogCaptureFixture
+):
+    """zipfile names the entry in its CRC error; the log keeps the type only."""
+    blob = _image_bytes(800, 600)
+    path = tmp_path / "document.zip"
+    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_STORED) as archive:
+        archive.writestr(f"word/media/{_PRIVATE_MEMBER}", blob)
+    data = bytearray(path.read_bytes())
+    middle = data.index(blob) + len(blob) // 2
+    data[middle] ^= 0xFF
+    path.write_bytes(bytes(data))
+
+    assert extract_images_from_office(path, mimetype=DOCX_MIMETYPE, max_images=8) == []
+
+    assert image_log.records
+    assert "Anna_Svensson" not in image_log.text

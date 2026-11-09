@@ -4,7 +4,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from eneo.object_content.content import StorageKind
+from eneo.object_content.content import (
+    ObjectContentConfigurationError,
+    StorageKind,
+)
 from eneo.object_content.file_icon_backfill import (
     FileIconBackfillResult,
     FileIconBackfillState,
@@ -141,3 +144,31 @@ async def test_file_icon_backfill_task_logs_operational_state(
         assert records[0].state == state.value
         assert records[0].admitted_count == admitted_count
         assert records[0].claimed_count == 0
+
+
+@pytest.mark.asyncio
+async def test_a_refused_bucket_is_one_log_line_without_a_traceback(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bucket that gets versioning while Eneo runs is refused every minute.
+    Readiness already reports it; the cron says why in one line."""
+    logger = logging.getLogger("test_reconcile_refused_bucket")
+    logger.handlers = []
+    monkeypatch.setattr(object_content_tasks, "logger", logger)
+    runtime = MagicMock(spec=ObjectContentRuntime)
+    runtime.reconcile_once = AsyncMock(
+        side_effect=ObjectContentConfigurationError(
+            "Object content storage bucket 'eneo' has versioning enabled or suspended"
+        )
+    )
+
+    with caplog.at_level(logging.INFO, logger=logger.name):
+        summary = await reconcile_object_content_task(
+            cast(ObjectContentRuntime, runtime)
+        )
+
+    assert not any(summary.values())
+    [record] = [record for record in caplog.records if record.name == logger.name]
+    assert record.levelno == logging.WARNING
+    assert record.exc_info is None
+    assert "bucket 'eneo' has versioning enabled" in record.getMessage()

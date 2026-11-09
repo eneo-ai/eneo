@@ -1,6 +1,6 @@
 ---
 title: Driftsätt Eneo
-translationSource: guides/deployment.mdx@00a200f56b21
+translationSource: guides/deployment.mdx@f39a0e831eeb
 ---
 
 import { Callout } from "nextra/components";
@@ -216,6 +216,20 @@ kräver en kontrollerad dränering av jobb och stopp av gamla skrivare före
 migrering. Kör inte en rullande uppdatering för den övergången. Följ
 [uppgraderingsguiden för filer och ikoner](/guides/file-icon-storage-upgrade)
 och [backup- och återställningsrutinen](/guides/object-content-storage#back-up-and-restore).
+
+Inför den version som tömmer sparade frågeloggar stoppar du dessutom alla
+backend- och workerinstanser i den tidigare versionen innan `db-init` körs. Bara
+den nya versionen kontrollerar om något har gallrats innan den sparar en logg,
+så en logg som en äldre backend eller worker sparar medan migreringen pågår
+behåller sitt innehåll. Stoppa dem och kontrollera att det andra kommandot inte
+listar någon container:
+
+```bash
+docker compose --env-file .env --env-file release.env stop backend worker
+docker compose --env-file .env --env-file release.env ps --status running backend worker
+```
+
+Stoppa instanser på andra värdar på samma sätt.
 
 Vid uppgradering byter du ut hela releasepaketet (`release.env` och
 `release.json`) på en gång och behåller det gamla för återställning. Uppdatera

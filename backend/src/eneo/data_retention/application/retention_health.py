@@ -62,6 +62,9 @@ class RetentionTaskHealth(BaseModel):
     error_code: RetentionErrorCode | None = None
     blocked_reasons: tuple[str, ...] = ()
     """The blocked reasons the latest run recorded (`<step>.<reason>`)."""
+    limiting_settings: tuple[str, ...] = ()
+    """The deployment settings whose limit kept due data in the latest run;
+    raising one lets a later run remove it."""
     overdue_complete: bool | None = None
     """Whether the newest overdue snapshot counted all overdue data (False: the
     count is a lower bound)."""
@@ -152,6 +155,15 @@ async def _task_health(
         if latest is not None
         else ()
     )
+    limiting_settings = tuple(
+        sorted(
+            {
+                setting
+                for key in blocked_reasons
+                for setting in task.limited_by.get(key.rpartition(".")[2], ())
+            }
+        )
+    )
     if _turned_off(latest, enabled=task.enabled):
         return RetentionTaskHealth(
             name=task.name,
@@ -161,6 +173,7 @@ async def _task_health(
             latest_outcome=latest_outcome,
             error_code=error_code,
             blocked_reasons=blocked_reasons,
+            limiting_settings=limiting_settings,
         )
     stale_before = now - RETENTION_STALE_AFTER
     reports_overdue = overdue_reporter(task.build(repository.session)) is not None
@@ -218,5 +231,6 @@ async def _task_health(
         latest_outcome=latest_outcome,
         error_code=error_code,
         blocked_reasons=blocked_reasons,
+        limiting_settings=limiting_settings,
         overdue_complete=snapshot.overdue.complete if snapshot is not None else None,
     )

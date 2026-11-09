@@ -44,6 +44,8 @@ class ConversationRootKind(StrEnum):
 class ConversationBlockReason(StrEnum):
     UNIT_EXCEEDS_BUDGET = "unit_exceeds_budget"
     NO_LONGER_DUE = "no_longer_due"
+    # Another transaction held a row the unit locks first without waiting:
+    # the root, or a question's session.
     ROOT_LOCKED = "root_locked"
     # Another transaction held a row the root DELETE cascades to (a child row
     # or stored content), past the lock timeout.
@@ -142,8 +144,9 @@ class ConversationPageRepository(Protocol):
         of the roots they select after it, locked."""
         ...
 
-    async def cascade_cost(self, identifier: UUID, ceiling: int) -> int:
-        """Child rows of one root, counting at most `ceiling + 1` in total."""
+    async def cascade_cost(self, identifier: UUID, ceiling: int) -> int | None:
+        """Rows one root's removal writes, counting at most `ceiling + 1` in
+        total, or None when another transaction holds the root's session."""
         ...
 
     async def delete_unit(
@@ -281,6 +284,14 @@ async def run_conversation_page(
         # The proof leaves one row of the remaining allowance for the DELETE.
         ceiling = remaining - 1
         children = await repository.cascade_cost(root.id, ceiling)
+        if children is None:
+            # The root waits for a later pass, not for the session while it
+            # holds the root; the attempt read the session row.
+            rows += 1
+            out.blocked[ConversationBlockReason.ROOT_LOCKED.key] += 1
+            cursor = root
+            visited += 1
+            continue
         rows += children
         if children > ceiling:
             # Only a fully funded root is too large by itself; otherwise retry

@@ -1073,14 +1073,15 @@ async def test_an_oversized_question_is_proved_within_one_limit_and_passed(
     await retention_session.flush()
     big_id, small_id = big.id, small.id
 
-    # Two links and three tool references: a ceiling of 2 stops at 3 rows.
+    # Its session, two links and three tool references: a ceiling of 2 stops
+    # at 3 rows.
     repository = ConversationRetentionRepository(
         retention_session,
         kind=ConversationRootKind.QUESTION,
         now=datetime.now(timezone.utc),
     )
     assert await repository.cascade_cost(big_id, 2) == 3
-    assert await repository.cascade_cost(big_id, 10) == 5
+    assert await repository.cascade_cost(big_id, 10) == 6
 
     settings = get_settings().model_copy(
         update={"retention_conversations_max_unit_rows": 4, "retention_chunk_rows": 30}
@@ -1143,11 +1144,12 @@ async def test_a_unit_its_remainder_cannot_fund_writes_nothing(
     connection = (await retention_session.connection()).sync_connection
     event.listen(connection, "before_cursor_execute", record)
     try:
-        # A session release needs up to 3 rows after the root DELETE.
+        # A session release needs up to 2 rows after the root DELETE; the
+        # proof charged the session's lock.
         unit = await repository.delete_unit(
             question.id,
             child_rows=1,
-            max_rows=3 if short == "session" else 10,
+            max_rows=2 if short == "session" else 10,
             max_files=0 if short == "files" else 10,
             max_family_rows=5,
         )

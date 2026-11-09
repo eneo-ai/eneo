@@ -1,9 +1,10 @@
 """Message logging route over stored logging rows.
 
-A question answered while extended logging was off still points at a logging
-row: the answer path stores one with empty model kwargs and no request body.
-The route reports such a question as not logged, the same answer a question
-without any logging row gets.
+A logging row can hold empty model kwargs and no request body: a question
+answered while extended logging was off got one before answers stopped storing
+it, and removing an earlier turn clears the later logs of its conversation to
+that. The route reports such a question as not logged, the same answer a
+question without any logging row gets.
 """
 
 from __future__ import annotations
@@ -94,7 +95,7 @@ async def test_question_answered_without_extended_logging_is_not_logged(
 ):
     token = await _token(client)
     assistant_id, user_id = await _insight_assistant(client, token)
-    # The row the answer path stores when the Assistant does not log.
+    # The row a cleared log, or an earlier answer without logging, leaves.
     message_id = await _question_with_logging(
         assistant_id=assistant_id,
         user_id=user_id,

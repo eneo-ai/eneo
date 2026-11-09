@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 from uuid import uuid4
@@ -672,6 +673,34 @@ async def test_non_streaming_supports_multiple_tool_rounds():
     assert {ref.uri for ref in completion.mcp_tool_references} == {
         "https://example.test/shared"
     }
+
+
+async def test_non_streaming_never_logs_the_answer_or_its_reasoning(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Retention can remove a conversation; a log line would keep a copy of it."""
+    adapter = _make_completion_adapter()
+    monkeypatch.setattr(
+        tenant_model_adapter, "logger", logging.getLogger("eneo.test.model_adapter")
+    )
+    caplog.set_level(logging.DEBUG, logger="eneo.test.model_adapter")
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(
+            return_value=_response(
+                content="private answer", reasoning_content="private reasoning"
+            )
+        ),
+    ):
+        completion = await adapter.get_response(
+            context=SimpleNamespace(), model_kwargs={}
+        )
+
+    assert completion.text == "private answer"
+    assert caplog.records
+    assert "private answer" not in caplog.text
+    assert "private reasoning" not in caplog.text
 
 
 class _ErrorSecondRoundMCPProxy(_FakeMCPProxy):
