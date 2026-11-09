@@ -26,6 +26,7 @@ from eneo.main.config import Settings, get_settings
 from eneo.main.retention_tasks import (
     EXISTING_WITHOUT_CHOICE,
     FOLLOWS_A_REMOVAL,
+    OUTSIDE_THE_ENGINE,
     RetentionHealthCache,
     _read_retention_health,
     retention_task_registrations,
@@ -90,6 +91,32 @@ def test_only_listed_removals_run_without_a_choice():
             for registration in retention_task_registrations(switched_off)
             if registration.name == task
         ] == [False]
+
+
+def test_records_outside_the_engine_are_declared_with_how_they_end():
+    """Mutants: an exception is dropped or added without the owner; one loses
+    its reason; the cron a reason names no longer runs."""
+    from eneo.worker.arq import worker
+
+    crons = {job.coroutine.__name__ for job in worker.cron_jobs}
+
+    assert set(OUTSIDE_THE_ENGINE) == {
+        "audit exports",
+        "insights",
+        "browser sessions",
+        "audit logs",
+        "service runs",
+    }
+    for reason in OUTSIDE_THE_ENGINE.values():
+        assert reason and "\n" not in reason
+    named = {
+        cron
+        for reason in OUTSIDE_THE_ENGINE.values()
+        for cron in reason.split()
+        if cron.startswith(("cleanup_", "purge_"))
+    }
+    assert named == {"cleanup_old_exports", "purge_old_audit_logs"}
+    assert named <= crons
 
 
 def _violations(**changes: object) -> list[str]:

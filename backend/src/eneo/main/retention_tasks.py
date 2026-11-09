@@ -63,6 +63,24 @@ FOLLOWS_A_REMOVAL: Mapping[str, str] = MappingProxyType(
     {DERIVED_COPIES_TASK: "retention_derived_copies_enabled"}
 )
 
+# Records kept outside the engine, each with how it ends today, until the owner
+# decides whether retention removes them. Retention reports none of them as
+# removed, and a removed conversation does not shorten them.
+OUTSIDE_THE_ENGINE: Mapping[str, str] = MappingProxyType(
+    {
+        "audit exports": "cleanup_old_exports deletes each export file and its "
+        "job key once it is older than export_max_age_hours",
+        "insights": "an insight job keeps its question and answer in Redis "
+        "until one day after its last update",
+        "browser sessions": "a row ends at sign-out, at the user's next sign-in "
+        "after it expired, or with the user",
+        "audit logs": "purge_old_audit_logs deletes them after each "
+        "organisation's audit retention period",
+        "service runs": "a service run keeps its question and answer until its "
+        "service or organisation is deleted; no retention period applies yet",
+    }
+)
+
 
 def retention_task_registrations(
     settings: Settings, *, now: datetime | None = None
