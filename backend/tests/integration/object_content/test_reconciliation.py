@@ -674,6 +674,82 @@ async def test_an_inventory_outage_is_reported_as_a_store_failure(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("verification", ["digest differs", "store refuses"])
+async def test_an_upload_that_fails_verification_is_reported_as_a_store_failure(
+    verification: str,
+    monkeypatch: pytest.MonkeyPatch,
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+) -> None:
+    """The store holds bytes other than those Eneo wrote: the readback after a
+    restore must say the store failed, not only that a removal is pending."""
+    pending = await _create_pending(
+        object_content_database,
+        real_object_store,
+        upload_remote=True,
+    )
+    monkeypatch.setattr(
+        real_object_store.store,
+        "recompute_sha256",
+        AsyncMock(return_value=bytes(32))
+        if verification == "digest differs"
+        else AsyncMock(side_effect=ObjectStoreIntegrityError("checksum differs")),
+    )
+
+    result = await _reconciler(
+        real_object_store.settings,
+        real_object_store.store,
+        object_content_database,
+    ).run_once()
+
+    assert result.store_failures == 1
+    async with object_content_database.session() as session, session.begin():
+        row = await session.get(ObjectContents, pending.content_id)
+        assert row is not None
+        assert row.failure_code == ContentFailureCode.VERIFICATION_MISMATCH.value
+
+
+@pytest.mark.asyncio
+async def test_an_orphan_delete_left_for_retry_is_reported_as_a_store_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+) -> None:
+    """An orphan's bytes that the store would not delete stay in it; the pass
+    says so instead of reporting nothing deleted and nothing failed."""
+    settings = real_object_store.settings
+    orphan_key = new_object_key(settings)
+    payload = b"orphan-bytes"
+    async with capture_content(
+        _source(payload),
+        declared_media_type="application/octet-stream",
+        verified_media_type="application/octet-stream",
+        maximum_size_bytes=len(payload),
+        spool_memory_bytes=settings.spool_memory_bytes,
+        multipart_part_bytes=settings.multipart_part_bytes,
+    ) as captured:
+        await real_object_store.store.upload(orphan_key, captured)
+    reconciler = _reconciler(
+        settings,
+        real_object_store.store,
+        object_content_database,
+    )
+    assert (await reconciler.run_once()).orphan_objects_deleted == 0
+    await asyncio.sleep(settings.orphan_grace_seconds + 0.1)
+    monkeypatch.setattr(
+        real_object_store.store,
+        "delete_and_confirm",
+        AsyncMock(side_effect=ObjectStoreUnavailableError("delete unconfirmed")),
+    )
+
+    result = await reconciler.run_once()
+
+    assert result.orphan_objects_deleted == 0
+    assert result.store_failures == 1
+    await real_object_store.store.head(orphan_key)
+
+
+@pytest.mark.asyncio
 async def test_delete_renews_before_head_and_cannot_be_reconciled_twice(
     monkeypatch: pytest.MonkeyPatch,
     object_content_database: DatabaseSessionManager,
