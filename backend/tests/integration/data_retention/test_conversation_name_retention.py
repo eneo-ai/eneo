@@ -198,6 +198,51 @@ async def test_a_name_and_feedback_text_go_when_their_own_time_has_passed(
         assert removed not in audited
 
 
+async def test_a_conversation_with_both_texts_due_is_written_once(
+    retention_session: AsyncSession, test_tenant, admin_user, completion_model_factory
+):
+    """The step charges one write for each conversation it writes, so a
+    conversation whose name and feedback text are both due is written once.
+    Mutant: one statement per text writes the row twice for one charge."""
+    model_id = (await completion_model_factory(retention_session, "gpt-4")).id
+    space = await _space(retention_session, tenant_id=test_tenant.id)
+    assistant = await _assistant(
+        retention_session,
+        model_id,
+        space=space,
+        user_id=admin_user.id,
+        days=30,
+    )
+    both, _, _ = await _conversation(
+        retention_session,
+        user_id=admin_user.id,
+        assistant_id=assistant.id,
+        created_days_ago=60,
+        named_days_ago=60,
+    )
+    await retention_session.commit()
+    await retention_session.begin()
+    session_writes: list[int] = []
+
+    def count_session_writes(
+        conn, cursor, statement: str, parameters, context, executemany
+    ) -> None:
+        if "UPDATE sessions SET" in statement:
+            session_writes.append(cursor.rowcount)
+
+    engine = retention_session.bind.sync_engine
+    sa.event.listen(engine, "after_cursor_execute", count_session_writes)
+    try:
+        report = await run_registered_retention(retention_session)
+    finally:
+        sa.event.remove(engine, "after_cursor_execute", count_session_writes)
+
+    assert await _texts(retention_session, both) == ("", 1, None)
+    assert report.counts[f"{STEP}.names_cleared"] == 1
+    assert report.counts[f"{STEP}.feedback_texts_cleared"] == 1
+    assert session_writes == [1]
+
+
 async def test_a_name_outside_any_period_or_in_a_widget_stays(
     retention_session: AsyncSession, test_tenant, admin_user, completion_model_factory
 ):

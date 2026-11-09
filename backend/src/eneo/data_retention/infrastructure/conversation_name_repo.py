@@ -7,7 +7,7 @@ its questions are still there. The name is replaced by an empty one, which both
 apps show as untitled; the feedback vote stays.
 """
 
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from datetime import datetime
 from typing import cast
 from uuid import UUID
@@ -107,30 +107,37 @@ class ConversationNameRepository:
         other transaction holds: the id and tenant of each conversation written
         and which of the two went.
 
-        Each write checks the field's own time against the cutoff again, so a
-        rename or new feedback that lands first is kept."""
-        names = await self._clear(ids, _name_due, name="")
-        texts = await self._clear(ids, _feedback_due, feedback_text=None)
-        return tuple(
-            (session_id, tenant_id, session_id in names, session_id in texts)
-            for session_id, tenant_id in {**names, **texts}.items()
+        Both go in one write of the row, which checks each field's own time
+        against the cutoff again, so a rename or new feedback that lands first
+        is kept."""
+        due = (
+            self._due(ids)
+            .add_columns(
+                _name_due(self.cutoff).label("name_due"),
+                _feedback_due(self.cutoff).label("feedback_due"),
+            )
+            .with_for_update(of=Sessions, skip_locked=True)
+            .cte("due")
         )
-
-    async def _clear(
-        self,
-        ids: Sequence[UUID],
-        is_due: Callable[[ColumnElement[datetime]], ColumnElement[bool]],
-        **emptied: str | None,
-    ) -> dict[UUID, UUID]:
-        due = self._due(ids).with_for_update(of=Sessions, skip_locked=True).cte("due")
+        name_due = _name_due(due.c.cutoff)
+        feedback_due = _feedback_due(due.c.cutoff)
         statement = (
             sa.update(Sessions)
-            .where(Sessions.id == due.c.id, is_due(due.c.cutoff))
-            # Not a change by anyone: the conversation keeps its place.
-            .values(**emptied, updated_at=Sessions.updated_at)
-            .returning(Sessions.id, due.c.tenant_id)
+            .where(Sessions.id == due.c.id, sa.or_(name_due, feedback_due))
+            .values(
+                name=sa.case((name_due, ""), else_=Sessions.name),
+                feedback_text=sa.case(
+                    (feedback_due, None), else_=Sessions.feedback_text
+                ),
+                # Not a change by anyone: the conversation keeps its place.
+                updated_at=Sessions.updated_at,
+            )
+            # The returned values are the new ones; which field went comes from
+            # the CTE, which holds the row's lock and so read the version this
+            # write checks.
+            .returning(Sessions.id, due.c.tenant_id, due.c.name_due, due.c.feedback_due)
         )
-        return dict((await self.session.execute(statement)).tuples().all())
+        return tuple((await self.session.execute(statement)).tuples().all())
 
     async def count_due(self, ids: Sequence[UUID]) -> int:
         """How many of these conversations still have a due name or feedback
