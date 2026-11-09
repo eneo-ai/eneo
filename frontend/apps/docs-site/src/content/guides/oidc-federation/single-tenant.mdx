@@ -292,7 +292,7 @@ curl "https://your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/federation" \
 With the settings stored in Eneo, the organisation's administrators open **Administration › Sign-in (SSO)**. The page always applies to their own organisation.
 
 - **Shown, set by the operator:** the discovery URL, issuer, redirect URIs (each with a copy button, to register at the identity provider), scopes and client authentication method. The operator changes the discovery URL and the redirect settings through the [sysadmin API](#configure-via-api); the issuer and client authentication method come from the provider's discovery document, and the scopes are Eneo's defaults.
-- **Changed by the administrator:** the provider's display name, client ID, client secret and allowed email domains, one per line. The secret is never shown: the page says when it was saved, and **Replace secret** opens an empty field.
+- **Changed by the administrator:** the provider's display name, client ID, client secret and allowed email domains, one per line. The secret is never shown: the page says when it was saved, and **Replace secret** opens an empty field. Under the domains the page says whether new accounts are created at first sign-in ([JIT](#user-provisioning)) and links to that setting on the administration overview.
 
 Next to **Save changes** the page names the settings changed but not saved, and **Undo changes** restores the saved values. Saving asks for confirmation:
 
@@ -301,7 +301,7 @@ Next to **Save changes** the page names the settings changed but not saved, and 
 
 Each saved change is written to the audit log. The change applies from the next sign-in, and people already signed in stay signed in; after a change to who can sign in, the page suggests trying SSO in a private window before signing out. If another administrator saved in the meantime, the save is refused and the page offers to load their values.
 
-While sign-in is configured with `OIDC_*` variables, the page only says that the operator manages it in the server configuration.
+While sign-in is configured with `OIDC_*` variables, the page only says that the operator manages it in the server configuration, and links to [Move the settings into Eneo](#move-the-settings-into-eneo).
 
 ## Move the settings into Eneo
 

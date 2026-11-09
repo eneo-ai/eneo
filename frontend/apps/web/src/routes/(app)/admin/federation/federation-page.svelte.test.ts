@@ -64,10 +64,15 @@ type State =
   | { kind: "disabled" }
   | { kind: "error" };
 
-function show(state: State | Promise<State>) {
-  return render(FederationPage, {
-    data: { federation: Promise.resolve(state) }
-  } as never);
+type Settings = { provisioning?: boolean };
+
+/** The page's data as the admin layout delivers it: `settings` is always there. */
+function pageData(federation: Promise<State>, settings: Settings = {}) {
+  return { data: { federation, settings } } as never;
+}
+
+function show(state: State | Promise<State>, settings: Settings = {}) {
+  return render(FederationPage, pageData(Promise.resolve(state), settings));
 }
 
 function answer(result: unknown) {
@@ -122,7 +127,7 @@ afterEach(() => {
 
 describe("the page's states", () => {
   test("shows a loading state while the settings are read", async () => {
-    render(FederationPage, { data: { federation: new Promise(() => {}) } } as never);
+    render(FederationPage, pageData(new Promise(() => {})));
     await expect.element(page.getByLabelText("federation_admin_loading")).toBeVisible();
   });
 
@@ -529,9 +534,7 @@ describe("refused saves", () => {
     );
     const screen = show({ kind: "ready", view });
     invalidate.mockImplementationOnce(async () => {
-      await screen.rerender({
-        data: { federation: Promise.resolve({ kind: "disabled" }) }
-      } as never);
+      await screen.rerender(pageData(Promise.resolve({ kind: "disabled" })));
     });
     await changeDomains("example.org");
     await requestSave();
@@ -548,5 +551,32 @@ describe("refused saves", () => {
     await saveDomainChange({ type: "redirect", status: 303, location: "/login?next=%2Fadmin" });
 
     await vi.waitFor(() => expect(assignLocation).toHaveBeenCalledWith("/login?next=%2Fadmin"));
+  });
+});
+
+describe("account creation at first sign-in", () => {
+  test.each([
+    [false, "federation_admin_jit_off"],
+    [true, "federation_admin_jit_on"]
+  ])(
+    "with automatic account creation %s the domain field says what happens to people without an account",
+    async (provisioning, text) => {
+      show({ kind: "ready", view }, { provisioning });
+
+      const domains = page.getByLabelText("federation_admin_domains", { exact: true });
+      await expect.element(domains).toHaveAccessibleDescription(new RegExp(text));
+      await expect
+        .element(page.getByRole("link", { name: /federation_admin_jit_link/ }))
+        .toHaveAttribute("href", "/admin");
+    }
+  );
+
+  test("with automatic account creation and an empty list it says no accounts are created", async () => {
+    show({ kind: "ready", view }, { provisioning: true });
+
+    await changeDomains("");
+    await expect
+      .element(field("federation_admin_domains"))
+      .toHaveAccessibleDescription(/federation_admin_jit_no_domains/);
   });
 });

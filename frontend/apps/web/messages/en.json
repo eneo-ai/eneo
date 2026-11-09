@@ -5799,7 +5799,7 @@
   "federation_admin_discovery": "Discovery URL",
   "federation_admin_domain_invalid": "“{domain}” is not a valid domain. Write a domain such as example.org.",
   "federation_admin_domains": "Allowed email domains",
-  "federation_admin_domains_help": "One domain per line, such as example.org. When the list has domains, only email addresses in them can sign in through the identity provider. People without an account get one only if your organisation creates accounts at first sign-in.",
+  "federation_admin_domains_help": "One domain per line, such as example.org. When the list has domains, only email addresses in them can sign in through the identity provider.",
   "federation_admin_editable": "Settings you can change",
   "federation_admin_encryption_unavailable": "The secret cannot be saved because encryption is not configured. Contact your operator.",
   "federation_admin_field_refused": "The value was not accepted. Check it and try again.",
@@ -5848,5 +5848,9 @@
   "federation_admin_change_domains": "{field}: {changes}",
   "federation_admin_domains_added": "adds {domains}",
   "federation_admin_domains_removed": "removes {domains}",
-  "federation_admin_register_guide_link": "How the operator connects the identity provider"
+  "federation_admin_register_guide_link": "How the operator connects the identity provider",
+  "federation_admin_jit_on": "New accounts are created at first sign-in: people in these domains without an account get one if their email address is verified.",
+  "federation_admin_jit_off": "New accounts are not created at first sign-in: only people who already have an account can sign in.",
+  "federation_admin_jit_no_domains": "New accounts are not created while the list is empty: only people who already have an account can sign in. Add domains to create accounts at first sign-in.",
+  "federation_admin_jit_link": "Change under {setting}"
 }

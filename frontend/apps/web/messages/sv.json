@@ -5799,7 +5799,7 @@
   "federation_admin_discovery": "Discovery-URL",
   "federation_admin_domain_invalid": "”{domain}” är inte en giltig domän. Skriv till exempel example.org.",
   "federation_admin_domains": "Tillåtna e-postdomäner",
-  "federation_admin_domains_help": "En domän per rad, till exempel example.org. När listan har domäner kan bara e-postadresser i dem logga in via identitetsleverantören. Personer utan konto får ett bara om organisationen skapar konton vid första inloggningen.",
+  "federation_admin_domains_help": "En domän per rad, till exempel example.org. När listan har domäner kan bara e-postadresser i dem logga in via identitetsleverantören.",
   "federation_admin_editable": "Inställningar ni kan ändra",
   "federation_admin_encryption_unavailable": "Hemligheten kan inte sparas eftersom kryptering inte är konfigurerad. Kontakta er driftleverantör.",
   "federation_admin_field_refused": "Värdet godtogs inte. Kontrollera det och försök igen.",
@@ -5848,5 +5848,9 @@
   "federation_admin_change_domains": "{field}: {changes}",
   "federation_admin_domains_added": "lägger till {domains}",
   "federation_admin_domains_removed": "tar bort {domains}",
-  "federation_admin_register_guide_link": "Så kopplar driftleverantören in identitetsleverantören"
+  "federation_admin_register_guide_link": "Så kopplar driftleverantören in identitetsleverantören",
+  "federation_admin_jit_on": "Nya konton skapas vid första inloggningen: personer i domänerna som saknar konto får ett om e-postadressen är verifierad.",
+  "federation_admin_jit_off": "Nya konton skapas inte vid första inloggningen: bara personer som redan har ett konto kan logga in.",
+  "federation_admin_jit_no_domains": "Nya konton skapas inte så länge listan är tom: bara personer som redan har ett konto kan logga in. Lägg till domäner för att skapa konton vid första inloggningen.",
+  "federation_admin_jit_link": "Ändra under {setting}"
 }

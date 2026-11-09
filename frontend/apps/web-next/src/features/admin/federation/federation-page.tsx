@@ -12,6 +12,7 @@ import { KeyRound } from "lucide-react";
 import { useLocale, useTranslations } from "use-intl";
 import { useId, useRef, useState, type SubmitEvent } from "react";
 import { TextInput } from "@/components/astryx/text-input";
+import { useAppContext } from "@/components/providers/app-context";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { EmptyState } from "@/components/composites/empty-state";
 import { revealProblems } from "@/components/composites/field-problem";
@@ -133,6 +134,26 @@ function ManagedByOperator() {
   );
 }
 
+/** Whether newcomers in the allowed domains get an account; the switch is on the settings page. */
+function ProvisioningState({ id, hasDomains }: { id: string; hasDomains: boolean }) {
+  const t = useTranslations();
+  const { settings } = useAppContext();
+  // Account creation also needs domains to match (the sign-in refuses it with an empty list).
+  const state = !settings.provisioning
+    ? "federation_admin_jit_off"
+    : hasDomains
+      ? "federation_admin_jit_on"
+      : "federation_admin_jit_no_domains";
+  return (
+    <Text type="supporting" id={id}>
+      <span>{t(state)}</span>{" "}
+      <Link href="/admin/settings" hasUnderline>
+        {t("federation_admin_jit_link", { setting: t("enable_provisioning") })}
+      </Link>
+    </Text>
+  );
+}
+
 /** A section of the single-tenant sign-in guide, in a new tab. */
 function GuideLink({ anchor, children }: { anchor: string; children: string }) {
   const t = useTranslations();
@@ -199,6 +220,7 @@ function FederationForm({
   const announce = useAnnounce();
   const queryClient = useQueryClient();
   const headingId = useId();
+  const provisioningId = useId();
   // The settings the draft was made from; a background refetch does not
   // replace what the admin is editing (a stale save answers 409 instead).
   const [base, setBase] = useState(view);
@@ -377,12 +399,17 @@ function FederationForm({
             ref={domainsRef}
             label={t("federation_admin_domains")}
             description={t("federation_admin_domains_help")}
+            aria-describedby={provisioningId}
             value={draft.domains}
             onChange={(domains) => edit("allowed_domains", { domains })}
             rows={4}
             hasSpellCheck={false}
             {...KEYBOARD.identifier}
             status={status("allowed_domains")}
+          />
+          <ProvisioningState
+            id={provisioningId}
+            hasDomains={parseDomains(draft.domains).length > 0}
           />
           {saveError != null ? <SaveError error={saveError} /> : null}
           <Button

@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import en from "@/lib/i18n/messages/en.json";
 import sv from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderInApp, testQueryClient } from "@/test/render";
+import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
 import type { FederationView } from "./federation";
 
 const api = vi.hoisted(() => ({ GET: vi.fn(), PATCH: vi.fn() }));
@@ -388,4 +388,43 @@ it("has every text in Swedish and English", () => {
   expect(keys(sv).length).toBeGreaterThan(30);
   expect(keys(en)).toEqual(keys(sv));
   for (const key of keys(en)) expect((en as Record<string, string>)[key]).toBeTruthy();
+});
+
+describe("account creation at first sign-in", () => {
+  it.each([
+    [false, "federation_admin_jit_off"],
+    [true, "federation_admin_jit_on"]
+  ] as const)(
+    "with automatic account creation %s it says what happens to people without an account",
+    async (provisioning, key) => {
+      api.GET.mockImplementation(() => ok(view));
+      renderInApp(<FederationPage />, {
+        appContext: testAppContext({ settings: { provisioning } })
+      });
+
+      const domains = await screen.findByLabelText(sv.federation_admin_domains);
+      expect(domains.getAttribute("aria-describedby")).toBeTruthy();
+      const describedBy = domains
+        .getAttribute("aria-describedby")!
+        .split(" ")
+        .map((id) => document.getElementById(id)?.textContent)
+        .join(" ");
+      expect(describedBy).toContain(sv[key]);
+      const link = screen.getByRole("link", {
+        name: `Ändra under ${sv.enable_provisioning}`
+      });
+      expect(link.getAttribute("href")).toBe("/admin/settings");
+    }
+  );
+
+  it("with automatic account creation and an empty list it says no accounts are created", async () => {
+    api.GET.mockImplementation(() => ok(view));
+    renderInApp(<FederationPage />, {
+      appContext: testAppContext({ settings: { provisioning: true } })
+    });
+
+    const domains = await screen.findByLabelText(sv.federation_admin_domains);
+    fireEvent.change(domains, { target: { value: "" } });
+    expect(await screen.findByText(sv.federation_admin_jit_no_domains)).toBeTruthy();
+  });
 });

@@ -3,6 +3,7 @@
   import type { ActionResult } from "@sveltejs/kit";
   import { deserialize } from "$app/forms";
   import { beforeNavigate, invalidate } from "$app/navigation";
+  import { resolve } from "$app/paths";
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import CircleCheck from "@lucide/svelte/icons/circle-check";
   import Copy from "@lucide/svelte/icons/copy";
@@ -36,8 +37,9 @@
   import { m } from "$lib/paraglide/messages";
   import type { SaveFailure } from "./+page.server";
 
-  type Props = { view: FederationView };
-  let { view }: Props = $props();
+  /** `provisioning`: the organisation creates accounts at first sign-in (set on the overview). */
+  type Props = { view: FederationView; provisioning: boolean };
+  let { view, provisioning }: Props = $props();
 
   const eneo = getEneo();
   const copyState = createCopyState();
@@ -88,6 +90,14 @@
 
   const changed = $derived(changedFields(base, draft));
   const problems = $derived(validate(draft));
+  // Account creation also needs domains to match (the sign-in refuses it with an empty list).
+  const provisioningState = $derived(
+    !provisioning
+      ? m.federation_admin_jit_off()
+      : parseDomains(draft.domains).length > 0
+        ? m.federation_admin_jit_on()
+        : m.federation_admin_jit_no_domains()
+  );
 
   function problemFor(field: FederationField): FieldProblem | undefined {
     return (submitted ? problems[field] : undefined) ?? serverProblems[field];
@@ -519,10 +529,20 @@
         rows={4}
         spellcheck={false}
         aria-invalid={problemFor("allowed_domains") ? true : undefined}
-        aria-describedby={describedBy("allowed_domains", "federation-domains-help")}
+        aria-describedby={describedBy(
+          "allowed_domains",
+          "federation-domains-help federation-provisioning-state"
+        )}
       />
       <Field.Description id="federation-domains-help">
         {m.federation_admin_domains_help()}
+      </Field.Description>
+      <!-- The domains decide who may sign in; this setting decides whether newcomers get an account. -->
+      <Field.Description id="federation-provisioning-state">
+        <span>{provisioningState}</span>
+        <a href={resolve("/admin")}
+          >{m.federation_admin_jit_link({ setting: m.enable_provisioning() })}</a
+        >
       </Field.Description>
       {@render fieldError("allowed_domains")}
     </Field.Field>

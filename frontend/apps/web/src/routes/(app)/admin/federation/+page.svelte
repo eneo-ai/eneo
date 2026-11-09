@@ -45,7 +45,7 @@
       {:then state}
         {#if state.kind === "ready"}
           <div {@attach markFormShown}>
-            <FederationForm view={state.view} />
+            <FederationForm view={state.view} provisioning={data.settings.provisioning ?? false} />
           </div>
         {:else if state.kind === "error"}
           <Alert.Root variant="destructive">
