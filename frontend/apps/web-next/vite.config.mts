@@ -59,6 +59,7 @@ function devServer(mode: string): ServerOptions {
   // Whole path segments, matched against the path and query.
   return {
     port: 3101,
+    host: true,
     strictPort: true,
     proxy: {
       "^/api(?:[/?]|$)": { ...backend, ws: true },
