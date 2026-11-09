@@ -1,9 +1,11 @@
 """Integration tests for audit logging ARQ worker."""
 
+import json
 from datetime import datetime
 from uuid import uuid4
 
 import pytest
+import sqlalchemy as sa
 
 from eneo.audit.application.audit_worker_task import log_audit_event_task
 from eneo.audit.domain.action_types import ActionType
@@ -11,6 +13,7 @@ from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.domain.outcome import Outcome
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
 
 pytestmark = pytest.mark.integration
 
@@ -65,6 +68,51 @@ async def test_log_audit_event_task(db_session, test_tenant, test_user):
         assert created_log.action == ActionType.ASSISTANT_CREATED
         assert created_log.actor_id == test_user
         assert created_log.ip_address == "192.168.1.1"
+
+
+@pytest.mark.asyncio
+async def test_a_file_event_queued_with_its_name_is_stored_without_it(
+    db_session, test_tenant, test_user
+):
+    """A job queued before the upgrade carries the file's name; the row it
+    writes keeps the file's id, size and MIME type only."""
+    name = "Utredning Anna Svensson.pdf"
+    file_id = uuid4()
+    params = {
+        "tenant_id": str(test_tenant.id),
+        "actor_id": str(test_user),
+        "actor_type": ActorType.USER.value,
+        "action": ActionType.FILE_UPLOADED.value,
+        "entity_type": EntityType.FILE.value,
+        "entity_id": str(file_id),
+        "timestamp": datetime.utcnow().isoformat(),
+        "description": f"Uploaded file '{name}' (7 bytes)",
+        "metadata": {
+            "actor": {"id": str(test_user), "name": "anna"},
+            "target": {"id": str(file_id), "name": name},
+            "extra": {"size_bytes": 7, "mimetype": "application/pdf"},
+        },
+        "outcome": Outcome.SUCCESS.value,
+        "ip_address": None,
+        "user_agent": None,
+        "request_id": None,
+        "error_message": None,
+    }
+
+    async with db_session() as session:
+        await log_audit_event_task(job_id=str(uuid4()), params=params, session=session)
+        description, metadata = (
+            await session.execute(
+                sa.select(AuditLogTable.description, AuditLogTable.log_metadata).where(
+                    AuditLogTable.entity_id == file_id
+                )
+            )
+        ).one()
+
+    assert name not in description
+    assert name not in json.dumps(metadata)
+    assert metadata["target"] == {"id": str(file_id), "name": "file"}
+    assert metadata["extra"] == {"size_bytes": 7, "mimetype": "application/pdf"}
 
 
 @pytest.mark.asyncio

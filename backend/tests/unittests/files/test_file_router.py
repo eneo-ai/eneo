@@ -1,3 +1,4 @@
+import json
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -37,6 +38,15 @@ from eneo.object_content.content import (
 )
 from eneo.server.exception_handlers import add_exception_handlers
 from tests.fixtures import TEST_USER
+
+# A file's name is often what it is about, and retention removes it; an
+# audit row records the file by id, type, size and MIME type only.
+NAME = "Utredning Anna Svensson.pdf"
+
+
+def _assert_names_no_file(audit: dict[str, object]) -> None:
+    assert NAME not in str(audit["description"])
+    assert NAME not in json.dumps(audit["metadata"], default=str)
 
 
 def _dependency_calls(route: APIRoute) -> set[object]:
@@ -157,7 +167,7 @@ async def test_upload_enqueues_audit_only_after_file_success() -> None:
         id=uuid4(),
         created_at=now,
         updated_at=now,
-        name="source.txt",
+        name=NAME,
         checksum="checksum",
         size=7,
         mimetype="text/plain",
@@ -211,6 +221,7 @@ async def test_upload_enqueues_audit_only_after_file_success() -> None:
     service.get_public_file_by_id.assert_awaited_once_with(file.id)
     audit_service.log_async.assert_awaited_once()
     audit_service.log.assert_not_awaited()
+    _assert_names_no_file(audit_service.log_async.await_args.kwargs)
 
     service.save_file.side_effect = RuntimeError("upload failed")
     with pytest.raises(RuntimeError, match="upload failed"):
@@ -233,7 +244,7 @@ async def test_original_signed_url_audits_the_attributable_access_grant(
         id=file_id,
         created_at=now,
         updated_at=now,
-        name="source.pdf",
+        name=NAME,
         file_type=FileType.TEXT,
         mimetype="application/pdf",
         user_id=user_id,
@@ -288,11 +299,58 @@ async def test_original_signed_url_audits_the_attributable_access_grant(
     audit = audit_service.log_async.await_args.kwargs
     assert audit["action"].value == "file_original_download_link_created"
     assert audit["entity_id"] == file_id
+    _assert_names_no_file(audit)
     assert audit["metadata"]["extra"] == {
         "content_disposition": "attachment",
         "expires_at": 1_120,
         "expires_in_seconds": 120,
     }
+
+
+async def test_deleting_a_file_audits_it_without_its_name() -> None:
+    now = datetime.now(UTC)
+    user = MagicMock(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        username="file-owner",
+        email="owner@example.eu",
+    )
+    file = FileInfo(
+        id=uuid4(),
+        created_at=now,
+        updated_at=now,
+        name=NAME,
+        checksum="checksum",
+        size=7,
+        mimetype="application/pdf",
+        file_type=FileType.TEXT,
+        user_id=user.id,
+        tenant_id=user.tenant_id,
+    )
+    service = AsyncMock()
+    service.delete_file.return_value = file
+    audit_service = AsyncMock()
+
+    class Container:
+        @staticmethod
+        def file_service():
+            return service
+
+        @staticmethod
+        def audit_service():
+            return audit_service
+
+        @staticmethod
+        def user():
+            return user
+
+    await file_router.delete_file(id=file.id, container=Container())
+
+    audit = audit_service.log_async.await_args.kwargs
+    assert audit["action"].value == "file_deleted"
+    assert audit["entity_id"] == file.id
+    assert audit["metadata"]["extra"]["mimetype"] == "application/pdf"
+    _assert_names_no_file(audit)
 
 
 async def test_download_file_signed_raises_not_found_for_missing_content(monkeypatch):
@@ -490,7 +548,7 @@ async def test_original_download_audits_the_redemption(monkeypatch):
         chunks=chunks(),
         content_length=5,
         media_type="application/pdf",
-        filename="source.pdf",
+        filename=NAME,
         sha256=b"x" * 32,
         content_range=None,
         range_supported=False,
@@ -532,7 +590,8 @@ async def test_original_download_audits_the_redemption(monkeypatch):
     assert audit["entity_id"] == file_id
     assert audit["actor_type"].value == "system"
     assert "user" not in audit
-    assert audit["metadata"]["target"] == {"id": str(file_id), "name": "source.pdf"}
+    assert audit["metadata"]["target"] == {"id": str(file_id), "name": "file"}
+    _assert_names_no_file(audit)
     assert audit["metadata"]["extra"] == {
         "content_disposition": "attachment",
         "ranged": False,

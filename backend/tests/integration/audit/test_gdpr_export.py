@@ -8,6 +8,7 @@ from eneo.audit.application.audit_export_service import AuditExportService
 from eneo.audit.application.audit_service import AuditService
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.audit.domain.removable_names import FILE_DESCRIPTIONS
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 
 pytestmark = pytest.mark.integration
@@ -95,7 +96,8 @@ async def test_csv_export_format(db_session, test_tenant, test_user):
         assert "Timestamp,Actor ID,Actor Type,Action,Entity Type" in csv_content
         assert str(test_user) in csv_content
         assert "file_uploaded" in csv_content
-        assert "User uploaded file" in csv_content
+        # A file row is stored under its action's fixed description.
+        assert FILE_DESCRIPTIONS[ActionType.FILE_UPLOADED] in csv_content
 
         # Verify it's valid CSV (can be split into rows)
         rows = csv_content.strip().split("\n")

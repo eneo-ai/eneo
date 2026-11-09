@@ -147,6 +147,20 @@
             "en": "When retention removes a question or someone deletes it, Eneo empties every log that held it, also the logs of later questions in the same conversation. Questions asked before this version have no log, and the question details in Insights tell you so instead of offering to try again.",
             "sv": "När gallringen tar bort en fråga eller någon raderar den tömmer Eneo varje logg som innehöll den, även loggarna för senare frågor i samma konversation. Frågor som ställdes före den här versionen har ingen logg, och frågedetaljerna under Insikter talar om det för dig i stället för att erbjuda ett nytt försök."
           }
+        },
+        {
+          "id": "audit-log-without-file-and-conversation-names",
+          "type": "improved",
+          "area": "admin",
+          "audience": "admin",
+          "title": {
+            "en": "Keep file and conversation names out of the audit log",
+            "sv": "Slipp fil- och konversationsnamn i granskningsloggen"
+          },
+          "body": {
+            "en": "A file's name often says what the file is about, and a conversation's name copies text that retention removes. In the audit log you now see a file by its id, size and file type, and a conversation by its id. Entries from before this version were changed the same way, so a search for a file name finds none of them.",
+            "sv": "Ett filnamn säger ofta vad filen handlar om, och en konversations namn kopierar text som gallras. I granskningsloggen ser du nu en fil med id, storlek och filtyp, och en konversation med sitt id. Rader från före den här versionen ändrades på samma sätt, så du hittar dem inte genom att söka på ett filnamn."
+          }
         }
       ]
     },

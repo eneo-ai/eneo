@@ -35,21 +35,29 @@ Security considerations:
 from typing import Any, Mapping, Optional
 from uuid import UUID
 
+from eneo.audit.domain.removable_names import (
+    CONVERSATION_TARGET_NAME,
+    FILE_TARGET_NAME,
+)
 from eneo.authentication.auth_models import is_service_api_key
 
 
 def _target_name(target: Any) -> str | None:
     """The name an audit row records for its target.
 
-    A conversation is named after its first question, or a title made from
-    its turns. Retention removes that text, and an audit row would keep a
-    copy, so a conversation is recorded by its id and this fixed name.
+    A conversation's name copies conversation text that retention removes:
+    its first question, or a title made from its turns. A file's name is
+    often what the file is about. An audit row would keep a copy, so a
+    conversation or file is recorded by its id and a fixed name.
     """
-    # Deferred: the session model imports much of the domain.
+    # Deferred: the session and file models import much of the domain.
+    from eneo.files.file_models import FileBase, FileMetadataCreate
     from eneo.sessions.session import SessionBase
 
     if isinstance(target, SessionBase):
-        return "conversation"
+        return CONVERSATION_TARGET_NAME
+    if isinstance(target, (FileBase, FileMetadataCreate)):
+        return FILE_TARGET_NAME
     return getattr(target, "name", getattr(target, "title", None))
 
 

@@ -33,6 +33,8 @@ Key fields include:
 
 Metadata follows a consistent schema via `AuditMetadata` to prevent drift. It stores actor and target snapshots so log entries remain meaningful even if users or entities are renamed or deleted.
 
+A log never holds text that retention removes. A log about a file records the file by its id, with its size and MIME type where known, under a fixed description for each action and the target name `file`; an upload to a collection names the collection, not the file. A log about a conversation (a tool view's call, a document export or a saved document version) names its target `conversation`, and an assistant update records attached files by id, scope and mode. Logs stored before this behaviour are changed the same way on upgrade.
+
 ## Configuration model
 
 Configuration is layered to allow broad and precise control:
@@ -63,7 +65,7 @@ Audit queries support filters for:
 - actions (single or multi-select)
 - date range
 
-Free-text search matches the log `description` field. If you want reliable search for a name or identifier, include it in `description` or metadata.
+Free-text search matches the log `description` field. If you want reliable search for a name or identifier, include it in `description` or metadata. File and conversation names are never stored, so a search for one finds nothing.
 
 For data subject access requests, `GET /api/v1/audit/logs/user/{user_id}` returns every log where the user is the actor or the target (GDPR Article 15). The same `user_id` filter is accepted by the synchronous export.
 
