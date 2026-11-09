@@ -85,11 +85,11 @@ test("an exception matches only its advisory, package and vulnerable range", () 
 });
 
 test("expired exceptions still fail when the finding is absent or below high", () => {
-  const expired = new Date("2026-11-05T00:00:00Z");
+  const expired = new Date("2026-12-15T00:00:00Z");
   for (const report of [{}, { example: [advisory("low")] }]) {
     assert.match(
       evaluate(report, expired).errors[0],
-      /Review braces.*before 2026-11-05/,
+      /Review braces.*before 2026-12-15/,
     );
   }
 });

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { createServer, type AddressInfo } from "node:net";
 import { tabularConfigSchema, type DownloadPolicy } from "../../src/tools/tabular/config";
 import {
   addressAllowed,
@@ -22,6 +23,45 @@ describe("URL intake boundaries", () => {
     expect(addressAllowed("169.254.169.254", true)).toBe(false);
     expect(addressAllowed("0.0.0.0", true)).toBe(false);
     expect(addressAllowed("10.0.0.1", false)).toBe(false);
+    expect(addressAllowed("100.64.0.1", true)).toBe(true);
+    expect(addressAllowed("100.65.13.15", true)).toBe(true);
+    expect(addressAllowed("100.127.255.254", true)).toBe(true);
+    expect(addressAllowed("100.64.0.1", false)).toBe(false);
+    // Beyond 100.127.255.255 addresses are ordinary unicast.
+    expect(addressAllowed("100.128.0.1", false)).toBe(true);
+  });
+  test("never contacts cloud metadata endpoints inside the allowed private ranges", () => {
+    for (const address of [
+      "100.100.100.200", // Alibaba Cloud, inside the shared address space
+      "::ffff:100.100.100.200",
+      "fd00:ec2::254", // AWS IMDS over IPv6, inside unique-local space
+      "FD00:0EC2:0000:0000:0000:0000:0000:0254",
+    ]) {
+      expect(addressAllowed(address, true)).toBe(false);
+      expect(addressAllowed(address, false)).toBe(false);
+    }
+    expect(addressAllowed("100.100.100.201", true)).toBe(true);
+    expect(addressAllowed("fd00:ec2::253", true)).toBe(true);
+  });
+  test("refuses an address before connecting and says why", async () => {
+    // A local listener stands in for the refused host, so a regression connects here only.
+    let connections = 0;
+    const server = createServer((socket) => {
+      connections++;
+      socket.destroy();
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const probe = probeUrl(`${origin}/file.csv`, policy([{ origin, allow_private: false }]));
+      await expect(probe).rejects.toMatchObject({
+        code: "DOWNLOAD_DENIED",
+        message: expect.stringContaining("an address the runtime never contacts"),
+      });
+      expect(connections).toBe(0);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
   });
   test("allows Docker's synthetic host only with its hostname and private access", () => {
     expect(addressAllowed("0.250.250.254", true, "host.docker.internal")).toBe(true);
