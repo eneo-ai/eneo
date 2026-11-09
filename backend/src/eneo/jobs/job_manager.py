@@ -1,3 +1,4 @@
+from typing import cast
 from uuid import UUID
 
 from arq import create_pool
@@ -11,6 +12,7 @@ from arq.constants import (
 )
 from arq.jobs import Job
 from arq.utils import timestamp_ms
+from redis.asyncio import ConnectionPool
 
 from eneo.jobs.job_models import Task
 from eneo.jobs.job_serialization import deserialize_job, serialize_job
@@ -44,6 +46,19 @@ class JobManager:
             job_serializer=serialize_job,
             job_deserializer=deserialize_job,
         )
+        # arq's settings carry no read timeout. Without one, an enqueue on a
+        # Redis that accepts connections and never answers waits for ever, and
+        # so does the transaction cleanup after it. Every read now ends at the
+        # bound the other Redis clients use.
+        # ponytail: redis-py 5.x leaves the connection of a transaction whose
+        # cleanup timed out counted as in use; with REDIS_MAX_CONNECTIONS set,
+        # enough such stalls exhaust this pool until restart. Recheck whenever
+        # redis-py is upgraded.
+        connections = cast(ConnectionPool, self._redis.connection_pool)
+        connections.connection_kwargs["socket_timeout"] = settings.redis_conn_timeout  # pyright: ignore[reportUnknownMemberType]
+        # The connection create_pool checked Redis with predates the bound.
+        await connections.disconnect()
+        connections.reset()
 
         logger.debug(
             f"Job manager connected to redis on host {settings.redis_host}"

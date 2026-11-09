@@ -11,6 +11,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -32,6 +33,8 @@ from eneo.database.tables.audit_log_table import AuditLog
 from eneo.database.tables.browser_sessions_table import BrowserSessions
 from eneo.database.tables.identity_bindings_table import IdentityBindings
 from eneo.database.tables.users_table import Users
+from eneo.jobs import job_manager as job_manager_module
+from eneo.jobs.job_manager import JobManager
 from eneo.main.config import get_settings, set_settings
 from eneo.main.logging import OTELJSONFormatter
 from eneo.users import user_service as user_service_module
@@ -44,6 +47,7 @@ from tests.integration.test_federation_tenant_admin import (
     _store,
     _stored,
 )
+from tests.silent_server import freezing_redis
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
@@ -501,6 +505,41 @@ async def test_a_refusal_whose_audit_never_ends_keeps_the_typed_403(
     body = response.json()
     assert (body["code"], body["eneo_error_code"]) == ("identity_conflict", 9082)
     assert await _bindings() == {(await _account(), API, "person-a")}
+
+
+async def test_an_identity_conflict_still_answers_403_when_the_audit_queue_is_silent(
+    sign_in, provider, monkeypatch
+):
+    # The callback audits its refusal through the queue, outside any store
+    # deadline. A queue whose Redis answers the enqueue's WATCH and then
+    # nothing ends the enqueue at the read bound; the refusal still answers.
+    assert await sign_in("generic", "person-a") == SIGNED_IN
+
+    async with freezing_redis(freeze_after=b"WATCH") as redis:
+        settings = get_settings().model_copy(
+            update={
+                "redis_host": "127.0.0.1",
+                "redis_port": redis.port,
+                "redis_db": 0,
+                "redis_conn_timeout": 1,
+            }
+        )
+        manager = JobManager()
+        with monkeypatch.context() as patched:
+            patched.setattr(job_manager_module, "get_settings", lambda: settings)
+            await manager.init()
+        monkeypatch.setattr(audit_service_module, "job_manager", manager)
+        try:
+            started = time.monotonic()
+            async with asyncio.timeout(15):
+                outcome = await sign_in("generic", "someone-else")
+            elapsed = time.monotonic() - started
+        finally:
+            await manager.close()
+
+    assert outcome == "identity_conflict"
+    assert elapsed < 6
+    assert b"WATCH" in redis.commands
 
 
 @contextlib.contextmanager
