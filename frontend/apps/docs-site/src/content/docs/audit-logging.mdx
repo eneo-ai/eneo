@@ -189,7 +189,9 @@ another. The empty-session and unused-upload sweeps examine every row of their
 population once per pass, so a pass takes about population divided by
 `RETENTION_MAX_ROWS_PER_RUN` nights and reports `partial` until it ends; an empty
 session can wait up to one pass. A session emptied by history retention is removed
-in the same unit unless a live chat holds it. The execution record
+in the same unit unless a live chat holds it. An empty session that another
+transaction holds is kept for a later execution and counted as `root_locked`. The
+execution record
 (`retention_job_runs`) keeps counts, blocked reasons, cursors and the overdue
 snapshot.
 
@@ -382,6 +384,45 @@ LIMIT 5;
 
 Questions whose Assistant was deleted keep a null owner and follow no retention
 policy, so they do not expire. This is unchanged from earlier releases.
+
+#### Read back after a restore
+
+A restored database can hold rows that became due after its recovery point. Before
+traffic opens again, with the API closed and every worker stopped, run retention
+until nothing due is left:
+
+```bash
+docker compose run --rm backend run-cron --until-complete run_retention
+```
+
+The command runs the registered tasks in its own process, round after round, and
+prints each round's outcome and the number of rows removed. Retention is complete
+when every step of every task has finished a pass that began after the latest
+removal, because a removal can make other rows due (a removed question can leave
+its session empty). A pass resumed from a cursor stored before the restore does
+not count.
+
+It then runs object-content reconciliation and reports storage on its own line:
+
+| Line | Meaning |
+| --- | --- |
+| `storage: confirmed` | The store has removed every payload that nothing refers to any more |
+| `storage: pending N (held H, retrying R, waiting W)` | Payloads are still kept by a minimum retention or a hold, wait for a retry after a failure, or were not reached yet. Not confirmed erasure |
+| `storage: not reachable (code)` | The store could not be checked |
+| `storage: failed (...)` | A store operation failed during reconciliation |
+
+Exit code 0 means retention is complete and storage is confirmed or pending. Exit
+code 1 means it is not: the output names each task and reason, such as a missing
+report (the task raised; see the log), an execution held by another process (stop
+the workers), an outcome other than `succeeded` or `partial`, a blocked reason
+other than "no longer due" or "not old enough", a step that made no progress, or a
+storage line other than `confirmed` or `pending`. A task turned off by its setting
+also fails the readback, since nothing shows that its work is done. Resolve the
+cause and run the command again.
+
+The readback covers what the retention engine removes. It does not replay manual
+deletions made after the recovery point and does not remove backup copies; see the
+[storage and restore procedures](/guides/object-content-storage#back-up-and-restore).
 
 ## Export formats
 

@@ -715,8 +715,11 @@ expiry with the provider. PostgreSQL row deletion and current-key deletion in
 S3 do not remove backup copies. Before reopening a restored system, reconcile
 deletions made since the recovery point so erased data does not become available
 again. Keep the evidence needed for that reconciliation outside the restored
-snapshot. Eneo does not automatically replay manual deletions or certify backup
-expiry; a successful retention run is not evidence that all copies are gone.
+snapshot. For what scheduled retention made due since the recovery point, run the
+[retention readback](/docs/audit-logging#read-back-after-a-restore) before traffic
+opens; it reports separately whether the store has confirmed each removal. Eneo
+does not automatically replay manual deletions or certify backup expiry; a
+successful retention run is not evidence that all copies are gone.
 These operational procedures follow the concerns described in
 [IMY's guidance on deletion routines, section 5.1.3](https://www.imy.se/globalassets/dokument/rapporter/transkribering-inom-socialtjansten.pdf)
 and its [report on erasure and backups, page 17](https://www.imy.se/globalassets/dokument/rapporter/imy-nationell-rapport-till-edpb-svenska.pdf).

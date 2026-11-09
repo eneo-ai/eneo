@@ -149,6 +149,21 @@ class ObjectContentHealthFacts:
     last_object_cycle_completed_at: datetime | None
 
 
+@dataclass(frozen=True, slots=True)
+class RemovalReadback:
+    """Contents whose bytes are to be removed and are not yet, by why: kept on
+    purpose (minimum retention or a hold), failed and to be retried, or not
+    reached yet."""
+
+    held: int
+    retrying: int
+    waiting: int
+
+    @property
+    def pending(self) -> int:
+        return self.held + self.retrying + self.waiting
+
+
 CONTENT_REFERENCE_OWNER_COLUMNS = (
     (ContentOwner.FILE_CONTENT, FileContentReferences.content_id),
     (ContentOwner.KNOWLEDGE_FILE, InfoBlobContentReferences.content_id),
@@ -162,6 +177,27 @@ def _no_concrete_references() -> ColumnElement[bool]:
             ~exists(select(content_id).where(content_id == ObjectContents.id))
             for _owner, content_id in CONTENT_REFERENCE_OWNER_COLUMNS
         )
+    )
+
+
+def _retention_clear(now: datetime) -> ColumnElement[bool]:
+    """Neither a minimum retention nor an active hold keeps the content."""
+    active_hold = exists(
+        select(ObjectContentHolds.id).where(
+            ObjectContentHolds.content_id == ObjectContents.id,
+            ObjectContentHolds.released_at.is_(None),
+            or_(
+                ObjectContentHolds.expires_at.is_(None),
+                ObjectContentHolds.expires_at > now,
+            ),
+        )
+    )
+    return and_(
+        or_(
+            ObjectContents.minimum_retain_until.is_(None),
+            ObjectContents.minimum_retain_until <= now,
+        ),
+        ~active_hold,
     )
 
 
@@ -209,23 +245,7 @@ class ObjectContentReconciliationRepository:
             await self._session.flush()
             return len(unowned_pending)
 
-        active_hold = exists(
-            select(ObjectContentHolds.id).where(
-                ObjectContentHolds.content_id == ObjectContents.id,
-                ObjectContentHolds.released_at.is_(None),
-                or_(
-                    ObjectContentHolds.expires_at.is_(None),
-                    ObjectContentHolds.expires_at > now,
-                ),
-            )
-        )
-        retention_clear = and_(
-            or_(
-                ObjectContents.minimum_retain_until.is_(None),
-                ObjectContents.minimum_retain_until <= now,
-            ),
-            ~active_hold,
-        )
+        retention_clear = _retention_clear(now)
         eligible_retained = and_(
             ObjectContents.state == ContentState.RETAINED.value,
             retention_clear,
@@ -1318,6 +1338,40 @@ class ObjectContentReconciliationRepository:
             content.lease_owner = None
             content.lease_until = None
         await self._session.flush()
+
+    async def removal_readback(self) -> RemovalReadback:
+        """Every content no owner refers to whose bytes are not yet removed:
+        the states the lifecycle and the delete reconciliation move on."""
+        now = await self._database_now()
+        clear = _retention_clear(now)
+        failed = ObjectContents.failure_code.is_not(None)
+        row = (
+            await self._session.execute(
+                select(
+                    func.count().filter(~clear),
+                    func.count().filter(clear, failed),
+                    func.count().filter(clear, ~failed),
+                ).where(
+                    or_(
+                        ObjectContents.state.in_(
+                            (
+                                ContentState.PENDING.value,
+                                ContentState.RETAINED.value,
+                                ContentState.DELETE_PENDING.value,
+                            )
+                        ),
+                        and_(
+                            ObjectContents.state == ContentState.FAILED.value,
+                            ObjectContents.delete_requested_at.is_not(None),
+                        ),
+                    ),
+                    ObjectContents.reference_count == 0,
+                    _no_concrete_references(),
+                )
+            )
+        ).one()
+        held, retrying, waiting = row
+        return RemovalReadback(held=held, retrying=retrying, waiting=waiting)
 
     async def health_facts(self) -> ObjectContentHealthFacts:
         states = await self._content_state_facts()

@@ -258,6 +258,18 @@ class RetentionChunkLimits:
 
 
 @dataclass(frozen=True, slots=True)
+class RetentionStepPass:
+    """Where one step's pass stood when the execution first called the step
+    and after its last call."""
+
+    # None: the pass began in this execution.
+    started_at: RetentionKeyset | None
+    # None once the pass finished.
+    ended_at: RetentionKeyset | None
+    finished: bool
+
+
+@dataclass(frozen=True, slots=True)
 class RetentionRunReport:
     task: str
     # None: another execution holds the task, nothing ran.
@@ -267,6 +279,13 @@ class RetentionRunReport:
     counts: Mapping[str, int] = field(default_factory=dict[str, int])
     blocked: Mapping[str, int] = field(default_factory=dict[str, int])
     error_code: RetentionErrorCode | None = None
+    # The disposal facts among the counts.
+    disposed: Mapping[str, int] = field(default_factory=dict[str, int])
+    # Every step of the task in order; None for a step the execution never
+    # called (the budget was spent, or an earlier step failed).
+    steps: Mapping[str, RetentionStepPass | None] = field(
+        default_factory=dict[str, RetentionStepPass | None]
+    )
 
 
 class RetentionOwnershipLost(RuntimeError):
@@ -390,11 +409,16 @@ class RetentionRunner:
                 raise
             return await self._record_claim_timeout(task.name)
 
-        progress = _Progress(started=self.clock(), cursors=cursors)
+        steps = task.steps()
+        progress = _Progress(
+            started=self.clock(),
+            cursors=cursors,
+            passes={step.name: None for step in steps},
+        )
         outcome = RetentionJobOutcome.SUCCEEDED
         error_code: RetentionErrorCode | None = None
         try:
-            for step in task.steps():
+            for step in steps:
                 if not await self._run_step(task, step, job_run_id, progress):
                     outcome = RetentionJobOutcome.PARTIAL
                 if progress.budget_spent:
@@ -407,6 +431,8 @@ class RetentionRunner:
                 outcome=RetentionJobOutcome.SUPERSEDED,
                 counts=progress.counts,
                 blocked=progress.blocked,
+                disposed=progress.disposed,
+                steps=progress.passes,
             )
         except Exception as exc:
             outcome, error_code = _chunk_ending(exc)
@@ -454,6 +480,8 @@ class RetentionRunner:
                 counts=progress.counts,
                 blocked=progress.blocked,
                 error_code=RetentionErrorCode.FINISH_TIMEOUT,
+                disposed=progress.disposed,
+                steps=progress.passes,
             )
         if not finished:
             outcome = RetentionJobOutcome.SUPERSEDED
@@ -464,6 +492,8 @@ class RetentionRunner:
             counts=progress.counts,
             blocked=progress.blocked,
             error_code=error_code,
+            disposed=progress.disposed,
+            steps=progress.passes,
         )
 
     async def _run_step(
@@ -475,11 +505,19 @@ class RetentionRunner:
     ) -> bool:
         """Call the step until it is exhausted; False if it ended early."""
         retention_name(step.name)
+        started_at = progress.cursors.get(step.name)
+        called = False
         while True:
             elapsed = self.clock() - progress.started
             left = self.budget.left(progress.used, elapsed_seconds=elapsed)
             if left.rows == 0:
                 progress.budget_spent = True
+                if called:
+                    progress.passes[step.name] = RetentionStepPass(
+                        started_at=started_at,
+                        ended_at=progress.cursors.get(step.name),
+                        finished=False,
+                    )
                 return False
             progress.batch_seq += 1
             batch = RetentionBatch(
@@ -536,6 +574,13 @@ class RetentionRunner:
             progress.disposal_totals = _summed(progress.disposal_totals, disposed)
             progress.cursors = cursors
             progress.used = progress.used.plus(rows=result.rows, files=result.files)
+            called = True
+            if result.exhausted or result.deferred or stalled:
+                progress.passes[step.name] = RetentionStepPass(
+                    started_at=started_at,
+                    ended_at=progress.cursors.get(step.name),
+                    finished=result.exhausted,
+                )
             if result.exhausted:
                 return True
             if result.deferred:
@@ -799,6 +844,9 @@ class _Progress:
     budget_spent: bool = False
     cursors: dict[str, RetentionKeyset] = field(
         default_factory=dict[str, RetentionKeyset]
+    )
+    passes: dict[str, RetentionStepPass | None] = field(
+        default_factory=dict[str, RetentionStepPass | None]
     )
 
 

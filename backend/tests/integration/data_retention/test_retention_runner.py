@@ -38,6 +38,7 @@ from eneo.data_retention.application.retention_runner import (
     RetentionRunner,
     RetentionRunReport,
     RetentionStep,
+    RetentionStepPass,
     RetentionStepResult,
     RetentionTenantEffect,
 )
@@ -972,6 +973,61 @@ async def test_observations_are_progress_and_only_disposals_are_audited(
     assert run.log_metadata["counts"] == (
         {"items.deleted": 1} if kind == "disposed" else {}
     )
+
+
+async def test_the_report_shows_where_each_step_pass_began_and_ended(
+    test_tenant,
+) -> None:
+    """The readback after a restore tells a fresh pass from a resumed one, and
+    a finished pass from one the budget stopped, by these. Kills a report
+    without the steps the budget kept from running, or with the disposals of
+    another execution."""
+    await _work_items(3)
+    positions = [RetentionKeyset(at=_NOW, id=uuid4()) for _ in range(3)]
+
+    async def walk(batch: RetentionBatch) -> RetentionStepResult:
+        index = 0 if batch.cursor is None else positions.index(batch.cursor) + 1
+        if index == len(positions):
+            return RetentionStepResult(exhausted=True)
+        return RetentionStepResult(
+            rows=1,
+            effects=(RetentionTenantEffect(tenant_id=None, counts={"examined": 1}),),
+            cursor=positions[index],
+        )
+
+    async def last(batch: RetentionBatch) -> RetentionStepResult:
+        return RetentionStepResult(exhausted=True)
+
+    steps = (RetentionStep("walk", walk), RetentionStep("last", last))
+    reports: list[RetentionRunReport] = []
+    for _ in range(2):
+        async with sessionmanager.session() as session:
+            reports.append(
+                await _runner(session, budget_rows=5).run(
+                    _FakeTask(session, extra_steps=steps)
+                )
+            )
+    first, second = reports
+
+    finished = RetentionStepPass(started_at=None, ended_at=None, finished=True)
+    assert first.outcome is RetentionJobOutcome.PARTIAL
+    assert first.disposed == {"items.deleted": 3}
+    assert first.steps == {
+        "items": finished,
+        "walk": RetentionStepPass(
+            started_at=None, ended_at=positions[1], finished=False
+        ),
+        "last": None,
+    }
+    assert second.outcome is RetentionJobOutcome.SUCCEEDED
+    assert second.disposed == {}
+    assert second.steps == {
+        "items": finished,
+        "walk": RetentionStepPass(
+            started_at=positions[1], ended_at=None, finished=True
+        ),
+        "last": finished,
+    }
 
 
 async def test_the_batch_carries_the_execution_deadline() -> None:

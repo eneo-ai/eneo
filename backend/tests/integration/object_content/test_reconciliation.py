@@ -605,6 +605,75 @@ async def test_reconciler_reclaims_a_stale_delete_after_worker_crash(
 
 
 @pytest.mark.asyncio
+async def test_a_delete_left_for_retry_is_reported_as_a_store_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+) -> None:
+    """The readback after a restore must not call storage confirmed when the
+    store failed under it; the pass reports what it only left for a retry."""
+    pending = await _create_pending(
+        object_content_database,
+        real_object_store,
+        upload_remote=True,
+    )
+    async with object_content_database.session() as session, session.begin():
+        await session.execute(
+            delete(FileContentReferences).where(
+                FileContentReferences.file_id == pending.file_id
+            )
+        )
+        now = await session.scalar(select(func.now()))
+        assert now is not None
+        row = await session.get(ObjectContents, pending.content_id)
+        assert row is not None
+        row.state = ContentState.DELETE_PENDING.value
+        row.delete_requested_at = now
+        row.next_attempt_at = now
+    monkeypatch.setattr(
+        real_object_store.store,
+        "delete_and_confirm",
+        AsyncMock(side_effect=ObjectStoreUnavailableError("delete unconfirmed")),
+    )
+
+    result = await _reconciler(
+        real_object_store.settings,
+        real_object_store.store,
+        object_content_database,
+    ).run_once()
+
+    assert result.store_failures == 1
+    async with object_content_database.session() as session, session.begin():
+        readback = await ObjectContentReconciliationRepository(
+            session
+        ).removal_readback()
+    assert readback.retrying == 1
+
+
+@pytest.mark.asyncio
+async def test_an_inventory_outage_is_reported_as_a_store_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+) -> None:
+    """The pass keeps what earlier phases committed and still says the store
+    failed, instead of returning as if the inventory had run."""
+    monkeypatch.setattr(
+        real_object_store.store,
+        "list_multipart_page",
+        AsyncMock(side_effect=ObjectStoreUnavailableError("inventory unavailable")),
+    )
+
+    result = await _reconciler(
+        real_object_store.settings,
+        real_object_store.store,
+        object_content_database,
+    ).run_once()
+
+    assert result.store_failures == 1
+
+
+@pytest.mark.asyncio
 async def test_delete_renews_before_head_and_cannot_be_reconciled_twice(
     monkeypatch: pytest.MonkeyPatch,
     object_content_database: DatabaseSessionManager,

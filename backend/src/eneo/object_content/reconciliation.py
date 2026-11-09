@@ -30,6 +30,7 @@ from eneo.object_content.reconciliation_repository import (
     ObjectContentReconciliationRepository,
     OrphanDeleteLease,
     ReconciliationWork,
+    RemovalReadback,
 )
 from eneo.object_content.s3_object_store import (
     ObjectStoreIntegrityError,
@@ -51,6 +52,10 @@ class ReconciliationResult:
     object_cycle_completed: bool
     multipart_aborted: int
     orphan_objects_deleted: int
+    # Store operations that failed and that the pass left for a later one: a
+    # delete or a verification scheduled for retry, an inventory or move run
+    # cut short, an unready store. What the pass did commit stands.
+    store_failures: int = 0
 
     @classmethod
     def empty(cls) -> "ReconciliationResult":
@@ -167,6 +172,7 @@ class ObjectContentReconciler:
         content_processed = sum(
             1 for outcome in outcomes if not isinstance(outcome, BaseException)
         )
+        store_failures = sum(1 for outcome in outcomes if outcome is True)
         remote_work_available = True
         for outcome in outcomes:
             if isinstance(outcome, ObjectContentUnavailableError):
@@ -201,7 +207,7 @@ class ObjectContentReconciler:
             # rotation or destination switch advances the store generation, so
             # the worker summary agrees with the durable transitions already
             # recorded.
-            pass
+            store_failures += 1
         async with self._database.session() as session, session.begin():
             (
                 references_audited,
@@ -219,6 +225,7 @@ class ObjectContentReconciler:
             ).run_once()
         except ObjectContentUnavailableError:
             moves_processed = 0
+            store_failures += 1
         return ReconciliationResult(
             lifecycle_advanced=lifecycle_advanced,
             inline_deleted=inline_deleted,
@@ -230,11 +237,18 @@ class ObjectContentReconciler:
             object_cycle_completed=object_cycle_completed,
             multipart_aborted=multipart_aborted,
             orphan_objects_deleted=orphan_objects_deleted,
+            store_failures=store_failures,
         )
 
     async def health_facts(self) -> ObjectContentHealthFacts:
         async with self._database.session() as session, session.begin():
             return await ObjectContentReconciliationRepository(session).health_facts()
+
+    async def removal_readback(self) -> RemovalReadback:
+        async with self._database.session() as session, session.begin():
+            return await ObjectContentReconciliationRepository(
+                session
+            ).removal_readback()
 
     async def _process_content(
         self,
@@ -243,23 +257,21 @@ class ObjectContentReconciler:
         *,
         store_lease: ObjectStoreLease,
         lease_started_at: float,
-    ) -> None:
+    ) -> bool:
         if work.state is ContentState.PENDING:
-            await self._reconcile_pending(
+            return await self._reconcile_pending(
                 work,
                 lease_owner,
                 store_lease=store_lease,
                 lease_started_at=lease_started_at,
             )
-            return
         if work.state is ContentState.DELETE_PENDING:
-            await self._reconcile_delete(
+            return await self._reconcile_delete(
                 work,
                 lease_owner,
                 store_lease=store_lease,
                 lease_started_at=lease_started_at,
             )
-            return
         raise RuntimeError(f"Unsupported reconciliation state: {work.state}")
 
     async def _reconcile_pending(
@@ -269,7 +281,7 @@ class ObjectContentReconciler:
         *,
         store_lease: ObjectStoreLease,
         lease_started_at: float,
-    ) -> None:
+    ) -> bool:
         settings = store_lease.settings
         store = store_lease.store
 
@@ -312,25 +324,25 @@ class ObjectContentReconciler:
                     content_id=work.content_id,
                     lease_owner=lease_owner,
                 )
-            return
+            return False
         except ObjectStoreIntegrityError:
             await self._record_integrity_failure(
                 work.content_id, lease_owner, store_lease=store_lease
             )
-            return
+            return False
         except ObjectStoreUnavailableError:
             await self._record_retry(work, lease_owner)
-            return
+            return True
         except (ObjectContentBusyError, ObjectContentStateError):
             # An expired lease may legally move to another reconciler while a
             # stalled process resumes. The current lease owner will converge it.
-            return
+            return False
 
         if digest != work.sha256:
             await self._record_integrity_failure(
                 work.content_id, lease_owner, store_lease=store_lease
             )
-            return
+            return False
         try:
             async with self._database.session() as session, session.begin():
                 await require_store_generation(
@@ -344,7 +356,8 @@ class ObjectContentReconciler:
                 )
         except ObjectContentStateError:
             # A final owner detach can legally win while the remote verification runs.
-            return
+            return False
+        return False
 
     async def _reconcile_delete(
         self,
@@ -353,7 +366,7 @@ class ObjectContentReconciler:
         *,
         store_lease: ObjectStoreLease,
         lease_started_at: float,
-    ) -> None:
+    ) -> bool:
         settings = store_lease.settings
         store = store_lease.store
 
@@ -378,9 +391,9 @@ class ObjectContentReconciler:
             )
         except ObjectStoreUnavailableError:
             await self._record_retry(work, lease_owner)
-            return
+            return True
         except (ObjectContentBusyError, ObjectContentStateError):
-            return
+            return False
         try:
             async with self._database.session() as session, session.begin():
                 await require_store_generation(
@@ -396,7 +409,8 @@ class ObjectContentReconciler:
                     purge_after=None,
                 )
         except (ObjectContentBusyError, ObjectContentStateError):
-            return
+            return False
+        return False
 
     async def _record_integrity_failure(
         self,

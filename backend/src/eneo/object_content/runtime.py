@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from time import monotonic
 from uuid import UUID
@@ -57,6 +57,7 @@ from eneo.object_content.reconciliation import (
 )
 from eneo.object_content.reconciliation_repository import (
     ObjectContentHealthFacts,
+    RemovalReadback,
 )
 from eneo.object_content.s3_object_store import S3ObjectStore
 from eneo.settings.encryption_service import EncryptionService
@@ -642,6 +643,7 @@ class ObjectContentRuntime:
             raise ObjectContentConfigurationError(
                 "Object-store configuration is required by active content"
             )
+        unready = 0
         if self.object_store_configured:
             try:
                 await self.service.check_object_store_ready()
@@ -650,8 +652,9 @@ class ObjectContentRuntime:
             except ObjectContentUnavailableError:
                 # The reconciler still advances local lifecycle/audit work and
                 # treats a transient object-store outage as a bounded no-op.
-                pass
-        return await self.reconciler.run_once()
+                unready = 1
+        result = await self.reconciler.run_once()
+        return replace(result, store_failures=result.store_failures + unready)
 
     async def backfill_file_icons_once(self) -> FileIconBackfillResult:
         backfill = self._file_icon_backfill
@@ -663,6 +666,9 @@ class ObjectContentRuntime:
 
     async def health_facts(self) -> ObjectContentHealthFacts:
         return await self.reconciler.health_facts()
+
+    async def removal_readback(self) -> RemovalReadback:
+        return await self.reconciler.removal_readback()
 
 
 object_content_runtime = ObjectContentRuntime()
