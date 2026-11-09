@@ -146,6 +146,52 @@
             "en": "Every nightly retention run writes to the audit log: how many questions, app runs, sessions and files were removed, what was kept and why, and whether the run finished or stopped at its limit. The log never contains the content itself. Your operator can pause each retention task and set its limits.",
             "sv": "Varje nattlig gallringskörning skriver till granskningsloggen: hur många frågor, appkörningar, sessioner och filer som togs bort, vad som behölls och varför, och om körningen blev klar eller stoppade vid sin gräns. Loggen innehåller aldrig själva innehållet. Driftansvarig kan pausa varje gallringsuppgift och ställa in dess gränser."
           }
+        },
+        {
+          "id": "admin-sign-in-settings",
+          "type": "new",
+          "area": "admin",
+          "audience": "admin",
+          "title": {
+            "en": "Change your organisation's sign-in settings",
+            "sv": "Ändra organisationens inloggningsinställningar"
+          },
+          "body": {
+            "en": "Under Administration › Sign-in (SSO), you can replace the client ID, the client secret and the allowed email domains for single sign-on, and copy the redirect URIs to register at your identity provider. Every change is confirmed before it applies. While sign-in is still set in the server configuration, the page explains how your operator can move it into Eneo.",
+            "sv": "Under Administration › Inloggning (SSO) kan ni byta klient-ID, klienthemlighet och tillåtna e-postdomäner för enkel inloggning och kopiera omdirigerings-URI:erna som ska registreras hos identitetsleverantören. Varje ändring bekräftas innan den gäller. Så länge inloggningen är inställd i serverns konfiguration förklarar sidan hur er driftleverantör kan flytta den till Eneo."
+          },
+          "showMe": {
+            "href": "/admin/federation",
+            "anchor": "admin-federation"
+          }
+        },
+        {
+          "id": "insights-question-logs-follow-retention",
+          "type": "improved",
+          "area": "admin",
+          "audience": "admin",
+          "title": {
+            "en": "Keep removed questions out of question logs",
+            "sv": "Slipp gallrade frågor i frågeloggarna"
+          },
+          "body": {
+            "en": "When retention removes a question or someone deletes it, Eneo empties every log that held it, also the logs of later questions in the same conversation. Questions asked before this version have no log, and the question details in Insights tell you so instead of offering to try again.",
+            "sv": "När gallringen tar bort en fråga eller någon raderar den tömmer Eneo varje logg som innehöll den, även loggarna för senare frågor i samma konversation. Frågor som ställdes före den här versionen har ingen logg, och frågedetaljerna under Insikter talar om det för dig i stället för att erbjuda ett nytt försök."
+          }
+        },
+        {
+          "id": "audit-log-without-file-and-conversation-names",
+          "type": "improved",
+          "area": "admin",
+          "audience": "admin",
+          "title": {
+            "en": "Keep file and conversation names out of the audit log",
+            "sv": "Slipp fil- och konversationsnamn i granskningsloggen"
+          },
+          "body": {
+            "en": "A file's name often says what the file is about, and a conversation's name copies text that retention removes. In the audit log you now see a file by its id, size and file type, and a conversation by its id. Entries from before this version were changed the same way, so a search for a file name finds none of them.",
+            "sv": "Ett filnamn säger ofta vad filen handlar om, och en konversations namn kopierar text som gallras. I granskningsloggen ser du nu en fil med id, storlek och filtyp, och en konversation med sitt id. Rader från före den här versionen ändrades på samma sätt, så du hittar dem inte genom att söka på ett filnamn."
+          }
         }
       ]
     },

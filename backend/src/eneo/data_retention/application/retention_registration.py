@@ -1,7 +1,7 @@
 """The composition root supplies explicit task instances and execution policy."""
 
 from collections.abc import Callable, Collection, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,6 +16,11 @@ class RetentionTaskRegistration:
     enabled: bool
     budget: RetentionBudget
     build: Callable[[AsyncSession], RetentionTask]
+    limited_by: Mapping[str, tuple[str, ...]] = field(
+        default_factory=dict[str, tuple[str, ...]]
+    )
+    """A blocked reason, without its step, mapped to the deployment settings
+    whose limits can keep a root for that reason."""
 
 
 def retention_registration_violations(

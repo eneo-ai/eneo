@@ -1453,10 +1453,6 @@ class TenantModelAdapter(CompletionModelAdapter):
             if response.choices:
                 choice = response.choices[0]
                 msg = choice.message
-                logger.debug(f"[DEBUG] Message: {msg}")
-                reasoning = getattr(msg, "reasoning_content", None)
-                if reasoning:
-                    logger.debug(f"[DEBUG] reasoning_content: {reasoning}")
 
                 tool_round = 0
                 max_rounds = get_settings().max_tool_rounds

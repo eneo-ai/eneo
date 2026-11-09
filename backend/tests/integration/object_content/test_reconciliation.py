@@ -72,6 +72,8 @@ if TYPE_CHECKING:
         ListMultipartUploadsRequestTypeDef,
         ListObjectsV2OutputTypeDef,
         ListObjectsV2RequestTypeDef,
+        ListObjectVersionsOutputTypeDef,
+        ListObjectVersionsRequestTypeDef,
     )
 
 
@@ -117,6 +119,14 @@ class _DelayedDeleteClient:
     ) -> "ListMultipartUploadsOutputTypeDef":
         return self._delegate.list_multipart_uploads(
             **cast("ListMultipartUploadsRequestTypeDef", request)
+        )
+
+    def list_object_versions(
+        self,
+        **request: object,
+    ) -> "ListObjectVersionsOutputTypeDef":
+        return self._delegate.list_object_versions(
+            **cast("ListObjectVersionsRequestTypeDef", request)
         )
 
 

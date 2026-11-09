@@ -27,7 +27,13 @@ logger = logging.getLogger(__name__)
 
 
 class ExtractionError(Exception):
-    """Base exception for text extraction failures."""
+    """Base exception for text extraction failures.
+
+    An error names what went wrong, never the file: its message is logged and
+    returned to the client, and a file's name is often what it is about, which
+    retention removes with the file. Nor does it carry a parser's own text,
+    which can quote the file's content.
+    """
 
     def __init__(self, message: str, code: str = "EXTRACTION_FAILED"):
         self.message = message
@@ -38,37 +44,33 @@ class ExtractionError(Exception):
 class NoExtractableTextError(ExtractionError):
     """Raised when extraction or transcription produces no usable text."""
 
-    def __init__(self, filename: str):
-        super().__init__(
-            f"File '{filename}' contains no extractable text", "NO_EXTRACTABLE_TEXT"
-        )
+    def __init__(self) -> None:
+        super().__init__("The file contains no extractable text", "NO_EXTRACTABLE_TEXT")
 
 
 class ExtractionLimitError(ExtractionError):
-    def __init__(self, filename: str, limit: str):
+    def __init__(self, limit: str):
         self.limit = limit
-        super().__init__(f"File '{filename}' exceeded the {limit}", "EXTRACTION_LIMIT")
+        super().__init__(f"The file exceeded the {limit}", "EXTRACTION_LIMIT")
 
 
 class PdfPageLimitError(ExtractionLimitError):
-    def __init__(self, filename: str, max_pages: int):
-        super().__init__(filename, f"PDF page limit ({max_pages} pages)")
+    def __init__(self, max_pages: int):
+        super().__init__(f"PDF page limit ({max_pages} pages)")
 
 
 class EncryptedFileError(ExtractionError):
     """Raised for password-protected files."""
 
-    def __init__(self, filename: str):
-        super().__init__(
-            f"File '{filename}' is encrypted/password-protected", "ENCRYPTED"
-        )
+    def __init__(self) -> None:
+        super().__init__("The file is encrypted/password-protected", "ENCRYPTED")
 
 
 class CorruptFileError(ExtractionError):
     """Raised for corrupted or malformed files."""
 
-    def __init__(self, filename: str, details: str = ""):
-        message = f"File '{filename}' is corrupted or malformed"
+    def __init__(self, details: str = ""):
+        message = "The file is corrupted or malformed"
         if details:
             message = f"{message}. {details}"
         super().__init__(message, "CORRUPT")
@@ -77,10 +79,10 @@ class CorruptFileError(ExtractionError):
 class UnsupportedFormatError(ExtractionError):
     """Raised for unsupported file formats."""
 
-    def __init__(self, filename: str, format_type: str):
+    def __init__(self, format_type: str):
         super().__init__(
             f"Format '{format_type}' not supported. "
-            f"Please convert '{filename}' to a supported format.",
+            "Please convert the file to a supported format.",
             "UNSUPPORTED_FORMAT",
         )
 
@@ -138,6 +140,15 @@ class TextSanitizer:
         return text
 
 
+def _log_read_error(error: OSError) -> None:
+    # The error's message holds the path, so only its type and errno.
+    logger.warning(
+        "Reading a file for extraction failed (%s, errno %s)",
+        type(error).__name__,
+        error.errno,
+    )
+
+
 class TextExtractor:
     @staticmethod
     def _looks_binary(filepath: Path) -> bool:
@@ -150,8 +161,7 @@ class TextExtractor:
             return False
 
     @staticmethod
-    def extract_from_plain_text(filepath: Path, filename: str | None = None) -> str:
-        display_name = filename or filepath.name
+    def extract_from_plain_text(filepath: Path) -> str:
         # Try UTF-8 first, then cp1252 (Windows), then UTF-8 with replacement
         # Avoid latin-1 as it accepts any byte sequence including binary garbage
         try:
@@ -159,20 +169,26 @@ class TextExtractor:
         except UnicodeDecodeError:
             pass
         except PermissionError as e:
-            raise ExtractionError(f"Permission denied reading '{display_name}': {e}")
+            _log_read_error(e)
+            raise ExtractionError("Permission denied reading the file") from None
         except OSError as e:
-            raise ExtractionError(f"Error reading '{display_name}': {e}")
+            _log_read_error(e)
+            raise ExtractionError("Error reading the file") from None
 
         try:
             return filepath.read_text("cp1252")
         except UnicodeDecodeError:
             pass
+        except OSError as e:
+            _log_read_error(e)
+            raise ExtractionError("Error reading the file") from None
 
         # Final fallback: UTF-8 with replacement characters for undecodable bytes
         try:
             return filepath.read_text("utf-8", errors="replace")
-        except (PermissionError, OSError) as e:
-            raise ExtractionError(f"Error reading '{display_name}': {e}")
+        except OSError as e:
+            _log_read_error(e)
+            raise ExtractionError("Error reading the file") from None
 
     @staticmethod
     def _table_to_markdown(table: list[list[str | None]]) -> str:
@@ -225,16 +241,17 @@ class TextExtractor:
         return "\n\n".join(parts)
 
     @classmethod
-    def _layout_page_texts(cls, pdf: Any, display_name: str) -> Iterator[str]:
+    def _layout_page_texts(cls, pdf: Any) -> Iterator[str]:
         for page in pdf.pages:
             try:
                 try:
                     page_text = cls._extract_pdf_page(page)
                 except Exception as e:
                     logger.warning(
-                        f"Table-aware extraction failed on page "
-                        f"{page.page_number} of '{display_name}', "
-                        f"falling back to plain text: {e}"
+                        "Table-aware extraction failed on page %s (%s), "
+                        "falling back to plain text",
+                        page.page_number,
+                        type(e).__name__,
                     )
                     page_text = str(page.extract_text() or "")
             finally:
@@ -271,28 +288,26 @@ class TextExtractor:
     def extract_from_pdf(
         cls,
         filepath: Path,
-        filename: str | None = None,
         *,
         limits: FileExtractionLimits | None = None,
     ) -> str:
-        display_name = filename or filepath.name
         try:
             with pdfplumber.open(filepath) as pdf:
                 page_count = len(pdf.pages)
                 if limits is not None and page_count > limits.max_pdf_pages:
-                    raise PdfPageLimitError(display_name, limits.max_pdf_pages)
+                    raise PdfPageLimitError(limits.max_pdf_pages)
                 layout_max_pages = (
                     limits or get_file_extraction_limits()
                 ).pdf_layout_max_pages
                 if page_count > layout_max_pages:
                     logger.info(
-                        f"PDF '{display_name}' has {page_count} pages (over "
+                        f"PDF has {page_count} pages (over "
                         f"{layout_max_pages}); reading its text layer without "
                         "table detection"
                     )
                     texts = cls._text_layer_page_texts(filepath)
                 else:
-                    texts = cls._layout_page_texts(pdf, display_name)
+                    texts = cls._layout_page_texts(pdf)
 
                 page_texts: list[str] = []
                 output_bytes = 0
@@ -304,7 +319,7 @@ class TextExtractor:
                         2 if page_texts else 0
                     )
                     if limits is not None and output_bytes > limits.max_output_bytes:
-                        raise ExtractionLimitError(display_name, "text output limit")
+                        raise ExtractionLimitError("text output limit")
                     page_texts.append(marked_text)
 
                 extracted_text = "\n\n".join(page_texts)
@@ -312,8 +327,7 @@ class TextExtractor:
             # Warn if no text extracted (likely image-only/scanned PDF)
             if not has_content:
                 logger.warning(
-                    f"No text extracted from PDF '{display_name}' - "
-                    "file may be image-only or scanned"
+                    "No text extracted from PDF - file may be image-only or scanned"
                 )
                 # Return empty rather than bare page markers, so downstream
                 # empty-content handling keeps working.
@@ -324,37 +338,29 @@ class TextExtractor:
         except ExtractionLimitError:
             raise
         except PDFPasswordIncorrect as e:
-            logger.warning(f"Password-protected PDF rejected: {display_name}")
-            raise EncryptedFileError(display_name) from e
-        except PDFSyntaxError as e:
-            logger.warning(f"PDF read error for {display_name}: {e}")
-            raise CorruptFileError(display_name, str(e))
+            logger.warning("Password-protected PDF rejected")
+            raise EncryptedFileError() from e
+        except PDFSyntaxError:
+            logger.warning("PDF read error")
+            raise CorruptFileError() from None
         except Exception as e:
-            logger.error(f"Unexpected PDF extraction error for {display_name}: {e}")
-            raise ExtractionError(
-                f"PDF extraction failed for '{display_name}': {str(e)}"
-            )
+            logger.error("Unexpected PDF extraction error (%s)", type(e).__name__)
+            raise ExtractionError("PDF extraction failed") from None
 
     @staticmethod
-    def extract_from_docx(filepath: Path, filename: str | None = None) -> str:
-        display_name = filename or filepath.name
+    def extract_from_docx(filepath: Path) -> str:
         try:
             with docx2python(filepath) as docx_content:
                 return docx_content.text
         except zipfile.BadZipFile:
             raise CorruptFileError(
-                display_name,
                 "Invalid ZIP structure - file may be corrupted or in legacy .doc format",
-            )
-        except KeyError as e:
-            raise CorruptFileError(
-                display_name, f"Missing required document component: {e}"
-            )
+            ) from None
+        except KeyError:
+            raise CorruptFileError("Missing required document component") from None
         except Exception as e:
-            logger.error(f"Unexpected DOCX extraction error for {display_name}: {e}")
-            raise ExtractionError(
-                f"DOCX extraction failed for '{display_name}': {str(e)}"
-            )
+            logger.error("Unexpected DOCX extraction error (%s)", type(e).__name__)
+            raise ExtractionError("DOCX extraction failed") from None
 
     @staticmethod
     def extract_from_xlsx(filepath: Path, filename: str | None = None) -> str:
@@ -424,17 +430,14 @@ class TextExtractor:
                 return "\n\n".join(parts)
             finally:
                 xls.close()  # pyright: ignore[reportUnknownMemberType, reportAttributeAccessIssue]  # pandas-stubs miss ExcelFile.close
-        except ValueError as e:
-            raise CorruptFileError(display_name, f"Cannot parse Excel format: {e}")
+        except ValueError:
+            raise CorruptFileError("Cannot parse Excel format") from None
         except Exception as e:
-            logger.error(f"Unexpected Excel extraction error for {display_name}: {e}")
-            raise ExtractionError(
-                f"Excel extraction failed for '{display_name}': {str(e)}"
-            )
+            logger.error("Unexpected Excel extraction error (%s)", type(e).__name__)
+            raise ExtractionError("Excel extraction failed") from None
 
     @staticmethod
-    def extract_from_pptx(filepath: Path, filename: str | None = None) -> str:
-        display_name = filename or filepath.name
+    def extract_from_pptx(filepath: Path) -> str:
         try:
             # Extract text from pptx using python-pptx
             # Use list join instead of string concatenation for O(n) vs O(n^2) complexity
@@ -469,30 +472,21 @@ class TextExtractor:
             return "\n".join(parts)
         except (zipfile.BadZipFile, PackageNotFoundError):
             raise CorruptFileError(
-                display_name,
                 "Invalid ZIP structure - file may be corrupted or in legacy .ppt format",
-            )
-        except KeyError as e:
-            raise CorruptFileError(
-                display_name, f"Missing required presentation component: {e}"
-            )
+            ) from None
+        except KeyError:
+            raise CorruptFileError("Missing required presentation component") from None
         except Exception as e:
-            logger.error(f"Unexpected PPTX extraction error for {display_name}: {e}")
-            raise ExtractionError(
-                f"PPTX extraction failed for '{display_name}': {str(e)}"
-            )
+            logger.error("Unexpected PPTX extraction error (%s)", type(e).__name__)
+            raise ExtractionError("PPTX extraction failed") from None
 
     @staticmethod
-    def _reject_legacy_format(mimetype: str | None, display_name: str) -> None:
+    def _reject_legacy_format(mimetype: str | None) -> None:
         if mimetype == TextMimeTypes.DOC.value:
-            raise UnsupportedFormatError(
-                display_name,
-                ".doc (Legacy Word) - please save as .docx",
-            )
+            raise UnsupportedFormatError(".doc (Legacy Word) - please save as .docx")
         if mimetype == TextMimeTypes.PPT.value:
             raise UnsupportedFormatError(
-                display_name,
-                ".ppt (Legacy PowerPoint) - please save as .pptx",
+                ".ppt (Legacy PowerPoint) - please save as .pptx"
             )
 
     def extract(
@@ -504,10 +498,7 @@ class TextExtractor:
         limits: FileExtractionLimits | None = None,
     ) -> str:
         mimetype = mimetype or magic.from_file(filepath, mime=True)  # pyright: ignore[reportUnknownMemberType]  # python-magic stubs are incomplete
-        # Use original filename for error messages, fallback to temp filepath
-        display_name = filename or filepath.name
-
-        self._reject_legacy_format(mimetype, display_name)
+        self._reject_legacy_format(mimetype)
 
         match mimetype:
             case (
@@ -519,24 +510,25 @@ class TextExtractor:
                 | TextMimeTypes.XML
                 | TextMimeTypes.XML_APP
             ):
-                extracted_text = self.extract_from_plain_text(filepath, display_name)
+                extracted_text = self.extract_from_plain_text(filepath)
             case TextMimeTypes.PDF:
-                extracted_text = self.extract_from_pdf(
-                    filepath, display_name, limits=limits
-                )
+                extracted_text = self.extract_from_pdf(filepath, limits=limits)
             case TextMimeTypes.DOCX:
-                extracted_text = self.extract_from_docx(filepath, display_name)
+                extracted_text = self.extract_from_docx(filepath)
             case TextMimeTypes.PPTX:
-                extracted_text = self.extract_from_pptx(filepath, display_name)
+                extracted_text = self.extract_from_pptx(filepath)
             case TextMimeTypes.XLSX | TextMimeTypes.XLS:
-                extracted_text = self.extract_from_xlsx(filepath, display_name)
+                # The workbook's name heads its text, as context for its chunks.
+                extracted_text = self.extract_from_xlsx(
+                    filepath, filename or filepath.name
+                )
             case _:
                 # Unknown mimetype: only treat as text if it is not binary.
                 # Guards against binary uploads (e.g. unsupported image formats)
                 # being decoded into garbage and written to the TEXT column.
                 if self._looks_binary(filepath):
-                    raise UnsupportedFormatError(display_name, mimetype or "binary")
-                extracted_text = self.extract_from_plain_text(filepath, display_name)
+                    raise UnsupportedFormatError(mimetype or "binary")
+                extracted_text = self.extract_from_plain_text(filepath)
 
         return extracted_text.strip()
 
@@ -552,7 +544,7 @@ class TextExtractor:
 
         # The child reports failures as an exit status, so the conversion
         # hint for legacy formats is raised here, before it is spawned.
-        self._reject_legacy_format(mimetype, filename or filepath.name)
+        self._reject_legacy_format(mimetype)
         return await extract_in_process(
             filepath, mimetype, filename or filepath.name, limits=limits
         )

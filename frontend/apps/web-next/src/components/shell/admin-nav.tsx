@@ -20,11 +20,10 @@ export function AdminTopContent() {
 export function AdminSections() {
   const t = useTranslations();
   const pathname = usePathname();
-  const { settings, can, featureFlags } = useAppContext();
+  const { settings, can } = useAppContext();
   const groups = adminNavGroups({
     usingTemplates: Boolean(settings.using_templates),
-    canManageModules: can("modules"),
-    federationEnabled: featureFlags.federation
+    canManageModules: can("modules")
   });
 
   return (

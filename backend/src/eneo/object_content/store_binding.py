@@ -32,6 +32,8 @@ from eneo.object_content.content import (
 )
 from eneo.object_content.s3_object_store import (
     ObjectStoreBindingError,
+    ObjectStoreKeepsVersionsError,
+    ObjectStorePermissionError,
     ObjectStoreUnavailableError,
     S3ObjectStore,
 )
@@ -457,9 +459,16 @@ async def ensure_store_binding_ready(
     *,
     slot: int = ACTIVE_DESTINATION_SLOT,
 ) -> None:
-    """Establish or verify the durable PostgreSQL-to-object-store binding."""
+    """Establish or verify the durable PostgreSQL-to-object-store binding.
+
+    A bucket that keeps old versions, or credentials without a permission the
+    store needs, is a configuration error that names the reason: Eneo does
+    not start against it.
+    """
     try:
         await store.check_ready()
+    except (ObjectStoreKeepsVersionsError, ObjectStorePermissionError) as error:
+        raise ObjectContentConfigurationError(str(error)) from error
     except ObjectStoreUnavailableError as error:
         raise ObjectContentUnavailableError(
             "Durable object content is temporarily unavailable"

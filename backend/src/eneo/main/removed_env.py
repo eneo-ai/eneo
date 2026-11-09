@@ -14,6 +14,10 @@ OIDC_MIGRATION_GUIDE_URL = (
     "https://docs.eneo.ai/guides/oidc-federation"
     "#migrate-from-the-mobilityguard-settings"
 )
+OIDC_STORED_MODE_GUIDE_URL = (
+    "https://docs.eneo.ai/guides/oidc-federation/single-tenant"
+    "#move-the-settings-into-eneo"
+)
 
 
 @dataclass(frozen=True)

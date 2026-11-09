@@ -458,13 +458,14 @@ def _build_assistant_update_changes(
 
         def extract_item_info(
             item: object, assistant_space_id: UUID | None
-        ) -> tuple[str, str, str | None]:
+        ) -> tuple[str, str | None, str | None]:
             """Extract ID, name, and scope from an item, handling attachments specially."""
             item_id = str(getattr(item, "id", item))
 
-            # Special handling for FileAttachment objects
+            # A file is recorded by its id alone: retention removes its name.
+            item_name: str | None
             if is_attachment:
-                item_name = str(getattr(item, "name", "unknown_file"))
+                item_name = None
             else:
                 # For other types, use the specified attribute or a safe fallback
                 if hasattr(item, name_attr):
@@ -494,10 +495,9 @@ def _build_assistant_update_changes(
         added: list[dict[str, str | None]] = []
         for k in new_items:
             if k not in old_items:
-                item_data: dict[str, str | None] = {
-                    "id": k,
-                    "name": new_items[k]["name"],
-                }
+                item_data: dict[str, str | None] = {"id": k}
+                if new_items[k]["name"] is not None:
+                    item_data["name"] = new_items[k]["name"]
                 if new_items[k]["scope"]:
                     item_data["scope"] = new_items[k]["scope"]
                 added.append(item_data)
@@ -505,10 +505,9 @@ def _build_assistant_update_changes(
         removed: list[dict[str, str | None]] = []
         for k in old_items:
             if k not in new_items:
-                item_data: dict[str, str | None] = {
-                    "id": k,
-                    "name": old_items[k]["name"],
-                }
+                item_data: dict[str, str | None] = {"id": k}
+                if old_items[k]["name"] is not None:
+                    item_data["name"] = old_items[k]["name"]
                 if old_items[k]["scope"]:
                     item_data["scope"] = old_items[k]["scope"]
                 removed.append(item_data)
@@ -556,7 +555,6 @@ def _build_assistant_update_changes(
     attachment_modes_changed: list[dict[str, str | None]] = [
         {
             "id": str(file.id),
-            "name": file.name,
             "mode": (
                 "inline"
                 if updated_assistant.attachment_inline_text.get(file.id, True)

@@ -26,6 +26,7 @@ from eneo.main.config import Settings, get_settings
 from eneo.main.retention_tasks import (
     EXISTING_WITHOUT_CHOICE,
     FOLLOWS_A_REMOVAL,
+    OUTSIDE_THE_ENGINE,
     RetentionHealthCache,
     _read_retention_health,
     retention_task_registrations,
@@ -90,6 +91,32 @@ def test_only_listed_removals_run_without_a_choice():
             for registration in retention_task_registrations(switched_off)
             if registration.name == task
         ] == [False]
+
+
+def test_records_outside_the_engine_are_declared_with_how_they_end():
+    """Mutants: an exception is dropped or added without the owner; one loses
+    its reason; the cron a reason names no longer runs."""
+    from eneo.worker.arq import worker
+
+    crons = {job.coroutine.__name__ for job in worker.cron_jobs}
+
+    assert set(OUTSIDE_THE_ENGINE) == {
+        "audit exports",
+        "insights",
+        "browser sessions",
+        "audit logs",
+        "service runs",
+    }
+    for reason in OUTSIDE_THE_ENGINE.values():
+        assert reason and "\n" not in reason
+    named = {
+        cron
+        for reason in OUTSIDE_THE_ENGINE.values()
+        for cron in reason.split()
+        if cron.startswith(("cleanup_", "purge_"))
+    }
+    assert named == {"cleanup_old_exports", "purge_old_audit_logs"}
+    assert named <= crons
 
 
 def _violations(**changes: object) -> list[str]:
@@ -189,6 +216,46 @@ def test_registrations_match_their_tasks():
     task that never writes a row (unknown forever)."""
     for registration in retention_task_registrations(get_settings()):
         assert registration.name == registration.build(AsyncSession()).name
+
+
+_ROWS = "retention_conversations_max_unit_rows"
+_FILES = "retention_max_files_per_run"
+
+
+@pytest.mark.parametrize(
+    "changes,limits",
+    [
+        pytest.param({}, (_ROWS,), id="defaults"),
+        pytest.param(
+            {_FILES: 50, "retention_max_family_rows": 150, _ROWS: 5000},
+            (_ROWS, _FILES),
+            id="files fund fewer rows than a unit",
+        ),
+        pytest.param(
+            {_FILES: 50, "retention_max_family_rows": 150, _ROWS: 150},
+            (_ROWS,),
+            id="files fund exactly a unit",
+        ),
+    ],
+)
+def test_a_unit_kept_for_its_size_names_the_settings_that_can_hold_it(
+    changes: dict[str, int], limits: tuple[str, ...]
+):
+    """Mutant: health names only the row cap for a unit kept by a file budget
+    that funds fewer rows than that cap, so raising the named setting changes
+    nothing. Each File charges at least three rows."""
+    values = get_settings().model_dump()
+    values.update(changes)
+
+    named = {
+        registration.limited_by["unit_exceeds_budget"]
+        for registration in retention_task_registrations(
+            Settings.model_validate(values)
+        )
+        if "unit_exceeds_budget" in registration.limited_by
+    }
+
+    assert named == {limits}
 
 
 @pytest.mark.parametrize(

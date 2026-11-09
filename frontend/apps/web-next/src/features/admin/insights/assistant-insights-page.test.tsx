@@ -34,7 +34,7 @@ const spies = vi.hoisted(() => ({
   questionQueries: [] as QuestionQuery[],
   asked: [] as unknown[],
   log: null as unknown,
-  logFails: false,
+  logFails: null as number | null,
   nextStream: null as ReadableStream<Uint8Array> | null,
   signal: null as AbortSignal | null
 }));
@@ -46,7 +46,7 @@ vi.mock("@/lib/api/browser", () => ({
         return spies.logFails
           ? {
               error: { message: "Question was not logged." },
-              response: new Response(null, { status: 400 })
+              response: new Response(null, { status: spies.logFails })
             }
           : { data: spies.log, response: new Response("{}") };
       if (path === "/api/v1/analysis/assistants/{assistant_id}/feedback/")
@@ -99,7 +99,7 @@ afterEach(() => {
   spies.questionQueries.length = 0;
   spies.asked.length = 0;
   spies.log = null;
-  spies.logFails = false;
+  spies.logFails = null;
   spies.nextStream = null;
   spies.signal = null;
 });
@@ -141,19 +141,34 @@ describe("AssistantInsightsPage", () => {
     expect(document.activeElement).toBe(trigger);
   });
 
-  it("shows a logging refusal and retries without passing a row off as a full log", async () => {
-    spies.logFails = true;
+  it("says calmly that a question has no log, with nothing to retry", async () => {
+    spies.logFails = 400;
     renderPage("/admin/insights/assistant/assistant-1?tab=questions");
     fireEvent.click(await screen.findByRole("button", { name: QUESTIONS[0]!.question }));
     const dialog = screen.getByRole("dialog", { name: "Frågedetaljer" });
-    expect(await within(dialog).findByText("Question was not logged.")).toBeTruthy();
+    expect(await within(dialog).findByText(/Frågan har ingen logg/)).toBeTruthy();
+    expect(within(dialog).queryByText("Question was not logged.")).toBeNull();
+    expect(within(dialog).queryByRole("button", { name: "Försök igen" })).toBeNull();
     expect(within(dialog).queryByRole("button", { name: "Kopiera" })).toBeNull();
     expect(
       within(dialog).queryByRole("region", { name: "Loggad information som JSON" })
     ).toBeNull();
-    spies.logFails = false;
+    spies.logFails = null;
+  });
+
+  it("retries a failed log read without passing a row off as a full log", async () => {
+    spies.logFails = 500;
+    renderPage("/admin/insights/assistant/assistant-1?tab=questions");
+    fireEvent.click(await screen.findByRole("button", { name: QUESTIONS[0]!.question }));
+    const dialog = screen.getByRole("dialog", { name: "Frågedetaljer" });
+    const retry = await within(dialog).findByRole("button", { name: "Försök igen" });
+    expect(within(dialog).queryByRole("button", { name: "Kopiera" })).toBeNull();
+    expect(
+      within(dialog).queryByRole("region", { name: "Loggad information som JSON" })
+    ).toBeNull();
+    spies.logFails = null;
     spies.log = { ...QUESTIONS[0], logging_details: { prompt: "fixture" } };
-    fireEvent.click(within(dialog).getByRole("button", { name: "Försök igen" }));
+    fireEvent.click(retry);
     expect(
       await within(dialog).findByRole("region", { name: "Loggad information som JSON" })
     ).toBeTruthy();

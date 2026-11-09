@@ -45,6 +45,9 @@ class Sessions(BasePublic):
     feedback_set_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), server_default=func.now(), nullable=False
     )
+    # Raised by the question removal trigger: an answer generated from history
+    # read at an older revision may hold removed turns, so its log is cleared.
+    history_revision: Mapped[int] = mapped_column(server_default=sa.text("0"))
 
     # Foreign keys
     assistant_id: Mapped[Optional[UUID]] = mapped_column(
