@@ -30,7 +30,10 @@ from eneo.files.file_models import (
 from eneo.files.file_repo import FileRepository
 from eneo.files.file_service import FileService
 from eneo.files.file_usage import FileUsageRepository
-from eneo.files.unused_file_cleanup import sweep_unused_files
+from eneo.files.unused_file_cleanup import (
+    delete_unused_root_files,
+    sweep_unused_files,
+)
 from eneo.flows.infrastructure.flow_run_history_purge_repo import (
     FlowRunHistoryPurgeRepository,
 )
@@ -359,6 +362,68 @@ async def test_derived_file_named_by_a_flow_version_blocks_its_root(
         assert [b.kind for b in exc_info.value.preview.blockers] == [
             FileUsageKind.FLOW_VERSION
         ]
+
+
+@pytest.mark.asyncio
+async def test_unused_family_cleanup_skips_a_child_locked_before_its_root(
+    object_content_database: DatabaseSessionManager,
+) -> None:
+    # A publisher naming a root and its child key-share locks both in one
+    # statement, in no fixed order. Holding the child while waiting for the
+    # root must not deadlock cleanup that holds the root and reaches the child.
+    tenant_id, user_id = await _owner_ids(object_content_database)
+    async with object_content_database.session() as session, session.begin():
+        root = await _add_file(
+            session, tenant_id=tenant_id, user_id=user_id, name="report.pdf"
+        )
+        child = await _add_file(
+            session,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            name="page-1.png",
+            parent_file_id=root.id,
+        )
+        root_id, child_id = root.id, child.id
+
+    def key_share(file_id: UUID) -> sa.Select[tuple[UUID]]:
+        return (
+            sa.select(Files.id)
+            .where(Files.id == file_id)
+            .with_for_update(read=True, key_share=True, of=Files)
+        )
+
+    root_held = asyncio.Event()
+    child_held = asyncio.Event()
+
+    async def publisher() -> None:
+        async with object_content_database.session() as session, session.begin():
+            await root_held.wait()
+            await session.execute(key_share(child_id))
+            child_held.set()
+            await session.execute(key_share(root_id))
+
+    async def cleanup() -> frozenset[UUID]:
+        async with object_content_database.session() as session, session.begin():
+            await session.execute(
+                sa.select(Files.id).where(Files.id == root_id).with_for_update(of=Files)
+            )
+            root_held.set()
+            await child_held.wait()
+            # Let the publisher block on the root before cleanup reaches the child.
+            await asyncio.sleep(0.3)
+            return await delete_unused_root_files(session, [root_id])
+
+    publisher_task = asyncio.create_task(publisher())
+    deleted = await asyncio.wait_for(cleanup(), timeout=20)
+    await asyncio.wait_for(publisher_task, timeout=20)
+
+    assert deleted == frozenset()
+    async with object_content_database.session() as session, session.begin():
+        assert await session.get(Files, root_id) is not None
+        assert await session.get(Files, child_id) is not None
+        # Nothing holds the child any more, so the next pass deletes the family.
+        assert await delete_unused_root_files(session, [root_id]) == {root_id}
+        assert await session.get(Files, child_id) is None
 
 
 @pytest.mark.asyncio

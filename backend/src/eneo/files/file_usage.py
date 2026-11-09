@@ -196,6 +196,7 @@ class FileUsageRepository:
         crosses a tenant boundary, is left intact. Rows are locked root first
         and then level by level, matching ``lock_family``, so a concurrent
         attach either commits first and is seen here or waits for the delete.
+        A family with a descendant locked elsewhere is left for a later pass.
         """
         candidates = sorted(set(candidate_file_ids))
         if not candidates:
@@ -219,18 +220,27 @@ class FileUsageRepository:
 
         frontier: list[UUID] = list(root_tenant)
         while frontier:
+            children = (
+                sa.select(Files.id, Files.parent_file_id, Files.tenant_id)
+                .where(
+                    Files.parent_file_id
+                    == sa.any_(self._file_ids_parameter("frontier_ids"))
+                )
+                .order_by(Files.id)
+            )
+            parameters = {"frontier_ids": frontier}
             rows = (
                 await self._session.execute(
-                    sa.select(Files.id, Files.parent_file_id, Files.tenant_id)
-                    .where(
-                        Files.parent_file_id
-                        == sa.any_(self._file_ids_parameter("frontier_ids"))
-                    )
-                    .order_by(Files.id)
-                    .with_for_update(of=Files),
-                    {"frontier_ids": frontier},
+                    children.with_for_update(of=Files, skip_locked=True), parameters
                 )
             ).all()
+            # A descendant another transaction holds keeps its family for a
+            # later pass. Waiting could deadlock with a caller that locked the
+            # child before the root, as a publisher naming both may.
+            locked_ids = {row.id for row in rows}
+            for row in (await self._session.execute(children, parameters)).all():
+                if row.id not in locked_ids and row.parent_file_id in root_of:
+                    kept.add(root_of[row.parent_file_id])
             frontier = []
             for row in rows:
                 if row.id in root_of:
