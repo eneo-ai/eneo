@@ -38,6 +38,21 @@ from uuid import UUID
 from eneo.authentication.auth_models import is_service_api_key
 
 
+def _target_name(target: Any) -> str | None:
+    """The name an audit row records for its target.
+
+    A conversation is named after its first question, or a title made from
+    its turns. Retention removes that text, and an audit row would keep a
+    copy, so a conversation is recorded by its id and this fixed name.
+    """
+    # Deferred: the session model imports much of the domain.
+    from eneo.sessions.session import SessionBase
+
+    if isinstance(target, SessionBase):
+        return "conversation"
+    return getattr(target, "name", getattr(target, "title", None))
+
+
 def _actor_snapshot(actor: Any) -> dict[str, Any]:
     """Build the ``actor`` block for audit metadata.
 
@@ -124,7 +139,7 @@ class AuditMetadata:
         # Build target snapshot with all available context
         target_snapshot = {
             "id": str(target.id),
-            "name": getattr(target, "name", getattr(target, "title", None)),
+            "name": _target_name(target),
         }
 
         # Auto-include space_id from target if it exists
@@ -194,7 +209,7 @@ class AuditMetadata:
             "targets": [
                 {
                     "id": str(target.id),
-                    "name": getattr(target, "name", getattr(target, "title", None)),
+                    "name": _target_name(target),
                 }
                 for target in targets
             ],
@@ -246,7 +261,7 @@ class AuditMetadata:
         if target:
             metadata["target"] = {
                 "id": str(target.id),
-                "name": getattr(target, "name", getattr(target, "title", None)),
+                "name": _target_name(target),
             }
 
         if affected_count is not None:
