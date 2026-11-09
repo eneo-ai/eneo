@@ -165,8 +165,14 @@ class ConversationHistoryRetentionTask:
             return out.result(rows=0, exhausted=True, cursor=batch.cursor)
         candidates = [key.id for key, passed in window if not passed]
         cleared = await self.names.clear_due(candidates) if candidates else ()
-        held = await self.names.count_due(candidates) if candidates else 0
-        for tenant_id, name, feedback in cleared:
+        # Only a conversation left unwritten can have been held: one written
+        # and due again (its period shortened meanwhile) waits for a later pass.
+        written = {session_id for session_id, *_ in cleared}
+        unwritten = [
+            session_id for session_id in candidates if session_id not in written
+        ]
+        held = await self.names.count_due(unwritten) if unwritten else 0
+        for _, tenant_id, name, feedback in cleared:
             out.add(tenant_id, "names_cleared", int(name))
             out.add(tenant_id, "feedback_texts_cleared", int(feedback))
         out.blocked[ConversationBlockReason.ROOT_LOCKED.key] += held

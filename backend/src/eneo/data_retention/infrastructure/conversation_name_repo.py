@@ -7,7 +7,7 @@ its questions are still there. The name is replaced by an empty one, which both
 apps show as untitled; the feedback vote stays.
 """
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import datetime
 from typing import cast
 from uuid import UUID
@@ -56,21 +56,12 @@ class ConversationNameRepository:
                 else_=Assistants.data_retention_days,
             )
         ).days
-        cutoff = now - sa.func.make_interval(0, 0, 0, days)
-        self.name_due = sa.and_(Sessions.name != "", Sessions.name_set_at < cutoff)
-        self.feedback_due = sa.and_(
-            Sessions.feedback_text.is_not(None), Sessions.feedback_set_at < cutoff
-        )
+        self.cutoff = now - sa.func.make_interval(0, 0, 0, days)
         self.days = days
 
-    def _due(self, ids: Sequence[UUID]) -> sa.Select[tuple[UUID, UUID, bool, bool]]:
+    def _due(self, ids: Sequence[UUID]) -> sa.Select[tuple[UUID, UUID, datetime]]:
         return (
-            sa.select(
-                Sessions.id,
-                Spaces.tenant_id,
-                self.name_due.label("name_due"),
-                self.feedback_due.label("feedback_due"),
-            )
+            sa.select(Sessions.id, Spaces.tenant_id, self.cutoff.label("cutoff"))
             .select_from(Sessions)
             .outerjoin(Assistants, Assistants.id == Sessions.assistant_id)
             .outerjoin(GroupChatsTable, GroupChatsTable.id == Sessions.group_chat_id)
@@ -85,7 +76,7 @@ class ConversationNameRepository:
                 uuid_in(Sessions.id, ids),
                 outside_widgets(),
                 self.days.is_not(None),
-                sa.or_(self.name_due, self.feedback_due),
+                sa.or_(_name_due(self.cutoff), _feedback_due(self.cutoff)),
             )
         )
 
@@ -109,28 +100,50 @@ class ConversationNameRepository:
             for identifier, at, passed in rows
         )
 
-    async def clear_due(self, ids: Sequence[UUID]) -> Sequence[tuple[UUID, bool, bool]]:
+    async def clear_due(
+        self, ids: Sequence[UUID]
+    ) -> Sequence[tuple[UUID, UUID, bool, bool]]:
         """Empty each due name and feedback text of these conversations that no
-        other transaction holds, checked in the statement that writes them: the
-        tenant of each and which of the two went."""
+        other transaction holds: the id and tenant of each conversation written
+        and which of the two went.
+
+        Each write checks the field's own time against the cutoff again, so a
+        rename or new feedback that lands first is kept."""
+        names = await self._clear(ids, _name_due, name="")
+        texts = await self._clear(ids, _feedback_due, feedback_text=None)
+        return tuple(
+            (session_id, tenant_id, session_id in names, session_id in texts)
+            for session_id, tenant_id in {**names, **texts}.items()
+        )
+
+    async def _clear(
+        self,
+        ids: Sequence[UUID],
+        is_due: Callable[[ColumnElement[datetime]], ColumnElement[bool]],
+        **emptied: str | None,
+    ) -> dict[UUID, UUID]:
         due = self._due(ids).with_for_update(of=Sessions, skip_locked=True).cte("due")
         statement = (
             sa.update(Sessions)
-            .where(Sessions.id == due.c.id)
-            .values(
-                name=sa.case((due.c.name_due, ""), else_=Sessions.name),
-                feedback_text=sa.case(
-                    (due.c.feedback_due, None), else_=Sessions.feedback_text
-                ),
-                # Not a change by anyone: the conversation keeps its place.
-                updated_at=Sessions.updated_at,
-            )
-            .returning(due.c.tenant_id, due.c.name_due, due.c.feedback_due)
+            .where(Sessions.id == due.c.id, is_due(due.c.cutoff))
+            # Not a change by anyone: the conversation keeps its place.
+            .values(**emptied, updated_at=Sessions.updated_at)
+            .returning(Sessions.id, due.c.tenant_id)
         )
-        return tuple((await self.session.execute(statement)).tuples().all())
+        return dict((await self.session.execute(statement)).tuples().all())
 
     async def count_due(self, ids: Sequence[UUID]) -> int:
         """How many of these conversations still have a due name or feedback
         text, without locking: those another transaction held."""
         statement = sa.select(sa.func.count()).select_from(self._due(ids).subquery())
         return (await self.session.execute(statement)).scalar_one()
+
+
+def _name_due(cutoff: ColumnElement[datetime]) -> ColumnElement[bool]:
+    return sa.and_(Sessions.name != "", Sessions.name_set_at < cutoff)
+
+
+def _feedback_due(cutoff: ColumnElement[datetime]) -> ColumnElement[bool]:
+    return sa.and_(
+        Sessions.feedback_text.is_not(None), Sessions.feedback_set_at < cutoff
+    )
