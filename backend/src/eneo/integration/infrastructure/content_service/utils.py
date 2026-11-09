@@ -38,6 +38,7 @@ from eneo.integration.domain.skip_reasons import (
     unsupported_type_reason,
 )
 from eneo.integration.infrastructure.content_service.types import SharePointItem
+from eneo.main import process_scratch
 
 logger = getLogger(__name__)
 
@@ -388,7 +389,9 @@ _MIME_BY_KIND: dict[str, str] = {
 async def _parse_in_sandbox(
     kind: str, payload: bytes, filename: str, limits: FileExtractionLimits
 ) -> str:
-    with tempfile.TemporaryDirectory(prefix="sharepoint-extract-") as tmp:
+    with tempfile.TemporaryDirectory(
+        prefix="sharepoint-extract-", dir=process_scratch.directory()
+    ) as tmp:
         # Keep the extension so parsers see the same name shape as uploads.
         path = Path(tmp) / f"download{_extension(filename)}"
         path.write_bytes(payload)

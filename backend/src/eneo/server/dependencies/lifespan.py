@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from eneo.database.database import sessionmanager
 from eneo.internal_mcp import internal_mcp_lifespan
 from eneo.jobs.job_manager import job_manager
+from eneo.main import process_scratch
 from eneo.main.aiohttp_client import aiohttp_client
 from eneo.main.config import get_settings
 from eneo.main.stream_lifecycle import FINALIZATION_BUDGET_SECONDS
@@ -51,6 +52,7 @@ async def startup():
     if settings.openapi_only_mode:
         return
 
+    process_scratch.start()
     sessionmanager.init(settings.database_url)
     # PostgreSQL owns the optional administrator-managed connection, so it must
     # be available before object-content imports or loads that configuration.
@@ -105,3 +107,4 @@ async def shutdown():
     await aiohttp_client.stop()
     await job_manager.close()
     await websocket_manager.shutdown()
+    process_scratch.stop()

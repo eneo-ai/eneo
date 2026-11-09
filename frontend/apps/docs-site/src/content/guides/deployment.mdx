@@ -1347,6 +1347,17 @@ per process, while `CRAWL_JOB_CONCURRENCY_LIMIT` and
 workers. Set `CRAWL_JOB_TENANT_CONCURRENCY_LIMIT` to the same value on the
 backend and every worker.
 
+### Temporary files
+
+Each backend and worker process keeps its temporary files (uploads before
+they are stored, audio being transcribed, crawled files) in a directory of its
+own, `eneo-scratch/proc-<id>` under `UPLOAD_TMP_DIR` (default `/tmp`), and
+removes it when it stops. A process that crashes leaves its directory; the
+next process to start on the same volume removes it once the crashed process
+is gone. Nothing else under `UPLOAD_TMP_DIR` is removed at start. The owner
+check uses a file lock, so `UPLOAD_TMP_DIR` must be a local filesystem; a
+volume shared between hosts over a network filesystem is not supported.
+
 ---
 
 ## Related Documentation

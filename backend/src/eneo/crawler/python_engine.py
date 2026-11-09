@@ -9,7 +9,6 @@ import hashlib
 import ipaddress
 import logging
 import re
-import shutil
 import socket
 import unicodedata
 from collections import deque
@@ -20,7 +19,7 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from itertools import islice
 from pathlib import Path
-from tempfile import TemporaryDirectory, gettempdir
+from tempfile import TemporaryDirectory
 from time import monotonic
 from typing import TypeVar
 from urllib.parse import unquote, urlsplit
@@ -61,6 +60,7 @@ from eneo.crawler.sitemap import (
     parse_sitemap,
     snapshot_sitemap,
 )
+from eneo.main import process_scratch
 from eneo.websites.domain.crawl_run import CrawlType
 
 logger = logging.getLogger(__name__)
@@ -79,28 +79,6 @@ _ResponseResult = TypeVar("_ResponseResult")
 _process_capacity: asyncio.Semaphore | None = None
 _process_capacity_loop: asyncio.AbstractEventLoop | None = None
 _process_capacity_limit: int | None = None
-
-
-def cleanup_orphaned_crawl_directories(temp_root: Path | None = None) -> int:
-    """Remove abandoned workspaces from a temp root private to this worker."""
-
-    root = temp_root or Path(gettempdir())
-    removed = 0
-    for path in root.glob(f"{_CRAWL_TEMP_PREFIX}*"):
-        try:
-            if path.is_symlink() or not path.is_dir():
-                continue
-            shutil.rmtree(path)
-        except FileNotFoundError:
-            continue
-        except OSError as exc:
-            logger.warning(
-                "Abandoned crawler workspace could not be removed",
-                extra={"workspace": path.name, "errno": exc.errno},
-            )
-            continue
-        removed += 1
-    return removed
 
 
 @dataclass(frozen=True, slots=True)
@@ -668,7 +646,9 @@ class PythonCrawlEngine:
                 termination_reason = "item_limit" if item_limit_reached else None
 
                 if request.download_files and file_links and remaining_file_items:
-                    files_dir = TemporaryDirectory(prefix=_CRAWL_TEMP_PREFIX)
+                    files_dir = TemporaryDirectory(
+                        prefix=_CRAWL_TEMP_PREFIX, dir=process_scratch.directory()
+                    )
                     try:
                         async for result in self._download_files(
                             session=session,
