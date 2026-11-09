@@ -54,6 +54,9 @@ class ObjectContentMoveExecutor:
         self._store_lease = store_lease
         self._settings = store_lease.settings
         self._store = store_lease.store
+        # Store operations this run left for a retry, or whose bytes did not
+        # verify: the reconciliation reports them as store failures.
+        self.store_failures = 0
 
     async def run_once(self) -> int:
         settings = self._settings
@@ -231,8 +234,10 @@ class ObjectContentMoveExecutor:
                     publication_lease_owner=publication_lease_owner,
                 )
         except ObjectStoreUnavailableError:
+            self.store_failures += 1
             await self._record_move_retry(work, lease_owner)
         except ObjectStoreIntegrityError:
+            self.store_failures += 1
             await self._record_move_failure(
                 work,
                 lease_owner,
@@ -343,6 +348,7 @@ class ObjectContentMoveExecutor:
             )
             return
         except ObjectStoreIntegrityError:
+            self.store_failures += 1
             await self._record_move_failure(
                 work,
                 lease_owner,
@@ -351,6 +357,7 @@ class ObjectContentMoveExecutor:
             )
             return
         except ObjectStoreUnavailableError:
+            self.store_failures += 1
             await self._record_move_retry(work, lease_owner)
             return
         except (ObjectContentBusyError, ObjectContentStateError):

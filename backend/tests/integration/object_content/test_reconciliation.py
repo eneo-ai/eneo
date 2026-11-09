@@ -750,6 +750,49 @@ async def test_an_orphan_delete_left_for_retry_is_reported_as_a_store_failure(
 
 
 @pytest.mark.asyncio
+async def test_a_multipart_abort_left_for_retry_is_reported_as_a_store_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+) -> None:
+    """The parts of an abandoned upload that the store would not abort stay in
+    it; the pass says so instead of reporting nothing aborted and nothing
+    failed."""
+    settings = real_object_store.settings
+    key = new_object_key(settings)
+    client = _raw_client(real_object_store)
+    upload_id = client.create_multipart_upload(
+        Bucket=settings.bucket,
+        Key=key,
+        ContentType="application/octet-stream",
+        ChecksumAlgorithm="SHA256",
+        ChecksumType="COMPOSITE",
+    )["UploadId"]
+    try:
+        reconciler = _reconciler(
+            settings,
+            real_object_store.store,
+            object_content_database,
+        )
+        assert (await reconciler.run_once()).multipart_aborted == 0
+        await asyncio.sleep(settings.orphan_grace_seconds + 0.1)
+        monkeypatch.setattr(
+            real_object_store.store,
+            "abort_multipart",
+            AsyncMock(side_effect=ObjectStoreUnavailableError("abort unconfirmed")),
+        )
+
+        result = await reconciler.run_once()
+
+        assert result.multipart_aborted == 0
+        assert result.store_failures == 1
+    finally:
+        client.abort_multipart_upload(
+            Bucket=settings.bucket, Key=key, UploadId=upload_id
+        )
+
+
+@pytest.mark.asyncio
 async def test_storage_readback_waits_for_former_copies_and_not_for_live_objects(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,

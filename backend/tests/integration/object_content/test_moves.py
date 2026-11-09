@@ -1013,9 +1013,12 @@ async def test_store_outage_retries_without_changing_authority(
         )
 
     assert first.moves_processed == 1
+    # The store refused the move's upload: the pass reports a store failure.
+    assert first.store_failures == 1
     monkeypatch.setattr(real_object_store.store, "upload", original_upload)
     second = await reconciler.run_once()
     assert second.moves_processed == 1
+    assert second.store_failures == 0
     async with object_content_database.session() as session, session.begin():
         content = await session.get(ObjectContents, content_id)
         move = await session.get(ObjectContentMoves, content_id)
