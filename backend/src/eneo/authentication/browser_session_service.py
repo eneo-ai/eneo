@@ -377,9 +377,10 @@ class SessionWatch:
     held only for that check, so what refuses a new request ends the response
     too: sign-out, a password change, signing out everywhere, a deactivated
     account or a suspended tenant. In between, the answer is the clock against
-    the token's expiry. A refusal, the expiry or a check that fails or does
-    not finish within ``STORE_DEADLINE_SECONDS`` ends the response, and the
-    client reconnects through ordinary authentication.
+    the token's expiry. A refusal or the expiry ends the response for good. A
+    check that fails or does not finish within ``STORE_DEADLINE_SECONDS``
+    ends it too, but proves nothing about the session: ``unanswered`` says so,
+    and the client reconnects through ordinary authentication.
 
     The expiry is the admitted token's, not the row's: a renewal issues a new
     token for the session, and a response opened with the old one still ends
@@ -391,6 +392,8 @@ class SessionWatch:
         self._payload = payload
         self._connection = connection
         self._admitted = True
+        # Set when a check ended the response without an answer.
+        self.unanswered = False
         # The request has just authenticated.
         self._next_check = time.monotonic() + RECHECK_SECONDS
 
@@ -425,4 +428,5 @@ class SessionWatch:
                     "error_type": type(exc).__name__,
                 },
             )
+            self.unanswered = True
             return False

@@ -2,7 +2,7 @@ import asyncio
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
-from starlette.status import WS_1008_POLICY_VIOLATION
+from starlette.status import WS_1008_POLICY_VIOLATION, WS_1013_TRY_AGAIN_LATER
 
 from eneo.authentication.browser_session_service import SessionWatch
 from eneo.authentication.endpoint_access import (
@@ -93,5 +93,14 @@ async def _receive_while_admitted(
         receiving.cancel()
         watching.cancel()
     if receiving not in done:
-        # 1008: the client must not reconnect with the same token.
-        await websocket.close(code=WS_1008_POLICY_VIOLATION, reason="Session ended")
+        if admitted.unanswered:
+            # The store did not answer the check: the client reconnects, and
+            # its token is authenticated again then.
+            await websocket.close(
+                code=WS_1013_TRY_AGAIN_LATER, reason="Session check unavailable"
+            )
+        else:
+            # 1008: the client must not reconnect with the same token.
+            await websocket.close(
+                code=WS_1008_POLICY_VIOLATION, reason="Session ended"
+            )

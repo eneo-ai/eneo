@@ -25,7 +25,7 @@ from sqlalchemy import event
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
-from starlette.status import WS_1008_POLICY_VIOLATION
+from starlette.status import WS_1008_POLICY_VIOLATION, WS_1013_TRY_AGAIN_LATER
 
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 from eneo.authentication import browser_session_service
@@ -1244,6 +1244,44 @@ async def test_a_socket_closes_when_its_session_ends(
     finally:
         for task in tasks.values():
             task.cancel()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_socket_whose_check_gets_no_answer_closes_for_a_retry(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+    monkeypatch,
+):
+    # A check the store does not answer proves nothing about the session. The
+    # socket stops serving, but not with 1008, which the client takes as
+    # final: it reconnects through ordinary authentication once the store
+    # answers again.
+    monkeypatch.setattr(browser_session_service, "RECHECK_SECONDS", 0.5)
+    monkeypatch.setattr(browser_session_service, "STORE_DEADLINE_SECONDS", 1.0)
+    email = await _create_local_user(client, super_admin_token)
+    token = (await _login(client, TOKEN_LOGIN, email, PASSWORD)).json()["access_token"]
+    socket = _Socket({"type": "subscribe", "data": {"channel": "app_run_updates"}})
+    user = await get_user_from_websocket(websocket=socket, token=token, session=None)
+    task = asyncio.create_task(websocket_router.connect(socket, user))
+    try:
+        async with asyncio.timeout(5):
+            while not socket.subscribed:
+                await asyncio.sleep(0.05)
+        async with sessionmanager.session() as holder, holder.begin():
+            # Every read of the sessions waits behind this transaction.
+            await holder.execute(
+                sa.text("LOCK TABLE browser_sessions IN ACCESS EXCLUSIVE MODE")
+            )
+            async with asyncio.timeout(4):
+                assert await socket.closed == WS_1013_TRY_AGAIN_LATER
+                await task
+        assert not socket.subscribed
+    finally:
+        task.cancel()
 
 
 async def _subscribers(redis_client, user_id: str, count: int) -> None:
