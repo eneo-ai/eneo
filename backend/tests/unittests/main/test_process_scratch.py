@@ -4,6 +4,7 @@ only once its owner is gone, and nothing else in upload_tmp_dir is touched."""
 
 import ast
 import fcntl
+import logging
 import os
 import time
 from collections.abc import Iterator
@@ -175,6 +176,63 @@ def test_a_crashed_parent_is_reclaimed_while_its_forked_child_lives(
     finally:
         os.close(release_written)
         os.close(paths_read)
+
+
+def _refuse(monkeypatch: pytest.MonkeyPatch, refused: Path) -> None:
+    remove_tree = process_scratch.shutil.rmtree
+
+    def rmtree(path: Path, *args: object, **kwargs: object) -> None:
+        if Path(path) == refused:
+            raise PermissionError(13, "Permission denied")
+        remove_tree(path, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(process_scratch.shutil, "rmtree", rmtree)
+
+
+def test_a_directory_that_cannot_be_removed_is_not_counted_and_is_kept(
+    upload_tmp_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Mutant: a failed removal counts as one and nothing says why."""
+    root = upload_tmp_dir / "eneo-scratch"
+    refused = _crashed(root, "proc-refused")
+    removable = _crashed(root, "proc-removable")
+    _refuse(monkeypatch, refused)
+
+    with caplog.at_level(logging.WARNING, logger=process_scratch.logger.name):
+        removed = process_scratch.reclaim(root)
+
+    assert removed == 1
+    assert refused.is_dir()
+    assert not removable.exists()
+    [record] = caplog.records
+    assert getattr(record, "directory") == "proc-refused"
+    assert "removed-content" not in caplog.text
+
+
+def test_a_directory_stop_cannot_remove_is_left_for_a_later_start(
+    upload_tmp_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    directory = process_scratch.start()
+    (directory / "upload").write_bytes(b"content")
+    _refuse(monkeypatch, directory)
+
+    with caplog.at_level(logging.WARNING, logger=process_scratch.logger.name):
+        process_scratch.stop()
+
+    assert directory.is_dir()
+    assert len(caplog.records) == 1
+    monkeypatch.undo()
+    monkeypatch.setattr(
+        process_scratch,
+        "get_settings",
+        lambda: SimpleNamespace(upload_tmp_dir=upload_tmp_dir),
+    )
+    assert process_scratch.reclaim(directory.parent) == 1
+    assert not directory.exists()
 
 
 def test_every_named_temporary_file_is_made_in_process_scratch() -> None:

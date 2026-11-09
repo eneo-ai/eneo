@@ -21,6 +21,7 @@ from __future__ import annotations
 import atexit
 import contextlib
 import fcntl
+import logging
 import os
 import shutil
 import tempfile
@@ -31,6 +32,7 @@ from pathlib import Path
 
 from eneo.main.config import get_settings
 
+logger = logging.getLogger(__name__)
 _SCRATCH = "eneo-scratch"
 _MARKER = "owner.lock"
 _LIVE = "proc-"
@@ -93,7 +95,9 @@ def stop() -> None:
     owned, _owned = _owned, None
     if owned is None or owned.pid != os.getpid():
         return
-    shutil.rmtree(owned.path, ignore_errors=True)
+    # A directory left behind is unlocked once the marker closes, so a later
+    # start reclaims it.
+    _remove(owned.path)
     os.close(owned.marker)
 
 
@@ -131,8 +135,7 @@ def _remove_if_abandoned(path: Path) -> int:
         except BlockingIOError:
             return 0
         # Removed while locked, so no process can take the directory meanwhile.
-        shutil.rmtree(path, ignore_errors=True)
-        return 1
+        return _remove(path)
     finally:
         os.close(marker)
 
@@ -140,9 +143,24 @@ def _remove_if_abandoned(path: Path) -> int:
 def _remove_if_old(path: Path) -> int:
     with contextlib.suppress(FileNotFoundError):
         if time.time() - path.stat().st_mtime > _CREATION_GRACE_SECONDS:
-            shutil.rmtree(path, ignore_errors=True)
-            return 1
+            return _remove(path)
     return 0
+
+
+def _remove(path: Path) -> int:
+    """1 once the directory is gone. One that cannot be removed is kept for a
+    later start, and the log names it without its content."""
+    try:
+        shutil.rmtree(path)
+    except FileNotFoundError:
+        return 0
+    except OSError as error:
+        logger.warning(
+            "Scratch directory could not be removed",
+            extra={"directory": path.name, "errno": error.errno},
+        )
+        return 0
+    return 1
 
 
 def _forget_inherited() -> None:
