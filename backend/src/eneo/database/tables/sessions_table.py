@@ -1,8 +1,9 @@
+from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
 import sqlalchemy as sa
-from sqlalchemy import CheckConstraint, ForeignKey, Index
+from sqlalchemy import TIMESTAMP, CheckConstraint, ForeignKey, Index, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from eneo.database.tables.api_keys_v2_table import ApiKeysV2
@@ -36,6 +37,14 @@ class Sessions(BasePublic):
     name: Mapped[str] = mapped_column()
     feedback_value: Mapped[Optional[int]] = mapped_column()
     feedback_text: Mapped[Optional[str]] = mapped_column()
+    # When the name and the feedback text were last written: conversation
+    # history removes each once its own time is older than the period.
+    name_set_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=func.now(), nullable=False
+    )
+    feedback_set_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=func.now(), nullable=False
+    )
 
     # Foreign keys
     assistant_id: Mapped[Optional[UUID]] = mapped_column(

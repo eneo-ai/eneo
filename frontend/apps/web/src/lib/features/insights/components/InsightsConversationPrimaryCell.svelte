@@ -8,6 +8,7 @@
   import type { ConversationSparse } from "@eneo/eneo-js";
   import { getInsightsService } from "../InsightsService.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
+  import { m } from "$lib/paraglide/messages";
 
   const insights = getInsightsService();
   export let conversation: ConversationSparse;
@@ -29,7 +30,7 @@
     ></div>
 
     <span class="truncate overflow-ellipsis">
-      {conversation.name}
+      {conversation.name || m.chat_history_untitled()}
     </span>
   </Button>
 </div>

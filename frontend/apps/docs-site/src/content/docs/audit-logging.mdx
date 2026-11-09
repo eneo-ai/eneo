@@ -121,13 +121,31 @@ before keeps the period it was installed with.
 A removed conversation never returns. Questions without an owner Assistant follow no
 period, and scheduled retention does not remove them.
 
+#### Names and feedback text
+
+A conversation's name is its first question, a title made from its turns or a name
+its user chose, and its feedback text can quote the turns. Each keeps the time it was
+last written. Once that time is older than the conversation's period, conversation
+history replaces the name with an empty one, which both apps show as Untitled, and
+removes the feedback text; the feedback vote stays. This holds whether or not the
+conversation's questions are still there, so a name chosen later is kept as long as
+its own time allows. A group chat's name and feedback text follow the shortest period
+among its assistants. A conversation from before the upgrade that recorded these
+times counts from when it was created. The step `names_and_feedback` reports them as
+`names_cleared` and `feedback_texts_cleared`.
+
+If a period is lengthened or removed after a question was removed, a name taken from
+that question stays until the new period has passed, or for good when no period
+applies.
+
 ### Scheduled execution and limits
 
 ![One retention engine: chats, apps and uploads hand their due records to the engine, which locks, proves, checks again and deletes in bounded atomic units, audits every disposal without content, asks the Files owner whether a file is still in use, and leaves byte deletion to object content storage. Expiry and erasure are two different decisions.](/diagrams/retention-engine.svg)
 
 The general worker runs the shared retention engine once a day, at 03:30 by default.
 The time is read in the worker's time zone; the shipped image runs in UTC. The
-registered tasks remove due questions and App runs, sessions that were created more
+registered tasks remove due questions and App runs, the names and feedback texts of
+conversations past their period, sessions that were created more
 than `RETENTION_EMPTY_SESSION_GRACE_HOURS` ago and have no question, unused upload
 families and expired retention execution records. Each removal has this one scheduled
 path. Audit-log purging remains governed by the separate audit retention policy above.
@@ -185,7 +203,8 @@ not removed is counted under a blocked reason. `partial` means the budget ended 
 due work left; the next execution resumes from the stored cursor. The question and
 App-run streams take turns going first on consecutive days, and the empty-session
 scan is its own task with its own budget, so a backlog in one stream cannot starve
-another. The empty-session and unused-upload sweeps examine every row of their
+another. The `names_and_feedback` step reads every conversation once per pass and
+runs after both streams, so it never spends their budget first. The empty-session and unused-upload sweeps examine every row of their
 population once per pass, so a pass takes about population divided by
 `RETENTION_MAX_ROWS_PER_RUN` nights and reports `partial` until it ends; an empty
 session can wait up to one pass. A session emptied by history retention is removed

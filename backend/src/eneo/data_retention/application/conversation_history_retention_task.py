@@ -19,10 +19,14 @@ from eneo.data_retention.application.retention_runner import (
     RetentionStepResult,
 )
 from eneo.data_retention.application.retention_step_order import rotate_retention_steps
+from eneo.data_retention.application.retention_units import RetentionEffects
 from eneo.data_retention.domain.retention import (
     RetentionOverdue,
 )
 from eneo.data_retention.domain.rules import RetentionRule, rule_task
+from eneo.data_retention.infrastructure.conversation_name_repo import (
+    ConversationNameRepository,
+)
 from eneo.data_retention.infrastructure.conversation_retention_repo import (
     ConversationRetentionRepository,
 )
@@ -37,6 +41,8 @@ class ConversationHistoryRetentionTask:
             *(kind.deleted_key for kind in ConversationRootKind),
             "sessions_deleted",
             "files_deleted",
+            "names_cleared",
+            "feedback_texts_cleared",
             *(
                 f"by_{level.value}_rule"
                 for level in rule_task(RetentionRule.CONVERSATION_HISTORY).levels
@@ -50,6 +56,7 @@ class ConversationHistoryRetentionTask:
     observation_keys = frozenset(
         {
             "owners_examined",
+            "sessions_examined",
             *(
                 reason.key
                 for reason in FileRetentionReason
@@ -90,6 +97,7 @@ class ConversationHistoryRetentionTask:
         self.app_runs = ConversationRetentionRepository(
             session, kind=ConversationRootKind.APP_RUN, now=self.now
         )
+        self.names = ConversationNameRepository(session, now=self.now)
         self.question_cost = ConversationRootCostEstimate()
         self.app_run_cost = ConversationRootCostEstimate()
 
@@ -99,23 +107,27 @@ class ConversationHistoryRetentionTask:
 
     def steps(self) -> Sequence[RetentionStep]:
         # A standing backlog in one stream spends the budget before the next, so
-        # each stream goes first on some date.
-        return rotate_retention_steps(
-            (
-                RetentionStep(
-                    "questions",
-                    self._questions,
-                    max_batch=self.allocation.max_batch,
-                    max_files=self.allocation.unit_files,
+        # each stream goes first on some date. Names and feedback texts come
+        # last: a scan of every conversation, it never spends their budget first.
+        return (
+            *rotate_retention_steps(
+                (
+                    RetentionStep(
+                        "questions",
+                        self._questions,
+                        max_batch=self.allocation.max_batch,
+                        max_files=self.allocation.unit_files,
+                    ),
+                    RetentionStep(
+                        "app_runs",
+                        self._app_runs,
+                        max_batch=self.allocation.max_batch,
+                        max_files=self.allocation.unit_files,
+                    ),
                 ),
-                RetentionStep(
-                    "app_runs",
-                    self._app_runs,
-                    max_batch=self.allocation.max_batch,
-                    max_files=self.allocation.unit_files,
-                ),
+                execution_date=self.now.date(),
             ),
-            execution_date=self.now.date(),
+            RetentionStep("names_and_feedback", self._names, max_files=0),
         )
 
     async def _questions(self, batch: RetentionBatch) -> RetentionStepResult:
@@ -134,6 +146,35 @@ class ConversationHistoryRetentionTask:
             self.allocation,
             self.app_run_cost,
             gather_seconds=self.gather_seconds,
+        )
+
+    async def _names(self, batch: RetentionBatch) -> RetentionStepResult:
+        """One window of conversations whose due names and feedback texts go.
+
+        Each windowed conversation charges its discovery row and at most one
+        more: its write, or its count when another transaction held it.
+        """
+        out = RetentionEffects()
+        limit = batch.rows // 2
+        if limit == 0:
+            return out.result(
+                rows=0, exhausted=False, deferred=True, cursor=batch.cursor
+            )
+        window = await self.names.window(batch.cursor, limit)
+        if not window:
+            return out.result(rows=0, exhausted=True, cursor=batch.cursor)
+        candidates = [key.id for key, passed in window if not passed]
+        cleared = await self.names.clear_due(candidates) if candidates else ()
+        held = await self.names.count_due(candidates) if candidates else 0
+        for tenant_id, name, feedback in cleared:
+            out.add(tenant_id, "names_cleared", int(name))
+            out.add(tenant_id, "feedback_texts_cleared", int(feedback))
+        out.blocked[ConversationBlockReason.ROOT_LOCKED.key] += held
+        out.add(None, "sessions_examined", len(window))
+        return out.result(
+            rows=len(window) + len(cleared) + held,
+            exhausted=len(window) < limit,
+            cursor=window[-1][0],
         )
 
     async def overdue(self) -> RetentionOverdue:

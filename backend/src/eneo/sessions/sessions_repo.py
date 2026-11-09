@@ -245,7 +245,11 @@ class SessionRepository:
         """None also for a copy whose source was removed: it stays unchanged."""
         stmt = self._add_options(
             sa.update(Sessions)
-            .values(**session.model_dump(exclude_unset=True, exclude={"id"}))
+            .values(
+                **session.model_dump(exclude_unset=True, exclude={"id"}),
+                # The name's own retention time starts again.
+                name_set_at=sa.func.now(),
+            )
             .where(
                 Sessions.id == session.id,
                 copy_session_valid(Sessions.id.expression),
@@ -270,6 +274,8 @@ class SessionRepository:
         values: dict[str, object] = {"feedback_value": feedback.value}
         if feedback.text is not None or not keep_existing_text:
             values["feedback_text"] = feedback.text
+            # The text's own retention time starts again.
+            values["feedback_set_at"] = sa.func.now()
         stmt = (
             sa.Update(Sessions)
             .values(values)

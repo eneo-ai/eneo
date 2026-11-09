@@ -73,6 +73,19 @@
           }
         },
         {
+          "id": "conversation-names-follow-retention",
+          "type": "improved",
+          "area": "chat",
+          "title": {
+            "en": "See old conversations as Untitled when their time ends",
+            "sv": "Se gamla konversationer som Namnlös när tiden gått ut"
+          },
+          "body": {
+            "en": "When an assistant, space or your organisation removes conversations after a set time, a conversation's name and feedback comment now follow that time too, counted from when each was last written. Once it has passed, the conversation shows as Untitled and the comment is removed; your thumbs up or down stays.",
+            "sv": "När en assistent, en yta eller organisationen gallrar konversationer efter en viss tid följer nu också konversationens namn och feedbackkommentar den tiden, räknat från när de senast skrevs. När tiden har gått ut visas konversationen som Namnlös och kommentaren tas bort; din tumme upp eller ner finns kvar."
+          }
+        },
+        {
           "id": "sharepoint-credential-health",
           "type": "new",
           "area": "admin",
