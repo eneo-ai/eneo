@@ -957,13 +957,14 @@ _SIGN_IN_IDENTITY_ACCESS_REASON = (
 
 
 @router.get(
-    "/users/{username}/identity",
+    "/users/{user_id}/identity",
     response_model=AccountIdentity,
     summary="Get a user's sign-in identities",
     description=(
         "The identity provider identities bound to the account (issuer, "
         "audience, subject) and its open re-binding allowance, if any. A bound "
-        "account signs in only with its identities; its email binds no other."
+        "account signs in only with its identities; its email binds no other. "
+        "The account is named by its id, the `id` of the user list."
     ),
     responses=responses.get_responses([401, 403, 404]),
 )
@@ -973,13 +974,13 @@ _SIGN_IN_IDENTITY_ACCESS_REASON = (
     reason=_SIGN_IN_IDENTITY_ACCESS_REASON,
 )
 async def get_user_identity(
-    username: str, container: AdminContainer
+    user_id: UUID, container: AdminContainer
 ) -> AccountIdentity:
-    return await container.admin_service().get_account_identity(username)
+    return await container.admin_service().get_account_identity(user_id)
 
 
 @router.put(
-    "/users/{username}/identity/rebinding",
+    "/users/{user_id}/identity/rebinding",
     response_model=AccountIdentity,
     summary="Allow a user to bind a new sign-in identity",
     description=(
@@ -997,17 +998,17 @@ async def get_user_identity(
     reason=_SIGN_IN_IDENTITY_ACCESS_REASON,
 )
 async def allow_user_identity_rebinding(
-    username: str,
+    user_id: UUID,
     allowance: IdentityRebindingAllowance,
     container: AdminApiKeyMutationContainer,
 ) -> AccountIdentity:
     return await container.admin_service().set_identity_rebinding(
-        username, allowance.allowed_until
+        user_id, allowance.allowed_until
     )
 
 
 @router.delete(
-    "/users/{username}/identity/rebinding",
+    "/users/{user_id}/identity/rebinding",
     response_model=AccountIdentity,
     summary="Withdraw a user's sign-in re-binding",
     description="Closes the account's re-binding allowance. Audited.",
@@ -1019,9 +1020,9 @@ async def allow_user_identity_rebinding(
     reason=_SIGN_IN_IDENTITY_ACCESS_REASON,
 )
 async def withdraw_user_identity_rebinding(
-    username: str, container: AdminApiKeyMutationContainer
+    user_id: UUID, container: AdminApiKeyMutationContainer
 ) -> AccountIdentity:
-    return await container.admin_service().set_identity_rebinding(username, None)
+    return await container.admin_service().set_identity_rebinding(user_id, None)
 
 
 @router.get(

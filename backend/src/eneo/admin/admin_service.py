@@ -516,17 +516,30 @@ class AdminService:
             ),
         )
 
+    async def _tenant_account(self, user_id: UUID) -> UserInDB:
+        """The caller's tenant's active account with this id.
+
+        By id, not by username: usernames are not unique, so a username can
+        name more than one account. Another tenant's account is not found.
+        """
+        account = await self.user_repo.get_user_by_id_and_tenant_id(
+            user_id, self.user.tenant_id
+        )
+        if account is None:
+            raise NotFoundException("User not found in your tenant")
+        return account
+
     @validate_permissions(Permission.ADMIN)
-    async def get_account_identity(self, username: str) -> AccountIdentity:
-        return await self._account_identity(await self.get_tenant_user(username))
+    async def get_account_identity(self, user_id: UUID) -> AccountIdentity:
+        return await self._account_identity(await self._tenant_account(user_id))
 
     @validate_permissions(Permission.ADMIN)
     async def set_identity_rebinding(
-        self, username: str, allowed_until: datetime | None
+        self, user_id: UUID, allowed_until: datetime | None
     ) -> AccountIdentity:
         """Open the account's single-use allowance to bind a new identity by
         email until ``allowed_until``, or withdraw it with None."""
-        account = await self.get_tenant_user(username)
+        account = await self._tenant_account(user_id)
         before = await self.identity_binding_repo.rebinding_until(account.id)
         await self.identity_binding_repo.set_rebinding(account.id, allowed_until)
         await self.audit_service.log(

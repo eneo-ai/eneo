@@ -46,8 +46,8 @@ GET /api/v1/admin/templates/assistants/deleted
 GET /api/v1/admin/users/
 GET /api/v1/admin/users/deleted
 GET /api/v1/admin/users/inactive
+GET /api/v1/admin/users/{user_id}/identity
 GET /api/v1/admin/users/{username}/
-GET /api/v1/admin/users/{username}/identity
 GET /api/v1/admin/widget-policy/
 GET /api/v1/admin/widget-templates/{id}/
 GET /api/v1/admin/widgets/

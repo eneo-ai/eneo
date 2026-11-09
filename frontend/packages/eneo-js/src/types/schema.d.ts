@@ -2606,7 +2606,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/admin/users/{username}/identity": {
+  "/api/v1/admin/users/{user_id}/identity": {
     parameters: {
       query?: never;
       header?: never;
@@ -2615,9 +2615,9 @@ export interface paths {
     };
     /**
      * Get a user's sign-in identities
-     * @description The identity provider identities bound to the account (issuer, audience, subject) and its open re-binding allowance, if any. A bound account signs in only with its identities; its email binds no other.
+     * @description The identity provider identities bound to the account (issuer, audience, subject) and its open re-binding allowance, if any. A bound account signs in only with its identities; its email binds no other. The account is named by its id, the `id` of the user list.
      */
-    get: operations["get_user_identity_api_v1_admin_users__username__identity_get"];
+    get: operations["get_user_identity_api_v1_admin_users__user_id__identity_get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -2626,7 +2626,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/admin/users/{username}/identity/rebinding": {
+  "/api/v1/admin/users/{user_id}/identity/rebinding": {
     parameters: {
       query?: never;
       header?: never;
@@ -2638,13 +2638,13 @@ export interface paths {
      * Allow a user to bind a new sign-in identity
      * @description Until `allowed_until` (at most 30 days ahead), the account's next sign-in by email binds the identity it presents, replacing the account's subject under that issuer and audience. Single use: the allowance closes with that sign-in. It never takes an identity another account holds. Audited.
      */
-    put: operations["allow_user_identity_rebinding_api_v1_admin_users__username__identity_rebinding_put"];
+    put: operations["allow_user_identity_rebinding_api_v1_admin_users__user_id__identity_rebinding_put"];
     post?: never;
     /**
      * Withdraw a user's sign-in re-binding
      * @description Closes the account's re-binding allowance. Audited.
      */
-    delete: operations["withdraw_user_identity_rebinding_api_v1_admin_users__username__identity_rebinding_delete"];
+    delete: operations["withdraw_user_identity_rebinding_api_v1_admin_users__user_id__identity_rebinding_delete"];
     options?: never;
     head?: never;
     patch?: never;
@@ -37783,12 +37783,12 @@ export interface operations {
       };
     };
   };
-  get_user_identity_api_v1_admin_users__username__identity_get: {
+  get_user_identity_api_v1_admin_users__user_id__identity_get: {
     parameters: {
       query?: never;
       header?: never;
       path: {
-        username: string;
+        user_id: string;
       };
       cookie?: never;
     };
@@ -37841,12 +37841,12 @@ export interface operations {
       };
     };
   };
-  allow_user_identity_rebinding_api_v1_admin_users__username__identity_rebinding_put: {
+  allow_user_identity_rebinding_api_v1_admin_users__user_id__identity_rebinding_put: {
     parameters: {
       query?: never;
       header?: never;
       path: {
-        username: string;
+        user_id: string;
       };
       cookie?: never;
     };
@@ -37903,12 +37903,12 @@ export interface operations {
       };
     };
   };
-  withdraw_user_identity_rebinding_api_v1_admin_users__username__identity_rebinding_delete: {
+  withdraw_user_identity_rebinding_api_v1_admin_users__user_id__identity_rebinding_delete: {
     parameters: {
       query?: never;
       header?: never;
       path: {
-        username: string;
+        user_id: string;
       };
       cookie?: never;
     };

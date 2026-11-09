@@ -254,18 +254,18 @@ Two administrator tools let the email bind an account that is already bound. Bot
 | Binds | The presented identity: adds its issuer and audience, or replaces the account's subject there | From one pair to another: adds the new pair and keeps the old, so both keep signing in. From a pair to itself: replaces the subject there, with its claim, once per account bound before the window opened, whether the email or the new subject under another audience finds the account |
 | For | One person with a new identity at the provider | A new client ID, a second entry point, a subject claim change |
 
-The endpoints, under `/api/v1/admin`:
+The endpoints, under `/api/v1/admin`. `{user_id}` is the account's `id` from `GET /users/`; a username can name more than one account.
 
 | Request | Body | Answer |
 |---------|------|--------|
-| `GET /users/{username}/identity` | | `{"bindings": [{"issuer", "audience", "subject_claim", "subject", "created_at"}], "rebinding_allowed_until"}` |
-| `PUT /users/{username}/identity/rebinding` | `{"allowed_until"}` | The same shape |
-| `DELETE /users/{username}/identity/rebinding` | | The same shape |
+| `GET /users/{user_id}/identity` | | `{"bindings": [{"issuer", "audience", "subject_claim", "subject", "created_at"}], "rebinding_allowed_until"}` |
+| `PUT /users/{user_id}/identity/rebinding` | `{"allowed_until"}` | The same shape |
+| `DELETE /users/{user_id}/identity/rebinding` | | The same shape |
 | `GET /identity-migration-windows` | | The open windows |
 | `POST /identity-migration-windows` | `{"from_issuer", "from_audience", "to_issuer", "to_audience", "closes_at"}` | `201` `{"id", "from_issuer", "from_audience", "to_issuer", "to_audience", "closes_at", "created_at"}` |
 | `DELETE /identity-migration-windows/{id}` | | The closed window, `404` when no open window has the id |
 
-`allowed_until` and `closes_at` are times with a time zone, in the future and at most 30 days ahead; anything else answers `422`.
+The three user routes answer `404` when the id names no active account of your organisation. `allowed_until` and `closes_at` are times with a time zone, in the future and at most 30 days ahead; anything else answers `422`.
 
 ### Upgrading to account binding
 

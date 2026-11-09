@@ -1,5 +1,5 @@
 """An org admin re-opens email matching on purpose: for one account
-(``/api/v1/admin/users/{username}/identity``) or for every account bound under
+(``/api/v1/admin/users/{user_id}/identity``) or for every account bound under
 one provider pair (``/api/v1/admin/identity-migration-windows``). Both end on
 their own, at most 30 days ahead, and every change is audited."""
 
@@ -19,6 +19,7 @@ from eneo.database.tables.identity_bindings_table import (
     IdentityBindings,
     IdentityMigrationWindows,
 )
+from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import Users
 from eneo.users.identity_binding_repo import IdentityConflictError
 from eneo.users.user import UserState
@@ -71,27 +72,39 @@ def sign_in(db_container, test_tenant):
     return _sign_in
 
 
-async def _person(tenant_id: UUID, name: str) -> tuple[str, str]:
-    """A bindable account: its username and its email."""
-    email = f"{name}@example.com"
+async def _person(
+    tenant_id: UUID, name: str, *, email: str | None = None
+) -> tuple[UUID, str]:
+    """A bindable account named ``name``: its id and its email."""
+    email = email or f"{name}@example.com"
     async with sessionmanager.session() as session, session.begin():
-        await session.execute(
-            sa.insert(Users).values(
+        account = await session.scalar(
+            sa.insert(Users)
+            .values(
                 email=email,
                 username=name,
                 tenant_id=tenant_id,
                 state=UserState.ACTIVE.value,
             )
+            .returning(Users.id)
         )
-    return name, email
+    assert account is not None
+    return account, email
 
 
-def _identity_url(username: str) -> str:
-    return f"/api/v1/admin/users/{username}/identity"
+def _identity_url(account: UUID) -> str:
+    return f"/api/v1/admin/users/{account}/identity"
 
 
-def _rebinding_url(username: str) -> str:
-    return f"{_identity_url(username)}/rebinding"
+def _rebinding_url(account: UUID) -> str:
+    return f"{_identity_url(account)}/rebinding"
+
+
+async def _rebinding_until(account: UUID) -> datetime | None:
+    async with sessionmanager.session() as session, session.begin():
+        return await session.scalar(
+            sa.select(Users.identity_rebinding_until).where(Users.id == account)
+        )
 
 
 def _ahead(delta: timedelta) -> str:
@@ -140,10 +153,10 @@ async def _refusal(sign_in_call: Any) -> str:
 async def test_the_identity_view_shows_the_bindings_and_the_allowance(
     client: AsyncClient, admin, sign_in, test_tenant
 ):
-    username, email = await _person(test_tenant.id, "anna")
+    account_id, email = await _person(test_tenant.id, "anna")
     await sign_in(email, "anna-1")
 
-    response = await client.get(_identity_url(username), headers=admin)
+    response = await client.get(_identity_url(account_id), headers=admin)
 
     assert response.status_code == 200, response.text
     body = response.json()
@@ -163,12 +176,12 @@ async def test_the_identity_view_shows_the_bindings_and_the_allowance(
 async def test_an_allowance_admits_one_new_subject_and_is_then_cleared(
     client: AsyncClient, admin, admin_user, sign_in, test_tenant
 ):
-    username, email = await _person(test_tenant.id, "anna")
+    account_id, email = await _person(test_tenant.id, "anna")
     account = await sign_in(email, "anna-1")
     until = _ahead(timedelta(days=1))
 
     response = await client.put(
-        _rebinding_url(username), json={"allowed_until": until}, headers=admin
+        _rebinding_url(account_id), json={"allowed_until": until}, headers=admin
     )
 
     assert response.status_code == 200, response.text
@@ -176,7 +189,7 @@ async def test_an_allowance_admits_one_new_subject_and_is_then_cleared(
     assert allowed == datetime.fromisoformat(until)
     # The provider re-issued the person under a new subject.
     assert await sign_in(email, "anna-2") == account
-    view = (await client.get(_identity_url(username), headers=admin)).json()
+    view = (await client.get(_identity_url(account_id), headers=admin)).json()
     assert [b["subject"] for b in view["bindings"]] == ["anna-2"]
     assert view["rebinding_allowed_until"] is None
     # Single use: the next new subject is refused again.
@@ -196,15 +209,15 @@ async def test_an_allowance_admits_one_new_subject_and_is_then_cleared(
 async def test_a_withdrawn_allowance_admits_nothing(
     client: AsyncClient, admin, sign_in, test_tenant
 ):
-    username, email = await _person(test_tenant.id, "anna")
+    account_id, email = await _person(test_tenant.id, "anna")
     await sign_in(email, "anna-1")
     await client.put(
-        _rebinding_url(username),
+        _rebinding_url(account_id),
         json={"allowed_until": _ahead(timedelta(days=1))},
         headers=admin,
     )
 
-    response = await client.delete(_rebinding_url(username), headers=admin)
+    response = await client.delete(_rebinding_url(account_id), headers=admin)
 
     assert response.status_code == 200, response.text
     assert response.json()["rebinding_allowed_until"] is None
@@ -226,7 +239,7 @@ async def test_a_withdrawn_allowance_admits_nothing(
 async def test_an_allowance_and_a_window_end_within_30_days(
     client: AsyncClient, admin, sign_in, test_tenant, until
 ):
-    username, email = await _person(test_tenant.id, "anna")
+    account_id, email = await _person(test_tenant.id, "anna")
     await sign_in(email, "anna-1")
     window = {
         "from_issuer": ISSUER,
@@ -237,13 +250,13 @@ async def test_an_allowance_and_a_window_end_within_30_days(
     }
 
     allowance = await client.put(
-        _rebinding_url(username), json={"allowed_until": until}, headers=admin
+        _rebinding_url(account_id), json={"allowed_until": until}, headers=admin
     )
     opened = await client.post(WINDOWS, json=window, headers=admin)
 
     assert (allowance.status_code, opened.status_code) == (422, 422)
     assert (await client.get(WINDOWS, headers=admin)).json() == []
-    view = (await client.get(_identity_url(username), headers=admin)).json()
+    view = (await client.get(_identity_url(account_id), headers=admin)).json()
     assert view["rebinding_allowed_until"] is None
     assert await _audits("identity_rebinding_updated") == []
     assert await _audits("identity_migration_window_updated") == []
@@ -361,16 +374,77 @@ async def test_a_window_may_lead_to_its_own_pair(
 
 
 async def test_an_unknown_account_has_no_identity(client: AsyncClient, admin):
-    username = f"nobody-{uuid4().hex[:8]}"
+    account_id = uuid4()
 
-    view = await client.get(_identity_url(username), headers=admin)
+    view = await client.get(_identity_url(account_id), headers=admin)
     allowance = await client.put(
-        _rebinding_url(username),
+        _rebinding_url(account_id),
         json={"allowed_until": _ahead(timedelta(days=1))},
         headers=admin,
     )
+    withdrawal = await client.delete(_rebinding_url(account_id), headers=admin)
 
-    assert (view.status_code, allowance.status_code) == (404, 404)
+    assert [r.status_code for r in (view, allowance, withdrawal)] == [404] * 3
+
+
+async def test_the_routes_act_only_on_the_account_they_name(
+    client: AsyncClient, admin, sign_in, test_tenant
+):
+    # Usernames are not unique: two accounts of one organisation can share
+    # one, so the routes name the account by its id.
+    first, first_email = await _person(test_tenant.id, "anna")
+    second, second_email = await _person(
+        test_tenant.id, "anna", email="anna.s@example.com"
+    )
+    await sign_in(first_email, "anna-1")
+    await sign_in(second_email, "anna-2")
+    allowance = {"allowed_until": _ahead(timedelta(days=1))}
+
+    opened = await client.put(_rebinding_url(second), json=allowance, headers=admin)
+
+    assert opened.status_code == 200, opened.text
+    views = {
+        account: (await client.get(_identity_url(account), headers=admin)).json()
+        for account in (first, second)
+    }
+    assert [b["subject"] for b in views[first]["bindings"]] == ["anna-1"]
+    assert views[first]["rebinding_allowed_until"] is None
+    assert [b["subject"] for b in views[second]["bindings"]] == ["anna-2"]
+    assert views[second]["rebinding_allowed_until"] is not None
+
+    await client.put(_rebinding_url(first), json=allowance, headers=admin)
+    withdrawn = await client.delete(_rebinding_url(second), headers=admin)
+
+    assert withdrawn.status_code == 200, withdrawn.text
+    assert withdrawn.json()["rebinding_allowed_until"] is None
+    assert await _rebinding_until(first) is not None
+    assert await _rebinding_until(second) is None
+
+
+async def test_an_account_of_another_organisation_is_not_found(
+    client: AsyncClient, admin
+):
+    other = uuid4()
+    async with sessionmanager.session() as session, session.begin():
+        await session.execute(
+            sa.insert(Tenants).values(
+                id=other,
+                name=f"other-{other.hex[:8]}",
+                quota_limit=1_000_000,
+                state="active",
+            )
+        )
+    account_id, _ = await _person(other, "anna")
+    allowance = {"allowed_until": _ahead(timedelta(days=1))}
+
+    answers = [
+        await client.get(_identity_url(account_id), headers=admin),
+        await client.put(_rebinding_url(account_id), json=allowance, headers=admin),
+        await client.delete(_rebinding_url(account_id), headers=admin),
+    ]
+
+    assert [a.status_code for a in answers] == [404] * 3
+    assert await _rebinding_until(account_id) is None
 
 
 async def test_only_an_admin_in_an_interactive_session_reaches_them(
@@ -380,7 +454,7 @@ async def test_only_an_admin_in_an_interactive_session_reaches_them(
     sign_in,
     test_tenant,
 ):
-    username, email = await _person(test_tenant.id, "anna")
+    account_id, email = await _person(test_tenant.id, "anna")
     await sign_in(email, "anna-1")
     window = {
         "from_issuer": ISSUER,
@@ -398,9 +472,11 @@ async def test_only_an_admin_in_an_interactive_session_reaches_them(
 
     for name, (headers, status) in refused.items():
         answers = [
-            await client.get(_identity_url(username), headers=headers),
-            await client.put(_rebinding_url(username), json=allowance, headers=headers),
-            await client.delete(_rebinding_url(username), headers=headers),
+            await client.get(_identity_url(account_id), headers=headers),
+            await client.put(
+                _rebinding_url(account_id), json=allowance, headers=headers
+            ),
+            await client.delete(_rebinding_url(account_id), headers=headers),
             await client.get(WINDOWS, headers=headers),
             await client.post(WINDOWS, json=window, headers=headers),
             await client.delete(f"{WINDOWS}/{uuid4()}", headers=headers),
@@ -409,15 +485,8 @@ async def test_only_an_admin_in_an_interactive_session_reaches_them(
         if name == "admin API key":
             assert {a.json()["code"] for a in answers} == {"session_auth_required"}
 
+    assert await _rebinding_until(account_id) is None
     async with sessionmanager.session() as session, session.begin():
-        assert (
-            await session.scalar(
-                sa.select(Users.identity_rebinding_until).where(
-                    Users.username == username
-                )
-            )
-            is None
-        )
         assert (
             await session.scalar(
                 sa.select(sa.func.count()).select_from(IdentityMigrationWindows)
