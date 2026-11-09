@@ -18,6 +18,7 @@ from uuid import uuid4
 
 import psycopg2
 import pytest
+from sqlalchemy.exc import DBAPIError
 from testcontainers.postgres import PostgresContainer
 
 from alembic import command
@@ -40,6 +41,15 @@ NAME = "Utredning Anna Svensson.pdf"
 TITLE = "Can my neighbour read my medical records"
 # More file rows than one batch of the upgrade.
 _FILE_ROWS = 5_001
+_BATCH_ROWS = 5_000
+# The actions whose rows the upgrade reads, in its batches by id.
+_REWRITTEN_ACTIONS = [
+    *(action.value for action in FILE_DESCRIPTIONS),
+    ActionType.MCP_APP_TOOL_CALLED.value,
+    ActionType.DOCUMENT_EXPORTED.value,
+    ActionType.DOCUMENT_VERSION_SAVED.value,
+    ActionType.ASSISTANT_UPDATED.value,
+]
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -231,6 +241,43 @@ def _stored(database_url: str) -> dict[str, tuple[str, str, str, dict[str, Any]]
         connection.close()
 
 
+def _interrupt_after_first_batch(database_url: str) -> str:
+    """Make the upgrade fail on the first row past its first batch, so that
+    batch is committed and the rest is not; the last id of that batch."""
+    connection = _connect(database_url)
+    try:
+        with connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT id::text FROM audit_logs WHERE action = ANY(%s) "
+                "ORDER BY id OFFSET %s LIMIT 1",
+                (_REWRITTEN_ACTIONS, _BATCH_ROWS - 1),
+            )
+            (boundary,) = cursor.fetchone()
+            cursor.execute(
+                "CREATE FUNCTION interrupt_upgrade() RETURNS trigger "
+                "LANGUAGE plpgsql AS $$ BEGIN "
+                "RAISE EXCEPTION 'upgrade interrupted'; END $$"
+            )
+            cursor.execute(
+                "CREATE TRIGGER interrupt_upgrade BEFORE UPDATE ON audit_logs "
+                f"FOR EACH ROW WHEN (OLD.id > '{boundary}'::uuid) "
+                "EXECUTE FUNCTION interrupt_upgrade()"
+            )
+        return boundary
+    finally:
+        connection.close()
+
+
+def _allow_upgrade(database_url: str) -> None:
+    connection = _connect(database_url)
+    try:
+        with connection, connection.cursor() as cursor:
+            cursor.execute("DROP TRIGGER interrupt_upgrade ON audit_logs")
+            cursor.execute("DROP FUNCTION interrupt_upgrade()")
+    finally:
+        connection.close()
+
+
 def _expected(
     action: ActionType, description: str, metadata: dict[str, Any]
 ) -> tuple[str, dict[str, Any]]:
@@ -267,7 +314,8 @@ def test_names_are_removed_from_audit_rows_on_upgrade() -> None:
     """Mutants: a row past the first batch keeps its name; a file row keeps a
     variable description; a collection upload keeps its file name; a row of
     another action or one without a file name is rewritten; who or when
-    changes; a second run or the downgrade changes a row."""
+    changes; an upgrade interrupted after a committed batch and run again
+    leaves a name or changes a row twice; the downgrade changes a row."""
     postgres = PostgresContainer(
         image=_POSTGRES_13_IMAGE,
         username="audit_names_migration",
@@ -282,10 +330,26 @@ def test_names_are_removed_from_audit_rows_on_upgrade() -> None:
         _insert(database_url, written)
         before = _stored(database_url)
 
+        boundary = _interrupt_after_first_batch(database_url)
+        with pytest.raises(DBAPIError, match="upgrade interrupted"):
+            command.upgrade(config, "head")
+        interrupted = _stored(database_url)
+        _allow_upgrade(database_url)
         command.upgrade(config, "head")
         after = _stored(database_url)
-        command.upgrade(config, "head")
         command.downgrade(config, _PREVIOUS_REVISION)
+
+        # The first batch was committed as it ends, and the rest was not.
+        assert all(
+            row == after[row_id]
+            for row_id, row in interrupted.items()
+            if row_id <= boundary
+        )
+        assert any(
+            NAME in description + json.dumps(metadata)
+            for row_id, (_, _, description, metadata) in interrupted.items()
+            if row_id > boundary
+        )
 
         assert _stored(database_url) == after
         assert len(after) == len(written) + _FILE_ROWS
