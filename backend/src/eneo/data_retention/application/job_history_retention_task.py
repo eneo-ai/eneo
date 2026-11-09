@@ -1,6 +1,7 @@
 """Execution history follows the deployment's audit retention policy."""
 
 from collections.abc import Sequence
+from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,8 +24,9 @@ class JobHistoryRetentionTask:
     observation_keys = frozenset({"job_runs_examined"})
     blocked_keys: frozenset[str] = frozenset()
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, *, now: datetime | None = None) -> None:
         self.repository = RetentionJobRunRepository(session)
+        self.now = now
 
     def steps(self) -> Sequence[RetentionStep]:
         return (RetentionStep("history", self._history, max_files=0),)
@@ -35,7 +37,9 @@ class JobHistoryRetentionTask:
         limit = batch.rows // 2
         if limit == 0:
             return out.result(rows=0, exhausted=False, deferred=True)
-        result = await self.repository.prune_after_audit_retention(limit=limit)
+        result = await self.repository.prune_after_audit_retention(
+            limit=limit, now=self.now
+        )
         out.add(None, "job_runs_examined", result.examined)
         out.add(None, "job_runs_deleted", result.deleted)
         return out.result(

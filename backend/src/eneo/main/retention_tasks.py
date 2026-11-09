@@ -179,13 +179,15 @@ def retention_task_registrations(
                 execution_files=budget.files,
                 chunk_rows=settings.retention_chunk_rows,
                 gather_seconds=settings.retention_chunk_gather_seconds,
+                # Without a given time these two keep the database's clock.
+                now=now,
             ),
         ),
         RetentionTaskRegistration(
             name=JOB_HISTORY_TASK,
             enabled=settings.retention_job_history_enabled,
             budget=budget,
-            build=lambda session: JobHistoryRetentionTask(session),
+            build=lambda session: JobHistoryRetentionTask(session, now=now),
         ),
     )
 

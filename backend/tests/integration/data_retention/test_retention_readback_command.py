@@ -14,10 +14,16 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from eneo.data_retention.domain.retention import RetentionJobOutcome
 from eneo.data_retention.infrastructure import retention_worker
 from eneo.database.database import sessionmanager
+from eneo.database.tables.audit_retention_policy_table import AuditRetentionPolicy
+from eneo.database.tables.files_table import Files
 from eneo.database.tables.questions_table import Questions
+from eneo.database.tables.retention_tables import RetentionJobRuns
 from eneo.database.tables.sessions_table import Sessions
+from eneo.files.file_models import FileType
+from eneo.main.config import get_settings
 from eneo.main.retention_readback import read_back_retention
 from eneo.object_content.reconciliation import ReconciliationResult, RemovalReadback
 from eneo.object_content.runtime import object_content_runtime
@@ -41,7 +47,7 @@ async def object_content() -> AsyncIterator[None]:
         await object_content_runtime.stop()
 
 
-async def _exists(model: type[Questions] | type[Sessions], row_id: object) -> bool:
+async def _exists(model: type[Any], row_id: object) -> bool:
     async with sessionmanager.session() as session, session.begin():
         return await session.get(model, row_id) is not None
 
@@ -142,6 +148,69 @@ async def test_rows_that_fall_due_while_it_runs_are_left_to_the_scheduled_run(
     assert [await _exists(Questions, row) for row in falling_due] == [True] * len(
         falling_due
     )
+
+
+async def test_unused_files_and_job_history_are_judged_at_the_readback_time(
+    retention_session: AsyncSession, object_content: None, test_tenant, admin_user
+) -> None:
+    """Unused uploads and finished executions follow the readback's time like
+    every other row: those due only by the moving clock are left to the
+    scheduled run."""
+    database_now = (
+        await retention_session.execute(sa.select(sa.func.now()))
+    ).scalar_one()
+    readback_at = database_now - timedelta(hours=1)
+    grace = timedelta(hours=get_settings().retention_unused_file_grace_hours)
+    retention_session.add(
+        AuditRetentionPolicy(tenant_id=test_tenant.id, retention_days=30)
+    )
+
+    def upload(created_at: datetime) -> Files:
+        return Files(
+            name="upload.txt",
+            mimetype="text/plain",
+            file_type=FileType.TEXT.value,
+            tenant_id=test_tenant.id,
+            user_id=admin_user.id,
+            created_at=created_at,
+            updated_at=created_at,
+        )
+
+    def execution(finished_at: datetime) -> RetentionJobRuns:
+        return RetentionJobRuns(
+            task="tests.readback_time",
+            outcome=RetentionJobOutcome.SUCCEEDED.value,
+            started_at=finished_at,
+            heartbeat_at=finished_at,
+            finished_at=finished_at,
+        )
+
+    half_an_hour = timedelta(minutes=30)
+    audit_period = timedelta(days=30)
+    due = [
+        upload(readback_at - grace - half_an_hour),
+        execution(readback_at - audit_period - half_an_hour),
+    ]
+    late = [
+        upload(database_now - grace - half_an_hour),
+        execution(database_now - audit_period - half_an_hour),
+    ]
+    retention_session.add_all([*due, *late])
+    await retention_session.flush()
+    due_rows = [(type(row), row.id) for row in due]
+    late_rows = [(type(row), row.id) for row in late]
+    await retention_session.commit()
+
+    await retention_worker.run_retention_at(readback_at)
+
+    assert [await _exists(model, row_id) for model, row_id in due_rows] == [
+        False,
+        False,
+    ]
+    assert [await _exists(model, row_id) for model, row_id in late_rows] == [
+        True,
+        True,
+    ]
 
 
 async def test_a_locked_empty_session_fails_the_readback_until_it_is_released(
