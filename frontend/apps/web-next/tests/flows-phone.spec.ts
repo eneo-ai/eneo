@@ -81,7 +81,8 @@ test(
     const flow = await audioFlow(page);
     const space = flow.url.replace(/\/flows\/[^/]+$/, "");
 
-    // Reachable: Flöden is a tab of the space, its flows are rows that say what they take and give.
+    // Reachable: Flöden is a tab of the space, its flows are rows under their state that say what
+    // they take and give.
     await page.goto(`${space}/overview`);
     await page
       .getByRole("navigation", { name: "Ytans innehåll" })
@@ -89,7 +90,7 @@ test(
       .click();
     await expect(page).toHaveURL(/\/flows$/);
     await expect(page.getByRole("table")).toHaveCount(0);
-    const rows = page.getByRole("list", { name: "Flöden" });
+    const rows = page.getByRole("region", { name: "Publicerad", exact: true }).getByRole("list");
     await expect(rows.getByText("Indata: Ljud")).toBeVisible();
     await expect(page.getByRole("button", { name: "Nytt flöde" })).toHaveCount(0);
     await fitsTheWidth(page);
