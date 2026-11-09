@@ -13,7 +13,9 @@ import { useLocale, useTranslations } from "use-intl";
 import { useId, useRef, useState, type SubmitEvent } from "react";
 import { TextInput } from "@/components/astryx/text-input";
 import { useAppContext } from "@/components/providers/app-context";
+import { useAnnounceChange } from "@/lib/hooks/use-announce-change";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
+import { LeaveConfirmation } from "@/components/composites/leave-confirmation";
 import { EmptyState } from "@/components/composites/empty-state";
 import { revealProblems } from "@/components/composites/field-problem";
 import { PageHeader } from "@/components/composites/page-header";
@@ -34,22 +36,19 @@ import {
 } from "./federation";
 import {
   changedFields,
+  consequences,
+  domainChange,
   draftFromView,
   FEDERATION_FIELDS,
   parseDomains,
+  RISKY,
   toPatch,
   validate,
+  type Consequence,
   type FederationDraft,
   type FederationField
 } from "./federation-draft";
 import { RedirectUris } from "./redirect-uris";
-
-// A wrong value here locks every SSO user out; a label is only a label.
-const RISKY: ReadonlySet<FederationField> = new Set([
-  "client_id",
-  "client_secret",
-  "allowed_domains"
-]);
 
 const CARD = "bg-ax-card border-ax-border rounded-ax-container border";
 
@@ -227,6 +226,16 @@ function FederationForm({
   const [draft, setDraft] = useState<FederationDraft>(() => draftFromView(view));
   const [submitted, setSubmitted] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  // What the open dialog lists, fixed when it opens: a save resets the draft.
+  const [confirmation, setConfirmation] = useState<{
+    lines: string[];
+    effects: string[];
+    risky: boolean;
+  }>({ lines: [], effects: [], risky: false });
+  // A Save with nothing changed says so instead of doing nothing silently.
+  const [nothingToSave, setNothingToSave] = useState(false);
+  // After a save that changed who can sign in: suggest trying it.
+  const [suggestTest, setSuggestTest] = useState(false);
   const [conflict, setConflict] = useState(false);
   const [reloading, setReloading] = useState(false);
   const [saveError, setSaveError] = useState<unknown>(null);
@@ -238,6 +247,7 @@ function FederationForm({
   const secretRef = useRef<HTMLInputElement>(null);
   const domainsRef = useRef<HTMLTextAreaElement>(null);
   const replaceSecretRef = useRef<HTMLButtonElement>(null);
+  const saveRef = useRef<HTMLButtonElement>(null);
   const rescueFocus = useFocusRescue();
 
   const changed = changedFields(base, draft);
@@ -251,9 +261,20 @@ function FederationForm({
     const problem = problemFor(field);
     return problem ? { type: "error" as const, message: problem } : undefined;
   };
+  const saveState =
+    changed.length > 0
+      ? t("federation_admin_unsaved", {
+          fields: changed.map((field) => t(FIELD_LABEL_KEYS[field])).join(", ")
+        })
+      : nothingToSave
+        ? t("federation_admin_nothing_to_save")
+        : null;
+  useAnnounceChange(saveState);
 
   function edit(field: FederationField, changes: Partial<FederationDraft>) {
     setDraft((current) => ({ ...current, ...changes }));
+    setNothingToSave(false);
+    setSuggestTest(false);
     setServerProblems((current) => {
       const next = { ...current };
       delete next[field];
@@ -276,11 +297,16 @@ function FederationForm({
       queryClient.setQueryData(FEDERATION_KEY, saved);
       void queryClient.invalidateQueries({ queryKey: FEDERATION_KEY });
       startFrom(saved);
+      setSuggestTest(confirmation.risky);
       setConfirming(false);
       // A save from the secret field removes it; the dialog's focus return
       // then has nothing to go to. "Byt hemlighet" stands in its place.
       rescueFocus(() => replaceSecretRef.current);
-      announce(t("federation_admin_saved"));
+      announce(
+        confirmation.risky
+          ? `${t("federation_admin_saved")} ${t("federation_admin_saved_next_step")}`
+          : t("federation_admin_saved")
+      );
     },
     onError: (error) => {
       setConfirming(false);
@@ -307,7 +333,11 @@ function FederationForm({
     event.preventDefault();
     // Never disabled: the dialog returns focus here after a save, and a
     // disabled button would drop it to the page. Nothing changed, nothing to do.
-    if (save.isPending || changed.length === 0) return;
+    if (save.isPending) return;
+    if (changed.length === 0) {
+      setNothingToSave(true);
+      return;
+    }
     const first = FEDERATION_FIELDS.find((field) => problems[field]);
     if (first) {
       const fieldRef = {
@@ -320,7 +350,18 @@ function FederationForm({
       return;
     }
     setSaveError(null);
+    setConfirmation({
+      lines: changed.map((field) => changeLine(field, base, draft, t)),
+      effects: consequences(base, draft).map((effect) => effectText(effect, t)),
+      risky: changed.some((field) => RISKY.has(field))
+    });
     setConfirming(true);
+  }
+
+  function undo() {
+    startFrom(base);
+    setNothingToSave(false);
+    saveRef.current?.focus();
   }
 
   async function reloadAfterConflict() {
@@ -337,8 +378,6 @@ function FederationForm({
       setReloading(false);
     }
   }
-
-  const changeLines = changed.map((field) => changeLine(field, base, draft, t));
 
   return (
     <>
@@ -370,6 +409,7 @@ function FederationForm({
           <TextInput
             ref={providerRef}
             label={t("federation_admin_provider_label")}
+            description={t("federation_admin_provider_help")}
             value={draft.provider}
             onChange={(provider) => edit("provider", { provider })}
             autoComplete="off"
@@ -380,6 +420,7 @@ function FederationForm({
           <TextInput
             ref={clientIdRef}
             label={t("client_id")}
+            description={t("federation_admin_client_id_help")}
             value={draft.clientId}
             onChange={(clientId) => edit("client_id", { clientId })}
             autoComplete="off"
@@ -412,23 +453,40 @@ function FederationForm({
             hasDomains={parseDomains(draft.domains).length > 0}
           />
           {saveError != null ? <SaveError error={saveError} /> : null}
-          <Button
-            type="submit"
-            variant="primary"
-            label={t("save_changes")}
-            className="self-start"
-            isLoading={save.isPending}
-            isInterruptible
-          />
+          {suggestTest ? (
+            <Banner status="success" title={t("federation_admin_saved_next_step")} />
+          ) : null}
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              ref={saveRef}
+              type="submit"
+              variant="primary"
+              label={t("save_changes")}
+              isLoading={save.isPending}
+              isInterruptible
+            />
+            {changed.length > 0 ? (
+              <Button variant="ghost" label={t("federation_admin_undo")} onClick={undo} />
+            ) : null}
+            {saveState ? <Text type="supporting">{saveState}</Text> : null}
+          </div>
         </form>
       </section>
       <ConfirmDialogControlled
         open={confirming}
         onOpenChange={setConfirming}
-        title={t("federation_admin_confirm_title")}
-        description={t("federation_admin_confirm_description")}
+        title={t(
+          confirmation.risky
+            ? "federation_admin_confirm_title"
+            : "federation_admin_confirm_label_title"
+        )}
+        description={t(
+          confirmation.risky
+            ? "federation_admin_confirm_description"
+            : "federation_admin_confirm_label_description"
+        )}
         confirmLabel={t("federation_admin_confirm_action")}
-        variant={changed.some((field) => RISKY.has(field)) ? "destructive" : "default"}
+        variant={confirmation.risky ? "destructive" : "default"}
         pending={save.isPending}
         onConfirm={() => {
           if (save.isPending) return;
@@ -438,16 +496,22 @@ function FederationForm({
         <div className="flex flex-col gap-2">
           <Text weight="semibold">{t("federation_admin_confirm_changes")}</Text>
           <ul className="list-disc space-y-1 pl-6 text-sm">
-            {changeLines.map((line) => (
+            {confirmation.lines.map((line) => (
               <li key={line} className="break-words">
                 {line}
               </li>
             ))}
           </ul>
-          {changed.includes("client_id") && <Text>{t("federation_admin_confirm_client_id")}</Text>}
-          <Text type="supporting">{t("federation_admin_confirm_recovery")}</Text>
+          {confirmation.effects.map((effect) => (
+            <Text key={effect}>{effect}</Text>
+          ))}
+          {confirmation.risky ? (
+            <Text type="supporting">{t("federation_admin_confirm_recovery")}</Text>
+          ) : null}
         </div>
       </ConfirmDialogControlled>
+      {/* Until the save's outcome is known: a failed save keeps the draft to try again. */}
+      <LeaveConfirmation active={changed.length > 0 || save.isPending} />
     </>
   );
 }
@@ -481,6 +545,21 @@ function changeLine(
 ): string {
   if (field === "client_secret") return t("federation_admin_secret_replaced_change");
   const list = (values: string[]) => values.join(", ") || t("federation_admin_none");
+  if (field === "allowed_domains") {
+    // The domains added and removed, not two whole lists to compare.
+    const { added, removed } = domainChange(base, draft);
+    const changes = [
+      added.length ? t("federation_admin_domains_added", { domains: added.join(", ") }) : null,
+      removed.length ? t("federation_admin_domains_removed", { domains: removed.join(", ") }) : null
+    ].filter((change) => change !== null);
+    // Only the order changed: the whole lists say that.
+    if (changes.length) {
+      return t("federation_admin_change_domains", {
+        field: t(FIELD_LABEL_KEYS[field]),
+        changes: changes.join("; ")
+      });
+    }
+  }
   const [from, to] =
     field === "provider"
       ? [base.provider ?? "", draft.provider.trim()]
@@ -492,6 +571,25 @@ function changeLine(
     from: from || t("federation_admin_none"),
     to: to || t("federation_admin_none")
   });
+}
+
+/** What one change does to the people who sign in. */
+function effectText(effect: Consequence, t: Translate): string {
+  const list = (domains: string[]) => domains.join(", ");
+  switch (effect.code) {
+    case "client_id":
+      return t("federation_admin_confirm_client_id");
+    case "secret":
+      return t("federation_admin_confirm_secret");
+    case "domains_restricted":
+      return t("federation_admin_confirm_domains_restricted", { domains: list(effect.domains) });
+    case "domains_emptied":
+      return t("federation_admin_confirm_domains_emptied");
+    case "domains_removed":
+      return t("federation_admin_confirm_domains_removed", { domains: list(effect.domains) });
+    case "domains_added":
+      return t("federation_admin_confirm_domains_added", { domains: list(effect.domains) });
+  }
 }
 
 /**

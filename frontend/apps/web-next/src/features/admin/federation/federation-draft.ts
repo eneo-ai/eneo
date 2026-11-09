@@ -22,6 +22,13 @@ export const FEDERATION_FIELDS: readonly FederationField[] = [
   "allowed_domains"
 ];
 
+/** A wrong value here locks every SSO user out; the name is only a label. */
+export const RISKY: ReadonlySet<FederationField> = new Set([
+  "client_id",
+  "client_secret",
+  "allowed_domains"
+]);
+
 // The backend's rule (tenant_federation_service._DOMAIN_PATTERN), so a bad
 // domain is explained at the field instead of by a 422.
 const DOMAIN = /^[a-z0-9]+([-.][a-z0-9]+)*\.[a-z]{2,}$/;
@@ -58,6 +65,54 @@ export function changedFields(view: FederationView, draft: FederationDraft): Fed
     allowed_domains: !sameDomains(parseDomains(draft.domains), view.allowed_domains ?? [])
   };
   return FEDERATION_FIELDS.filter((field) => changed[field]);
+}
+
+/** The allowed domains a draft adds and removes, as sign-in compares them. */
+export function domainChange(
+  view: FederationView,
+  draft: FederationDraft
+): { added: string[]; removed: string[] } {
+  const before = (view.allowed_domains ?? []).map((domain) => domain.toLowerCase());
+  const after = parseDomains(draft.domains);
+  return {
+    added: after.filter((domain) => !before.includes(domain)),
+    removed: before.filter((domain) => !after.includes(domain))
+  };
+}
+
+/** What a save does to the people who sign in, one entry per effect. */
+export type Consequence =
+  | { code: "client_id" }
+  | { code: "secret" }
+  /** From no list to a list: everyone outside it is refused. */
+  | { code: "domains_restricted"; domains: string[] }
+  /** From a list to none: every member signs in, no account is created. */
+  | { code: "domains_emptied" }
+  | { code: "domains_removed"; domains: string[] }
+  | { code: "domains_added"; domains: string[] };
+
+/**
+ * The effects the confirmation names. With domains, sign-in admits only the
+ * listed ones; without, it checks none and creates no account automatically
+ * (user_service.resolve_federated_user). The name is only a label.
+ */
+export function consequences(view: FederationView, draft: FederationDraft): Consequence[] {
+  const changed = changedFields(view, draft);
+  const effects: Consequence[] = [];
+  if (changed.includes("client_id")) effects.push({ code: "client_id" });
+  if (changed.includes("client_secret")) effects.push({ code: "secret" });
+  if (!changed.includes("allowed_domains")) return effects;
+
+  const { added, removed } = domainChange(view, draft);
+  const hadList = (view.allowed_domains ?? []).length > 0;
+  const hasList = parseDomains(draft.domains).length > 0;
+  if (!hadList && hasList) effects.push({ code: "domains_restricted", domains: added });
+  else if (hadList && !hasList) effects.push({ code: "domains_emptied" });
+  else {
+    if (removed.length) effects.push({ code: "domains_removed", domains: removed });
+    if (added.length) effects.push({ code: "domains_added", domains: added });
+  }
+  return effects;
 }
 
 /** What the backend would refuse, per field. */

@@ -9,6 +9,7 @@ import type { FederationView } from "./federation";
 
 const api = vi.hoisted(() => ({ GET: vi.fn(), PATCH: vi.fn() }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 
 import { FederationPage } from "./federation-page";
 
@@ -36,9 +37,12 @@ const ok = (data: unknown) => Promise.resolve({ data, response: new Response("{}
 const refused = (status: number, body: unknown) =>
   Promise.resolve({ error: body, response: new Response(null, { status }) });
 
-/** What Astryx's polite live region says now. */
+/** What Astryx's polite live region says now; messages close together are joined. */
 const announced = () =>
   document.querySelector('[data-astryx-live-region="polite"]')?.textContent ?? "";
+/** Text shown on the page, not only in the live region. */
+const shown = (text: string) =>
+  screen.queryByText(text, { ignore: "script, style, [data-astryx-live-region]" });
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -176,11 +180,13 @@ describe("saving", () => {
       body: { revision: "rev-1", client_id: "next-client" }
     });
     expect(clientId().value).toBe("next-client");
-    // Nothing left to save: Save stays focusable and asks nothing.
+    await waitFor(() => expect(announced()).toContain("Inloggningsinställningarna är sparade."));
+    // Nothing left to save: Save stays focusable, asks nothing and says so. That
+    // announcement replaces the previous one, so each is checked after its own action.
     fireEvent.click(save());
     expect(screen.queryByRole("alertdialog")).toBeNull();
     expect(api.PATCH).toHaveBeenCalledTimes(1);
-    await waitFor(() => expect(announced()).toBe("Inloggningsinställningarna är sparade."));
+    await waitFor(() => expect(announced()).toBe(sv.federation_admin_nothing_to_save));
   });
 
   it("warns about existing accounts only when the client ID changes", async () => {
@@ -255,6 +261,7 @@ describe("saving", () => {
         .getAllByRole("listitem")
         .map((item) => item.textContent)
     ).toEqual(["Klienthemligheten byts ut"]);
+    expect(dialog.textContent).toContain(sv.federation_admin_confirm_secret);
     expect(dialog.textContent).not.toContain(SECRET);
     fireEvent.click(within(dialog).getByRole("button", { name: "Spara och använd" }));
 
@@ -426,5 +433,130 @@ describe("account creation at first sign-in", () => {
     const domains = await screen.findByLabelText(sv.federation_admin_domains);
     fireEvent.change(domains, { target: { value: "" } });
     expect(await screen.findByText(sv.federation_admin_jit_no_domains)).toBeTruthy();
+  });
+});
+
+describe("before and after a save", () => {
+  const listed: FederationView = { ...view, allowed_domains: ["example.org", "example.com"] };
+  const provider = () => screen.getByLabelText(new RegExp(sv.federation_admin_provider_label));
+  const domains = () => screen.getByLabelText(new RegExp(sv.federation_admin_domains));
+  const description = (field: HTMLElement) =>
+    (field.getAttribute("aria-describedby") ?? "")
+      .split(/\s+/)
+      .map((id) => document.getElementById(id)?.textContent ?? "")
+      .join(" ");
+  const items = (dialog: HTMLElement) =>
+    within(dialog)
+      .getAllByRole("listitem")
+      .map((item) => item.textContent);
+  const confirm = async () =>
+    fireEvent.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: sv.federation_admin_confirm_action
+      })
+    );
+
+  it("explains the name and the client ID at their fields", async () => {
+    await show();
+
+    expect(description(provider())).toContain(sv.federation_admin_provider_help);
+    expect(description(clientId())).toContain(sv.federation_admin_client_id_help);
+  });
+
+  it("names what is not saved, and Undo restores the saved values", async () => {
+    await show();
+
+    fireEvent.change(clientId(), { target: { value: "next-client" } });
+    const unsaved = sv.federation_admin_unsaved.replace("{fields}", sv.client_id);
+    expect(shown(unsaved)).toBeTruthy();
+    await waitFor(() => expect(announced()).toBe(unsaved));
+
+    fireEvent.click(screen.getByRole("button", { name: sv.federation_admin_undo }));
+
+    expect(clientId().value).toBe("eneo-client");
+    expect(document.activeElement).toBe(save());
+    expect(shown(unsaved)).toBeNull();
+    expect(screen.queryByRole("button", { name: sv.federation_admin_undo })).toBeNull();
+  });
+
+  it("says so when Save has nothing to save", async () => {
+    await show();
+
+    fireEvent.click(save());
+
+    expect(shown(sv.federation_admin_nothing_to_save)).toBeTruthy();
+    await waitFor(() => expect(announced()).toBe(sv.federation_admin_nothing_to_save));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    fireEvent.change(clientId(), { target: { value: "next-client" } });
+    expect(shown(sv.federation_admin_nothing_to_save)).toBeNull();
+  });
+
+  it("confirms a new name calmly, without the sign-in warning", async () => {
+    await show();
+
+    fireEvent.change(provider(), { target: { value: "Okta" } });
+    fireEvent.click(save());
+
+    const dialog = await screen.findByRole("alertdialog", {
+      name: sv.federation_admin_confirm_label_title
+    });
+    expect(dialog.textContent).toContain(sv.federation_admin_confirm_label_description);
+    expect(dialog.textContent).not.toContain(sv.federation_admin_confirm_recovery);
+  });
+
+  it("lists the domains added and removed, and what each change does to sign-in", async () => {
+    await show(listed);
+
+    fireEvent.change(domains(), { target: { value: "example.com\nfoo.se" } });
+    fireEvent.click(save());
+
+    const dialog = await screen.findByRole("alertdialog", {
+      name: sv.federation_admin_confirm_title
+    });
+    const added = sv.federation_admin_domains_added.replace("{domains}", "foo.se");
+    const removed = sv.federation_admin_domains_removed.replace("{domains}", "example.org");
+    expect(items(dialog)).toEqual([`${sv.federation_admin_domains}: ${added}; ${removed}`]);
+    expect(dialog.textContent).toContain(
+      sv.federation_admin_confirm_domains_removed.replace("{domains}", "example.org")
+    );
+    expect(dialog.textContent).toContain(
+      sv.federation_admin_confirm_domains_added.replace("{domains}", "foo.se")
+    );
+    expect(dialog.textContent).toContain(sv.federation_admin_confirm_recovery);
+    await expectNoAxeViolations(dialog);
+  });
+
+  it("after a change to who can sign in, suggests trying it before signing out", async () => {
+    api.PATCH.mockImplementation(() =>
+      ok({ ...view, client_id: "next-client", revision: "rev-2" })
+    );
+    await show();
+
+    fireEvent.change(clientId(), { target: { value: "next-client" } });
+    fireEvent.click(save());
+    await confirm();
+
+    expect(await screen.findByText(sv.federation_admin_saved_next_step)).toBeTruthy();
+    await waitFor(() =>
+      expect(announced()).toContain(
+        `${sv.federation_admin_saved} ${sv.federation_admin_saved_next_step}`
+      )
+    );
+    fireEvent.change(clientId(), { target: { value: "again" } });
+    expect(screen.queryByText(sv.federation_admin_saved_next_step)).toBeNull();
+  });
+
+  it("a new name is saved without the suggestion", async () => {
+    api.PATCH.mockImplementation(() => ok({ ...view, provider: "Okta", revision: "rev-2" }));
+    await show();
+
+    fireEvent.change(provider(), { target: { value: "Okta" } });
+    fireEvent.click(save());
+    await confirm();
+
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(screen.queryByText(sv.federation_admin_saved_next_step)).toBeNull();
+    await waitFor(() => expect(announced()).toContain(sv.federation_admin_saved));
+    expect(announced()).not.toContain(sv.federation_admin_saved_next_step);
   });
 });

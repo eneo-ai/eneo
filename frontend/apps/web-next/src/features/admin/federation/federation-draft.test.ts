@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { FederationView } from "./federation";
 import {
   changedFields,
+  consequences,
+  domainChange,
   draftFromView,
   parseDomains,
   toPatch,
@@ -130,5 +132,51 @@ describe("toPatch", () => {
       revision: "rev-1",
       allowed_domains: ["b.se", "sundsvall.se"]
     });
+  });
+});
+
+describe("what a save does to sign-in", () => {
+  const listed = { ...view, allowed_domains: ["example.org", "example.com"] };
+  const draft = (changes: Partial<FederationDraft>): FederationDraft => ({
+    ...draftFromView(listed),
+    ...changes
+  });
+
+  it("a new name changes nothing for the people who sign in", () => {
+    expect(consequences(listed, draft({ provider: "Okta" }))).toEqual([]);
+  });
+
+  it("a new client ID and a new secret each have their own consequence", () => {
+    expect(consequences(listed, draft({ clientId: "next", secret: "s3cret-value" }))).toEqual([
+      { code: "client_id" },
+      { code: "secret" }
+    ]);
+  });
+
+  it("names the domains a save removes and adds, ignoring case", () => {
+    const next = draft({ domains: "EXAMPLE.com\nfoo.se" });
+    expect(domainChange(listed, next)).toEqual({ added: ["foo.se"], removed: ["example.org"] });
+    expect(consequences(listed, next)).toEqual([
+      { code: "domains_removed", domains: ["example.org"] },
+      { code: "domains_added", domains: ["foo.se"] }
+    ]);
+  });
+
+  it("an emptied list lets every member in and stops automatic accounts", () => {
+    expect(consequences(listed, draft({ domains: "" }))).toEqual([{ code: "domains_emptied" }]);
+  });
+
+  it("a first list shuts out everyone else", () => {
+    const open = { ...listed, allowed_domains: [] };
+    expect(consequences(open, draft({ domains: "foo.se" }))).toEqual([
+      { code: "domains_restricted", domains: ["foo.se"] }
+    ]);
+  });
+
+  it("a new order of the same domains admits and refuses the same people", () => {
+    const next = draft({ domains: "example.com\nexample.org" });
+    expect(changedFields(listed, next)).toEqual(["allowed_domains"]);
+    expect(domainChange(listed, next)).toEqual({ added: [], removed: [] });
+    expect(consequences(listed, next)).toEqual([]);
   });
 });
