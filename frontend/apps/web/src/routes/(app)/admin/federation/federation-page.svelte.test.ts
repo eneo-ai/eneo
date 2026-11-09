@@ -138,11 +138,14 @@ describe("the page's states", () => {
     expect(document.activeElement).toBe(document.body);
   });
 
-  test("an organisation without a provider is told so, without a form", async () => {
+  test("an organisation without a provider is told so, without a form, with the operator's guide", async () => {
     show({ kind: "unconfigured" });
 
     await expect.element(page.getByText("federation_admin_not_configured_title")).toBeVisible();
     expect(page.getByRole("button", { name: "save_changes" }).elements()).toHaveLength(0);
+    await expect
+      .element(page.getByRole("link", { name: /federation_admin_register_guide_link/ }))
+      .toHaveAttribute("href", expect.stringContaining("#configure-via-api"));
   });
 
   test("a failed read can be retried", async () => {
@@ -168,6 +171,35 @@ describe("the page's states", () => {
     await expect.element(page.getByText("federation_admin_secret_plaintext")).toBeVisible();
     await expect.element(field("client_id")).toHaveValue("client-a");
     expect(document.querySelector("input[type=password]")).toBeNull();
+  });
+
+  test("announces which redirect URI was copied, also right after another", async () => {
+    const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+    const uris = ["https://eneo.example/login/callback", "https://eneo.example/other/callback"];
+    show({ kind: "ready", view: { ...view, redirect_uris: uris } });
+
+    for (const uri of uris) {
+      await press(page.getByRole("button", { name: `federation_admin_copy_uri {"uri":"${uri}"}` }));
+      await expect
+        .element(page.getByText(`federation_admin_uri_copied {"uri":"${uri}"}`))
+        .toBeInTheDocument();
+    }
+    expect(writeText).toHaveBeenLastCalledWith(uris[1]);
+    writeText.mockRestore();
+  });
+
+  test("explains the name, the client ID and the stored secret before anything is saved", async () => {
+    show({ kind: "ready", view });
+
+    await expect
+      .element(field("federation_admin_provider_label"))
+      .toHaveAccessibleDescription(/federation_admin_provider_help/);
+    await expect
+      .element(field("client_id"))
+      .toHaveAccessibleDescription(/federation_admin_client_id_help/);
+    await expect
+      .element(page.getByRole("button", { name: "federation_admin_secret_replace" }))
+      .toHaveAccessibleDescription(/federation_admin_secret_saved/);
   });
 });
 
@@ -195,11 +227,13 @@ describe("saving", () => {
     await requestSave();
 
     const dialog = page.getByRole("alertdialog");
+    await expect.element(dialog).toHaveTextContent("federation_admin_confirm_title");
+    // The domains the save adds, not two whole lists, and what that means.
+    await expect.element(dialog).toHaveTextContent(/federation_admin_domains_added.*example\.org/);
     await expect
       .element(dialog)
-      .toHaveTextContent(
-        'federation_admin_change {"field":"federation_admin_domains","from":"example.com","to":"example.com, example.org"}'
-      );
+      .toHaveTextContent(/federation_admin_confirm_domains_added.*example\.org/);
+    await expect.element(dialog).toHaveTextContent("federation_admin_confirm_recovery");
     await expect.element(confirmButton()).toHaveClass(/text-destructive/);
     await confirmSave();
     await expect.element(page.getByRole("button", { name: "saving" })).toBeVisible();
@@ -224,6 +258,8 @@ describe("saving", () => {
     await expect.element(dialog).not.toBeInTheDocument();
     expect(toastSuccess).toHaveBeenCalledWith("federation_admin_saved");
     await expect.element(page.getByRole("button", { name: "save_changes" })).toHaveFocus();
+    // After a change to who can sign in, the next step is to try it.
+    await expect.element(page.getByText("federation_admin_saved_next_step")).toBeVisible();
 
     fetchSpy.mockResolvedValueOnce(
       answer({ type: "success", status: 200, data: { view: { ...view, revision: "rev-3" } } })
@@ -238,11 +274,38 @@ describe("saving", () => {
     ]);
   });
 
+  test("starting a new secret after a save ends the suggestion to try sign-in", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      answer({
+        type: "success",
+        status: 200,
+        data: {
+          view: { ...view, allowed_domains: ["example.com", "example.org"], revision: "rev-2" }
+        }
+      })
+    );
+    show({ kind: "ready", view });
+
+    await changeDomains("example.com\nexample.org");
+    await requestSave();
+    await confirmSave();
+    await expect.element(page.getByText("federation_admin_saved_next_step")).toBeVisible();
+
+    await press(page.getByRole("button", { name: "federation_admin_secret_replace" }));
+    await expect
+      .element(page.getByText("federation_admin_saved_next_step"))
+      .not.toBeInTheDocument();
+  });
+
   test("renaming the provider is a plain confirmation, and cancelling sends nothing", async () => {
     show({ kind: "ready", view });
 
     await userEvent.fill(field("federation_admin_provider_label"), "Okta");
     await requestSave();
+    const dialog = page.getByRole("alertdialog");
+    await expect.element(dialog).toHaveTextContent("federation_admin_confirm_label_title");
+    await expect.element(dialog).not.toHaveTextContent("federation_admin_confirm_title");
+    await expect.element(dialog).not.toHaveTextContent("federation_admin_confirm_recovery");
     await expect.element(confirmButton()).toHaveClass(/bg-accent-default/);
     await press(page.getByRole("button", { name: "cancel" }));
 
@@ -270,12 +333,29 @@ describe("saving", () => {
       .not.toHaveTextContent(/federation_admin_confirm_client_id/);
   });
 
-  test("an unchanged form has nothing to confirm", async () => {
+  test("an unchanged form has nothing to confirm, and says so", async () => {
     show({ kind: "ready", view });
 
     await requestSave();
 
     expect(confirmButton().elements()).toHaveLength(0);
+    await expect.element(page.getByText("federation_admin_nothing_to_save")).toBeVisible();
+  });
+
+  test("unsaved changes are named next to Save and can be undone", async () => {
+    show({ kind: "ready", view });
+
+    await userEvent.fill(field("client_id"), "client-b");
+    await expect
+      .element(page.getByText('federation_admin_unsaved {"fields":"client_id"}'))
+      .toBeVisible();
+
+    await press(page.getByRole("button", { name: "federation_admin_undo" }));
+
+    await expect.element(field("client_id")).toHaveValue("client-a");
+    await expect.element(page.getByRole("button", { name: "save_changes" })).toHaveFocus();
+    expect(page.getByRole("button", { name: "federation_admin_undo" }).elements()).toHaveLength(0);
+    expect(page.getByText(/federation_admin_unsaved/).elements()).toHaveLength(0);
   });
 });
 
@@ -309,6 +389,7 @@ describe("the client secret", () => {
 
     const dialog = page.getByRole("alertdialog");
     await expect.element(dialog).toHaveTextContent("federation_admin_secret_replaced_change");
+    await expect.element(dialog).toHaveTextContent("federation_admin_confirm_secret");
     expect(dialog.element().textContent).not.toContain(SECRET);
     await confirmSave();
 
@@ -318,6 +399,18 @@ describe("the client secret", () => {
       ["client_secret", SECRET]
     ]);
     await vi.waitFor(() => expect(document.querySelector("input[type=password]")).toBeNull());
+  });
+
+  test("an empty new secret is explained at the field", async () => {
+    show({ kind: "ready", view });
+
+    await press(page.getByRole("button", { name: "federation_admin_secret_replace" }));
+    await requestSave();
+
+    const secret = field("client_secret");
+    await expect.element(secret).toHaveFocus();
+    await expect.element(secret).toHaveAccessibleDescription(/federation_admin_secret_required/);
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   test("a refused secret is reported at the field, which is emptied and focused", async () => {

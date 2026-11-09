@@ -4,6 +4,7 @@
   import { deserialize } from "$app/forms";
   import { beforeNavigate, invalidate } from "$app/navigation";
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
+  import CircleCheck from "@lucide/svelte/icons/circle-check";
   import Copy from "@lucide/svelte/icons/copy";
   import { Settings } from "$lib/components/layout";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
@@ -19,12 +20,15 @@
   import { createCopyState } from "$lib/core/helpers/clipboard.svelte";
   import {
     changedFields,
+    consequences,
+    domainChange,
     draftFromView,
     FEDERATION_FIELDS,
     parseDomains,
     RISKY,
     toFormData,
     validate,
+    type Consequence,
     type FederationField,
     type FederationView,
     type FieldProblem
@@ -59,11 +63,15 @@
   let serverProblems = $state<Partial<Record<FederationField, FieldProblem>>>({});
   let confirming = $state(false);
   // What the open dialog lists, fixed when it opens: the save resets the draft.
-  let confirmation = $state<{ lines: string[]; risky: boolean; clientId: boolean }>({
+  let confirmation = $state<{ lines: string[]; risky: boolean; effects: string[] }>({
     lines: [],
     risky: false,
-    clientId: false
+    effects: []
   });
+  // A Save with nothing changed says so instead of doing nothing silently.
+  let nothingToSave = $state(false);
+  // After a save that changed who can sign in: suggest trying it.
+  let suggestTest = $state(false);
   let conflict = $state(false);
   let reloading = $state(false);
   let reloadFailed = $state(false);
@@ -89,6 +97,8 @@
     switch (problem.code) {
       case "required":
         return m.required_field();
+      case "secret_required":
+        return m.federation_admin_secret_required();
       case "secret_too_short":
         return m.federation_admin_secret_too_short({ min: problem.min });
       case "domain_invalid":
@@ -107,6 +117,8 @@
   }
 
   function edited(field: FederationField) {
+    nothingToSave = false;
+    suggestTest = false;
     if (!serverProblems[field]) return;
     const { [field]: _, ...rest } = serverProblems;
     serverProblems = rest;
@@ -127,7 +139,11 @@
   async function requestSave(event: SubmitEvent) {
     event.preventDefault();
     // The button stays enabled, so focus can return to it after a save.
-    if (confirming || changed.length === 0) return;
+    if (confirming) return;
+    if (changed.length === 0) {
+      nothingToSave = true;
+      return;
+    }
     const first = FEDERATION_FIELDS.find((field) => problems[field]);
     if (first) {
       submitted = true;
@@ -139,13 +155,21 @@
     confirmation = {
       lines: changed.map(changeLine),
       risky: changed.some((field) => RISKY.has(field)),
-      clientId: changed.includes("client_id")
+      effects: consequences(base, draft).map(effectText)
     };
     confirming = true;
   }
 
+  async function undo() {
+    startFrom(base);
+    nothingToSave = false;
+    await tick();
+    saveButton?.focus();
+  }
+
   async function replaceSecret() {
     draft.secret = "";
+    edited("client_secret");
     await tick();
     focusField("client_secret");
   }
@@ -178,6 +202,7 @@
     if (result.type === "success") {
       startFrom((result.data as { view: FederationView }).view);
       toast.success(m.federation_admin_saved());
+      suggestTest = confirmation.risky;
       focusAfterSave = () => saveButton;
       return;
     }
@@ -250,6 +275,21 @@
   function changeLine(field: FederationField): string {
     if (field === "client_secret") return m.federation_admin_secret_replaced_change();
     const list = (values: string[]) => values.join(", ");
+    if (field === "allowed_domains") {
+      // The domains added and removed, not two whole lists to compare.
+      const { added, removed } = domainChange(base, draft);
+      const changes = [
+        added.length ? m.federation_admin_domains_added({ domains: list(added) }) : null,
+        removed.length ? m.federation_admin_domains_removed({ domains: list(removed) }) : null
+      ].filter((change) => change !== null);
+      // Only the order changed: the whole lists say that.
+      if (changes.length) {
+        return m.federation_admin_change_domains({
+          field: LABELS[field](),
+          changes: changes.join("; ")
+        });
+      }
+    }
     const [from, to] =
       field === "provider"
         ? [base.provider ?? "", draft.provider.trim()]
@@ -261,6 +301,24 @@
       from: from || m.federation_admin_none(),
       to: to || m.federation_admin_none()
     });
+  }
+
+  function effectText(effect: Consequence): string {
+    const list = (domains: string[]) => domains.join(", ");
+    switch (effect.code) {
+      case "client_id":
+        return m.federation_admin_confirm_client_id();
+      case "secret":
+        return m.federation_admin_confirm_secret();
+      case "domains_restricted":
+        return m.federation_admin_confirm_domains_restricted({ domains: list(effect.domains) });
+      case "domains_emptied":
+        return m.federation_admin_confirm_domains_emptied();
+      case "domains_removed":
+        return m.federation_admin_confirm_domains_removed({ domains: list(effect.domains) });
+      case "domains_added":
+        return m.federation_admin_confirm_domains_added({ domains: list(effect.domains) });
+    }
   }
 
   beforeNavigate((navigation) => {
@@ -284,11 +342,15 @@
     <dl class="grid gap-x-8 gap-y-4 sm:grid-cols-2">
       <div>
         <dt class="text-secondary text-sm">{m.federation_admin_discovery()}</dt>
-        <dd class="mt-1 text-sm font-medium break-all">{base.discovery_endpoint ?? "—"}</dd>
+        <dd class="mt-1 text-sm">
+          <code class="font-medium wrap-anywhere">{base.discovery_endpoint ?? "—"}</code>
+        </dd>
       </div>
       <div>
         <dt class="text-secondary text-sm">{m.federation_admin_issuer()}</dt>
-        <dd class="mt-1 text-sm font-medium break-all">{base.issuer ?? "—"}</dd>
+        <dd class="mt-1 text-sm">
+          <code class="font-medium wrap-anywhere">{base.issuer ?? "—"}</code>
+        </dd>
       </div>
       <div class="sm:col-span-2">
         <dt class="text-secondary text-sm">{m.federation_admin_redirects()}</dt>
@@ -299,7 +361,7 @@
             <ul class="flex flex-col gap-2">
               {#each base.redirect_uris as uri (uri)}
                 <li class="flex flex-wrap items-center gap-2">
-                  <code class="min-w-0 font-medium break-all">{uri}</code>
+                  <code class="min-w-0 font-medium wrap-anywhere">{uri}</code>
                   <Button
                     size="sm"
                     variant="outline"
@@ -312,6 +374,12 @@
                 </li>
               {/each}
             </ul>
+            <!-- The button's name carries the URI, so its visible "Copied" is announced here. -->
+            <span class="sr-only" role="status"
+              >{copyState.copied && copiedUri
+                ? m.federation_admin_uri_copied({ uri: copiedUri })
+                : ""}</span
+            >
           {/if}
         </dd>
       </div>
@@ -366,8 +434,11 @@
         autocomplete="off"
         spellcheck={false}
         aria-invalid={problemFor("provider") ? true : undefined}
-        aria-describedby={describedBy("provider")}
+        aria-describedby={describedBy("provider", "federation-provider-help")}
       />
+      <Field.Description id="federation-provider-help">
+        {m.federation_admin_provider_help()}
+      </Field.Description>
       {@render fieldError("provider")}
     </Field.Field>
 
@@ -380,15 +451,18 @@
         autocomplete="off"
         spellcheck={false}
         aria-invalid={problemFor("client_id") ? true : undefined}
-        aria-describedby={describedBy("client_id")}
+        aria-describedby={describedBy("client_id", "federation-client-id-help")}
       />
+      <Field.Description id="federation-client-id-help">
+        {m.federation_admin_client_id_help()}
+      </Field.Description>
       {@render fieldError("client_id")}
     </Field.Field>
 
     {#if draft.secret === null}
       <div role="group" aria-labelledby="federation-secret-label" class="flex flex-col gap-2">
         <p id="federation-secret-label" class="text-sm font-medium">{m.client_secret()}</p>
-        <p class="text-muted text-sm">
+        <p id="federation-secret-saved" class="text-muted text-sm">
           {m.federation_admin_secret_saved({
             date: formatDateTime(base.client_secret_updated_at) || "—"
           })}
@@ -404,6 +478,7 @@
           size="sm"
           variant="outline"
           class="w-fit"
+          aria-describedby="federation-secret-saved"
           onclick={replaceSecret}
         >
           {m.federation_admin_secret_replace()}
@@ -459,14 +534,39 @@
       </Alert.Root>
     {/if}
 
-    <Button type="submit" class="w-fit" bind:ref={saveButton}>{m.save_changes()}</Button>
+    {#if suggestTest}
+      <Alert.Root role="status">
+        <CircleCheck />
+        <Alert.Description>{m.federation_admin_saved_next_step()}</Alert.Description>
+      </Alert.Root>
+    {/if}
+
+    <div class="flex flex-wrap items-center gap-3">
+      <Button type="submit" class="w-fit" bind:ref={saveButton}>{m.save_changes()}</Button>
+      {#if changed.length > 0}
+        <Button variant="ghost" onclick={undo}>{m.federation_admin_undo()}</Button>
+      {/if}
+      <p class="text-muted text-sm" role="status">
+        {#if changed.length > 0}
+          {m.federation_admin_unsaved({
+            fields: changed.map((field) => LABELS[field]()).join(", ")
+          })}
+        {:else if nothingToSave}
+          {m.federation_admin_nothing_to_save()}
+        {/if}
+      </p>
+    </div>
   </form>
 </Settings.Group>
 
 <ConfirmDialog
   bind:open={confirming}
-  title={m.federation_admin_confirm_title()}
-  description={m.federation_admin_confirm_description()}
+  title={confirmation.risky
+    ? m.federation_admin_confirm_title()
+    : m.federation_admin_confirm_label_title()}
+  description={confirmation.risky
+    ? m.federation_admin_confirm_description()
+    : m.federation_admin_confirm_label_description()}
   confirmLabel={m.federation_admin_confirm_action()}
   pendingLabel={m.saving()}
   variant={confirmation.risky ? "destructive" : "default"}
@@ -481,9 +581,11 @@
         <li class="break-words">{line}</li>
       {/each}
     </ul>
-    {#if confirmation.clientId}
-      <p>{m.federation_admin_confirm_client_id()}</p>
+    {#each confirmation.effects as effect (effect)}
+      <p>{effect}</p>
+    {/each}
+    {#if confirmation.risky}
+      <p class="text-muted">{m.federation_admin_confirm_recovery()}</p>
     {/if}
-    <p class="text-muted">{m.federation_admin_confirm_recovery()}</p>
   </div>
 </ConfirmDialog>

@@ -33,6 +33,7 @@ export type FederationDraft = {
 /** Why a field cannot be saved, shown at the field. */
 export type FieldProblem =
   | { code: "required" }
+  | { code: "secret_required" }
   | { code: "secret_too_short"; min: number }
   | { code: "domain_invalid"; domain: string }
   | { code: "refused" }
@@ -80,7 +81,7 @@ export function validate(draft: FederationDraft): Partial<Record<FederationField
   if (!draft.clientId.trim()) problems.client_id = { code: "required" };
   if (draft.secret !== null) {
     const secret = draft.secret.trim();
-    if (!secret) problems.client_secret = { code: "required" };
+    if (!secret) problems.client_secret = { code: "secret_required" };
     else if (secret.length < SECRET_MIN_LENGTH) {
       problems.client_secret = { code: "secret_too_short", min: SECRET_MIN_LENGTH };
     }
@@ -88,6 +89,54 @@ export function validate(draft: FederationDraft): Partial<Record<FederationField
   const invalid = parseDomains(draft.domains).find((domain) => !DOMAIN.test(domain));
   if (invalid !== undefined) problems.allowed_domains = { code: "domain_invalid", domain: invalid };
   return problems;
+}
+
+/** The allowed domains a draft adds and removes, as the backend compares them. */
+export function domainChange(
+  view: FederationView,
+  draft: FederationDraft
+): { added: string[]; removed: string[] } {
+  const before = (view.allowed_domains ?? []).map((domain) => domain.toLowerCase());
+  const after = parseDomains(draft.domains);
+  return {
+    added: after.filter((domain) => !before.includes(domain)),
+    removed: before.filter((domain) => !after.includes(domain))
+  };
+}
+
+/** What a save does to the people who sign in, one entry per effect. */
+export type Consequence =
+  | { code: "client_id" }
+  | { code: "secret" }
+  /** From no list to a list: everyone outside it is refused. */
+  | { code: "domains_restricted"; domains: string[] }
+  /** From a list to none: every member signs in, no account is created. */
+  | { code: "domains_emptied" }
+  | { code: "domains_removed"; domains: string[] }
+  | { code: "domains_added"; domains: string[] };
+
+/**
+ * The effects the confirmation names. With domains, sign-in admits only the
+ * listed ones; without, it checks none and creates no account automatically
+ * (user_service.resolve_federated_user). The name is only a label.
+ */
+export function consequences(view: FederationView, draft: FederationDraft): Consequence[] {
+  const changed = changedFields(view, draft);
+  const effects: Consequence[] = [];
+  if (changed.includes("client_id")) effects.push({ code: "client_id" });
+  if (changed.includes("client_secret")) effects.push({ code: "secret" });
+  if (!changed.includes("allowed_domains")) return effects;
+
+  const { added, removed } = domainChange(view, draft);
+  const hadList = (view.allowed_domains ?? []).length > 0;
+  const hasList = parseDomains(draft.domains).length > 0;
+  if (!hadList && hasList) effects.push({ code: "domains_restricted", domains: added });
+  else if (hadList && !hasList) effects.push({ code: "domains_emptied" });
+  else {
+    if (removed.length) effects.push({ code: "domains_removed", domains: removed });
+    if (added.length) effects.push({ code: "domains_added", domains: added });
+  }
+  return effects;
 }
 
 /** The save's form: the revision the draft was made against and only what changed. */

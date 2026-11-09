@@ -37,10 +37,10 @@
       <p class="text-muted mb-8 max-w-2xl text-sm">{m.federation_admin_description()}</p>
 
       {#await data.federation}
-        <div class="flex flex-col gap-3" role="status" aria-label={m.federation_admin_loading()}>
-          {#each [1, 2, 3, 4] as row (row)}
-            <Skeleton class="h-12 w-full" />
-          {/each}
+        <!-- The operator's settings, then the form. -->
+        <div class="flex flex-col gap-8" role="status" aria-label={m.federation_admin_loading()}>
+          <Skeleton class="h-32 w-full max-w-3xl" />
+          <Skeleton class="h-80 w-full max-w-2xl" />
         </div>
       {:then state}
         {#if state.kind === "ready"}
@@ -91,6 +91,21 @@
               <p class="text-muted mt-1 text-sm">
                 {m.federation_admin_not_configured_description()}
               </p>
+              <Button
+                href={docsUrl(
+                  "guides/oidc-federation/single-tenant",
+                  getLocale(),
+                  "configure-via-api"
+                )}
+                target="_blank"
+                rel="noreferrer"
+                variant="link"
+                size="sm"
+                class="mt-3 h-auto w-fit px-0"
+              >
+                {m.federation_admin_register_guide_link()}
+                <ExternalLink data-icon="inline-end" aria-hidden="true" />
+              </Button>
             {/if}
           </div>
         {/if}

@@ -1,6 +1,8 @@
 import { describe, expect, test } from "vitest";
 import {
   changedFields,
+  consequences,
+  domainChange,
   draftFromView,
   parseDomains,
   patchFromForm,
@@ -61,7 +63,7 @@ describe("the sign-in settings draft", () => {
       allowed_domains: { code: "domain_invalid", domain: "not" }
     });
     expect(validate({ ...draftFromView(view), secret: "" })).toEqual({
-      client_secret: { code: "required" }
+      client_secret: { code: "secret_required" }
     });
     expect(validate(draftFromView(view))).toEqual({});
   });
@@ -83,6 +85,51 @@ describe("the sign-in settings draft", () => {
       ["client_secret", "s3cret-value"],
       ["allowed_domains", ""]
     ]);
+  });
+});
+
+describe("what a save does to who can sign in", () => {
+  const draft = (changes: Partial<ReturnType<typeof draftFromView>>) => ({
+    ...draftFromView(view),
+    ...changes
+  });
+
+  test("a new name changes nothing for anyone signing in", () => {
+    expect(consequences(view, draft({ provider: "Okta" }))).toEqual([]);
+  });
+
+  test("a new client ID and a new secret each have their own consequence", () => {
+    expect(consequences(view, draft({ clientId: "client-b", secret: "s3cret-value" }))).toEqual([
+      { code: "client_id" },
+      { code: "secret" }
+    ]);
+  });
+
+  test("names the domains a save removes and adds, ignoring case", () => {
+    const next = draft({ domains: "EXAMPLE.com\nfoo.se" });
+    expect(domainChange(view, next)).toEqual({ added: ["foo.se"], removed: ["example.org"] });
+    expect(consequences(view, next)).toEqual([
+      { code: "domains_removed", domains: ["example.org"] },
+      { code: "domains_added", domains: ["foo.se"] }
+    ]);
+  });
+
+  test("an emptied list lets every member in and stops automatic accounts", () => {
+    expect(consequences(view, draft({ domains: "" }))).toEqual([{ code: "domains_emptied" }]);
+  });
+
+  test("a first list shuts out everyone else", () => {
+    const open = { ...view, allowed_domains: [] } as FederationView;
+    expect(consequences(open, draft({ domains: "foo.se" }))).toEqual([
+      { code: "domains_restricted", domains: ["foo.se"] }
+    ]);
+  });
+
+  test("a new order of the same domains admits and refuses the same people", () => {
+    const next = draft({ domains: "example.org\nexample.com" });
+    expect(changedFields(view, next)).toEqual(["allowed_domains"]);
+    expect(domainChange(view, next)).toEqual({ added: [], removed: [] });
+    expect(consequences(view, next)).toEqual([]);
   });
 });
 
