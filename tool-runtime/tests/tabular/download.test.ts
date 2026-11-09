@@ -22,6 +22,12 @@ describe("URL intake boundaries", () => {
     expect(addressAllowed("169.254.169.254", true)).toBe(false);
     expect(addressAllowed("0.0.0.0", true)).toBe(false);
     expect(addressAllowed("10.0.0.1", false)).toBe(false);
+    expect(addressAllowed("100.64.0.1", true)).toBe(true);
+    expect(addressAllowed("100.65.13.15", true)).toBe(true);
+    expect(addressAllowed("100.127.255.254", true)).toBe(true);
+    expect(addressAllowed("100.64.0.1", false)).toBe(false);
+    // Beyond 100.127.255.255 addresses are ordinary unicast.
+    expect(addressAllowed("100.128.0.1", false)).toBe(true);
   });
   test("allows Docker's synthetic host only with its hostname and private access", () => {
     expect(addressAllowed("0.250.250.254", true, "host.docker.internal")).toBe(true);

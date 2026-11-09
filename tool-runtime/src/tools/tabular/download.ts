@@ -35,7 +35,9 @@ export function addressAllowed(address: string, allowPrivate: boolean, hostname 
   const range = parsed.range();
   return (
     range === "unicast" ||
-    (allowPrivate && ["private", "loopback", "uniqueLocal"].includes(range)) ||
+    // RFC 6598 (100.64.0.0/10) is used for pod and service networks.
+    (allowPrivate &&
+      ["private", "loopback", "uniqueLocal", "carrierGradeNat"].includes(range)) ||
     allowedDockerHostAddress(parsed.toString(), hostname, allowPrivate)
   );
 }
