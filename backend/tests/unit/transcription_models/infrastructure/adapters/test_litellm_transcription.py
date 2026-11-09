@@ -360,3 +360,24 @@ async def test_transcription_request_uses_remaining_attempt_budget(
         clock["now"] = 100.0
         await _adapter().get_text_from_file(audio)
     assert transport.await_args.kwargs["timeout"] == 7100
+
+
+async def test_html_entities_from_the_model_are_decoded(monkeypatch, tmp_path) -> None:
+    # Whisper models trained on subtitles write entities ("120&nbsp;000&nbsp;kr").
+    # Only complete entities are text the model escaped; a bare "&" is speech.
+    spoken = "ungefär 120&nbsp;000&nbsp;kr, 5 &lt; 6 &#246;l &#x2013; R&D &copy &amp"
+    texts = iter([spoken, "&nbsp;"])
+
+    async def fake(**kwargs):
+        return SimpleNamespace(text=next(texts))
+
+    monkeypatch.setattr(TRANSPORT, AsyncMock(side_effect=fake))
+    audio = _audio(tmp_path, [300.0, 60.0], monkeypatch)
+
+    result = await _adapter().get_text_from_file(audio)  # type: ignore[arg-type]
+
+    decoded = "ungefär 120 000 kr, 5 < 6 öl – R&D &copy &amp"
+    assert result.segments == (TranscriptSegment(decoded, 0.0, 300.0),)
+    assert result.text == f"### 0:00 - 5:00\n\n{decoded}"
+    # A chunk that only held an entity for a space held no speech.
+    assert result.empty_intervals == (EmptyTranscriptionInterval(300.0, 360.0),)

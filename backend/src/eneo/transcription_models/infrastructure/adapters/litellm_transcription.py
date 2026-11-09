@@ -1,5 +1,7 @@
 import asyncio
 import hashlib
+import html
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
@@ -331,7 +333,16 @@ class LiteLLMTranscriptionAdapter:
                     provider_response_id=getattr(response, "id", None),
                 ),
             )
-        return cast(str, response.text)  # type: ignore[reportUnknownMemberType]
+        return _decode_entities(cast(str, response.text))  # type: ignore[reportUnknownMemberType]
+
+
+# A complete named or numeric entity. Whisper models trained on subtitles
+# write them ("120&nbsp;000&nbsp;kr"); a bare "&" ("R&D") is what was said.
+_ENTITY = re.compile(r"&(?:#[0-9]+|#[xX][0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]*);")
+
+
+def _decode_entities(text: str) -> str:
+    return _ENTITY.sub(lambda match: html.unescape(match.group(0)), text)
 
 
 def _clock(seconds: float) -> str:
