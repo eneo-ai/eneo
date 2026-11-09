@@ -9,7 +9,7 @@ from uuid import uuid4
 
 import pytest
 
-from eneo.services import service_runner
+from eneo.services import service_protocol, service_runner
 from eneo.services.service import DatastoreResult
 from eneo.services.service_runner import ServiceRunner
 
@@ -67,5 +67,35 @@ async def test_a_service_run_never_logs_its_answer(
     assert result.result == "private answer"
     question_repo.add.assert_awaited_once()
     assert caplog.records
+    assert "private answer" not in caplog.text
+    assert "private question" not in caplog.text
+
+
+def test_reading_a_run_whose_answer_is_not_json_never_logs_the_answer(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """GET /services/{id}/runs/ reads every run through `to_question`, so a
+    plain-text answer would be logged on every read."""
+    monkeypatch.setattr(
+        service_protocol, "logger", logging.getLogger("eneo.test.service_protocol")
+    )
+    monkeypatch.setattr(
+        service_protocol,
+        "CompletionModelPublic",
+        SimpleNamespace(from_domain=lambda model, show_pricing: model),
+    )
+    monkeypatch.setattr(
+        service_protocol, "ServiceRun", lambda **fields: SimpleNamespace(**fields)
+    )
+    caplog.set_level(logging.DEBUG, logger="eneo.test.service_protocol")
+    question = SimpleNamespace(
+        id=uuid4(), question="private question", answer="private answer", info_blobs=[]
+    )
+    service = SimpleNamespace(completion_model=SimpleNamespace(id=uuid4()))
+
+    run = service_protocol.to_question(cast(Any, question), cast(Any, service))
+
+    assert run.output == "private answer"
+    assert str(question.id) in caplog.text
     assert "private answer" not in caplog.text
     assert "private question" not in caplog.text
