@@ -890,12 +890,22 @@ async def delete_user(
     )
 
 
+_ZITADEL_MIGRATION_GUIDE_URL = (
+    "https://docs.eneo.ai/guides/oidc-federation#migrate-from-the-zitadel-settings"
+)
+
+
 @router.post(
     "/provision/",
     status_code=201,
-    description="Provision a user from a Zitadel access token.",
+    description=(
+        "Deprecated, removed in the next release, together with the Zitadel "
+        "sign-in it served. People are created at their first OIDC sign-in, "
+        "under the organisation's provisioning setting."
+    ),
     response_model=None,
     responses=responses.get_responses([403]),
+    deprecated=True,
 )
 @endpoint_access(
     authentication=Authentication.PUBLIC,
@@ -906,6 +916,12 @@ async def provision_user(
     user_provision: UserProvision,
     container: Annotated[Container, Depends(get_container())],
 ):
+    # Before the service lookup, so every call is logged; never the token.
+    logger.warning(
+        "POST /api/v1/users/provision/ is deprecated and will be removed in the "
+        "next release. People are created at their first OIDC sign-in instead. "
+        f"See {_ZITADEL_MIGRATION_GUIDE_URL}"
+    )
     user_service = cast(_ProvisioningService, container.user_creation_service())  # pyright: ignore[reportUnknownMemberType]  # not yet in container's typed interface
 
     await user_service.provision_user(access_token=user_provision.zitadel_token)

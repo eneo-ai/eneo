@@ -263,6 +263,8 @@ curl -X PATCH "https://eneo.your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/
   }'
 ```
 
+Each tenant's administrators can also change its display name, client ID, client secret and allowed email domains themselves under **Administration › Sign-in (SSO)**, as described in [Change the settings in Eneo](/guides/oidc-federation/single-tenant#change-the-settings-in-eneo).
+
 `PATCH` requires an existing configuration (`404 No federation config found for tenant` otherwise) and does not accept `null` for `provider`, `discovery_endpoint`, `client_id` or `client_secret`. Changing `discovery_endpoint` re-fetches the discovery document. To replace the whole federation definition, continue to use `PUT` and send the full required payload.
 
 ### Remove tenant federation

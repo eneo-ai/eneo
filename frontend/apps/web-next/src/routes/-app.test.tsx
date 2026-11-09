@@ -1744,14 +1744,22 @@ it("opens enabled federation administration with its navigation and title", asyn
   expect(requestedPaths()).toContain("/api/v1/admin/federation");
 });
 
-it("hides disabled federation administration and rejects its URL before the API read", async () => {
+it("lists federation administration while the settings live in the server configuration", async () => {
   setViewport("desktop");
   replies.set("/api/v1/users/me/", testAppContext({ permissions: ["admin"] }).user);
+  replies.set(
+    "/api/v1/admin/federation",
+    new Response(JSON.stringify({ detail: { code: "federation_disabled", message: "Off." } }), {
+      status: 404,
+      headers: { "content-type": "application/json" }
+    })
+  );
   const { router } = await renderRoute("/admin/federation");
-  await screen.findByRole("heading", { name: messages.page_not_found });
-  expect(router.state.matches.some((match) => match.status === "notFound")).toBe(true);
-  expect(screen.queryByRole("link", { name: messages.federation_admin_nav })).toBeNull();
-  expect(requestedPaths()).not.toContain("/api/v1/admin/federation");
+  await screen.findByRole("heading", { level: 1, name: messages.federation_admin_title });
+  expect(router.state.matches.some((match) => match.status === "notFound")).toBe(false);
+  expect(
+    screen.getByRole("link", { name: messages.federation_admin_nav }).getAttribute("href")
+  ).toBe("/admin/federation");
 });
 
 it("keeps federation administration behind the existing admin guard", async () => {

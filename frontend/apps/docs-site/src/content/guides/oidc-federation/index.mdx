@@ -15,7 +15,7 @@ import { Callout, Cards } from 'nextra/components'
   >
     **One organization, one identity provider.**
 
-    All users authenticate against the same IdP (Azure Entra ID, Keycloak, Auth0, MobilityGuard, …). Configure it with environment variables or through the sysadmin API.
+    All users authenticate against the same IdP (Azure Entra ID, Keycloak, Auth0, MobilityGuard, …). Store its settings in Eneo (recommended), or keep them in the server configuration.
   </Cards.Card>
 </Cards>
 
@@ -25,8 +25,9 @@ import { Callout, Cards } from 'nextra/components'
 
 | Scenario | Recommended Setup |
 |----------|-------------------|
-| Single organization deployment | [Single-Tenant](/guides/oidc-federation/single-tenant) |
-| Want to change OIDC settings without restarting, or restrict logins by email domain | [Single-Tenant via the API](/guides/oidc-federation/single-tenant#api-configuration) |
+| New single-organization deployment | [Single-Tenant with the settings stored in Eneo](/guides/oidc-federation/single-tenant#api-configuration): administrators change the client ID, client secret and allowed email domains in Eneo, without a restart |
+| Identity provider managed as configuration code | [Single-Tenant in the server configuration](/guides/oidc-federation/single-tenant#environment-variable-configuration) (`OIDC_*` variables) |
+| Existing deployment with `OIDC_*` variables | Nothing changes on upgrade; to let administrators change the settings, [move them into Eneo](/guides/oidc-federation/single-tenant#move-the-settings-into-eneo) |
 | Several organisations | Single-tenant is recommended: one installation per organisation, each with its own IdP. Several organisations in one installation ([Multi-Tenant](/guides/oidc-federation/multi-tenant)) have basic support only, will be phased out and have no guaranteed data separation, because they share the same database |
 
 ---
@@ -40,6 +41,7 @@ Eneo works with any OIDC-compliant identity provider that supports discovery (`/
 - **Keycloak**
 - **Auth0**
 - **Okta**
+- **Zitadel**
 
 <Callout type="info">
   The guides walk through Azure Entra ID, Keycloak, Auth0 and MobilityGuard as examples. The same principles apply to other OIDC providers.
@@ -93,7 +95,7 @@ What Eneo expects from any OIDC provider on the generic sign-in (`/api/v1/auth/i
 
 A response that fails any check ends the sign-in with `401` (`oidc_response_not_verified`); nothing falls back to a weaker check.
 
-The provider-bound Zitadel login in the Svelte frontend keeps its own requests: it sends PKCE but no `nonce`.
+The provider-bound Zitadel login in the Svelte frontend is deprecated and is removed in the next release; see [Migrate from the Zitadel settings](#migrate-from-the-zitadel-settings). Until then it keeps its own requests: it sends PKCE but no `nonce`.
 
 **Optional provider settings.** Set them through the [federation API](/guides/oidc-federation/multi-tenant#configure-the-tenant-via-api), which also serves a single-tenant setup made through the API. Leave them out to keep the defaults. With the `OIDC_*` environment variables the defaults always apply; to change them, configure the provider through the API (`FEDERATION_ENABLED=true`).
 
@@ -105,11 +107,11 @@ The provider-bound Zitadel login in the Svelte frontend keeps its own requests: 
 ### Upgrading
 
 - Redis is required for sign-in.
-- The ID token's `iss` must equal the provider's issuer: the one Eneo stored from discovery when the federation config was saved, else the one discovery gives at sign-in (always so with the `OIDC_*` variables). A `PATCH` that includes the organisation's own `discovery_endpoint` stores the issuer again. If your discovery URL is a shared one whose issuer contains a placeholder (for example `{tenantid}`), switch to your organisation's own discovery URL before upgrading (`discovery_endpoint` in the federation config, or `OIDC_DISCOVERY_ENDPOINT`). Otherwise every sign-in fails with `oidc_response_not_verified` (`issuer_mismatch`).
+- The ID token's `iss` must equal the provider's issuer: the one Eneo stored from discovery when the federation config was saved, else the one discovery gives at sign-in (always so with the `OIDC_*` variables). A `PATCH` that includes the organisation's own `discovery_endpoint` stores the issuer again. A shared discovery URL whose issuer contains a placeholder (for example `{tenantid}`) is refused: saving such a federation config answers `400`, and a sign-in with one already stored or set in `OIDC_DISCOVERY_ENDPOINT` answers `500` before anyone is sent to the provider. Switch to your organisation's own discovery URL before upgrading (`discovery_endpoint` in the federation config, or `OIDC_DISCOVERY_ENDPOINT`).
 - PKCE (`S256`) and `nonce` are always sent. A provider that ignores PKCE keeps working.
 - The provider must return the `nonce` in the ID token ([OpenID Connect Core 3.1.3.7](https://openid.net/specs/openid-connect-core-1_0.html#IDTokenValidation)). With a provider that does not, every sign-in is refused with `oidc_response_not_verified` (`nonce_mismatch`).
 - The provider's discovery document must stay reachable. Each backend process caches it for `oidc_jwks_cache_ttl_seconds` (default one hour) with no stale copy to fall back on: when the cache has expired and the document cannot be fetched, sign-in answers `500`.
-- A sign-in started before the upgrade must be started again: its state is refused with `400 Invalid state parameter`. In a rolling deploy, replace all backend instances together, or accept that sign-ins which cross versions fail until the switch is done; people only need to start the sign-in again.
+- A sign-in started before the upgrade must be started again: its state is refused with `400 Invalid state parameter`, or its transaction with `oidc_transaction_invalid`. In a rolling deploy, replace all backend instances together, or accept that sign-ins which cross versions fail until the switch is done; people only need to start the sign-in again.
 - Upgrade the frontend together with the backend: the older frontend does not forward the provider's `iss` parameter. Any other client that calls `POST /api/v1/auth/callback`, through eneo-js or directly, must forward the redirect's `iss` query parameter whenever the provider sends one: Eneo requires it when the provider's discovery announced it, and refuses one that differs.
 - With `OIDC_RESOURCE_SERVER_ENABLED=true`, Eneo also accepts the provider's access tokens as bearer tokens. Such a token must be a JWT signed with `RS256`, `RS384` or `RS512` that names its key (`kid`) and carries `sub`, `email`, `exp`, `iss` equal to `OIDC_ACCEPTED_ISSUER` and `aud` containing `OIDC_ACCEPTED_AUDIENCE`. The person is admitted by the same rules as at sign-in, to the tenant `OIDC_TENANT_ID` names, else to the first active tenant.
 
@@ -142,6 +144,56 @@ At the provider, check these differences from the old sign-in:
 - Eneo sends a `nonce`, and the ID token must carry it back (see the contract above). The old sign-in sent none.
 
 **How to check.** Open the login page and sign in. If the page says "Signing in through your organisation is not available right now. Contact your administrator.", the frontend still has `MOBILITY_GUARD_AUTH` while the backend reports no OIDC sign-in: check that the backend has the `OIDC_*` variables and has started. A sign-in begun on the old MobilityGuard link before the upgrade ends on the login page; start it again.
+
+### Migrate from the Zitadel settings
+
+<Callout type="warning">
+  The Zitadel sign-in that `ZITADEL_INSTANCE_URL` and `ZITADEL_PROJECT_CLIENT_ID` turn on in the Svelte frontend is deprecated and is removed in the next release, together with `POST /api/v1/users/provision/`. Zitadel is a standard OIDC provider: register it in the OIDC settings like any other.
+</Callout>
+
+Nothing changes in this release until you move. While either variable is set, the frontend logs one warning at startup:
+
+```text
+The Zitadel sign-in (ZITADEL_INSTANCE_URL, ZITADEL_PROJECT_CLIENT_ID) is deprecated and will be removed in the next release. Register Zitadel in the backend's OIDC_DISCOVERY_ENDPOINT, OIDC_CLIENT_ID and OIDC_CLIENT_SECRET, then remove the ZITADEL_* variables.
+```
+
+The backend logs a warning each time `POST /api/v1/users/provision/` is called, and the OpenAPI schema marks it deprecated.
+
+**1. Register Eneo in Zitadel.** In your Zitadel project, add a web application with these settings:
+
+| Setting | Value |
+|---------|-------|
+| Redirect URI | `{PUBLIC_ORIGIN}/login/callback`, from the backend's `PUBLIC_ORIGIN`: the same address the Zitadel sign-in used |
+| Authentication method | One with a client secret (Basic or Post). Zitadel's discovery lists `client_secret_post`, so Eneo sends the secret in the request body; Zitadel accepts that with either method. The application the Zitadel sign-in used sends no secret, so add a new one or give it a method with a secret |
+| Grant type | Authorization Code |
+| User Info inside ID Token | On. Eneo reads `email` and `email_verified` from the ID token only. Without this setting Zitadel leaves them out, and every sign-in is refused with "Email claim not found in ID token" |
+
+Eneo asks for the scopes `openid`, `email` and `profile`, and sends a `nonce` and PKCE (`S256`); Zitadel supports them without further settings. The Zitadel-specific scope `urn:zitadel:iam:org:project:id:zitadel:aud` is no longer requested.
+
+**2. Set the OIDC settings in the backend.** They replace the frontend's Zitadel variables:
+
+| Old variable | Where | Use instead |
+|--------------|-------|-------------|
+| `ZITADEL_INSTANCE_URL` | frontend | `OIDC_DISCOVERY_ENDPOINT` in the backend: `{ZITADEL_INSTANCE_URL}/.well-known/openid-configuration` |
+| `ZITADEL_PROJECT_CLIENT_ID` | frontend | `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET` in the backend, from the application in step 1 |
+
+See [Single-Tenant Setup](/guides/oidc-federation/single-tenant#configure-backend-environment-variables) for the other backend variables. Set `OIDC_ALLOWED_DOMAINS` if people are to be created at their first sign-in (see below).
+
+With the settings stored in Eneo (`FEDERATION_ENABLED=true`), the backend ignores these variables. Register the same discovery URL, client ID, secret and allowed domains through the [sysadmin API](/guides/oidc-federation/single-tenant#configure-via-api) instead. The allowed domains below are then the stored list, which administrators [change in Eneo](/guides/oidc-federation/single-tenant#change-the-settings-in-eneo).
+
+**3. Remove both `ZITADEL_*` variables from the frontend and restart it.** While they are set, the login page still sends people to the Zitadel sign-in, even when the OIDC settings are in place.
+
+The Zitadel sign-in sent Zitadel's ID token to the backend, which accepted it in resource-server mode (`OIDC_RESOURCE_SERVER_ENABLED`, `OIDC_ACCEPTED_ISSUER`, `OIDC_ACCEPTED_AUDIENCE`). After the move, Eneo issues its own token at sign-in. Keep resource-server mode only for other clients that call the API with Zitadel tokens.
+
+**What changes for people:**
+
+- **Passwords and names are changed in Zitadel.** Eneo's account page no longer changes the Zitadel password or name. It shows the username and says the password is managed by the identity provider. People change both on Zitadel's own account pages, for example `{ZITADEL_INSTANCE_URL}/ui/console/users/me`. A person who also has a local Eneo password still sees Eneo's password change, which changes only that local password.
+- **People are created at their first sign-in, not through invite links.** The invite page (`/invite/{organisationId}`) and the activation page (`/activate`) only serve the Zitadel sign-in and are removed with it. A person who signs in for the first time gets an account when the organisation's `provisioning` setting is on, their email domain is in `OIDC_ALLOWED_DOMAINS` and Zitadel reports the address as verified. With provisioning off, create accounts ahead of time, for example through SCIM. Such an account still signs in only when its email domain is in `OIDC_ALLOWED_DOMAINS`, if that list is set, and Zitadel does not report the address as unverified. See [User Provisioning](/guides/oidc-federation/single-tenant#user-provisioning).
+- **Signing out of Eneo does not sign people out of Zitadel.** The Zitadel sign-in also ended the Zitadel session; the OIDC sign-in ends only Eneo's.
+
+The organisation field `zitadel_org_id` in the sysadmin tenant API is not used by any sign-in and is removed in the next release.
+
+**How to check.** Remove the `ZITADEL_*` variables, restart the frontend and sign in. The login page sends you to Zitadel, and after signing in you land in Eneo. The frontend log no longer has the Zitadel warning.
 
 ---
 

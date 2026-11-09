@@ -8,7 +8,7 @@ from uuid import UUID
 
 import jwt as pyjwt
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from redis.asyncio import Redis
 from typing_extensions import NotRequired, TypedDict
 
@@ -26,12 +26,18 @@ from eneo.authentication.oidc.profile import (
 )
 from eneo.authentication.oidc.transaction import (
     STORE_TIMEOUT_SECONDS,
+    OidcChannel,
     OidcTransaction,
     save_transaction,
     take_transaction,
 )
 from eneo.authentication.oidc.verification import CallbackResponse, verify_response
-from eneo.main.config import Settings, get_settings, validate_redirect_uri
+from eneo.main.config import (
+    Settings,
+    get_settings,
+    has_env_oidc_client,
+    validate_redirect_uri,
+)
 from eneo.main.container.container import Container
 from eneo.main.exceptions import FederatedLoginDenied
 from eneo.main.logging import get_logger
@@ -353,6 +359,17 @@ class CallbackRequest(BaseModel):
     code_verifier: Optional[str] = None
     # The authorization response's RFC 9207 issuer, when the provider sends it.
     iss: Optional[str] = None
+    binding_verifier: Optional[str] = Field(
+        default=None,
+        min_length=43,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9._~-]+$",
+        description=(
+            "The secret whose S256 hash was sent as binding_challenge at "
+            "initiate. Required for a bound sign-in and refused for an unbound "
+            "one."
+        ),
+    )
 
     model_config = {
         "json_schema_extra": {
@@ -420,7 +437,7 @@ async def get_federation_status(
         FederationStatusResponse with:
         - has_single_tenant_federation: True if exactly 1 active tenant with API federation config
         - has_multi_tenant_federation: True if federation_enabled with >1 tenants
-        - has_global_oidc_config: True if OIDC_* env vars are configured
+        - has_global_oidc_config: True if federation_enabled=false and OIDC_* env vars are configured
         - tenant_count: Number of active tenants
     """
     settings = get_settings()
@@ -430,10 +447,9 @@ async def get_federation_status(
     tenants = await tenant_repo.get_all_active()
     tenant_count = len(tenants)
 
-    # Check if global OIDC env vars are configured (used when federation_enabled=false)
-    has_global_oidc = bool(
-        settings.oidc_discovery_endpoint and settings.oidc_client_secret
-    )
+    # The OIDC_* settings sign people in only in env mode; with
+    # FEDERATION_ENABLED they are ignored and never a fallback.
+    has_global_oidc = not settings.federation_enabled and has_env_oidc_client(settings)
 
     # Multi-tenant mode: federation per tenant is enabled with multiple tenants
     if settings.federation_enabled and tenant_count > 1:
@@ -568,11 +584,45 @@ async def initiate_auth(
             ),
         ),
     ] = None,
+    binding_challenge: Annotated[
+        Optional[str],
+        Query(
+            pattern=r"^[A-Za-z0-9_-]{43}$",
+            description=(
+                "Optional base64url S256 hash of a secret the client keeps "
+                "(RFC 7636 4.2). The callback then needs that secret as "
+                "binding_verifier. Create the secret from at least 32 random "
+                "bytes."
+            ),
+        ),
+    ] = None,
+) -> InitiateAuthResponse:
+    """Get the authorization URL for the tenant's identity provider."""
+    return await initiate_federated_sign_in(
+        response,
+        container,
+        tenant=tenant,
+        state=state,
+        redirect_uri_param=redirect_uri_param,
+        channel="api",
+        binding_challenge=binding_challenge,
+    )
+
+
+async def initiate_federated_sign_in(
+    response: Response,
+    container: Container,
+    *,
+    tenant: str | None,
+    state: str | None,
+    redirect_uri_param: str | None,
+    channel: OidcChannel,
+    binding_challenge: str | None,
 ) -> InitiateAuthResponse:
     """
-    Get authorization URL for tenant's identity provider.
+    Start a sign-in at the tenant's identity provider: the shared initiation core.
 
-    This endpoint:
+    This function:
     1. Looks up tenant by slug (or uses first active tenant in single-tenant mode)
     2. Resolves tenant's federation config (tenant-specific or global)
     3. Computes redirect_uri server-side from canonical_public_origin
@@ -768,6 +818,8 @@ async def initiate_auth(
     profile = await _load_profile(federation_config, settings, correlation_id)
     transaction = OidcTransaction.start(
         "login",
+        channel=channel,
+        binding_challenge=binding_challenge,
         redirect_uri=redirect_uri,
         tenant_id=str(tenant_obj.id),
         tenant_slug=tenant_obj.slug or tenant_obj.name,
@@ -831,7 +883,12 @@ async def initiate_auth(
         "Returns JWT token for authenticated user."
     ),
     responses={
-        400: {"description": "Invalid or expired state"},
+        400: {
+            "description": (
+                "Invalid or expired state, or a binding_verifier that does not "
+                "match the sign-in (oidc_transaction_invalid)"
+            )
+        },
         401: {"description": "Token validation failed"},
         403: {"description": "Domain not allowed, inactive tenant, or user missing"},
         404: {"description": "Tenant or user not found"},
@@ -847,12 +904,23 @@ async def auth_callback(
     callback: CallbackRequest,
     container: Annotated[Container, Depends(get_container())],
 ) -> AccessTokenResponse:
-    """
-    Handle OIDC callback after user authenticates with IdP.
+    """Handle the OIDC callback after the user authenticated with the IdP."""
+    return await federated_sign_in(callback, container, channel="api")
 
-    This endpoint:
+
+async def federated_sign_in(
+    callback: CallbackRequest, container: Container, *, channel: OidcChannel
+) -> AccessTokenResponse:
+    """
+    Verify a provider's callback and admit its user: the shared sign-in core.
+
+    Starts no session. Each route that hands the token out decides which
+    session it gets (``BrowserSessionService.start``).
+
+    This function:
     1. Validates signed state (JWT with tenant context)
-    2. Takes the single-use sign-in transaction the state names
+    2. Takes the single-use sign-in transaction the state names, if this
+       channel and binding verifier are the ones that started it
     3. Exchanges the code with the PKCE verifier and verifies the ID token
        (signature, issuer, audience, freshness, nonce)
     4. Validates email domain against tenant's allowed_domains
@@ -925,8 +993,13 @@ async def auth_callback(
 
     # Global exception handler to ensure correlation_id is always included in responses
     try:
-        # Single use: GETDEL admits exactly one callback per transaction.
-        transaction = await take_transaction(redis_client, transaction_id)
+        # Single use, and only for the client that started the sign-in.
+        transaction = await take_transaction(
+            redis_client,
+            transaction_id,
+            channel=channel,
+            binding_verifier=callback.binding_verifier,
+        )
         if transaction.tenant_id != str(tenant_id) or (
             transaction.tenant_slug.lower() != (tenant_slug or "").lower()
         ):

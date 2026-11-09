@@ -70,6 +70,33 @@ describe("removed MobilityGuard settings", () => {
   );
 });
 
+describe("deprecated Zitadel settings", () => {
+  const guide = "https://docs.eneo.ai/guides/oidc-federation#migrate-from-the-zitadel-settings";
+
+  it.each([
+    [{ ZITADEL_INSTANCE_URL: "https://zitadel.example.com" }],
+    [{ ZITADEL_PROJECT_CLIENT_ID: "client" }],
+    [{ ZITADEL_INSTANCE_URL: "https://zitadel.example.com", ZITADEL_PROJECT_CLIENT_ID: "client" }]
+  ])("warns once for %o and points to the OIDC settings", (zitadel) => {
+    const report = inspectDeploymentEnv({ ...configured, ...zitadel });
+
+    expect(report.errors).toEqual([]);
+    expect(report.warnings).toHaveLength(1);
+    const [warning] = report.warnings;
+    for (const name of Object.keys(zitadel)) expect(warning).toContain(name);
+    expect(warning).toContain("deprecated");
+    expect(warning).toContain("removed in the next release");
+    expect(warning).toContain("OIDC_DISCOVERY_ENDPOINT, OIDC_CLIENT_ID and OIDC_CLIENT_SECRET");
+    expect(warning).toContain(guide);
+  });
+
+  it("ignores Zitadel variables the web app never read", () => {
+    expect(
+      inspectDeploymentEnv({ ...configured, ZITADEL_MASTERKEY: "x", ZITADEL_INSTANCE_URL: " " })
+    ).toEqual({ errors: [], warnings: [] });
+  });
+});
+
 describe("assertDeploymentEnv", () => {
   it("throws with every problem at once", () => {
     expect(() =>

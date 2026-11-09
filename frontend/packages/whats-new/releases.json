@@ -135,6 +135,24 @@
           }
         },
         {
+          "id": "admin-sign-in-settings",
+          "type": "new",
+          "area": "admin",
+          "audience": "admin",
+          "title": {
+            "en": "Change your organisation's sign-in settings",
+            "sv": "Ändra organisationens inloggningsinställningar"
+          },
+          "body": {
+            "en": "Under Administration › Sign-in (SSO), you can replace the client ID, the client secret and the allowed email domains for single sign-on, and copy the redirect URIs to register at your identity provider. Every change is confirmed before it applies. While sign-in is still set in the server configuration, the page explains how your operator can move it into Eneo.",
+            "sv": "Under Administration › Inloggning (SSO) kan ni byta klient-ID, klienthemlighet och tillåtna e-postdomäner för enkel inloggning och kopiera omdirigerings-URI:erna som ska registreras hos identitetsleverantören. Varje ändring bekräftas innan den gäller. Så länge inloggningen är inställd i serverns konfiguration förklarar sidan hur er driftleverantör kan flytta den till Eneo."
+          },
+          "showMe": {
+            "href": "/admin/federation",
+            "anchor": "admin-federation"
+          }
+        },
+        {
           "id": "insights-question-logs-follow-retention",
           "type": "improved",
           "area": "admin",

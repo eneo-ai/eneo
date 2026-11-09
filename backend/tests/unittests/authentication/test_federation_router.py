@@ -1,6 +1,8 @@
 """Unit tests for OIDC federation router edge cases."""
 
 import asyncio
+import json
+import secrets
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import cast
@@ -11,6 +13,7 @@ import jwt
 import pytest
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
 
 from eneo.authentication import federation_router
 from eneo.authentication.auth_models import FederatedIdentity
@@ -19,8 +22,14 @@ from eneo.authentication.oidc.errors import (
     OidcLoginUnavailableError,
     OidcTransactionInvalidError,
 )
-from eneo.authentication.oidc.transaction import OidcTransaction, save_transaction
+from eneo.authentication.oidc.transaction import (
+    OidcChannel,
+    OidcTransaction,
+    code_challenge,
+    save_transaction,
+)
 from eneo.server.endpoint_routes import endpoint_routes
+from eneo.server.exception_handlers import add_exception_handlers
 from eneo.server.middleware.request_context import RequestContextMiddleware
 from eneo.settings.encryption_service import EncryptionService
 from eneo.tenants.tenant import TenantInDB, TenantState
@@ -188,6 +197,8 @@ async def _signed_callback(
     correlation_id: str = "corr",
     config_version: str | None = None,
     claims: dict[str, object] | None = None,
+    channel: OidcChannel = "api",
+    binding_challenge: str | None = None,
 ) -> CallbackRequest:
     """A callback for a sign-in started at the tenant, as initiate stores it.
 
@@ -196,6 +207,8 @@ async def _signed_callback(
     """
     transaction = OidcTransaction.start(
         "login",
+        channel=channel,
+        binding_challenge=binding_challenge,
         redirect_uri=redirect_uri,
         tenant_id=str(tenant.id),
         tenant_slug=cast(str, tenant.slug),
@@ -1233,21 +1246,29 @@ class InterleavingRedis(FakeRedis):
 
 
 class FailingStateRedis(FakeRedis):
+    async def get(self, key: str) -> str | None:
+        raise ConnectionError("redis unavailable")
+
     async def getdel(self, key: str) -> str | None:
         raise ConnectionError("redis unavailable")
 
 
-async def _single_use_callback(monkeypatch, provider, redis_client: FakeRedis):
-    """A valid tenant callback whose transaction is stored once in redis_client."""
+SINGLE_USE_SLUG = "tenant-single-use"
+SINGLE_USE_REDIRECT_URI = "https://tenant.example.com/login/callback"
+
+
+def _single_use_tenant(
+    monkeypatch, redis_client: FakeRedis
+) -> tuple[TenantInDB, MockContainer]:
+    """A federated tenant with one active member, served from redis_client."""
     dummy_settings = DummySettings(federation_enabled=True)
     monkeypatch.setattr(federation_router, "get_settings", lambda: dummy_settings)
     tenant_id = uuid4()
-    slug = "tenant-single-use"
     tenant = TenantInDB(
         id=tenant_id,
         name="Tenant Single Use",
         display_name="Tenant Single Use",
-        slug=slug,
+        slug=SINGLE_USE_SLUG,
         quota_limit=1024**3,
         state=TenantState.ACTIVE,
         modules=[],
@@ -1288,14 +1309,29 @@ async def _single_use_callback(monkeypatch, provider, redis_client: FakeRedis):
         redis_client=redis_client,
         encryption_service=EncryptionService(None),
     )
+    return tenant, container
+
+
+async def _single_use_callback(
+    monkeypatch,
+    provider,
+    redis_client: FakeRedis,
+    *,
+    channel: OidcChannel = "api",
+    binding_challenge: str | None = None,
+):
+    """A valid tenant callback whose transaction is stored once in redis_client."""
+    tenant, container = _single_use_tenant(monkeypatch, redis_client)
     callback = await _signed_callback(
         FakeRedis() if isinstance(redis_client, FailingStateRedis) else redis_client,
         provider,
         tenant=tenant,
-        redirect_uri="https://tenant.example.com/login/callback",
+        redirect_uri=SINGLE_USE_REDIRECT_URI,
         frontend_state="{}",
         correlation_id="corr-single-use",
         config_version=datetime.now(timezone.utc).isoformat(),
+        channel=channel,
+        binding_challenge=binding_challenge,
     )
     return callback, container
 
@@ -1310,10 +1346,17 @@ async def test_auth_callback_state_is_single_use(monkeypatch, provider):
         await federation_router.auth_callback(callback, container=container)
 
 
-async def test_concurrent_callbacks_admit_exactly_one(monkeypatch, provider):
+@pytest.mark.parametrize("bound", [False, True], ids=["unbound", "bound"])
+async def test_concurrent_callbacks_admit_exactly_one(monkeypatch, provider, bound):
+    verifier = secrets.token_urlsafe(32)
     callback, container = await _single_use_callback(
-        monkeypatch, provider, InterleavingRedis()
+        monkeypatch,
+        provider,
+        InterleavingRedis(),
+        binding_challenge=code_challenge(verifier) if bound else None,
     )
+    if bound:
+        callback = callback.model_copy(update={"binding_verifier": verifier})
 
     results = await asyncio.gather(
         federation_router.auth_callback(callback, container=container),
@@ -1335,3 +1378,242 @@ async def test_state_lookup_failure_is_unavailable(monkeypatch, provider):
 
     with pytest.raises(OidcLoginUnavailableError):
         await federation_router.auth_callback(callback, container=container)
+
+
+def _token_exchanges(provider: FakeOidcProvider) -> int:
+    return sum(
+        1
+        for method, url in provider.requests
+        if method == "POST" and url == provider.token_endpoint
+    )
+
+
+def _http(container: MockContainer) -> AsyncClient:
+    """The federation routes over HTTP, with the application's error answers."""
+    app = FastAPI()
+    add_exception_handlers(app)
+    app.include_router(federation_router.router)
+    for route in endpoint_routes(app.routes):
+        for dependency in route.dependant.dependencies if route.dependant else ():
+            if dependency.name == "container":
+                app.dependency_overrides[dependency.call] = lambda: container
+    return AsyncClient(
+        transport=ASGITransport(app=app), base_url="https://tenant.example.com"
+    )
+
+
+def _body(callback: CallbackRequest, **extra: str) -> dict[str, str]:
+    return {"code": callback.code, "state": callback.state, **extra}
+
+
+def _stored_transactions(redis_client: FakeRedis) -> list[dict[str, object]]:
+    return [json.loads(raw) for raw in redis_client._store.values()]
+
+
+class TestRedeemerBinding:
+    """A client may bind its sign-in by sending the S256 hash of a secret at
+    initiate; only the holder of that secret can then redeem the callback.
+    Whoever holds a leaked code and state but not the secret is refused, and
+    the refusal leaves the owner's sign-in intact."""
+
+    async def test_the_owner_signs_in_with_its_verifier(self, monkeypatch, provider):
+        verifier = secrets.token_urlsafe(32)
+        callback, container = await _single_use_callback(
+            monkeypatch,
+            provider,
+            FakeRedis(),
+            binding_challenge=code_challenge(verifier),
+        )
+
+        async with _http(container) as client:
+            signed_in = await client.post(
+                "/auth/callback", json=_body(callback, binding_verifier=verifier)
+            )
+
+        assert signed_in.status_code == 200, signed_in.text
+        assert signed_in.json()["access_token"] == "access-token"
+
+    @pytest.mark.parametrize(
+        "presented", ["none", "other"], ids=["without-verifier", "other-verifier"]
+    )
+    async def test_a_leaked_code_and_state_are_refused(
+        self, monkeypatch, provider, presented
+    ):
+        verifier = secrets.token_urlsafe(32)
+        callback, container = await _single_use_callback(
+            monkeypatch,
+            provider,
+            FakeRedis(),
+            binding_challenge=code_challenge(verifier),
+        )
+        leaked = (
+            _body(callback)
+            if presented == "none"
+            else _body(callback, binding_verifier=secrets.token_urlsafe(32))
+        )
+
+        async with _http(container) as client:
+            refused = await client.post("/auth/callback", json=leaked)
+            assert refused.status_code == 400
+            assert refused.json()["code"] == "oidc_transaction_invalid"
+            assert refused.json()["eneo_error_code"] == 9078
+            assert _token_exchanges(provider) == 0
+
+            owner = await client.post(
+                "/auth/callback", json=_body(callback, binding_verifier=verifier)
+            )
+
+        assert owner.status_code == 200, owner.text
+        assert _token_exchanges(provider) == 1
+
+    async def test_initiate_stores_the_challenge_and_sends_it_nowhere(
+        self, monkeypatch, provider
+    ):
+        redis_client = FakeRedis()
+        _, container = _single_use_tenant(monkeypatch, redis_client)
+        challenge = code_challenge(secrets.token_urlsafe(32))
+
+        async with _http(container) as client:
+            started = await client.get(
+                "/auth/initiate",
+                params={"tenant": SINGLE_USE_SLUG, "binding_challenge": challenge},
+            )
+
+        assert started.status_code == 200, started.text
+        (stored,) = _stored_transactions(redis_client)
+        assert (stored["channel"], stored["binding_challenge"]) == ("api", challenge)
+        state = jwt.decode(started.json()["state"], options={"verify_signature": False})
+        assert challenge not in started.json()["authorization_url"]
+        assert challenge not in json.dumps(state)
+
+    @pytest.mark.parametrize(
+        "challenge",
+        ["A" * 42, "A" * 44, "A" * 42 + "=", "A" * 42 + "+"],
+        ids=["short", "long", "padded", "outside-base64url"],
+    )
+    async def test_a_malformed_challenge_starts_nothing(
+        self, monkeypatch, provider, challenge
+    ):
+        redis_client = FakeRedis()
+        _, container = _single_use_tenant(monkeypatch, redis_client)
+
+        async with _http(container) as client:
+            refused = await client.get(
+                "/auth/initiate",
+                params={"tenant": SINGLE_USE_SLUG, "binding_challenge": challenge},
+            )
+
+        assert refused.status_code == 422
+        assert redis_client._store == {}
+
+    @pytest.mark.parametrize(
+        "malformed",
+        [
+            "A" * 42,
+            "A" * 129,
+            secrets.token_urlsafe(32) + "+",
+        ],
+        ids=["short", "long", "outside-unreserved"],
+    )
+    async def test_a_malformed_verifier_is_refused_and_the_transaction_kept(
+        self, monkeypatch, provider, malformed
+    ):
+        verifier = secrets.token_urlsafe(32)
+        callback, container = await _single_use_callback(
+            monkeypatch,
+            provider,
+            FakeRedis(),
+            binding_challenge=code_challenge(verifier),
+        )
+
+        async with _http(container) as client:
+            refused = await client.post(
+                "/auth/callback", json=_body(callback, binding_verifier=malformed)
+            )
+            owner = await client.post(
+                "/auth/callback", json=_body(callback, binding_verifier=verifier)
+            )
+
+        assert refused.status_code == 422
+        assert malformed not in refused.text
+        assert owner.status_code == 200, owner.text
+        assert _token_exchanges(provider) == 1
+
+    @pytest.mark.parametrize(
+        "extra",
+        [{}, {"code_verifier": "sent-by-an-older-client"}],
+        ids=["code-and-state", "with-ignored-code-verifier"],
+    )
+    async def test_an_unbound_sign_in_works_as_before(
+        self, monkeypatch, provider, extra
+    ):
+        _, container = _single_use_tenant(monkeypatch, FakeRedis())
+
+        async with _http(container) as client:
+            started = await client.get(
+                "/auth/initiate", params={"tenant": SINGLE_USE_SLUG}
+            )
+            answer = provider.authorize(started.json()["authorization_url"])
+            signed_in = await client.post(
+                "/auth/callback",
+                json={
+                    "code": answer.code,
+                    "state": started.json()["state"],
+                    **({"iss": answer.iss} if answer.iss else {}),
+                    **extra,
+                },
+            )
+
+        assert signed_in.status_code == 200, signed_in.text
+        assert signed_in.json()["access_token"] == "access-token"
+
+    async def test_a_request_cannot_choose_the_channel(self, monkeypatch, provider):
+        redis_client = FakeRedis()
+        tenant, container = _single_use_tenant(monkeypatch, redis_client)
+        verifier = secrets.token_urlsafe(32)
+
+        async with _http(container) as client:
+            started = await client.get(
+                "/auth/initiate",
+                params={"tenant": SINGLE_USE_SLUG, "channel": "browser"},
+            )
+            (stored,) = _stored_transactions(redis_client)
+            browser = await _signed_callback(
+                redis_client,
+                provider,
+                tenant=tenant,
+                redirect_uri=SINGLE_USE_REDIRECT_URI,
+                channel="browser",
+                binding_challenge=code_challenge(verifier),
+            )
+            refused = await client.post(
+                "/auth/callback",
+                json=_body(browser, binding_verifier=verifier, channel="browser"),
+            )
+
+        assert started.status_code == 200, started.text
+        assert stored["channel"] == "api"
+        assert refused.status_code == 400
+        assert refused.json()["code"] == "oidc_transaction_invalid"
+        assert _token_exchanges(provider) == 0
+
+
+async def test_initiate_refuses_a_templated_issuer_before_storing_anything(
+    monkeypatch, provider
+):
+    """A config saved before the check, an environment-only config or the
+    startup migration can still name a template; initiate stops before any
+    transaction or authorization URL exists."""
+    redis_client = FakeRedis()
+    tenant, container = _single_use_tenant(monkeypatch, redis_client)
+    tenant.federation_config["issuer"] = (
+        "https://login.microsoftonline.com/{tenantid}/v2.0"
+    )
+
+    async with _http(container) as client:
+        refused = await client.get("/auth/initiate", params={"tenant": SINGLE_USE_SLUG})
+
+    assert refused.status_code == 500
+    assert "template" in refused.json()["detail"]
+    assert "authorization_url" not in refused.text
+    assert redis_client._store == {}

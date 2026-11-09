@@ -15,6 +15,8 @@ export type OidcLoginResult = {
 export async function loginWithOidc(
   code: string,
   state: string,
+  // The secret whose hash initiate stored: only this browser can redeem the code.
+  bindingVerifier: string,
   fetchFn: typeof fetch = fetch,
   // The provider's RFC 9207 issuer from the redirect; the backend checks it.
   iss: string | null = null
@@ -42,7 +44,8 @@ export async function loginWithOidc(
       body: JSON.stringify({
         code,
         state,
-        ...(iss !== null && { iss })
+        ...(iss !== null && { iss }),
+        binding_verifier: bindingVerifier
       })
     });
 

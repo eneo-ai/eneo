@@ -35,6 +35,8 @@ The frontend calls `GET /api/v1/auth/initiate` (with `?tenant={slug}` in multi-t
 - `nonce`
 - `code_challenge` (the verifier's SHA-256) with `code_challenge_method=S256`
 
+A client that also sends `binding_challenge`, the S256 hash of a secret it keeps, binds the transaction to itself (see [Public OIDC Endpoints](#public-oidc-endpoints)). The Svelte login always does.
+
 A `correlation_id` (16 hex characters) traces the request. When Redis cannot store the transaction, initiation is refused with `503` (`oidc_login_unavailable`).
 
 ### User Authentication
@@ -47,7 +49,7 @@ IdP redirects to `{origin}/login/callback` with:
 - `iss` - The provider's issuer, when it sends one ([RFC 9207](https://www.rfc-editor.org/rfc/rfc9207))
 
 ### Token Exchange
-The frontend posts `code`, `state` and `iss` to `POST /api/v1/auth/callback`. The backend validates the state JWT signature (HS256) and expiry, takes the transaction from Redis exactly once, checks that it belongs to the state's tenant, validates the `redirect_uri` and the `iss` parameter, then exchanges the code and the PKCE verifier for tokens at the IdP's token endpoint.
+The frontend posts `code`, `state`, `iss` and, for a bound sign-in, `binding_verifier` to `POST /api/v1/auth/callback`. The backend validates the state JWT signature (HS256) and expiry, takes the transaction from Redis exactly once and only for the client that started it, checks that it belongs to the state's tenant, validates the `redirect_uri` and the `iss` parameter, then exchanges the code and the PKCE verifier for tokens at the IdP's token endpoint.
 
 ### ID Token Validation
 JWT signature verified against the IdP's JWKS with the allowed algorithms, then the claims listed under [ID Token Validation](#id-token-validation). Any failure is refused with `401` (`oidc_response_not_verified`).
@@ -251,10 +253,11 @@ An expired state is rejected with `400 Authorization session expired. Please try
 ### Browser Login Binding
 
 Generic OIDC login also requires a browser-bound attempt. Starting authentication
-through the `/login` page's `oidc` POST action creates a random attempt ID and
-passes it as `frontend_state` to the backend. After successful initiation, the
-action stores the same ID in the HttpOnly `oidc-login-resume` cookie, even when no
-`next` destination was requested. Its expiry follows the backend-signed state's
+through the `/login` page's `oidc` POST action creates a random attempt ID and a
+binding verifier (32 random bytes). It passes the attempt ID as `frontend_state`
+and the verifier's S256 hash as `binding_challenge` to the backend. After
+successful initiation, the action stores both in the HttpOnly `oidc-login-resume`
+cookie, even when no `next` destination was requested. Its expiry follows the backend-signed state's
 `exp`: the default is 10 minutes from initiation, rather than from opening the
 login page. The cookie uses `Path=/`, `SameSite=Lax`, and `Secure` outside
 development. Single-tenant automatic login, tenant selection, and retries use
@@ -269,6 +272,12 @@ attempt is consumed, so a later callback without that cookie cannot exchange
 another code. The backend still verifies the state signature; reading its
 frontend payload for browser correlation does not replace that verification.
 
+The attempt ID travels in the state, which anyone who sees the callback URL can
+read, so it only tells tabs apart. The verifier stays in the cookie and the Svelte
+server: the callback sends it as `binding_verifier`, and the backend redeems the
+code only with it. A leaked code and state therefore cannot be finished in another
+browser or by calling the API directly.
+
 The optional local `next` destination is separate from the required binding.
 Unsafe or oversized destinations are omitted from the cookie without allowing
 an unbound login. Module handoff destinations retain their original encoding.
@@ -282,21 +291,25 @@ starting authentication again does. After deploying this change, attempts starte
 with an older cookie format must restart login.
 
 The legacy Zitadel flow continues to use its existing local PKCE verifier
-cookie and sends no nonce.
+cookie and sends no nonce. It is deprecated and is removed in the next release;
+see [Migrate from the Zitadel settings](/guides/oidc-federation#migrate-from-the-zitadel-settings).
 
 ### Sign-in Transaction
 
-`authentication/oidc/transaction.py` stores each sign-in in Redis under `oidc:transaction:{id}` for `oidc_state_ttl_seconds`. It holds the `nonce`, the PKCE `code_verifier`, the `redirect_uri`, the tenant and its config version, the provider's issuer and whether its discovery announced the `iss` parameter, and the time the sign-in started. The browser and the provider never see the verifier. The callback checks the `iss` parameter and the ID token's `iss` against the stored issuer, so a config or discovery change during a sign-in does not change what it accepts. If the provider's issuer has changed since, the callback refuses before the token exchange.
+`authentication/oidc/transaction.py` stores each sign-in in Redis under `oidc:transaction:{id}` for `oidc_state_ttl_seconds`. It holds the `nonce`, the PKCE `code_verifier`, the `redirect_uri`, the tenant and its config version, the provider's issuer and whether its discovery announced the `iss` parameter, the time the sign-in started, the channel that started it and, for a bound sign-in, the hash of the client's binding secret. The browser and the provider never see the verifier. The callback checks the `iss` parameter and the ID token's `iss` against the stored issuer, so a config or discovery change during a sign-in does not change what it accepts. If the provider's issuer has changed since, the callback refuses before the token exchange.
 
-The callback takes the transaction with `GETDEL`, so exactly one callback can use it:
+There are two channels. `POST /api/v1/auth/callback` answers with a bearer token. The Vite web app's server-side sign-in (`GET /api/v1/auth/browser/initiate`) answers with an HttpOnly session cookie: it always binds the transaction to its transaction cookie, and only its own callback redeems it.
+
+The callback first reads the transaction and checks the channel and the binding secret, comparing hashes in constant time. Only then does it take the transaction with `GETDEL`, so exactly one callback can use it. A channel or binding refusal removes nothing, so whoever holds a leaked code and state cannot use up a bound sign-in either:
 
 | Situation | Behaviour |
 |-----------|-----------|
 | Transaction present | Taken and removed; its tenant must match the state's, otherwise `400 Authorization state mismatch detected. Please restart the sign-in flow.` |
-| Transaction missing or unreadable (expired, already used, Redis restarted), or the provider's issuer changed since the sign-in started | `400` `oidc_transaction_invalid`: "Authorization session is invalid or has expired. Please restart the sign-in flow." |
-| Redis unavailable, or no answer within 2 seconds | `503` `oidc_login_unavailable` at initiation or callback. A callback whose read got no answer counts the transaction as used, so the sign-in must be started again |
+| Started on the other channel; bound, but `binding_verifier` is missing or wrong; or unbound, but a `binding_verifier` was sent | `400` `oidc_transaction_invalid`. The transaction stays, so the client that started the sign-in can still finish it |
+| Transaction missing or unreadable (expired, already used, Redis restarted, or stored by a version without the sign-in binding), or the provider's issuer changed since the sign-in started | `400` `oidc_transaction_invalid`: "Authorization session is invalid or has expired. Please restart the sign-in flow." |
+| Redis unavailable, or no answer within 2 seconds | `503` `oidc_login_unavailable` at initiation or callback. The callback is refused and nothing writes the transaction back, so the sign-in must be started again |
 
-A state from before an upgrade is refused earlier with `400 Invalid state parameter`. None of these refusals writes a session or a user row.
+A state from a version without sign-in transactions is refused earlier with `400 Invalid state parameter`. None of these refusals writes a session or a user row.
 
 ### Redirect URI Grace Period
 
@@ -506,9 +519,9 @@ From `config.py`:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `federation_enabled` (`FEDERATION_ENABLED`) | `false` | `false`: IdP from `OIDC_*` env vars; `true`: per-tenant config via the sysadmin API |
+| `federation_enabled` (`FEDERATION_ENABLED`) | `false` | The only mode selector, read at startup. `true` (recommended for new installations): the IdP settings stored on the tenant, registered through the sysadmin API and changed by administrators under **Administration › Sign-in (SSO)**; the `OIDC_*` sign-in settings are ignored and logged by name at startup. `false`: the IdP from the `OIDC_*` env vars. There is no fallback between the modes |
 | `federation_per_tenant_enabled` (`FEDERATION_PER_TENANT_ENABLED`) | - | Deprecated alias for `FEDERATION_ENABLED`; logs a warning at startup, `FEDERATION_ENABLED` wins when both are set |
-| `oidc_discovery_endpoint`, `oidc_client_id`, `oidc_client_secret` | - | Global IdP used when `FEDERATION_ENABLED=false`; active when discovery endpoint and client secret are both set |
+| `oidc_discovery_endpoint`, `oidc_client_id`, `oidc_client_secret` | - | Global IdP used when `FEDERATION_ENABLED=false`; active when the discovery endpoint, client ID and client secret are all set (`has_env_oidc_client`) |
 | `oidc_allowed_domains` (`OIDC_ALLOWED_DOMAINS`) | `[]` | Global OIDC email-domain restriction; non-empty and matching domains are required for JIT |
 | `public_origin` (`PUBLIC_ORIGIN`) | - | Origin used to build `redirect_uri` when the tenant has no `canonical_public_origin`; must be `https://` (or `http://localhost`) without a path |
 | `encryption_key` (`ENCRYPTION_KEY`) | - | Fernet key; required when `FEDERATION_ENABLED=true` |
@@ -532,7 +545,7 @@ All paths are relative to `/api/v1/sysadmin` and return `404 Federation is not e
 | `PUT` | `/tenants/{tenant_id}/federation` | Provide a complete config (replaces the current one) |
 | `PATCH` | `/tenants/{tenant_id}/federation` | Update individual fields of an existing config |
 | `GET` | `/tenants/{tenant_id}/federation` | View config (secrets masked) |
-| `DELETE` | `/tenants/{tenant_id}/federation` | Remove config |
+| `DELETE` | `/tenants/{tenant_id}/federation` | Remove config; turns single sign-on off for the tenant (no fallback to `OIDC_*`) |
 | `POST` | `/tenants/{tenant_id}/federation/test` | Test IdP discovery endpoint |
 
 **Authentication:** `X-API-Key` header with the super admin API key (`ENEO_SUPER_API_KEY`).
@@ -647,15 +660,23 @@ These endpoints do NOT require authentication:
 |--------|------|---------|
 | `GET` | `/api/v1/auth/federation-status` | Tells the login page which mode is active (`has_single_tenant_federation`, `has_multi_tenant_federation`, `has_global_oidc_config`, `tenant_count`) |
 | `GET` | `/api/v1/auth/tenants` | List active tenants with a slug for the selector |
-| `GET` | `/api/v1/auth/initiate` | Initiate OIDC authentication (`tenant`, `state`, optional `redirect_uri` query parameters) |
-| `POST` | `/api/v1/auth/callback` | Handle OIDC callback (`code`, `state`, optional `iss`) and issue the Eneo session token |
+| `GET` | `/api/v1/auth/initiate` | Initiate OIDC authentication (`tenant`, `state`, optional `redirect_uri` and `binding_challenge` query parameters) |
+| `POST` | `/api/v1/auth/callback` | Handle OIDC callback (`code`, `state`, optional `iss` and `binding_verifier`) and issue the Eneo session token |
 
 `/auth/initiate` and `/auth/callback` refuse with a typed code in the error body:
 
 | Status | `code` | `eneo_error_code` | Meaning |
 |--------|--------|-------------------|---------|
 | `503` | `oidc_login_unavailable` | `9077` | Redis could not store or return the sign-in transaction |
-| `400` | `oidc_transaction_invalid` | `9078` | The sign-in transaction is missing, used or no longer fits the provider |
+| `400` | `oidc_transaction_invalid` | `9078` | The sign-in transaction is missing, used, started by another client or no longer fits the provider |
 | `401` | `oidc_response_not_verified` | `9079` | The provider's response failed a check of the provider contract |
 
 Other refusals are plain `400` answers without a code: `Invalid state parameter`, `Authorization session expired. Please try logging in again.`, `Authorization state mismatch detected. Please restart the sign-in flow.` and the redirect URI mismatch.
+
+**Clients that call the API directly**, such as eneo-js, should bind each sign-in:
+
+1. Create a verifier from at least 32 random bytes, encoded as 43 to 128 characters of `A-Z`, `a-z`, `0-9`, `-`, `.`, `_` and `~` (like a PKCE verifier, [RFC 7636](https://www.rfc-editor.org/rfc/rfc7636#section-4.1)). Keep it out of URLs and logs.
+2. Send `binding_challenge`, the unpadded base64url SHA-256 of the verifier, to `/initiate`.
+3. Send the verifier as `binding_verifier` to `/callback`.
+
+A bound sign-in is redeemed only with its verifier. An unbound one works as before and refuses a `binding_verifier`. Binding adds only the verifier: the callback's other requirements stay, including forwarding the provider's `iss` when it sends one. A malformed value is refused with `422`. `code_verifier` is still accepted and ignored.

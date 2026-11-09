@@ -7,9 +7,16 @@ import ipaddr from "ipaddr.js";
 import { allowedDockerHostAddress, type DownloadPolicy } from "./config";
 import { ToolError } from "../../errors";
 
-function denied(
-  reason = "Check the allowed origins and private-network settings with the operator.",
-): never {
+// Where an operator's own backend can live once private access is allowed: RFC 1918, loopback,
+// IPv6 unique-local and the RFC 6598 shared space that pod and service networks often use.
+const PRIVATE_RANGES = ["private", "loopback", "uniqueLocal", "carrierGradeNat"];
+// Cloud metadata endpoints inside those ranges: Alibaba Cloud and AWS IMDS over IPv6. The
+// link-local 169.254.169.254 is outside them. The crawler refuses the same two addresses.
+const METADATA_ENDPOINTS = new Set(
+  ["100.100.100.200", "fd00:ec2::254"].map((a) => ipaddr.process(a).toNormalizedString()),
+);
+
+function denied(reason = "Check the allowed origins with the operator."): never {
   throw new ToolError(
     "DOWNLOAD_DENIED",
     `File URL is not an allowed download destination. ${reason} This is a destination-policy block; it does not establish that the signed URL is invalid or expired.`,
@@ -32,10 +39,11 @@ export function validateUrl(raw: string, config: Pick<DownloadPolicy, "allowed_o
 export function addressAllowed(address: string, allowPrivate: boolean, hostname = ""): boolean {
   if (!ipaddr.isValid(address)) return false;
   const parsed = ipaddr.process(address);
+  if (METADATA_ENDPOINTS.has(parsed.toNormalizedString())) return false;
   const range = parsed.range();
   return (
     range === "unicast" ||
-    (allowPrivate && ["private", "loopback", "uniqueLocal"].includes(range)) ||
+    (allowPrivate && PRIVATE_RANGES.includes(range)) ||
     allowedDockerHostAddress(parsed.toString(), hostname, allowPrivate)
   );
 }
@@ -57,11 +65,16 @@ async function resolvePinned(url: URL, config: DownloadPolicy, signal: AbortSign
       .catch(() => reject(new Error(`ENOTFOUND ${hostname}`)))
       .finally(() => signal.removeEventListener("abort", abort));
   });
-  if (
-    !addresses.length ||
-    addresses.some((a) => !addressAllowed(a.address, allowPrivate, hostname))
-  )
-    return denied();
+  const refused = addresses.filter((a) => !addressAllowed(a.address, allowPrivate, hostname));
+  // An address that private access would admit is refused by this origin's setting, not always.
+  if (refused.length && refused.every((a) => addressAllowed(a.address, true, hostname)))
+    return denied(
+      "Its host resolves to a private address, and private addresses are not allowed for this origin.",
+    );
+  if (!addresses.length || refused.length)
+    return denied(
+      "Its host resolves to an address the runtime never contacts: link-local, cloud metadata, multicast or reserved. Point Eneo's file origin at the backend's private, shared (100.64.0.0/10) or public address.",
+    );
   return { hostname, pinned: addresses[0]! };
 }
 /** The operator-facing reason a fetch failed, without the signed URL. */

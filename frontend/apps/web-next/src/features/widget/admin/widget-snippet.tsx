@@ -8,7 +8,7 @@ import { useId, useState } from "react";
 import { Switch } from "@astryxdesign/core/Switch";
 import { TextInput } from "@/components/astryx/text-input";
 import type { Widget } from "./autosave";
-import { docsUrl } from "./docs";
+import { docsUrl } from "@/lib/docs";
 import {
   floatingSnippet,
   pinnedSnippet,
