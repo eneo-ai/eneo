@@ -1,5 +1,6 @@
-"""Logs that no question refers to are removed on upgrade, and the index of
-logged turns is valid after an upgrade that follows a failed build.
+"""Logs that no question refers to are removed on upgrade, each log that
+holds a request body is found from its conversation, and the index that finds
+them is valid after an upgrade that follows a failed build.
 
 Before removal took a question's log with it, deleting a question left its log
 behind with the whole request body, and an answer completed after its
@@ -61,10 +62,17 @@ def _connect(database_url: str):
     return psycopg2.connect(database_url.replace("+psycopg2", ""))
 
 
-def _insert_logs(database_url: str) -> tuple[str, str]:
-    """An orphan log and a log its question still refers to."""
+# More logs than one batch of the upgrade's search for them.
+_LOGS_IN_CONVERSATION = 5_001
+
+
+def _insert_logs(database_url: str) -> tuple[str, str, str, str, str]:
+    """An orphan log, logs their questions still refer to in one conversation
+    (one with a request body, more of them, and an empty one), and a log of a
+    question without a conversation."""
     tenant_id, user_id, session_id = str(uuid4()), str(uuid4()), str(uuid4())
     orphan_id, referenced_id = str(uuid4()), str(uuid4())
+    empty_id, without_conversation_id = str(uuid4()), str(uuid4())
     connection = _connect(database_url)
     try:
         with connection, connection.cursor() as cursor:
@@ -94,14 +102,38 @@ def _insert_logs(database_url: str) -> tuple[str, str]:
                 (session_id, user_id),
             )
             cursor.execute(
+                "INSERT INTO logging (id, model_kwargs, json_body) "
+                "SELECT gen_random_uuid(), '{}', '\"[earlier turn]\"' "
+                "FROM generate_series(2, %s)",
+                (_LOGS_IN_CONVERSATION,),
+            )
+            cursor.execute(
+                # As the app stored a log without a request body.
+                "INSERT INTO logging (id, model_kwargs, json_body) "
+                "VALUES (%s, '{}', 'null')",
+                (empty_id,),
+            )
+            cursor.execute(
                 "INSERT INTO questions (id, question, answer, num_tokens_question, "
                 "num_tokens_answer, tenant_id, session_id, logging_details_id) "
-                "VALUES (%s, 'kept question', 'kept answer', 1, 1, %s, %s, %s)",
-                (str(uuid4()), tenant_id, session_id, referenced_id),
+                "SELECT gen_random_uuid(), 'kept question', 'kept answer', 1, 1, "
+                "%s, %s, id FROM logging WHERE id <> %s",
+                (tenant_id, session_id, orphan_id),
+            )
+            cursor.execute(
+                "INSERT INTO logging (id, model_kwargs, json_body) "
+                "VALUES (%s, '{}', '\"[no conversation]\"')",
+                (without_conversation_id,),
+            )
+            cursor.execute(
+                "INSERT INTO questions (id, question, answer, num_tokens_question, "
+                "num_tokens_answer, tenant_id, logging_details_id) "
+                "VALUES (%s, 'asked', 'answered', 1, 1, %s, %s)",
+                (str(uuid4()), tenant_id, without_conversation_id),
             )
     finally:
         connection.close()
-    return orphan_id, referenced_id
+    return orphan_id, referenced_id, empty_id, without_conversation_id, session_id
 
 
 def _log_ids(database_url: str) -> set[str]:
@@ -114,7 +146,24 @@ def _log_ids(database_url: str) -> set[str]:
         connection.close()
 
 
+def _found_from(database_url: str) -> dict[str | None, set[str]]:
+    """Each log by the conversation a removal finds it through."""
+    found: dict[str | None, set[str]] = {}
+    connection = _connect(database_url)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT session_id::text, id::text FROM logging")
+            for conversation, log in cursor.fetchall():
+                found.setdefault(conversation, set()).add(log)
+            return found
+    finally:
+        connection.close()
+
+
 def test_logs_no_question_refers_to_are_removed_on_upgrade() -> None:
+    """Mutants for the logs that stay: an empty log, or a log of a question
+    without a conversation, is found from one; a log past the upgrade's first
+    batch is not."""
     postgres = PostgresContainer(
         image=_POSTGRES_13_IMAGE,
         username="orphan_logs_migration",
@@ -125,24 +174,30 @@ def test_logs_no_question_refers_to_are_removed_on_upgrade() -> None:
         database_url = postgres.get_connection_url()
         config = _alembic_config(database_url)
         command.upgrade(config, _PREVIOUS_REVISION)
-        orphan_id, referenced_id = _insert_logs(database_url)
-        assert _log_ids(database_url) == {orphan_id, referenced_id}
+        orphan_id, referenced_id, empty_id, without_conversation_id, session_id = (
+            _insert_logs(database_url)
+        )
+        kept = _log_ids(database_url) - {orphan_id}
+        assert orphan_id in _log_ids(database_url)
 
-        command.upgrade(config, "head")
-        assert _log_ids(database_url) == {referenced_id}
+        for _ in range(2):
+            command.upgrade(config, "head")
+            assert _log_ids(database_url) == kept
+            found = _found_from(database_url)
+            assert set(found) == {None, session_id}
+            assert len(found[session_id]) == _LOGS_IN_CONVERSATION
+            assert referenced_id in found[session_id]
+            assert found[None] == {empty_id, without_conversation_id}
+            command.downgrade(config, _PREVIOUS_REVISION)
 
-        command.downgrade(config, _PREVIOUS_REVISION)
-        command.upgrade(config, "head")
-        assert _log_ids(database_url) == {referenced_id}
 
-
-def _logged_turns_index_valid(database_url: str) -> bool | None:
+def _logs_index_valid(database_url: str) -> bool | None:
     connection = _connect(database_url)
     try:
         with connection.cursor() as cursor:
             cursor.execute(
                 "SELECT indisvalid FROM pg_index "
-                "WHERE indexrelid = to_regclass('ix_questions_logged_turns')"
+                "WHERE indexrelid = to_regclass('ix_logging_session_id')"
             )
             row = cursor.fetchone()
             return None if row is None else row[0]
@@ -155,9 +210,9 @@ def test_an_index_a_failed_build_left_invalid_is_rebuilt_on_upgrade() -> None:
     does not use it. Mutant: the rerun keeps it because it exists."""
     postgres = PostgresContainer(
         image=_POSTGRES_13_IMAGE,
-        username="logged_turns_migration",
-        password="logged_turns_migration_password",
-        dbname="logged_turns_migration",
+        username="logs_index_migration",
+        password="logs_index_migration_password",
+        dbname="logs_index_migration",
     )
     with postgres:
         database_url = postgres.get_connection_url()
@@ -166,17 +221,19 @@ def test_an_index_a_failed_build_left_invalid_is_rebuilt_on_upgrade() -> None:
         connection = _connect(database_url)
         try:
             with connection, connection.cursor() as cursor:
+                # What an upgrade whose index build failed left behind.
+                cursor.execute("ALTER TABLE logging ADD COLUMN session_id UUID")
                 cursor.execute(
-                    "CREATE INDEX ix_questions_logged_turns ON questions (session_id)"
+                    "CREATE INDEX ix_logging_session_id ON logging (session_id)"
                 )
                 cursor.execute(
                     "UPDATE pg_index SET indisvalid = false "
-                    "WHERE indexrelid = 'ix_questions_logged_turns'::regclass"
+                    "WHERE indexrelid = 'ix_logging_session_id'::regclass"
                 )
         finally:
             connection.close()
-        assert _logged_turns_index_valid(database_url) is False
+        assert _logs_index_valid(database_url) is False
 
         command.upgrade(config, "head")
 
-        assert _logged_turns_index_valid(database_url) is True
+        assert _logs_index_valid(database_url) is True

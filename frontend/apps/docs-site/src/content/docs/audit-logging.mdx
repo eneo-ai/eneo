@@ -158,6 +158,15 @@ configured limit is examined up to that limit, charged, kept and reported as blo
 an operator must resolve the cause or raise the applicable limit. Manual conversation
 deletion continues to release unused files immediately.
 
+With extended logging, the log of each turn holds the earlier turns of its
+conversation. Removing a question clears every later log of its conversation that
+still holds content, in the same unit, so access to the removed turn ends with the
+question; the unit is charged one row per log it clears. The logs are never cleared
+in parts. A question whose conversation has more such logs than
+`RETENTION_CONVERSATIONS_MAX_UNIT_ROWS` allows is kept as `unit_exceeds_budget`, and
+health names `retention_conversations_max_unit_rows` in `limiting_settings`; the
+first execution after the limit is raised removes it.
+
 #### What the records say
 
 A task reports three kinds of counts under names it declares:
@@ -238,7 +247,7 @@ stops the process at start with the reason.
 | `RETENTION_MAX_SECONDS_PER_RUN` | `1800` | Seconds per execution; no new unit starts after it, the unit in progress completes |
 | `RETENTION_CHUNK_ROWS` | `500` (4 to 2000) | Rows per chunk transaction; one large unit may use more; a value near 4 makes every transaction hold one root |
 | `RETENTION_CHUNK_GATHER_SECONDS` | `1.0` | Longest time a chunk admits new units, so the rows it locks stay locked for a short time |
-| `RETENTION_CONVERSATIONS_MAX_UNIT_ROWS` | `5000` (min 4) | Largest question or App-run unit, including proof and cascade; must fit the conversation row budget. The minimum admits one question with its session and helper row |
+| `RETENTION_CONVERSATIONS_MAX_UNIT_ROWS` | `5000` (min 4) | Largest question or App-run unit, including proof, cascade and the later logs a question's removal clears; must fit the conversation row budget. The minimum admits one question with its session and helper row |
 | `RETENTION_MAX_FAMILY_ROWS` | `5000` (3 to 100000) | Largest file family, including proof; must fit the row budget plus one discovery row, and at most three times `RETENTION_MAX_FILES_PER_RUN`. The minimum admits one member |
 | `RETENTION_UNUSED_FILE_GRACE_HOURS` | `24` | Minimum age of an upload that nothing uses |
 | `RETENTION_EMPTY_SESSION_GRACE_HOURS` | `24` | Minimum age of a session without a question |
@@ -346,6 +355,7 @@ unavailable.
 | `no_execution` | The task has no execution record |
 | `no_overdue_snapshot` | The task reports overdue work but no execution has written a snapshot |
 | `latest_outcome`, `error_code`, `blocked_reasons` | From the latest execution; blocked reasons read `<step>.<reason>` |
+| `limiting_settings` | Settings whose limit kept due data in the latest execution, for example `retention_conversations_max_unit_rows` for `unit_exceeds_budget`; raising it lets a later execution remove the data |
 
 `error_code` names why an execution did not succeed:
 

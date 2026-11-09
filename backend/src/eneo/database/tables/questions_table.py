@@ -8,7 +8,6 @@ from sqlalchemy import (
     SmallInteger,
     Text,
     UniqueConstraint,
-    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.associationproxy import AssociationProxy, association_proxy
@@ -39,13 +38,6 @@ class Questions(BasePublic):
             "assistant_id",
             "created_at",
             "id",
-        ),
-        # A question's removal finds the later logs of its conversation here.
-        Index(
-            "ix_questions_logged_turns",
-            "session_id",
-            "created_at",
-            postgresql_where=text("logging_details_id IS NOT NULL"),
         ),
     )
 

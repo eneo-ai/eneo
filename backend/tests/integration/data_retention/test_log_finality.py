@@ -26,6 +26,9 @@ from eneo.ai_models.completion_models.completion_model import (
     ResponseType,
 )
 from eneo.completion_models.infrastructure.completion_service import CompletionService
+from eneo.data_retention.application.conversation_history_retention_task import (
+    CONVERSATION_HISTORY_TASK,
+)
 from eneo.data_retention.application.conversation_retention import (
     ConversationRootKind,
 )
@@ -38,6 +41,8 @@ from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import SpacesCompletionModels
 from eneo.logging.logging import LoggingDetails
+from eneo.main.config import get_settings
+from eneo.main.retention_tasks import _read_retention_health
 from eneo.questions.question import QuestionAdd
 from eneo.users.user import UserInDB
 from tests.integration.data_retention.copy_support import auth, create_assistant
@@ -177,6 +182,94 @@ async def _delete_question(question_id: UUID) -> None:
         await session.execute(sa.delete(Questions).where(Questions.id == question_id))
 
 
+async def _conversation_of(question_id: UUID) -> UUID:
+    async with sessionmanager.session() as session, session.begin():
+        conversation_id = await session.scalar(
+            sa.select(Questions.session_id).where(Questions.id == question_id)
+        )
+    assert conversation_id is not None
+    return conversation_id
+
+
+async def _found_from(question_id: UUID) -> UUID | None:
+    """The conversation a removal finds the question's log through."""
+    async with sessionmanager.session() as session, session.begin():
+        return (
+            await session.execute(
+                sa.text(
+                    "SELECT logging.session_id FROM logging JOIN questions "
+                    "ON questions.logging_details_id = logging.id "
+                    "WHERE questions.id = :id"
+                ),
+                {"id": question_id},
+            )
+        ).scalar_one()
+
+
+async def _store_turn(
+    writer: str,
+    db_container,
+    owner: UserInDB,
+    *,
+    assistant_id: UUID,
+    conversation_id: UUID,
+    details: LoggingDetails,
+) -> UUID:
+    """One more turn of the conversation, its log stored by `writer`: the
+    answer path, the repository's add, or a link written directly, as an
+    older version of the app wrote it."""
+    if writer == "added":
+        async with db_container() as container:
+            added = await container.question_repo().add(
+                QuestionAdd(
+                    question="next",
+                    answer="next",
+                    num_tokens_question=1,
+                    num_tokens_answer=1,
+                    tenant_id=owner.tenant_id,
+                    session_id=conversation_id,
+                    assistant_id=assistant_id,
+                    logging_details=details,
+                )
+            )
+        return added.id
+    async with db_container() as container:
+        conversation = await container.session_repo().get(id=conversation_id)
+        assert conversation is not None
+        (
+            question_id,
+            _,
+        ) = await container.session_service().create_question_placeholder(
+            question="next", session=conversation, assistant_id=assistant_id
+        )
+    if writer == "answer":
+        async with db_container() as container:
+            await container.session_service().complete_question_with_answer(
+                question_id=question_id,
+                answer="next",
+                num_tokens_question=1,
+                num_tokens_answer=1,
+                info_blob_chunks=[],
+                logging_details=details,
+                history_revision=conversation.history_revision,
+            )
+        return question_id
+    async with sessionmanager.session() as session, session.begin():
+        log_id = await session.scalar(
+            sa.text(
+                "INSERT INTO logging (model_kwargs, json_body) "
+                "VALUES ('{}', to_jsonb(CAST(:body AS text))) RETURNING id"
+            ),
+            {"body": details.json_body},
+        )
+        await session.execute(
+            sa.update(Questions)
+            .where(Questions.id == question_id)
+            .values(logging_details_id=log_id)
+        )
+    return question_id
+
+
 async def _make_due(
     session: AsyncSession, assistant_id: UUID, question_id: UUID
 ) -> UUID:
@@ -297,6 +390,50 @@ async def test_removing_a_question_keeps_the_logs_of_the_turns_before_it(
     assert cleared.status_code == 400, cleared.text
 
 
+@pytest.mark.parametrize("writer", ["answer", "added", "linked directly"])
+async def test_only_a_log_with_a_request_body_is_found_from_its_conversation(
+    client: AsyncClient,
+    db_container,
+    admin_user: UserInDB,
+    owner_token: str,
+    writer: str,
+):
+    """A removal finds the logs it clears through their conversation and reads
+    no other log. Mutants: a log one writer stores is not found and keeps the
+    removed turn; an empty log is found; a cleared log stays found."""
+    removed = f"removed-{uuid4().hex}"
+    assistant_id = await _insight_assistant(client, owner_token)
+    [first] = await _logged_conversation(
+        db_container,
+        admin_user,
+        assistant_id=assistant_id,
+        turns=[(f"first question {removed}", "first answer")],
+    )
+    conversation_id = await _conversation_of(first)
+    body = json.dumps([{"role": "user", "content": f"first question {removed}"}])
+    logged, empty = [
+        await _store_turn(
+            writer,
+            db_container,
+            admin_user,
+            assistant_id=assistant_id,
+            conversation_id=conversation_id,
+            details=details,
+        )
+        for details in (
+            LoggingDetails(model_kwargs={}, json_body=body),
+            LoggingDetails(model_kwargs={}),
+        )
+    ]
+    assert await _found_from(logged) == conversation_id
+    assert await _found_from(empty) is None
+
+    await _delete_question(first)
+
+    assert await _logs_containing(removed) == 0
+    assert await _found_from(logged) is None
+
+
 async def test_a_question_is_charged_for_each_log_its_removal_clears(
     client: AsyncClient,
     db_container,
@@ -327,6 +464,40 @@ async def test_a_question_is_charged_for_each_log_its_removal_clears(
     assert await cost(first) == 4
     await _delete_question(first)
     assert await cost(second) == 2
+
+
+async def test_a_question_whose_later_logs_exceed_the_unit_budget_is_kept_and_named(
+    client: AsyncClient,
+    db_container,
+    admin_user: UserInDB,
+    owner_token: str,
+    retention_session: AsyncSession,
+):
+    """Logs are cleared in the unit that removes the question, never in
+    batches: access to their content ends with it. A question whose later logs
+    do not fit the unit is kept, and health names the setting to raise.
+    Mutants: the question is removed past the budget; health names nothing."""
+    assistant_id = await _insight_assistant(client, owner_token)
+    first, *_ = await _logged_conversation(
+        db_container,
+        admin_user,
+        assistant_id=assistant_id,
+        turns=[(f"question {turn}", f"answer {turn}") for turn in range(4)],
+    )
+    await _make_due(retention_session, assistant_id, first)
+    small = get_settings().model_copy(
+        update={"retention_conversations_max_unit_rows": 4}
+    )
+
+    report = await run_registered_retention(retention_session, settings=small)
+
+    assert report.blocked["questions.unit_exceeds_budget"] == 1
+    assert "questions.questions_deleted" not in report.counts
+    health = await _read_retention_health(small)
+    [history] = [
+        task for task in health.tasks if task.name == CONVERSATION_HISTORY_TASK
+    ]
+    assert history.limiting_settings == ("retention_conversations_max_unit_rows",)
 
 
 @pytest.mark.parametrize(

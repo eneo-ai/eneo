@@ -14,6 +14,7 @@ from eneo.data_retention.application.conversation_history_retention_task import 
     ConversationHistoryRetentionTask,
 )
 from eneo.data_retention.application.conversation_retention import (
+    ConversationBlockReason,
     ConversationPageAllocation,
     conversation_page_allocation,
 )
@@ -61,6 +62,15 @@ EXISTING_WITHOUT_CHOICE: Mapping[str, str] = MappingProxyType(
 # this removes what is left of it.
 FOLLOWS_A_REMOVAL: Mapping[str, str] = MappingProxyType(
     {DERIVED_COPIES_TASK: "retention_derived_copies_enabled"}
+)
+
+# A conversation's removal, its later logs included, must fit one unit.
+UNIT_BUDGET: Mapping[str, str] = MappingProxyType(
+    {
+        ConversationBlockReason.UNIT_EXCEEDS_BUDGET.key: (
+            "retention_conversations_max_unit_rows"
+        )
+    }
 )
 
 # Records kept outside the engine, each with how it ends today, until the owner
@@ -113,6 +123,7 @@ def retention_task_registrations(
             name=CONVERSATION_HISTORY_TASK,
             enabled=settings.retention_conversations_history_enabled,
             budget=chat_budget,
+            limited_by=UNIT_BUDGET,
             build=lambda session: ConversationHistoryRetentionTask(
                 session,
                 allocation=allocation(),
@@ -130,6 +141,7 @@ def retention_task_registrations(
             name=DERIVED_COPIES_TASK,
             enabled=settings.retention_derived_copies_enabled,
             budget=chat_budget,
+            limited_by=UNIT_BUDGET,
             build=lambda session: DerivedCopyRetentionTask(
                 session,
                 allocation=allocation(),

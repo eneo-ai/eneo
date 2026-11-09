@@ -14,7 +14,6 @@ from typing import Any
 from uuid import UUID
 
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
@@ -96,18 +95,17 @@ _RELEASE_ROWS = EmptySessionRepository.MAX_RELEASE_ROWS - 1
 
 def _question_log_rows(identifier: UUID) -> tuple[sa.Select[Any], ...]:
     """The logs the question removal trigger writes for one question: its own
-    log and each later log of the conversation that still holds a request
-    body, which it clears once. A turn asked at the same instant counts as
-    later, as in the trigger."""
+    log and each later log of the conversation that still holds content,
+    found through the conversation, which it clears once. A turn asked at the
+    same instant counts as later, as in the trigger."""
     removed = (
         sa.select(Questions.session_id, Questions.created_at)
         .where(Questions.id == identifier)
         .subquery("removed")
     )
-    # ponytail: each removal reads every later logged turn of its
-    # conversation, logs an earlier removal cleared included (about 6 ms at
-    # 4,900 logged turns among 50,000 logs); unlinking cleared logs from
-    # their turns would let the index skip them.
+    # ponytail: an earlier turn's log that holds content is read uncharged.
+    # An earlier turn is due first, so that log is left only while its turn
+    # is held back; the log's turn time beside its conversation would skip it.
     later = aliased(Questions)
     logs = _LOGGING_TABLE.c
     return (
@@ -115,19 +113,9 @@ def _question_log_rows(identifier: UUID) -> tuple[sa.Select[Any], ...]:
             Questions.id == identifier, Questions.logging_details_id.is_not(None)
         ),
         sa.select(logs.id)
+        .join(removed, logs.session_id == removed.c.session_id)
         .join(later, later.logging_details_id == logs.id)
-        .join(removed, later.session_id == removed.c.session_id)
-        .where(
-            later.id != identifier,
-            later.created_at >= removed.c.created_at,
-            # The index of logged turns leaves out turns without a log.
-            later.logging_details_id.is_not(None),
-            sa.or_(
-                logs.json_body.is_not(None),
-                logs.context.is_not(None),
-                logs.model_kwargs.is_distinct_from(sa.literal({}, JSONB)),
-            ),
-        ),
+        .where(later.id != identifier, later.created_at >= removed.c.created_at),
     )
 
 
