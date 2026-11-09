@@ -26,6 +26,7 @@ from eneo.object_content.object_store_provider import (
     ObjectStoreProvider,
 )
 from eneo.object_content.reconciliation_repository import (
+    InventoryListing,
     MultipartAbortLease,
     ObjectContentHealthFacts,
     ObjectContentReconciliationRepository,
@@ -264,6 +265,12 @@ class ObjectContentReconciler:
             return await ObjectContentReconciliationRepository(
                 session
             ).removal_readback()
+
+    async def inventory_listing(self) -> InventoryListing:
+        async with self._database.session() as session, session.begin():
+            return await ObjectContentReconciliationRepository(
+                session
+            ).inventory_listing()
 
     async def _process_content(
         self,

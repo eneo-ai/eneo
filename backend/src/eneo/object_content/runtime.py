@@ -56,6 +56,7 @@ from eneo.object_content.reconciliation import (
     ReconciliationResult,
 )
 from eneo.object_content.reconciliation_repository import (
+    InventoryListing,
     ObjectContentHealthFacts,
     RemovalReadback,
 )
@@ -669,6 +670,9 @@ class ObjectContentRuntime:
 
     async def removal_readback(self) -> RemovalReadback:
         return await self.reconciler.removal_readback()
+
+    async def inventory_listing(self) -> InventoryListing:
+        return await self.reconciler.inventory_listing()
 
 
 object_content_runtime = ObjectContentRuntime()

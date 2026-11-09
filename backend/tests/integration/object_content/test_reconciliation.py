@@ -44,6 +44,8 @@ from eneo.object_content.content_service import ObjectContentService
 from eneo.object_content.object_store_provider import ObjectStoreProvider
 from eneo.object_content.reconciliation import ObjectContentReconciler
 from eneo.object_content.reconciliation_repository import (
+    InventoryListing,
+    InventoryListingFollower,
     ObjectContentReconciliationRepository,
     PublicationReservation,
 )
@@ -871,6 +873,56 @@ async def test_storage_readback_waits_for_abandoned_multipart_uploads(
 
     assert after.waiting == before.waiting + 1
     assert (after.held, after.retrying) == (before.held, before.retrying)
+
+
+@pytest.mark.asyncio
+async def test_a_listing_counts_once_a_cycle_begun_after_the_readback_completes(
+    object_content_database: DatabaseSessionManager,
+) -> None:
+    """The readback continues the listings under way. Their completion does
+    not count, since they began before it: a multipart cycle that completes
+    begins the next at that moment, so only the next one's completion
+    counts."""
+
+    async def page(*, objects_done: bool, multipart_done: bool) -> InventoryListing:
+        async with object_content_database.session() as session, session.begin():
+            repository = ObjectContentReconciliationRepository(session)
+            await repository.record_object_page(
+                cursor=await repository.object_inventory_cursor(),
+                objects=(),
+                next_token=None if objects_done else "next",
+                orphan_grace_seconds=1,
+            )
+            multipart = await repository.multipart_inventory_cursor()
+            await repository.record_multipart_page(
+                cursor=multipart,
+                uploads=(),
+                next_key_marker=None if multipart_done else f"{multipart.key_marker}+",
+                next_upload_id_marker=None,
+                orphan_grace_seconds=1,
+            )
+        async with object_content_database.session() as session, session.begin():
+            return await ObjectContentReconciliationRepository(
+                session
+            ).inventory_listing()
+
+    await page(objects_done=False, multipart_done=False)
+    async with object_content_database.session() as session, session.begin():
+        follower = InventoryListingFollower(
+            since=(
+                await ObjectContentReconciliationRepository(session).inventory_listing()
+            ).observed_at
+        )
+
+    # Objects: the cycle under way completes, then one begun after. Multipart:
+    # the cycle under way, begun before, completes only on the second page.
+    assert not follower.listed_in_full(
+        await page(objects_done=True, multipart_done=False)
+    )
+    assert not follower.listed_in_full(
+        await page(objects_done=True, multipart_done=True)
+    )
+    assert follower.listed_in_full(await page(objects_done=False, multipart_done=True))
 
 
 @pytest.mark.asyncio

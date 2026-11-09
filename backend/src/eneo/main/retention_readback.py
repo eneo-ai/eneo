@@ -4,8 +4,11 @@
 traffic closed and every worker stopped. It runs the worker's own retention
 cron, round after round, until every registered task shows that nothing due
 is left, then drives the object-content reconciliation and reports separately
-whether the store has confirmed every removal. It prints counts and reasons,
-never content.
+whether the store has confirmed every removal. Bytes that no content names
+any more are known only from a listing of the store, so removal is confirmed
+only after a listing in full that began after this readback started. The
+readback continues the listing under way rather than restarting it. It
+prints counts and reasons, never content.
 
 Exit 0: retention is complete (storage confirmed or pending). Exit 1: it is
 not, or storage was not reachable or failed under it.
@@ -28,10 +31,19 @@ from eneo.main.config import get_settings
 from eneo.main.retention_tasks import retention_task_registrations
 from eneo.object_content.content import ObjectContentError
 from eneo.object_content.object_store_connection import ObjectStoreConnectionError
+from eneo.object_content.reconciliation_repository import InventoryListingFollower
 from eneo.object_content.runtime import object_content_runtime
 from eneo.settings.encryption_service import EncryptionService
 
 Emit = Callable[[str], None]
+
+# Each pass lists one page of the store's objects and one of its multipart
+# uploads. The readback may first finish the listing under way, then needs a
+# whole one that began after it started, so this covers two listings of
+# 10,000 pages (1,000,000 objects at the default page of 100).
+# ponytail: fixed ceiling; a larger store ends as pending, so make it a
+# setting when one does.
+_STORAGE_PASSES = 20_000
 
 
 async def read_back_retention(*, emit: Emit) -> bool:
@@ -61,16 +73,25 @@ async def read_back_retention(*, emit: Emit) -> bool:
 async def _read_back_storage(emit: Emit) -> bool:
     runtime = object_content_runtime
     await runtime.refresh_object_store_configuration()
+    follower: InventoryListingFollower | None = None
     if runtime.object_store_configured:
         try:
             await runtime.service.check_object_store_ready()
         except (ObjectContentError, ObjectStoreConnectionError) as error:
             emit(f"storage: not reachable ({error.code})")
             return False
+        follower = InventoryListingFollower(
+            since=(await runtime.inventory_listing()).observed_at
+        )
+    listed = follower is None
     pending = await runtime.removal_readback()
-    # Each pass removes at least one claimable payload or the loop ends; what
-    # it cannot remove now (held, retried later) is reported as pending.
-    while pending.pending:
+    # Each pass lists one more page of the store until a listing that began
+    # after this readback started is complete, then removes at least one
+    # claimable payload or the loop ends. What it cannot remove now (held,
+    # retried later, in its grace period) is pending.
+    passes = 0
+    while (not listed or pending.pending) and passes < _STORAGE_PASSES:
+        passes += 1
         result = await runtime.reconcile_once()
         if result.store_failures:
             emit(
@@ -79,15 +100,20 @@ async def _read_back_storage(emit: Emit) -> bool:
             )
             return False
         after = await runtime.removal_readback()
-        if after.pending >= pending.pending:
-            pending = after
-            break
+        stalled = after.pending >= pending.pending
         pending = after
-    if pending.pending:
-        emit(
-            f"storage: pending {pending.pending} (held {pending.held}, "
-            f"retrying {pending.retrying}, waiting {pending.waiting})"
-        )
+        if follower is not None and not listed:
+            listed = follower.listed_in_full(await runtime.inventory_listing())
+        elif stalled:
+            break
+    counts = (
+        f"storage: pending {pending.pending} (held {pending.held}, "
+        f"retrying {pending.retrying}, waiting {pending.waiting})"
+    )
+    if not listed:
+        emit(f"{counts}, store not listed in full")
+    elif pending.pending:
+        emit(counts)
     else:
         emit("storage: confirmed")
     return True

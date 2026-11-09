@@ -166,6 +166,50 @@ class RemovalReadback:
         return self.held + self.retrying + self.waiting
 
 
+@dataclass(frozen=True, slots=True)
+class InventoryListing:
+    """Where the store's two listings stand, as of `observed_at`. Each lists
+    one cycle at a time. A completed object cycle keeps its own start; a
+    completed multipart cycle keeps only when it completed."""
+
+    observed_at: datetime
+    last_completed_object_cycle_started_at: datetime | None
+    multipart_cycle_started_at: datetime
+    last_multipart_cycle_completed_at: datetime | None
+
+
+@dataclass(slots=True)
+class InventoryListingFollower:
+    """Follows the store's listings until each has been listed in full by a
+    cycle that began at `since` or later.
+
+    A completing multipart cycle begins the next at the same moment, so the
+    completion of a cycle begun before `since` can fall after it. The
+    follower notes the start of the first multipart cycle it sees begun at
+    `since` or later; one cycle runs at a time, so a completion after that
+    start completes that cycle or a later one. Call it after every page: a
+    cycle it did not see begin is not counted, only the one it sees next."""
+
+    since: datetime
+    _multipart_started_at: datetime | None = None
+
+    def listed_in_full(self, listing: InventoryListing) -> bool:
+        if (
+            self._multipart_started_at is None
+            and listing.multipart_cycle_started_at >= self.since
+        ):
+            self._multipart_started_at = listing.multipart_cycle_started_at
+        objects = listing.last_completed_object_cycle_started_at
+        multipart = listing.last_multipart_cycle_completed_at
+        return (
+            objects is not None
+            and objects >= self.since
+            and self._multipart_started_at is not None
+            and multipart is not None
+            and multipart > self._multipart_started_at
+        )
+
+
 CONTENT_REFERENCE_OWNER_COLUMNS = (
     (ContentOwner.FILE_CONTENT, FileContentReferences.content_id),
     (ContentOwner.KNOWLEDGE_FILE, InfoBlobContentReferences.content_id),
@@ -1559,6 +1603,23 @@ class ObjectContentReconciliationRepository:
                 total_bytes - inline_content_bytes - searchable_knowledge_bytes,
                 0,
             ),
+        )
+
+    async def inventory_listing(self) -> InventoryListing:
+        state = (
+            await self._session.scalars(
+                select(ObjectContentReconciliationState).where(
+                    ObjectContentReconciliationState.id == 1
+                )
+            )
+        ).one()
+        return InventoryListing(
+            observed_at=await self._database_now(),
+            last_completed_object_cycle_started_at=(
+                state.last_completed_object_cycle_started_at
+            ),
+            multipart_cycle_started_at=state.multipart_cycle_started_at,
+            last_multipart_cycle_completed_at=state.last_multipart_cycle_completed_at,
         )
 
     async def reset_remote_inventory(self) -> None:

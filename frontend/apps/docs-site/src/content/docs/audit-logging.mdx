@@ -421,12 +421,19 @@ removal, because a removal can make other rows due (a removed question can leave
 its session empty). A pass resumed from a cursor stored before the restore does
 not count.
 
-It then runs object-content reconciliation and reports storage on its own line:
+It then runs object-content reconciliation and reports storage on its own line.
+Payloads that nothing refers to any more are known only from a listing of the
+store. Reconciliation lists the store one page per pass. The readback continues
+the listing under way and confirms storage only once a whole listing that began
+after the readback started has completed, and nothing is left to remove. It
+stops after a fixed number of passes, enough for two listings of a million
+objects at the default page size:
 
 | Line | Meaning |
 | --- | --- |
-| `storage: confirmed` | The store has removed every payload that nothing refers to any more |
-| `storage: pending N (held H, retrying R, waiting W)` | Payloads are still kept by a minimum retention or a hold, wait for a retry after a failure, or were not reached yet. Not confirmed erasure |
+| `storage: confirmed` | A listing begun after the readback started has completed, and the store has removed every payload that nothing refers to any more |
+| `storage: pending N (held H, retrying R, waiting W)` | Payloads are still kept by a minimum retention or a hold, wait for a retry after a failure, or were not reached yet. A payload the listing found is deleted once a second listing has seen it after its grace period (one hour by default): run the command again after that. Not confirmed erasure |
+| `storage: pending N (...), store not listed in full` | No listing that began after the readback started completed within its passes. Run the command again: it continues the listing. Not confirmed erasure |
 | `storage: not reachable (code)` | The store could not be checked |
 | `storage: failed (...)` | A store operation failed during reconciliation |
 
