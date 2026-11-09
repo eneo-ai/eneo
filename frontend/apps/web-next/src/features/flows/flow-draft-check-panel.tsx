@@ -45,7 +45,7 @@ import {
   type FlowProblem,
   type StepProblem
 } from "./flow-draft-check";
-import type { SpeakerServiceLink } from "./flow-transcription";
+import type { TranscriptionResources } from "./flow-transcription";
 import { showSuggestionsSummary } from "./flow-suggestions-section";
 import {
   flowSuggestionsQueryOptions,
@@ -106,14 +106,17 @@ function flowProblemText(problem: FlowProblem, t: Translate): string {
       return t("flow_editor_tools_check_transcription_model_missing");
     case "speaker_service_missing":
       return t("flow_editor_tools_check_speaker_service_missing");
+    case "live_model_unavailable":
+      return t("flow_editor_tools_check_live_model_unavailable");
   }
 }
 
 /** The settings field that fixes a flow problem, for the ones fixed in the flow's settings. */
-export type SettingsField = "transcription_model" | "speaker_service";
+export type SettingsField = "transcription_model" | "speaker_service" | "live_model";
 const SETTINGS_FIELD: Partial<Record<FlowProblem["code"], SettingsField>> = {
   transcription_model_missing: "transcription_model",
-  speaker_service_missing: "speaker_service"
+  speaker_service_missing: "speaker_service",
+  live_model_unavailable: "live_model"
 };
 
 function resultSentence(check: DraftCheck, t: Translate): string {
@@ -127,7 +130,7 @@ function resultSentence(check: DraftCheck, t: Translate): string {
 function cachedFacts(
   queryClient: QueryClient,
   flow: FlowPublic,
-  speakerServices: readonly SpeakerServiceLink[]
+  transcription: TranscriptionResources
 ): DraftFacts {
   const assistants = new Map<string, FlowAssistant>();
   for (const step of flow.steps) {
@@ -145,7 +148,7 @@ function cachedFacts(
       queryClient.getQueryData<ClassificationPreview>(
         classificationPreviewQueryOptions(flow.id, savedFlowPreviewRequest(flow)).queryKey
       )?.steps ?? null,
-    speakerServices
+    transcription
   };
 }
 
@@ -226,7 +229,7 @@ function RemovedReadRepair({
 export function FlowDraftCheck({
   flow,
   suggestionRuns = 0,
-  speakerServices,
+  transcription,
   onOpenStep,
   onRepair,
   onOpenSettings,
@@ -240,7 +243,8 @@ export function FlowDraftCheck({
    * its own.
    */
   suggestionRuns?: number;
-  speakerServices: readonly SpeakerServiceLink[];
+  /** The space's transcription models and services. */
+  transcription: TranscriptionResources;
   onOpenStep: (step: FlowStep) => void;
   /** Saves the step's repaired underlag; resolves to whether it was saved. */
   onRepair?: (step: FlowStep, inputBindings: JsonObject | null) => Promise<boolean>;
@@ -289,7 +293,7 @@ export function FlowDraftCheck({
     ),
     toolOptions: toolOptions.data?.items ?? null,
     classification: preview.data?.steps ?? null,
-    speakerServices
+    transcription
   });
   const count = problemCount(check);
   const reported = pending || unchecked ? null : count;
@@ -307,7 +311,7 @@ export function FlowDraftCheck({
     announce(
       results.some((result) => result.isError)
         ? t("flow_editor_tools_check_incomplete")
-        : resultSentence(checkDraft(flow, cachedFacts(queryClient, flow, speakerServices)), t)
+        : resultSentence(checkDraft(flow, cachedFacts(queryClient, flow, transcription)), t)
     );
   }
 

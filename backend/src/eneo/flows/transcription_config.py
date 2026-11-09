@@ -10,9 +10,13 @@ _ALLOWED_TRANSCRIPTION_LANGUAGES = {"auto", "sv", "en"}
 DEFAULT_TRANSCRIPTION_LANGUAGE = "sv"
 SPEAKER_SERVICE_KEY = "transcription_speaker_service"
 MAX_SPEAKERS_KEY = "transcription_max_speakers"
+LIVE_MODEL_KEY = "transcription_live_model"
 
 if TYPE_CHECKING:
     from eneo.spaces.space import Space
+    from eneo.transcription_models.domain.transcription_model import (
+        TranscriptionModel,
+    )
     from eneo.transcription_services.models import TranscriptionServiceConnection
 
 
@@ -33,12 +37,21 @@ class FlowTranscriptionConfig:
     # The most speakers the service may label in a run that states no bound;
     # None lets the service count them.
     max_speakers: int | None = None
+    # The model that streams the live preview while someone records; None
+    # leaves the preview to the transcription model. It never writes a
+    # run's transcript: ``model_id`` does, however the audio arrived.
+    live_model_id: UUID | None = None
 
     @property
     def service_in_use(self) -> UUID | None:
         """The chosen service, while the flow transcribes: it times the words
         of every transcript, whether or not the speakers are labelled."""
         return self.speaker_service_id if self.enabled else None
+
+    @property
+    def live_model_in_use(self) -> UUID | None:
+        """The chosen live model, while the flow transcribes."""
+        return self.live_model_id if self.enabled else None
 
     def diarize(self, speaker_labels: bool | None) -> bool:
         """Whether speakers are labelled: the run's own choice, else the flow's."""
@@ -75,14 +88,24 @@ def parse_transcription_config(
         raise FlowTranscriptionConfigError(
             "wizard.transcription_diarization must be a boolean when provided."
         )
+    # The author's choice of no service is text only: it labels no speakers.
+    chose_no_service = (
+        SPEAKER_SERVICE_KEY in wizard and wizard[SPEAKER_SERVICE_KEY] is None
+    )
+
+    # A live model that is the transcription model is no separate choice.
+    live_model_id = _reference_id(wizard, LIVE_MODEL_KEY)
+    if live_model_id == model_id:
+        live_model_id = None
 
     return FlowTranscriptionConfig(
         enabled=enabled,
         model_id=model_id,
         language=language,
-        diarization=raw_diarization,
+        diarization=raw_diarization and not chose_no_service,
         speaker_service_id=_reference_id(wizard, SPEAKER_SERVICE_KEY),
         max_speakers=_max_speakers(wizard.get(MAX_SPEAKERS_KEY)),
+        live_model_id=live_model_id,
     )
 
 
@@ -151,6 +174,18 @@ def resolve_speaker_service(
         connection,
         None if connection is not None else SpeakerServiceGap.PICKED_UNAVAILABLE,
     )
+
+
+def usable_transcription_model(
+    space: Space, model_id: UUID
+) -> TranscriptionModel | None:
+    """The transcription model ``model_id`` names, when ``space`` may use it."""
+    for model in list(getattr(space, "transcription_models", []) or []):
+        if getattr(model, "id", None) == model_id and bool(
+            getattr(model, "can_access", True)
+        ):
+            return model
+    return None
 
 
 def to_provider_language(language: str) -> str | None:

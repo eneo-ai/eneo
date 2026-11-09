@@ -5,7 +5,7 @@ import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 import { makeFlow, makeStep } from "./flow-fixtures";
 import { FlowSettings, SettingsSummary } from "./flow-settings";
-import type { TranscriptionResources } from "./flow-transcription-settings";
+import type { TranscriptionResources } from "./flow-transcription";
 
 vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 
@@ -350,6 +350,87 @@ describe("FlowSettings", () => {
       })
     );
   }, 20_000);
+
+  it("chooses a live text model apart from the transcription model, and says what each does", async () => {
+    const onSave = vi.fn(async () => true);
+    const withLive: TranscriptionResources = {
+      ...resources,
+      models: [
+        ...resources.models,
+        {
+          id: "live-1",
+          name: "pianissimo-sv-live",
+          nickname: "Pianissimo",
+          supports_realtime: true
+        }
+      ]
+    };
+    const whisperFlow = makeFlow({
+      steps: audioFlow.steps,
+      metadata_json: {
+        wizard: {
+          transcription_enabled: true,
+          transcription_model: { id: "tm-1" },
+          transcription_speaker_service: null
+        }
+      }
+    });
+    const { container } = renderInApp(
+      <FlowSettings flow={whisperFlow} canEdit transcription={withLive} onSave={onSave} />
+    );
+    expect(rowValue("Modell för livetext")).toBe("Ingen livetext");
+    fireEvent.click(screen.getByRole("button", { name: "Ändra inställningar" }));
+
+    const live = screen.getByRole("combobox", { name: /Modell för livetext/ });
+    expect(live.textContent).toContain("Ingen livetext");
+    fireEvent.click(live);
+    // The transcription model's list offers the same model, so pick from this list.
+    const liveList = await waitFor(() =>
+      document.getElementById(live.getAttribute("aria-controls") ?? "")!
+    );
+    fireEvent.click(await within(liveList).findByRole("option", { name: "Pianissimo" }));
+    expect(
+      screen.getByText(
+        "Medan någon spelar in visar Pianissimo texten. Den slutliga texten skriver sedan transkriberingsmodellen."
+      )
+    ).toBeTruthy();
+    await expectNoAxeViolations(container);
+    fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata_json: {
+          wizard: {
+            transcription_enabled: true,
+            transcription_model: { id: "tm-1" },
+            transcription_speaker_service: null,
+            transcription_live_model: { id: "live-1" }
+          }
+        }
+      })
+    );
+  }, 20_000);
+
+  it("keeps a live text model the space lost visible, with a warning, until it is changed", () => {
+    const lostLive = makeFlow({
+      steps: audioFlow.steps,
+      metadata_json: {
+        wizard: {
+          transcription_enabled: true,
+          transcription_model: { id: "tm-1" },
+          transcription_speaker_service: null,
+          transcription_live_model: { id: "gone" }
+        }
+      }
+    });
+    renderInApp(
+      <FlowSettings flow={lostLive} canEdit={false} transcription={resources} onSave={vi.fn()} />
+    );
+    expect(rowValue("Modell för livetext")).toBe(
+      "Den valda modellen kan inte längre visa livetext i ytan, så ingen text visas medan någon spelar in. Välj en annan."
+    );
+  });
 
   it("saves a renamed field and a transcription change as one edit", async () => {
     const onSave = vi.fn(async () => true);

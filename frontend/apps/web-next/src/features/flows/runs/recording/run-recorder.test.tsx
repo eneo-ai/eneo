@@ -475,7 +475,7 @@ describe("RunRecorder in the start dialog", () => {
     expect(socket.url).toBe("ws://localhost:3000/api/v1/live-transcription");
     act(() => {
       socket.open();
-      socket.receive({ type: "ready" });
+      socket.receive({ type: "ready", keeps_transcript: true });
       FakeNode.instances[0]!.frame(1);
       socket.receive({ type: "transcript.delta", text: "Välkomna till mötet" });
     });

@@ -1,8 +1,8 @@
 /**
- * The live transcript of a recording in the run form: a draft the flow's
- * transcription model writes while the person records. The recording is
- * uploaded and transcribed as usual, so nothing here ever stops or changes
- * the recording.
+ * The live transcript of a recording in the run form: a draft the flow's live
+ * model (or its transcription model, when it chose none) writes while the
+ * person records. The recording is uploaded and transcribed as usual, so
+ * nothing here ever stops or changes the recording.
  *
  * One owner per audio step for the ticket, the socket, the worklet on the
  * recorder's audio graph and the text so far. The protocol is the core's
@@ -14,8 +14,11 @@
  * A session that heard the whole recording, from its first sample with
  * nothing lost, counts the samples in its stop, and its final text may name a
  * stored transcript the run can use instead of transcribing the recording's
- * one file again. A session that drops while the recording goes on is
- * connected again, up to three times: the text then goes on as a draft only.
+ * one file again. Only the transcription model's text is kept: `ready` says
+ * whether this session's is (`keeps_transcript`), and a preview from a
+ * separate live model holds nothing up. A session that drops while the
+ * recording goes on is connected again, up to three times: the text then goes
+ * on as a draft only.
  *
  * Read it from React with `useSyncExternalStore(subscribe, getSnapshot)`.
  */
@@ -74,7 +77,7 @@ export type RecorderAudioGraph = {
 export type LiveTicket = { ticket: string; websocket_path: string };
 
 type ServerMessage =
-  | { type: "ready" }
+  | { type: "ready"; keeps_transcript: boolean }
   | { type: "transcript.delta"; text: string }
   | { type: "transcript.done"; text: string; transcript_id?: string }
   | { type: "error"; code: string; message?: string; retryable?: boolean };
@@ -390,6 +393,8 @@ export class LiveTranscript {
         const { status } = this.#snapshot;
         if (status !== "connecting" && status !== "reconnecting") return;
         if (status === "reconnecting" && this.#socket) this.#flush(this.#socket);
+        // A preview the core does not keep is a draft from the start.
+        if (!message.keeps_transcript) this.lose();
         this.#set({ ...this.#snapshot, status: "listening", errorCode: null });
         return;
       }

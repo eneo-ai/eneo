@@ -46,8 +46,17 @@ The socket answers `ready`, `transcript.delta` (text to append),
 `transcript.done` (the full preview text) and `error` (`code`, `message`,
 `retryable`) events.
 
+The preview streams through the flow's live transcription model, or through
+its transcription model when the flow chose none. The transcription model
+writes the run's transcript however the recording arrived, so only its own
+text can stand in for transcribing the recording.
+
 The optional body `recording_id` is an opaque client string matching
-`^[A-Za-z0-9_-]{8,64}$`. To store a clean session, also send `produced_samples`
+`^[A-Za-z0-9_-]{8,64}$`. Eneo keeps it only when the preview streams through
+the flow's transcription model; `ready` says whether it did, as
+`keeps_transcript`. When `keeps_transcript` is false the text is only a
+preview: no `transcript_id` follows, and a client need not wait for
+`transcript.done` before creating the run. To store a clean session, also send `produced_samples`
 in the stop message: a non-negative integer counting captured 16 kHz samples
 before client queueing or discarding. Missing or invalid counts disable storage
 without changing the preview. Storage also requires a successfully sent final
@@ -58,9 +67,10 @@ leave the preview usable without an id.
 
 The preview is not the run's transcript. Upload the recording as a runtime file
 and create the run as usual; the flow's transcription model then produces the
-transcript the run uses. Live preview is only available when the flow's own
-transcription model transcribes and that model supports realtime; otherwise
-this route answers 409 `flow_live_transcription_unavailable` with a `reason`.
+transcript the run uses. Live preview is only available while both of the
+flow's models are available in its space and the model it streams through
+supports realtime; otherwise this route answers 409
+`flow_live_transcription_unavailable` with a `reason`.
 The run contract's `transcription.live` reports the same availability and
 reason, so a client can decide before recording whether to offer the preview.
 """

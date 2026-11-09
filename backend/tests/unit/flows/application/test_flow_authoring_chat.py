@@ -85,6 +85,16 @@ def test_the_instructions_offer_only_what_a_flow_can_do() -> None:
     assert "An answer already given is settled" in instructions
 
 
+def test_the_instructions_explain_transcription_but_leave_its_choices() -> None:
+    instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
+
+    assert "transcription_model writes the text of every run" in instructions
+    assert "transcription_live_model, when set, only shows the text" in instructions
+    assert "its text never becomes the run's text" in instructions
+    assert "never write their ids" in instructions
+    assert '"Ändra inställningar", in the Transkribering part' in instructions
+
+
 def test_the_instructions_take_a_contract_from_an_example() -> None:
     instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
 

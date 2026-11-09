@@ -172,6 +172,8 @@ const ISSUE_MESSAGE_KEYS: Record<string, string> = {
   transcribe_only_violation: "flow_validation_msg_transcribe_only_violation",
   flow_audio_transcription_required: "flow_validation_msg_audio_transcription_required",
   flow_audio_transcription_model_required: "flow_validation_msg_audio_transcription_model_required",
+  flow_live_transcription_model_unavailable:
+    "flow_validation_msg_live_transcription_model_unavailable",
   input_contract_source_mismatch: "flow_validation_msg_input_contract_source_mismatch",
   unsupported_input_type: "flow_validation_msg_unsupported_type"
 };

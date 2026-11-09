@@ -165,6 +165,9 @@ async def relay_live_session(
                     "type": "ready",
                     "sample_rate": SAMPLE_RATE,
                     "max_seconds": max_seconds,
+                    # Without it the text is only a preview: the client need
+                    # not wait for it once the recording ends.
+                    "keeps_transcript": grant is not None and grant.keeps_transcript,
                 },
             )
             return await _run(
@@ -289,7 +292,7 @@ async def _run(
         event: dict[str, object] = {"type": "transcript.done", "text": completed.text}
         if (
             grant is not None
-            and grant.recording_id is not None
+            and grant.keeps_transcript
             and capture.final_commit_sent.is_set()
             and capture.produced_samples == stats.received_samples
             and completed.audio_seconds is not None

@@ -71,7 +71,7 @@ There is no chunked or resumable upload and no general mid-run file injection. A
 
 ## Live text while recording
 
-When `transcription.live.available` is true, an app can show preview text while someone records. The preview never becomes the run's transcript: keep the recording, then upload it and create the run as usual. When it is false, `live.reason` is `transcription_disabled`, `transcription_service_mode`, `model_unavailable`, or `model_not_realtime`; record without a preview.
+When `transcription.live.available` is true, an app can show preview text while someone records. The preview never becomes the run's transcript: keep the recording, then upload it and create the run as usual. The flow's transcription model writes the transcript; a flow may stream the preview through a separate live text model. When it is false, `live.reason` is `transcription_disabled`, `model_unavailable`, `live_model_unavailable`, or `model_not_realtime`; record without a preview.
 
 1. Request a ticket for the audio step with `POST /flows/{flow_id}/steps/{step_id}/live-transcription-sessions/` (no body, `201`). It needs the same access as creating a run.
 2. Within 30 seconds, open a WebSocket to the returned `websocket_path`, resolved against the deployment origin, offering the subprotocols `eneo-live.v1` and `ticket.<ticket>`. A ticket opens one socket.

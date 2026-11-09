@@ -107,7 +107,12 @@ async def test_the_preview_streams_committed_text_and_ends_with_the_full_transcr
 
     assert outcome == "completed"
     assert browser.events == [
-        {"type": "ready", "sample_rate": 16000, "max_seconds": 60},
+        {
+            "type": "ready",
+            "sample_rate": 16000,
+            "max_seconds": 60,
+            "keeps_transcript": False,
+        },
         {"type": "transcript.delta", "text": "Hej"},
         {"type": "transcript.delta", "text": " världen"},
         {"type": "transcript.done", "text": "Hej världen"},

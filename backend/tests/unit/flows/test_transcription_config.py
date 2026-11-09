@@ -85,3 +85,74 @@ def test_the_flow_may_set_a_speaker_bound_or_leave_it_automatic() -> None:
 def test_a_speaker_bound_must_be_a_whole_number_of_at_least_one(raw: object) -> None:
     with pytest.raises(FlowTranscriptionConfigError):
         parse_transcription_config({"wizard": {"transcription_max_speakers": raw}})
+
+
+def test_a_live_model_is_in_use_only_while_the_flow_transcribes() -> None:
+    # It only streams the live preview; the transcription model writes the text.
+    live_id, model_id = uuid4(), uuid4()
+    wizard = {
+        "transcription_enabled": True,
+        "transcription_model": {"id": str(model_id)},
+        "transcription_live_model": {"id": str(live_id)},
+    }
+
+    config = parse_transcription_config({"wizard": wizard})
+    assert (config.model_id, config.live_model_id) == (model_id, live_id)
+    assert config.live_model_in_use == live_id
+
+    config = parse_transcription_config(
+        {"wizard": {**wizard, "transcription_enabled": False}}
+    )
+    assert config.live_model_id == live_id
+    assert config.live_model_in_use is None
+
+
+@pytest.mark.parametrize("raw", [None, {"id": None}, {"id": " "}])
+def test_no_live_model_leaves_the_preview_to_the_transcription_model(
+    raw: object,
+) -> None:
+    config = parse_transcription_config(
+        {"wizard": {"transcription_enabled": True, "transcription_live_model": raw}}
+    )
+
+    assert (config.live_model_id, config.live_model_in_use) == (None, None)
+
+
+@pytest.mark.parametrize("raw", ["model", {"id": "not-a-uuid"}])
+def test_a_malformed_live_model_reference_is_refused(raw: object) -> None:
+    with pytest.raises(FlowTranscriptionConfigError):
+        parse_transcription_config({"wizard": {"transcription_live_model": raw}})
+
+
+def test_the_transcription_model_as_live_model_is_no_separate_choice() -> None:
+    """Choosing the transcription model again for live text reads as no live
+    model: its text may become the run's transcript, as with none chosen."""
+    model_id = uuid4()
+    config = parse_transcription_config(
+        {
+            "wizard": {
+                "transcription_enabled": True,
+                "transcription_model": {"id": str(model_id)},
+                "transcription_live_model": {"id": str(model_id)},
+            }
+        }
+    )
+
+    assert (config.model_id, config.live_model_id) == (model_id, None)
+
+
+def test_a_choice_of_no_speaker_service_is_text_only() -> None:
+    """The author's "none" labels no speakers, as the editor shows it; a flow
+    that has not chosen keeps its label setting until it chooses."""
+    chose_none = parse_transcription_config(
+        {
+            "wizard": {
+                "transcription_enabled": True,
+                "transcription_speaker_service": None,
+            }
+        }
+    )
+    not_chosen = parse_transcription_config({"wizard": {"transcription_enabled": True}})
+
+    assert (chose_none.diarization, not_chosen.diarization) == (False, True)
+    assert chose_none.diarize(True) is True, "a run may still ask for labels"

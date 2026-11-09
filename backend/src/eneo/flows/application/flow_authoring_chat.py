@@ -358,6 +358,22 @@ action in the editor, never yours.
 """
 
 
+_TRANSCRIPTION = """A flow that takes audio is transcribed by the settings in metadata_json.wizard,
+which read_flow shows in section "settings". transcription_model writes the text
+of every run, whether the audio was uploaded, recorded or streamed.
+transcription_live_model, when set, only shows the text while someone records in
+an app (live text); its text never becomes the run's text, and the run
+transcribes the recording with the transcription model. Without it, the
+transcription model shows the live text when it can stream, and the text of a
+session that heard the whole recording then stands in for the run's
+transcription. transcription_speaker_service times the words and labels the
+speakers. You cannot see which models and services the space offers, so never
+write their ids: ask the person to choose them in the editor under "Ändra
+inställningar", in the Transkribering part, and read the settings again when
+they say they have.
+"""
+
+
 def _suggestion_rules() -> str:
     """The catalogue's authoring rules, one per suggestion code."""
     return "".join(
@@ -387,6 +403,7 @@ AUTHORING_INSTRUCTIONS = (
     + _RUN_HELP
     + _CONTENT
     + _CONNECTIONS
+    + _TRANSCRIPTION
 )
 
 

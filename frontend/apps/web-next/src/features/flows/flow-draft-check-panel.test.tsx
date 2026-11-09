@@ -76,7 +76,11 @@ describe("FlowDraftCheck", () => {
     const onOpenStep = vi.fn();
     const flow = makeFlow();
     const { container } = renderInApp(
-      <FlowDraftCheck flow={flow} speakerServices={[]} onOpenStep={onOpenStep} />
+      <FlowDraftCheck
+        flow={flow}
+        transcription={{ models: [], services: [] }}
+        onOpenStep={onOpenStep}
+      />
     );
 
     expect(await screen.findByText("1 sak hindrar publicering")).toBeTruthy();
@@ -106,7 +110,12 @@ describe("FlowDraftCheck", () => {
     });
     const onRepair = vi.fn().mockResolvedValue(true);
     const { container } = renderInApp(
-      <FlowDraftCheck flow={flow} speakerServices={[]} onOpenStep={vi.fn()} onRepair={onRepair} />
+      <FlowDraftCheck
+        flow={flow}
+        transcription={{ models: [], services: [] }}
+        onOpenStep={vi.fn()}
+        onRepair={onRepair}
+      />
     );
 
     expect(
@@ -145,7 +154,7 @@ describe("FlowDraftCheck", () => {
     const { container } = renderInApp(
       <FlowDraftCheck
         flow={audio}
-        speakerServices={[]}
+        transcription={{ models: [], services: [] }}
         onOpenStep={vi.fn()}
         onOpenSettings={onOpenSettings}
         onAddStep={onAddStep}
@@ -170,7 +179,7 @@ describe("FlowDraftCheck", () => {
     renderInApp(
       <FlowDraftCheck
         flow={makeFlow({ steps: [] })}
-        speakerServices={[]}
+        transcription={{ models: [], services: [] }}
         onOpenStep={vi.fn()}
         onAddStep={onAddStep}
       />
@@ -183,7 +192,13 @@ describe("FlowDraftCheck", () => {
     route(ASSISTANTS);
     let answer!: (value: unknown) => void;
     api.POST.mockReturnValue(new Promise((resolve) => (answer = resolve)));
-    renderInApp(<FlowDraftCheck flow={makeFlow()} speakerServices={[]} onOpenStep={vi.fn()} />);
+    renderInApp(
+      <FlowDraftCheck
+        flow={makeFlow()}
+        transcription={{ models: [], services: [] }}
+        onOpenStep={vi.fn()}
+      />
+    );
 
     const running = await screen.findByText("Kontrollerar utkastet…");
     const description = screen.getByText("Publicera kontrollerar flödet en gång till.");
@@ -203,7 +218,7 @@ describe("FlowDraftCheck", () => {
     renderInApp(
       <FlowDraftCheck
         flow={makeFlow({ steps: [makeStep(1, { user_description: "Sammanfatta" })] })}
-        speakerServices={[]}
+        transcription={{ models: [], services: [] }}
         onOpenStep={vi.fn()}
       />
     );
@@ -226,7 +241,11 @@ describe("FlowDraftCheck", () => {
     const scrolled = vi.spyOn(Element.prototype, "scrollIntoView");
     const { container } = renderInApp(
       <>
-        <FlowDraftCheck flow={makeFlow()} speakerServices={[]} onOpenStep={vi.fn()} />
+        <FlowDraftCheck
+          flow={makeFlow()}
+          transcription={{ models: [], services: [] }}
+          onOpenStep={vi.fn()}
+        />
         {/* The step list's summary, as the page puts it below. */}
         <div id={SUGGESTIONS_SUMMARY_ID} tabIndex={-1}>
           Sammanfattningen
@@ -251,9 +270,16 @@ describe("FlowDraftCheck", () => {
   it("says nothing of suggestions while the draft has none, or only dismissed ones", async () => {
     route(ASSISTANTS, [suggestion("c", ["step-1"], true)]);
     const queryClient = testQueryClient();
-    renderInApp(<FlowDraftCheck flow={makeFlow()} speakerServices={[]} onOpenStep={vi.fn()} />, {
-      queryClient
-    });
+    renderInApp(
+      <FlowDraftCheck
+        flow={makeFlow()}
+        transcription={{ models: [], services: [] }}
+        onOpenStep={vi.fn()}
+      />,
+      {
+        queryClient
+      }
+    );
 
     expect(await screen.findByText("Inget hindrar publicering just nu.")).toBeTruthy();
     await waitFor(() =>

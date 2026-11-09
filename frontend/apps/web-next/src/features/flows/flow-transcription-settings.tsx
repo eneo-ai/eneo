@@ -6,21 +6,20 @@ import { useTranslations } from "use-intl";
 import { Switch } from "@astryxdesign/core/Switch";
 import { modelDisplayName } from "@/features/spaces/space-models";
 import {
+  liveModels,
+  liveModelState,
   speakerServiceState,
   TRANSCRIPTION_LANGUAGES,
   usableSpeakerServices,
   withSpeakerService,
+  type LiveModelState,
   type SpeakerServiceLink,
   type SpeakerServiceState,
   type TranscriptionLanguage,
+  type TranscriptionModelLink,
+  type TranscriptionResources,
   type TranscriptionSettings
 } from "./flow-transcription";
-
-/** What the space offers for transcription: its models and the services granted to it. */
-export type TranscriptionResources = {
-  models: readonly { id: string; name: string; nickname?: string | null }[];
-  services: readonly SpeakerServiceLink[];
-};
 
 type Translate = ReturnType<typeof useTranslations>;
 
@@ -54,6 +53,50 @@ function lostSentence(state: SpeakerServiceState, required: boolean, usable: num
   return `${reason} ${action}`;
 }
 
+/** What the live model setting does now, below its field; null when its status says it. */
+function liveModelNote(state: LiveModelState, t: Translate): string | null {
+  switch (state.kind) {
+    case "transcription_model":
+      return state.streams
+        ? t("flow_editor_tools_live_model_same_note")
+        : t("flow_editor_tools_live_model_off_note");
+    case "picked":
+      return t("flow_editor_tools_live_model_separate_note", {
+        name: modelDisplayName(state.model)
+      });
+    case "lost":
+      return null;
+  }
+}
+
+/** The live model setting in a word: the transcription model, none, or the chosen model's name. */
+function liveModelValue(state: LiveModelState, t: Translate): string {
+  if (state.kind !== "transcription_model") {
+    return state.model
+      ? modelDisplayName(state.model)
+      : t("flow_editor_tools_transcription_model_gone");
+  }
+  return state.streams
+    ? t("flow_editor_tools_live_model_same")
+    : t("flow_editor_tools_live_model_off");
+}
+
+/**
+ * A model option's second line: its provider, which tells apart models of the
+ * same name, and, among transcription models, whether it can show live text.
+ */
+function modelOption(model: TranscriptionModelLink, t: Translate, showsLive: boolean) {
+  const facts = [
+    model.provider_name?.trim(),
+    showsLive && model.supports_realtime ? t("flow_editor_tools_model_shows_live_text") : null
+  ].filter(Boolean);
+  return {
+    value: model.id,
+    label: modelDisplayName(model),
+    description: facts.length > 0 ? facts.join(" · ") : undefined
+  };
+}
+
 function serviceName(service: SpeakerServiceLink, t: Translate): string {
   return service.is_default
     ? t("flow_editor_tools_speaker_service_default", { name: service.name })
@@ -75,6 +118,7 @@ export function TranscriptionSummary({
   const t = useTranslations();
   const model = resources.models.find((candidate) => candidate.id === settings.modelId);
   const state = speakerServiceState(settings, resources.services, required);
+  const live = liveModelState(settings, resources.models);
   const choice = settings.speakerService;
   return (
     <>
@@ -89,6 +133,13 @@ export function TranscriptionSummary({
                 ? t("flow_editor_tools_transcription_model_missing")
                 : t("flow_editor_tools_transcription_model_none")}
           </span>
+        )}
+      </MetadataListItem>
+      <MetadataListItem label={t("flow_editor_tools_live_model")}>
+        {live.kind === "lost" ? (
+          <span className="text-ax-warning">{t("flow_editor_tools_live_model_lost")}</span>
+        ) : (
+          liveModelValue(live, t)
         )}
       </MetadataListItem>
       <MetadataListItem label={t("flow_editor_tools_transcription_language")}>
@@ -152,6 +203,11 @@ export function TranscriptionFields({
   const modelKnown = resources.models.some((model) => model.id === settings.modelId);
   const lost = lostSentence(state, required, usable.length, t);
   const on = takesAudio || settings.enabled;
+  const live = liveModelState(settings, resources.models);
+  // The transcription model itself is the "same" choice, not a second option.
+  const liveOptions = liveModels(resources.models).filter((model) => model.id !== settings.modelId);
+  const modelStreams = liveModels(resources.models).some((model) => model.id === settings.modelId);
+  const liveValue = live.kind === "transcription_model" ? UNSET : (settings.liveModelId ?? UNSET);
 
   const serviceValue = state.picked
     ? state.picked.id
@@ -221,10 +277,7 @@ export function TranscriptionFields({
                 }
                 options={[
                   { value: NONE, label: t("flow_editor_tools_transcription_model_none") },
-                  ...resources.models.map((model) => ({
-                    value: model.id,
-                    label: modelDisplayName(model)
-                  })),
+                  ...resources.models.map((model) => modelOption(model, t, true)),
                   ...(settings.modelId && !modelKnown
                     ? [
                         {
@@ -267,6 +320,42 @@ export function TranscriptionFields({
               width="100%"
             />
           </div>
+          {liveOptions.length === 0 && live.kind === "transcription_model" ? (
+            <Text type="supporting" size="sm" as="p" display="block" className="m-0">
+              {live.streams
+                ? t("flow_editor_tools_live_model_same_note")
+                : t("flow_editor_tools_live_model_none_in_space")}
+            </Text>
+          ) : (
+            <div data-settings-field="live_model">
+              <Selector
+                label={t("flow_editor_tools_live_model")}
+                description={liveModelNote(live, t) ?? undefined}
+                options={[
+                  {
+                    value: UNSET,
+                    label: modelStreams
+                      ? t("flow_editor_tools_live_model_same")
+                      : t("flow_editor_tools_live_model_off")
+                  },
+                  ...liveOptions.map((model) => modelOption(model, t, false)),
+                  ...(live.kind === "lost"
+                    ? [{ value: liveValue, label: liveModelValue(live, t) }]
+                    : [])
+                ]}
+                value={liveValue}
+                onChange={(value) =>
+                  onChange({ ...settings, liveModelId: value === UNSET ? null : value })
+                }
+                status={
+                  live.kind === "lost"
+                    ? { type: "warning", message: t("flow_editor_tools_live_model_lost") }
+                    : undefined
+                }
+                width="100%"
+              />
+            </div>
+          )}
           {usable.length === 0 && !required && !state.lost ? (
             <Text type="supporting" size="sm" as="p" display="block" className="m-0">
               {t("flow_editor_tools_speaker_service_none_in_space")}

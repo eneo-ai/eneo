@@ -57,9 +57,10 @@ from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.flows.flow_authoring_transcription import (
     apply_audio_transcription_defaults,
     fill_default_speaker_service,
-    kept_speaker_service_id,
+    kept_transcription_config,
     lacks_speaker_service_choice,
     require_chosen_speaker_service,
+    require_usable_live_model,
     require_usable_speaker_service,
     requires_audio_transcription,
     transcription_config_for_write,
@@ -254,7 +255,7 @@ class FlowService:
         self._validate_variable_alias_collisions(
             steps=[], metadata_json=normalized_metadata
         )
-        await self._check_speaker_service(
+        await self._check_transcription_choices(
             space_id=space_id, metadata_json=normalized_metadata, space=space
         )
         flow = Flow(
@@ -394,7 +395,7 @@ class FlowService:
         self._refuse_step_timeouts_above_the_maximum(next_steps)
         # An edit that leaves the metadata alone states no new choice.
         if metadata_json is not NOT_PROVIDED:
-            space = await self._check_speaker_service(
+            space = await self._check_transcription_choices(
                 space_id=existing.space_id,
                 metadata_json=next_metadata,
                 kept_metadata_json=existing.metadata_json,
@@ -718,7 +719,7 @@ class FlowService:
                 for step in flow.steps
             },
         )
-        space = await self._check_speaker_service(
+        space = await self._check_transcription_choices(
             space_id=flow.space_id,
             metadata_json=normalized_metadata,
             publishing_steps=flow.steps,
@@ -939,7 +940,7 @@ class FlowService:
             space,
         )
 
-    async def _check_speaker_service(
+    async def _check_transcription_choices(
         self,
         *,
         space_id: UUID,
@@ -948,26 +949,36 @@ class FlowService:
         publishing_steps: list[FlowStep] | None = None,
         space: Space | None = None,
     ) -> Space | None:
-        """Refuse a malformed transcription choice, a chosen service the space
+        """Refuse a malformed transcription choice; a chosen service the space
         may not use (whether or not the flow labels speakers: the service
-        times the words too), and on publish (``publishing_steps``) a flow
-        that asks for speaker labels without having chosen a service. A draft
-        may be saved before the choice is made. A saved draft keeps the
-        choice it has, as a space keeps its grants, so an administrator's
-        later change never blocks unrelated edits; publishing checks it again.
+        times the words too); a chosen live model the space may not use or
+        that cannot stream; and on publish (``publishing_steps``) a flow that
+        asks for speaker labels without having chosen a service. A draft may
+        be saved before the choice is made. A saved draft keeps the choices
+        it has, as a space keeps its grants, so an administrator's later
+        change never blocks unrelated edits; publishing checks them again.
 
         Returns the space (``space`` when the caller already loaded it) for
         the checks that follow, or None when none was needed."""
         config = transcription_config_for_write(metadata_json)
-        pick = config.service_in_use
-        if pick is not None and pick == kept_speaker_service_id(kept_metadata_json):
-            pick = None
-        if self.space_service is None or (pick is None and publishing_steps is None):
+        kept = kept_transcription_config(kept_metadata_json)
+        service = config.service_in_use
+        live_model = config.live_model_in_use
+        if kept is not None:
+            if service == kept.service_in_use:
+                service = None
+            if live_model == kept.live_model_in_use:
+                live_model = None
+        if self.space_service is None or (
+            service is None and live_model is None and publishing_steps is None
+        ):
             return space
         if space is None:
             space = await self.space_service.get_space(space_id)
-        if pick is not None:
-            require_usable_speaker_service(pick, space=space)
+        if service is not None:
+            require_usable_speaker_service(service, space=space)
+        if live_model is not None:
+            require_usable_live_model(live_model, space=space)
         if publishing_steps is not None:
             require_chosen_speaker_service(config, steps=publishing_steps, space=space)
         return space

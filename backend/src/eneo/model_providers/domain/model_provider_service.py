@@ -1,7 +1,7 @@
 from collections.abc import Sequence
 from datetime import date, datetime, timezone
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Literal, Optional
+from typing import TYPE_CHECKING, Any, Literal, Optional, cast
 from uuid import UUID, uuid4
 
 from eneo.embedding_models.domain.embedding_model_repo import (
@@ -166,7 +166,10 @@ def _extract_mode_hint(m: dict[str, Any]) -> str | None:
 
     1. ``model_type`` — coarse category. Values seen in the wild:
        ``"embedding"``, ``"text"``, ``"audio"``/``"transcription"``.
-    2. ``capabilities.embeddings: true`` — fallback for providers that
+    2. ``types`` — a list of categories, such as ``["transcription"]``,
+       ``["realtime"]`` or ``["chatcompletion", "image"]``. A realtime
+       speech model is a transcription model.
+    3. ``capabilities.embeddings: true`` — fallback for providers that
        use ``model_type: "text"`` for everything and rely on the flag.
 
     Returns one of ``"completion"``, ``"embedding"``, ``"transcription"``,
@@ -191,6 +194,21 @@ def _extract_mode_hint(m: dict[str, Any]) -> str | None:
     if model_type == "text":
         # Could still be an embedding flagged via capabilities.
         return "embedding" if embeddings_flag else "completion"
+
+    raw_types: Any = m.get("types")
+    if isinstance(raw_types, list):
+        entries = cast(list[object], raw_types)
+        types = {kind.lower() for kind in entries if isinstance(kind, str)}
+        if "embedding" in types:
+            return "embedding"
+        if "rerank" in types:
+            return "rerank"
+        if types & {"transcription", "realtime", "audio"}:
+            return "transcription"
+        if "image" in types:
+            return "image"
+        if types & {"chatcompletion", "chat", "completion", "text"}:
+            return "completion"
 
     if embeddings_flag:
         return "embedding"

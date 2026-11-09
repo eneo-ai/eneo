@@ -68,6 +68,7 @@ from eneo.flows.transcription_config import (
     parse_transcription_config,
     resolve_speaker_service,
     to_provider_language,
+    usable_transcription_model,
 )
 from eneo.main.exceptions import (
     NotFoundException,
@@ -704,8 +705,6 @@ def select_transcription_model(
     step_order: int,
 ) -> "TranscriptionModel":
     """The flow's transcription model, when the step's space may use it."""
-    available_models = list(getattr(space, "transcription_models", []) or [])
-
     if config.model_id is None:
         raise TypedIOValidationException(
             (
@@ -715,11 +714,9 @@ def select_transcription_model(
             code=FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_MODEL_MISSING.value,
         )
 
-    for model in available_models:
-        if getattr(model, "id", None) == config.model_id and bool(
-            getattr(model, "can_access", True)
-        ):
-            return model
+    model = usable_transcription_model(space, config.model_id)
+    if model is not None:
+        return model
 
     raise TypedIOValidationException(
         (

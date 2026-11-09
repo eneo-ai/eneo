@@ -6398,8 +6398,17 @@ export interface paths {
      *     `transcript.done` (the full preview text) and `error` (`code`, `message`,
      *     `retryable`) events.
      *
+     *     The preview streams through the flow's live transcription model, or through
+     *     its transcription model when the flow chose none. The transcription model
+     *     writes the run's transcript however the recording arrived, so only its own
+     *     text can stand in for transcribing the recording.
+     *
      *     The optional body `recording_id` is an opaque client string matching
-     *     `^[A-Za-z0-9_-]{8,64}$`. To store a clean session, also send `produced_samples`
+     *     `^[A-Za-z0-9_-]{8,64}$`. Eneo keeps it only when the preview streams through
+     *     the flow's transcription model; `ready` says whether it did, as
+     *     `keeps_transcript`. When `keeps_transcript` is false the text is only a
+     *     preview: no `transcript_id` follows, and a client need not wait for
+     *     `transcript.done` before creating the run. To store a clean session, also send `produced_samples`
      *     in the stop message: a non-negative integer counting captured 16 kHz samples
      *     before client queueing or discarding. Missing or invalid counts disable storage
      *     without changing the preview. Storage also requires a successfully sent final
@@ -6410,9 +6419,10 @@ export interface paths {
      *
      *     The preview is not the run's transcript. Upload the recording as a runtime file
      *     and create the run as usual; the flow's transcription model then produces the
-     *     transcript the run uses. Live preview is only available when the flow's own
-     *     transcription model transcribes and that model supports realtime; otherwise
-     *     this route answers 409 `flow_live_transcription_unavailable` with a `reason`.
+     *     transcript the run uses. Live preview is only available while both of the
+     *     flow's models are available in its space and the model it streams through
+     *     supports realtime; otherwise this route answers 409
+     *     `flow_live_transcription_unavailable` with a `reason`.
      *     The run contract's `transcription.live` reports the same availability and
      *     reason, so a client can decide before recording whether to offer the preview.
      */
@@ -19893,6 +19903,7 @@ export interface components {
       | "flow_has_no_steps"
       | "flow_speaker_service_not_chosen"
       | "flow_speaker_service_unavailable"
+      | "flow_live_transcription_model_unavailable"
       | "flow_http_post_output_must_be_terminal"
       | "flow_input_alias_not_received"
       | "flow_input_binding_future_step_reference"
@@ -20001,9 +20012,16 @@ export interface components {
       available: boolean;
       /**
        * Reason
-       * @description Why live preview is unavailable: `transcription_disabled`, `model_unavailable`, or `model_not_realtime`.
+       * @description Why live preview is unavailable: `transcription_disabled`, `model_unavailable`, `live_model_unavailable`, or `model_not_realtime`.
        */
-      reason?: ("transcription_disabled" | "model_unavailable" | "model_not_realtime") | null;
+      reason?:
+        | (
+            | "transcription_disabled"
+            | "model_unavailable"
+            | "live_model_unavailable"
+            | "model_not_realtime"
+          )
+        | null;
     };
     /** FlowLiveTranscriptionModelPublic */
     FlowLiveTranscriptionModelPublic: {
@@ -20045,6 +20063,7 @@ export interface components {
        * @description Longest audio the session accepts, the flow audio duration limit.
        */
       max_seconds: number;
+      /** @description The model the preview streams through: the flow's live transcription model, or its transcription model when the flow chose none. */
       model: components["schemas"]["FlowLiveTranscriptionModelPublic"];
       /**
        * Sample Rate
@@ -20087,10 +20106,14 @@ export interface components {
     FlowLiveTranscriptionUnavailableContext: {
       /**
        * Reason
-       * @description `transcription_disabled`: the flow does not transcribe audio. `model_unavailable`: the flow's transcription model is not available in its space. `model_not_realtime`: the model does not support realtime.
+       * @description `transcription_disabled`: the flow does not transcribe audio. `model_unavailable`: the flow's transcription model is not available in its space. `live_model_unavailable`: the flow's live transcription model is not available in its space. `model_not_realtime`: the model the preview would stream through, the live transcription model or else the transcription model, does not support realtime.
        * @enum {string}
        */
-      reason: "transcription_disabled" | "model_unavailable" | "model_not_realtime";
+      reason:
+        | "transcription_disabled"
+        | "model_unavailable"
+        | "live_model_unavailable"
+        | "model_not_realtime";
     };
     /**
      * FlowLiveTranscriptionUnavailableError

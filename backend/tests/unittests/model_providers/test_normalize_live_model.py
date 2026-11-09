@@ -153,6 +153,22 @@ def test_mode_hint_from_audio_model_type() -> None:
     )
 
 
+def test_mode_hint_from_a_types_list() -> None:
+    """Some gateways list a model's categories in ``types``; a realtime-only
+    speech model is still a transcription model."""
+    cases = {
+        "kb-whisper-large": (["transcription"], "transcription"),
+        "pianissimo-sv-live": (["realtime"], "transcription"),
+        "multilingual-e5-large": (["embedding"], "embedding"),
+        "bge-reranker-v2-m3": (["rerank"], "rerank"),
+        "gemma4-31b-it": (["chatcompletion"], "completion"),
+        "flux2-klein-9b": (["chatcompletion", "image"], "image"),
+        "laya-multilingual": (["systemone"], None),
+    }
+    for name, (types, mode) in cases.items():
+        assert _extract_mode_hint({"id": name, "types": types}) == mode, name
+
+
 def test_mode_hint_returns_none_when_metadata_missing() -> None:
     """OpenAI/Anthropic don't expose model_type or capabilities on /v1/models —
     the hint extractor returns None and the caller falls back to name inference."""

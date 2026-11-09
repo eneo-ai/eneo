@@ -58,6 +58,7 @@ class LiveFlow:
     step_id: str
     model_id: str
     model_name: str
+    space_id: str
 
     @property
     def sessions_path(self) -> str:
@@ -131,6 +132,25 @@ async def _create_transcription_model(
     return {"id": model.json()["id"], "model_name": model_name}
 
 
+async def _add_to_space(db_container, space_id: str, model_id: str) -> None:
+    async with db_container() as container:
+        container.session().add(
+            SpacesTranscriptionModels(
+                space_id=UUID(space_id), transcription_model_id=UUID(model_id)
+            )
+        )
+
+
+async def _remove_from_space(db_container, space_id: str, model_id: str) -> None:
+    async with db_container() as container:
+        await container.session().execute(
+            sa.delete(SpacesTranscriptionModels).where(
+                SpacesTranscriptionModels.space_id == UUID(space_id),
+                SpacesTranscriptionModels.transcription_model_id == UUID(model_id),
+            )
+        )
+
+
 async def _draft_flow(
     client: AsyncClient,
     headers: Mapping[str, str],
@@ -151,12 +171,7 @@ async def _draft_flow(
     model = await _create_transcription_model(
         client, headers, endpoint=endpoint, supports_realtime=supports_realtime
     )
-    async with db_container() as container:
-        container.session().add(
-            SpacesTranscriptionModels(
-                space_id=UUID(space_id), transcription_model_id=UUID(model["id"])
-            )
-        )
+    await _add_to_space(db_container, space_id, model["id"])
 
     created = await client.post(
         "/api/v1/flows/",
@@ -256,6 +271,7 @@ async def _draft_flow(
         step_id=updated.json()["steps"][0]["id"],
         model_id=model["id"],
         model_name=model["model_name"],
+        space_id=space_id,
     )
 
 
@@ -371,7 +387,13 @@ async def test_an_admitted_session_streams_the_preview_through_the_flows_model(
     assert session["sample_rate"] == 16000
     assert session["max_seconds"] == max_seconds
     assert session["model"]["id"] == live_stack.flow.model_id
-    assert ready == {"type": "ready", "sample_rate": 16000, "max_seconds": max_seconds}
+    assert ready == {
+        "type": "ready",
+        "sample_rate": 16000,
+        "max_seconds": max_seconds,
+        # A session that names no recording only previews.
+        "keeps_transcript": False,
+    }
     assert events == [
         {"type": "transcript.delta", "text": "Hej"},
         {"type": "transcript.delta", "text": " världen"},
@@ -413,7 +435,8 @@ async def test_clean_session_commits_its_transcript_before_done(
     async with connect(
         live_stack.socket_url(session), subprotocols=_subprotocols(session["ticket"])
     ) as socket:
-        assert json.loads(await socket.recv())["type"] == "ready"
+        ready = json.loads(await socket.recv())
+        assert (ready["type"], ready["keeps_transcript"]) == ("ready", True)
         await socket.send(TENTH_OF_A_SECOND)
         await socket.send(TENTH_OF_A_SECOND)
         await socket.send(json.dumps({"type": "stop", "produced_samples": 3200}))
@@ -811,3 +834,185 @@ async def test_an_unexpected_failure_still_ends_the_session_with_an_error(
 
     assert [event["code"] for event in events] == ["internal_error"]
     assert close_code == 1000
+
+
+_LIVE_MODEL_UNAVAILABLE = "flow_live_transcription_model_unavailable"
+
+
+def _wizard(flow: LiveFlow, **live: object) -> dict[str, object]:
+    return {
+        "wizard": {
+            "transcription_enabled": True,
+            "transcription_model": {"id": flow.model_id},
+            "transcription_language": "sv",
+            **live,
+        }
+    }
+
+
+async def _with_live_model(
+    client: AsyncClient, headers: Mapping[str, str], flow: LiveFlow, live_id: str | None
+):
+    return await client.patch(
+        f"/api/v1/flows/{flow.flow_id}/",
+        json={
+            "metadata_json": _wizard(
+                flow,
+                transcription_live_model=None if live_id is None else {"id": live_id},
+            )
+        },
+        headers=headers,
+    )
+
+
+async def _flow_with_a_live_model(
+    client: AsyncClient,
+    headers: Mapping[str, str],
+    db_container,
+    *,
+    endpoint: str = UNREACHABLE_ENDPOINT,
+) -> tuple[LiveFlow, dict[str, str]]:
+    """A published flow whose transcription model cannot stream and whose live
+    model can, both in the flow's space."""
+    space_id = await _create_space(client, headers)
+    live = await _create_transcription_model(
+        client, headers, endpoint=endpoint, supports_realtime=True
+    )
+    await _add_to_space(db_container, space_id, live["id"])
+    flow = await _published_flow(
+        client,
+        headers,
+        db_container,
+        endpoint=endpoint,
+        supports_realtime=False,
+        space_id=space_id,
+        wizard={"transcription_live_model": {"id": live["id"]}},
+    )
+    return flow, live
+
+
+async def test_a_live_model_previews_and_the_transcription_model_keeps_the_transcript(
+    client, app, flow_process_auth_headers, db_container
+):
+    headers = dict(flow_process_auth_headers)
+    async with (
+        fake_realtime_server() as model_server,
+        _served(app) as (base_url, _),
+    ):
+        flow, live = await _flow_with_a_live_model(
+            client, headers, db_container, endpoint=_provider_endpoint(model_server)
+        )
+        response = await client.post(
+            flow.sessions_path, headers=headers, json={"recording_id": "recording_123"}
+        )
+        assert response.status_code == 201, response.text
+        session = response.json()
+        async with connect(
+            f"{base_url}{session['websocket_path']}",
+            subprotocols=_subprotocols(session["ticket"]),
+        ) as socket:
+            ready = json.loads(await socket.recv())
+            await socket.send(TENTH_OF_A_SECOND)
+            await socket.send(TENTH_OF_A_SECOND)
+            await socket.send(json.dumps({"type": "stop", "produced_samples": 3200}))
+            events = [json.loads(message) async for message in socket]
+
+    assert session["model"]["id"] == live["id"]
+    assert ready["keeps_transcript"] is False
+    assert model_server.received[0] == {
+        "type": "session.update",
+        "model": live["model_name"],
+    }
+    # The whole recording was heard, yet the text stays a preview: the run
+    # transcribes the recording with the flow's transcription model.
+    assert events[-1] == {"type": "transcript.done", "text": "Hej världen"}
+    from eneo.database.tables.flow_tables import FlowLiveTranscripts
+
+    async with db_container() as container:
+        stored = await container.session().scalar(
+            sa.select(sa.func.count())
+            .select_from(FlowLiveTranscripts)
+            .where(FlowLiveTranscripts.flow_id == UUID(flow.flow_id))
+        )
+    assert stored == 0
+    [extra] = await _started_audit_extras(db_container, flow.flow_id)
+    assert extra["model_id"] == live["id"]
+
+
+async def test_the_preview_needs_both_models_usable_in_the_space(
+    client, flow_process_auth_headers, db_container
+):
+    headers = dict(flow_process_auth_headers)
+    flow, live = await _flow_with_a_live_model(client, headers, db_container)
+
+    async def reason() -> object:
+        response = await client.post(flow.sessions_path, headers=headers)
+        assert response.status_code == 409, response.text
+        return response.json()["context"]["reason"]
+
+    await _remove_from_space(db_container, flow.space_id, live["id"])
+    assert await reason() == "live_model_unavailable"
+
+    # The run's transcript needs the transcription model; a preview of a
+    # recording the run cannot transcribe is not offered.
+    await _add_to_space(db_container, flow.space_id, live["id"])
+    await _remove_from_space(db_container, flow.space_id, flow.model_id)
+    assert await reason() == "model_unavailable"
+
+    await _add_to_space(db_container, flow.space_id, flow.model_id)
+    switched_off = await client.put(
+        f"/api/v1/admin/tenant-models/transcription/{live['id']}/",
+        headers=headers,
+        json={"supports_realtime": False},
+    )
+    assert switched_off.status_code == 200, switched_off.text
+    assert await reason() == "model_not_realtime"
+
+
+async def test_a_flow_picks_only_a_live_model_its_space_may_use_and_that_can_stream(
+    client, flow_process_auth_headers, db_container
+):
+    headers = dict(flow_process_auth_headers)
+    flow = await _draft_flow(client, headers, db_container, supports_realtime=False)
+
+    def refused(response) -> None:
+        assert response.status_code == 400, response.text
+        assert response.json()["code"] == _LIVE_MODEL_UNAVAILABLE
+        assert response.json()["context"]["issue_code"] == _LIVE_MODEL_UNAVAILABLE
+
+    live = await _create_transcription_model(
+        client, headers, endpoint=UNREACHABLE_ENDPOINT, supports_realtime=True
+    )
+    refused(await _with_live_model(client, headers, flow, live["id"]))
+    # The flow's own model is no separate choice, even one that cannot stream:
+    # it reads as none, which leaves the preview to the transcription model.
+    own = await _with_live_model(client, headers, flow, flow.model_id)
+    assert own.status_code == 200, own.text
+
+    await _add_to_space(db_container, flow.space_id, live["id"])
+    picked = await _with_live_model(client, headers, flow, live["id"])
+    assert picked.status_code == 200, picked.text
+    assert picked.json()["metadata_json"]["wizard"]["transcription_live_model"] == {
+        "id": live["id"]
+    }
+
+    # A saved draft keeps a pick its space has since lost, so unrelated
+    # edits go on; publishing checks it again.
+    await _remove_from_space(db_container, flow.space_id, live["id"])
+    renamed = await client.patch(
+        f"/api/v1/flows/{flow.flow_id}/", json={"name": "Möte"}, headers=headers
+    )
+    assert renamed.status_code == 200, renamed.text
+    resent = await _with_live_model(client, headers, flow, live["id"])
+    assert resent.status_code == 200, resent.text
+    refused(
+        await client.post(f"/api/v1/flows/{flow.flow_id}/publish/", headers=headers)
+    )
+
+    # Choosing no live model leaves the preview to the transcription model.
+    none = await _with_live_model(client, headers, flow, None)
+    assert none.status_code == 200, none.text
+    published = await client.post(
+        f"/api/v1/flows/{flow.flow_id}/publish/", headers=headers
+    )
+    assert published.status_code == 200, published.text

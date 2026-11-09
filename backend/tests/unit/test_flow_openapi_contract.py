@@ -188,6 +188,7 @@ def test_live_transcription_refusal_types_its_reason(openapi_spec):
     assert _extract_enum_values(openapi_spec, context["properties"]["reason"]) == {
         "transcription_disabled",
         "model_unavailable",
+        "live_model_unavailable",
         "model_not_realtime",
     }
 
@@ -1981,6 +1982,7 @@ def test_openapi_documents_transcription_options_and_the_run_speaker_choice(
     assert _extract_enum_values(openapi_spec, _non_null_schema(live["reason"])) == {
         "transcription_disabled",
         "model_unavailable",
+        "live_model_unavailable",
         "model_not_realtime",
     }
     speaker_labels = schemas["FlowSpeakerLabelsOptionPublic"]

@@ -30,12 +30,13 @@ import type { FlowAssistant, StepClassification, ToolOption } from "./editor/ste
 import type { FlowPublic, FlowStep } from "./flows-api";
 import { readTarget, tokensOf } from "./flow-steps";
 import {
+  flowTakesAudio,
+  liveModelState,
   speakerServiceState,
   speakersRequired,
   transcriptionModelMissing,
   transcriptionSettingsOf,
-  flowTakesAudio,
-  type SpeakerServiceLink
+  type TranscriptionResources
 } from "./flow-transcription";
 
 export type StepProblem =
@@ -60,7 +61,8 @@ export type StepProblem =
 export type FlowProblem =
   | { code: "no_steps" }
   | { code: "transcription_model_missing" }
-  | { code: "speaker_service_missing" };
+  | { code: "speaker_service_missing" }
+  | { code: "live_model_unavailable" };
 
 export type DraftCheck = {
   flow: FlowProblem[];
@@ -72,7 +74,8 @@ export type DraftFacts = {
   assistants: ReadonlyMap<string, FlowAssistant>;
   toolOptions: readonly ToolOption[] | null;
   classification: readonly StepClassification[] | null;
-  speakerServices: readonly SpeakerServiceLink[];
+  /** The space's transcription models and services. */
+  transcription: TranscriptionResources;
 };
 
 /**
@@ -216,12 +219,17 @@ export function checkDraft(
     problems.push({ code: "transcription_model_missing" });
   }
   const required = speakersRequired(ordered);
+  const takesAudio = flowTakesAudio(ordered);
   if (
     required &&
-    flowTakesAudio(ordered) &&
-    speakerServiceState(transcription, facts.speakerServices, required).picked === null
+    takesAudio &&
+    speakerServiceState(transcription, facts.transcription.services, required).picked === null
   ) {
     problems.push({ code: "speaker_service_missing" });
+  }
+  // The core refuses to publish a live model the space cannot stream through.
+  if (takesAudio && liveModelState(transcription, facts.transcription.models).kind === "lost") {
+    problems.push({ code: "live_model_unavailable" });
   }
   return {
     flow: problems,

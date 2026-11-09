@@ -1,10 +1,11 @@
 /**
  * The flow's transcription settings (`metadata_json.wizard`) as the core reads
- * them (`transcription_config.py`): the model that writes the text, the
- * language, the service that times the words and labels the speakers, whether
- * the speakers are labelled, and at most how many. Pure and unit-tested; the
- * reference editor's behaviour (`FlowSpeakerIdentification.svelte`,
- * `flowEditorMetadata.ts` in apps/web) is the spec.
+ * them (`transcription_config.py`): the model that writes the text, the model
+ * that shows it live while someone records, the language, the service that
+ * times the words and labels the speakers, whether the speakers are labelled,
+ * and at most how many. Pure and unit-tested; the reference editor's
+ * behaviour (`FlowSpeakerIdentification.svelte`, `flowEditorMetadata.ts` in
+ * apps/web) is the spec.
  */
 import { takesAudio } from "./editor/step-draft";
 import type { FlowStep } from "./flows-api";
@@ -32,6 +33,28 @@ export type TranscriptionSettings = {
   speakerService: SpeakerServiceChoice;
   /** The most speakers a run labels when it states no bound; null counts them. */
   maxSpeakers: number | null;
+  /**
+   * `transcription_live_model`: the model that shows the text while someone
+   * records. Null leaves it to the transcription model, when that one can.
+   */
+  liveModelId: string | null;
+};
+
+/** A transcription model of the space, as the space payload lists it. */
+export type TranscriptionModelLink = {
+  id: string;
+  name: string;
+  nickname?: string | null;
+  can_access?: boolean;
+  supports_realtime?: boolean;
+  /** Tells apart models of the same name from different providers. */
+  provider_name?: string | null;
+};
+
+/** What the space offers for transcription: its models and the services granted to it. */
+export type TranscriptionResources = {
+  models: readonly TranscriptionModelLink[];
+  services: readonly SpeakerServiceLink[];
 };
 
 /** A transcription service granted to the space, as the space payload lists it. */
@@ -82,7 +105,8 @@ export function transcriptionSettingsOf(metadata: Metadata): TranscriptionSettin
         : "transcription_speaker_service" in wizard && service === null
           ? { kind: "none" }
           : { kind: "unset" },
-    maxSpeakers: typeof max === "number" && Number.isInteger(max) && max >= 1 ? max : null
+    maxSpeakers: typeof max === "number" && Number.isInteger(max) && max >= 1 ? max : null,
+    liveModelId: referenceId(wizard.transcription_live_model)
   };
 }
 
@@ -153,6 +177,45 @@ export function withSpeakerService(
     : { ...settings, speakerService: { kind: "service", id: serviceId } };
 }
 
+/** The models the space may stream a live preview through (the core's rule). */
+export function liveModels<T extends TranscriptionModelLink>(models: readonly T[]): T[] {
+  return models.filter((model) => model.supports_realtime === true && model.can_access !== false);
+}
+
+/**
+ * Which model shows the text while someone records. With no choice, or the
+ * transcription model chosen again (the core reads both alike), the
+ * transcription model does when it can stream (`streams`). A chosen model the
+ * space can no longer stream through stays chosen until it is changed:
+ * `model` is null when the space no longer has it at all. Only the
+ * transcription model's own text can become the run's transcript.
+ */
+export type LiveModelState =
+  | { kind: "transcription_model"; streams: boolean }
+  | { kind: "picked"; model: TranscriptionModelLink }
+  | { kind: "lost"; model: TranscriptionModelLink | null };
+
+export function liveModelState(
+  settings: Pick<TranscriptionSettings, "modelId" | "liveModelId">,
+  models: readonly TranscriptionModelLink[]
+): LiveModelState {
+  const streaming = liveModels(models);
+  if (settings.liveModelId === null || settings.liveModelId === settings.modelId) {
+    return {
+      kind: "transcription_model",
+      streams: streaming.some((model) => model.id === settings.modelId)
+    };
+  }
+  const picked = streaming.find((model) => model.id === settings.liveModelId);
+  if (picked) {
+    return { kind: "picked", model: picked };
+  }
+  return {
+    kind: "lost",
+    model: models.find((model) => model.id === settings.liveModelId) ?? null
+  };
+}
+
 /** The bound typed for the speakers: empty counts them, else a whole number of at least 1. */
 export function parseMaxSpeakers(value: number | null | undefined): number | null | undefined {
   if (value === null || value === undefined) return null;
@@ -190,6 +253,10 @@ export function metadataWithTranscription(
   if (draft.maxSpeakers !== saved.maxSpeakers) {
     if (draft.maxSpeakers === null) delete wizard.transcription_max_speakers;
     else wizard.transcription_max_speakers = draft.maxSpeakers;
+  }
+  if (draft.liveModelId !== saved.liveModelId) {
+    if (draft.liveModelId === null) delete wizard.transcription_live_model;
+    else wizard.transcription_live_model = { id: draft.liveModelId };
   }
   const next: Record<string, unknown> = { ...(metadata ?? {}) };
   if (JSON.stringify(wizard) !== JSON.stringify(before)) next.wizard = wizard;

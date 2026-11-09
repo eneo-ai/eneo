@@ -18,8 +18,9 @@ from eneo.flows.flow_authoring_spec import (
 from eneo.flows.flow_authoring_transcription import (
     apply_audio_transcription_defaults,
     fill_default_speaker_service,
-    kept_speaker_service_id,
+    kept_transcription_config,
     require_chosen_speaker_service,
+    require_usable_live_model,
     require_usable_speaker_service,
     requires_audio_transcription,
     transcription_config_for_write,
@@ -89,6 +90,7 @@ class TestTranscriptionCleanup:
                 "transcription_model": {"id": str(uuid4())},
                 "transcription_language": "auto",
                 "transcription_speaker_service": {"id": str(uuid4())},
+                "transcription_live_model": {"id": str(uuid4())},
             },
             "form_schema": {"fields": []},
         }
@@ -106,6 +108,7 @@ class TestTranscriptionCleanup:
         assert "transcription_model" not in wizard
         assert "transcription_language" not in wizard
         assert "transcription_speaker_service" not in wizard
+        assert "transcription_live_model" not in wizard
 
     def test_cleanup_preserves_non_transcription_wizard_data(self) -> None:
         existing_metadata = {
@@ -207,22 +210,22 @@ class TestPickedSpeakerService:
     ) -> None:
         service_id = uuid4()
 
-        assert (
-            kept_speaker_service_id(
-                {
-                    "wizard": {
-                        "transcription_enabled": True,
-                        "transcription_diarization": labels,
-                        "transcription_speaker_service": {"id": str(service_id)},
-                    }
+        kept = kept_transcription_config(
+            {
+                "wizard": {
+                    "transcription_enabled": True,
+                    "transcription_diarization": labels,
+                    "transcription_speaker_service": {"id": str(service_id)},
                 }
-            )
-            == service_id
+            }
         )
 
-    def test_an_unreadable_saved_pick_names_no_service(self) -> None:
+        assert kept is not None
+        assert kept.service_in_use == service_id
+
+    def test_an_unreadable_saved_choice_keeps_nothing(self) -> None:
         assert (
-            kept_speaker_service_id(
+            kept_transcription_config(
                 {
                     "wizard": {
                         "transcription_enabled": True,
@@ -336,6 +339,7 @@ class TestChosenSpeakerService:
                 1,
             ),
             ({"transcription_enabled": False}, _MAPS_SPEAKERS, 1),
+            ({"transcription_speaker_service": None}, [], 1),
         ],
         ids=[
             "setting_on_nothing_to_choose",
@@ -343,6 +347,7 @@ class TestChosenSpeakerService:
             "chosen",
             "chosen_for_a_step_that_requires_labels",
             "transcribes_nothing",
+            "none_chosen_is_text_only",
         ],
     )
     def test_a_flow_that_chose_or_asks_for_no_labels_is_not_refused(
@@ -428,3 +433,57 @@ class TestDefaultSpeakerService:
 
     def test_a_flow_without_metadata_stays_without(self) -> None:
         assert self._fill(None) is None
+
+
+class TestLiveModelChoice:
+    """A flow's live model streams the preview: the space must offer it, and
+    it must be able to stream."""
+
+    @staticmethod
+    def _model(*, realtime: bool = True, provider_type: str = "hosted_vllm"):
+        return SimpleNamespace(
+            id=uuid4(),
+            can_access=True,
+            supports_realtime=realtime,
+            provider_type=provider_type,
+        )
+
+    @staticmethod
+    def _refused(model_id, space) -> None:
+        with pytest.raises(BadRequestException) as refused:
+            require_usable_live_model(model_id, space=space)
+        code = FlowGraphIssueCode.FLOW_LIVE_TRANSCRIPTION_MODEL_UNAVAILABLE.value
+        assert refused.value.code == code
+        assert refused.value.context == {
+            "issue_code": code,
+            "live_model_id": str(model_id),
+        }
+
+    def test_a_streaming_model_of_the_space_is_accepted(self) -> None:
+        model = self._model()
+
+        require_usable_live_model(
+            model.id,
+            space=SimpleNamespace(transcription_models=[model]),  # pyright: ignore[reportArgumentType]
+        )
+
+    def test_a_model_outside_the_space_is_refused(self) -> None:
+        self._refused(uuid4(), SimpleNamespace(transcription_models=[self._model()]))
+
+    def test_a_model_the_space_may_no_longer_use_is_refused(self) -> None:
+        model = self._model()
+        model.can_access = False
+
+        self._refused(model.id, SimpleNamespace(transcription_models=[model]))
+
+    @pytest.mark.parametrize(
+        "model",
+        [
+            SimpleNamespace(realtime=False, provider_type="hosted_vllm"),
+            SimpleNamespace(realtime=True, provider_type="openai"),
+        ],
+    )
+    def test_a_model_that_cannot_stream_is_refused(self, model) -> None:
+        picked = self._model(realtime=model.realtime, provider_type=model.provider_type)
+
+        self._refused(picked.id, SimpleNamespace(transcription_models=[picked]))

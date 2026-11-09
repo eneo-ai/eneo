@@ -107,7 +107,9 @@ class LiveTranscriptionSessionService:
                 step_id=step_id,
                 model_id=availability.model.id,
                 max_seconds=max_seconds,
-                recording_id=recording_id,
+                # A recording names the text a run may use instead of
+                # transcribing it; only the transcription model's text may.
+                recording_id=recording_id if availability.keeps_transcript else None,
             )
         )
         return LiveTranscriptionSession(

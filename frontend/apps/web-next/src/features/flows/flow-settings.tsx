@@ -41,13 +41,10 @@ import {
   speakersRequired,
   transcriptionModelMissing,
   transcriptionSettingsOf,
+  type TranscriptionResources,
   type TranscriptionSettings
 } from "./flow-transcription";
-import {
-  TranscriptionFields,
-  TranscriptionSummary,
-  type TranscriptionResources
-} from "./flow-transcription-settings";
+import { TranscriptionFields, TranscriptionSummary } from "./flow-transcription-settings";
 
 const TYPE_KEYS: Record<FormFieldType, string> = {
   text: "flows_field_type_text",
@@ -69,7 +66,7 @@ const PROBLEM_KEYS: Record<FormFieldProblem["problem"], string> = {
 };
 
 /** The field a page can ask the form to focus. */
-type RequestedField = "name" | "transcription_model" | "speaker_service";
+type RequestedField = "name" | "transcription_model" | "speaker_service" | "live_model";
 
 type SettingsOpenRequest = { nonce: number; focus?: RequestedField };
 

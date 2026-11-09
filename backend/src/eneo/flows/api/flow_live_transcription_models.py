@@ -79,7 +79,12 @@ class FlowLiveTranscriptionSessionPublic(BaseModel):
     max_seconds: int = Field(
         description="Longest audio the session accepts, the flow audio duration limit."
     )
-    model: FlowLiveTranscriptionModelPublic
+    model: FlowLiveTranscriptionModelPublic = Field(
+        description=(
+            "The model the preview streams through: the flow's live transcription "
+            "model, or its transcription model when the flow chose none."
+        )
+    )
 
 
 class FlowLiveTranscriptionAvailabilityPublic(BaseModel):
@@ -90,7 +95,8 @@ class FlowLiveTranscriptionAvailabilityPublic(BaseModel):
         default=None,
         description=(
             "Why live preview is unavailable: `transcription_disabled`, "
-            "`model_unavailable`, or `model_not_realtime`."
+            "`model_unavailable`, `live_model_unavailable`, or "
+            "`model_not_realtime`."
         ),
     )
 
@@ -100,7 +106,10 @@ class FlowLiveTranscriptionUnavailableContext(BaseModel):
         description=(
             "`transcription_disabled`: the flow does not transcribe audio. "
             "`model_unavailable`: the flow's transcription model is not available "
-            "in its space. `model_not_realtime`: the model does not support realtime."
+            "in its space. `live_model_unavailable`: the flow's live transcription "
+            "model is not available in its space. `model_not_realtime`: the model "
+            "the preview would stream through, the live transcription model or "
+            "else the transcription model, does not support realtime."
         )
     )
 

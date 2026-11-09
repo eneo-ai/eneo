@@ -1,5 +1,6 @@
 import wave
-from contextlib import nullcontext
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager, nullcontext
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from types import SimpleNamespace
@@ -10,6 +11,7 @@ import pytest
 from dependency_injector import providers
 
 from eneo.database.database import sessionmanager
+from eneo.files.transcriber import TranscribedAudio
 from eneo.flows.api import flow_run_lifecycle_router
 from eneo.flows.flow_input_limits import resolve_flow_input_limits
 from eneo.flows.flow_run_step_inputs import FlowRunStepInputFiles
@@ -26,9 +28,32 @@ from eneo.flows.runtime.transcription import FlowTranscribers
 from eneo.main.container.container import Container
 from eneo.main.exceptions import NotFoundException
 from eneo.server.dependencies.container import load_container_upload_admission
-from tests.integration.flows.test_flow_live_transcription_session import _published_flow
+from tests.integration.flows.test_flow_live_transcription_session import (
+    UNREACHABLE_ENDPOINT,
+    _add_to_space,
+    _create_space,
+    _create_transcription_model,
+    _published_flow,
+    _remove_from_space,
+)
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
+
+
+async def _upload_second_of_silence(client, headers, flow) -> UUID:
+    payload = BytesIO()
+    with wave.open(payload, "wb") as audio:
+        audio.setnchannels(1)
+        audio.setsampwidth(2)
+        audio.setframerate(16000)
+        audio.writeframes(b"\x00\x00" * 16000)
+    uploaded = await client.post(
+        f"/api/v1/flows/{flow.flow_id}/steps/{flow.step_id}/runtime-files/",
+        headers=headers,
+        files={"upload_file": ("live.wav", payload.getvalue(), "audio/wav")},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    return UUID(uploaded.json()["id"])
 
 
 @pytest.fixture
@@ -42,19 +67,7 @@ async def live_recording(client, flow_process_auth_headers, db_container, monkey
         "dispatch_flow_run_recoverably_after_commit",
         AsyncMock(),
     )
-    payload = BytesIO()
-    with wave.open(payload, "wb") as audio:
-        audio.setnchannels(1)
-        audio.setsampwidth(2)
-        audio.setframerate(16000)
-        audio.writeframes(b"\x00\x00" * 16000)
-    uploaded = await client.post(
-        f"/api/v1/flows/{flow.flow_id}/steps/{flow.step_id}/runtime-files/",
-        headers=headers,
-        files={"upload_file": ("live.wav", payload.getvalue(), "audio/wav")},
-    )
-    assert uploaded.status_code == 201, uploaded.text
-    file = SimpleNamespace(id=UUID(uploaded.json()["id"]))
+    file = SimpleNamespace(id=await _upload_second_of_silence(client, headers, flow))
     async with db_container() as container:
         user, tenant = container.user(), container.tenant()
         transcript_id = await LiveTranscriptRepository(container.session()).create(
@@ -84,6 +97,58 @@ async def live_recording(client, flow_process_auth_headers, db_container, monkey
         user=user,
         tenant=tenant,
     )
+
+
+@asynccontextmanager
+async def _executed(
+    db_container, case, run_id: UUID, registry
+) -> AsyncIterator[tuple[object, Container, dict[str, object]]]:
+    """Run ``run_id`` in a worker whose batch transcription is ``registry``."""
+    user, tenant, flow_id = case.user, case.tenant, case.flow.flow_id
+    async with db_container(), sessionmanager.session() as session:
+        enable_autobegin_for_flow_task_session(session)
+        worker = Container(
+            session=providers.Object(session),
+            tenant=providers.Object(tenant),
+            user=providers.Object(user),
+        )
+        admission = await load_container_upload_admission(worker)
+        executor = FlowRunExecutor(
+            # The worker opens this on a session of its own; here the executor's audit service serves.
+            read_audit_service=lambda: nullcontext(executor.audit_service),
+            runtime_actor=FlowRunActor.from_user(user=user),
+            session=session,
+            flow_repo=worker.flow_repo(),
+            flow_run_repo=worker.flow_run_repo(),
+            flow_run_review_checkpoint_repo=worker.flow_run_review_checkpoint_repo(),
+            flow_run_terminalizer=worker.flow_run_terminalizer(),
+            flow_version_repo=worker.flow_version_repo(),
+            space_repo=worker.tenant_scoped_space_repo(),
+            completion_service=AsyncMock(),
+            file_repo=worker.file_repo(),
+            file_content_loader=worker.file_content_loader(),
+            file_service=worker.file_service(),
+            template_asset_repo=worker.flow_template_asset_repo(),
+            encryption_service=worker.encryption_service(),
+            audit_service=SimpleNamespace(log_async=AsyncMock(return_value=uuid4())),
+            transcribers=FlowTranscribers(
+                model=RegistryFlowTranscriber(registry),
+                with_speaker_service=AsyncMock(),
+            ),
+            max_inline_text_bytes=1024 * 1024,
+            input_limits=resolve_flow_input_limits(
+                tenant.flow_settings, defaults=admission
+            ),
+        )
+        outcome = await executor.execute(
+            run_id=run_id,
+            flow_id=UUID(flow_id),
+            tenant_id=user.tenant_id,
+            run_revision=1,
+            dispatch_task_id="live-use-test",
+            retry_count=0,
+        )
+        yield session, worker, outcome
 
 
 async def _admit(container, case):
@@ -163,49 +228,11 @@ async def test_full_run_uses_live_segments_and_persists_evidence(
     registry = SimpleNamespace(
         transcribe_from_filepath=AsyncMock(side_effect=AssertionError("Unexpected ASR"))
     )
-    async with db_container(), sessionmanager.session() as session:
-        enable_autobegin_for_flow_task_session(session)
-        worker = Container(
-            session=providers.Object(session),
-            tenant=providers.Object(case.tenant),
-            user=providers.Object(case.user),
-        )
-        admission = await load_container_upload_admission(worker)
-        executor = FlowRunExecutor(
-            # The worker opens this on a session of its own; here the executor's audit service serves.
-            read_audit_service=lambda: nullcontext(executor.audit_service),
-            runtime_actor=FlowRunActor.from_user(user=case.user),
-            session=session,
-            flow_repo=worker.flow_repo(),
-            flow_run_repo=worker.flow_run_repo(),
-            flow_run_review_checkpoint_repo=worker.flow_run_review_checkpoint_repo(),
-            flow_run_terminalizer=worker.flow_run_terminalizer(),
-            flow_version_repo=worker.flow_version_repo(),
-            space_repo=worker.tenant_scoped_space_repo(),
-            completion_service=AsyncMock(),
-            file_repo=worker.file_repo(),
-            file_content_loader=worker.file_content_loader(),
-            file_service=worker.file_service(),
-            template_asset_repo=worker.flow_template_asset_repo(),
-            encryption_service=worker.encryption_service(),
-            audit_service=SimpleNamespace(log_async=AsyncMock(return_value=uuid4())),
-            transcribers=FlowTranscribers(
-                model=RegistryFlowTranscriber(registry),
-                with_speaker_service=AsyncMock(),
-            ),
-            max_inline_text_bytes=1024 * 1024,
-            input_limits=resolve_flow_input_limits(
-                case.tenant.flow_settings, defaults=admission
-            ),
-        )
-        outcome = await executor.execute(
-            run_id=run_id,
-            flow_id=UUID(case.flow.flow_id),
-            tenant_id=case.user.tenant_id,
-            run_revision=1,
-            dispatch_task_id="live-use-test",
-            retry_count=0,
-        )
+    async with _executed(db_container, case, run_id, registry) as (
+        session,
+        worker,
+        outcome,
+    ):
         registry.transcribe_from_filepath.assert_not_awaited()
         assert outcome["status"] == "completed", outcome
         run = await worker.flow_run_repo().get(
@@ -230,3 +257,69 @@ async def test_full_run_uses_live_segments_and_persists_evidence(
         assert [(s["text"], s["start"], s["end"]) for s in source.segments] == [
             ("Live text.", 0.0, 1.0)
         ]
+
+
+@pytest.mark.parametrize("live_model_in_space", [True, False])
+async def test_a_live_model_never_transcribes_the_run(
+    live_model_in_space, client, flow_process_auth_headers, db_container, monkeypatch
+):
+    """The run is transcribed by the flow's transcription model, whether or
+    not its live model is there to stream a preview."""
+    headers = dict(flow_process_auth_headers)
+    space_id = await _create_space(client, headers)
+    live = await _create_transcription_model(
+        client, headers, endpoint=UNREACHABLE_ENDPOINT, supports_realtime=True
+    )
+    await _add_to_space(db_container, space_id, live["id"])
+    flow = await _published_flow(
+        client,
+        headers,
+        db_container,
+        supports_realtime=False,
+        space_id=space_id,
+        wizard={
+            "transcription_live_model": {"id": live["id"]},
+            "transcription_diarization": False,
+        },
+    )
+    if not live_model_in_space:
+        await _remove_from_space(db_container, space_id, live["id"])
+    monkeypatch.setattr(
+        flow_run_lifecycle_router,
+        "dispatch_flow_run_recoverably_after_commit",
+        AsyncMock(),
+    )
+    file_id = await _upload_second_of_silence(client, headers, flow)
+    response = await client.post(
+        f"/api/v1/flows/{flow.flow_id}/runs/",
+        headers={**headers, "Idempotency-Key": f"batch-{live_model_in_space}"},
+        json={"step_inputs": {flow.step_id: {"file_ids": [str(file_id)]}}},
+    )
+    assert response.status_code == 201, response.text
+    run_id = UUID(response.json()["id"])
+    async with db_container() as container:
+        case = SimpleNamespace(
+            flow=flow, user=container.user(), tenant=container.tenant()
+        )
+    registry = SimpleNamespace(
+        transcribe_from_filepath=AsyncMock(
+            return_value=TranscribedAudio("Batch text.", 1.0)
+        )
+    )
+
+    async with _executed(db_container, case, run_id, registry) as (_, worker, outcome):
+        assert outcome["status"] == "completed", outcome
+        registry.transcribe_from_filepath.assert_awaited_once()
+        model = registry.transcribe_from_filepath.await_args.kwargs[
+            "transcription_model"
+        ]
+        assert str(model.id) == flow.model_id != live["id"]
+        run = await worker.flow_run_repo().get(
+            run_id=run_id, tenant_id=case.user.tenant_id
+        )
+        assert run.output_payload_json["text"] == "Batch text."
+        results = await worker.flow_run_repo().list_step_results(
+            run_id=run_id, tenant_id=case.user.tenant_id
+        )
+        metadata = results[0].input_payload_json["transcription"]
+        assert metadata["transcript_origin"] == "batch"

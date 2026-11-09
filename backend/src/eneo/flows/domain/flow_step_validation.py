@@ -66,6 +66,9 @@ class FlowGraphIssueCode(StrEnum):
     FLOW_HAS_NO_STEPS = "flow_has_no_steps"
     FLOW_SPEAKER_SERVICE_NOT_CHOSEN = "flow_speaker_service_not_chosen"
     FLOW_SPEAKER_SERVICE_UNAVAILABLE = "flow_speaker_service_unavailable"
+    FLOW_LIVE_TRANSCRIPTION_MODEL_UNAVAILABLE = (
+        "flow_live_transcription_model_unavailable"
+    )
     FLOW_HTTP_POST_OUTPUT_MUST_BE_TERMINAL = "flow_http_post_output_must_be_terminal"
     FLOW_INPUT_ALIAS_NOT_RECEIVED = "flow_input_alias_not_received"
     FLOW_INPUT_BINDING_FUTURE_STEP_REFERENCE = (

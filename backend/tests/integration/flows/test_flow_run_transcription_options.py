@@ -36,7 +36,9 @@ from eneo.flows.flow_run_error import FlowRunError
 from eneo.object_content.content import ObjectContentUnavailableError
 from tests.integration.flows.test_flow_live_transcription_session import (
     LiveFlow,
+    _flow_with_a_live_model,
     _published_flow,
+    _remove_from_space,
 )
 from tests.integration.flows.test_flow_transcription_choice import (
     _connection,
@@ -208,6 +210,24 @@ async def test_the_contract_gives_the_reason_the_live_route_refuses_with(
     refused = await client.post(flow.sessions_path, headers=headers)
 
     reason = "model_not_realtime"
+    assert contract["transcription"]["live"] == {"available": False, "reason": reason}
+    assert refused.status_code == 409, refused.text
+    assert refused.json()["context"] == {"reason": reason}
+
+
+async def test_a_live_model_offers_the_preview_the_transcription_model_cannot(
+    client, flow_process_auth_headers, db_container
+):
+    headers = dict(flow_process_auth_headers)
+    flow, live = await _flow_with_a_live_model(client, headers, db_container)
+
+    offered = await _contract(client, headers, flow.flow_id)
+    await _remove_from_space(db_container, flow.space_id, live["id"])
+    contract = await _contract(client, headers, flow.flow_id)
+    refused = await client.post(flow.sessions_path, headers=headers)
+
+    assert offered["transcription"]["live"] == {"available": True, "reason": None}
+    reason = "live_model_unavailable"
     assert contract["transcription"]["live"] == {"available": False, "reason": reason}
     assert refused.status_code == 409, refused.text
     assert refused.json()["context"] == {"reason": reason}

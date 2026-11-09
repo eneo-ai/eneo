@@ -33,7 +33,13 @@ class LiveTranscriptionGrant:
     step_id: UUID
     model_id: UUID
     max_seconds: int
+    # Set only when the session's text may become the run's transcript.
     recording_id: str | None = None
+
+    @property
+    def keeps_transcript(self) -> bool:
+        """Whether a session that hears the whole recording stores its text."""
+        return self.recording_id is not None
 
     def to_json(self) -> str:
         return json.dumps(

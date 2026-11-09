@@ -142,6 +142,11 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
   const queryClient = useQueryClient();
   const rescue = useFocusRescue();
   const { routeId, space } = useSpace();
+  // What the space offers for transcription, for the settings and the draft check.
+  const transcription = {
+    models: space.transcription_models,
+    services: space.transcription_services ?? []
+  };
   const { can } = useAppContext();
   const spaceName = useSpaceDisplayName();
   const sections = useSpaceSections();
@@ -886,10 +891,7 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
                   <FlowSettings
                     flow={flow}
                     canEdit={canEdit}
-                    transcription={{
-                      models: space.transcription_models,
-                      services: space.transcription_services ?? []
-                    }}
+                    transcription={transcription}
                     onSave={saveSettings}
                     onEditingChange={setUnsavedEdits}
                     openRequest={settingsRequest}
@@ -902,7 +904,7 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
                     <FlowDraftCheck
                       flow={flow}
                       suggestionRuns={suggestionRuns}
-                      speakerServices={space.transcription_services ?? []}
+                      transcription={transcription}
                       onOpenStep={openStep}
                       onRepair={repairReference}
                       onOpenSettings={openSettings}

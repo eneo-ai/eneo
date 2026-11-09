@@ -14,12 +14,17 @@ function makeLive(openSession = vi.fn(() => Promise.resolve(TICKET))) {
 }
 
 /** Starts a session and lets the socket open and say ready. */
-async function listening(live: LiveTranscript) {
+async function listening(live: LiveTranscript, { keepsTranscript = true } = {}) {
   await live.start(fakeGraph());
   await vi.waitFor(() => expect(FakeSocket.instances.length).toBeGreaterThan(0));
   const socket = FakeSocket.instances.at(-1)!;
   socket.open();
-  socket.receive({ type: "ready", sample_rate: 16000, max_seconds: 18000 });
+  socket.receive({
+    type: "ready",
+    sample_rate: 16000,
+    max_seconds: 18000,
+    keeps_transcript: keepsTranscript
+  });
   return { socket, node: FakeNode.instances.at(-1)! };
 }
 
@@ -72,6 +77,21 @@ describe("LiveTranscript", () => {
     expect(text(live)).toBe("Hej allihop.");
     expect(live.transcriptId).toBe("tr-1");
     expect(live.getSnapshot().finishing).toBe(false);
+  });
+
+  it("does not hold the run for a preview the core will not keep", async () => {
+    // The flow's live model streams the text; its transcription model writes the transcript.
+    const { live } = makeLive();
+    const { socket, node } = await listening(live, { keepsTranscript: false });
+    node.frame(1);
+    socket.receive({ type: "transcript.delta", text: "Hej" });
+    live.stop();
+    expect(live.getSnapshot()).toMatchObject({ status: "finished", finishing: false });
+    await live.settled();
+    await vi.waitFor(() => expect(socket.texts).toEqual([{ type: "stop" }]));
+    socket.receive({ type: "transcript.done", text: "Hej.", transcript_id: "tr-1" });
+    expect(text(live)).toBe("Hej.");
+    expect(live.transcriptId).toBeNull();
   });
 
   it("stops waiting for the final text after its bound", async () => {

@@ -15,13 +15,16 @@ from eneo.flows.domain.speaker_mapping_config import steps_require_speaker_label
 from eneo.flows.flow_authoring_spec import InputSource, InputType
 from eneo.flows.transcription_config import (
     DEFAULT_TRANSCRIPTION_LANGUAGE,
+    LIVE_MODEL_KEY,
     MAX_SPEAKERS_KEY,
     SPEAKER_SERVICE_KEY,
     FlowTranscriptionConfig,
     FlowTranscriptionConfigError,
     parse_transcription_config,
+    usable_transcription_model,
 )
 from eneo.main.exceptions import BadRequestException
+from eneo.transcription_models.domain.realtime import streams_live
 
 if TYPE_CHECKING:
     from eneo.spaces.space import Space
@@ -127,11 +130,13 @@ def transcription_config_for_write(
         ) from exc
 
 
-def kept_speaker_service_id(metadata: FlowPersistedJsonObject | None) -> UUID | None:
-    """The service a saved draft chose and uses; None when it chose none or
-    its stored choice is unreadable."""
+def kept_transcription_config(
+    metadata: FlowPersistedJsonObject | None,
+) -> FlowTranscriptionConfig | None:
+    """The transcription choice a saved draft stores; None when it is
+    unreadable, so a write that fixes it is checked as a new choice."""
     try:
-        return parse_transcription_config(metadata).service_in_use
+        return parse_transcription_config(metadata)
     except FlowTranscriptionConfigError:
         return None
 
@@ -175,6 +180,19 @@ def require_usable_speaker_service(service_id: UUID, *, space: Space) -> None:
         )
 
 
+def require_usable_live_model(model_id: UUID, *, space: Space) -> None:
+    """Refuse a chosen live model the space may not use or that cannot stream."""
+    model = usable_transcription_model(space, model_id)
+    if model is None or not streams_live(model):
+        code = FlowGraphIssueCode.FLOW_LIVE_TRANSCRIPTION_MODEL_UNAVAILABLE.value
+        raise BadRequestException(
+            "The chosen live transcription model cannot be used in this space: "
+            "it is not available to the space, or it does not support realtime.",
+            code=code,
+            context={"issue_code": code, "live_model_id": str(model_id)},
+        )
+
+
 def requires_audio_transcription(steps: Sequence[AudioInputStep]) -> bool:
     for step in steps:
         if (
@@ -195,6 +213,7 @@ _TRANSCRIPTION_WIZARD_KEYS = {
     "transcription_diarization",
     SPEAKER_SERVICE_KEY,
     MAX_SPEAKERS_KEY,
+    LIVE_MODEL_KEY,
 }
 
 

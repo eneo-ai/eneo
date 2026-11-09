@@ -7,7 +7,7 @@ const none: DraftFacts = {
   assistants: new Map(),
   toolOptions: null,
   classification: null,
-  speakerServices: []
+  transcription: { models: [], services: [] }
 };
 
 describe("checkDraft", () => {
@@ -121,7 +121,7 @@ describe("checkDraft", () => {
           }
         }
       ] as never,
-      speakerServices: []
+      transcription: { models: [], services: [] }
     });
     expect(check.steps.map(({ problems }) => problems.map((problem) => problem.code))).toEqual([
       ["tool_arguments_missing"],
@@ -186,5 +186,33 @@ describe("checkDraft", () => {
       { code: "transcription_model_missing" },
       { code: "speaker_service_missing" }
     ]);
+  });
+
+  it("asks for another live model when the space can no longer stream through the chosen one", () => {
+    const whisper = { id: "whisper", name: "kb-whisper-large", supports_realtime: false };
+    const live = { id: "live", name: "pianissimo-sv-live", supports_realtime: true };
+    const flow = makeFlow({
+      steps: [makeStep(1, { input_type: "audio", output_mode: "transcribe_only" })],
+      metadata_json: {
+        wizard: {
+          transcription_enabled: true,
+          transcription_model: { id: "whisper" },
+          transcription_speaker_service: null,
+          transcription_live_model: { id: "live" }
+        }
+      }
+    });
+    const offering = (models: (typeof whisper)[]) => ({
+      ...none,
+      transcription: { models, services: [] }
+    });
+
+    expect(checkDraft(flow, offering([whisper, live])).flow).toEqual([]);
+    expect(checkDraft(flow, offering([whisper])).flow).toEqual([
+      { code: "live_model_unavailable" }
+    ]);
+    expect(
+      checkDraft(flow, offering([whisper, { ...live, supports_realtime: false }])).flow
+    ).toEqual([{ code: "live_model_unavailable" }]);
   });
 });
