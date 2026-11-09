@@ -522,5 +522,6 @@ class ConversationService:
         )
 
         return await self.session_service.update_session(
-            SessionUpdate(id=session_id, name=response.completion.text)  # type: ignore[union-attr]
+            SessionUpdate(id=session_id, name=response.completion.text),  # type: ignore[union-attr]
+            title_from_turns=True,
         )

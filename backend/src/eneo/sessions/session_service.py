@@ -419,8 +419,12 @@ class SessionService:
             name_filter=name_filter,
         )
 
-    async def update_session(self, session_update: SessionUpdate) -> SessionInDB:
-        session = await self.session_repo.update(session_update)
+    async def update_session(
+        self, session_update: SessionUpdate, *, title_from_turns: bool = False
+    ) -> SessionInDB:
+        session = await self.session_repo.update(
+            session_update, title_from_turns=title_from_turns
+        )
         return self._check_exists_and_belongs_to_user(session)
 
     async def delete(

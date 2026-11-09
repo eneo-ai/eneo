@@ -23,6 +23,7 @@ from eneo.database.tables.group_chats_table import (
     GroupChatsAssistantsMapping,
     GroupChatsTable,
 )
+from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.widgets_table import Widgets
@@ -404,6 +405,62 @@ async def test_writing_a_name_or_feedback_text_starts_its_time_again(
         "New feedback",
     )
     assert await _texts(retention_session, voted) == (voted_name, -1, None)
+
+
+async def test_a_title_made_late_from_the_turns_goes_with_their_oldest_question(
+    retention_session: AsyncSession, test_tenant, admin_user, completion_model_factory
+):
+    """A title can quote any turn it was made from, so it keeps the time of
+    the oldest question still there, however late it is made. A name the
+    user sets starts its own time."""
+    model_id = (await completion_model_factory(retention_session, "gpt-4")).id
+    space = await _space(retention_session, tenant_id=test_tenant.id)
+    assistant = await _assistant(
+        retention_session,
+        model_id,
+        space=space,
+        user_id=admin_user.id,
+        days=30,
+    )
+    titled, _, _ = await _conversation(
+        retention_session,
+        user_id=admin_user.id,
+        assistant_id=assistant.id,
+        created_days_ago=31,
+        named_days_ago=31,
+    )
+    renamed, _, _ = await _conversation(
+        retention_session,
+        user_id=admin_user.id,
+        assistant_id=assistant.id,
+        created_days_ago=31,
+        named_days_ago=31,
+    )
+    for conversation, days in ((titled, 31), (titled, 5), (renamed, 31), (renamed, 5)):
+        retention_session.add(
+            Questions(
+                question="Question",
+                answer="Answer",
+                num_tokens_question=1,
+                num_tokens_answer=1,
+                tenant_id=test_tenant.id,
+                assistant_id=assistant.id,
+                session_id=conversation,
+                created_at=_ago(days),
+                updated_at=_ago(days),
+            )
+        )
+    await retention_session.flush()
+    repository = SessionRepository(retention_session)
+    await repository.update(
+        SessionUpdate(id=titled, name="Title made today"), title_from_turns=True
+    )
+    await repository.update(SessionUpdate(id=renamed, name="Name set today"))
+
+    await run_registered_retention(retention_session)
+
+    assert (await _texts(retention_session, titled))[0] == ""
+    assert (await _texts(retention_session, renamed))[0] == "Name set today"
 
 
 async def test_a_held_conversation_keeps_its_name_and_is_reported(
