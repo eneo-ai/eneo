@@ -8,9 +8,11 @@ callback receives.
 
 Its settings reproduce providers that differ or misbehave: PKCE enforced or
 ignored, the ``iss`` parameter advertised or not, a key marked for another
-use, an outage, and ID tokens with a wrong ``iss``, ``aud``, ``azp`` or
+use, an outage, ``sub`` values that differ per client (with a stable ``oid``
+claim beside them), and ID tokens with a wrong ``iss``, ``aud``, ``azp`` or
 ``nonce``, an unsupported algorithm, a foreign signature, a key of the wrong
-type, an expiry in the past or an ``iat`` in the future.
+type, an expiry in the past or an ``iat`` in the future. ``access_token``
+signs the JWT access token a resource server receives.
 """
 
 import asyncio
@@ -139,6 +141,9 @@ class FakeOidcProvider:
     down: bool = False
     # When the person last signed in at the provider (its SSO session).
     session_auth_time: int = field(default_factory=lambda: int(time.time()) - 3600)
+    # Each client sees its own ``sub`` for the person (pairwise subjects);
+    # the ``oid`` claim stays the same for all of them.
+    pairwise_subjects: bool = False
     requests: list[tuple[str, str]] = field(default_factory=list)
     token_requests: list[dict[str, str]] = field(default_factory=list)
     # Every ID token issued, in order.
@@ -301,6 +306,37 @@ class FakeOidcProvider:
             }
         )
 
+    def subject_for(self, client_id: str, person: str = "person-0001") -> str:
+        """The ``sub`` this client sees for the person."""
+        if not self.pairwise_subjects:
+            return "subject-0001"
+        return (
+            "pairwise-"
+            + hashlib.sha256(f"{client_id}:{person}".encode()).hexdigest()[:16]
+        )
+
+    def access_token(self, *, audience: str, client_id: str, **claims: Any) -> str:
+        """A JWT access token for an API, as issued to one client."""
+        now = int(time.time())
+        payload: dict[str, Any] = {
+            "iss": self.issuer,
+            "aud": audience,
+            "azp": client_id,
+            "sub": self.subject_for(client_id),
+            "oid": "person-0001",
+            "iat": now,
+            "exp": now + 300,
+            "email": "user@example.com",
+            **claims,
+        }
+        payload = {key: value for key, value in payload.items() if value is not DROP}
+        return jwt.encode(
+            payload,
+            _private_key(_key_kind(self.algorithm)),
+            algorithm=self.algorithm,
+            headers={"kid": self.kid},
+        )
+
     def _id_token(self, grant: _Grant, access_token: str) -> str:
         if self.signing_override == "HS256":
             algorithm, key, kid = "HS256", self.client_secret.encode() * 4, self.kid
@@ -318,7 +354,8 @@ class FakeOidcProvider:
         claims: dict[str, Any] = {
             "iss": self.issuer,
             "aud": grant.client_id,
-            "sub": "subject-0001",
+            "sub": self.subject_for(grant.client_id),
+            "oid": "person-0001",
             "iat": now,
             "exp": now + 300,
             "auth_time": self.session_auth_time,
@@ -386,3 +423,6 @@ def install(monkeypatch: pytest.MonkeyPatch, *providers: FakeOidcProvider) -> No
     monkeypatch.setattr(aiohttp_client, "session", http)
     monkeypatch.setattr(profile, "_discovery_cache", {})
     monkeypatch.setattr(oidc_resource_server, "_federation_jwks_caches", {})
+    monkeypatch.setattr(
+        oidc_resource_server, "_jwks_cache", oidc_resource_server.JWKSCache()
+    )

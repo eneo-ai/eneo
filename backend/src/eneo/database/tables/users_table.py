@@ -50,6 +50,11 @@ class Users(BasePublic):
     tenant_id: Mapped[UUID] = mapped_column(ForeignKey(Tenants.id, ondelete="CASCADE"))
     quota_limit: Mapped[Optional[int]] = mapped_column(BigInteger)
     is_system_user: Mapped[bool] = mapped_column(server_default=false(), nullable=False)
+    # Until then, an organisation admin allows the account's next sign-in by
+    # email to bind a new identity (identity_bindings); used once.
+    identity_rebinding_until: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True)
+    )
 
     tenant: Mapped[Tenants] = relationship()
     roles: Mapped[list[Roles]] = relationship(

@@ -1,4 +1,7 @@
 from eneo.apps.app_runs.api.app_run_worker import worker as app_worker
+from eneo.authentication.browser_session_cleanup_worker import (
+    worker as browser_session_cleanup_worker,
+)
 from eneo.completion_models.infrastructure.model_cleanup_worker import (
     worker as model_cleanup_worker,
 )
@@ -41,6 +44,7 @@ worker.include_subworker(transcription_model_cleanup_worker)
 worker.include_subworker(embedding_model_cleanup_worker)
 worker.include_subworker(image_model_cleanup_worker)
 worker.include_subworker(rerank_model_cleanup_worker)
+worker.include_subworker(browser_session_cleanup_worker)
 
 
 def _arq_settings(runtime: Worker, *, queue_name: str) -> dict[str, object]:

@@ -45,12 +45,14 @@ class CallbackResponse:
 class VerifiedAuthentication:
     issuer: str
     client_id: str
+    # The value of the profile's subject claim, ``sub`` by default.
     subject: str
     claims: Mapping[str, object]
     acr: str | None
     amr: tuple[str, ...] | None
     auth_time: int | None
     email_claim: str
+    subject_claim: str
     email_verified_claims: tuple[str, ...]
 
     def identity(self) -> FederatedIdentity:
@@ -62,7 +64,8 @@ class VerifiedAuthentication:
         return FederatedIdentity.from_claims(
             self.claims,
             issuer=self.issuer,
-            client_id=self.client_id,
+            audience=self.client_id,
+            subject_claim=self.subject_claim,
             email_claim=self.email_claim,
             email_verified_claims=self.email_verified_claims,
         )
@@ -233,7 +236,10 @@ async def verify_response(
         nonce.encode(), transaction.nonce.encode()
     ):
         raise _refuse("nonce_mismatch", correlation_id)
-    subject = claims.get("sub")
+    if not isinstance(claims.get("sub"), str) or not claims["sub"]:
+        raise _refuse("subject_missing", correlation_id)
+    # A configured subject claim is required in addition to sub.
+    subject = claims.get(profile.subject_claim)
     if not isinstance(subject, str) or not subject:
         raise _refuse("subject_missing", correlation_id)
 
@@ -265,5 +271,6 @@ async def verify_response(
         amr=tuple(cast(list[str], amr)) if amr is not None else None,
         auth_time=int(auth_time) if auth_time is not None else None,
         email_claim=profile.email_claim,
+        subject_claim=profile.subject_claim,
         email_verified_claims=profile.email_verified_claims,
     )

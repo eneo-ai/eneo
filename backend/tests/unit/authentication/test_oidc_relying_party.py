@@ -18,6 +18,7 @@ from urllib.parse import parse_qs, urlsplit
 import jwt
 import pytest
 
+from eneo.audit.domain.action_types import ActionType
 from eneo.authentication import federation_router
 from eneo.authentication.auth_models import FederatedIdentity
 from eneo.authentication.federation_router import CallbackRequest
@@ -825,10 +826,10 @@ class TestTransactionStore:
             await federation_router.auth_callback(callback, login.container)
 
         assert _token_posts(provider) == 1
-        assert [
-            event["metadata"]["provisioning_method"]
-            for event in login.audit.logged_events
-        ] == ["jit_federation"]
+        assert [event["action"] for event in login.audit.logged_events] == [
+            ActionType.USER_CREATED,
+            ActionType.IDENTITY_BOUND,
+        ]
 
 
 async def test_discovery_and_keys_are_fetched_once_for_several_logins(monkeypatch):
@@ -956,11 +957,52 @@ async def test_the_provider_identity_reaches_account_admission(monkeypatch, db_m
     await login.sign_in()
 
     (identity,) = seen
-    assert (identity.issuer, identity.client_id, identity.subject) == (
+    assert (identity.issuer, identity.audience, identity.subject) == (
         provider.issuer,
         provider.client_id,
         "subject-0001",
     )
+
+
+async def test_a_configured_subject_claim_names_the_identity(monkeypatch):
+    seen: list[FederatedIdentity] = []
+    admit = UserService.resolve_federated_user
+
+    async def spy(self, *, identity, **kwargs):
+        seen.append(identity)
+        return await admit(self, identity=identity, **kwargs)
+
+    monkeypatch.setattr(UserService, "resolve_federated_user", spy)
+    provider = FakeOidcProvider(pairwise_subjects=True)
+    login = Login(monkeypatch, provider, existing_email="user@example.com")
+    login.tenant.federation_config["claims_mapping"] = {
+        "email": "email",
+        "subject": "oid",
+    }
+
+    await login.sign_in()
+
+    (identity,) = seen
+    assert (identity.audience, identity.subject_claim, identity.subject) == (
+        provider.client_id,
+        "oid",
+        "person-0001",
+    )
+
+
+@pytest.mark.parametrize("value", [DROP, 7, ""], ids=["missing", "number", "empty"])
+async def test_a_configured_subject_claim_must_be_text_in_the_token(monkeypatch, value):
+    provider = FakeOidcProvider(token_claims={"oid": value})
+    login = Login(monkeypatch, provider)
+    login.tenant.federation_config["claims_mapping"] = {
+        "email": "email",
+        "subject": "oid",
+    }
+
+    with pytest.raises(OidcResponseNotVerifiedError):
+        await login.sign_in(email="new.person@example.com")
+
+    assert login.users._created_user is None
 
 
 class TestProfileDefaults:
@@ -976,6 +1018,7 @@ class TestProfileDefaults:
 
         assert profile.signing_algorithms == ("RS256",)
         assert profile.email_claim == "email"
+        assert profile.subject_claim == "sub"
         assert profile.email_verified_claims == ("email_verified", "xms_edov")
         assert profile.scopes == ("openid", "email", "profile")
 
@@ -1034,6 +1077,25 @@ class TestProfileDefaults:
 
         assert profile.issuer == issuer
 
+    def test_the_claims_mapping_names_the_subject_claim(self):
+        profile = self._profile(claims_mapping={"email": "upn", "subject": "oid"})
+
+        assert (profile.email_claim, profile.subject_claim) == ("upn", "oid")
+
+    @pytest.mark.parametrize(
+        "mapping",
+        [
+            {"email": "upn", "subject": "upn"},
+            {"subject": "email"},
+            # The standard email claim is an address too, wherever the
+            # mapping reads the address from.
+            {"email": "upn", "subject": "email"},
+        ],
+    )
+    def test_the_subject_claim_cannot_be_the_email_claim(self, mapping):
+        with pytest.raises(OidcProviderError):
+            self._profile(claims_mapping=mapping)
+
     def test_the_stored_issuer_wins_over_discovery(self):
         profile = self._profile({"issuer": "https://elsewhere.example"})
 
@@ -1053,7 +1115,7 @@ class TestEmailVerifiedClaims:
         return FederatedIdentity.from_claims(
             {**self.CLAIMS, **claims},
             issuer="https://idp.example.org",
-            client_id="eneo-client",
+            audience="eneo-client",
             **extra,
         )
 
@@ -1108,7 +1170,7 @@ class TestEmailVerifiedClaims:
             FederatedIdentity.from_claims(
                 {"email": "user@example.com", "email_verified": True},
                 issuer="https://idp.example.org",
-                client_id="eneo-client",
+                audience="eneo-client",
             )
 
 
@@ -1202,6 +1264,72 @@ class TestHttpAnswers:
         assert refused.status_code == 401
         assert refused.json()["code"] == "oidc_response_not_verified"
         assert refused.json()["eneo_error_code"] == 9079
+
+    async def _bound_to_another_subject(self, login) -> None:
+        await login.container._identity_bindings.bind(
+            tenant_id=login.tenant.id,
+            user_id=login.users._user.id,
+            issuer=login.provider.issuer,
+            audience=login.provider.client_id,
+            subject_claim="sub",
+            subject="another-subject",
+        )
+
+    async def test_an_identity_conflict_answers_403_with_its_code(self, monkeypatch):
+        provider = FakeOidcProvider()
+        login = Login(monkeypatch, provider, existing_email="user@example.com")
+        await self._bound_to_another_subject(login)
+        started = await login.initiate()
+        answer = provider.authorize(started.authorization_url)
+        client, restore = await self._client(login)
+        try:
+            async with client:
+                refused = await client.post(
+                    "/api/v1/auth/callback",
+                    json={"code": answer.code, "state": started.state},
+                )
+        finally:
+            restore()
+
+        assert refused.status_code == 403
+        assert refused.json()["code"] == "identity_conflict"
+        assert refused.json()["eneo_error_code"] == 9082
+
+    async def test_the_browser_login_names_an_identity_conflict(self, monkeypatch):
+        from eneo.authentication.browser_session_service import (
+            BrowserSessionService,
+        )
+
+        provider = FakeOidcProvider()
+        login = Login(monkeypatch, provider, existing_email="user@example.com")
+        await self._bound_to_another_subject(login)
+        sessions = AsyncMock(spec=BrowserSessionService)
+        login.container.browser_session_service = lambda: sessions
+        client, restore = await self._client(login)
+        try:
+            async with client:
+                started = await client.get(
+                    "/api/v1/auth/browser/initiate",
+                    params={"tenant": login.tenant.slug},
+                    headers={"Sec-Fetch-Site": "same-origin"},
+                )
+                answer = provider.authorize(started.headers["location"])
+                finished = await client.get(
+                    "/login/callback",
+                    params={
+                        "code": answer.code,
+                        "state": _query(started.headers["location"])["state"][0],
+                    },
+                    headers={"Sec-Fetch-Site": "cross-site"},
+                )
+        finally:
+            restore()
+
+        assert finished.status_code == 303
+        assert _query(finished.headers["location"])["detailCode"] == [
+            "identity_conflict"
+        ]
+        sessions.start.assert_not_called()
 
     @pytest.mark.parametrize(
         ("break_store", "detail_code"),

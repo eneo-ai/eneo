@@ -1,6 +1,7 @@
 import { dev } from "$app/environment";
 import { getRequestEvent } from "$app/server";
 import { DEFAULT_LANDING_PAGE } from "$lib/core/constants";
+import { getBackendUrl } from "$lib/core/environment.server";
 import { type Cookies, type RequestEvent } from "@sveltejs/kit";
 
 export const EneoIdTokenCookie = "auth";
@@ -85,6 +86,50 @@ export const clearFrontendCookies = (event: RequestEvent) => {
     event.cookies.delete(cookie.name, { path: "/" });
   });
 };
+
+/** Longer than the backend's own 5 seconds to confirm the deletion, so a
+ * stalled connection cannot hold the logout: it counts as unconfirmed. */
+const SIGN_OUT_DEADLINE_MS = 10_000;
+
+/**
+ * End the Eneo session the `auth` cookie's token names, before its cookies
+ * are cleared, so a copy of the token stops working too. Returns false when
+ * the backend could not confirm it (503, unreachable, no answer within the
+ * deadline): the caller keeps the cookies, as the handle for a retry.
+ *
+ * Only a token Eneo issued for a session names one. Its claims are read
+ * without verification, only to choose this path; the backend verifies the
+ * token. Any other token (a provider's ID token may carry an OIDC `sid` of
+ * its own, a token issued before sessions) has nothing to end here.
+ */
+export async function endEneoSession(event: RequestEvent): Promise<boolean> {
+  const token = event.cookies.get(EneoIdTokenCookie);
+  if (!token || !namesEneoSession(await parseJwt(token))) return true;
+  try {
+    const response = await event.fetch(`${getBackendUrl()}/api/v1/users/logout/`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(SIGN_OUT_DEADLINE_MS)
+    });
+    if (!response.ok) console.error("Sign-out not confirmed. Status: %s", response.status);
+    return response.ok;
+  } catch {
+    console.error("Sign-out not confirmed: the backend did not answer");
+    return false;
+  }
+}
+
+/** The claims of an Eneo session token (`JWTCreds` with `sid`). */
+function namesEneoSession(claims: unknown): boolean {
+  if (typeof claims !== "object" || claims === null) return false;
+  const { token_version, user_id, credential_version, sid } = claims as Record<string, unknown>;
+  return (
+    token_version === 2 &&
+    typeof user_id === "string" &&
+    typeof credential_version === "number" &&
+    typeof sid === "string"
+  );
+}
 
 // -------- HELPER functions ---------------------------------------------------------------------------
 /** Will try to parse a JWT, returns an empty object on failure */

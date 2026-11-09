@@ -2,8 +2,8 @@
 
 Each entry point runs against a fake provider that signs real ID tokens: the
 generic login in database federation mode and in environment-only mode, and
-the browser cookie login. Signing out of a browser session is pinned in
-test_browser_session_router.py; the Svelte logout never calls the backend.
+the browser cookie login. Signing out, with the cookie or the Svelte app's
+Bearer token, is pinned in test_browser_session_router.py.
 """
 
 import hashlib
@@ -17,6 +17,7 @@ import jwt
 import pytest
 from fastapi import HTTPException, Response
 
+from eneo.audit.domain.action_types import ActionType
 from eneo.authentication import federation_router
 from eneo.authentication.auth_service import AuthService
 from eneo.authentication.browser_session_service import BrowserSessionService
@@ -166,7 +167,9 @@ async def test_first_sign_in_creates_the_account_once(monkeypatch, db_mode):
     assert created.email == "new.person@example.com"
     assert created.tenant_id == login.tenant.id
     assert [
-        event["metadata"]["provisioning_method"] for event in login.audit.logged_events
+        event["metadata"]["provisioning_method"]
+        for event in login.audit.logged_events
+        if event["action"] == ActionType.USER_CREATED
     ] == ["jit_federation"]
 
 
@@ -207,8 +210,13 @@ async def test_a_domain_outside_the_allowlist_is_refused(monkeypatch):
     assert login.users._created_user is None
 
 
-async def test_frontend_state_comes_back_from_the_callback(monkeypatch):
+async def test_the_callback_route_hands_out_a_session_and_the_frontend_state(
+    monkeypatch,
+):
     login = Login(monkeypatch, FakeOidcProvider(), existing_email="user@example.com")
+    sessions = AsyncMock(spec=BrowserSessionService)
+    sessions.start.side_effect = lambda issued: f"{issued}.session"
+    login.container.browser_session_service = lambda: sessions
 
     started = await login.initiate(frontend_state='{"next":"/spaces"}')
     answer = login.provider.authorize(started.authorization_url)
@@ -216,7 +224,12 @@ async def test_frontend_state_comes_back_from_the_callback(monkeypatch):
         CallbackRequest(code=answer.code, state=started.state), login.container
     )
 
-    assert result["frontend_state"] == '{"next":"/spaces"}'
+    [(issued,), _] = sessions.start.await_args
+    assert login.signed_in_user({"access_token": issued})
+    assert result == {
+        "access_token": f"{issued}.session",
+        "frontend_state": '{"next":"/spaces"}',
+    }
 
 
 async def test_the_authorization_request_keeps_its_parameters(monkeypatch):

@@ -5,6 +5,9 @@ const HEARTBEAT = {
   TIMEOUT: 20 * 1000
 };
 
+/** The server closes an open socket with this code when its session ended. */
+const SESSION_ENDED = 1008;
+
 /** @typedef {import("./types").ServerMessages} ServerMessages*/
 /** @typedef {import("./types").ClientSubscribableMessageType} ClientSubscribableMessageType*/
 
@@ -39,8 +42,16 @@ export function createEneoSocket(args, options) {
     url.pathname = "api/v1/ws";
     socket = new WebSocket(url.toString(), ["eneo", `auth_${token}`]);
     socket.onmessage = dispatchToHandlers;
-    // Don't set onclose, this will be handled by our heartbeat
-    // socket.onclose = reconnect;
+    // Other closes are left to the heartbeat, which reconnects. A session that
+    // ended (signed out, expired) is final: the same token cannot open another
+    // socket, so stop the heartbeat instead of retrying with it.
+    socket.onclose = (event) => {
+      if (event.code === SESSION_ENDED) {
+        clearTimeout(heartbeatReconnectTimeout);
+        clearInterval(heartbeatInterval);
+        socket = null;
+      }
+    };
     socket.onopen = () => {
       startHeartbeat();
       initSubscriptions();
@@ -62,15 +73,18 @@ export function createEneoSocket(args, options) {
   }
 
   function disconnect() {
+    // Only an existing socket can be told; the local state goes either way,
+    // also after a 1008 left none, so a later connect starts clean.
     if (socket) {
       currentSubscriptions.forEach((count, type) => {
         sendMessage({ type: "unsubscribe", data: { channel: type } });
       });
-      currentSubscriptions.clear();
-      handlers.clear();
-      clearInterval(heartbeatInterval);
-      safelyCloseSocket();
     }
+    currentSubscriptions.clear();
+    handlers.clear();
+    clearTimeout(heartbeatReconnectTimeout);
+    clearInterval(heartbeatInterval);
+    safelyCloseSocket();
   }
 
   /** @param {MessageEvent} event */
@@ -146,7 +160,8 @@ export function createEneoSocket(args, options) {
     clearTimeout(heartbeatReconnectTimeout);
     clearInterval(heartbeatInterval);
     heartbeatInterval = setInterval(() => {
-      sendMessage({ type: "ping" });
+      // A socket the server closed takes no ping; the reconnect below heals it.
+      sendMessage({ type: "ping" }).catch(() => {});
       heartbeatReconnectTimeout = setTimeout(() => {
         // Try to reconnect, should also try to heal existing subscriptions
         safelyCloseSocket();

@@ -6,7 +6,7 @@
   "main": "index.js",
   "types": "index.d.ts",
   "scripts": {
-    "test": "node --test --test-concurrency=1 src/auth/*.test.js src/endpoints/*.test.js src/integrations/*.test.js src/widgets/*.test.js",
+    "test": "node --test --test-concurrency=1 src/auth/*.test.js src/endpoints/*.test.js src/integrations/*.test.js src/socket/*.test.js src/widgets/*.test.js",
     "lint": "prettier --check . && eslint .",
     "format": "prettier --write .",
     "update": "node update.js"
