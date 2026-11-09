@@ -1199,7 +1199,9 @@ class S3ObjectStore:
         Readiness refuses a versioned bucket, but versioning can be turned on
         while Eneo runs. The delete then stays unconfirmed and is retried;
         the old version is not deleted by version id. Each retried delete
-        adds a delete marker, so a page cut short counts as unconfirmed.
+        adds a delete marker, so a page cut short counts as unconfirmed, and
+        so does a listing that does not say it is complete or a version it
+        does not name.
         """
         try:
             if operation_checkpoint is not None:
@@ -1213,9 +1215,17 @@ class S3ObjectStore:
             raise ObjectStoreUnavailableError(
                 "Object deletion could not be confirmed"
             ) from error
-        if result.get("IsTruncated") is True or any(
-            version.get("Key") == key for version in result.get("Versions", ())
-        ):
+        listing = cast(Mapping[str, object], result)
+        versions = listing.get("Versions", [])
+        if listing.get("IsTruncated") is not False or not isinstance(versions, list):
+            raise ObjectStoreUnavailableError("Object deletion could not be confirmed")
+        names = [
+            cast(Mapping[str, object], version).get("Key")
+            if isinstance(version, Mapping)
+            else None
+            for version in cast(list[object], versions)
+        ]
+        if any(not isinstance(name, str) or name == key for name in names):
             raise ObjectStoreUnavailableError(
                 "Object deletion left an old version of the object"
             )

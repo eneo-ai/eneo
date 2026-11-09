@@ -124,6 +124,41 @@ async def test_a_delete_with_versions_beyond_one_page_is_unconfirmed(
         await store.delete_and_confirm(key)
 
 
+def _deleted_then_listed(store: S3ObjectStore, listing: dict[str, object]) -> Stubber:
+    stubber = Stubber(store._client)
+    stubber.add_response("delete_object", {})
+    stubber.add_client_error(
+        "head_object", service_error_code="404", http_status_code=404
+    )
+    stubber.add_response("list_object_versions", listing)
+    return stubber
+
+
+@pytest.mark.parametrize(
+    "listing",
+    [{}, {"IsTruncated": False, "Versions": [{"VersionId": "kept"}]}],
+    ids=["no-completion-flag", "version-without-key"],
+)
+async def test_a_delete_with_an_unreadable_version_listing_is_unconfirmed(
+    store: S3ObjectStore, listing: dict[str, object]
+) -> None:
+    """A listing that does not say it is complete, or a version it does not
+    name, cannot show that no version is left. Mutant: only a version named
+    with the key, or a page marked as cut short, keeps the delete open."""
+    with (
+        _deleted_then_listed(store, listing),
+        pytest.raises(ObjectStoreUnavailableError),
+    ):
+        await store.delete_and_confirm(new_object_key(_settings()))
+
+
+async def test_a_delete_with_a_complete_empty_listing_is_confirmed(
+    store: S3ObjectStore,
+) -> None:
+    with _deleted_then_listed(store, {"IsTruncated": False}):
+        await store.delete_and_confirm(new_object_key(_settings()))
+
+
 def _caused(error: ObjectContentConfigurationError, cause: ObjectStoreError):
     error.__cause__ = cause
     return error
