@@ -15,6 +15,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from pdfminer.pdfdocument import PDFPasswordIncorrect
+from pdfminer.pdfparser import PDFSyntaxError
 
 from eneo.files.extraction_limits import FileExtractionLimits
 from eneo.files.text import (
@@ -663,7 +664,25 @@ class TestTextExtractorErrorHandling:
                 TextExtractor.extract_from_pdf(Path("protected.pdf"))
 
         assert exc_info.value.code == "ENCRYPTED"
-        assert "protected.pdf" in exc_info.value.message
+        assert "protected.pdf" not in exc_info.value.message
+
+    def test_a_parser_error_quoting_the_file_stays_out_of_the_extraction_error(
+        self,
+    ):
+        """A parser's message can quote the file; the error, its message and
+        the traceback a log prints from it carry neither that text nor the
+        file's name."""
+        with patch(
+            "eneo.files.text.pdfplumber.open",
+            side_effect=PDFSyntaxError("Utredning om Anna Svensson"),
+        ):
+            with pytest.raises(CorruptFileError) as exc_info:
+                TextExtractor.extract_from_pdf(Path("Utredning.pdf"))
+
+        error = exc_info.value
+        assert "Anna Svensson" not in error.message
+        assert "Utredning" not in error.message
+        assert error.__suppress_context__
 
     def test_extract_from_docx_raises_corrupt_error_on_bad_zip(self, tmp_path):
         """Should raise CorruptFileError for invalid DOCX (bad ZIP)."""
@@ -772,28 +791,25 @@ class TestTextExtractorExceptionClasses:
 
     def test_encrypted_file_error_attributes(self):
         """EncryptedFileError should set correct attributes."""
-        error = EncryptedFileError("secret.pdf")
-        assert "secret.pdf" in error.message
+        error = EncryptedFileError()
         assert "encrypted" in error.message.lower()
         assert error.code == "ENCRYPTED"
 
     def test_corrupt_file_error_with_details(self):
         """CorruptFileError should include details when provided."""
-        error = CorruptFileError("broken.docx", "Missing required element")
-        assert "broken.docx" in error.message
+        error = CorruptFileError("Missing required element")
         assert "Missing required element" in error.message
         assert error.code == "CORRUPT"
 
     def test_corrupt_file_error_without_details(self):
         """CorruptFileError should work without details."""
-        error = CorruptFileError("broken.docx")
-        assert "broken.docx" in error.message
+        error = CorruptFileError()
+        assert "corrupted" in error.message
         assert error.code == "CORRUPT"
 
     def test_unsupported_format_error_attributes(self):
         """UnsupportedFormatError should suggest conversion."""
-        error = UnsupportedFormatError("old.doc", ".doc (Legacy Word)")
-        assert "old.doc" in error.message
+        error = UnsupportedFormatError(".doc (Legacy Word)")
         assert ".doc" in error.message
         assert "not supported" in error.message.lower()
         assert error.code == "UNSUPPORTED_FORMAT"
