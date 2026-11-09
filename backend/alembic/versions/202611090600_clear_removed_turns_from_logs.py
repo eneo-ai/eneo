@@ -8,11 +8,15 @@ from history read at an older revision is stored with a cleared log.
 
 A removal finds the logs it clears through `logging.session_id`, the
 conversation of a log that holds content: linking such a log to its question
-sets it, whichever writer links it, clearing the log unsets it, and the
-upgrade sets it for the logs stored before, in batches. A partial index holds
-only these logs, so a removal never reads an empty log. The index is built
-concurrently; a failed build leaves it invalid, and a rerun drops that
-leftover before building it again.
+sets it, whichever writer links it, and clearing the log unsets it. A partial
+index holds only these logs, so a removal never reads an empty log. The index
+is built concurrently; a failed build leaves it invalid, and a rerun drops
+that leftover before building it again.
+
+A log stored before this version may hold turns that earlier removals left in
+it, and nothing tells them apart from kept turns: the upgrade empties every
+stored log, in batches. The rows stay, so each question still links to its
+log, which reads as not logged.
 
 Logs that no question refers to are removed: nothing can read or remove them
 later. Answers stopped writing such logs, so this runs once.
@@ -86,21 +90,18 @@ _LOCATE_QUESTION_LOG_TRIGGER = (
 )
 
 # Each batch is one short transaction; the last id read continues the scan.
-_LOCATE_BATCH_ROWS = 5000
-_LOCATE_STORED_LOGS = f"""
+_EMPTY_BATCH_ROWS = 5000
+_EMPTY_STORED_LOGS = f"""
 WITH batch AS (
     SELECT id FROM logging
     WHERE id > CAST(:after AS uuid)
     ORDER BY id
-    LIMIT {_LOCATE_BATCH_ROWS}
-), located AS (
+    LIMIT {_EMPTY_BATCH_ROWS}
+), emptied AS (
     UPDATE logging
-    SET session_id = questions.session_id
-    FROM questions
+    SET json_body = NULL, context = NULL, model_kwargs = '{{}}'::jsonb,
+        session_id = NULL
     WHERE logging.id IN (SELECT id FROM batch)
-      AND questions.logging_details_id = logging.id
-      AND questions.session_id IS NOT NULL
-      AND logging.session_id IS NULL
       AND {_HOLDS_CONTENT}
 )
 SELECT id::text FROM batch ORDER BY id DESC LIMIT 1
@@ -229,11 +230,11 @@ def _with_immediate_locks(locks: Sequence[str], statements: Sequence[str]) -> No
             raise
 
 
-def _locate_stored_logs() -> None:
+def _empty_stored_logs() -> None:
     bind = op.get_bind()
     after = "00000000-0000-0000-0000-000000000000"
     while (
-        last := bind.execute(sa.text(_LOCATE_STORED_LOGS), {"after": after}).scalar()
+        last := bind.execute(sa.text(_EMPTY_STORED_LOGS), {"after": after}).scalar()
     ) is not None:
         after = last
 
@@ -267,13 +268,14 @@ def upgrade() -> None:
         _with_immediate_locks(
             ("logging IN ACCESS EXCLUSIVE MODE",), (_LOG_CONVERSATION,)
         )
-        # Found from the first link on, before the stored logs are searched,
-        # and all of them before a removal looks for them.
+        # A log linked from here on is found from its conversation; every
+        # log stored before is emptied, so none is left that holds content
+        # and cannot be found.
         op.execute(_LOCATE_QUESTION_LOG_FUNCTION)
         _with_immediate_locks(
             ("questions IN ACCESS EXCLUSIVE MODE",), _LOCATE_QUESTION_LOG_TRIGGER
         )
-        _locate_stored_logs()
+        _empty_stored_logs()
         _build_logs_index()
         op.execute(_REMOVE_QUESTION_LOGS_FUNCTION)
         _with_immediate_locks(
@@ -284,7 +286,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # Removed orphan logs and cleared request bodies stay removed.
+    # Removed orphan logs, emptied logs and cleared request bodies stay so.
     with op.get_context().autocommit_block():
         op.execute(_QUESTION_LOG_CLEANUP_FUNCTION)
         _with_immediate_locks(

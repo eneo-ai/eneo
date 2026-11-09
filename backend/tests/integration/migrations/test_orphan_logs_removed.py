@@ -1,11 +1,13 @@
-"""Logs that no question refers to are removed on upgrade, each log that
-holds a request body is found from its conversation, and the index that finds
-them is valid after an upgrade that follows a failed build.
+"""Logs that no question refers to are removed on upgrade, every stored log
+is emptied, and the index that finds logs holding content is valid after an
+upgrade that follows a failed build.
 
 Before removal took a question's log with it, deleting a question left its log
 behind with the whole request body, and an answer completed after its
 question was gone stored a log nothing refers to. Nothing can read or remove
-such a log later, so the upgrade removes it once.
+such a log later, so the upgrade removes it once. A log that a question still
+refers to holds the earlier turns of its conversation, which earlier removals
+did not clear, so the upgrade empties every stored log and keeps the row.
 """
 
 from __future__ import annotations
@@ -62,14 +64,14 @@ def _connect(database_url: str):
     return psycopg2.connect(database_url.replace("+psycopg2", ""))
 
 
-# More logs than one batch of the upgrade's search for them.
+# More logs than one batch of the upgrade's emptying.
 _LOGS_IN_CONVERSATION = 5_001
 
 
 def _insert_logs(database_url: str) -> tuple[str, str, str, str, str]:
     """An orphan log, logs their questions still refer to in one conversation
-    (one with a request body, more of them, and an empty one), and a log of a
-    question without a conversation."""
+    (one with a request body, model settings and retrieved context, more of
+    them, and an empty one), and a log of a question without a conversation."""
     tenant_id, user_id, session_id = str(uuid4()), str(uuid4()), str(uuid4())
     orphan_id, referenced_id = str(uuid4()), str(uuid4())
     empty_id, without_conversation_id = str(uuid4()), str(uuid4())
@@ -92,9 +94,10 @@ def _insert_logs(database_url: str) -> tuple[str, str, str, str, str]:
                 ),
             )
             cursor.execute(
-                "INSERT INTO logging (id, model_kwargs, json_body) VALUES "
-                "(%s, '{}', '\"[removed question]\"'), "
-                "(%s, '{}', '\"[kept question]\"')",
+                "INSERT INTO logging (id, model_kwargs, json_body, context) VALUES "
+                "(%s, '{}', '\"[removed question]\"', NULL), "
+                "(%s, '{\"temperature\": 0.2}', '\"[kept question]\"', "
+                "'[retrieved text]')",
                 (orphan_id, referenced_id),
             )
             cursor.execute(
@@ -160,10 +163,23 @@ def _found_from(database_url: str) -> dict[str | None, set[str]]:
         connection.close()
 
 
-def test_logs_no_question_refers_to_are_removed_on_upgrade() -> None:
-    """Mutants for the logs that stay: an empty log, or a log of a question
-    without a conversation, is found from one; a log past the upgrade's first
-    batch is not."""
+def _holding_content(database_url: str) -> int:
+    connection = _connect(database_url)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT count(*) FROM logging WHERE json_body <> 'null'::jsonb "
+                "OR context IS NOT NULL OR model_kwargs <> '{}'::jsonb"
+            )
+            return cursor.fetchone()[0]
+    finally:
+        connection.close()
+
+
+def test_logs_are_emptied_and_orphans_removed_on_upgrade() -> None:
+    """Mutants: a log past the upgrade's first batch keeps its content; the
+    model settings or the retrieved context of a log stay; the emptied rows
+    are deleted; an emptied log is found from its conversation."""
     postgres = PostgresContainer(
         image=_POSTGRES_13_IMAGE,
         username="orphan_logs_migration",
@@ -174,20 +190,17 @@ def test_logs_no_question_refers_to_are_removed_on_upgrade() -> None:
         database_url = postgres.get_connection_url()
         config = _alembic_config(database_url)
         command.upgrade(config, _PREVIOUS_REVISION)
-        orphan_id, referenced_id, empty_id, without_conversation_id, session_id = (
-            _insert_logs(database_url)
-        )
+        orphan_id = _insert_logs(database_url)[0]
         kept = _log_ids(database_url) - {orphan_id}
         assert orphan_id in _log_ids(database_url)
+
+        assert _holding_content(database_url) > _LOGS_IN_CONVERSATION
 
         for _ in range(2):
             command.upgrade(config, "head")
             assert _log_ids(database_url) == kept
-            found = _found_from(database_url)
-            assert set(found) == {None, session_id}
-            assert len(found[session_id]) == _LOGS_IN_CONVERSATION
-            assert referenced_id in found[session_id]
-            assert found[None] == {empty_id, without_conversation_id}
+            assert _holding_content(database_url) == 0
+            assert set(_found_from(database_url)) == {None}
             command.downgrade(config, _PREVIOUS_REVISION)
 
 
