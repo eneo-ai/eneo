@@ -11,6 +11,7 @@ from uuid import uuid4
 
 import jwt
 import pytest
+from cryptography.fernet import Fernet
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
@@ -1685,3 +1686,76 @@ async def test_initiate_refuses_a_templated_issuer_before_storing_anything(
     assert "template" in refused.json()["detail"]
     assert "authorization_url" not in refused.text
     assert redis_client._store == {}
+
+
+@pytest.mark.asyncio
+async def test_a_callback_decrypts_the_client_secret_once(monkeypatch, provider):
+    # Every sign-in question in one callback reads the same resolved config.
+    monkeypatch.setattr(
+        federation_router,
+        "get_settings",
+        lambda: DummySettings(federation_enabled=True),
+    )
+    encryption = EncryptionService(Fernet.generate_key().decode())
+    decrypted: list[str] = []
+    real_decrypt = encryption.decrypt
+
+    def counted(ciphertext: str) -> str:
+        decrypted.append(ciphertext)
+        return real_decrypt(ciphertext)
+
+    monkeypatch.setattr(encryption, "decrypt", counted)
+    redis_client = FakeRedis()
+    tenant = TenantInDB(
+        id=uuid4(),
+        name="Encrypted",
+        display_name="Encrypted",
+        slug="encrypted",
+        quota_limit=1024**3,
+        state=TenantState.ACTIVE,
+        modules=[],
+        api_credentials={},
+        federation_config={
+            "provider": "entra",
+            "client_id": "client",
+            "client_secret": encryption.encrypt("secret"),
+            "discovery_endpoint": "https://idp.example.com/.well-known/openid-configuration",
+            "canonical_public_origin": "https://encrypted.example.com",
+            "additional_redirect_uris": ["https://alt.example.com/login/callback"],
+            "allowed_domains": ["example.com"],
+        },
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    user = UserInDB(
+        id=uuid4(),
+        username="Tester",
+        email="user@Example.COM",
+        salt="salt",
+        password="hashed123",
+        used_tokens=0,
+        tenant_id=tenant.id,
+        tenant=tenant,
+        quota_limit=1024**3,
+        user_groups=[],
+        roles=[],
+        state="active",
+    )
+    container = MockContainer(
+        tenant_repo=TenantRepoStub(tenant),
+        user_repo=UserRepoStub(user),
+        auth_service=AuthServiceStub(),
+        redis_client=redis_client,
+        encryption_service=encryption,
+    )
+    callback = await _signed_callback(
+        redis_client,
+        provider,
+        tenant=tenant,
+        redirect_uri="https://alt.example.com/login/callback",
+    )
+
+    result = await federation_router.auth_callback(callback, container=container)
+
+    assert result["access_token"] == "access-token"
+    assert len(decrypted) == 1

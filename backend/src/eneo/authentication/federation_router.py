@@ -2,15 +2,16 @@
 
 import asyncio
 import secrets
+from collections.abc import Mapping
 from datetime import datetime, timezone
-from typing import Annotated, Any, Optional, Protocol, cast
+from typing import Annotated, Any, Optional, cast
 from uuid import UUID
 
 import jwt as pyjwt
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
 from redis.asyncio import Redis
-from typing_extensions import NotRequired, TypedDict
+from typing_extensions import TypedDict
 
 from eneo.authentication.endpoint_access import (
     Authentication,
@@ -24,6 +25,7 @@ from eneo.authentication.oidc.profile import (
     OidcProviderError,
     load_profile,
 )
+from eneo.authentication.oidc.sign_in_source import redirect_uris, sign_in_config
 from eneo.authentication.oidc.transaction import (
     STORE_TIMEOUT_SECONDS,
     OidcChannel,
@@ -47,7 +49,6 @@ from eneo.observability.debug_toggle import is_debug_enabled
 from eneo.observability.redaction import sanitize_payload
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
-from eneo.settings.credential_resolver import CredentialResolver
 from eneo.tenants.tenant import TenantInDB, TenantState
 from eneo.users.identity_binding_repo import IdentityConflictError
 
@@ -57,26 +58,6 @@ router = APIRouter(
     prefix="/auth",
     tags=["authentication"],
 )
-
-
-class OIDCClaimsMapping(TypedDict):
-    email: str
-    subject: NotRequired[str]
-
-
-class FederationConfig(TypedDict):
-    client_id: str
-    client_secret: str
-    provider: NotRequired[str]
-    discovery_endpoint: NotRequired[str]
-    authorization_endpoint: NotRequired[str]
-    token_endpoint: NotRequired[str]
-    jwks_uri: NotRequired[str]
-    token_endpoint_auth_method: NotRequired[str]
-    token_endpoint_auth_methods_supported: NotRequired[list[str]]
-    scopes: NotRequired[list[str]]
-    claims_mapping: NotRequired[OIDCClaimsMapping]
-    allowed_domains: NotRequired[list[str]]
 
 
 class OIDCStatePayload(TypedDict):
@@ -93,10 +74,6 @@ class OIDCStatePayload(TypedDict):
 class AccessTokenResponse(TypedDict):
     access_token: str
     frontend_state: str
-
-
-class _FederationConfigResolver(Protocol):
-    def get_federation_config(self) -> FederationConfig: ...
 
 
 async def _log_oidc_debug(
@@ -146,7 +123,7 @@ def _transaction_store(container: Container) -> Redis | None:
 
 
 async def _load_profile(
-    federation_config: FederationConfig, settings: Settings, correlation_id: str
+    federation_config: Mapping[str, object], settings: Settings, correlation_id: str
 ) -> OidcProfile:
     try:
         # Discovery is cached as long as the provider's keys.
@@ -206,7 +183,7 @@ def _changed_during_sign_in(
 def _require_registered_redirect_uri(
     transaction: OidcTransaction,
     tenant: TenantInDB,
-    credential_resolver: CredentialResolver,
+    federation_config: Mapping[str, object],
     settings: Settings,
     correlation_id: str,
 ) -> None:
@@ -222,7 +199,9 @@ def _require_registered_redirect_uri(
         "correlation_id": correlation_id,
     }
     try:
-        expected_redirect_uri = credential_resolver.get_redirect_uri()
+        expected_redirect_uri, valid_redirect_uris = redirect_uris(
+            federation_config, settings
+        )
     except ValueError as e:
         logger.error(
             "Failed to resolve expected redirect_uri for validation",
@@ -233,7 +212,6 @@ def _require_registered_redirect_uri(
             detail="Failed to validate redirect_uri configuration",
             headers={"X-Correlation-ID": correlation_id},
         )
-    valid_redirect_uris = set(credential_resolver.get_valid_redirect_uris())
     try:
         redirect_uri = validate_redirect_uri(transaction.redirect_uri) or ""
     except ValueError:
@@ -730,19 +708,10 @@ async def initiate_federated_sign_in(
 
     set_request_context(tenant_slug=tenant_obj.slug or tenant_obj.name)
 
-    # Resolve federation config (tenant-specific or global)
-    # Create CredentialResolver with tenant, settings, and encryption_service
-    encryption_service = container.encryption_service()
-    credential_resolver = CredentialResolver(
-        tenant=tenant_obj,
-        settings=settings,
-        encryption_service=encryption_service,
-    )
-
     try:
-        federation_config = cast(
-            _FederationConfigResolver, credential_resolver
-        ).get_federation_config()
+        federation_config = sign_in_config(
+            settings, tenant_obj, container.encryption_service()
+        )
     except ValueError as e:
         logger.error(
             "No federation config for tenant",
@@ -764,7 +733,9 @@ async def initiate_federated_sign_in(
 
     # Resolve redirect_uri server-side
     try:
-        canonical_redirect_uri = credential_resolver.get_redirect_uri()
+        canonical_redirect_uri, valid_redirect_uris = redirect_uris(
+            federation_config, settings
+        )
     except ValueError as e:
         logger.error(
             "Failed to resolve redirect_uri for tenant",
@@ -780,8 +751,6 @@ async def initiate_federated_sign_in(
             f"No public origin configured for tenant '{tenant}'. "
             "Contact administrator to configure canonical_public_origin.",
         )
-
-    valid_redirect_uris = credential_resolver.get_valid_redirect_uris()
 
     if redirect_uri_param is not None:
         try:
@@ -1085,16 +1054,11 @@ async def federated_sign_in(
                 headers={"X-Correlation-ID": correlation_id},
             )
 
-        credential_resolver = CredentialResolver(
-            tenant=tenant_obj,
-            settings=settings,
-            encryption_service=container.encryption_service(),
+        federation_config = sign_in_config(
+            settings, tenant_obj, container.encryption_service()
         )
-        federation_config = cast(
-            _FederationConfigResolver, credential_resolver
-        ).get_federation_config()
         _require_registered_redirect_uri(
-            transaction, tenant_obj, credential_resolver, settings, correlation_id
+            transaction, tenant_obj, federation_config, settings, correlation_id
         )
         profile = await _load_profile(federation_config, settings, correlation_id)
         verified = await verify_response(
@@ -1127,7 +1091,9 @@ async def federated_sign_in(
             user, created = await container.user_service().resolve_federated_user(
                 identity=identity,
                 tenant_id=tenant_id,
-                allowed_domains=federation_config.get("allowed_domains") or [],
+                allowed_domains=cast(
+                    list[str], federation_config.get("allowed_domains") or []
+                ),
                 correlation_id=correlation_id,
             )
         except IdentityConflictError as exc:

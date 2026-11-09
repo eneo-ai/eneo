@@ -12,9 +12,9 @@ from cryptography.fernet import Fernet
 
 from eneo.audit.domain.action_types import ActionType
 from eneo.authentication.auth_models import FederatedIdentity
+from eneo.authentication.oidc.sign_in_source import sign_in_config
 from eneo.main.config import Settings
 from eneo.main.exceptions import FederatedLoginDenied
-from eneo.settings.credential_resolver import CredentialResolver
 from eneo.settings.encryption_service import EncryptionService
 from eneo.tenants.federation_startup_migration import (
     FederationStartupMigrationService,
@@ -532,9 +532,7 @@ async def test_moving_global_oidc_into_eneo_keeps_its_domain_policy(
         ]
         tenant = tenant.model_copy(update={"federation_config": stored})
     # Read as the federation callback reads them (federation_router.py).
-    config = CredentialResolver(
-        tenant=tenant, settings=settings, encryption_service=encryption
-    ).get_federation_config()
+    config = sign_in_config(settings, tenant, encryption)
     domains = cast(list[str], config.get("allowed_domains") or [])
 
     # A current member inside the domains still signs in...
@@ -557,7 +555,9 @@ async def test_moving_global_oidc_into_eneo_keeps_its_domain_policy(
     assert created is True
 
 
-def test_global_oidc_domain_configuration_is_resolved(test_settings, monkeypatch):
+def test_global_oidc_domain_configuration_is_resolved(
+    test_settings, monkeypatch, tenant
+):
     monkeypatch.setenv("OIDC_ALLOWED_DOMAINS", '["example.com"]')
     settings = Settings(
         _env_file=None,
@@ -567,7 +567,7 @@ def test_global_oidc_domain_configuration_is_resolved(test_settings, monkeypatch
     settings.oidc_client_id = "client"
     settings.oidc_client_secret = "secret"
     assert settings.oidc_allowed_domains == ["example.com"]
-    config = CredentialResolver(settings=settings).get_federation_config()
+    config = sign_in_config(settings, tenant, None)
     assert config["allowed_domains"] == ["example.com"]
 
 

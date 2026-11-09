@@ -28,6 +28,7 @@ from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.oidc import sign_in_source
 from eneo.authentication.oidc.profile import (
     DEFAULT_SCOPES,
     SIGNING_ALGORITHM_ALLOWLIST,
@@ -46,7 +47,6 @@ from eneo.main.config import (
     validate_redirect_uri,
 )
 from eneo.main.logging import get_logger
-from eneo.settings.credential_resolver import CredentialResolver
 from eneo.settings.encryption_service import EncryptionService
 from eneo.tenants.masking import looks_masked
 from eneo.tenants.tenant import TenantInDB
@@ -544,9 +544,10 @@ def build_admin_view(
     redirect_problem: Literal["unresolvable"] | None = None
     try:
         # No encryption service: listing the URIs never decrypts the secret.
-        redirect_uris = CredentialResolver(
-            tenant=tenant, settings=settings
-        ).get_valid_redirect_uris()
+        _, accepted = sign_in_source.redirect_uris(
+            sign_in_source.sign_in_config(settings, tenant, None), settings
+        )
+        redirect_uris = list(accepted)
     except ValueError:
         redirect_uris, redirect_problem = [], "unresolvable"
 

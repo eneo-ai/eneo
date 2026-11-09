@@ -6,9 +6,9 @@ from uuid import uuid4
 import pytest
 
 from eneo.authentication import federation_router as routes
+from eneo.authentication.oidc.sign_in_source import sign_in_config
 from eneo.main.config import Settings, get_settings
 from eneo.main.container.container import Container
-from eneo.settings.credential_resolver import CredentialResolver
 from eneo.tenants.tenant import TenantInDB
 
 
@@ -172,4 +172,4 @@ async def test_env_sign_in_without_a_client_id_is_not_offered(
 
     assert status.has_global_oidc_config is False
     with pytest.raises(ValueError, match="No identity provider configured"):
-        CredentialResolver(settings=settings).get_federation_config()
+        sign_in_config(settings, tenant(None, {}), None)
