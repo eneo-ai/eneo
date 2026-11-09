@@ -170,7 +170,9 @@ it("shows the host, the classification and that the connection is untested", asy
   expect(vemsa.textContent).toContain("vemsa.sundsvall.se");
   expect(vemsa.textContent).toContain("Intern");
   expect(vemsa.textContent).toContain("Inte testad");
-  expect(screen.getByRole("table", { name: "Ordtider och talaridentifiering" })).toBeTruthy();
+  const table = screen.getByRole("table", { name: "Ordtider och talaridentifiering" });
+  // An iPad held upright leaves it 682 px beside the icon rail: it fits whole.
+  expect(Number.parseFloat(table.style.minWidth)).toBeLessThanOrEqual(682);
   await act(async () => {
     await expectNoAxeViolations(document.body);
   });

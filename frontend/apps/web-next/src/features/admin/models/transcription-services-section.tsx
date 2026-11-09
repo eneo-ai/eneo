@@ -269,11 +269,13 @@ export function TranscriptionServicesSection({
     />
   );
 
+  // The columns fit 640 px, so the table fits whole beside the icon rail on an
+  // iPad held upright (682 px) and beside the open sidebar on a laptop.
   const columns: TableColumn<TranscriptionService>[] = [
     {
       key: "name",
       header: t("speaker_service_column_service"),
-      width: proportional(1, { minWidth: 200 }),
+      width: proportional(1, { minWidth: 176 }),
       renderCell: (service) => (
         <div className="flex min-w-0 flex-col gap-0.5">
           <span className="flex flex-wrap items-center gap-2">
@@ -282,7 +284,7 @@ export function TranscriptionServicesSection({
               <Badge variant="blue" label={t("speaker_service_default_badge")} />
             )}
           </span>
-          <Text type="supporting" maxLines={1}>
+          <Text type="supporting" maxLines={2}>
             {host(service.endpoint_url)} · {spaceUsage(service.space_count)}
           </Text>
         </div>
@@ -291,7 +293,7 @@ export function TranscriptionServicesSection({
     {
       key: "classification",
       header: t("speaker_service_column_classification"),
-      width: pixel(144),
+      width: pixel(128),
       renderCell: (service) =>
         service.security_classification ? (
           <Badge label={service.security_classification.name} />
@@ -304,7 +306,7 @@ export function TranscriptionServicesSection({
     {
       key: "connection",
       header: t("speaker_service_column_connection"),
-      width: pixel(232),
+      width: pixel(200),
       renderCell: (service) => {
         if (checking.has(service.id)) {
           return <StatusLabel status="accent" label={t("speaker_service_testing")} isPulsing />;
@@ -338,7 +340,7 @@ export function TranscriptionServicesSection({
     {
       key: "active",
       header: t("speaker_service_column_active"),
-      width: pixel(88),
+      width: pixel(72),
       renderCell: (service) => (
         // The track centred in its 44 px touch box, level with the row's menu.
         <div className="[&>*]:flex [&>*]:items-center pointer-coarse:[&>*]:min-h-11">
@@ -436,7 +438,6 @@ export function TranscriptionServicesSection({
                   aria-labelledby={headingId}
                   pinnedColumn="name"
                   pinnedEndColumn="actions"
-                  className="min-w-182"
                 />
               </TableFrame>
               {/* Under the list, as the models' "Lägg till leverantör" is on its tab. */}
