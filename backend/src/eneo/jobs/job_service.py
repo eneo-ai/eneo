@@ -6,7 +6,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.database.transaction_callbacks import after_outer_transaction
 from eneo.jobs.job_manager import job_manager
-from eneo.jobs.job_models import KNOWLEDGE_TASKS, Job, JobInDb, JobUpdate, Task
+from eneo.jobs.job_models import (
+    KNOWLEDGE_TASKS,
+    Job,
+    JobFailureCode,
+    JobInDb,
+    JobUpdate,
+    Task,
+)
 from eneo.jobs.job_repo import JobRepository
 from eneo.jobs.job_staging import job_staging_path
 from eneo.jobs.task_models import (
@@ -154,12 +161,20 @@ class JobService:
 
         return await self.job_repo.update_job(job_id, job_update)
 
-    async def fail_job(self, job_id: UUID, error_message: str | None = None):
+    async def fail_job(
+        self,
+        job_id: UUID,
+        error_message: str | None = None,
+        *,
+        failure_code: JobFailureCode | None = None,
+    ):
         job_update = JobUpdate(
             status=Status.FAILED,
             finished_at=datetime.now(timezone.utc),
             result_location=error_message,
         )
+        if failure_code is not None:
+            job_update.failure_code = failure_code
 
         return await self.job_repo.update_job(job_id, job_update)
 
