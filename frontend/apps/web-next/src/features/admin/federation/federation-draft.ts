@@ -44,8 +44,9 @@ export function parseDomains(text: string): string[] {
     .filter(Boolean);
 }
 
-function sameList(a: readonly string[], b: readonly string[]) {
-  return a.length === b.length && a.every((item, index) => item === b[index]);
+/** Stored domains may be upper case; sign-in compares them lower-cased. */
+function sameDomains(a: readonly string[], b: readonly string[]) {
+  return a.length === b.length && a.every((domain, index) => domain === b[index]?.toLowerCase());
 }
 
 /** The settings the draft changes, in form order. */
@@ -54,7 +55,7 @@ export function changedFields(view: FederationView, draft: FederationDraft): Fed
     provider: draft.provider.trim() !== (view.provider ?? ""),
     client_id: draft.clientId.trim() !== (view.client_id ?? ""),
     client_secret: draft.secret !== null,
-    allowed_domains: !sameList(parseDomains(draft.domains), view.allowed_domains ?? [])
+    allowed_domains: !sameDomains(parseDomains(draft.domains), view.allowed_domains ?? [])
   };
   return FEDERATION_FIELDS.filter((field) => changed[field]);
 }

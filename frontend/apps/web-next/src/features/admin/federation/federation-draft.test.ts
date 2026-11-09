@@ -58,6 +58,11 @@ describe("changedFields", () => {
     expect(changedFields(view, draftFromView(view))).toEqual([]);
   });
 
+  it("ignores the case of stored domains", () => {
+    const stored = { ...view, allowed_domains: ["Example.SE"] };
+    expect(changedFields(stored, draftFromView(stored))).toEqual([]);
+  });
+
   it("ignores surrounding space and how the domains are separated", () => {
     expect(
       changedFields(view, edit({ clientId: " eneo-client ", domains: "Sundsvall.se, example.se" }))
