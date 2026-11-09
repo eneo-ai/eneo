@@ -32,7 +32,7 @@ from eneo.main.retention_tasks import retention_task_registrations
 from eneo.object_content.content import ObjectContentError
 from eneo.object_content.object_store_connection import ObjectStoreConnectionError
 from eneo.object_content.reconciliation_repository import InventoryListingFollower
-from eneo.object_content.runtime import object_content_runtime
+from eneo.object_content.runtime import ObjectContentRuntime, object_content_runtime
 from eneo.settings.encryption_service import EncryptionService
 
 Emit = Callable[[str], None]
@@ -84,27 +84,27 @@ async def _read_back_storage(emit: Emit) -> bool:
             since=(await runtime.inventory_listing()).observed_at
         )
     listed = follower is None
-    pending = await runtime.removal_readback()
-    # Each pass lists one more page of the store until a listing that began
-    # after this readback started is complete, then removes at least one
-    # claimable payload or the loop ends. What it cannot remove now (held,
-    # retried later, in its grace period) is pending.
     passes = 0
-    while (not listed or pending.pending) and passes < _STORAGE_PASSES:
+    # Each pass lists one more page of the store until a listing that began
+    # after this readback started is complete. Counting what is left reads
+    # every candidate, and cannot end the readback before then.
+    while follower is not None and not listed and passes < _STORAGE_PASSES:
         passes += 1
-        result = await runtime.reconcile_once()
-        if result.store_failures:
-            emit(
-                f"storage: failed ({result.store_failures} store operations "
-                "failed during reconciliation)"
-            )
+        if not await _reconciled(runtime, emit):
+            return False
+        listed = follower.listed_in_full(await runtime.inventory_listing())
+    pending = await runtime.removal_readback()
+    # Then each pass removes at least one claimable payload or the loop ends.
+    # What it cannot remove now (held, retried later, in its grace period) is
+    # pending.
+    while listed and pending.pending and passes < _STORAGE_PASSES:
+        passes += 1
+        if not await _reconciled(runtime, emit):
             return False
         after = await runtime.removal_readback()
         stalled = after.pending >= pending.pending
         pending = after
-        if follower is not None and not listed:
-            listed = follower.listed_in_full(await runtime.inventory_listing())
-        elif stalled:
+        if stalled:
             break
     counts = (
         f"storage: pending {pending.pending} (held {pending.held}, "
@@ -116,6 +116,17 @@ async def _read_back_storage(emit: Emit) -> bool:
         emit(counts)
     else:
         emit("storage: confirmed")
+    return True
+
+
+async def _reconciled(runtime: ObjectContentRuntime, emit: Emit) -> bool:
+    result = await runtime.reconcile_once()
+    if result.store_failures:
+        emit(
+            f"storage: failed ({result.store_failures} store operations "
+            "failed during reconciliation)"
+        )
+        return False
     return True
 
 

@@ -34,12 +34,14 @@ class _Store:
         self._lists = lists
         self._waiting = waiting
         self.passes = 0
+        self.counts = 0
 
     async def reconcile_once(self) -> ReconciliationResult:
         self.passes += 1
         return ReconciliationResult.empty()
 
     async def removal_readback(self) -> RemovalReadback:
+        self.counts += 1
         return RemovalReadback(
             held=0, retrying=0, waiting=self._waiting if self.passes >= 2 else 0
         )
@@ -102,3 +104,20 @@ async def test_a_store_not_listed_within_the_ceiling_ends_as_pending(
     assert lines == [
         "storage: pending 0 (held 0, retrying 0, waiting 0), store not listed in full"
     ]
+
+
+@pytest.mark.asyncio
+async def test_what_is_left_is_counted_once_the_store_is_listed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Counting what is left reads every candidate. Until a listing that
+    began after the readback is complete, the count cannot end it, so the
+    readback counts only when it reports."""
+    store = _Store(lists=False)
+    monkeypatch.setattr(retention_readback, "object_content_runtime", store)
+    monkeypatch.setattr(retention_readback, "_STORAGE_PASSES", 3)
+
+    assert await retention_readback._read_back_storage(lambda _line: None) is True
+
+    assert store.passes == 3
+    assert store.counts == 1
