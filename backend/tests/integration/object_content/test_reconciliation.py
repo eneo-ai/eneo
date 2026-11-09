@@ -750,6 +750,36 @@ async def test_an_orphan_delete_left_for_retry_is_reported_as_a_store_failure(
 
 
 @pytest.mark.asyncio
+async def test_storage_readback_waits_for_former_copies_and_not_for_live_objects(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+) -> None:
+    """A move to PostgreSQL leaves the former remote copy as an orphan to delete,
+    so removal is not confirmed while those bytes are in the store. A key that
+    a live content still names is not an orphan."""
+    live = await _create_pending(
+        object_content_database,
+        real_object_store,
+        upload_remote=True,
+    )
+    async with object_content_database.session() as session, session.begin():
+        repository = ObjectContentReconciliationRepository(session)
+        before = await repository.removal_readback()
+        for key in (new_object_key(real_object_store.settings), live.object_key):
+            await repository.register_known_orphan(
+                object_key=key,
+                size_bytes=7,
+                orphan_grace_seconds=1,
+            )
+
+    async with object_content_database.session() as session, session.begin():
+        after = await ObjectContentReconciliationRepository(session).removal_readback()
+
+    assert after.waiting == before.waiting + 1
+    assert (after.held, after.retrying) == (before.held, before.retrying)
+
+
+@pytest.mark.asyncio
 async def test_delete_renews_before_head_and_cannot_be_reconciled_twice(
     monkeypatch: pytest.MonkeyPatch,
     object_content_database: DatabaseSessionManager,

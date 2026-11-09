@@ -151,9 +151,11 @@ class ObjectContentHealthFacts:
 
 @dataclass(frozen=True, slots=True)
 class RemovalReadback:
-    """Contents whose bytes are to be removed and are not yet, by why: kept on
-    purpose (minimum retention or a hold), failed and to be retried, or not
-    reached yet."""
+    """Bytes to be removed that are not yet, by why: kept on purpose (minimum
+    retention or a hold), failed and to be retried, or not reached yet. Bytes
+    in the store that no content names any more, such as the remote copy a
+    move to PostgreSQL leaves, are not reached yet until their delete is
+    confirmed."""
 
     held: int
     retrying: int
@@ -1344,7 +1346,8 @@ class ObjectContentReconciliationRepository:
 
     async def removal_readback(self) -> RemovalReadback:
         """Every content no owner refers to whose bytes are not yet removed:
-        the states the lifecycle and the delete reconciliation move on."""
+        the states the lifecycle and the delete reconciliation move on, and
+        every orphan in the store that waits for its delete."""
         now = await self._database_now()
         clear = _retention_clear(now)
         failed = ObjectContents.failure_code.is_not(None)
@@ -1374,7 +1377,14 @@ class ObjectContentReconciliationRepository:
             )
         ).one()
         held, retrying, waiting = row
-        return RemovalReadback(held=held, retrying=retrying, waiting=waiting)
+        orphans = await self._session.scalar(
+            select(func.count())
+            .select_from(ObjectContentOrphanCandidates)
+            .where(~_orphan_key_is_live())
+        )
+        return RemovalReadback(
+            held=held, retrying=retrying, waiting=waiting + (orphans or 0)
+        )
 
     async def health_facts(self) -> ObjectContentHealthFacts:
         states = await self._content_state_facts()
