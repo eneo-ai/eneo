@@ -41,7 +41,7 @@ from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import SpacesCompletionModels
 from eneo.logging.logging import LoggingDetails
-from eneo.main.config import get_settings
+from eneo.main.config import Settings, get_settings
 from eneo.main.retention_tasks import _read_retention_health
 from eneo.questions.question import QuestionAdd
 from eneo.users.user import UserInDB
@@ -495,11 +495,12 @@ async def test_a_question_is_charged_for_each_log_its_removal_clears(
 
 
 @pytest.mark.parametrize(
-    "files_per_run,limiting",
+    "file_budget,limiting",
     [
-        pytest.param(None, ("retention_conversations_max_unit_rows",), id="rows"),
+        pytest.param({}, ("retention_conversations_max_unit_rows",), id="rows"),
         pytest.param(
-            1,
+            # Three rows per file fund less than the unit, so health names both.
+            {"retention_max_files_per_run": 1, "retention_max_family_rows": 3},
             ("retention_conversations_max_unit_rows", "retention_max_files_per_run"),
             id="rows and files",
         ),
@@ -511,7 +512,7 @@ async def test_a_question_whose_later_logs_exceed_the_unit_budget_is_kept_and_na
     admin_user: UserInDB,
     owner_token: str,
     retention_session: AsyncSession,
-    files_per_run: int | None,
+    file_budget: dict[str, int],
     limiting: tuple[str, ...],
 ):
     """Logs are cleared in the unit that removes the question, never in
@@ -527,11 +528,13 @@ async def test_a_question_whose_later_logs_exceed_the_unit_budget_is_kept_and_na
         turns=[(f"question {turn}", f"answer {turn}") for turn in range(4)],
     )
     await _make_due(retention_session, assistant_id, first)
-    update: dict[str, int] = {"retention_conversations_max_unit_rows": 4}
-    if files_per_run is not None:
-        # Three rows per file fund less than the unit, so health names both.
-        update["retention_max_files_per_run"] = files_per_run
-    small = get_settings().model_copy(update=update)
+    small = Settings.model_validate(
+        {
+            **get_settings().model_dump(),
+            "retention_conversations_max_unit_rows": 4,
+            **file_budget,
+        }
+    )
 
     report = await run_registered_retention(retention_session, settings=small)
 
