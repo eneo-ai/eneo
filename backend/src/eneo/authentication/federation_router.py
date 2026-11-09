@@ -32,7 +32,12 @@ from eneo.authentication.oidc.transaction import (
     take_transaction,
 )
 from eneo.authentication.oidc.verification import CallbackResponse, verify_response
-from eneo.main.config import Settings, get_settings, validate_redirect_uri
+from eneo.main.config import (
+    Settings,
+    get_settings,
+    has_env_oidc_client,
+    validate_redirect_uri,
+)
 from eneo.main.container.container import Container
 from eneo.main.exceptions import FederatedLoginDenied
 from eneo.main.logging import get_logger
@@ -435,7 +440,7 @@ async def get_federation_status(
         FederationStatusResponse with:
         - has_single_tenant_federation: True if exactly 1 active tenant with API federation config
         - has_multi_tenant_federation: True if federation_enabled with >1 tenants
-        - has_global_oidc_config: True if OIDC_* env vars are configured
+        - has_global_oidc_config: True if federation_enabled=false and OIDC_* env vars are configured
         - tenant_count: Number of active tenants
     """
     settings = get_settings()
@@ -445,10 +450,9 @@ async def get_federation_status(
     tenants = await tenant_repo.get_all_active()
     tenant_count = len(tenants)
 
-    # Check if global OIDC env vars are configured (used when federation_enabled=false)
-    has_global_oidc = bool(
-        settings.oidc_discovery_endpoint and settings.oidc_client_secret
-    )
+    # The OIDC_* settings sign people in only in env mode; with
+    # FEDERATION_ENABLED they are ignored and never a fallback.
+    has_global_oidc = not settings.federation_enabled and has_env_oidc_client(settings)
 
     # Multi-tenant mode: federation per tenant is enabled with multiple tenants
     if settings.federation_enabled and tenant_count > 1:

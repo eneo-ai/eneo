@@ -146,6 +146,24 @@
             "en": "Every nightly retention run writes to the audit log: how many questions, app runs, sessions and files were removed, what was kept and why, and whether the run finished or stopped at its limit. The log never contains the content itself. Your operator can pause each retention task and set its limits.",
             "sv": "Varje nattlig gallringskörning skriver till granskningsloggen: hur många frågor, appkörningar, sessioner och filer som togs bort, vad som behölls och varför, och om körningen blev klar eller stoppade vid sin gräns. Loggen innehåller aldrig själva innehållet. Driftansvarig kan pausa varje gallringsuppgift och ställa in dess gränser."
           }
+        },
+        {
+          "id": "admin-sign-in-settings",
+          "type": "new",
+          "area": "admin",
+          "audience": "admin",
+          "title": {
+            "en": "Change your organisation's sign-in settings",
+            "sv": "Ändra organisationens inloggningsinställningar"
+          },
+          "body": {
+            "en": "Under Administration › Sign-in (SSO), you can replace the client ID, the client secret and the allowed email domains for single sign-on, and copy the redirect URIs to register at your identity provider. Every change is confirmed before it applies. While sign-in is still set in the server configuration, the page explains how your operator can move it into Eneo.",
+            "sv": "Under Administration › Inloggning (SSO) kan ni byta klient-ID, klienthemlighet och tillåtna e-postdomäner för enkel inloggning och kopiera omdirigerings-URI:erna som ska registreras hos identitetsleverantören. Varje ändring bekräftas innan den gäller. Så länge inloggningen är inställd i serverns konfiguration förklarar sidan hur er driftleverantör kan flytta den till Eneo."
+          },
+          "showMe": {
+            "href": "/admin/federation",
+            "anchor": "admin-federation"
+          }
         }
       ]
     },

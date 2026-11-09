@@ -2,21 +2,29 @@
 
 from collections.abc import Sequence
 from datetime import datetime, timezone
+from typing import cast
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
+from cryptography.fernet import Fernet
 
 from eneo.audit.domain.action_types import ActionType
 from eneo.authentication.auth_models import FederatedIdentity
 from eneo.main.config import Settings
 from eneo.main.exceptions import FederatedLoginDenied
 from eneo.settings.credential_resolver import CredentialResolver
+from eneo.settings.encryption_service import EncryptionService
+from eneo.tenants.federation_startup_migration import (
+    FederationStartupMigrationService,
+)
 from eneo.tenants.tenant import TenantInDB, TenantState
+from eneo.tenants.tenant_federation_service import TenantFederationService
 from eneo.users.user import UserAdd, UserInDB, UserState
 from eneo.users.user_repo import UsersRepository
 from eneo.users.user_service import UserService
+from tests.fake_oidc_provider import FakeOidcProvider, install
 from tests.fixtures import TEST_TENANT, TEST_USER
 from tests.identity_bindings_in_memory import IdentityBindingsInMemory
 
@@ -487,6 +495,68 @@ def test_invalid_email_is_rejected_before_account_admission(email):
         identity_of({"email": email, "email_verified": True})
 
 
+@pytest.mark.parametrize("moved", [False, True], ids=["oidc-env", "moved-into-eneo"])
+async def test_moving_global_oidc_into_eneo_keeps_its_domain_policy(
+    monkeypatch, test_settings, tenant, moved
+):
+    """OIDC_ALLOWED_DOMAINS decides who signs in before the OIDC_* settings are
+    moved into the stored configuration (the env-to-tenant script) and after."""
+    provider = FakeOidcProvider(issuer=ISSUER)
+    install(monkeypatch, provider)
+    encryption = EncryptionService(Fernet.generate_key().decode())
+    settings = test_settings.model_copy(
+        update={
+            "federation_enabled": moved,
+            "oidc_discovery_endpoint": provider.discovery_url,
+            "oidc_client_id": "client",
+            "oidc_client_secret": "client-secret-value",
+            "oidc_allowed_domains": ["example.com"],
+        }
+    )
+    if moved:
+        tenant_repo = AsyncMock()
+        tenant_repo.get_all_active.return_value = [tenant]
+        tenant_repo.lock_federation_config.return_value = tenant.federation_config
+        await FederationStartupMigrationService(
+            tenant_repo=tenant_repo,
+            encryption_service=encryption,
+            federation_service=TenantFederationService(
+                tenant_repo=tenant_repo,
+                encryption_service=encryption,
+                audit_service=AsyncMock(),
+            ),
+            settings=settings,
+        ).migrate_env_oidc_to_tenant_federation()
+        stored = tenant_repo.update_federation_config.await_args.kwargs[
+            "federation_config"
+        ]
+        tenant = tenant.model_copy(update={"federation_config": stored})
+    # Read as the federation callback reads them (federation_router.py).
+    config = CredentialResolver(
+        tenant=tenant, settings=settings, encryption_service=encryption
+    ).get_federation_config()
+    domains = cast(list[str], config.get("allowed_domains") or [])
+
+    # A current member inside the domains still signs in...
+    member = existing_user(tenant)
+    signed_in, created, _ = await sign_in(
+        tenant, UsersInMemory(tenant, [member]), CLAIMS, domains
+    )
+    assert (signed_in.id, created) == (member.id, False)
+    # ...a current member outside them is refused...
+    outsider = existing_user(tenant, email="user@outside.example")
+    with pytest.raises(FederatedLoginDenied, match="not allowed"):
+        await sign_in(
+            tenant,
+            UsersInMemory(tenant, [outsider]),
+            {**CLAIMS, "email": "user@outside.example"},
+            domains,
+        )
+    # ...and a new account inside them is still created.
+    _, created, _ = await sign_in(tenant, UsersInMemory(tenant), CLAIMS, domains)
+    assert created is True
+
+
 def test_global_oidc_domain_configuration_is_resolved(test_settings, monkeypatch):
     monkeypatch.setenv("OIDC_ALLOWED_DOMAINS", '["example.com"]')
     settings = Settings(
@@ -494,6 +564,7 @@ def test_global_oidc_domain_configuration_is_resolved(test_settings, monkeypatch
         **test_settings.model_dump(exclude={"oidc_allowed_domains"}),
     )
     settings.oidc_discovery_endpoint = "https://idp.example.com/discovery"
+    settings.oidc_client_id = "client"
     settings.oidc_client_secret = "secret"
     assert settings.oidc_allowed_domains == ["example.com"]
     config = CredentialResolver(settings=settings).get_federation_config()

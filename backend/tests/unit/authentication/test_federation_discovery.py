@@ -8,6 +8,7 @@ import pytest
 from eneo.authentication import federation_router as routes
 from eneo.main.config import Settings, get_settings
 from eneo.main.container.container import Container
+from eneo.settings.credential_resolver import CredentialResolver
 from eneo.tenants.tenant import TenantInDB
 
 
@@ -114,3 +115,61 @@ async def test_no_active_tenants_has_no_selector_or_single_tenant_flow(
     assert status.tenant_count == 0
     assert status.has_single_tenant_federation is False
     assert status.has_multi_tenant_federation is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "federation_enabled,stored,expected",
+    [
+        # Env mode: the OIDC_* settings are the sign-in.
+        (False, {}, {"global": True, "single": False}),
+        # Stored mode: OIDC_* is ignored, so it never offers sign-in on its own,
+        # whether or not the operator has registered a provider yet.
+        (True, {}, {"global": False, "single": False}),
+        (True, configured_idp(), {"global": False, "single": True}),
+    ],
+    ids=["env-mode", "stored-mode-unregistered", "stored-mode-registered"],
+)
+async def test_global_oidc_is_offered_only_where_it_signs_in(
+    discovery: tuple[Settings, Mock],
+    federation_enabled: bool,
+    stored: dict[str, str],
+    expected: dict[str, bool],
+) -> None:
+    settings, container = discovery
+    settings.federation_enabled = federation_enabled
+    settings.oidc_discovery_endpoint = (
+        "https://idp.example/.well-known/openid-configuration"
+    )
+    settings.oidc_client_id = "env-client"
+    settings.oidc_client_secret = "env-secret-value"
+    container.tenant_repo.return_value.get_all_active.return_value = [
+        tenant(None, stored)
+    ]
+
+    status = await routes.get_federation_status(container)
+
+    assert status.has_global_oidc_config is expected["global"]
+    assert status.has_single_tenant_federation is expected["single"]
+
+
+@pytest.mark.asyncio
+async def test_env_sign_in_without_a_client_id_is_not_offered(
+    discovery: tuple[Settings, Mock],
+) -> None:
+    """A discovery URL and a secret are no client: without OIDC_CLIENT_ID the
+    status offers no SSO, and resolving the env sign-in refuses."""
+    settings, container = discovery
+    settings.federation_enabled = False
+    settings.oidc_discovery_endpoint = (
+        "https://idp.example/.well-known/openid-configuration"
+    )
+    settings.oidc_client_id = None
+    settings.oidc_client_secret = "env-secret-value"
+    container.tenant_repo.return_value.get_all_active.return_value = [tenant(None, {})]
+
+    status = await routes.get_federation_status(container)
+
+    assert status.has_global_oidc_config is False
+    with pytest.raises(ValueError, match="No identity provider configured"):
+        CredentialResolver(settings=settings).get_federation_config()
