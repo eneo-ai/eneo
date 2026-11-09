@@ -38,6 +38,7 @@ from eneo.mcp_servers.infrastructure.tool_approval import (
 from eneo.model_providers.infrastructure.litellm_transport import (
     PROVIDER_UNREACHABLE,
 )
+from tests.log_capture import chained_error, emitted, logged_errors
 
 
 class _AsyncChunkStream:
@@ -539,6 +540,25 @@ async def test_provider_connectivity_failure_returns_unreachable_error(
     span.set_attribute.assert_any_call("eneo.ai.provider_unavailable", True)
     span.set_attribute.assert_any_call("eneo.ai.operation", phase)
     span.record_exception.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_a_failed_response_logs_the_kind_of_error_not_its_text():
+    """A provider's error can echo the prompt it was sent. Mutant: the
+    failure is logged with a traceback that ends in that message."""
+    adapter = _make_completion_adapter()
+
+    with (
+        emitted(tenant_model_adapter.logger) as records,
+        patch(
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+            AsyncMock(side_effect=chained_error()),
+        ),
+        pytest.raises(Exception),
+    ):
+        await adapter.get_response(context=SimpleNamespace(), model_kwargs={})
+
+    assert logged_errors(records), [record.getMessage() for record in records]
 
 
 @pytest.mark.asyncio

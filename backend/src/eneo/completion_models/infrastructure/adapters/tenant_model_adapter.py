@@ -3,6 +3,7 @@
 import base64
 import binascii
 import json
+import logging
 import re
 import uuid
 from dataclasses import dataclass, field
@@ -77,6 +78,7 @@ from eneo.model_providers.infrastructure.outbound_headers_runtime import (
 from eneo.model_providers.infrastructure.tenant_model_credential_resolver import (
     TenantModelCredentialResolver,
 )
+from eneo.observability.error_log import log_error
 from eneo.tokens.token_utils import count_tokens, measure_provider_input_tokens
 
 logger = get_logger(__name__)
@@ -1764,8 +1766,13 @@ class TenantModelAdapter(CompletionModelAdapter):
             return completion
 
         except Exception as exc:
-            logger.exception(
-                f"[TenantModelAdapter] Unexpected error for {self.litellm_model}"
+            # A provider's error can echo the prompt: log its kinds, not its text.
+            log_error(
+                logger,
+                logging.ERROR,
+                "[TenantModelAdapter] Unexpected error for %s",
+                self.litellm_model,
+                error=exc,
             )
             if isinstance(
                 exc,
