@@ -281,7 +281,6 @@ class TestOperatorProviderKeys:
         return _build_full_federation_config(
             SetFederationRequest.model_validate({**self.BODY, **keys}),
             encrypted_secret=CIPHERTEXT,
-            discovery_metadata={},
         )
 
     def test_absent_keys_are_not_stored(self):
@@ -323,7 +322,6 @@ class TestOperatorProviderKeys:
                 stored,
                 request.model_dump(exclude_unset=True),
                 encrypted_secret=None,
-                discovery_metadata=None,
             )
 
         assert patch(email_verified_claims=["xms_edov"])["email_verified_claims"] == [
@@ -343,7 +341,6 @@ class TestSubjectClaim:
         return _build_full_federation_config(
             SetFederationRequest.model_validate({**self.BODY, **keys}),
             encrypted_secret=CIPHERTEXT,
-            discovery_metadata={},
         )
 
     @staticmethod
@@ -353,7 +350,6 @@ class TestSubjectClaim:
             stored,
             request.model_dump(exclude_unset=True, exclude={"revision"}),
             encrypted_secret=None,
-            discovery_metadata=None,
         )
 
     def test_put_stores_the_default_or_the_given_claim(self):

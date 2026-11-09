@@ -223,7 +223,7 @@ Follow the same steps as in [Register your application in the IdP](#register-you
 
 ### Configure via API
 
-Use the federation API endpoint to set your OIDC configuration. The backend fetches the discovery document immediately and rejects the request with `400` if it is unreachable or incomplete:
+Use the federation API endpoint to set your OIDC configuration. The backend fetches the discovery document immediately and checks the configuration with the rules sign-in uses. It rejects the request with `502` if the document cannot be read, and with `400`, naming the reason, if sign-in could not use the configuration (for example, discovery lacks an endpoint or the provider signs with no algorithm Eneo accepts):
 
 ```bash
 curl -X PUT "https://your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/federation" \
@@ -248,7 +248,7 @@ curl -X POST "https://your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/federa
   -H "X-API-Key: your-super-admin-api-key"
 ```
 
-This fetches the discovery document and checks that `issuer`, `authorization_endpoint`, `token_endpoint` and `jwks_uri` are present. It does not fetch the JWKS or validate the client credentials.
+This fetches the discovery document and checks the stored configuration with the rules sign-in uses: it answers `502` if the document cannot be read and `400`, naming the reason, if sign-in could not use the configuration. It does not fetch the JWKS or validate the client credentials.
 
 ### Test login
 

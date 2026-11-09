@@ -60,6 +60,11 @@ class OidcProviderError(Exception):
     """The provider's config or discovery cannot be used to sign in."""
 
 
+class OidcProviderUnavailable(OidcProviderError):
+    """The provider's discovery document cannot be read: unreachable, not
+    answering 200, or not JSON."""
+
+
 @dataclass(frozen=True)
 class OidcProfile:
     # The issuer the ID token and the iss parameter must name: the stored
@@ -115,16 +120,17 @@ async def fetch_discovery(url: str, *, ttl_seconds: int) -> dict[str, object]:
         if (document := entry.fresh(ttl_seconds)) is not None:
             return document
         if time.monotonic() < entry.retry_at:
-            raise OidcProviderError("Failed to fetch IdP configuration")
+            raise OidcProviderUnavailable("Failed to fetch IdP configuration")
         # Marked before the fetch, so an outage costs one attempt per cooldown.
         entry.retry_at = time.monotonic() + DISCOVERY_RETRY_SECONDS
-        entry.document = await _download_discovery(url)
+        entry.document = await download_discovery(url)
         entry.fetched_at = time.monotonic()
         entry.retry_at = 0.0
         return entry.document
 
 
-async def _download_discovery(url: str) -> dict[str, object]:
+async def download_discovery(url: str) -> dict[str, object]:
+    """The provider's discovery document, fetched now, without the cache."""
     try:
         async with aiohttp_client().get(url) as resp:
             if resp.status != 200:
@@ -132,7 +138,7 @@ async def _download_discovery(url: str) -> dict[str, object]:
                     f"Failed to fetch OIDC discovery document: HTTP {resp.status}",
                     extra={"discovery_url": url, "http_status": resp.status},
                 )
-                raise OidcProviderError(
+                raise OidcProviderUnavailable(
                     f"Failed to fetch discovery document: HTTP {resp.status}"
                 )
             document: object = await resp.json()
@@ -141,7 +147,7 @@ async def _download_discovery(url: str) -> dict[str, object]:
             "Failed to fetch OIDC discovery document",
             extra={"discovery_url": url, "error_type": type(exc).__name__},
         )
-        raise OidcProviderError("Failed to fetch IdP configuration") from exc
+        raise OidcProviderUnavailable("Failed to fetch IdP configuration") from exc
     if not isinstance(document, dict):
         raise OidcProviderError("Failed to fetch IdP configuration")
     return cast(dict[str, object], document)
@@ -233,6 +239,37 @@ def _signing_algorithms(
     return allowed
 
 
+def _client(config: Mapping[str, object]) -> tuple[str, str]:
+    client_id = _text(config.get("client_id"))
+    client_secret = _text(config.get("client_secret"))
+    if client_id is None or client_secret is None:
+        raise OidcProviderError("The OIDC client is not configured")
+    return client_id, client_secret
+
+
+def _email_claim(config: Mapping[str, object]) -> str:
+    return _mapped_claim(config.get("claims_mapping"), "email") or "email"
+
+
+def check_config(config: Mapping[str, object]) -> None:
+    """Refuse a federation config that no discovery document can make usable.
+
+    These are the rules the config decides on its own, so a save that fetches
+    nothing applies them; ``build_profile`` applies them first. A key that
+    discovery decides at sign-in, such as the issuer of a config moved from
+    the OIDC_* settings, may be absent here.
+    """
+    _client(config)
+    subject_claim(config.get("claims_mapping"), email_claim=_email_claim(config))
+    _texts(config.get("scopes"), "scopes")
+    _texts(config.get("email_verified_claims"), "email_verified_claims")
+    if config.get("signing_algorithms") is not None:
+        _signing_algorithms(config, {})
+    issuer = _text(config.get("issuer"))
+    if issuer is not None and is_templated_issuer(issuer):
+        raise OidcProviderError(TEMPLATED_ISSUER_GUIDANCE)
+
+
 def build_profile(
     config: Mapping[str, object], discovery: Mapping[str, object]
 ) -> OidcProfile:
@@ -247,12 +284,10 @@ def build_profile(
             raise OidcProviderError(missing)
         return value
 
-    client_id = _text(config.get("client_id"))
-    client_secret = _text(config.get("client_secret"))
-    if client_id is None or client_secret is None:
-        raise OidcProviderError("The OIDC client is not configured")
+    check_config(config)
+    client_id, client_secret = _client(config)
     mapping = config.get("claims_mapping")
-    email_claim = _mapped_claim(mapping, "email") or "email"
+    email_claim = _email_claim(config)
     issuer = resolve("issuer", "Failed to resolve the provider's issuer")
     if is_templated_issuer(issuer):
         raise OidcProviderError(TEMPLATED_ISSUER_GUIDANCE)

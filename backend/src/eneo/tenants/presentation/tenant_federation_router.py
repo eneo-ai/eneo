@@ -106,7 +106,7 @@ def _mask_secret(secret: str) -> str:
         "This replaces the current setup and requires all required fields. "
         "System admin only."
     ),
-    responses=responses.get_responses([400, 404]),
+    responses=responses.get_responses([400, 404, 502]),
 )
 @endpoint_access(
     authentication=Authentication.SYSADMIN,
@@ -142,7 +142,7 @@ async def set_tenant_federation(
         "Only provided fields are changed; omitted fields stay unchanged. "
         "PATCH requires an existing federation config. System admin only."
     ),
-    responses=responses.get_responses([400, 404]),
+    responses=responses.get_responses([400, 404, 502]),
 )
 @endpoint_access(
     authentication=Authentication.SYSADMIN,
@@ -272,7 +272,7 @@ async def get_tenant_federation(
     status_code=status.HTTP_200_OK,
     summary="Test tenant federation config",
     description="Test connection to tenant's IdP. System admin only.",
-    responses=responses.get_responses([400, 404, 500]),
+    responses=responses.get_responses([400, 404, 502]),
 )
 @endpoint_access(
     authentication=Authentication.SYSADMIN,

@@ -366,7 +366,7 @@ Otherwise the callback fails with `400 Redirect URI mismatch - authentication fl
 
 ### Token Auth Method Selection
 
-At sign-in, `_token_auth_method` in `authentication/oidc/profile.py` selects the token endpoint authentication method. When a federation config is saved, `_select_token_auth_method` in `tenants/tenant_federation_service.py` stores one from discovery.
+At sign-in, `_token_auth_method` in `authentication/oidc/profile.py` selects the token endpoint authentication method. When a federation config is saved with a discovery document, the method this function selects is the one stored, so a saved config names `client_secret_post` or `client_secret_basic`.
 
 **Selection priority:**
 
@@ -578,21 +578,20 @@ All paths are relative to `/api/v1/sysadmin` and return `404 Federation is not e
 
 **Authentication:** `X-API-Key` header with the super admin API key (`ENEO_SUPER_API_KEY`).
 
-`PUT` and `PATCH` (when `discovery_endpoint` changes) fetch the discovery document before saving and fail with `400` if it is unreachable or lacks `issuer`, `authorization_endpoint`, `token_endpoint` or `jwks_uri`. Every change writes a `FEDERATION_UPDATED` audit event.
+`PUT` and `PATCH` (when `discovery_endpoint` changes) fetch the discovery document before saving and build the profile from it with `build_profile` in `authentication/oidc/profile.py`, the function sign-in uses. They fail with `502` when the document cannot be read (unreachable, not HTTP 200, not JSON) and with `400`, naming the reason, when sign-in could not use the config. Other `PATCH` changes and the tenant administrator's edits apply `check_config`, the rules the config decides on its own, without contacting the provider. Every change writes a `FEDERATION_UPDATED` audit event.
 
 ### Test Endpoint Behavior
 
 `POST /tenants/{tenant_id}/federation/test` performs:
 
-- Fetches the discovery document from the stored `discovery_endpoint`
-- Validates HTTP 200 response
-- Verifies required OIDC fields are present (`issuer`, `authorization_endpoint`, `token_endpoint`, `jwks_uri`)
+- Fetches the discovery document from the stored `discovery_endpoint`, bypassing the discovery cache
+- Builds the sign-in profile from the stored config and that document with `build_profile`: issuer and endpoints, templated issuer, signing algorithms and claims mapping
 - Returns `{"success": true, "message": "Federation config is valid and IdP is reachable", "issuer": "…"}`
 - Does NOT fetch the JWKS
 - Does NOT attempt authentication
 - Does NOT validate client credentials
 
-Failures are reported as `500` with the reason in `detail` (HTTP status from the IdP, missing fields, or connection error).
+A document that cannot be read answers `502` (`Failed to fetch discovery document: HTTP 503`, for example); a config sign-in could not use answers `400` with the reason in `detail`.
 
 ---
 

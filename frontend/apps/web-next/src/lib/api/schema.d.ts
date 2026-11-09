@@ -60663,6 +60663,15 @@ export interface operations {
           "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
+      /** @description Bad Gateway */
+      502: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   delete_tenant_federation_api_v1_sysadmin_tenants__tenant_id__federation_delete: {
@@ -60774,6 +60783,15 @@ export interface operations {
           "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
+      /** @description Bad Gateway */
+      502: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   test_tenant_federation_api_v1_sysadmin_tenants__tenant_id__federation_test_post: {
@@ -60832,8 +60850,8 @@ export interface operations {
           "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
-      /** @description Internal Server Error */
-      500: {
+      /** @description Bad Gateway */
+      502: {
         headers: {
           [name: string]: unknown;
         };
