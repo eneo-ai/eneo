@@ -169,6 +169,12 @@ parts. A question whose conversation has more such logs than
 health names `retention_conversations_max_unit_rows` in `limiting_settings`; the
 first execution after the limit is raised removes it.
 
+Only this version and later ones check for a removal before they store a log. When
+upgrading, stop the backend and worker of the earlier version before the migration
+runs: an answer an earlier version finishes after the migration can store a log that
+holds a turn removed meanwhile, or a log that no question refers to.
+[Updating Eneo](/guides/deployment#updating-eneo) gives the commands.
+
 #### What the records say
 
 A task reports three kinds of counts under names it declares:
