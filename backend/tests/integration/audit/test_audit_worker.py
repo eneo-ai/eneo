@@ -1,7 +1,9 @@
 """Integration tests for audit logging ARQ worker."""
 
 import json
+import logging
 from datetime import datetime
+from typing import Any, cast
 from uuid import uuid4
 
 import pytest
@@ -14,6 +16,8 @@ from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.domain.outcome import Outcome
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
+from eneo.worker import worker as worker_module
+from eneo.worker.routes import log_audit_event
 
 pytestmark = pytest.mark.integration
 
@@ -71,11 +75,18 @@ async def test_log_audit_event_task(db_session, test_tenant, test_user):
 
 
 @pytest.mark.asyncio
-async def test_a_file_event_queued_with_its_name_is_stored_without_it(
-    db_session, test_tenant, test_user
+async def test_a_file_event_queued_with_its_name_is_stored_and_logged_without_it(
+    db_session,
+    test_tenant,
+    test_user,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ):
-    """A job queued before the upgrade carries the file's name; the row it
-    writes keeps the file's id, size and MIME type only."""
+    """A job queued before the upgrade carries the file's name. The worker
+    runs it through its job entry point: the log names the job without its
+    parameters, and the row keeps the file's id, size and MIME type only."""
+    monkeypatch.setattr(worker_module, "logger", logging.getLogger("eneo.test.worker"))
+    caplog.set_level(logging.DEBUG, logger="eneo.test.worker")
     name = "Utredning Anna Svensson.pdf"
     file_id = uuid4()
     params = {
@@ -99,8 +110,9 @@ async def test_a_file_event_queued_with_its_name_is_stored_without_it(
         "error_message": None,
     }
 
+    await log_audit_event(cast(Any, {"job_id": str(uuid4())}), params)
+
     async with db_session() as session:
-        await log_audit_event_task(job_id=str(uuid4()), params=params, session=session)
         description, metadata = (
             await session.execute(
                 sa.select(AuditLogTable.description, AuditLogTable.log_metadata).where(
@@ -109,6 +121,8 @@ async def test_a_file_event_queued_with_its_name_is_stored_without_it(
             )
         ).one()
 
+    assert caplog.records
+    assert name not in caplog.text
     assert name not in description
     assert name not in json.dumps(metadata)
     assert metadata["target"] == {"id": str(file_id), "name": "file"}
