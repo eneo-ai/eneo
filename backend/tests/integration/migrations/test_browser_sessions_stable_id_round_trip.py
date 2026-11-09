@@ -1,4 +1,4 @@
-"""Round trip for 202611091000: browser sessions get a stable id.
+"""Round trip for 202611091100: browser sessions get a stable id.
 
     pytest -m migration_isolation \
         tests/integration/migrations/test_browser_sessions_stable_id_round_trip.py
@@ -21,8 +21,8 @@ from alembic.config import Config
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
-PRE_REVISION = "202611081500"
-REVISION = "202611091000"
+PRE_REVISION = "202611091000"
+REVISION = "202611091100"
 
 
 @pytest.fixture(scope="session", autouse=True)

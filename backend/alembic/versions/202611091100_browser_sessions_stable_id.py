@@ -1,8 +1,8 @@
 """give each browser session a stable id beside its sid
 
-Revision ID: 202611091000
-Revises: 202611081500
-Create Date: 2026-11-09 10:00:00.000000
+Revision ID: 202611091100
+Revises: 202611091000
+Create Date: 2026-11-09 11:00:00.000000
 
 The id becomes the primary key; the sid stays, unique and required, as the
 secret a token presents. Existing rows get an id from the database, and the
@@ -17,8 +17,8 @@ from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
-revision: str = "202611091000"
-down_revision: str | None = "202611081500"
+revision: str = "202611091100"
+down_revision: str | None = "202611091000"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

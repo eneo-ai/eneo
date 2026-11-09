@@ -1,8 +1,8 @@
 """bind accounts to the provider identities that sign in to them
 
-Revision ID: 202611091010
-Revises: 202611091000
-Create Date: 2026-11-09 10:10:00.000000
+Revision ID: 202611091110
+Revises: 202611091100
+Create Date: 2026-11-09 11:10:00.000000
 
 identity_bindings maps (tenant, issuer, audience, subject claim, subject) to
 one account.
@@ -19,8 +19,8 @@ from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
-revision: str = "202611091010"
-down_revision: str | None = "202611091000"
+revision: str = "202611091110"
+down_revision: str | None = "202611091100"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

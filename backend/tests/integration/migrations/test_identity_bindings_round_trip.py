@@ -1,4 +1,4 @@
-"""Round trip for 202611091010: accounts bound to provider identities.
+"""Round trip for 202611091110: accounts bound to provider identities.
 
     pytest -m migration_isolation \
         tests/integration/migrations/test_identity_bindings_round_trip.py
@@ -20,8 +20,8 @@ from alembic.config import Config
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
-PRE_REVISION = "202611091000"
-REVISION = "202611091010"
+PRE_REVISION = "202611091100"
+REVISION = "202611091110"
 
 
 @pytest.fixture(scope="session", autouse=True)
