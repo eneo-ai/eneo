@@ -35,6 +35,24 @@ async def test_hydrates_all_info_blobs_without_file_loader(monkeypatch):
     hydrate.assert_awaited_once_with(blobs)
 
 
+async def test_hydration_follows_the_principals_file_grant(monkeypatch):
+    attach = AsyncMock()
+    monkeypatch.setattr("eneo.questions.questions_repo.attach_question_files", attach)
+    monkeypatch.setattr(
+        "eneo.questions.questions_repo.InfoBlobRepository.hydrate_original_availability",
+        AsyncMock(),
+    )
+    loader = MagicMock()
+    repo = QuestionRepository(AsyncMock(), loader, include_user_uploads=False)
+    questions = [SimpleNamespace(info_blobs=[], questions_files=[])]
+
+    assert await repo._hydrate_questions(questions) is questions
+
+    attach.assert_awaited_once_with(
+        questions, loader=loader, include_user_uploads=False
+    )
+
+
 async def test_get_by_tenant_filters_out_questions_without_session_id():
     repo = QuestionRepository(AsyncMock())
     repo.delegate.get_models_from_query = AsyncMock(return_value=[])

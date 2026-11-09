@@ -25,4 +25,6 @@ async def test_hydrates_all_info_blobs_before_file_projection(monkeypatch):
     await repo._hydrate_sessions([SimpleNamespace(id=uuid4(), questions=questions)])
 
     hydrate.assert_awaited_once_with(blobs)
-    attach_files.assert_awaited_once_with(questions, loader=repo.file_content_loader)
+    attach_files.assert_awaited_once_with(
+        questions, loader=repo.file_content_loader, include_user_uploads=True
+    )

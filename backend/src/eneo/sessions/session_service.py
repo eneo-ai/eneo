@@ -13,7 +13,8 @@ from eneo.data_retention.derivations import DerivedSourceRemovedError
 from eneo.database.database import AsyncSession, sessionmanager
 from eneo.files.file_content_loader import FileContentLoader
 from eneo.files.file_models import File
-from eneo.files.file_service import FileService, require_file_read_permission
+from eneo.files.file_service import FileService
+from eneo.files.upload_access import may_read_user_uploads
 from eneo.group_chat.application.group_chat_service import GroupChatService
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from eneo.logging.logging import LoggingDetails
@@ -23,7 +24,7 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from eneo.main.logging import get_logger
-from eneo.questions.question import MessageFeedback, Question, QuestionAdd, ToolCallInfo
+from eneo.questions.question import MessageFeedback, QuestionAdd, ToolCallInfo
 from eneo.questions.questions_repo import QuestionRepository
 from eneo.sessions.session import (
     SessionAdd,
@@ -47,14 +48,6 @@ if TYPE_CHECKING:
     from eneo.ai_models.completion_models.completion_model import McpToolReference
 
 logger = get_logger(__name__)
-
-
-def require_history_file_read_permission(
-    user: UserInDB, questions: Sequence[Question]
-) -> None:
-    """Keep user uploads out of history responses and replay without a grant."""
-    if any(question.files for question in questions):
-        require_file_read_permission(user)
 
 
 def safe_count_tokens(text: str, model_name: str | None) -> int:
@@ -221,16 +214,18 @@ class SessionService:
         return self._file_content_loader_factory(session)
 
     def _question_repository(self, session: AsyncSession) -> QuestionRepository:
-        loader = self._file_content_loader(session)
-        if loader is None:
-            return QuestionRepository(session)
-        return QuestionRepository(session, loader)
+        return QuestionRepository(
+            session,
+            self._file_content_loader(session),
+            include_user_uploads=may_read_user_uploads(self.user),
+        )
 
     def _session_repository(self, session: AsyncSession) -> SessionRepository:
-        loader = self._file_content_loader(session)
-        if loader is None:
-            return SessionRepository(session)
-        return SessionRepository(session, loader)
+        return SessionRepository(
+            session,
+            self._file_content_loader(session),
+            include_user_uploads=may_read_user_uploads(self.user),
+        )
 
     @asynccontextmanager
     async def _write_transaction(self) -> AsyncGenerator[None]:
@@ -364,30 +359,11 @@ class SessionService:
         assistant_id: UUID | None = None,
         group_chat_id: UUID | None = None,
     ) -> SessionInDB:
-        if self.user.active_api_key is not None:
-            await self.get_session_ownership(
-                id, assistant_id=assistant_id, group_chat_id=group_chat_id
-            )
-            await self.authorize_history_files(id)
         session = await self.session_repo.get(id=id)
-        owned_session = self._check_exists_and_belongs_to_user(
+
+        return self._check_exists_and_belongs_to_user(
             session, assistant_id=assistant_id, group_chat_id=group_chat_id
         )
-        # A concurrent turn may have linked an upload after the metadata probe.
-        require_history_file_read_permission(self.user, owned_session.questions)
-        return owned_session
-
-    async def authorize_history_files(self, session_id: UUID) -> None:
-        """Check the file grant before hydration, after owner/partner access.
-
-        Generated outputs are conversation data; only user uploads require the
-        file resource grant. Unreadable copies retain their normal read errors.
-        """
-        if (
-            self.user.active_api_key is not None
-            and await self.session_repo.has_user_uploads(session_id)
-        ):
-            require_file_read_permission(self.user)
 
     async def refuse_removed_copy(self, id: UUID) -> None:
         """Raise DerivedSourceRemovedError when ``get_session_by_uuid`` missed
@@ -447,13 +423,8 @@ class SessionService:
         )
 
     async def update_session(self, session_update: SessionUpdate) -> SessionInDB:
-        if self.user.active_api_key is not None:
-            await self.get_session_ownership(session_update.id)
-            await self.authorize_history_files(session_update.id)
         session = await self.session_repo.update(session_update)
-        owned_session = self._check_exists_and_belongs_to_user(session)
-        require_history_file_read_permission(self.user, owned_session.questions)
-        return owned_session
+        return self._check_exists_and_belongs_to_user(session)
 
     async def delete(
         self,
@@ -678,7 +649,6 @@ class SessionService:
         await self.get_session_ownership(
             session_id, assistant_id=assistant_id, group_chat_id=group_chat_id
         )
-        await self.authorize_history_files(session_id)
         session = await self.session_repo.add_feedback(
             feedback=feedback,
             id=session_id,
@@ -686,7 +656,6 @@ class SessionService:
         )
         if session is None:
             raise NotFoundException("Session not found")
-        require_history_file_read_permission(self.user, session.questions)
         return session
 
     async def get_message_partner(

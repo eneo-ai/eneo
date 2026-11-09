@@ -250,7 +250,9 @@ async def test_question_placeholder_persists_selected_skill_revision(
         skill_activation=activation,
     )
 
-    question_repo_factory.assert_called_once_with(fresh_session)
+    question_repo_factory.assert_called_once_with(
+        fresh_session, None, include_user_uploads=True
+    )
     question_add = fresh_question_repo.add.await_args.args[0]
     assert question_add.skill_provenance == [reference]
     assert question_add.skill_activation == activation

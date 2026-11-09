@@ -127,10 +127,14 @@ class AnalysisRepository:
         self,
         session: AsyncSession,
         file_content_loader: FileContentLoader,
+        *,
+        include_user_uploads: bool = True,
     ) -> None:
         super().__init__()
         self.session = session
         self.file_content_loader = file_content_loader
+        # The principal's ``files`` read grant; see ``attach_question_files``.
+        self.include_user_uploads = include_user_uploads
 
     async def _hydrate_sessions(
         self,
@@ -146,6 +150,7 @@ class AnalysisRepository:
         await attach_question_files(
             [question for session in sessions for question in session.questions],
             loader=self.file_content_loader,
+            include_user_uploads=self.include_user_uploads,
         )
         # The turns came after the session rows' check: ask again, last.
         readable = await readable_sessions(

@@ -52,7 +52,9 @@ async def test_session_service_create_session_commits_independently(
 
     await service.create_session(name="new-session", assistant_id=uuid4())
 
-    session_repo_factory.assert_called_once_with(fresh_session)
+    session_repo_factory.assert_called_once_with(
+        fresh_session, None, include_user_uploads=True
+    )
     fresh_repo.add.assert_awaited_once()
     request_repo.add.assert_not_awaited()
 
@@ -105,7 +107,9 @@ async def test_question_placeholder_commits_independently(
         session=SimpleNamespace(id=uuid4()),
     )
 
-    question_repo_factory.assert_called_once_with(fresh_session)
+    question_repo_factory.assert_called_once_with(
+        fresh_session, None, include_user_uploads=True
+    )
     fresh_question_repo.add.assert_awaited_once()
     request_question_repo.add.assert_not_awaited()
 
@@ -162,8 +166,12 @@ async def test_new_session_and_first_question_share_one_short_transaction(
     assert session is created_session
     assert question_id == created_question.id
     assert question_created_at == created_question.created_at
-    session_repo_factory.assert_called_once_with(fresh_session)
-    question_repo_factory.assert_called_once_with(fresh_session)
+    session_repo_factory.assert_called_once_with(
+        fresh_session, None, include_user_uploads=True
+    )
+    question_repo_factory.assert_called_once_with(
+        fresh_session, None, include_user_uploads=True
+    )
     fresh_session_repo.add.assert_awaited_once()
     fresh_question_repo.add.assert_awaited_once()
 

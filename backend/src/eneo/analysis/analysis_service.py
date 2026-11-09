@@ -37,10 +37,7 @@ from eneo.questions.question import MessageFeedback, Question
 from eneo.questions.questions_repo import QuestionRepository
 from eneo.roles.permissions import Permission, validate_permissions
 from eneo.sessions.session import SessionInDB, SessionMetadataPublic
-from eneo.sessions.session_service import (
-    SessionService,
-    require_history_file_read_permission,
-)
+from eneo.sessions.session_service import SessionService
 from eneo.sessions.sessions_repo import SessionRepository
 from eneo.spaces.space import Space
 from eneo.spaces.space_service import SpaceService
@@ -694,20 +691,23 @@ class AnalysisService:
             tenant_id=self.user.tenant_id,
         )
 
-        questions: list[Question] = []
+        if include_followups:
+            return [question for session in sessions for question in session.questions]
+
+        first_questions: list[Question] = []
         for session in sessions:
-            if include_followups:
-                questions.extend(session.questions)
-            elif session.questions:
-                questions.append(session.questions[0])
+            questions = session.questions
+            if questions:
+                first_questions.append(questions[0])
             else:
+                # Session did not contain any questions, log this as an error
+                # and don't add anything to the list
                 logger.error(
                     "Session was empty",
                     extra=dict(session_id=session.id),
                 )
 
-        require_history_file_read_permission(self.user, questions)
-        return questions
+        return first_questions
 
     async def get_questions_from_group_chat(
         self,
@@ -1056,13 +1056,11 @@ class AnalysisService:
                 raise NotFoundException("Session assistant not found")
             await self._check_insight_access(assistant_id=facts.assistant_id)
 
-        await self.session_service.authorize_history_files(session_id)
         session = await self.session_repo.get(id=session_id)
         if session is None:
             if await self.session_repo.is_removed_copy(session_id):
                 raise DerivedSourceRemovedError()
             raise NotFoundException("Session not found")
-        require_history_file_read_permission(self.user, session.questions)
         return session
 
     async def get_conversation_stats(

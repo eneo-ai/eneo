@@ -221,8 +221,20 @@ class Question(QuestionAdd, InDB):
     tool_calls: Optional[list[ToolCallInfo]] = None
     feedback: Optional[MessageFeedback] = None
 
-    def attach_hydrated_files(self, files_by_id: dict[UUID, File]) -> None:
-        """Attach byte-complete Files after the persistent row is authorized."""
+    def attach_hydrated_files(
+        self, files_by_id: dict[UUID, File], *, include_user_uploads: bool = True
+    ) -> None:
+        """Attach byte-complete Files after the persistent row is authorized.
+
+        Without ``include_user_uploads`` the upload relationships are dropped
+        along with their content, so no later projection sees even a name.
+        """
+        if not include_user_uploads:
+            self.questions_files = [
+                question_file
+                for question_file in self.questions_files
+                if question_file.type != "user"
+            ]
         self.files = [
             files_by_id[question_file.file.id]
             for question_file in self.questions_files

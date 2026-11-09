@@ -1,17 +1,24 @@
-"""A chat capability must not turn the key owner's files into public inputs."""
+"""A chat capability must not turn the key owner's files into public inputs.
 
+A user-owned API key acts as its owner. Its ``files`` grant decides two
+things: whether a request may name uploads (refused without it), and whether
+the uploads earlier turns attached travel with a conversation (left out
+without it, so the key reads its conversations with no trace of them).
+"""
+
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 from uuid import UUID, uuid4
 
 import pytest
+from dependency_injector import providers
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from eneo.analysis.analysis_service import AnalysisService
+from eneo.apps.app_runs.app_run_service import AppRunService
 from eneo.apps.apps.app_service import AppService
-from eneo.assistants.api.assistant_models import AssistantSparse
 from eneo.authentication import api_key_resolver
 from eneo.authentication.auth_models import (
     ApiKeyHashVersion,
@@ -24,15 +31,19 @@ from eneo.authentication.auth_models import (
     ResourcePermissions,
 )
 from eneo.conversations.application.conversation_service import ConversationService
+from eneo.files.file_content_loader import FileAttachmentGroup
 from eneo.files.file_models import File, FileMetadata, FileType
 from eneo.files.file_service import FileService, require_requested_files
+from eneo.files.upload_access import may_read_user_uploads
+from eneo.main.container.request_container import request_container
 from eneo.main.exceptions import (
     BadRequestException,
     NotFoundException,
     UnauthorizedException,
 )
 from eneo.main.models import ModelId
-from eneo.questions.question import Question
+from eneo.questions.question import Question, QuestionsFiles
+from eneo.questions.question_file_projection import attach_question_files
 from eneo.server.exception_handlers import add_exception_handlers
 from eneo.services.service_runner import ServiceRunner
 from eneo.sessions.session import SessionFeedback, SessionInDB, SessionUpdate
@@ -92,7 +103,11 @@ def _key(
     )
 
 
-def _file(user: UserInDB) -> File:
+def _file(
+    user: UserInDB,
+    name: str = "private-payroll.txt",
+    text: str = "CONFIDENTIAL-PAYROLL-42",
+) -> File:
     now = datetime.now(timezone.utc)
     return File(
         id=uuid4(),
@@ -100,32 +115,38 @@ def _file(user: UserInDB) -> File:
         updated_at=now,
         user_id=user.id,
         tenant_id=user.tenant_id,
-        name="private-payroll.txt",
+        name=name,
         checksum="test-checksum",
-        size=22,
+        size=len(text),
         mimetype="text/plain",
         file_type=FileType.TEXT,
-        text="CONFIDENTIAL-PAYROLL-42",
+        text=text,
     )
 
 
-def _files(user: UserInDB, file: File) -> FileService:
-    metadata = FileMetadata(
+def _metadata(file: File) -> FileMetadata:
+    return FileMetadata(
         id=file.id,
         created_at=file.created_at,
         updated_at=file.updated_at,
-        user_id=user.id,
-        tenant_id=user.tenant_id,
+        user_id=file.user_id,
+        tenant_id=file.tenant_id,
         name=file.name,
         mimetype=file.mimetype,
         file_type=file.file_type,
     )
+
+
+def _files(user: UserInDB, file: File) -> FileService:
     repo = AsyncMock()
     repo.session = Mock()
-    repo.get_list_by_id_and_user.return_value = [metadata]
+    repo.get_list_by_id_and_user.return_value = [_metadata(file)]
     service = FileService(user=user, repo=repo, protocol=Mock(), object_content=Mock())
     service._content_loader.load = AsyncMock(return_value={file.id: file})
     return service
+
+
+# --- Naming uploads in a request -----------------------------------------------
 
 
 @pytest.mark.parametrize("key_type", [ApiKeyType.PK, ApiKeyType.SK])
@@ -198,14 +219,111 @@ async def test_missing_or_foreign_file_keeps_existing_unavailable_error():
         require_requested_files([file.id], files)
 
 
-def _history(user: UserInDB, session: SessionInDB) -> SessionService:
-    repo = AsyncMock()
-    repo.get.return_value = session
-    repo.get_ownership.return_value = _ownership(session)
-    repo.has_user_uploads.return_value = any(
-        question.files for question in session.questions
+# --- Uploads earlier turns attached ---------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("login", "level", "enforced", "expected"),
+    [
+        ("session", None, True, True),
+        ("key", ResourcePermissionLevel.NONE, True, False),
+        ("key", ResourcePermissionLevel.READ, True, True),
+        ("key", ResourcePermissionLevel.ADMIN, True, True),
+        ("key", None, True, True),  # Simple key: the basic READ ceiling covers it.
+        ("key", ResourcePermissionLevel.NONE, False, True),
+    ],
+)
+def test_the_files_grant_decides_whether_uploads_are_readable(
+    resource_enforcement, login, level, enforced, expected
+):
+    resource_enforcement.api_key_enforce_resource_permissions = enforced
+    user = TEST_USER.model_copy()
+    user.active_api_key = None if login == "session" else _key(user, level)
+
+    assert may_read_user_uploads(user) is expected
+
+
+@pytest.mark.parametrize("granted", [False, True])
+def test_request_container_hydrates_conversations_by_the_principals_grant(granted):
+    user = TEST_USER.model_copy()
+    user.active_api_key = _key(
+        user, ResourcePermissionLevel.READ if granted else ResourcePermissionLevel.NONE
     )
-    return SessionService(session_repo=repo, question_repo=AsyncMock(), user=user)
+    container = request_container(
+        session=providers.Object(Mock()),
+        user=providers.Object(user),
+        tenant=providers.Object(user.tenant),
+    )
+    container.file_content_loader.override(providers.Object(Mock()))
+
+    assert container.session_repo().include_user_uploads is granted
+    assert container.question_repo().include_user_uploads is granted
+    assert container.analysis_repo().include_user_uploads is granted
+
+
+@pytest.mark.parametrize("granted", [False, True])
+def test_session_service_write_repositories_follow_the_grant(granted):
+    user = TEST_USER.model_copy()
+    user.active_api_key = _key(
+        user, ResourcePermissionLevel.READ if granted else ResourcePermissionLevel.NONE
+    )
+    loader = Mock()
+    service = SessionService(
+        session_repo=AsyncMock(),
+        question_repo=AsyncMock(),
+        user=user,
+        file_content_loader_factory=lambda session: loader,
+    )
+
+    for repo in (
+        service._session_repository(Mock()),
+        service._question_repository(Mock()),
+    ):
+        assert repo.include_user_uploads is granted
+        assert repo.file_content_loader is loader
+
+
+class _Loader:
+    """Hydrates exactly the metadata it is asked for."""
+
+    def __init__(self, files: Sequence[File]) -> None:
+        self._files = {file.id: file for file in files}
+
+    async def load_attachment_groups(
+        self, groups: Sequence[FileAttachmentGroup], **_: object
+    ) -> dict[tuple[str, UUID], list[File]]:
+        return {
+            group.key: [self._files[file.id] for file in group.files]
+            for group in groups
+        }
+
+
+async def _hydrated_question(
+    session: SessionInDB, user: UserInDB
+) -> tuple[Question, File, File]:
+    """An earlier turn with one upload and one generated file, hydrated the
+    way the repositories do it for ``user``."""
+    upload = _file(user)
+    generated = _file(user, name="summary.txt", text="GENERATED-SUMMARY")
+    question = Question(
+        id=uuid4(),
+        tenant_id=user.tenant_id,
+        session_id=session.id,
+        question="Read the attached document.",
+        answer="Earlier answer.",
+        num_tokens_question=5,
+        num_tokens_answer=2,
+        questions_files=[
+            QuestionsFiles(type="user", file=_metadata(upload)),
+            QuestionsFiles(type="assistant", file=_metadata(generated)),
+        ],
+    )
+    await attach_question_files(
+        [question],
+        loader=_Loader([upload, generated]),  # type: ignore[arg-type]
+        include_user_uploads=may_read_user_uploads(user),
+    )
+    return question, upload, generated
 
 
 def _ownership(session: SessionInDB) -> SessionOwnership:
@@ -219,79 +337,58 @@ def _ownership(session: SessionInDB) -> SessionOwnership:
     )
 
 
-def _previous_question(
-    session: SessionInDB, user: UserInDB, *, generated: bool = False
-) -> Question:
-    file = _file(user)
-    return Question(
-        id=uuid4(),
-        tenant_id=user.tenant_id,
-        session_id=session.id,
-        question="Read the attached document.",
-        answer="Earlier answer.",
-        num_tokens_question=5,
-        num_tokens_answer=2,
-        files=[] if generated else [file],
-        generated_files=[file] if generated else [],
-    )
+def _history(user: UserInDB, session: SessionInDB) -> SessionService:
+    repo = AsyncMock()
+    repo.get.return_value = session
+    repo.get_ownership.return_value = _ownership(session)
+    return SessionService(session_repo=repo, question_repo=AsyncMock(), user=user)
 
 
-async def test_history_read_requires_files_permission_for_previous_uploads():
+async def test_history_without_the_grant_is_read_once_with_uploads_left_out():
     user = TEST_USER.model_copy()
     user.active_api_key = _key(user)
     session = SessionInDB(id=uuid4(), user_id=user.id, name="Private chat")
-    session.questions = [_previous_question(session, user)]
-
+    question, upload, generated = await _hydrated_question(session, user)
+    session.questions = [question]
     history = _history(user, session)
-    with pytest.raises(UnauthorizedException) as denied:
-        await history.get_session_by_uuid(session.id)
 
-    assert denied.value.code == "insufficient_resource_permission"
-    history.session_repo.get.assert_not_awaited()
+    read = await history.get_session_by_uuid(session.id)
+
+    assert read.questions[0].files == []
+    assert read.questions[0].generated_files == [generated]
+    assert upload.name not in read.model_dump_json()
+    history.session_repo.get.assert_awaited_once()
+    history.session_repo.get_ownership.assert_not_awaited()
 
 
 @pytest.mark.parametrize("operation", ["feedback", "rename"])
-@pytest.mark.parametrize("allowed", [False, True])
-async def test_history_returning_mutations_authorize_files_before_writing(
-    operation: str, allowed: bool
-):
+async def test_rename_and_feedback_stay_available_without_the_grant(operation: str):
     user = TEST_USER.model_copy()
-    user.active_api_key = _key(
-        user,
-        ResourcePermissionLevel.READ if allowed else ResourcePermissionLevel.NONE,
-    )
+    user.active_api_key = _key(user)
     session = SessionInDB(id=uuid4(), user_id=user.id, name="Private chat")
-    session.questions = [_previous_question(session, user)]
+    question, _, _ = await _hydrated_question(session, user)
+    session.questions = [question]
     service = _history(user, session)
     service.session_repo.add_feedback.return_value = session
     service.session_repo.update.return_value = session
 
-    async def mutate():
-        if operation == "feedback":
-            return await service.leave_feedback(session.id, SessionFeedback(value=1))
-        return await service.update_session(
+    if operation == "feedback":
+        result = await service.leave_feedback(session.id, SessionFeedback(value=1))
+        service.session_repo.add_feedback.assert_awaited_once()
+    else:
+        result = await service.update_session(
             SessionUpdate(id=session.id, name="New name")
         )
+        service.session_repo.update.assert_awaited_once()
 
-    if allowed:
-        assert await mutate() is session
-        if operation == "feedback":
-            service.session_repo.add_feedback.assert_awaited_once()
-        else:
-            service.session_repo.update.assert_awaited_once()
-    else:
-        with pytest.raises(UnauthorizedException) as denied:
-            await mutate()
-        assert denied.value.code == "insufficient_resource_permission"
-        service.session_repo.add_feedback.assert_not_awaited()
-        service.session_repo.update.assert_not_awaited()
+    assert result is session
+    assert result.questions[0].files == []
 
 
 async def test_files_none_can_delete_using_ownership_without_reading_history():
     user = TEST_USER.model_copy()
     user.active_api_key = _key(user)
     session = SessionInDB(id=uuid4(), user_id=user.id, name="Private chat")
-    session.questions = [_previous_question(session, user)]
     service = _history(user, session)
     metadata = session.model_copy(update={"questions": []})
     service.session_repo.delete.return_value = metadata
@@ -299,22 +396,6 @@ async def test_files_none_can_delete_using_ownership_without_reading_history():
     assert await service.delete(session.id) is metadata
     service.session_repo.delete.assert_awaited_once_with(session.id)
     service.session_repo.get.assert_not_awaited()
-    service.session_repo.has_user_uploads.assert_not_awaited()
-
-
-async def test_history_rechecks_uploads_linked_after_the_metadata_probe():
-    user = TEST_USER.model_copy()
-    user.active_api_key = _key(user)
-    session = SessionInDB(id=uuid4(), user_id=user.id, name="Private chat")
-    session.questions = [_previous_question(session, user)]
-    service = _history(user, session)
-    service.session_repo.has_user_uploads.return_value = False
-
-    with pytest.raises(UnauthorizedException) as denied:
-        await service.get_session_by_uuid(session.id)
-
-    assert denied.value.code == "insufficient_resource_permission"
-    service.session_repo.get.assert_awaited_once()
 
 
 async def test_unreadable_copy_keeps_its_existing_missing_history_error():
@@ -328,123 +409,32 @@ async def test_unreadable_copy_keeps_its_existing_missing_history_error():
         await service.get_session_by_uuid(session.id)
 
 
-@pytest.mark.parametrize(
-    "level", [ResourcePermissionLevel.NONE, ResourcePermissionLevel.READ]
-)
-@pytest.mark.parametrize("view", ["session", "first_questions", "all_questions"])
-async def test_insight_history_requires_file_grant_without_changing_insight_ownership(
-    view: str, level: ResourcePermissionLevel
+@pytest.mark.parametrize("granted", [False, True])
+async def test_history_reaches_the_model_only_with_the_files_grant(
+    turn: TurnFixture, granted: bool
 ):
-    user = TEST_USER.model_copy()
-    user.active_api_key = _key(user, level, key_type=ApiKeyType.SK)
-    user.active_api_key.scope_type = ApiKeyScopeType.TENANT
-    user.active_api_key.scope_id = None
-    owner = user.model_copy(update={"id": uuid4(), "active_api_key": None})
-    assistant = AssistantSparse(
-        id=uuid4(), user_id=owner.id, name="Insights", type="assistant"
+    turn.user.active_api_key = _key(
+        turn.user,
+        ResourcePermissionLevel.READ if granted else ResourcePermissionLevel.NONE,
+        scope_id=turn.assistant.id,
     )
-    session = SessionInDB(
-        id=uuid4(), user_id=owner.id, assistant=assistant, name="Another user's chat"
-    )
-    question = _previous_question(session, owner)
-    # The public history projection includes transcription, unlike file text.
-    question.files[0].transcription = "CONFIDENTIAL-AUDIO-42"
-    session.questions = [question]
-    repo = AsyncMock()
-    repo.get_assistant_sessions_since.return_value = [session]
-    sessions = AsyncMock()
-    sessions.get.return_value = session
-    sessions.get_ownership.return_value = _ownership(session)
-    assistants = AsyncMock()
-    assistants.get_assistant.return_value = (SimpleNamespace(space_id=uuid4()), [])
-    service = AnalysisService(
-        user=user,
-        repo=repo,
-        assistant_service=assistants,
-        question_repo=AsyncMock(),
-        session_repo=sessions,
-        space_service=Mock(),
-        session_service=_history(user, session),
-        group_chat_service=Mock(),
-        completion_service=Mock(),
-    )
-    service._check_insight_access = AsyncMock()
-    service._check_assistant_question_access = AsyncMock()
-
-    async def read():
-        if view == "session":
-            return await service.get_insight_session(session.id)
-        return await service.get_questions_since(
-            assistant.id,
-            from_date=datetime.now(timezone.utc),
-            to_date=datetime.now(timezone.utc),
-            include_followups=view == "all_questions",
-        )
-
-    if level == ResourcePermissionLevel.NONE:
-        with pytest.raises(UnauthorizedException) as denied:
-            await read()
-        assert denied.value.code == "insufficient_resource_permission"
-    else:
-        result = await read()
-        assert result == (session if view == "session" else [question])
-        assert question.files[0].transcription == "CONFIDENTIAL-AUDIO-42"
-
-
-@pytest.mark.parametrize("session_login", [False, True])
-async def test_permitted_history_still_reaches_the_model(
-    turn: TurnFixture, session_login: bool
-):
-    turn.user.active_api_key = (
-        None
-        if session_login
-        else _key(turn.user, ResourcePermissionLevel.READ, scope_id=turn.assistant.id)
-    )
-    turn.session.questions = [_previous_question(turn.session, turn.user)]
+    question, upload, _ = await _hydrated_question(turn.session, turn.user)
+    turn.session.questions = [question]
     history = _history(turn.user, turn.session)
     turn.history.get_session_by_uuid.side_effect = history.get_session_by_uuid
 
-    await turn.service.ask(
+    result = await turn.service.ask(
         question="Continue", assistant_id=turn.assistant.id, session_id=turn.session.id
     )
 
-    assert "CONFIDENTIAL-PAYROLL-42" in str(turn.requests[0]["messages"])
+    assert result.answer == "Check the policy."
+    assert len(turn.requests) == 1
+    messages = str(turn.requests[0]["messages"])
+    assert "Earlier answer." in messages
+    assert (upload.text in messages) is granted
 
 
-@pytest.mark.parametrize("generated", [False, True])
-async def test_followup_cannot_replay_uploads_but_preserves_generated_outputs(
-    turn: TurnFixture, generated: bool
-):
-    turn.user.active_api_key = _key(turn.user, scope_id=turn.assistant.id)
-    turn.session.questions = [
-        _previous_question(turn.session, turn.user, generated=generated)
-    ]
-    history = _history(turn.user, turn.session)
-    # Keep the real session policy; only its repository and persistence are
-    # replaced, just as in the ordinary completion fixture.
-    turn.history.get_session_by_uuid.side_effect = history.get_session_by_uuid
-    turn.service.file_service = _files(turn.user, _file(turn.user))
-    turn.service.file_service.repo.get_list_by_id_and_user.return_value = []
-
-    if generated:
-        result = await turn.service.ask(
-            question="Continue",
-            assistant_id=turn.assistant.id,
-            session_id=turn.session.id,
-        )
-        assert result.answer == "Check the policy."
-        assert len(turn.requests) == 1
-    else:
-        with pytest.raises(UnauthorizedException) as denied:
-            await turn.service.ask(
-                question="Summarize the earlier upload",
-                assistant_id=turn.assistant.id,
-                session_id=turn.session.id,
-            )
-        assert denied.value.code == "insufficient_resource_permission"
-        assert turn.requests == []
-        turn.history.create_question_placeholder.assert_not_awaited()
-        turn.history.complete_question_with_answer.assert_not_awaited()
+# --- Uploads named in the current request ----------------------------------------
 
 
 @pytest.mark.parametrize("allowed", [False, True])
@@ -540,6 +530,34 @@ async def test_app_run_cannot_read_denied_input_before_execution():
     assert denied.value.code == "insufficient_resource_permission"
     app.run.assert_not_awaited()
     service.file_service._content_loader.load.assert_not_awaited()
+
+
+async def test_queued_app_run_cannot_name_denied_files():
+    """The worker later runs the app as the plain owner, so the key's grant
+    has to be checked when the run is queued."""
+    user = TEST_USER.model_copy()
+    user.active_api_key = _key(user)
+    file = _file(user)
+    files = _files(user, file)
+    files.repo.get_by_ids.return_value = [_metadata(file)]
+    jobs = AsyncMock()
+    runs = AsyncMock()
+    service = AppRunService(
+        user=user,
+        repo=runs,
+        factory=Mock(),
+        app_service=AsyncMock(),
+        job_service=jobs,
+        file_service=files,
+    )
+
+    with pytest.raises(UnauthorizedException) as denied:
+        await service.queue_app_run(uuid4(), file_ids=[file.id], text="Read it")
+
+    assert denied.value.code == "insufficient_resource_permission"
+    files.repo.get_by_ids.assert_not_awaited()
+    runs.add.assert_not_awaited()
+    jobs.queue_job.assert_not_awaited()
 
 
 async def test_service_run_cannot_read_denied_input_before_execution():

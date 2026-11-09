@@ -60,6 +60,8 @@ class QuestionRepository:
         self,
         session: AsyncSession,
         file_content_loader: FileContentLoader | None = None,
+        *,
+        include_user_uploads: bool = True,
     ) -> None:
         super().__init__()
         self.delegate: BaseRepositoryDelegate[Question] = BaseRepositoryDelegate(
@@ -70,6 +72,8 @@ class QuestionRepository:
         )
         self.session = session
         self.file_content_loader = file_content_loader
+        # The principal's ``files`` read grant; see ``attach_question_files``.
+        self.include_user_uploads = include_user_uploads
 
     async def _hydrate_questions(
         self,
@@ -86,6 +90,7 @@ class QuestionRepository:
         await attach_question_files(
             questions,
             loader=self.file_content_loader,
+            include_user_uploads=self.include_user_uploads,
         )
         return questions
 

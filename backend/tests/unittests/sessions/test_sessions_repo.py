@@ -2,7 +2,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
-import pytest
 from sqlalchemy.dialects import postgresql
 
 from eneo.questions.question import MessageFeedback
@@ -10,25 +9,22 @@ from eneo.sessions.session import SessionInDB, SessionUpdate
 from eneo.sessions.sessions_repo import OwnedChatPartner, SessionRepository
 
 
-@pytest.mark.parametrize("file_id", [None, uuid4()])
-async def test_upload_probe_checks_only_readable_user_upload_relationships(file_id):
-    session = AsyncMock()
-    session.scalar.return_value = file_id
-    repo = SessionRepository(session)
-    session_id = uuid4()
-
-    assert await repo.has_user_uploads(session_id) is (file_id is not None)
-
-    query = session.scalar.call_args.args[0]
-    sql = str(
-        query.compile(
-            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
-        )
+async def test_turn_details_follow_the_principals_file_grant(monkeypatch):
+    attach = AsyncMock()
+    monkeypatch.setattr("eneo.sessions.sessions_repo.attach_question_files", attach)
+    monkeypatch.setattr(
+        "eneo.sessions.sessions_repo.InfoBlobRepository.hydrate_original_availability",
+        AsyncMock(),
     )
-    assert "questions_files.type = 'user'" in sql
-    assert f"questions.session_id = '{session_id}'" in sql
-    assert "content_derivations" in sql
-    assert "LIMIT 1" in sql
+    loader = MagicMock()
+    repo = SessionRepository(AsyncMock(), loader, include_user_uploads=False)
+    question = SimpleNamespace(info_blobs=[], questions_files=[], tool_calls=None)
+
+    await repo._attach_turn_details([SimpleNamespace(id=uuid4(), questions=[question])])
+
+    attach.assert_awaited_once_with(
+        [question], loader=loader, include_user_uploads=False
+    )
 
 
 async def test_hydrates_all_info_blobs_without_file_loader(monkeypatch):

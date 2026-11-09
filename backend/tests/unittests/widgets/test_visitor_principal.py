@@ -158,11 +158,11 @@ def _placeholder_harness(monkeypatch):
     manager.session = lambda: _Ctx()
     record = SimpleNamespace(id=uuid4(), created_at=None, questions=[])
 
-    def session_repo(session, loader=None):
+    def session_repo(session, loader=None, **_):
         seen["session_repo"] = session
         return SimpleNamespace(add=AsyncMock(return_value=record))
 
-    def question_repo(session, loader=None):
+    def question_repo(session, loader=None, **_):
         seen["question_repo"] = session
         return SimpleNamespace(add=AsyncMock(return_value=record))
 

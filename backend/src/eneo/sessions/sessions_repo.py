@@ -122,6 +122,8 @@ class SessionRepository:
         self,
         session: AsyncSession,
         file_content_loader: FileContentLoader | None = None,
+        *,
+        include_user_uploads: bool = True,
     ):
         super().__init__()
         self.delegate: BaseRepositoryDelegate[SessionInDB] = BaseRepositoryDelegate(
@@ -129,6 +131,8 @@ class SessionRepository:
         )
         self.session = session
         self.file_content_loader = file_content_loader
+        # The principal's ``files`` read grant; see ``attach_question_files``.
+        self.include_user_uploads = include_user_uploads
 
     async def _hydrate_sessions(
         self,
@@ -171,6 +175,7 @@ class SessionRepository:
         await attach_question_files(
             [question for session in sessions for question in session.questions],
             loader=self.file_content_loader,
+            include_user_uploads=self.include_user_uploads,
         )
 
     async def _hydrate_optional(
@@ -313,20 +318,6 @@ class SessionRepository:
         )
         row = (await self.session.execute(query)).one_or_none()
         return None if row is None else SessionOwnership(*row)
-
-    async def has_user_uploads(self, id: UUID) -> bool:
-        """Probe readable upload relationships without loading file content."""
-        query = (
-            sa.select(QuestionsFiles.file_id)
-            .join(Questions, Questions.id == QuestionsFiles.question_id)
-            .where(
-                Questions.session_id == id,
-                QuestionsFiles.type == "user",
-                copy_session_valid(Questions.session_id.expression),
-            )
-            .limit(1)
-        )
-        return await self.session.scalar(query) is not None
 
     async def get_owned_chat_partner(
         self,
