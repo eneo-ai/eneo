@@ -1351,8 +1351,9 @@ class ObjectContentReconciliationRepository:
 
     async def removal_readback(self) -> RemovalReadback:
         """Every content no owner refers to whose bytes are not yet removed:
-        the states the lifecycle and the delete reconciliation move on, and
-        every orphan in the store that waits for its delete."""
+        the states the lifecycle and the delete reconciliation move on, every
+        orphan in the store that waits for its delete, and every multipart
+        upload no content is writing, whose parts wait for their abort."""
         now = await self._database_now()
         clear = _retention_clear(now)
         failed = ObjectContents.failure_code.is_not(None)
@@ -1387,8 +1388,15 @@ class ObjectContentReconciliationRepository:
             .select_from(ObjectContentOrphanCandidates)
             .where(~_orphan_key_is_live())
         )
+        multipart = await self._session.scalar(
+            select(func.count())
+            .select_from(ObjectContentMultipartCandidates)
+            .where(~_multipart_upload_is_live(now))
+        )
         return RemovalReadback(
-            held=held, retrying=retrying, waiting=waiting + (orphans or 0)
+            held=held,
+            retrying=retrying,
+            waiting=waiting + (orphans or 0) + (multipart or 0),
         )
 
     async def health_facts(self) -> ObjectContentHealthFacts:

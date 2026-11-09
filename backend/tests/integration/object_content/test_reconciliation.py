@@ -48,6 +48,7 @@ from eneo.object_content.reconciliation_repository import (
     PublicationReservation,
 )
 from eneo.object_content.s3_object_store import (
+    MultipartUpload,
     ObjectStoreIntegrityError,
     ObjectStoreNotFoundError,
     ObjectStoreUnavailableError,
@@ -814,6 +815,56 @@ async def test_storage_readback_waits_for_former_copies_and_not_for_live_objects
                 size_bytes=7,
                 orphan_grace_seconds=1,
             )
+
+    async with object_content_database.session() as session, session.begin():
+        after = await ObjectContentReconciliationRepository(session).removal_readback()
+
+    assert after.waiting == before.waiting + 1
+    assert (after.held, after.retrying) == (before.held, before.retrying)
+
+
+@pytest.mark.asyncio
+async def test_storage_readback_waits_for_abandoned_multipart_uploads(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+) -> None:
+    """An upload's parts stay in the store until it is aborted, so removal is
+    not confirmed while an abandoned multipart upload is listed. An upload that
+    a live content is still writing is not waiting."""
+    live = await _create_pending(
+        object_content_database,
+        real_object_store,
+        upload_remote=False,
+    )
+    async with object_content_database.session() as session, session.begin():
+        content = await session.get(ObjectContents, live.content_id)
+        descriptor = await session.get(ObjectStoreObjects, live.content_id)
+        assert content is not None and descriptor is not None
+        content.lease_owner = "writer"
+        content.lease_until = datetime.now(UTC) + timedelta(hours=1)
+        descriptor.multipart_upload_id = "live-upload"
+        descriptor.multipart_initiated_at = datetime.now(UTC)
+
+    async with object_content_database.session() as session, session.begin():
+        repository = ObjectContentReconciliationRepository(session)
+        before = await repository.removal_readback()
+        recorded = await repository.record_multipart_page(
+            cursor=await repository.multipart_inventory_cursor(),
+            uploads=[
+                MultipartUpload(
+                    key=new_object_key(real_object_store.settings),
+                    upload_id="abandoned-upload",
+                    initiated_at=None,
+                ),
+                MultipartUpload(
+                    key=live.object_key, upload_id="live-upload", initiated_at=None
+                ),
+            ],
+            next_key_marker=None,
+            next_upload_id_marker=None,
+            orphan_grace_seconds=1,
+        )
+    assert recorded
 
     async with object_content_database.session() as session, session.begin():
         after = await ObjectContentReconciliationRepository(session).removal_readback()
