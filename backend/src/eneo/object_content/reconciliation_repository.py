@@ -197,6 +197,34 @@ def _orphan_key_is_live() -> ColumnElement[bool]:
     )
 
 
+def _multipart_upload_is_live(now: datetime) -> ColumnElement[bool]:
+    """A pending content is still writing the multipart candidate's upload, or
+    a publication holds its key."""
+    active_upload = exists(
+        select(ObjectStoreObjects.content_id)
+        .join(
+            ObjectContents,
+            ObjectContents.id == ObjectStoreObjects.content_id,
+        )
+        .where(
+            ObjectStoreObjects.object_key
+            == ObjectContentMultipartCandidates.object_key,
+            ObjectStoreObjects.multipart_upload_id
+            == ObjectContentMultipartCandidates.upload_id,
+            ObjectContents.state == ContentState.PENDING.value,
+            ObjectContents.lease_until > now,
+        )
+    )
+    active_publication = exists(
+        select(ObjectContentOrphanCandidates.object_key).where(
+            ObjectContentOrphanCandidates.object_key
+            == ObjectContentMultipartCandidates.object_key,
+            ObjectContentOrphanCandidates.lease_until > now,
+        )
+    )
+    return or_(active_upload, active_publication)
+
+
 def _retention_clear(now: datetime) -> ColumnElement[bool]:
     """Neither a minimum retention nor an active hold keeps the content."""
     active_hold = exists(
@@ -1078,28 +1106,6 @@ class ObjectContentReconciliationRepository:
         limit: int,
     ) -> tuple[MultipartAbortLease, ...]:
         now = await self._database_now()
-        active_upload = exists(
-            select(ObjectStoreObjects.content_id)
-            .join(
-                ObjectContents,
-                ObjectContents.id == ObjectStoreObjects.content_id,
-            )
-            .where(
-                ObjectStoreObjects.object_key
-                == ObjectContentMultipartCandidates.object_key,
-                ObjectStoreObjects.multipart_upload_id
-                == ObjectContentMultipartCandidates.upload_id,
-                ObjectContents.state == ContentState.PENDING.value,
-                ObjectContents.lease_until > now,
-            )
-        )
-        active_publication = exists(
-            select(ObjectContentOrphanCandidates.object_key).where(
-                ObjectContentOrphanCandidates.object_key
-                == ObjectContentMultipartCandidates.object_key,
-                ObjectContentOrphanCandidates.lease_until > now,
-            )
-        )
         rows = (
             await self._session.scalars(
                 select(ObjectContentMultipartCandidates)
@@ -1111,8 +1117,7 @@ class ObjectContentReconciliationRepository:
                         ObjectContentMultipartCandidates.lease_until.is_(None),
                         ObjectContentMultipartCandidates.lease_until <= now,
                     ),
-                    ~active_upload,
-                    ~active_publication,
+                    ~_multipart_upload_is_live(now),
                 )
                 .order_by(
                     ObjectContentMultipartCandidates.eligible_after,
