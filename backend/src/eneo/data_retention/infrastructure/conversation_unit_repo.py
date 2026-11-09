@@ -16,7 +16,6 @@ from uuid import UUID
 import sqlalchemy as sa
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import aliased
 from sqlalchemy.sql.elements import ColumnElement
 from sqlalchemy.sql.functions import count
 
@@ -94,28 +93,25 @@ _RELEASE_ROWS = EmptySessionRepository.MAX_RELEASE_ROWS - 1
 
 
 def _question_log_rows(identifier: UUID) -> tuple[sa.Select[Any], ...]:
-    """The logs the question removal trigger writes for one question: its own
-    log and each later log of the conversation that still holds content,
-    found through the conversation, which it clears once. A turn asked at the
-    same instant counts as later, as in the trigger."""
+    """The logs the question removal trigger reads for one question: its own
+    log, which it deletes, and every other log of the conversation that still
+    holds content, found through the conversation, of which it clears the
+    later ones. An earlier turn's log is read too, and so charged: in a group
+    chat each turn follows its own Assistant's period, so an earlier turn can
+    be kept while a later one is removed."""
     removed = (
-        sa.select(Questions.session_id, Questions.created_at)
+        sa.select(Questions.session_id, Questions.logging_details_id)
         .where(Questions.id == identifier)
         .subquery("removed")
     )
-    # ponytail: an earlier turn's log that holds content is read uncharged.
-    # An earlier turn is due first, so that log is left only while its turn
-    # is held back; the log's turn time beside its conversation would skip it.
-    later = aliased(Questions)
     logs = _LOGGING_TABLE.c
     return (
-        sa.select(Questions.logging_details_id).where(
-            Questions.id == identifier, Questions.logging_details_id.is_not(None)
+        sa.select(removed.c.logging_details_id).where(
+            removed.c.logging_details_id.is_not(None)
         ),
         sa.select(logs.id)
         .join(removed, logs.session_id == removed.c.session_id)
-        .join(later, later.logging_details_id == logs.id)
-        .where(later.id != identifier, later.created_at >= removed.c.created_at),
+        .where(logs.id.is_distinct_from(removed.c.logging_details_id)),
     )
 
 

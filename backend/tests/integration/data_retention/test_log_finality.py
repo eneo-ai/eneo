@@ -216,8 +216,25 @@ async def _store_turn(
     details: LoggingDetails,
 ) -> UUID:
     """One more turn of the conversation, its log stored by `writer`: the
-    answer path, the repository's add, or a link written directly, as an
-    older version of the app wrote it."""
+    answer path, the repository's add, a link written directly, as an older
+    version of the app wrote it, or a question inserted with its log."""
+    if writer == "inserted with its log":
+        question_id = uuid4()
+        async with sessionmanager.session() as session, session.begin():
+            await session.execute(
+                sa.insert(Questions).values(
+                    id=question_id,
+                    question="next",
+                    answer="next",
+                    num_tokens_question=1,
+                    num_tokens_answer=1,
+                    tenant_id=owner.tenant_id,
+                    session_id=conversation_id,
+                    assistant_id=assistant_id,
+                    logging_details_id=await _insert_log(session, details),
+                )
+            )
+        return question_id
     if writer == "added":
         async with db_container() as container:
             added = await container.question_repo().add(
@@ -255,19 +272,24 @@ async def _store_turn(
             )
         return question_id
     async with sessionmanager.session() as session, session.begin():
-        log_id = await session.scalar(
-            sa.text(
-                "INSERT INTO logging (model_kwargs, json_body) "
-                "VALUES ('{}', to_jsonb(CAST(:body AS text))) RETURNING id"
-            ),
-            {"body": details.json_body},
-        )
         await session.execute(
             sa.update(Questions)
             .where(Questions.id == question_id)
-            .values(logging_details_id=log_id)
+            .values(logging_details_id=await _insert_log(session, details))
         )
     return question_id
+
+
+async def _insert_log(session: AsyncSession, details: LoggingDetails) -> UUID:
+    log_id = await session.scalar(
+        sa.text(
+            "INSERT INTO logging (model_kwargs, json_body) "
+            "VALUES ('{}', to_jsonb(CAST(:body AS text))) RETURNING id"
+        ),
+        {"body": details.json_body},
+    )
+    assert log_id is not None
+    return log_id
 
 
 async def _make_due(
@@ -390,7 +412,9 @@ async def test_removing_a_question_keeps_the_logs_of_the_turns_before_it(
     assert cleared.status_code == 400, cleared.text
 
 
-@pytest.mark.parametrize("writer", ["answer", "added", "linked directly"])
+@pytest.mark.parametrize(
+    "writer", ["answer", "added", "linked directly", "inserted with its log"]
+)
 async def test_only_a_log_with_a_request_body_is_found_from_its_conversation(
     client: AsyncClient,
     db_container,
@@ -440,12 +464,15 @@ async def test_a_question_is_charged_for_each_log_its_removal_clears(
     admin_user: UserInDB,
     owner_token: str,
 ):
-    """The retention unit pays for the rows the removal trigger writes: the
-    question's own log, each later log that still holds a request body, once,
-    and the conversation's row, which the proof locks. Mutant: the later logs
-    are not charged, or a cleared log is charged again."""
+    """The retention unit pays for the rows the removal trigger reads and
+    writes: the question's own log, each other log of the conversation that
+    still holds a request body, and the conversation's row, which the proof
+    locks. An earlier turn's log counts too: in a group chat its Assistant can
+    keep it while a later turn is removed. Mutants: the later logs are not
+    charged; an earlier log is read uncharged; a cleared log is charged
+    again."""
     assistant_id = await _insight_assistant(client, owner_token)
-    first, second, _ = await _logged_conversation(
+    first, second, third = await _logged_conversation(
         db_container,
         admin_user,
         assistant_id=assistant_id,
@@ -462,6 +489,7 @@ async def test_a_question_is_charged_for_each_log_its_removal_clears(
             return await unit.cascade_cost(question_id, ceiling=100)
 
     assert await cost(first) == 4
+    assert await cost(third) == 4
     await _delete_question(first)
     assert await cost(second) == 2
 
