@@ -179,6 +179,9 @@ class TextExtractor:
             return filepath.read_text("cp1252")
         except UnicodeDecodeError:
             pass
+        except OSError as e:
+            _log_read_error(e)
+            raise ExtractionError("Error reading the file") from None
 
         # Final fallback: UTF-8 with replacement characters for undecodable bytes
         try:

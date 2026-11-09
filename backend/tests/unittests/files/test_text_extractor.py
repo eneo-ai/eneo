@@ -760,11 +760,17 @@ class TestTextExtractorErrorHandling:
             assert "Permission denied" in exc_info.value.message
 
     @pytest.mark.parametrize(
-        ("error", "logged"),
+        "decode_failures",
+        [0, 1, 2],
+        ids=["utf-8 read", "cp1252 read", "replacing read"],
+    )
+    @pytest.mark.parametrize(
+        "error",
         [
-            (PermissionError(13, "Permission denied", "/tmp/Utredning.txt"), "13"),
-            (OSError(5, "Input/output error", "/tmp/Utredning.txt"), "5"),
+            PermissionError(13, "Permission denied", "/tmp/Utredning.txt"),
+            OSError(5, "Input/output error", "/tmp/Utredning.txt"),
         ],
+        ids=["permission", "io"],
     )
     def test_a_read_error_is_logged_by_type_and_errno_without_the_path(
         self,
@@ -772,21 +778,27 @@ class TestTextExtractorErrorHandling:
         monkeypatch: pytest.MonkeyPatch,
         caplog: pytest.LogCaptureFixture,
         error: OSError,
-        logged: str,
+        decode_failures: int,
     ):
-        """The error the caller gets says what failed; the log keeps the type
-        and errno to diagnose it, never the path."""
+        """Whichever read fails, the error the caller gets says what failed;
+        the log keeps the type and errno to diagnose it, never the path."""
         monkeypatch.setattr(text_module, "logger", logging.getLogger("eneo.test.text"))
         caplog.set_level(logging.DEBUG, logger="eneo.test.text")
         test_file = tmp_path / "Utredning.txt"
         test_file.write_text("content")
+        not_text = UnicodeDecodeError("utf-8", b"\x80", 0, 1, "invalid start byte")
 
-        with patch("pathlib.Path.read_text", side_effect=error):
-            with pytest.raises(ExtractionError):
+        with patch(
+            "pathlib.Path.read_text",
+            side_effect=[not_text] * decode_failures + [error],
+        ):
+            with pytest.raises(ExtractionError) as exc_info:
                 TextExtractor.extract_from_plain_text(test_file)
 
-        assert type(error).__name__ in caplog.text
-        assert logged in caplog.text
+        assert "Utredning" not in str(exc_info.value)
+        assert exc_info.value.__suppress_context__
+        message = caplog.records[-1].getMessage()
+        assert f"({type(error).__name__}, errno {error.errno})" in message
         assert "Utredning" not in caplog.text
 
     def test_extract_from_plain_text_handles_binary_with_replacement(self, tmp_path):
