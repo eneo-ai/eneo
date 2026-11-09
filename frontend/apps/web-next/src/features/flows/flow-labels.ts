@@ -1,5 +1,5 @@
 import type { Schema } from "@/lib/api/models";
-import type { FlowStep } from "./flows-api";
+import type { FlowSparse, FlowStep } from "./flows-api";
 import { stepName, type StepRead } from "./flow-steps";
 
 type Translate = (key: string, values?: Record<string, string | number>) => string;
@@ -87,4 +87,21 @@ export function readLabel(read: StepRead, t: Translate): string {
         ? stepLabel(read.step, t)
         : t("flows_read_step_missing", { order: read.order });
   }
+}
+
+/**
+ * What a flow asks for and what it gives back, in words ("Indata: Ljud ·
+ * Resultat: Word-dokument"), from the fields the list already returns. A flow
+ * that takes typed text or a form has no upload to name, so only its result
+ * is said.
+ */
+export function flowKindLine(
+  flow: Pick<FlowSparse, "input_type" | "output_type">,
+  t: Translate
+): string | null {
+  const parts = [
+    flow.input_type ? t("flows_row_input", { kind: runtimeInputLabel(flow.input_type, t) }) : null,
+    flow.output_type ? t("flows_row_output", { kind: outputTypeLabel(flow.output_type, t) }) : null
+  ].filter((part): part is string => part !== null);
+  return parts.length > 0 ? parts.join(" · ") : null;
 }

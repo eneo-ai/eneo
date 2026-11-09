@@ -11,7 +11,7 @@ import { useTranslations } from "use-intl";
 import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 
 export type ResourceView = "cards" | "list";
-type Surface = "apps" | "assistants" | "spaces";
+type Surface = "apps" | "assistants" | "flows" | "spaces";
 
 /** One best-effort display preference for each resource surface. */
 export function useResourceView(surface: Surface, defaultView: ResourceView) {

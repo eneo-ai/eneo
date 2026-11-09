@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
+import { openMenuOnRelease, tap } from "@/test/menus";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
 import { setViewport } from "@/test/setup-dom";
 import { replaceUrl, router } from "@/test/navigation";
@@ -33,6 +34,7 @@ vi.mock("@/features/spaces/use-space", async () => {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  window.localStorage.clear();
 });
 
 const sparse = (overrides: Partial<FlowSparse>): FlowSparse => {
@@ -94,56 +96,124 @@ const dated = () => [
 
 const search = () => screen.getByLabelText("Sök flöden");
 const NAMES = ["Medborgarbrev", "Mötesprotokoll", "Remissvar"];
-/** The names of the flows shown, in order, in the table or the phone rows. */
+/** The names of the flows shown, in order, on the cards, in the tables or in the phone rows. */
 const shown = () =>
-  screen
-    .queryAllByRole("link")
-    .map((link) => NAMES.find((name) => link.textContent?.startsWith(name)))
-    .filter(Boolean);
+  NAMES.flatMap((name) => {
+    const link = screen.queryByRole("link", { name: new RegExp(`^${name}`) });
+    return link ? [{ name, link }] : [];
+  })
+    .sort((a, b) =>
+      a.link.compareDocumentPosition(b.link) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1
+    )
+    .map(({ name }) => name);
+/** The card (or phone row) of the flow named `name`. */
+const card = (name: string) => screen.getByRole("link", { name }).closest("li")!;
+const chooseList = () => fireEvent.click(screen.getByRole("button", { name: "Lista" }));
+const menuOf = (name: string) => screen.getByRole("button", { name: `Fler åtgärder för ${name}` });
+
+/** Opens a flow's menu and chooses Delete; returns the dialog that asks. */
+async function chooseDelete(name: string) {
+  const menu = await openMenuOnRelease(menuOf(name));
+  tap(within(menu).getByRole("menuitem", { name: "Ta bort" }));
+  return screen.findByRole("alertdialog", { name: `Ta bort ”${name}”?` });
+}
 
 describe("FlowsPage", () => {
-  it("lists the space's flows with their state and links to each", async () => {
-    const { container } = renderPage([
-      sparse({ id: "f1", name: "Medborgarbrev", published_version: 2, step_count: 3 }),
-      sparse({ id: "f2", name: "Remissvar", description: null, step_count: 1 })
-    ]);
-    const table = screen.getByRole("table", { name: "Flöden" });
-    const link = within(table).getByRole("link", { name: "Medborgarbrev" });
-    expect(link.getAttribute("href")).toBe("/spaces/space-1/flows/f1");
-    expect(within(table).getByText("Publicerad, version 2")).toBeTruthy();
-    expect(within(table).getByText("Utkast")).toBeTruthy();
-    expect(within(table).getByText("3 steg")).toBeTruthy();
-    await expectNoAxeViolations(container);
-  });
-
-  it("lists the last changed flow first and says how many there are", async () => {
+  it("shows the flows as cards in a published and a drafts group, each opening its flow", async () => {
     const { container } = renderPage(dated());
-    expect(shown()).toEqual(["Mötesprotokoll", "Remissvar", "Medborgarbrev"]);
-    expect(screen.getByText("3 flöden · sorterade efter senast ändrad")).toBeTruthy();
+    expect(screen.queryByRole("table")).toBeNull();
+    const published = screen.getByRole("region", { name: "Publicerad" });
+    const drafts = screen.getByRole("region", { name: "Utkast" });
+    expect(
+      within(published).getByRole("link", { name: "Medborgarbrev" }).getAttribute("href")
+    ).toBe("/spaces/space-1/flows/letter");
+    expect(within(drafts).getByRole("link", { name: "Mötesprotokoll" })).toBeTruthy();
+    expect(within(drafts).getByRole("link", { name: "Remissvar" })).toBeTruthy();
     await expectNoAxeViolations(container);
   });
 
-  it("says under each name what the flow takes in and gives back, as the phone rows do", () => {
+  it("leaves a group out while it has no flows", () => {
+    renderPage([dated()[1]!]);
+    expect(screen.queryByRole("region", { name: "Publicerad" })).toBeNull();
+    expect(screen.getByRole("region", { name: "Utkast" })).toBeTruthy();
+  });
+
+  it("says on each card what the flow takes in and gives back, its steps, whose it is and when it changed", () => {
     renderPage(dated());
-    const table = screen.getByRole("table", { name: "Flöden" });
-    const cell = within(table).getByRole("link", { name: "Mötesprotokoll" }).parentElement!;
+    const minutes = card("Mötesprotokoll");
+    expect(within(minutes).getByText("Skriver ut mötet.")).toBeTruthy();
+    expect(within(minutes).getByText("Indata: Ljud · Resultat: Word-dokument")).toBeTruthy();
+    expect(within(minutes).getByText("2 steg")).toBeTruthy();
+    // Nobody took it over: it is its creator's.
+    expect(within(minutes).getByText("Ägare: anna.lind")).toBeTruthy();
+    expect(within(minutes).getByText(/^Ändrad .*2026$/)).toBeTruthy();
+    expect(within(card("Medborgarbrev")).getByText("Ägare: Du")).toBeTruthy();
+    expect(within(card("Remissvar")).getByText("Ägare: Okänd")).toBeTruthy();
+  });
+
+  it("puts the last changed flow first, and sorts by name when asked", async () => {
+    renderPage(dated(), ["flows_view"]);
+    expect(shown()).toEqual(["Mötesprotokoll", "Remissvar", "Medborgarbrev"]);
+    const sort = screen.getByRole("button", { name: /^Sortera: Senast ändrad · Fallande/ });
+    const menu = await openMenuOnRelease(sort);
+    tap(within(menu).getByRole("menuitemradio", { name: /^Namn · Stigande/ }));
+    await waitFor(() => expect(shown()).toEqual(["Medborgarbrev", "Mötesprotokoll", "Remissvar"]));
+  });
+
+  it("shows neither groups nor states to those who only run flows, and offers no sort by state", async () => {
+    renderPage(dated(), ["flows_view"]);
+    expect(screen.queryByRole("region")).toBeNull();
+    expect(screen.queryByText("Utkast")).toBeNull();
+    const menu = await openMenuOnRelease(screen.getByRole("button", { name: /^Sortera/ }));
+    expect(within(menu).queryByRole("menuitemradio", { name: /^Status/ })).toBeNull();
+  });
+
+  it("orders the groups by state when sorted by it", async () => {
+    renderPage(dated());
+    const headings = () =>
+      screen.getAllByRole("region").map((region) => region.getAttribute("aria-labelledby"));
+    const before = headings();
+    const menu = await openMenuOnRelease(screen.getByRole("button", { name: /^Sortera/ }));
+    tap(within(menu).getByRole("menuitemradio", { name: /^Status · Fallande/ }));
+    await waitFor(() => expect(headings()).toEqual([...before].reverse()));
+  });
+
+  it("shows a table per group in the list view, with state, steps, owner and last change, and remembers the choice", async () => {
+    const { container } = renderPage(dated());
+    chooseList();
+    expect(screen.getByRole("button", { name: "Lista" }).getAttribute("aria-pressed")).toBe("true");
+    const published = screen.getByRole("table", { name: "Flöden · Publicerad" });
+    const drafts = screen.getByRole("table", { name: "Flöden · Utkast" });
+    expect(within(published).getByText("Publicerad, version 2")).toBeTruthy();
+    expect(within(drafts).getAllByText("Utkast")).toHaveLength(2);
+    const row = (name: string) => screen.getByRole("link", { name }).closest("tr")!;
+    expect(within(row("Mötesprotokoll")).getByText("anna.lind")).toBeTruthy();
+    expect(within(row("Mötesprotokoll")).getByText("2 steg")).toBeTruthy();
+    expect(within(row("Medborgarbrev")).getByText("Du")).toBeTruthy();
+    expect(within(row("Remissvar")).getByText("Okänd")).toBeTruthy();
+    await expectNoAxeViolations(container);
+    expect(window.localStorage.getItem("eneo:resource-view:flows")).toBe("list");
+    cleanup();
+
+    renderPage(dated());
+    expect(screen.getByRole("table", { name: "Flöden · Utkast" })).toBeTruthy();
+  });
+
+  it("says under each name in the table what the flow takes in and gives back", () => {
+    renderPage(dated());
+    chooseList();
+    const cell = screen.getByRole("link", { name: "Mötesprotokoll" }).parentElement!;
     expect(within(cell).getByText("Skriver ut mötet.")).toBeTruthy();
     expect(within(cell).getByText("Indata: Ljud · Resultat: Word-dokument")).toBeTruthy();
     // A flow with nothing to say about its input or result adds no empty line.
-    const bare = within(table).getByRole("link", { name: "Remissvar" }).parentElement!;
+    const bare = screen.getByRole("link", { name: "Remissvar" }).parentElement!;
     expect(bare.children).toHaveLength(1);
   });
 
-  it("fits a 1024 px window with every column, its name pinned on the page's colour", () => {
-    setViewport({ width: 1024, height: 768, pointer: "fine" });
+  it("pins the table's name column on the page's colour", () => {
     renderPage(dated());
-    const table = screen.getByRole("table", { name: "Flöden" });
-    // The delete column is there (every flow here can be deleted): the widest the table gets.
-    expect(within(table).getAllByRole("button", { name: /^Ta bort / })).toHaveLength(3);
-    expect(within(table).getByRole("columnheader", { name: "Steg" })).toBeTruthy();
-    expect(within(table).getByRole("columnheader", { name: "Ägare" })).toBeTruthy();
-    expect(Number.parseFloat(table.style.minWidth)).toBeLessThanOrEqual(770);
-    // A pinned column takes its container's colour; on the page that is the surface.
+    chooseList();
+    const table = screen.getByRole("table", { name: "Flöden · Utkast" });
     expect(
       table.closest('[class*="[--table-sticky-background:var(--color-ax-surface)]"]')
     ).not.toBeNull();
@@ -152,95 +222,39 @@ describe("FlowsPage", () => {
   it.each([
     ["an upright iPad", "tablet-portrait"],
     ["a narrow window", { width: 768, height: 1024, pointer: "fine" }]
-  ] as const)(
-    "moves the steps and owner under the name on %s, keeping delete in reach",
-    (_, size) => {
-      setViewport(size);
-      renderPage(dated());
-      const table = screen.getByRole("table", { name: "Flöden" });
-      expect(within(table).queryByRole("columnheader", { name: "Steg" })).toBeNull();
-      expect(within(table).queryByRole("columnheader", { name: "Ägare" })).toBeNull();
-      expect(within(table).getAllByRole("button", { name: /^Ta bort / })).toHaveLength(3);
-      // Beside the icon rail an upright iPad leaves 682 px (AGENTS.md, Tables), a 768 px window 630.
-      expect(Number.parseFloat(table.style.minWidth)).toBeLessThanOrEqual(630);
-    }
-  );
-
-  it("says a flow's steps and owner in its name's subline when the columns are gone", async () => {
-    setViewport("tablet-portrait");
+  ] as const)("moves the steps and owner under the name in the table on %s", (_, size) => {
+    setViewport(size);
     renderPage(dated());
-    const table = screen.getByRole("table", { name: "Flöden" });
+    chooseList();
+    const table = screen.getByRole("table", { name: "Flöden · Utkast" });
+    expect(within(table).queryByRole("columnheader", { name: "Steg" })).toBeNull();
+    expect(within(table).queryByRole("columnheader", { name: "Ägare" })).toBeNull();
     const cell = within(table).getByRole("link", { name: "Mötesprotokoll" }).parentElement!;
-    expect(within(cell).getByText(/^\d+ steg · Ägare: /)).toBeTruthy();
-  });
-
-  it("says whose each flow is, by the names the space's members go by", async () => {
-    const { container } = renderPage(dated());
-    const table = screen.getByRole("table", { name: "Flöden" });
-    expect(within(table).getByRole("columnheader", { name: "Ägare" })).toBeTruthy();
-    const row = (name: string) => within(table).getByRole("link", { name }).closest("tr")!;
-    // Nobody took it over: it is its creator's.
-    expect(within(row("Mötesprotokoll")).getByText("anna.lind")).toBeTruthy();
-    expect(within(row("Medborgarbrev")).getByText("Du")).toBeTruthy();
-    expect(within(row("Remissvar")).getByText("Okänd")).toBeTruthy();
-    await expectNoAxeViolations(container);
+    expect(within(cell).getByText("2 steg · Ägare: anna.lind")).toBeTruthy();
   });
 
   it("finds a flow by its name, description or what it takes in, and keeps the search in the address", async () => {
     renderPage(dated());
     fireEvent.change(search(), { target: { value: "LJUD" } });
     expect(shown()).toEqual(["Mötesprotokoll"]);
-    expect(screen.getByText("1 flöde · sorterat efter senast ändrad")).toBeTruthy();
     fireEvent.change(search(), { target: { value: "besvarar" } });
     expect(shown()).toEqual(["Medborgarbrev"]);
     await waitFor(() => expect(replaceUrl).toHaveBeenLastCalledWith(`${LIST}?q=besvarar`));
   });
 
-  it("filters published flows and drafts, and keeps the choice in the address", () => {
-    renderPage(dated());
-    fireEvent.click(screen.getByRole("radio", { name: "Utkast" }));
-    expect(replaceUrl).toHaveBeenLastCalledWith(`${LIST}?status=drafts`);
-    expect(shown()).toEqual(["Mötesprotokoll", "Remissvar"]);
-    fireEvent.click(screen.getByRole("radio", { name: "Publicerade" }));
-    expect(shown()).toEqual(["Medborgarbrev"]);
-    fireEvent.click(screen.getByRole("radio", { name: "Alla" }));
-    expect(replaceUrl).toHaveBeenLastCalledWith(LIST);
-    expect(shown()).toHaveLength(3);
-  });
-
-  it("opens with the search and filter the address holds", () => {
-    renderPage(dated(), undefined, `${LIST}?q=protokoll&status=drafts`);
+  it("opens with the search the address holds", () => {
+    renderPage(dated(), undefined, `${LIST}?q=protokoll`);
     expect(search()).toHaveProperty("value", "protokoll");
-    expect(screen.getByRole("radio", { name: "Utkast" }).getAttribute("aria-checked")).toBe("true");
     expect(shown()).toEqual(["Mötesprotokoll"]);
   });
 
-  it("says when no flow matches, then clears the search or shows every state again", async () => {
+  it("says when no flow matches, then clears the search", async () => {
     const { container } = renderPage(dated(), undefined, `${LIST}?q=finns-inte`);
     expect(screen.getByRole("heading", { name: "Inga flöden matchar din sökning" })).toBeTruthy();
     await expectNoAxeViolations(container);
     fireEvent.click(screen.getByRole("button", { name: "Rensa sökningen" }));
     expect(document.activeElement).toBe(search());
     expect(search()).toHaveProperty("value", "");
-    expect(shown()).toHaveLength(3);
-    cleanup();
-
-    renderPage([dated()[1]!], undefined, `${LIST}?status=published`);
-    expect(screen.getByRole("heading", { name: "Inga publicerade flöden än" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Visa alla" }));
-    expect(replaceUrl).toHaveBeenLastCalledWith(LIST);
-    expect(document.activeElement).toBe(screen.getByRole("radio", { name: "Alla" }));
-    expect(shown()).toEqual(["Mötesprotokoll"]);
-    cleanup();
-
-    renderPage([dated()[0]!], undefined, `${LIST}?status=drafts`);
-    expect(screen.getByRole("heading", { name: "Inga utkast just nu" })).toBeTruthy();
-  });
-
-  it("offers the state filter only to those who manage flows, and ignores one in the address for others", () => {
-    renderPage(dated(), ["flows_view"], `${LIST}?status=drafts`);
-    expect(screen.queryByRole("radiogroup")).toBeNull();
-    expect(search()).toBeTruthy();
     expect(shown()).toHaveLength(3);
   });
 
@@ -255,6 +269,7 @@ describe("FlowsPage", () => {
 
   it("offers creating and importing to a role with the old flows grant, which includes managing", () => {
     renderPage([sparse({ id: "f1", name: "Medborgarbrev" })], ["flows"]);
+    expect(screen.getByRole("group", { name: "Flöden, åtgärder" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Nytt flöde" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Importera" })).toBeTruthy();
   });
@@ -289,7 +304,6 @@ describe("FlowsPage", () => {
       }
     });
   });
-
   it("says at the name when the space already has a flow by that name", async () => {
     api.POST.mockResolvedValue({
       error: { code: "flow_name_taken", message: "Taken.", eneo_error_code: 9017 },
@@ -311,18 +325,33 @@ describe("FlowsPage", () => {
     expect(router.push).not.toHaveBeenCalled();
   });
 
-  it("offers deletion only of the flows the core lets the caller delete", () => {
+  it("offers deletion only of the flows the core lets the caller delete", async () => {
     renderPage([
       sparse({ id: "f1", name: "Medborgarbrev" }),
       sparse({ id: "f2", name: "Remissvar", permissions: flowPermissions({ can_delete: false }) })
     ]);
-    expect(screen.getByRole("button", { name: "Ta bort Medborgarbrev" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Ta bort Remissvar" })).toBeNull();
+    expect(menuOf("Medborgarbrev")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Fler åtgärder för Remissvar" })).toBeNull();
     cleanup();
     renderPage([
       sparse({ id: "f2", name: "Remissvar", permissions: flowPermissions({ can_delete: false }) })
     ]);
+    chooseList();
     expect(screen.queryByRole("columnheader", { name: "Åtgärder" })).toBeNull();
+  });
+
+  it("deletes a flow from its menu, says so and refreshes the list", async () => {
+    api.DELETE.mockResolvedValue({ data: null, response: new Response(null, { status: 204 }) });
+    api.GET.mockResolvedValue({ data: [], response: new Response(null, { status: 200 }) });
+    renderPage([sparse({ id: "f1", name: "Medborgarbrev" })]);
+    const dialog = await chooseDelete("Medborgarbrev");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Ta bort" }));
+
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("”Medborgarbrev” togs bort"));
+    expect(api.DELETE).toHaveBeenCalledWith("/api/v1/flows/{id}/", {
+      params: { path: { id: "f1" } }
+    });
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
   });
 
   it("says in words why a deletion was refused, with the trace id to quote to support", async () => {
@@ -331,8 +360,7 @@ describe("FlowsPage", () => {
       response: new Response(null, { status: 403, headers: { "x-trace-id": "trace-1" } })
     });
     renderPage([sparse({ id: "f1", name: "Medborgarbrev" })]);
-    fireEvent.click(screen.getByRole("button", { name: "Ta bort Medborgarbrev" }));
-    const dialog = await screen.findByRole("alertdialog");
+    const dialog = await chooseDelete("Medborgarbrev");
     fireEvent.click(within(dialog).getByRole("button", { name: "Ta bort" }));
 
     await waitFor(() =>
@@ -352,16 +380,14 @@ describe("FlowsPage", () => {
       })
     ]);
 
-    fireEvent.click(screen.getByRole("button", { name: "Ta bort Medborgarbrev" }));
-    const dialog = await screen.findByRole("alertdialog", { name: "Ta bort ”Medborgarbrev”?" });
+    const dialog = await chooseDelete("Medborgarbrev");
     expect(
       within(dialog).getByText(new RegExp(messages.flow_delete_evidence_export_off))
     ).toBeTruthy();
     fireEvent.click(within(dialog).getByRole("button", { name: "Avbryt" }));
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
 
-    fireEvent.click(screen.getByRole("button", { name: "Ta bort Remissvar" }));
-    const allowed = await screen.findByRole("alertdialog", { name: "Ta bort ”Remissvar”?" });
+    const allowed = await chooseDelete("Remissvar");
     expect(within(allowed).getByText(messages.flows_delete_description)).toBeTruthy();
     expect(
       within(allowed).queryByText(new RegExp(messages.flow_delete_evidence_export_off))
@@ -389,23 +415,27 @@ describe("FlowsPage on a phone", () => {
       permissions: flowPermissions({ can_delete: true })
     })
   ];
+  /** Seven flows: enough for a phone to show the search. */
+  const many = () =>
+    Array.from({ length: 7 }, (_, index) =>
+      sparse({ id: `f${index}`, name: `Flöde ${index + 1}`, description: null })
+    );
 
   it("lists the flows as rows that say what they take and give", async () => {
     setViewport("phone");
-    const { container } = renderPage(flows());
+    const { container } = renderPage(flows(), ["flows_view"]);
     expect(screen.queryByRole("table")).toBeNull();
-    const list = screen.getByRole("list", { name: "Flöden" });
-    const rows = within(list).getAllByRole("listitem");
-    expect(rows).toHaveLength(2);
+    const row = (name: string) => screen.getByRole("link", { name: new RegExp(name) });
+    expect(row("Mötesprotokoll").getAttribute("href")).toBe("/spaces/space-1/flows/f1");
+    const first = row("Mötesprotokoll").closest("li")!;
+    expect(within(first).getByText("Skriver ut mötet och gör ett protokoll.")).toBeTruthy();
     expect(
-      within(rows[0]!)
-        .getByRole("link", { name: /Mötesprotokoll/ })
-        .getAttribute("href")
-    ).toBe("/spaces/space-1/flows/f1");
-    expect(within(rows[0]!).getByText("Skriver ut mötet och gör ett protokoll.")).toBeTruthy();
-    expect(within(rows[0]!).getByText("Indata: Ljud · Resultat: Word-dokument")).toBeTruthy();
+      within(first).getByText(/^Indata: Ljud · Resultat: Word-dokument · 2 steg/)
+    ).toBeTruthy();
     // Typed text or a form has no upload to name: only the result is said.
-    expect(within(rows[1]!).getByText("Resultat: Text")).toBeTruthy();
+    expect(
+      within(row("Svar på ärende").closest("li")!).getByText(/^Resultat: Text · /)
+    ).toBeTruthy();
     await expectNoAxeViolations(container);
   });
 
@@ -414,10 +444,10 @@ describe("FlowsPage on a phone", () => {
     renderPage(flows());
     expect(screen.queryByRole("button", { name: "Nytt flöde" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Importera" })).toBeNull();
-    expect(screen.queryByRole("button", { name: /Ta bort/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Fler åtgärder/ })).toBeNull();
     expect(screen.getByText("Skapa och redigera flöden görs på dator.")).toBeTruthy();
-    // The state is for those who manage flows.
-    expect(within(screen.getByRole("list", { name: "Flöden" })).getByText("Utkast")).toBeTruthy();
+    // The groups are for those who manage flows.
+    expect(screen.getByRole("region", { name: "Utkast" })).toBeTruthy();
     cleanup();
     renderPage(flows(), ["flows_view"]);
     expect(screen.queryByText("Skapa och redigera flöden görs på dator.")).toBeNull();
@@ -431,48 +461,52 @@ describe("FlowsPage on a phone", () => {
     expect(screen.queryByRole("button", { name: "Nytt flöde" })).toBeNull();
   });
 
-  it("lets a long flow name wrap instead of cutting it to one line", () => {
-    setViewport("phone");
-    const name =
-      "Sammanfattning av nämndens långa protokoll med bilagor till samtliga förvaltningar";
-    renderPage([sparse({ id: "f9", name })]);
-    // Astryx truncates a plain string label to one line; a node label is ours to wrap.
-    expect(screen.getByText(name).className).toContain("break-words");
-  });
-
   it("stays rows, with nothing to create, when the phone is held sideways", () => {
-    setViewport({ width: 844, height: 390, pointer: "coarse" });
+    setViewport("phone-landscape");
     renderPage(flows());
     expect(screen.queryByRole("table")).toBeNull();
-    expect(screen.getByRole("list", { name: "Flöden" })).toBeTruthy();
+    // Rows in a list, not cards in a grid.
+    const list = screen.getByRole("link", { name: /Mötesprotokoll/ }).closest("ul")!;
+    expect(list.className).not.toContain("grid");
     expect(screen.queryByRole("button", { name: "Nytt flöde" })).toBeNull();
   });
 
-  it("searches and filters the rows too, and keeps both across a turn to the tablet layout", async () => {
+  it("leaves the search out while there are few flows, and offers it with many", () => {
     setViewport("phone");
-    const { container } = renderPage(dated());
-    const field = search();
-    fireEvent.change(field, { target: { value: "r" } });
-    fireEvent.click(screen.getByRole("radio", { name: "Utkast" }));
-    expect(screen.getByRole("list", { name: "Flöden" })).toBeTruthy();
-    expect(shown()).toEqual(["Mötesprotokoll", "Remissvar"]);
-    await expectNoAxeViolations(container);
-
-    field.focus();
-    setViewport("tablet-portrait");
-    await waitFor(() => expect(screen.getByRole("table", { name: "Flöden" })).toBeTruthy());
-    expect(search()).toBe(field);
-    expect(document.activeElement).toBe(field);
-    expect(field).toHaveProperty("value", "r");
-    expect(screen.getByRole("radio", { name: "Utkast" }).getAttribute("aria-checked")).toBe("true");
-    expect(shown()).toEqual(["Mötesprotokoll", "Remissvar"]);
+    renderPage(flows());
+    expect(screen.queryByLabelText("Sök flöden")).toBeNull();
+    cleanup();
+    renderPage(many());
+    expect(search()).toBeTruthy();
   });
 
-  it("keeps the table on a tablet", () => {
+  it("keeps a search being typed across a turn to the tablet layout", async () => {
+    setViewport("phone");
+    renderPage(many());
+    const field = search();
+    fireEvent.change(field, { target: { value: "Flöde 3" } });
+    expect(screen.getAllByRole("link").map((link) => link.textContent)).toEqual([
+      expect.stringContaining("Flöde 3")
+    ]);
+
+    field.focus();
+    act(() => setViewport("tablet-portrait"));
+    expect(search()).toBe(field);
+    expect(document.activeElement).toBe(field);
+    expect(field).toHaveProperty("value", "Flöde 3");
+    await waitFor(() =>
+      expect(screen.getByRole("link", { name: "Flöde 3" }).getAttribute("href")).toBe(
+        "/spaces/space-1/flows/f2"
+      )
+    );
+  });
+
+  it("shows cards and offers creating on a tablet", () => {
     setViewport("tablet-portrait");
     renderPage(flows());
-    expect(screen.getByRole("table", { name: "Flöden" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Mötesprotokoll" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Nytt flöde" })).toBeTruthy();
+    expect(screen.queryByText("Skapa och redigera flöden görs på dator.")).toBeNull();
   });
 
   it("keeps create, import and delete available in a narrow mouse-driven desktop window", () => {
@@ -480,7 +514,7 @@ describe("FlowsPage on a phone", () => {
     renderPage(flows());
     expect(screen.getByRole("button", { name: "Nytt flöde" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Importera" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Ta bort.*Svar på ärende/ })).toBeTruthy();
+    expect(menuOf("Svar på ärende")).toBeTruthy();
     expect(screen.queryByText("Skapa och redigera flöden görs på dator.")).toBeNull();
   });
 });

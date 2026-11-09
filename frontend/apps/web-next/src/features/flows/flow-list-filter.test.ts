@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FlowSparse } from "./flows-api";
-import { flowChangedAt, flowOwner, visibleFlows } from "./flow-list-filter";
+import { flowChangedAt, flowOwner, matchingFlows } from "./flow-list-filter";
 
 function flow(overrides: Partial<FlowSparse>): FlowSparse {
   return {
@@ -14,31 +14,24 @@ function flow(overrides: Partial<FlowSparse>): FlowSparse {
   } as FlowSparse;
 }
 
-const all = { query: "", status: "all" } as const;
-const noSubtitle = () => null;
 const ids = (flows: FlowSparse[]) => flows.map((item) => item.id);
 
-describe("visibleFlows", () => {
-  it("shows the last changed flow first, a never changed one by its creation and one without dates last", () => {
-    const flows = [
-      flow({ id: "undated" }),
-      flow({ id: "old", updated_at: "2026-08-04T13:40:00Z" }),
-      flow({ id: "created", created_at: "2026-08-10T09:00:00Z" }),
-      flow({ id: "new", updated_at: "2026-08-16T09:52:00Z", created_at: "2026-01-01T00:00:00Z" }),
-      flow({ id: "garbled", updated_at: "not a date" })
-    ];
-    expect(ids(visibleFlows(flows, all, noSubtitle))).toEqual([
-      "new",
-      "created",
-      "old",
-      "undated",
-      "garbled"
-    ]);
-    // The list it was given keeps its order.
-    expect(flows[0]?.id).toBe("undated");
+describe("flowChangedAt", () => {
+  it("dates a flow by its last change, a never changed one by its creation and one without dates as 0", () => {
+    expect(
+      flowChangedAt(
+        flow({ updated_at: "2026-08-16T09:52:00Z", created_at: "2026-01-01T00:00:00Z" })
+      )
+    ).toBe(Date.parse("2026-08-16T09:52:00Z"));
+    expect(flowChangedAt(flow({ created_at: "2026-08-10T09:00:00Z" }))).toBe(
+      Date.parse("2026-08-10T09:00:00Z")
+    );
+    expect(flowChangedAt(flow({}))).toBe(0);
     expect(flowChangedAt(flow({ updated_at: "not a date" }))).toBe(0);
   });
+});
 
+describe("matchingFlows", () => {
   it("keeps a flow findable by its description and by what it takes in and gives back, in any case", () => {
     const flows = [
       flow({
@@ -49,31 +42,12 @@ describe("visibleFlows", () => {
       flow({ id: "audio", name: "Mötesprotokoll", input_type: "audio" })
     ];
     const subtitle = (item: FlowSparse) => (item.input_type === "audio" ? "Indata: Ljud" : null);
-    expect(ids(visibleFlows(flows, { query: "REMISS", status: "all" }, subtitle))).toEqual([
-      "letter"
-    ]);
-    expect(ids(visibleFlows(flows, { query: "ljud", status: "all" }, subtitle))).toEqual(["audio"]);
-    expect(ids(visibleFlows(flows, { query: "  medborgar  ", status: "all" }, subtitle))).toEqual([
-      "letter"
-    ]);
-    expect(visibleFlows(flows, { query: "finns inte", status: "all" }, subtitle)).toEqual([]);
-    expect(visibleFlows(flows, { query: "   ", status: "all" }, subtitle)).toHaveLength(2);
-  });
-
-  it("filters published flows and drafts separately, then by the query", () => {
-    const flows = [
-      flow({ id: "published", name: "Publicerat flöde", published_version: 1 }),
-      flow({ id: "draft", name: "Utkastflöde", description: "Läs remissvaren" }),
-      flow({ id: "first", name: "Första versionen", published_version: 0 })
-    ];
-    expect(ids(visibleFlows(flows, { query: "", status: "published" }, noSubtitle))).toEqual([
-      "published",
-      "first"
-    ]);
-    expect(ids(visibleFlows(flows, { query: "", status: "drafts" }, noSubtitle))).toEqual([
-      "draft"
-    ]);
-    expect(visibleFlows(flows, { query: "remiss", status: "published" }, noSubtitle)).toEqual([]);
+    expect(ids(matchingFlows(flows, "REMISS", subtitle))).toEqual(["letter"]);
+    expect(ids(matchingFlows(flows, "ljud", subtitle))).toEqual(["audio"]);
+    expect(ids(matchingFlows(flows, "  medborgar  ", subtitle))).toEqual(["letter"]);
+    expect(matchingFlows(flows, "finns inte", subtitle)).toEqual([]);
+    // An empty query keeps every flow, in the order given.
+    expect(ids(matchingFlows(flows, "   ", subtitle))).toEqual(["letter", "audio"]);
   });
 });
 

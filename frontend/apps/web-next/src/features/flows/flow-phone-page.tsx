@@ -10,7 +10,7 @@ import { browserApi } from "@/lib/api/browser";
 import { useSpace } from "@/features/spaces/use-space";
 import { flowQueryOptions } from "./flows-api";
 import { SettingsSummary } from "./flow-settings";
-import { flowKindLine } from "./flows-rows";
+import { flowKindLine } from "./flow-labels";
 import { FlowRunsList } from "./runs/runs-list";
 
 /**

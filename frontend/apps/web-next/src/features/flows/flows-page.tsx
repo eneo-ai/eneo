@@ -1,102 +1,130 @@
-import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Button } from "@astryxdesign/core/Button";
-import { IconButton } from "@astryxdesign/core/IconButton";
-import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
-import { pixel, proportional, type TableColumn } from "@astryxdesign/core/Table";
+import { useCollator } from "@astryxdesign/core/i18n";
+import {
+  pixel,
+  proportional,
+  useTableSortable,
+  useTableSortableState,
+  type TableColumn,
+  type TableSortComparator,
+  type TableSortState
+} from "@astryxdesign/core/Table";
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { useMediaQuery } from "@astryxdesign/core/hooks";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, SearchX, Trash2, Upload, Workflow } from "lucide-react";
-import Link from "@/lib/link";
-import { replaceUrl, usePathname, useSearchParams } from "@/lib/navigation";
+import { useQuery } from "@tanstack/react-query";
+import { Plus, SearchX, Upload, Workflow } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Table } from "@/components/astryx/table";
 import { ClientTime } from "@/components/composites/client-time";
 import { EmptyState } from "@/components/composites/empty-state";
 import { PageHeader } from "@/components/composites/page-header";
 import { QueryStateBoundary } from "@/components/composites/query-state";
+import { ResourceGroup } from "@/components/composites/resource-group";
+import { ResourceCollection } from "@/components/composites/resource-tile";
+import { StatusLabel } from "@/components/composites/status-label";
 import { useAppContext } from "@/components/providers/app-context";
-import { useAnnounceChange } from "@/lib/hooks/use-announce-change";
-import { HANDHELD_QUERY, MOBILE_QUERY } from "@/lib/hooks/use-media-match";
-import { useSearchDraft } from "@/lib/hooks/use-search-draft";
+import { DockedActions } from "@/components/shell/docked-actions";
 import { browserApi } from "@/lib/api/browser";
-import { toastApiError } from "@/lib/api/toast";
-import { toast } from "@/lib/toast";
+import { HANDHELD_QUERY, MOBILE_QUERY, usePhoneScreen } from "@/lib/hooks/use-media-match";
+import { useSearchDraft } from "@/lib/hooks/use-search-draft";
+import Link from "@/lib/link";
+import { replaceUrl, usePathname, useSearchParams } from "@/lib/navigation";
 import { useSectionHeadingLevels } from "@/features/spaces/frame/space-frame";
-import { useRemovalMutation } from "@/features/spaces/removal";
-import { ResourceFilterInput } from "@/features/spaces/resource-filter-input";
+import { RemovalFocusScope } from "@/features/spaces/removal";
+import { ResourceFilterInput, useFilterShown } from "@/features/spaces/resource-filter-input";
+import { ResourceViewControls, useResourceView } from "@/features/spaces/resource-view";
 import { useSpace } from "@/features/spaces/use-space";
-import { deleteFlow, flowKeys, flowsListQueryOptions, type FlowSparse } from "./flows-api";
-import { evidenceExportAllowed } from "./flow-form-fields";
-import {
-  FLOW_LIST_STATUSES,
-  flowOwner,
-  visibleFlows,
-  type FlowListStatus
-} from "./flow-list-filter";
+import { FlowActionScope, FlowActions } from "./actions";
+import { flowsListQueryOptions, type FlowSparse } from "./flows-api";
+import { flowKindLine } from "./flow-labels";
+import { flowChangedAt, flowOwner, matchingFlows } from "./flow-list-filter";
 import { FlowPackageImportDialog } from "./flow-package-import-dialog";
-import { flowRefusalMessage } from "./flow-refusals";
 import { flowListHref, parseFlowListSearch } from "./flow-search";
-import { FlowRows, flowKindLine } from "./flows-rows";
-import { FlowStatusBadge } from "./flow-status";
 import { NewFlowDialog } from "./new-flow-dialog";
+import { FlowTile } from "./tile";
+
+type SortKey = "updated" | "name" | "status";
+
+const DEFAULT_SORT: TableSortState<SortKey> = [{ sortKey: "updated", direction: "descending" }];
 
 /**
- * A space's flows, the last changed first: name and description, what each
- * takes in and gives back, whether it is published, how many steps it has,
- * whose it is and when it last changed. A search and (for those who manage
- * flows) a state filter narrow the list; both live in the address. "Nytt
- * flöde" creates an empty draft and opens it; a flow is built on its own page,
- * by hand or in its chat. A flow's own controls follow what the core says the
- * caller may do with it.
+ * A space's flows, as cards or a table, the last changed first: name and
+ * description, what each takes in and gives back, whether it is published,
+ * how many steps it has, whose it is and when it last changed. Those who
+ * manage flows see them in two groups, published and drafts; others see the
+ * published ones only. The search lives in the address. "Nytt flöde" creates
+ * an empty draft and opens it; a flow is built on its own page, by hand or in
+ * its chat. A flow's menu follows what the core says the caller may do with it.
  */
 export function FlowsPage() {
   const levels = useSectionHeadingLevels();
   const t = useTranslations();
   const { space, routeId } = useSpace();
   const { can, user } = useAppContext();
-  const queryClient = useQueryClient();
+  const collator = useCollator();
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
-  const allStatesRef = useRef<HTMLButtonElement>(null);
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<FlowSparse | null>(null);
   const flows = useQuery(flowsListQueryOptions(browserApi, space.id));
+  // Others see published flows only, so only those who manage flows see the state, by which
+  // the flows are grouped and can be sorted.
   const canManage = can("flows_manage");
-  // A phone runs and reviews flows; building one (many settings, prompts and
+  // On a phone the title is for screen readers only (the space's active tab names the page), so
+  // focus that a removal or an action needs to put somewhere goes to the visible page instead.
+  const phone = usePhoneScreen();
+  const focusTarget = phone ? panelRef : headingRef;
+  // A phone in a hand runs and reviews flows; building one (many settings, prompts and
   // steps) is for a computer, so nothing here offers to.
-  const phone = useMediaQuery(HANDHELD_QUERY);
+  const handheld = useMediaQuery(HANDHELD_QUERY);
   // Below `lg` the table has no room for every column: the steps and the owner go under the name.
   const compact = useMediaQuery(MOBILE_QUERY);
-  const base = `/spaces/${routeId}/flows`;
 
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const view = parseFlowListSearch({
-    q: searchParams.get("q"),
-    status: searchParams.get("status")
-  });
+  const addressQuery = parseFlowListSearch({ q: searchParams.get("q") }).q ?? "";
   // The list follows each key; the address follows once typing pauses.
-  const { draft, setDraft, settled } = useSearchDraft(view.q ?? "");
-  // Others see published flows only, so only those who manage flows filter by state.
-  const status: FlowListStatus = canManage ? (view.status ?? "all") : "all";
-  const kindLine = (flow: FlowSparse) => flowKindLine(flow, t);
-  const shown = visibleFlows(flows.data ?? [], { query: draft, status }, kindLine);
-  const count = t("flow_list_count", { count: shown.length });
-  // The search field announces its own matches; a change of state is said here.
-  useAnnounceChange(count, status);
-
+  const { draft, setDraft, settled } = useSearchDraft(addressQuery);
   useEffect(() => {
-    if (settled !== (view.q ?? "")) {
+    if (settled !== addressQuery) {
       replaceUrl(flowListHref(pathname, searchParams, { q: settled }));
     }
-  }, [settled, view.q, pathname, searchParams]);
+  }, [settled, addressQuery, pathname, searchParams]);
 
-  function showState(next: FlowListStatus) {
-    replaceUrl(flowListHref(pathname, searchParams, { status: next }));
-  }
+  const items = useMemo(() => flows.data ?? [], [flows.data]);
+  const filterShown = useFilterShown(items.length);
+  const query = filterShown ? draft : "";
+  const matched = useMemo(
+    () => matchingFlows(items, query, (flow) => flowKindLine(flow, t)),
+    [items, query, t]
+  );
+  const { view, chooseView } = useResourceView("flows", "cards");
+  const [sort, setSort] = useState(DEFAULT_SORT);
+  const comparePublished = useCallback(
+    (a: boolean, b: boolean) =>
+      collator.compare(t(a ? "published" : "draft"), t(b ? "published" : "draft")),
+    [collator, t]
+  );
+  const comparators = useMemo<Record<SortKey, TableSortComparator<FlowSparse>>>(
+    () => ({
+      updated: (a, b) => flowChangedAt(a) - flowChangedAt(b),
+      name: (a, b) => collator.compare(a.name, b.name),
+      status: (a, b) => comparePublished(a.published_version != null, b.published_version != null)
+    }),
+    [collator, comparePublished]
+  );
+  const { sortedData: shown, sortConfig } = useTableSortableState<FlowSparse, SortKey>({
+    data: matched,
+    comparators,
+    // As the filter: a list too short for the control keeps no order it cannot change.
+    sort: filterShown ? sort : DEFAULT_SORT,
+    onSortChange: setSort,
+    allowUnsortedState: false
+  });
+  const sortPlugin = useTableSortable<FlowSparse, SortKey>(sortConfig);
+  const hasActions = !handheld && items.some((flow) => flow.permissions.can_delete);
 
   function ownerLabel(flow: FlowSparse): string | null {
     const owner = flowOwner(flow, user.id, space.members.items);
@@ -105,21 +133,9 @@ export function FlowsPage() {
     return owner.kind === "you" ? t("flow_list_owner_you") : t("flow_list_owner_unknown");
   }
 
-  const remove = useRemovalMutation({
-    mutationFn: (flow: FlowSparse) => deleteFlow(flow.id),
-    refresh: () => queryClient.invalidateQueries({ queryKey: flowKeys.list(space.id) }),
-    onRemoved: (_data, flow) => {
-      setDeleteTarget(null);
-      toast.success(t("flows_deleted", { name: flow.name }));
-    },
-    // A refusal (one the flags did not foresee, such as a 403) says why in words.
-    onError: (error) => toastApiError(error, t, { message: flowRefusalMessage(error, [], t) }),
-    focusTarget: headingRef
-  });
-
-  const createButton =
-    canManage && !phone ? (
-      <div className="flex flex-wrap items-center gap-2">
+  const createActions =
+    canManage && !handheld ? (
+      <>
         <Button
           label={t("flow_editor_tools_package_import")}
           icon={<Upload aria-hidden="true" />}
@@ -131,22 +147,23 @@ export function FlowsPage() {
           icon={<Plus aria-hidden="true" />}
           onClick={() => setCreating(true)}
         />
-      </div>
-    ) : undefined;
+      </>
+    ) : null;
 
   const columns: TableColumn<FlowSparse>[] = [
     {
       key: "name",
       header: t("name"),
       width: proportional(3),
+      sortable: true,
       renderCell: (flow) => {
-        const kind = kindLine(flow);
+        const kind = flowKindLine(flow, t);
         const owner = ownerLabel(flow);
         const steps = t("flows_step_count", { count: flow.step_count });
         return (
           <span className="flex min-w-0 flex-col gap-0.5 py-1">
             <Link
-              href={`${base}/${flow.id}`}
+              href={`/spaces/${routeId}/flows/${flow.id}`}
               className="text-ax-text focus-visible:outline-ring rounded-ax-inner inline-flex min-h-6 w-fit items-center font-semibold break-words hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11"
             >
               {flow.name}
@@ -164,12 +181,26 @@ export function FlowsPage() {
         );
       }
     },
-    {
-      key: "status",
-      header: t("status"),
-      width: pixel(170),
-      renderCell: (flow) => <FlowStatusBadge publishedVersion={flow.published_version} />
-    },
+    ...(canManage
+      ? [
+          {
+            key: "status",
+            header: t("status"),
+            width: pixel(190),
+            sortable: true,
+            renderCell: (flow: FlowSparse) => (
+              <StatusLabel
+                status={flow.published_version != null ? "success" : "neutral"}
+                label={
+                  flow.published_version != null
+                    ? t("flows_status_published", { version: flow.published_version })
+                    : t("flows_status_draft")
+                }
+              />
+            )
+          }
+        ]
+      : []),
     ...(compact
       ? []
       : [
@@ -191,166 +222,163 @@ export function FlowsPage() {
     {
       key: "updated",
       header: t("flows_updated"),
-      width: pixel(160),
+      width: pixel(170),
+      sortable: true,
       // The date the list sorts by: a flow never changed since it was created shows when that was.
       renderCell: (flow) => {
         const changed = flow.updated_at ?? flow.created_at;
         return changed ? <ClientTime value={changed} format="auto" /> : "—";
       }
     },
-    ...((flows.data ?? []).some((flow) => flow.permissions.can_delete)
+    ...(hasActions
       ? [
           {
             key: "actions",
             header: <VisuallyHidden>{t("actions")}</VisuallyHidden>,
-            width: pixel(72),
-            align: "end" as const,
-            renderCell: (flow: FlowSparse) =>
-              flow.permissions.can_delete ? (
-                <IconButton
-                  label={t("flows_delete_named", { name: flow.name })}
-                  icon={<Trash2 aria-hidden="true" />}
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setDeleteTarget(flow)}
-                />
-              ) : null
+            width: pixel(64),
+            renderCell: (flow: FlowSparse) => <FlowActions flow={flow} />
           }
         ]
       : [])
   ];
 
+  const collection = (members: FlowSparse[], title: string) => (
+    <ResourceCollection
+      desktopList={
+        view === "list" ? (
+          <Table
+            data={members}
+            columns={columns}
+            idKey="id"
+            aria-label={title}
+            pinnedColumn="name"
+            plugins={{ sort: sortPlugin }}
+            className="[--table-sticky-background:var(--color-ax-surface)]"
+          />
+        ) : undefined
+      }
+    >
+      {members.map((flow) => (
+        <FlowTile key={flow.id} flow={flow} owner={ownerLabel(flow)} />
+      ))}
+    </ResourceCollection>
+  );
+  const groups = [true, false].map((published) => ({
+    published,
+    title: t(published ? "published" : "drafts"),
+    members: shown.filter((flow) => (flow.published_version != null) === published)
+  }));
+  if (sortConfig.sort[0]?.sortKey === "status") {
+    const direction = sortConfig.sort[0].direction === "ascending" ? 1 : -1;
+    groups.sort((a, b) => comparePublished(a.published, b.published) * direction);
+  }
+
   return (
-    <div className="flex w-full flex-col gap-6">
-      <PageHeader
-        headingLevel={levels.title}
-        headingRef={headingRef}
-        title={t("flows")}
-        description={t("flows_list_description")}
-        actions={createButton}
-      />
-      <QueryStateBoundary query={flows} rows={3}>
-        {(items) =>
-          items.length === 0 ? (
-            <EmptyState
-              icon={<Workflow />}
-              hue="purple"
-              headingLevel={levels.sub}
-              title={t("flows_empty_title")}
-              description={t("flows_empty_description")}
-              actions={createButton}
-            />
-          ) : (
-            // One set of controls above both layouts, so a search being typed
-            // and the chosen state survive a turn across the breakpoint.
-            <div className="flex flex-col gap-4">
-              <div className="flex flex-col gap-3 md:flex-row md:flex-wrap md:items-center">
-                <ResourceFilterInput
-                  value={draft}
-                  onChange={setDraft}
-                  label={t("flow_list_search_aria")}
-                  placeholder={t("flow_list_search_placeholder")}
-                  resultCount={shown.length}
-                  inputRef={searchRef}
-                  className="md:w-80"
+    <RemovalFocusScope target={focusTarget}>
+      <FlowActionScope focusTarget={focusTarget}>
+        <div
+          ref={panelRef}
+          tabIndex={-1}
+          className="focus-visible:outline-ring rounded-ax-element flex w-full flex-col gap-6 focus-visible:outline-2 focus-visible:outline-offset-4"
+        >
+          <PageHeader
+            headingLevel={levels.title}
+            headingRef={headingRef}
+            title={t("flows")}
+            description={t("flows_list_description")}
+            isTitleHiddenOnPhone
+            actions={
+              createActions ? (
+                <DockedActions label={t("space_flows_actions")}>{createActions}</DockedActions>
+              ) : undefined
+            }
+          />
+          <QueryStateBoundary query={flows} rows={3}>
+            {() =>
+              items.length === 0 ? (
+                <EmptyState
+                  icon={<Workflow />}
+                  hue="purple"
+                  headingLevel={levels.sub}
+                  title={t("flows_empty_title")}
+                  description={t("flows_empty_description")}
+                  actions={
+                    createActions ? (
+                      <div className="flex flex-wrap items-center gap-2">{createActions}</div>
+                    ) : undefined
+                  }
                 />
-                {canManage ? (
-                  <SegmentedControl
-                    label={t("flow_list_filter_aria")}
-                    value={status}
-                    onChange={(next) => showState(next as FlowListStatus)}
-                  >
-                    {FLOW_LIST_STATUSES.map((option) => (
-                      <SegmentedControlItem
-                        key={option}
-                        ref={option === "all" ? allStatesRef : undefined}
-                        value={option}
-                        label={t(`flow_list_filter_${option}`)}
-                      />
-                    ))}
-                  </SegmentedControl>
-                ) : null}
-                <p className="text-ax-text-secondary text-sm md:ms-auto">{count}</p>
-              </div>
-              {shown.length === 0 ? (
-                draft.trim() ? (
-                  <EmptyState
-                    icon={<SearchX />}
-                    headingLevel={levels.sub}
-                    isCompact
-                    title={t("flow_list_no_match_title")}
-                    actions={
-                      <Button
-                        label={t("flow_list_clear_search")}
-                        onClick={() => {
-                          setDraft("");
-                          searchRef.current?.focus();
-                        }}
-                      />
-                    }
-                  />
-                ) : (
-                  <EmptyState
-                    icon={<SearchX />}
-                    headingLevel={levels.sub}
-                    isCompact
-                    title={
-                      status === "published"
-                        ? t("flow_list_no_published_title")
-                        : t("flow_list_no_drafts_title")
-                    }
-                    actions={
-                      <Button
-                        label={t("flow_list_show_all")}
-                        onClick={() => {
-                          showState("all");
-                          allStatesRef.current?.focus();
-                        }}
-                      />
-                    }
-                  />
-                )
-              ) : phone ? (
-                <FlowRows flows={shown} base={base} showStatus={canManage} />
               ) : (
-                <Table
-                  data={shown}
-                  columns={columns}
-                  idKey="id"
-                  aria-label={t("flows")}
-                  pinnedColumn="name"
-                  className="[--table-sticky-background:var(--color-ax-surface)]"
-                />
-              )}
-            </div>
-          )
-        }
-      </QueryStateBoundary>
-      {phone && canManage ? (
-        <p className="text-ax-text-secondary -mt-2 text-sm">{t("flows_create_on_desktop")}</p>
-      ) : null}
-      <NewFlowDialog open={creating} onOpenChange={setCreating} />
-      {canManage ? <FlowPackageImportDialog open={importing} onOpenChange={setImporting} /> : null}
-      <AlertDialog
-        isOpen={deleteTarget !== null}
-        onOpenChange={(open) => {
-          if (!open && !remove.isPending) setDeleteTarget(null);
-        }}
-        title={t("flows_delete_title", { name: deleteTarget?.name ?? "" })}
-        description={
-          // A deleted flow can no longer be changed, so its runs' evidence
-          // could then never be downloaded: say so before it is too late.
-          deleteTarget && !evidenceExportAllowed(deleteTarget.metadata_json)
-            ? `${t("flows_delete_description")} ${t("flow_delete_evidence_export_off")}`
-            : t("flows_delete_description")
-        }
-        actionLabel={t("delete")}
-        cancelLabel={t("cancel")}
-        isActionLoading={remove.isPending}
-        onAction={() => {
-          if (deleteTarget && !remove.isPending) remove.mutate(deleteTarget);
-        }}
-      />
-    </div>
+                <>
+                  {filterShown ? (
+                    <div className="phone:flex-nowrap flex flex-wrap items-center justify-between gap-3">
+                      <ResourceFilterInput
+                        className="phone:flex-1"
+                        value={draft}
+                        onChange={setDraft}
+                        label={t("flow_list_search_aria")}
+                        placeholder={t("flow_list_search_placeholder")}
+                        resultCount={shown.length}
+                        inputRef={searchRef}
+                      />
+                      <ResourceViewControls
+                        view={view}
+                        onViewChange={chooseView}
+                        sortConfig={sortConfig}
+                        options={[
+                          { key: "updated", label: t("flows_updated") },
+                          { key: "name", label: t("name") },
+                          ...(canManage ? [{ key: "status" as const, label: t("status") }] : [])
+                        ]}
+                      />
+                    </div>
+                  ) : null}
+                  {shown.length === 0 ? (
+                    <EmptyState
+                      isAnnounced={false}
+                      icon={<SearchX />}
+                      headingLevel={levels.sub}
+                      isCompact
+                      title={t("flow_list_no_match_title")}
+                      actions={
+                        <Button
+                          label={t("flow_list_clear_search")}
+                          onClick={() => {
+                            setDraft("");
+                            searchRef.current?.focus();
+                          }}
+                        />
+                      }
+                    />
+                  ) : canManage ? (
+                    <div className="flex flex-col gap-6">
+                      {groups.map((group) => (
+                        <ResourceGroup
+                          key={String(group.published)}
+                          title={group.title}
+                          headingLevel={levels.sub}
+                          hidden={group.members.length === 0}
+                        >
+                          {collection(group.members, `${t("flows")} · ${group.title}`)}
+                        </ResourceGroup>
+                      ))}
+                    </div>
+                  ) : (
+                    collection(shown, t("flows"))
+                  )}
+                </>
+              )
+            }
+          </QueryStateBoundary>
+          {handheld && canManage ? (
+            <p className="text-ax-text-secondary -mt-2 text-sm">{t("flows_create_on_desktop")}</p>
+          ) : null}
+        </div>
+        <NewFlowDialog open={creating} onOpenChange={setCreating} />
+        {canManage ? (
+          <FlowPackageImportDialog open={importing} onOpenChange={setImporting} />
+        ) : null}
+      </FlowActionScope>
+    </RemovalFocusScope>
   );
 }
