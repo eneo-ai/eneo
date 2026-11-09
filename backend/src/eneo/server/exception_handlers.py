@@ -77,6 +77,7 @@ from eneo.object_content.object_store_connection import (
     ObjectStoreProbeCleanupFailed,
     ObjectStoreProbeConnectionFailed,
     ObjectStoreProbeIntegrityFailed,
+    ObjectStoreProbeKeepsVersions,
     ObjectStoreProbeTlsFailed,
     ObjectStoreProbeUnavailable,
 )
@@ -370,6 +371,7 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
     ObjectStoreProbeTlsFailed: (400, None, ErrorCodes.BAD_REQUEST),
     ObjectStoreProbeBindingMismatch: (409, None, ErrorCodes.BAD_REQUEST),
     ObjectStoreProbeIntegrityFailed: (400, None, ErrorCodes.BAD_REQUEST),
+    ObjectStoreProbeKeepsVersions: (400, None, ErrorCodes.BAD_REQUEST),
     ObjectStoreProbeCleanupFailed: (503, None, ErrorCodes.RESOURCE_NOT_READY),
     ObjectStoreProbeConnectionFailed: (
         503,

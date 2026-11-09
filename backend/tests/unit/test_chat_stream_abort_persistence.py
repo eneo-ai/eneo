@@ -71,7 +71,7 @@ def _make_session_service(*, question_id: UUID | None = None) -> SessionService:
 
 
 def _make_session_in_db() -> SimpleNamespace:
-    return SimpleNamespace(id=uuid4(), questions=[])
+    return SimpleNamespace(id=uuid4(), questions=[], history_revision=0)
 
 
 def _skill_runtime_args(

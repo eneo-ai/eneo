@@ -1,3 +1,4 @@
+import logging
 import struct
 from hashlib import sha256
 from pathlib import Path
@@ -40,6 +41,8 @@ from eneo.main.models import Status
 from eneo.object_content.configuration import ObjectContentCoreSettings
 from eneo.object_content.content import ContentState, StorageKind
 from eneo.object_content.content_service import ObjectContentService
+from eneo.worker import task_manager as task_manager_module
+from eneo.worker import upload_tasks as upload_tasks_module
 from eneo.worker.task_manager import TaskManager
 from eneo.worker.upload_tasks import transcription_task, upload_info_blob_task
 
@@ -450,6 +453,56 @@ async def test_first_upload_failure_publishes_no_knowledge(
         embeddings.get_embeddings.assert_not_awaited()
     assert blobs == []
     assert chunks == []
+
+
+async def test_a_file_without_text_fails_without_its_name_in_the_log_or_job(
+    db_container, tmp_path, monkeypatch, caplog
+):
+    """Retention removes a file's name with the file, so a failed upload names
+    the file neither in the worker's log nor on its job."""
+    name = "Utredning om Anna Svensson.txt"
+    for module in (task_manager_module, upload_tasks_module):
+        monkeypatch.setattr(
+            module, "logger", logging.getLogger(f"eneo.test.{module.__name__}")
+        )
+    caplog.set_level(logging.DEBUG, logger="eneo.test")
+    monkeypatch.setattr(
+        "eneo.jobs.job_staging.get_settings",
+        lambda: SimpleNamespace(upload_tmp_dir=tmp_path),
+    )
+    async with db_container() as container:
+        user, space, group, job, _ = await _seed_attempt(container, with_existing=False)
+        job_id = job.id
+        group_id = group.id
+        space_id = space.id
+        tenant = container.tenant()
+
+    _stage_job_file(tmp_path, job_id, b"replacement")
+    task_container = _sessionless_container(user=user, tenant=tenant)
+    task_container.text_extractor.override(providers.Object(StubExtractor(" \n ")))
+    async with db_container():
+        result = await upload_info_blob_task(
+            job_id=job_id,
+            params=UploadInfoBlob(
+                user_id=user.id,
+                group_id=group_id,
+                space_id=space_id,
+                filename=name,
+                mimetype="text/plain",
+                original_storage=_original_admission(),
+            ),
+            container=task_container,
+        )
+
+    assert result is False
+    (status, result_location, failure_code), _, _ = await _committed_state(job_id)
+    assert (status, result_location, failure_code) == (
+        Status.FAILED.value,
+        None,
+        JobFailureCode.NO_EXTRACTABLE_TEXT.value,
+    )
+    assert caplog.records
+    assert name not in caplog.text
 
 
 async def test_worker_uses_lower_live_inline_ceiling_and_reports_storage_limit(

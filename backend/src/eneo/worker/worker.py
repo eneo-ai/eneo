@@ -264,8 +264,11 @@ class Worker:
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             @wraps(func)
             async def wrapper(ctx: ARQContext, params: object) -> Any:
+                # A job's parameters can carry text that retention removes,
+                # such as a file's name in an audit event: name the job only.
                 logger.debug(
-                    f"Executing {func.__name__} with context {ctx} and params {params}"
+                    f"Executing {func.__name__}",
+                    extra={"job_id": str(ctx.get("job_id"))},
                 )
 
                 async with sessionmanager.session() as session, session.begin():
@@ -405,8 +408,11 @@ class Worker:
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             @wraps(func)
             async def wrapper(ctx: ARQContext, params: ResourceTaskParams) -> Any:
+                # A job's parameters can carry text that retention removes:
+                # name the job only.
                 logger.debug(
-                    f"Executing {func.__name__} with context {ctx} and params {params}"
+                    f"Executing {func.__name__}",
+                    extra={"job_id": str(ctx.get("job_id"))},
                 )
 
                 job_id = _job_id_from_ctx(ctx)

@@ -33,6 +33,8 @@ Key fields include:
 
 Metadata follows a consistent schema via `AuditMetadata` to prevent drift. It stores actor and target snapshots so log entries remain meaningful even if users or entities are renamed or deleted.
 
+Eneo does not copy names that retention removes into a log. A log about a file records the file by its id, with its size and MIME type where known, under a fixed description for each action and the target name `file`; an upload to a collection names the collection, not the file. A log about a conversation (a tool view's call, a document export or a saved document version) names its target `conversation`, and an assistant update records attached files by id, scope and mode. Logs stored before this behaviour are changed the same way on upgrade. The justification and search text an auditor enters are the auditor's own input: they are kept with the log of that access, under the audit log's retention.
+
 ## Configuration model
 
 Configuration is layered to allow broad and precise control:
@@ -63,7 +65,7 @@ Audit queries support filters for:
 - actions (single or multi-select)
 - date range
 
-Free-text search matches the log `description` field. If you want reliable search for a name or identifier, include it in `description` or metadata.
+Free-text search matches the log `description` field. If you want reliable search for a name or identifier, include it in `description` or metadata. Eneo does not copy file and conversation names into logs, so a search for one finds nothing.
 
 For data subject access requests, `GET /api/v1/audit/logs/user/{user_id}` returns every log where the user is the actor or the target (GDPR Article 15). The same `user_id` filter is accepted by the synchronous export.
 
@@ -142,7 +144,7 @@ the unit locks first (the root, its session, a file family) blocks only that uni
 other candidates proceed. A lock wait on any other row (a cascaded child row, an
 object content row) ends after the lock timeout: a question or App run is then kept
 and reported as `cascade_locked` and charged the bound of the statement that waited
-(its proved cascade for the delete, three rows for the session release, the family
+(its proved cascade for the delete, two rows for the session release, the family
 limit for a file release); the chunk commits and the execution continues with the
 next chunk. The same chunk admits further units only while its gather window is
 still open, which at the default settings (a one-second window, a two-second lock
@@ -157,6 +159,30 @@ snapshot are not charged. A unit whose cascade, or a file family, is larger than
 configured limit is examined up to that limit, charged, kept and reported as blocked;
 an operator must resolve the cause or raise the applicable limit. Manual conversation
 deletion continues to release unused files immediately.
+
+With extended logging, the log of each turn holds the earlier turns of its
+conversation. Removing a question clears every later log of its conversation that
+still holds content, in the same unit, so access to the removed turn ends with the
+question. The removal reads every log of the conversation that still holds content,
+and the unit is charged one row for each: in a group chat each turn follows its own
+Assistant's period, so earlier turns can be kept. The logs are never cleared in
+parts. A question whose conversation has more such logs than
+`RETENTION_CONVERSATIONS_MAX_UNIT_ROWS` allows is kept as `unit_exceeds_budget`, and
+health names `retention_conversations_max_unit_rows` in `limiting_settings`. Each
+file charges at least three rows, so when three times `RETENTION_MAX_FILES_PER_RUN`
+is below the unit limit, health names `retention_max_files_per_run` as well. The
+first execution after the limits allow the question removes it.
+
+A log stored before this version can hold turns that earlier removals left in it,
+and nothing tells them apart from kept turns, so the upgrade empties every stored
+log: its request body, model settings and retrieved context. The rows stay, and
+their questions read as not logged. Logs stored after the upgrade are kept as before.
+
+Only this version and later ones check for a removal before they store a log. When
+upgrading, stop the backend and worker of the earlier version before the migration
+runs: an answer an earlier version finishes after the migration can store a log that
+holds a turn removed meanwhile, or a log that no question refers to.
+[Updating Eneo](/guides/deployment#updating-eneo) gives the commands.
 
 #### What the records say
 
@@ -238,7 +264,7 @@ stops the process at start with the reason.
 | `RETENTION_MAX_SECONDS_PER_RUN` | `1800` | Seconds per execution; no new unit starts after it, the unit in progress completes |
 | `RETENTION_CHUNK_ROWS` | `500` (4 to 2000) | Rows per chunk transaction; one large unit may use more; a value near 4 makes every transaction hold one root |
 | `RETENTION_CHUNK_GATHER_SECONDS` | `1.0` | Longest time a chunk admits new units, so the rows it locks stay locked for a short time |
-| `RETENTION_CONVERSATIONS_MAX_UNIT_ROWS` | `5000` (min 4) | Largest question or App-run unit, including proof and cascade; must fit the conversation row budget. The minimum admits one question with its session and helper row |
+| `RETENTION_CONVERSATIONS_MAX_UNIT_ROWS` | `5000` (min 4) | Largest question or App-run unit, including proof, cascade and the logs of its conversation a question's removal reads; must fit the conversation row budget. The minimum admits one question with its session and helper row |
 | `RETENTION_MAX_FAMILY_ROWS` | `5000` (3 to 100000) | Largest file family, including proof; must fit the row budget plus one discovery row, and at most three times `RETENTION_MAX_FILES_PER_RUN`. The minimum admits one member |
 | `RETENTION_UNUSED_FILE_GRACE_HOURS` | `24` | Minimum age of an upload that nothing uses |
 | `RETENTION_EMPTY_SESSION_GRACE_HOURS` | `24` | Minimum age of a session without a question |
@@ -346,6 +372,7 @@ unavailable.
 | `no_execution` | The task has no execution record |
 | `no_overdue_snapshot` | The task reports overdue work but no execution has written a snapshot |
 | `latest_outcome`, `error_code`, `blocked_reasons` | From the latest execution; blocked reasons read `<step>.<reason>` |
+| `limiting_settings` | Settings whose limit kept due data in the latest execution, for example `retention_conversations_max_unit_rows` for `unit_exceeds_budget`; raising the named settings lets a later execution remove the data |
 
 `error_code` names why an execution did not succeed:
 

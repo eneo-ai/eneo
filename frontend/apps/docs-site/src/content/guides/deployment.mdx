@@ -1174,6 +1174,19 @@ For the upgrade to 2.3, also stop every backend and worker replica before
 its migrations and the old Scrapy worker cannot run side by side. Returning to
 2.2 requires restoring the backup taken in the next step.
 
+For the release that empties stored question logs, stop every backend and
+worker of the earlier version before `db-init` as well. Only the new version
+checks for a removal before it stores a log, so a log that an earlier backend or
+worker stores while the migration runs keeps its content. Stop them, then check
+that the second command lists no container:
+
+```bash
+docker compose --env-file .env --env-file release.env stop backend worker
+docker compose --env-file .env --env-file release.env ps --status running backend worker
+```
+
+Stop replicas that run on other hosts the same way.
+
 ### Take the stopped-writer recovery point
 
 After the drain is verified and every old writer is stopped, create the database

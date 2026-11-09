@@ -256,6 +256,10 @@ class _EventuallyDeletedClient:
             "HeadObject",
         )
 
+    def list_object_versions(self, **_request: object) -> dict[str, object]:
+        self._events.append("versions")
+        return {"IsTruncated": False}
+
 
 class _AbortClient:
     def __init__(self, events: list[str]) -> None:
@@ -746,6 +750,7 @@ async def test_full_rehash_emits_checkpoints_around_each_bounded_read() -> None:
 
 @pytest.mark.asyncio
 async def test_delete_checkpoints_before_delete_and_each_visibility_head() -> None:
+    """Also before the version listing that confirms no old version is left."""
     events: list[str] = []
     client = _EventuallyDeletedClient(events)
     settings = _settings().model_copy(
@@ -771,6 +776,8 @@ async def test_delete_checkpoints_before_delete_and_each_visibility_head() -> No
         "head",
         "checkpoint",
         "head",
+        "checkpoint",
+        "versions",
     ]
 
 

@@ -90,6 +90,13 @@ switch that turns it off.
 The check covers registered tasks and declared rules. It cannot see a removal
 written outside the engine, in arbitrary SQL, a log or another store.
 
+Records the engine keeps out of its removals are declared in
+`OUTSIDE_THE_ENGINE`, each with how it ends today, until the owner decides:
+audit exports, insights in Redis, browser sessions, audit logs and service
+runs. A test pins the list and checks that each cron a reason names still runs.
+Request logs are not among them: removing a question clears every later log of
+its conversation.
+
 ### The database clock
 
 Due-ness follows the database's clock, never a worker's. The nightly run

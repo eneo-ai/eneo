@@ -145,7 +145,7 @@ export function useFileUploads({ previews = false } = {}) {
         if (!owned.current.some((current) => current.key === entry.key)) continue;
         releasePreviews([entry]);
         replace(owned.current.filter((current) => current.key !== entry.key));
-        toastApiError(error, t);
+        toastApiError(error, t, { fileName: file.name });
       }
     }
   }
