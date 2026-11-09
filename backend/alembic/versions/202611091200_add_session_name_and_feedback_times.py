@@ -1,7 +1,7 @@
 """Record when a conversation's name and feedback text were written.
 
 Revision ID: 202611091200
-Revises: 202611091000
+Revises: 202611091110
 Conversation history removes each on its own time. An existing conversation gets
 its creation time: never later than its first question, so nothing written before
 the upgrade is kept longer than its period allows. The update rewrites every row
@@ -15,7 +15,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "202611091200"
-down_revision: str = "202611091000"
+down_revision: str = "202611091110"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
