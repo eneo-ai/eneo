@@ -23,7 +23,8 @@ Admission is checked when a request authenticates. Finite HTTP and SSE work
 admitted before sign-out may still finish. The job-event stream
 (``GET /jobs/events/``) and the socket (``/ws``) stay open until the client
 leaves, so while they serve a browser session they re-run authentication
-(``SessionWatch``) and end at the token's expiry; the socket closes with 1008.
+(``SessionWatch``) and end at the token's expiry; the socket closes with 1008,
+or with 1013 for a retry when the store cannot answer the check.
 """
 
 import asyncio

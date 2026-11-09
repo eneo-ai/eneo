@@ -102,7 +102,9 @@ authenticates, as the cookie or as Bearer, only while the session exists.
   most 30 seconds apart while they are open, and end at the token's expiry.
   After sign-out, a password change, signing out everywhere or the account's
   deactivation they close at the next check; the socket closes with code 1008
-  and the client does not reconnect with that token.
+  and the client does not reconnect with that token. A check the database
+  cannot answer closes them too, but the socket closes with code 1013, and
+  the client reconnects once sign-in can be checked again.
 - **Expired sessions** admit nothing; a nightly job deletes them.
 - **No session**: provider access tokens, API keys, system tokens, and
   internal MCP and module tokens. They work as before, and sign-out does not
