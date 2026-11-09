@@ -658,7 +658,8 @@ export interface paths {
     put?: never;
     /**
      * Provision User
-     * @description Provision a user from a Zitadel access token.
+     * @deprecated
+     * @description Deprecated, removed in the next release, together with the Zitadel sign-in it served. People are created at their first OIDC sign-in, under the organisation's provisioning setting.
      */
     post: operations["provision_user_api_v1_users_provision__post"];
     delete?: never;
