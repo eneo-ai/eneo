@@ -1519,6 +1519,34 @@ async def test_a_browser_session_extends_itself_and_is_audited(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_a_renewal_keeps_every_claim_its_sign_in_set(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+    federated_callback,
+):
+    email = await _create_local_user(client, super_admin_token)
+    password = _session_token(await _login(client, SESSION_LOGIN, email, PASSWORD))
+    [cookie] = _session_cookies(await federated_callback())
+    federated = cookie.removeprefix(f"{SESSION}=").split(";", 1)[0]
+
+    for token in (password, federated):
+        extended = await client.post(EXTEND, headers=_cookie(token))
+
+        assert extended.status_code == 200, extended.text
+        started, renewed = _claims(token), _claims(_session_token(extended))
+        # Only the times are new, and the sign-in time is kept as auth_time.
+        assert renewed == started | {
+            "iat": renewed["iat"],
+            "exp": renewed["exp"],
+            "auth_time": started["iat"],
+        }
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_only_a_usable_browser_session_can_extend_itself(
     client,
     super_admin_token,
@@ -1821,25 +1849,23 @@ def _payload(token: str) -> JWTPayload:
     )
 
 
-async def _issue(current: JWTPayload, seconds: float) -> str:
-    """A token for the session's user, as a renewal issues it."""
-    async with sessionmanager.session() as session, session.begin():
-        container = Container(session=providers.Object(session))
-        user = await container.user_repo().get_user_by_id_and_tenant_id(
-            current.user_id, tenant_id=current.tenant_id
-        )
-        return AuthService().create_access_token_for_user(user, expires_in=seconds / 60)
+def _signed_in_ago(token: str, seconds_left: float) -> str:
+    """The session token, signed again as if its sign-in was so long ago
+    that the session reaches its maximum age ``seconds_left`` from now."""
+    max_age = get_settings().browser_session_max_age * 60
+    return _signed(_claims(token) | {"auth_time": time.time() - max_age + seconds_left})
 
 
-async def _renew(current: JWTPayload, issued: str) -> str:
+async def _renew(token: str) -> str:
     """BrowserSessionService.renew in a database session of its own."""
+    current = _payload(token)
     async with sessionmanager.session() as session:
         container = Container(session=providers.Object(session))
         async with session.begin():
             user = await container.user_repo().get_user_by_id_and_tenant_id(
                 current.user_id, tenant_id=current.tenant_id
             )
-        return await container.browser_session_service().renew(current, issued, user)
+        return await container.browser_session_service().renew(token, user)
 
 
 async def _renewal_waits_for_the_row() -> None:
@@ -1859,7 +1885,7 @@ async def _renewal_waits_for_the_row() -> None:
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_a_renewal_issued_earlier_but_recorded_later_keeps_the_later_end(
+async def test_a_renewal_recorded_last_never_moves_the_end_earlier(
     client,
     super_admin_token,
     patch_auth_service_jwt,
@@ -1876,12 +1902,9 @@ async def test_a_renewal_issued_earlier_but_recorded_later_keeps_the_later_end(
         .where(BrowserSessions.sid == current.sid)
         .values(expires_at=datetime.now(timezone.utc) + timedelta(minutes=1))
     )
-    # Issued first, so it ends first.
-    earlier = await _issue(current, 3)
-    later = await _issue(current, 120)
-
     # The later renewal updates the row and holds it, uncommitted, in its
-    # audit write; the earlier one waits for the row, then updates it last.
+    # audit write; the earlier one, for a session at its maximum age in three
+    # seconds, waits for the row, then updates it last.
     create = AuditLogRepositoryImpl.create
     held, release = asyncio.Event(), asyncio.Event()
 
@@ -1893,7 +1916,7 @@ async def test_a_renewal_issued_earlier_but_recorded_later_keeps_the_later_end(
         return created
 
     monkeypatch.setattr(AuditLogRepositoryImpl, "create", hold_the_first)
-    later_renewal = asyncio.create_task(_renew(current, later))
+    later_renewal = asyncio.create_task(_renew(_signed_in_ago(token, 120)))
     earlier_renewal: asyncio.Task | None = None
     try:
         # A renewal that fails before its audit write must fail the test, not hang it.
@@ -1905,7 +1928,7 @@ async def test_a_renewal_issued_earlier_but_recorded_later_keeps_the_later_end(
         held_or_failed.cancel()
         if later_renewal.done():
             later_renewal.result()
-        earlier_renewal = asyncio.create_task(_renew(current, earlier))
+        earlier_renewal = asyncio.create_task(_renew(_signed_in_ago(token, 3)))
         async with asyncio.timeout(30):
             await _renewal_waits_for_the_row()
     finally:
@@ -1939,11 +1962,10 @@ async def test_a_renewal_after_sign_out_does_not_bring_the_session_back(
     email = await _create_local_user(client, super_admin_token)
     token = _session_token(await _login(client, SESSION_LOGIN, email, PASSWORD))
     current = _payload(token)
-    issued = await _issue(current, 120)
 
     assert (await _sign_out(client, token)).status_code == 204
 
     with pytest.raises(AuthenticationException):
-        await _renew(current, issued)
+        await _renew(token)
     assert await _rows(str(current.user_id)) == {}
     assert await _extension_audit_rows(str(current.user_id)) == []

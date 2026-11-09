@@ -51,6 +51,7 @@ from eneo.database.tables.browser_sessions_table import BrowserSessions
 from eneo.main.config import get_settings
 from eneo.main.exceptions import AuthenticationException
 from eneo.main.logging import get_logger
+from eneo.users.password_lifecycle import PASSWORD_AUTH_METHOD
 
 if TYPE_CHECKING:
     from eneo.audit.application.audit_service import AuditService
@@ -173,27 +174,60 @@ class BrowserSessionService:
         )
         return affected_row_count(result)
 
-    async def renew(self, current: JWTPayload, token: str, user: "UserInDB") -> str:
-        """Renew the browser session ``current`` names with ``token``.
+    async def renew(self, token: str, user: "UserInDB") -> str:
+        """Renew the browser session the admitted session ``token`` names.
 
-        ``token`` was just issued to ``user`` to replace the admitted session
-        token ``current``. Returns it carrying the same ``sid`` and
-        ``session_ref`` (none, for a session started before sessions had
-        one), so the session (and its sign-out) stays the same one. The
-        session's row moves to the new token's expiry unless another renewal
-        already moved it later (renewals can be recorded in another order
-        than they were issued), and the renewal is audited, in one
+        ``user`` is the account authentication admitted ``token`` for.
+        Returns a new token for the same session, valid for
+        ``JWT_EXPIRY_TIME`` again but never past ``BROWSER_SESSION_MAX_AGE``
+        after the original sign-in. It carries exactly these claims from
+        ``token``: the session (``sid``, and ``session_ref``, absent for a
+        session started before sessions had one), so the session and its
+        sign-out stay the same one; the sign-in time (``auth_time``, the
+        token's ``iat`` for tokens issued before it existed); and a password
+        sign-in's ``auth_method``, for the password lifecycle gate. The rest
+        is minted again for ``user`` as it is now. A claim a sign-in adds is
+        lost on the first renewal unless it is carried here.
+
+        The session's row moves to the new token's expiry unless another
+        renewal already moved it later (renewals can be recorded in another
+        order than they were issued), and the renewal is audited, in one
         transaction that commits within ``STORE_DEADLINE_SECONDS``, before
-        the caller sets the cookie.
-        A session that has ended meanwhile (its row is gone or expired) is
-        refused, and nothing is written.
+        the caller sets the cookie. A session that has ended meanwhile (its
+        row is gone or expired) is refused, and nothing is written.
 
         Commits on its own: the caller's session must have no transaction open.
         """
-        if current.sid is None:
+        settings = get_settings()
+        current, claims = self._verified_claims(token)
+        if (
+            current.sid is None
+            or current.user_id != user.id
+            or current.tenant_id != user.tenant_id
+        ):
             raise AuthenticationException("No browser session")
+        signed_in_at = claims.get("auth_time", current.iat)
+        if isinstance(signed_in_at, bool) or not isinstance(signed_in_at, int | float):
+            raise AuthenticationException("Could not validate token credentials.")
+        # Renewal never moves the original sign-in, so a captured cookie still
+        # ends BROWSER_SESSION_MAX_AGE after it.
+        seconds_left = (
+            signed_in_at + settings.browser_session_max_age * 60 - time.time()
+        )
+        if seconds_left <= 0:
+            raise AuthenticationException("The session has reached its maximum age")
+        issued = self.auth_service.create_access_token_for_user(
+            user,
+            expires_in=min(settings.jwt_expiry_time, seconds_left / 60),
+            extra_claims={"auth_time": signed_in_at},
+            auth_method=(
+                PASSWORD_AUTH_METHOD
+                if current.auth_method == PASSWORD_AUTH_METHOD
+                else None
+            ),
+        )
         renewed = self.auth_service.add_session_id(
-            token, current.sid, current.session_ref
+            issued, current.sid, current.session_ref
         )
         expires_at = datetime.fromtimestamp(
             self._verified_payload(renewed).exp, timezone.utc
@@ -317,15 +351,19 @@ class BrowserSessionService:
         return payload
 
     def _verified_payload(self, token: str, *, verify_exp: bool = True) -> JWTPayload:
+        return self._verified_claims(token, verify_exp=verify_exp)[0]
+
+    def _verified_claims(
+        self, token: str, *, verify_exp: bool = True
+    ) -> tuple[JWTPayload, dict[str, object]]:
         settings = get_settings()
-        payload, _ = self.auth_service.get_jwt_payload_with_claims(
+        return self.auth_service.get_jwt_payload_with_claims(
             token,
             key=str(settings.jwt_secret),
             aud=settings.jwt_audience,
             algs=[settings.jwt_algorithm],
             verify_exp=verify_exp,
         )
-        return payload
 
 
 class SessionWatch:

@@ -11,7 +11,6 @@ import hashlib
 import hmac
 import re
 import secrets
-import time
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from typing import Annotated, Any, cast
@@ -27,7 +26,6 @@ from starlette.types import Message, Receive, Scope, Send
 
 from eneo.authentication.auth_dependencies import get_current_active_user
 from eneo.authentication.auth_models import BrowserSessionExtension
-from eneo.authentication.auth_service import AuthService
 from eneo.authentication.browser_session import (
     SAFE_METHODS,
     SESSION_EXPIRES_IN_HEADER,
@@ -71,7 +69,6 @@ from eneo.server.dependencies.container import get_container
 from eneo.server.exception_handlers import http_exception_response
 from eneo.server.protocol import responses
 from eneo.users.identity_binding_repo import IdentityConflictError
-from eneo.users.password_lifecycle import PASSWORD_AUTH_METHOD
 from eneo.users.user import UserInDB
 from eneo.users.user_router import login_with_password
 
@@ -270,39 +267,11 @@ async def extend_browser_session(
     ],
 ) -> BrowserSessionExtension:
     settings = get_settings()
-    user = container.user()
-    auth_service = AuthService()
-    current, claims = auth_service.get_jwt_payload_with_claims(
-        _admitted_session_token(request),
-        key=str(settings.jwt_secret),
-        aud=settings.jwt_audience,
-        algs=[settings.jwt_algorithm],
-    )
-    if current.user_id != user.id or current.tenant_id != user.tenant_id:
-        raise AuthenticationException("No browser session")
-    # Tokens issued before auth_time existed started at their iat.
-    signed_in_at = claims.get("auth_time", current.iat)
-    if isinstance(signed_in_at, bool) or not isinstance(signed_in_at, int | float):
-        raise AuthenticationException("Could not validate token credentials.")
-    # Renewal never moves the original sign-in, so a captured cookie still
-    # ends BROWSER_SESSION_MAX_AGE after it.
-    seconds_left = signed_in_at + settings.browser_session_max_age * 60 - time.time()
-    if seconds_left <= 0:
-        raise AuthenticationException("The session has reached its maximum age")
-    issued = auth_service.create_access_token_for_user(
-        user,
-        expires_in=min(settings.jwt_expiry_time, seconds_left / 60),
-        extra_claims={"auth_time": signed_in_at},
-        # The password lifecycle gate applies to password sessions only.
-        auth_method=(
-            PASSWORD_AUTH_METHOD
-            if current.auth_method == PASSWORD_AUTH_METHOD
-            else None
-        ),
-    )
     # The same session, so sign-out still ends it. A renewal that cannot be
     # recorded or audited fails instead, and the cookie stays as it was.
-    token = await container.browser_session_service().renew(current, issued, user)
+    token = await container.browser_session_service().renew(
+        _admitted_session_token(request), container.user()
+    )
     set_session_cookie(response, token, settings=settings)
     return BrowserSessionExtension(
         generation=session_generation(token),
