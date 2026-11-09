@@ -69,9 +69,12 @@ type ChatPanelProps = {
  */
 function ModePicker({
   chat,
+  published,
   onRefused
 }: {
   chat: FlowAuthoringChat;
+  /** A published flow has no draft to change: Redigera is off and cannot be picked. */
+  published: boolean;
   onRefused: ChatPanelProps["onRefused"];
 }) {
   const t = useTranslations();
@@ -80,7 +83,7 @@ function ModePicker({
   const chatKey = flowKeys.authoringChat(chat.flow_id);
   // Whether the last saved switch started a new conversation.
   const restarted = useRef(false);
-  const [editing, setEditing] = useSettingSwitch(
+  const [savedEditing, setEditing] = useSettingSwitch(
     `flow-authoring-mode:${chat.flow_id}`,
     chat.editing,
     async (enabled) => {
@@ -110,6 +113,8 @@ function ModePicker({
     }
   );
 
+  // A mode saved before the flow was published does not apply to it.
+  const editing = savedEditing && !published;
   const label = editing ? t("flows_chat_mode_edit") : t("flows_chat_mode_ask");
   return (
     <DropdownMenu
@@ -150,7 +155,10 @@ function ModePicker({
         <DropdownMenuRadioItem
           value="edit"
           label={t("flows_chat_mode_edit")}
-          description={t("flows_chat_mode_edit_description")}
+          description={
+            published ? t("flows_chat_mode_edit_published") : t("flows_chat_mode_edit_description")
+          }
+          isDisabled={published}
           icon={<Pencil aria-hidden="true" />}
         />
       </DropdownMenuRadioGroup>
@@ -173,6 +181,7 @@ function AuthoringConversation({
   onRefused: ChatPanelProps["onRefused"];
 }) {
   const t = useTranslations();
+  const published = flow.published_version != null;
   const { references, composer } = useFlowChatReferences(flow);
   // The page's references (pills, the card, "Fråga assistenten") reach the composer through it.
   useEffect(() => {
@@ -232,7 +241,10 @@ function AuthoringConversation({
     type: "assistant",
     id: model.id,
     name: t("flows_chat_partner_name"),
-    description: t("flows_chat_partner_description"),
+    // A published flow has no draft to change; the panel's header says why.
+    description: published
+      ? t("flows_chat_partner_description_published")
+      : t("flows_chat_partner_description"),
     allowedAttachments: model.allowed_attachments,
     insightEnabled: false,
     iconId: null,
@@ -262,9 +274,11 @@ function AuthoringConversation({
       toolCards={(call) =>
         flowRunCardFor(call, flow, routeId, onAskChat) ?? flowChangeCardFor(call)
       }
-      footerActions={<ModePicker chat={chat} onRefused={onRefused} />}
+      footerActions={<ModePicker chat={chat} published={published} onRefused={onRefused} />}
       placeholder={
-        chat.editing ? t("flows_chat_placeholder_edit") : t("flows_chat_placeholder_ask")
+        chat.editing && !published
+          ? t("flows_chat_placeholder_edit")
+          : t("flows_chat_placeholder_ask")
       }
       onToolCallFinished={(call) => {
         if (isFlowsToolCall(call)) onFlowMayHaveChanged();
@@ -336,15 +350,19 @@ export function FlowChatPanel({
           </Heading>
           {chat.data ? (
             <span className="-my-1 -me-2 flex shrink-0 items-center gap-0.5">
-              {onAskChat ? <OptimizeFlowButton onAskChat={onAskChat} /> : null}
+              {onAskChat && flow.steps.length > 0 ? (
+                <OptimizeFlowButton onAskChat={onAskChat} />
+              ) : null}
               <NewConversationButton chat={chat.data} onRefused={onRefused} />
               <FlowChatSettings chat={chat.data} onRefused={onRefused} />
             </span>
           ) : null}
         </div>
-        <Text type="supporting" size="sm" as="p" display="block" className="m-0">
-          {t("flows_chat_intro")}
-        </Text>
+        {flow.published_version != null ? (
+          <Text type="supporting" size="sm" as="p" display="block" className="m-0">
+            {t("flows_chat_published_intro")}
+          </Text>
+        ) : null}
       </div>
       {chat.data ? (
         <AuthoringConversation

@@ -395,6 +395,8 @@ def test_a_steps_connections_name_the_service_and_whether_its_secret_is_stored()
         "output_config": {
             "url": "https://hooks.example.se/in",
             "auth": {"mode": "bearer_token", "token": ""},
+            # A row without a name is not sent: no credential to wait for.
+            "custom_headers": [{"name": "", "value": "", "secret": True}],
         },
     }
 

@@ -66,7 +66,11 @@ function instance(numId: number, abstractId: number, start?: number): Element {
 /** Appends a relationship and a content type for a numbering part the template lacked. */
 async function registerNumberingPart(zip: Zip): Promise<void> {
   const relsName = "word/_rels/document.xml.rels";
-  const rels = parseXml((await zip.file(relsName)?.async("string")) ?? "");
+  // A minimal template may have no part relationships at all; the part is optional.
+  const rels = parseXml(
+    (await zip.file(relsName)?.async("string")) ??
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>',
+  );
   const relationships = rootElement(rels);
   if (!findAll(relationships, "Relationship").some((r) => attr(r, "Type") === NUMBERING_TYPE)) {
     let id = 1;

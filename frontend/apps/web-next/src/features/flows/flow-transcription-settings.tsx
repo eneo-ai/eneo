@@ -1,7 +1,7 @@
 import { MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { NumberInput } from "@astryxdesign/core/NumberInput";
 import { Selector } from "@astryxdesign/core/Selector";
-import { Text } from "@astryxdesign/core/Text";
+import { Heading, Text } from "@astryxdesign/core/Text";
 import { useTranslations } from "use-intl";
 import { Switch } from "@astryxdesign/core/Switch";
 import { modelDisplayName } from "@/features/spaces/space-models";
@@ -247,10 +247,10 @@ export function TranscriptionFields({
   return (
     <fieldset
       data-settings-field="transcription"
-      className="m-0 flex min-w-0 flex-col gap-4 border-0 p-0"
+      className="border-ax-border m-0 flex min-w-0 flex-col gap-4 border-t p-0 pt-5"
     >
-      <legend className="text-ax-text mb-1 p-0 text-sm font-semibold">
-        {t("flow_editor_tools_transcription_heading")}
+      <legend className="float-left w-full p-0">
+        <Heading level={3}>{t("flow_editor_tools_transcription_heading")}</Heading>
       </legend>
       {takesAudio ? (
         <Text type="supporting" size="sm" as="p" display="block" className="m-0">

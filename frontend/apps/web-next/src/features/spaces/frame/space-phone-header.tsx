@@ -1,9 +1,12 @@
 import { Button } from "@astryxdesign/core/Button";
+import { useQuery } from "@tanstack/react-query";
 import { Heading } from "@astryxdesign/core/Heading";
 import { SquarePen } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { ClassificationToken } from "@/components/composites/classification-token";
 import { PageBar } from "@/components/shell/page-bar";
+import { flowQueryOptions } from "@/features/flows/flows-api";
+import { browserApi } from "@/lib/api/browser";
 import { useSpace } from "../use-space";
 import { useSpaceDisplayName } from "../space-display-name";
 import { useSpaceSections } from "./use-space-sections";
@@ -55,6 +58,9 @@ export function SpacePhoneHeader({
   // A result is opened from its app's page (apps/<app>/results/<result>).
   const appId = route.section === "apps" && segments[2] === "results" ? segments[1] : undefined;
   const app = space.applications?.apps.items.find((item) => item.id === appId);
+  // A run is opened from its flow's runs (flows/<flow>/runs/<run>); the run page has read the flow.
+  const flowId = route.section === "flows" && segments[2] === "runs" ? segments[1] : undefined;
+  const flow = useQuery({ ...flowQueryOptions(browserApi, flowId ?? ""), enabled: !!flowId }).data;
 
   // The screen the user came down from (decision 20). A section root that is
   // neither a tab nor in Hantera ytan (the organisation space's Översikt, a
@@ -70,9 +76,11 @@ export function SpacePhoneHeader({
         : { label: name, href: spaceHref }
       : app && section
         ? { label: app.name, href: `${section.href}/${app.id}` }
-        : section
-          ? { label: t(section.id), href: section.href }
-          : { label: name, href: spaceHref };
+        : flow && section
+          ? { label: flow.name, href: `${section.href}/${flow.id}?tab=runs` }
+          : section
+            ? { label: t(section.id), href: section.href }
+            : { label: name, href: spaceHref };
 
   return (
     <>

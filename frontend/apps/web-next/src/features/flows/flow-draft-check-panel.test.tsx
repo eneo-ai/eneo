@@ -87,7 +87,8 @@ describe("FlowDraftCheck", () => {
     expect(screen.getByText("Välj en AI-modell för steget.")).toBeTruthy();
     await expectNoAxeViolations(container);
     fireEvent.click(screen.getByRole("button", { name: "Öppna Steg 2: Skriv svar" }));
-    expect(onOpenStep).toHaveBeenCalledWith(flow.steps[1]);
+    // At the field that fixes it, not the step's top.
+    expect(onOpenStep).toHaveBeenCalledWith(flow.steps[1], "completion_model");
     expect(api.POST).toHaveBeenCalledWith(
       "/api/v1/flows/{id}/security-classification/preview",
       expect.objectContaining({ params: { path: { id: "flow-1" } } })
@@ -135,10 +136,9 @@ describe("FlowDraftCheck", () => {
     });
   });
 
-  it("fixes the flow's own problems where they are fixed: its settings, or a first step", async () => {
+  it("fixes the flow's own problems where they are fixed: in its settings", async () => {
     route(ASSISTANTS);
     const onOpenSettings = vi.fn();
-    const onAddStep = vi.fn();
     const onProblemCount = vi.fn();
     const audio = makeFlow({
       steps: [
@@ -157,7 +157,6 @@ describe("FlowDraftCheck", () => {
         transcription={{ models: [], services: [] }}
         onOpenStep={vi.fn()}
         onOpenSettings={onOpenSettings}
-        onAddStep={onAddStep}
         onProblemCount={onProblemCount}
       />
     );
@@ -173,22 +172,9 @@ describe("FlowDraftCheck", () => {
     expect(onOpenSettings).toHaveBeenLastCalledWith("speaker_service");
     // The page is told the count once the check has an answer.
     expect(onProblemCount).toHaveBeenLastCalledWith(2);
-    expect(screen.queryByRole("button", { name: "Lägg till steg" })).toBeNull();
-
-    cleanup();
-    renderInApp(
-      <FlowDraftCheck
-        flow={makeFlow({ steps: [] })}
-        transcription={{ models: [], services: [] }}
-        onOpenStep={vi.fn()}
-        onAddStep={onAddStep}
-      />
-    );
-    fireEvent.click(await screen.findByRole("button", { name: "Lägg till steg" }));
-    expect(onAddStep).toHaveBeenCalledTimes(1);
   });
 
-  it("holds the clean result's shape while it checks, so what follows stays put", async () => {
+  it("holds the clean result's one line while it checks, so what follows stays put", async () => {
     route(ASSISTANTS);
     let answer!: (value: unknown) => void;
     api.POST.mockReturnValue(new Promise((resolve) => (answer = resolve)));
@@ -201,16 +187,15 @@ describe("FlowDraftCheck", () => {
     );
 
     const running = await screen.findByText("Kontrollerar utkastet…");
-    const description = screen.getByText("Publicera kontrollerar flödet en gång till.");
-    // A title over a description in one box, as the result will be.
-    expect(running.parentElement?.contains(description)).toBe(true);
-
     answer(reply({ steps: [] }));
-    expect(await screen.findByText("Inget hindrar publicering just nu.")).toBeTruthy();
-    expect(screen.getByText("Publicera kontrollerar flödet en gång till.")).toBeTruthy();
+    const clean = await screen.findByText("Redo att publicera");
+    // The same line, its text swapped, and no banner around it.
+    expect(clean.parentElement).toBe(running.parentElement);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByText(/kontrollerar flödet en gång till/)).toBeNull();
   });
 
-  it("says nothing stops publishing, and announces it when checked again", async () => {
+  it("says the draft is ready to publish, and announces it when checked again", async () => {
     route({
       "assistant-1": makeAssistant({ id: "assistant-1" }),
       "assistant-2": makeAssistant({ id: "assistant-2" })
@@ -222,11 +207,9 @@ describe("FlowDraftCheck", () => {
         onOpenStep={vi.fn()}
       />
     );
-    expect(await screen.findByText("Inget hindrar publicering just nu.")).toBeTruthy();
+    expect(await screen.findByText("Redo att publicera")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Kontrollera igen" }));
-    await waitFor(() =>
-      expect(state.announce).toHaveBeenCalledWith("Inget hindrar publicering just nu.")
-    );
+    await waitFor(() => expect(state.announce).toHaveBeenCalledWith("Redo att publicera"));
   });
 
   it("says how many suggestions the draft has, and brings their summary into view and focus", async () => {
@@ -257,7 +240,7 @@ describe("FlowDraftCheck", () => {
       await screen.findByText("2 förslag kan göra flödet enklare eller billigare")
     ).toBeTruthy();
     // Advice beside the check: what stops publishing is still nothing.
-    expect(screen.getByText("Inget hindrar publicering just nu.")).toBeTruthy();
+    expect(screen.getByText("Redo att publicera")).toBeTruthy();
     await expectNoAxeViolations(container);
 
     fireEvent.click(screen.getByRole("button", { name: "Visa förslagen" }));
@@ -281,7 +264,7 @@ describe("FlowDraftCheck", () => {
       }
     );
 
-    expect(await screen.findByText("Inget hindrar publicering just nu.")).toBeTruthy();
+    expect(await screen.findByText("Redo att publicera")).toBeTruthy();
     await waitFor(() =>
       expect(
         queryClient.getQueryData(flowSuggestionsQueryOptions("flow-1", 4).queryKey)

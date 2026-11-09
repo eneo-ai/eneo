@@ -593,18 +593,18 @@ export function KnowledgePicker({
           <button
             type="button"
             disabled={disabled}
-            className="text-muted-foreground hover:text-foreground hover:bg-muted/50 flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-dashed text-sm font-medium transition-colors disabled:opacity-50"
+            className="text-muted-foreground hover:text-foreground hover:bg-muted/50 focus-visible:outline-ring flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-dashed px-4 py-2 text-center text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-50"
           >
-            <Plus className="size-4" />
+            <Plus className="size-4 shrink-0" />
             {addLabel}
           </button>
         </PopoverTrigger>
         <PopoverContent align="start" className="w-(--radix-popover-trigger-width) min-w-80 p-0">
-          <Command shouldFilter={false}>
+          <Command shouldFilter={false} label={t("knowledge_picker_search")}>
             <CommandInput
               value={filter}
               onValueChange={setFilter}
-              placeholder={t("knowledge_filter_label")}
+              placeholder={t("knowledge_picker_search")}
             />
             <CommandList>
               {sections.length === 0 ? (

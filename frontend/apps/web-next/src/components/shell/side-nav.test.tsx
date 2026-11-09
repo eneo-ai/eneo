@@ -496,12 +496,26 @@ describe("DesktopSideNav on a tablet or a small laptop", () => {
   it.each([
     ["expanded", false],
     ["collapsed", true]
-  ])("keeps a stored %s nav at every width", (_, collapsed) => {
-    setViewport("tablet-landscape");
+  ])("keeps a stored %s nav from 1024 px", (_, collapsed) => {
+    setViewport({ width: 1024, height: 768, pointer: "fine" });
     renderStored(collapsed);
     expect(expanded()).toBe(!collapsed);
     act(() => setViewport("desktop"));
     expect(expanded()).toBe(!collapsed);
+  });
+
+  it("is the icon rail below 1024 px whatever was stored, until the toggle is pressed", () => {
+    setViewport({ width: 1023, height: 768, pointer: "fine" });
+    renderStored(false);
+    expect(expanded()).toBe(false);
+    act(() => setViewport("desktop"));
+    expect(expanded()).toBe(true);
+    act(() => setViewport("tablet-portrait"));
+    expect(expanded()).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Fäll ut sidomenyn" }));
+    expect(expanded()).toBe(true);
+    expect(document.cookie).toContain(`${SIDE_NAV_COLLAPSED_COOKIE}=0`);
   });
 });
 

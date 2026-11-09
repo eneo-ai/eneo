@@ -45,7 +45,9 @@ function DebugExport({ evidence, runId }: { evidence: RunEvidence; runId: string
   const text = () => JSON.stringify(debug, null, 2);
   return (
     <div className="flex flex-col items-start gap-2">
-      <p className="text-ax-text-secondary text-sm">{t("flow_run_extras_debug_hint")}</p>
+      <p className="text-ax-text-secondary max-w-prose text-sm">
+        {t("flow_run_extras_debug_hint")}
+      </p>
       <div className="flex flex-wrap gap-2">
         <Button
           label={isCopied ? t("copied") : t("flow_run_extras_debug_copy")}
@@ -156,7 +158,9 @@ export function RunTrace({
       </h2>
       {!requested ? (
         <div className="flex flex-col items-start gap-2">
-          <p className="text-ax-text-secondary text-sm">{t("flow_run_extras_trace_hint")}</p>
+          <p className="text-ax-text-secondary max-w-prose text-sm">
+            {t("flow_run_extras_trace_hint")}
+          </p>
           <Button label={t("flow_run_extras_trace_show")} onClick={() => setRequested(true)} />
         </div>
       ) : evidence.isPending ? (

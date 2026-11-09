@@ -4,7 +4,10 @@ import { exportClock, transcriptText } from "./transcript-export";
 
 const words = {
   part: (n: number) => `Del ${n}`,
-  unknownSpeaker: "Okänd talare",
+  speaker: (label: string | null) =>
+    label
+      ? label.replace(/^SPEAKER_(\d+)$/, (_, n: string) => `Talare ${Number(n) + 1}`)
+      : "Okänd talare",
   unsureSpeaker: "osäker"
 };
 
@@ -46,7 +49,7 @@ describe("transcriptText", () => {
         "## Del 2",
         "",
         "[01:01:40 - 01:01:45] Okänd talare: Ja.",
-        "[01:01:50 - 01:01:52] SPEAKER_01 (osäker): Kanske.",
+        "[01:01:50 - 01:01:52] Talare 2 (osäker): Kanske.",
         ""
       ].join("\n")
     );

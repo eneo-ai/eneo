@@ -31,7 +31,8 @@ function AttemptRow({ attempt }: { attempt: Attempt }) {
       ? t("flow_runs_step_took", { time: formatSeconds(duration / 1000, t) })
       : null,
     model ? t("flow_run_extras_attempt_model", { model }) : null,
-    tokens !== null
+    // No tokens used (a transcription, a document) is nothing to count; none recorded is said.
+    tokens !== null && tokens > 0
       ? t("flow_run_journey_step_tokens", {
           total: formatCount(tokens, locale),
           input:
@@ -42,7 +43,7 @@ function AttemptRow({ attempt }: { attempt: Attempt }) {
         (attempt.num_tokens_input == null || attempt.num_tokens_output == null
           ? ` ${t("flow_runs_usage_incomplete")}`
           : "")
-      : attempt.status !== "started"
+      : tokens === null && attempt.status !== "started"
         ? t("flow_run_token_usage_not_recorded")
         : null,
     attempt.finish_reason?.trim()

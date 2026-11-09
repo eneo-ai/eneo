@@ -293,7 +293,7 @@ function AddStepForm({
       <div
         ref={summaryRef}
         tabIndex={-1}
-        className="focus-visible:outline-ring outline-none focus-visible:outline-2 focus-visible:outline-offset-2"
+        className="focus-visible:outline-ring focus-visible:outline-2 focus-visible:outline-offset-2"
       >
         {formProblem && (
           <Banner
@@ -370,6 +370,10 @@ function AddStepForm({
         label={t("flow_step_name")}
         description={t("flow_step_editor_name_description")}
         value={name}
+        // The kind's default is selected, so typing replaces it instead of adding to it.
+        onFocus={() => {
+          if (typedName === null) nameRef.current?.select();
+        }}
         onChange={(value) => {
           setTypedName(value);
           if (value.trim()) setProblems((current) => ({ ...current, name: undefined }));

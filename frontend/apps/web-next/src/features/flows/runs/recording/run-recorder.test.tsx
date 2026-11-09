@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { initializeBrowserSession, SESSION_GENERATION_HEADER } from "@/lib/api/refusal";
 import messages from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
@@ -35,6 +35,8 @@ vi.mock("@/lib/api/browser", async () => {
 });
 
 import { StartRunDialog } from "../start-run-dialog";
+import type { LiveSnapshot } from "./live-transcript";
+import { LiveText } from "./run-recorder";
 
 const CONTRACT = "GET /api/v1/flows/{id}/run-contract/";
 const START = "POST /api/v1/flows/{id}/runs/";
@@ -354,7 +356,9 @@ describe("RunRecorder in the start dialog", () => {
     const pause = await within(dialog).findByRole("button", {
       name: messages.flow_transcript_rec_pause
     });
-    const name = within(dialog).getByLabelText(/^Namn på körningen/);
+    const name = within(dialog).getByLabelText(
+      new RegExp(`^${messages.flow_run_extras_run_label}`)
+    );
     name.focus();
     fireEvent.click(pause);
     await within(dialog).findByRole("button", { name: messages.flow_transcript_rec_resume });
@@ -796,5 +800,91 @@ describe("Keeping a recording on the device", () => {
       within(confirm).getByRole("button", { name: messages.flow_transcript_close_confirm })
     );
     await waitFor(() => expect(device.db.parts.size).toBe(0));
+  });
+});
+
+describe("the live text", () => {
+  const listening = (...texts: string[]): LiveSnapshot => ({
+    status: "listening",
+    pieces: texts.map((text, id) => ({ id, text })),
+    paused: false,
+    finishing: false,
+    errorCode: null
+  });
+  /** A box 100 px high whose text is `height` px; jsdom lays nothing out. */
+  function layOut(box: HTMLElement, height: { current: number }) {
+    // ScrollableArea makes a box that overflows a tab stop once it has measured it.
+    box.tabIndex = 0;
+    Object.defineProperty(box, "clientHeight", { configurable: true, get: () => 100 });
+    Object.defineProperty(box, "scrollHeight", { configurable: true, get: () => height.current });
+    box.scrollTo = vi.fn(({ top }: ScrollToOptions) => {
+      box.scrollTop = top ?? 0;
+    }) as typeof box.scrollTo;
+  }
+  function scrollTo(box: HTMLElement, top: number) {
+    box.scrollTop = top;
+    fireEvent.scroll(box);
+  }
+  const latest = () => screen.queryByRole("button", { name: messages.flow_transcript_live_latest });
+
+  it("keeps to the newest text until the person scrolls up, and goes back to it on request", () => {
+    const height = { current: 300 };
+    const { rerender } = renderInApp(<LiveText snapshot={listening("Ett")} />);
+    const box = screen.getByRole("region", { name: messages.flow_transcript_live_heading });
+    layOut(box, height);
+
+    rerender(<LiveText snapshot={listening("Ett", "Två")} />);
+    expect(box.scrollTop).toBe(300);
+    scrollTo(box, 300);
+    expect(latest()).toBeNull();
+
+    // Scrolling up to read lets go of the end: new text no longer moves the box.
+    scrollTo(box, 120);
+    height.current = 400;
+    rerender(<LiveText snapshot={listening("Ett", "Två", "Tre")} />);
+    expect(box.scrollTop).toBe(120);
+    const show = latest();
+    expect(show).toBeTruthy();
+
+    fireEvent.click(show!);
+    expect(box.scrollTo).toHaveBeenCalledWith({ top: 400, behavior: "smooth" });
+    expect(document.activeElement).toBe(box);
+    expect(latest()).toBeNull();
+    height.current = 500;
+    rerender(<LiveText snapshot={listening("Ett", "Två", "Tre", "Fyra")} />);
+    expect(box.scrollTop).toBe(500);
+  });
+
+  it("follows again when the person scrolls back down to the end themselves", () => {
+    const height = { current: 300 };
+    renderInApp(<LiveText snapshot={listening("Ett")} />);
+    const box = screen.getByRole("region", { name: messages.flow_transcript_live_heading });
+    layOut(box, height);
+    scrollTo(box, 200);
+    scrollTo(box, 50);
+    expect(latest()).toBeTruthy();
+    // Within a line of the end counts as the end.
+    scrollTo(box, 180);
+    expect(latest()).toBeNull();
+  });
+
+  it("jumps without a smooth scroll when the person asks for less motion", () => {
+    const media = window.matchMedia;
+    const reduce = vi.spyOn(window, "matchMedia").mockImplementation((query: string) => {
+      const list = media(query);
+      if (query === "(prefers-reduced-motion: reduce)") {
+        Object.defineProperty(list, "matches", { get: () => true });
+      }
+      return list;
+    });
+    onTestFinished(() => reduce.mockRestore());
+    const height = { current: 300 };
+    renderInApp(<LiveText snapshot={listening("Ett")} />);
+    const box = screen.getByRole("region", { name: messages.flow_transcript_live_heading });
+    layOut(box, height);
+    scrollTo(box, 200);
+    scrollTo(box, 50);
+    fireEvent.click(latest()!);
+    expect(box.scrollTo).toHaveBeenCalledWith({ top: 300, behavior: "auto" });
   });
 });

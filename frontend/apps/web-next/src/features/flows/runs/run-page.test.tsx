@@ -179,6 +179,10 @@ describe("FlowRunPage", () => {
 
     expect(await screen.findByText("Beslutet är fattat.")).toBeTruthy();
     expect(screen.getByRole("heading", { level: 1 })).toBeTruthy();
+    // The heading names the run in full; the trail ends on a short "Körning", so it stays on one line.
+    const trail = screen.getByRole("navigation", { name: /./ });
+    const current = within(trail).getByText(messages.flow_runs_run_title_plain);
+    expect(current.closest("[aria-current='page']")).toBeTruthy();
     const steps = screen.getByRole("heading", { level: 2, name: messages.flow_runs_steps_heading });
     expect(steps).toBeTruthy();
     const first = await screen.findByRole("article", { name: "Steg 1: Sammanfatta" });
@@ -244,7 +248,13 @@ describe("FlowRunPage", () => {
     answerRun(summary, makeRunDetail({ ...summary, input_payload_json: { text: "Ärendet." } }));
     renderRun();
 
-    const heading = await screen.findByRole("heading", { level: 2, name: "Underlag" });
+    fireEvent.click(
+      await screen.findByRole("button", { name: messages.flow_runs_form_answers_heading })
+    );
+    const heading = screen.getByRole("heading", {
+      level: 2,
+      name: messages.flow_runs_form_answers_heading
+    });
     const section = heading.closest("section")!;
     expect(within(section).getByText("Ärendet.")).toBeTruthy();
     expect(within(section).queryByText("text")).toBeNull();
@@ -255,8 +265,10 @@ describe("FlowRunPage", () => {
     answerRun(summary, makeRunDetail({ ...summary, input_payload_json: { ärende: "Bygglov" } }));
     renderRun();
 
-    const heading = await screen.findByRole("heading", { level: 2, name: "Underlag" });
-    expect(within(heading.closest("section")!).getByText("ärende")).toBeTruthy();
+    const fold = await screen.findByRole("button", {
+      name: messages.flow_runs_form_answers_heading
+    });
+    expect(within(fold.closest("section")!).getByText("ärende")).toBeTruthy();
   });
 
   it("offers neither knowledge nor trace when the core would not let the caller read the evidence", async () => {
@@ -284,6 +296,35 @@ describe("FlowRunPage", () => {
     expect(
       screen.queryByRole("heading", { name: messages.flow_run_extras_trace_heading })
     ).toBeNull();
+    // The support ids stay, folded under a name that promises no evidence.
+    const technical = screen.getByRole("button", {
+      name: messages.flow_run_extras_failure_technical
+    });
+    expect(within(technical.closest("section")!).getAllByText("trace-1").length).toBeGreaterThan(0);
+  });
+
+  it("folds what it was started with, what it used and the evidence at every width, the steps open", async () => {
+    for (const viewport of [
+      "tablet-portrait",
+      { width: 1440, height: 900, pointer: "fine" }
+    ] as const) {
+      setViewport(viewport);
+      answerRun(makeRunSummary());
+      renderRun();
+      await screen.findByText("Beslutet är fattat.");
+      expect(
+        screen.getByRole("heading", { level: 2, name: messages.flow_runs_steps_heading })
+      ).toBeTruthy();
+      expect(screen.queryByRole("button", { name: messages.flow_runs_steps_heading })).toBeNull();
+      for (const name of [
+        messages.flow_runs_form_answers_heading,
+        messages.flow_runs_usage_heading,
+        messages.flow_run_extras_trace_heading
+      ]) {
+        expect(screen.getByRole("button", { name }).getAttribute("aria-expanded")).toBe("false");
+      }
+      cleanup();
+    }
   });
 
   it("says why a run failed in the catalog's words and offers a retry", async () => {
@@ -434,13 +475,16 @@ describe("FlowRunPage", () => {
       within(second).queryByRole("button", { name: messages.flow_run_extras_prompt_heading })
     ).toBeNull();
 
-    const deliveries = screen.getByRole("table", {
+    const deliveries = screen.getByRole("region", {
       name: messages.flow_run_extras_webhook_heading
     });
-    const row = within(deliveries).getAllByRole("row")[1]!;
-    expect(within(row).getByText("Steg 2: Skriv svar")).toBeTruthy();
-    expect(within(row).getByText(messages.flow_run_extras_webhook_dead_lettered)).toBeTruthy();
-    expect(within(row).getByText("5")).toBeTruthy();
+    const [delivery] = within(deliveries).getAllByRole("listitem");
+    expect(within(delivery!).getByText("Steg 2: Skriv svar")).toBeTruthy();
+    expect(
+      within(delivery!).getByText(messages.flow_run_extras_webhook_dead_lettered)
+    ).toBeTruthy();
+    expect(delivery!.textContent).toContain("5 försök");
+    expect(within(deliveries).getByText(messages.flow_run_extras_webhook_retry_note)).toBeTruthy();
     await expectNoAxeViolations(container);
   });
 
@@ -467,8 +511,8 @@ describe("FlowRunPage", () => {
     // The type as a tag beside the name; a file the core did not name keeps none.
     expect(within(files).getByText("pdf")).toBeTruthy();
     expect(within(files).getByText("Fil 2")).toBeTruthy();
-    expect(within(files).getByRole("button", { name: "Ladda ned underlag.pdf" })).toBeTruthy();
-    expect(within(files).getByRole("button", { name: "Ladda ned fil 2" })).toBeTruthy();
+    expect(within(files).getByRole("button", { name: "Ladda ner underlag.pdf" })).toBeTruthy();
+    expect(within(files).getByRole("button", { name: "Ladda ner fil 2" })).toBeTruthy();
     await expectNoAxeViolations(container);
   });
 
@@ -501,6 +545,50 @@ describe("FlowRunPage", () => {
     expect(screen.queryByRole("button", { name: messages.flow_runs_retry })).toBeNull();
   });
 
+  it("says the result is on its way to the receiver when every step is done and a delivery is pending", async () => {
+    const running = makeRunSummary({ status: "running", finished_at: null });
+    const delivery = (attempts: number) => ({
+      id: "delivery-1",
+      step_id: "step-2",
+      step_order: 2,
+      attempt_no: 1,
+      delivery_status: "pending" as const,
+      delivery_attempts: attempts,
+      next_delivery_at: attempts > 0 ? "2026-10-21T08:05:00Z" : null,
+      created_at: "2026-10-21T08:01:00Z",
+      updated_at: "2026-10-21T08:01:00Z"
+    });
+    answerRun(
+      running,
+      makeRunDetail({ ...running, result: null, webhook_deliveries: [delivery(0)] })
+    );
+    renderRun();
+
+    expect(
+      await screen.findByText(`· ${messages.flow_run_progress_delivery_summary}`)
+    ).toBeTruthy();
+    expect(screen.queryByText(`· ${messages.flow_run_progress_pending_summary}`)).toBeNull();
+    // The delivery fold is open: it is what the run waits on.
+    const deliveries = screen.getByRole("region", {
+      name: messages.flow_run_extras_webhook_heading
+    });
+    expect(
+      within(deliveries)
+        .getByRole("button", { name: messages.flow_run_extras_webhook_heading })
+        .getAttribute("aria-expanded")
+    ).toBe("true");
+
+    cleanup();
+    answerRun(
+      running,
+      makeRunDetail({ ...running, result: null, webhook_deliveries: [delivery(2)] })
+    );
+    renderRun();
+    expect(
+      await screen.findByText(`· ${messages.flow_run_progress_delivery_retrying_summary}`)
+    ).toBeTruthy();
+  });
+
   it("cancels a running run after asking, and says what the core answered", async () => {
     const running = makeRunSummary({ status: "running", finished_at: null });
     answerRun(running, makeRunDetail({ ...running, result: null }));
@@ -530,20 +618,69 @@ describe("FlowRunPage", () => {
     );
   });
 
-  it("reads the whole run again when asked, and says so", async () => {
-    answerRun(makeRunSummary());
+  it("reads the whole run again when asked while it moves, and says so", async () => {
+    const running = makeRunSummary({ status: "running", finished_at: null });
+    answerRun(running, makeRunDetail({ ...running, result: null }));
+    answerEvidence();
     renderRun();
-    await screen.findByText("Beslutet är fattat.");
+    fireEvent.click(
+      await screen.findByRole("button", { name: messages.flow_run_extras_trace_show })
+    );
+    await screen.findByRole("button", { name: messages.flow_run_extras_debug_copy });
     expect(calls(DETAIL)).toHaveLength(1);
+    expect(calls(EVIDENCE)).toHaveLength(1);
 
     fireEvent.click(screen.getByRole("button", { name: messages.flow_run_more_refresh }));
 
     await waitFor(() =>
       expect(state.announce).toHaveBeenCalledWith(messages.flow_run_more_refreshed)
     );
-    expect(calls(STATUS)).toHaveLength(2);
+    // A poll can come in between; the audited reads are read once more, on the click alone.
+    expect(calls(STATUS).length).toBeGreaterThanOrEqual(2);
     expect(calls(DETAIL)).toHaveLength(2);
     expect(calls(STEPS)).toHaveLength(2);
+    expect(calls(EVIDENCE)).toHaveLength(2);
+  });
+
+  it("offers no refresh of a finished run, unless a read of it failed", async () => {
+    answerRun(makeRunSummary());
+    renderRun();
+    await screen.findByText("Beslutet är fattat.");
+    expect(screen.queryByRole("button", { name: messages.flow_run_more_refresh })).toBeNull();
+    cleanup();
+
+    answerRun(makeRunSummary());
+    state.routes[DETAIL] = () => ({ status: 500, body: { message: "Down", code: "internal" } });
+    renderRun();
+    expect(await screen.findByText(messages.flow_runs_detail_failed)).toBeTruthy();
+    expect(screen.getByRole("button", { name: messages.flow_run_more_refresh })).toBeTruthy();
+  });
+
+  it("offers the knowledge only when a step of the run was set up to search it", async () => {
+    answerRun(makeRunSummary());
+    state.routes[STEPS] = () => ({
+      body: [
+        makeRunStep(1, { input_payload_json: { rag: { status: "skipped_no_knowledge" } } }),
+        makeRunStep(2)
+      ]
+    });
+    renderRun();
+    await screen.findByText("Beslutet är fattat.");
+    expect(screen.queryByRole("button", { name: messages.flow_runs_knowledge_heading })).toBeNull();
+    cleanup();
+
+    for (const rag of [{ status: "no_chunks" }, { execution_mode: "map" }]) {
+      answerRun(makeRunSummary());
+      state.routes[STEPS] = () => ({
+        body: [makeRunStep(1), makeRunStep(2, { input_payload_json: { rag } })]
+      });
+      renderRun();
+      await screen.findByText("Beslutet är fattat.");
+      expect(
+        screen.getByRole("button", { name: messages.flow_runs_knowledge_heading })
+      ).toBeTruthy();
+      cleanup();
+    }
   });
 
   it("copies the run's id and trace id for support", async () => {
@@ -569,7 +706,7 @@ describe("FlowRunPage", () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("run-1"));
   });
 
-  it("says what the run used and its ids beside its status, short", async () => {
+  it("says what the run used beside its status, and keeps its ids, short, with the evidence", async () => {
     const summary = makeRunSummary({ id: "3f2a8c1d-7e4b-4c1a-9a0e-5b6c7d8e9f01" });
     answerRun(
       summary,
@@ -586,9 +723,13 @@ describe("FlowRunPage", () => {
     });
     const above = (node: Node) =>
       Boolean(node.compareDocumentPosition(result) & Node.DOCUMENT_POSITION_FOLLOWING);
-    for (const text of [/^1\s500 token$/, /^Ljud: 2 min 5 s \(ofullständigt\)$/, "3f2a8c1d…"]) {
+    for (const text of [/^1\s500 token$/, /^Ljud: 2 min 5 s \(ofullständigt\)$/]) {
       expect(above(screen.getByText(text))).toBe(true);
     }
+    const evidence = screen.getByRole("button", { name: messages.flow_run_extras_trace_heading });
+    expect(evidence.getAttribute("aria-expanded")).toBe("false");
+    expect(above(evidence)).toBe(false);
+    expect(within(evidence.closest("section")!).getByText("3f2a8c1d…")).toBeTruthy();
   });
 
   it("explains what the run id and the trace id are for", async () => {
@@ -647,7 +788,7 @@ describe("FlowRunPage", () => {
       }
     });
     renderRun();
-    fireEvent.click(await screen.findByRole("button", { name: "Ladda ned underlag.docx" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Ladda ner underlag.docx" }));
 
     await waitFor(() =>
       expect(error).toHaveBeenCalledWith(
@@ -1072,11 +1213,11 @@ describe("FlowRunPage", () => {
       const { container } = renderRun(["flows_view", "flows_manage"]);
 
       const panel = await screen.findByRole("region", { name: "Granska steg 2: Skriv svar" });
-      expect((within(panel).getByLabelText(/^Namn för SPEAKER_00/) as HTMLInputElement).value).toBe(
+      expect((within(panel).getByLabelText(/^Namn för Talare 1/) as HTMLInputElement).value).toBe(
         "Anna"
       );
       await expectNoAxeViolations(container);
-      fireEvent.change(within(panel).getByLabelText(/^Namn för SPEAKER_01/), {
+      fireEvent.change(within(panel).getByLabelText(/^Namn för Talare 2/), {
         target: { value: "Bo" }
       });
       fireEvent.click(
@@ -1202,7 +1343,7 @@ describe("FlowRunPage", () => {
       expect(calls(DETAIL)).toHaveLength(1);
     });
 
-    it("docks the decision under the thumb on a phone, and leaves it in the page elsewhere", async () => {
+    it("docks the decision under the thumb on a phone, and keeps it in reach elsewhere", async () => {
       setViewport("phone");
       answerReview();
       renderRun(["flows_view", "flows_manage"]);
@@ -1214,18 +1355,27 @@ describe("FlowRunPage", () => {
       expect(
         within(docked).getByRole("button", { name: messages.flow_runs_review_reject })
       ).toBeTruthy();
+      // The decision comes first: the run's own buttons follow the panel, not the title.
+      const refresh = screen.getByRole("button", { name: messages.flow_run_more_refresh });
+      expect(
+        panel.compareDocumentPosition(refresh) & Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy();
       cleanup();
 
       setViewport("tablet-portrait");
       answerReview();
       renderRun(["flows_view", "flows_manage"]);
       const wide = await screen.findByRole("region", { name: "Granska steg 2: Skriv svar" });
+      // Wider, the bar sticks to the bottom of the view while a long transcript scrolls.
+      const sticky = within(wide).getByRole("group", { name: messages.flow_runs_review_actions });
+      expect(sticky.hasAttribute("data-docked-actions")).toBe(false);
+      expect(sticky.className).toContain("sticky");
       expect(
-        within(wide).queryByRole("group", { name: messages.flow_runs_review_actions })
-      ).toBeNull();
-      expect(
-        within(wide).getByRole("button", { name: messages.flow_runs_review_approve })
+        within(sticky).getByRole("button", { name: messages.flow_runs_review_approve })
       ).toBeTruthy();
+      // From a tablet up they stay in the header, beside the title.
+      const header = screen.getByRole("button", { name: messages.flow_run_more_refresh });
+      expect(wide.compareDocumentPosition(header) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
     });
 
     it("offers no decision once the review time has run out", async () => {
@@ -1313,14 +1463,28 @@ describe("FlowRunPage", () => {
       state.routes[CORRECTIONS] = () => ({ body: [] });
     }
 
+    /** Opens the step's transcript, which a run that had ended shows closed. */
+    async function openTranscript() {
+      const trigger = await screen.findByRole("button", {
+        name: new RegExp(
+          `^(${messages.flow_runs_transcript_heading}|${messages.flow_runs_transcript_and_speakers})$`
+        )
+      });
+      if (trigger.getAttribute("aria-expanded") === "false") fireEvent.click(trigger);
+    }
+
+    /** The lines of the step's transcript, opened. */
+    async function transcriptLines() {
+      await openTranscript();
+      return screen.findByRole("list", { name: messages.flow_runs_transcript_lines });
+    }
+
     it("shows the transcript once, in its step, and opens the steps for it on a phone", async () => {
       for (const viewport of ["phone", "tablet-portrait"] as const) {
         setViewport(viewport);
         answerAudioRun();
         renderRun(["flows_view", "flows_manage"]);
-        const lines = await screen.findByRole("list", {
-          name: messages.flow_runs_transcript_lines
-        });
+        const lines = await transcriptLines();
         expect(
           screen.getAllByRole("list", { name: messages.flow_runs_transcript_lines })
         ).toHaveLength(1);
@@ -1350,14 +1514,18 @@ describe("FlowRunPage", () => {
         }
       });
       renderRun(["flows_view", "flows_manage"]);
-      const lines = await screen.findByRole("list", { name: messages.flow_runs_transcript_lines });
+      const lines = await transcriptLines();
       const card = screen.getByRole("article", { name: "Steg 1: Sammanfatta" });
-      const result = within(card).getByRole("button", { name: messages.flow_runs_step_output });
-      expect(result.getAttribute("aria-expanded")).toBe("true");
+      // The transcript is the step's result, not a section beside it.
+      const results = within(card).getAllByRole("button", {
+        name: messages.flow_runs_transcript_heading
+      });
+      expect(results).toHaveLength(1);
+      expect(results[0]!.getAttribute("aria-expanded")).toBe("true");
       expect(card.contains(lines)).toBe(true);
       expect(within(card).queryByText("Resultat från steg 1")).toBeNull();
       expect(
-        within(card).queryByRole("button", { name: messages.flow_runs_transcript_heading })
+        within(card).queryByRole("button", { name: messages.flow_runs_step_output })
       ).toBeNull();
       cleanup();
 
@@ -1381,6 +1549,7 @@ describe("FlowRunPage", () => {
         }
       });
       renderRun(["flows_view", "flows_manage"]);
+      await openTranscript();
       expect(await screen.findByText(messages.flow_runs_transcript_omitted)).toBeTruthy();
       expect(
         within(screen.getByRole("article", { name: "Steg 1: Sammanfatta" })).getByText(
@@ -1415,6 +1584,7 @@ describe("FlowRunPage", () => {
         body: { message: "Unavailable", code: "unavailable" }
       });
       renderRun(["flows_view", "flows_manage"]);
+      await openTranscript();
 
       expect(await screen.findByText(messages.flow_runs_transcript_failed)).toBeTruthy();
       const card = screen.getByRole("article", { name: "Steg 1: Sammanfatta" });
@@ -1430,8 +1600,8 @@ describe("FlowRunPage", () => {
       setViewport("tablet-portrait");
       answerAudioRun();
       renderRun(["flows_view", "flows_manage"]);
-      const lines = await screen.findByRole("list", { name: messages.flow_runs_transcript_lines });
-      fireEvent.change(screen.getByLabelText("Namn för SPEAKER_00"), { target: { value: "Anna" } });
+      const lines = await transcriptLines();
+      fireEvent.change(screen.getByLabelText("Namn för Talare 1"), { target: { value: "Anna" } });
       fireEvent.click(within(lines).getByRole("button", { name: "Rätta raden 1:05" }));
       fireEvent.change(screen.getByLabelText("Texten på raden 1:05"), {
         target: { value: "Tack så mycket." }
@@ -1439,8 +1609,10 @@ describe("FlowRunPage", () => {
 
       for (const viewport of ["phone", "tablet-portrait"] as const) {
         act(() => setViewport(viewport));
+        // The steps render anew in the other layout, with the ended run's transcript closed.
+        await openTranscript();
         expect([
-          screen.queryByLabelText<HTMLInputElement>("Namn för SPEAKER_00")?.value,
+          screen.queryByLabelText<HTMLInputElement>("Namn för Talare 1")?.value,
           screen.queryByLabelText<HTMLTextAreaElement>("Texten på raden 1:05")?.value
         ]).toEqual(["Anna", "Tack så mycket."]);
       }
@@ -1452,12 +1624,12 @@ describe("FlowRunPage", () => {
       state.routes[EDIT] = () => ({ body: {} });
       const { container } = renderRun(["flows_view", "flows_manage"]);
 
-      const lines = await screen.findByRole("list", { name: messages.flow_runs_transcript_lines });
+      const lines = await transcriptLines();
       expect(within(lines).getByText("1:05")).toBeTruthy();
-      expect(within(lines).getByText("SPEAKER_01")).toBeTruthy();
+      expect(within(lines).getByText("Talare 2")).toBeTruthy();
       await expectNoAxeViolations(container);
 
-      fireEvent.change(screen.getByLabelText("Namn för SPEAKER_00"), { target: { value: "Anna" } });
+      fireEvent.change(screen.getByLabelText("Namn för Talare 1"), { target: { value: "Anna" } });
       fireEvent.click(
         screen.getByRole("button", { name: messages.flow_runs_transcript_names_save })
       );
@@ -1489,10 +1661,14 @@ describe("FlowRunPage", () => {
           }
         });
       state.routes[WORDS] = () => ({ status: 404, body: { detail: "No word timings" } });
+      // Refresh is offered while the run moves.
+      state.routes[STATUS] = () => ({
+        body: makeRunSummary({ status: "running", finished_at: null })
+      });
       const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
       renderRun(["flows_view"]);
 
-      const lines = await screen.findByRole("list", { name: messages.flow_runs_transcript_lines });
+      const lines = await transcriptLines();
       fireEvent.click(within(lines).getByRole("button", { name: /^Spela från 1:05/ }));
       await screen.findByLabelText(messages.flow_transcript_audio_label);
       await waitFor(() => expect(calls(WORDS)).toHaveLength(1));
@@ -1507,12 +1683,12 @@ describe("FlowRunPage", () => {
       play.mockRestore();
     });
 
-    it("reads the run's detail, steps and evidence again on Refresh or when the run moved, never on a refocus", async () => {
+    it("reads the run's detail, steps and evidence again when the run moved, never on a refocus", async () => {
       vi.useFakeTimers({ shouldAdvanceTime: true });
       answerAudioRun();
       answerEvidence();
       renderRun(["flows_view"]);
-      await screen.findByRole("list", { name: messages.flow_runs_transcript_lines });
+      await transcriptLines();
       fireEvent.click(screen.getByRole("button", { name: messages.flow_run_extras_trace_show }));
       await screen.findByRole("button", { name: messages.flow_run_extras_debug_copy });
       const audited = () => [DETAIL, STEPS, CORRECTIONS, EVIDENCE].map((r) => calls(r).length);
@@ -1533,12 +1709,6 @@ describe("FlowRunPage", () => {
       await waitFor(() => expect(calls(STATUS)).toHaveLength(2));
       expect(audited()).toEqual([1, 1, 2, 1]);
 
-      fireEvent.click(screen.getByRole("button", { name: messages.flow_run_more_refresh }));
-      await waitFor(() =>
-        expect(state.announce).toHaveBeenCalledWith(messages.flow_run_more_refreshed)
-      );
-      expect(audited()).toEqual([2, 2, 3, 2]);
-
       // The run moved on (a new revision): its detail and steps are read once more.
       state.routes[STATUS] = () => ({ body: makeRunSummary({ revision: 9 }) });
       await act(() => vi.advanceTimersByTimeAsync(31_000));
@@ -1547,17 +1717,17 @@ describe("FlowRunPage", () => {
         focusManager.setFocused(true);
       });
       focusManager.setFocused(undefined);
-      await waitFor(() => expect(calls(DETAIL)).toHaveLength(3));
-      await waitFor(() => expect(calls(STEPS)).toHaveLength(3));
+      await waitFor(() => expect(calls(DETAIL)).toHaveLength(2));
+      await waitFor(() => expect(calls(STEPS)).toHaveLength(2));
       await act(() => vi.advanceTimersByTimeAsync(100));
-      expect(audited()).toEqual([3, 3, 4, 2]);
+      expect(audited()).toEqual([2, 2, 3, 1]);
     });
 
     it("shows a correction saved elsewhere on a finished run on coming back", async () => {
       vi.useFakeTimers({ shouldAdvanceTime: true });
       answerAudioRun();
       renderRun(["flows_view"]);
-      const lines = await screen.findByRole("list", { name: messages.flow_runs_transcript_lines });
+      const lines = await transcriptLines();
       expect(within(lines).getByText("Tack.")).toBeTruthy();
 
       // Another reviewer corrects a line; the run itself does not move.
@@ -1621,7 +1791,7 @@ describe("FlowRunPage", () => {
       const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
       const { container } = renderRun(["flows_view"]);
 
-      const lines = await screen.findByRole("list", { name: messages.flow_runs_transcript_lines });
+      const lines = await transcriptLines();
       fireEvent.click(within(lines).getByRole("button", { name: /^Spela från 1:05/ }));
       const audio = await screen.findByLabelText<HTMLAudioElement>(
         messages.flow_transcript_audio_label
@@ -1679,7 +1849,7 @@ describe("FlowRunPage", () => {
         };
       };
       const { container } = renderRun(["flows_view", "flows_manage"]);
-      const lines = await screen.findByRole("list", { name: messages.flow_runs_transcript_lines });
+      const lines = await transcriptLines();
 
       fireEvent.click(within(lines).getByRole("button", { name: "Rätta raden 1:05" }));
       const field = within(lines).getByLabelText("Texten på raden 1:05");
@@ -1747,7 +1917,7 @@ describe("FlowRunPage", () => {
         };
       };
       const { container } = renderRun(["flows_view", "flows_manage"]);
-      const lines = await screen.findByRole("list", { name: messages.flow_runs_transcript_lines });
+      const lines = await transcriptLines();
 
       // The whole line, unsure.
       fireEvent.click(within(lines).getByRole("button", { name: "Rätta raden 1:05" }));
@@ -1871,6 +2041,7 @@ describe("FlowRunPage", () => {
         }
       });
       const { container } = renderRun(["flows_view", "flows_manage"]);
+      await openTranscript();
 
       fireEvent.click(
         await screen.findByRole("button", { name: messages.flow_transcript_history_heading })
@@ -1947,6 +2118,7 @@ describe("FlowRunPage", () => {
             (call.init as { params: { path: { run_id: string } } }).params.path.run_id === "run-2"
         );
       renderRun(["flows_view", "flows_manage"]);
+      await openTranscript();
 
       fireEvent.click(
         await screen.findByRole("button", { name: messages.flow_transcript_regenerate })
@@ -2012,6 +2184,7 @@ describe("FlowRunPage", () => {
         return { body: set(2, init.body.occurrences) };
       };
       renderRun(["flows_view", "flows_manage"]);
+      await openTranscript();
       const toggle = await screen.findByRole("button", {
         name: messages.flow_transcript_history_heading
       });
@@ -2082,6 +2255,7 @@ describe("FlowRunPage", () => {
         };
       };
       const { container } = renderRun(["flows_view", "flows_manage"]);
+      await openTranscript();
 
       expect(
         await screen.findByText("Ett ställe med överlappande tal behöver kontrolleras")
@@ -2099,7 +2273,7 @@ describe("FlowRunPage", () => {
       );
 
       fireEvent.click(within(lines).getByRole("button", { name: "Rätta raden 1:05" }));
-      fireEvent.click(within(lines).getByRole("button", { name: "Behåll SPEAKER_01 som talare" }));
+      fireEvent.click(within(lines).getByRole("button", { name: "Behåll Talare 2 som talare" }));
       await waitFor(() =>
         expect(state.announce).toHaveBeenCalledWith(messages.flow_transcript_speaker_confirmed)
       );
@@ -2199,11 +2373,90 @@ describe("FlowRunPage", () => {
       ).toBeTruthy();
     });
 
+    it("names the speakers in a review by number, shows the names as typed and plays a speaker from its name", async () => {
+      answerAudioRun();
+      // A name saved in the transcript wins over the one typed in the review.
+      state.routes[CORRECTIONS] = () => ({
+        body: [
+          {
+            flow_run_id: "run-1",
+            step_id: "step-1",
+            created_at: "2026-10-21T09:00:00Z",
+            updated_at: "2026-10-21T09:00:00Z",
+            edited_by_principal_type: "user",
+            schema_version: 3,
+            segments_hash: "hash-1",
+            stale: false,
+            revision: 1,
+            occurrences: [],
+            speaker_edits: [],
+            speaker_names: { SPEAKER_01: "Bo Ek" }
+          }
+        ]
+      });
+      state.routes["POST /api/v1/flows/{id}/runs/{run_id}/input-files/{file_id}/signed-url/"] =
+        () => ({
+          body: {
+            url: "http://backend:8000/api/v1/files/audio-1/download/?token=t0k3n",
+            expires_at: "2026-10-21T10:00:00Z"
+          }
+        });
+      const waiting = makeRunSummary({ status: "awaiting_review", finished_at: null });
+      state.routes[STATUS] = () => ({ body: waiting });
+      state.routes[DETAIL] = () => ({ body: makeRunDetail({ ...waiting, result: null }) });
+      state.routes[REVIEW] = () => ({
+        body: makeCheckpoint({
+          step_label: "Namnge talare",
+          output_type: "json",
+          current_payload_json: {
+            structured: {
+              speakers: [
+                { label: "SPEAKER_00", name: null, confidence: "low", evidence: "Hälsar" },
+                { label: "SPEAKER_01", name: "Bo", confidence: "high", evidence: "" }
+              ]
+            }
+          }
+        })
+      });
+      const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
+      renderRun(["flows_view", "flows_manage"]);
+
+      const panel = await screen.findByRole("region", { name: "Granska steg 2: Namnge talare" });
+      const lines = await within(panel).findByRole("list", {
+        name: messages.flow_runs_transcript_lines
+      });
+      // A speaker without a name is numbered, never shown by its internal label.
+      const field = within(panel).getByLabelText<HTMLInputElement>(/^Namn för Talare 1/);
+      expect(within(panel).getByText("Grund för förslaget: Hälsar")).toBeTruthy();
+      expect(within(lines).getByText("Talare 1")).toBeTruthy();
+      expect(panel.textContent).not.toContain("SPEAKER_0");
+
+      // What the reviewer types shows in the transcript at once.
+      fireEvent.change(field, { target: { value: "Anna" } });
+      expect(within(lines).getByText("Anna")).toBeTruthy();
+      expect(within(lines).queryByText("Talare 1")).toBeNull();
+      expect(within(lines).getByText("Bo Ek")).toBeTruthy();
+
+      // The name's own button plays the speaker through the transcript's one player.
+      const names = within(panel.querySelector<HTMLElement>('[id$="-editor"]')!);
+      fireEvent.click(names.getByRole("button", { name: "Lyssna på Bo" }));
+      const audio = await within(panel).findByLabelText<HTMLAudioElement>(
+        messages.flow_transcript_audio_label
+      );
+      fireEvent.loadedMetadata(audio);
+      expect(audio.currentTime).toBe(64.5);
+      expect(play).toHaveBeenCalled();
+      fireEvent.click(names.getByRole("button", { name: "Lyssna på Anna" }));
+      expect(audio.currentTime).toBe(0);
+      expect(panel.querySelectorAll("audio")).toHaveLength(1);
+      play.mockRestore();
+    });
+
     it("lets only someone who may review name the speakers", async () => {
       answerAudioRun();
       renderRun(["flows_view", "flows_run"]);
-      await screen.findByRole("list", { name: messages.flow_runs_transcript_lines });
-      expect(screen.queryByLabelText("Namn för SPEAKER_00")).toBeNull();
+      await transcriptLines();
+      expect(screen.queryByLabelText("Namn för Talare 1")).toBeNull();
     });
 
     it.each([
@@ -2222,6 +2475,7 @@ describe("FlowRunPage", () => {
         }
       });
       renderRun();
+      await openTranscript();
       expect(await screen.findByText(text)).toBeTruthy();
       expect(screen.queryByRole("list", { name: messages.flow_runs_transcript_lines })).toBeNull();
     });
@@ -2275,7 +2529,7 @@ describe("FlowRunPage on a phone", () => {
     ).toBeTruthy();
     // A tap away: closed until then.
     const steps = screen.getByRole("button", { name: messages.flow_runs_steps_heading });
-    const input = screen.getByRole("button", { name: messages.flow_runs_input_heading });
+    const input = screen.getByRole("button", { name: messages.flow_runs_form_answers_heading });
     const usage = screen.getByRole("button", { name: messages.flow_runs_usage_heading });
     const trace = screen.getByRole("button", { name: messages.flow_run_extras_trace_heading });
     for (const folded of [steps, input, usage, trace]) {

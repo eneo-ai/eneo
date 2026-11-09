@@ -31,12 +31,14 @@ from eneo.files.docx_template_validation import (
     validate_docx_template_archive,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_run_error import TemplateFillFailure, template_fill_context
 from eneo.flows.runtime.document_rendering.blocks import (
     DocumentBlock,
     normalize_document_headings,
 )
 from eneo.flows.runtime.document_rendering.limits import (
     DEFAULT_DOCUMENT_RENDER_LIMITS,
+    DocumentRenderLimitExceeded,
     DocumentRenderLimits,
     ensure_blocks_within_limits,
     ensure_source_within_limits,
@@ -96,7 +98,7 @@ async def inspect_docx_template_placeholders(
     """List the template's fill targets in document order; none for a
     document without controls."""
 
-    targets = await _inspect(template_bytes, filename=filename)
+    targets, _ = await _inspect(template_bytes, filename=filename)
     return tuple(target.spec for target in targets)
 
 
@@ -149,7 +151,9 @@ async def render_docx_template(
     """
 
     try:
-        targets = await _inspect(template_bytes, filename=template_name)
+        targets, other_placeholders = await _inspect(
+            template_bytes, filename=template_name
+        )
         _require_fill_targets(targets)
     except (BadRequestException, FileNotSupportedException) as exc:
         if exc.code == FlowApiErrorCode.DOCUMENT_RUNTIME_REQUIRED.value:
@@ -161,24 +165,31 @@ async def render_docx_template(
         raise TypedIOValidationException(
             f"The published DOCX template is no longer fillable: {exc}",
             code=FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED.value,
+            context=template_fill_context("invalid_template"),
         ) from exc
 
     specs = [target.spec for target in targets]
     values = _require_values(specs, context)
-    ensure_source_within_limits("\n".join(values.values()), limits=limits)
-    sections = {
-        spec.name: parse_markdown_blocks(values[spec.name].splitlines())
-        for spec in specs
-        if spec.kind == "rich" and values[spec.name].strip()
-    }
-    ensure_blocks_within_limits(
-        [block for blocks in sections.values() for block in blocks],
-        limits=limits,
-        additional_text_chars=sum(
-            len(values[spec.name]) for spec in specs if spec.kind == "text"
-        ),
-    )
-    fill: dict[str, str] = {}
+    try:
+        ensure_source_within_limits("\n".join(values.values()), limits=limits)
+        sections = {
+            spec.name: parse_markdown_blocks(values[spec.name].splitlines())
+            for spec in specs
+            if spec.kind == "rich" and values[spec.name].strip()
+        }
+        ensure_blocks_within_limits(
+            [block for blocks in sections.values() for block in blocks],
+            limits=limits,
+            additional_text_chars=sum(
+                len(values[spec.name]) for spec in specs if spec.kind == "text"
+            ),
+        )
+    except DocumentRenderLimitExceeded as exc:
+        raise _too_large(exc.context) from exc
+    # ``{{name}}`` placeholders are not fill targets, but the runtime fills
+    # every placeholder it finds: they are left blank, as in the built-in
+    # template's header and footer.
+    fill: dict[str, str] = dict.fromkeys(other_placeholders, "")
     for target in targets:
         name = target.spec.name
         if not values[name].strip():
@@ -195,13 +206,41 @@ async def render_docx_template(
     except runtime_client.RuntimeUnavailable as exc:
         raise _runtime_unavailable_during_render() from exc
     except BadRequestException as exc:
+        reason: TemplateFillFailure = _RUNTIME_REFUSALS.get(
+            str((exc.context or {}).get("runtime_code")), "render_refused"
+        )
+        if reason == "too_large":
+            raise _too_large() from exc
         raise TypedIOValidationException(
-            "The template could not be filled within its limits.",
+            "The document runtime refused to fill the template "
+            f"({(exc.context or {}).get('runtime_code') or 'no reason given'}).",
             code=FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED.value,
+            context=template_fill_context(reason),
         ) from exc
     text = extract_docx_text(document)
-    ensure_source_within_limits(text, limits=limits)
+    try:
+        ensure_source_within_limits(text, limits=limits)
+    except DocumentRenderLimitExceeded as exc:
+        raise _too_large(exc.context) from exc
     return document, mimetype, text
+
+
+# What the runtime's refusal codes mean for the person fixing the flow.
+_RUNTIME_REFUSALS: dict[str, TemplateFillFailure] = {
+    "INVALID_INPUT": "too_large",
+    "EXPORT_TOO_LARGE": "too_large",
+    "TOO_LARGE": "too_large",
+    "INVALID_TEMPLATE": "invalid_template",
+}
+
+
+def _too_large(limit: Mapping[str, object] | None = None) -> TypedIOValidationException:
+    """Keeps the limit's own facts (metric, actual, limit) beside the reason."""
+    return TypedIOValidationException(
+        "The template values exceed the document limits.",
+        code=FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED.value,
+        context={**(limit or {}), **template_fill_context("too_large")},
+    )
 
 
 def extract_docx_text(document_bytes: bytes) -> str:
@@ -221,7 +260,11 @@ def extract_docx_template_text_preview(template_bytes: bytes) -> str:
     return extract_docx_text(template_bytes)[:_PREVIEW_CHARS]
 
 
-async def _inspect(template_bytes: bytes, *, filename: str) -> tuple[_Target, ...]:
+async def _inspect(
+    template_bytes: bytes, *, filename: str
+) -> tuple[tuple[_Target, ...], tuple[str, ...]]:
+    """The flow's fill targets, and the names of the template's other
+    (``{{name}}``) placeholders."""
     try:
         validate_docx_template_archive(template_bytes, filename=filename)
         report = await runtime_client.inspect_template(template_bytes)
@@ -234,7 +277,16 @@ async def _inspect(template_bytes: bytes, *, filename: str) -> tuple[_Target, ..
         raise normalized from exc
     if report is None:
         raise _runtime_required()
-    return _flow_targets(report.placeholders)
+    others = tuple(
+        dict.fromkeys(
+            str(placeholder.get("name"))
+            for placeholder in report.placeholders
+            if placeholder.get("syntax") != "control"
+            and placeholder.get("supported")
+            and placeholder.get("name")
+        )
+    )
+    return _flow_targets(report.placeholders), others
 
 
 def _flow_targets(placeholders: Sequence[Mapping[str, Any]]) -> tuple[_Target, ...]:
@@ -347,6 +399,7 @@ def _require_values(
         raise TypedIOValidationException(
             f"Unresolved template placeholders: {', '.join(missing)}",
             code=FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED.value,
+            context=template_fill_context("unbound", field=missing[0]),
         )
     absent = sorted(target.name for target in targets if context[target.name] is None)
     if absent:
@@ -355,6 +408,7 @@ def _require_values(
             f"{', '.join(absent)}. The bound step or field produced nothing; bind "
             "another source or leave the placeholder empty on purpose.",
             code=FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED.value,
+            context=template_fill_context("missing_value", field=absent[0]),
         )
     values: dict[str, str] = {}
     non_text: list[str] = []
@@ -368,6 +422,7 @@ def _require_values(
         raise TypedIOValidationException(
             f"Template placeholders must be bound to text: {', '.join(sorted(non_text))}",
             code=FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED.value,
+            context=template_fill_context("not_text", field=sorted(non_text)[0]),
         )
     return values
 
@@ -396,4 +451,5 @@ def _runtime_unavailable_during_render() -> TypedIOValidationException:
     return TypedIOValidationException(
         "The shared document runtime is unavailable.",
         code=FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED.value,
+        context=template_fill_context("runtime_unavailable"),
     )

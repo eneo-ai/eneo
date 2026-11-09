@@ -36,6 +36,8 @@ type ConfirmSurfaceProps = {
   title: string;
   description: string;
   confirmLabel: string;
+  /** The way back, when "Avbryt" would read as the action (an editor's own "Avbryt" opened it). */
+  cancelLabel?: string;
   variant: "default" | "destructive";
   busy: boolean;
   onConfirm: () => void;
@@ -63,6 +65,7 @@ function ConfirmSurface({
   title,
   description,
   confirmLabel,
+  cancelLabel,
   variant,
   busy,
   onConfirm,
@@ -84,7 +87,8 @@ function ConfirmSurface({
     <Button
       key="cancel"
       variant="ghost"
-      label={t("cancel")}
+      label={cancelLabel ?? t("cancel")}
+      // eslint-disable-next-line eneo/no-busy-disabled-button -- the dismiss button, named by the caller; it waits while the action runs, whose own button holds the focus.
       isDisabled={busy}
       width={isSmallScreen ? "100%" : undefined}
       onClick={onRequestClose}
@@ -170,6 +174,7 @@ export function ConfirmDialogControlled({
   title,
   description,
   confirmLabel,
+  cancelLabel,
   variant = "destructive",
   pending,
   onConfirm,
@@ -180,6 +185,7 @@ export function ConfirmDialogControlled({
   title: string;
   description: string;
   confirmLabel: string;
+  cancelLabel?: string;
   variant?: "default" | "destructive";
   pending?: boolean;
   onConfirm: () => void;
@@ -196,6 +202,7 @@ export function ConfirmDialogControlled({
       title={title}
       description={description}
       confirmLabel={confirmLabel}
+      cancelLabel={cancelLabel}
       variant={variant}
       busy={pending ?? false}
       onConfirm={onConfirm}

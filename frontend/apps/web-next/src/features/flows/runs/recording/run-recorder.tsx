@@ -6,12 +6,13 @@ import { useAnnounce, useMediaQuery } from "@astryxdesign/core/hooks";
 import { Text } from "@astryxdesign/core/Text";
 import { Timer } from "@astryxdesign/core/Timer";
 import { useQuery } from "@tanstack/react-query";
-import { Mic, Pause, Play, Square } from "lucide-react";
+import { ArrowDown, Mic, Pause, Play, Square } from "lucide-react";
 import { useLocale, useTranslations } from "use-intl";
 import {
   useEffect,
   useId,
   useImperativeHandle,
+  useLayoutEffect,
   useRef,
   useState,
   useSyncExternalStore,
@@ -186,15 +187,47 @@ function partsOf(sessionId: string | null, entries: readonly UploadEntry[]) {
   );
 }
 
+/** How close to its end (px) a scrolled box still counts as at the end: about a line. */
+const AT_END_PX = 24;
+
 /**
  * The live text while recording: committed text, only ever appended, in a
- * region that scrolls with the keyboard. It is not a live region: a screen
- * reader would otherwise read every word of the meeting as it is spoken;
- * status changes are announced instead.
+ * region that scrolls with the keyboard. It keeps to the newest text until
+ * the person scrolls up to read; "Visa senaste" then takes them back. It is
+ * not a live region: a screen reader would otherwise read every word of the
+ * meeting as it is spoken; status changes are announced instead.
  */
-function LiveText({ snapshot }: { snapshot: LiveSnapshot }) {
+export function LiveText({ snapshot }: { snapshot: LiveSnapshot }) {
   const t = useTranslations();
   const { status, pieces, paused } = snapshot;
+  const box = useRef<HTMLDivElement>(null);
+  const [following, setFollowing] = useState(true);
+  const lastTop = useRef(0);
+  const reduceMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
+  // A new recording's text starts at its top again.
+  if (pieces.length === 0 && !following) setFollowing(true);
+
+  useLayoutEffect(() => {
+    const element = box.current;
+    if (following && element) element.scrollTop = element.scrollHeight;
+  }, [pieces, following]);
+
+  function onScroll(event: React.UIEvent<HTMLDivElement>) {
+    const { scrollTop, scrollHeight, clientHeight } = event.currentTarget;
+    // Only scrolling up lets go: following the text, or going back to it smoothly, scrolls down.
+    if (scrollHeight - clientHeight - scrollTop <= AT_END_PX) setFollowing(true);
+    else if (scrollTop < lastTop.current) setFollowing(false);
+    lastTop.current = scrollTop;
+  }
+
+  function showLatest() {
+    const element = box.current;
+    element?.scrollTo({ top: element.scrollHeight, behavior: reduceMotion ? "auto" : "smooth" });
+    // The button goes away: focus stays with the text it scrolled.
+    element?.focus({ preventScroll: true });
+    setFollowing(true);
+  }
+
   const active = status === "connecting" || status === "listening" || status === "reconnecting";
   const hasText = pieces.length > 0;
   const ended = status === "interrupted" || status === "unavailable";
@@ -232,20 +265,35 @@ function LiveText({ snapshot }: { snapshot: LiveSnapshot }) {
         />
       ) : null}
       {active || hasText ? (
-        <ScrollableArea
-          axis="block"
-          role="region"
-          label={t("flow_transcript_live_heading")}
-          className="border-ax-border-control bg-ax-surface text-ax-text focus-visible:outline-ring rounded-ax-inner max-h-56 border px-3 py-2 text-sm leading-relaxed focus-visible:outline-2 focus-visible:-outline-offset-2"
-        >
-          <p className="m-0">
-            {hasText ? (
-              pieces.map((piece) => <span key={piece.id}>{piece.text}</span>)
-            ) : (
-              <span className="text-ax-text-secondary">{t("flow_transcript_live_empty")}</span>
-            )}
-          </p>
-        </ScrollableArea>
+        <div className="relative">
+          <ScrollableArea
+            ref={box}
+            onScroll={onScroll}
+            axis="block"
+            role="region"
+            label={t("flow_transcript_live_heading")}
+            className="border-ax-border-control bg-ax-surface text-ax-text focus-visible:outline-ring rounded-ax-inner max-h-56 border px-3 py-2 text-sm leading-relaxed focus-visible:outline-2 focus-visible:-outline-offset-2"
+          >
+            <p className="m-0">
+              {hasText ? (
+                pieces.map((piece) => <span key={piece.id}>{piece.text}</span>)
+              ) : (
+                <span className="text-ax-text-secondary">{t("flow_transcript_live_empty")}</span>
+              )}
+            </p>
+          </ScrollableArea>
+          {following ? null : (
+            <span className="absolute end-2 bottom-2">
+              <Button
+                label={t("flow_transcript_live_latest")}
+                icon={<ArrowDown aria-hidden="true" />}
+                size="sm"
+                elevation="low"
+                onClick={showLatest}
+              />
+            </span>
+          )}
+        </div>
       ) : null}
       {status === "finished" ? (
         <Text type="supporting" as="p">
@@ -760,9 +808,9 @@ export function RunRecorder({
   const hint = limitHint();
 
   return (
-    <div className="border-ax-border rounded-ax-inner flex flex-col gap-3 border p-3">
+    <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-1">
-        <Heading level={4}>{t("flow_transcript_rec_heading")}</Heading>
+        <Heading level={3}>{t("flow_transcript_rec_heading")}</Heading>
         <Text type="supporting" as="p">
           {t("flow_transcript_rec_hint")}
           {hint ? ` ${hint}` : null}
@@ -925,7 +973,6 @@ export function RunRecorder({
           <Button
             label={t("flow_transcript_rec_stop")}
             icon={<Square aria-hidden="true" />}
-            variant="destructive"
             onClick={() => void recorder.stop()}
           />
         ) : null}

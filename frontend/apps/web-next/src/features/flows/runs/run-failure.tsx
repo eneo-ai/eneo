@@ -9,7 +9,7 @@ import {
   type FailureFact,
   type ReviewPolicyStep
 } from "./run-failure-facts";
-import { runErrorCatalogText } from "./run-messages";
+import { flowErrorText, runErrorCatalogText } from "./run-messages";
 import { showRunStep } from "./run-steps";
 import type { RunError, RunErrorWithGuidance } from "./runs-api";
 
@@ -158,6 +158,8 @@ export function RunFailure({
   const [technicalOpen, setTechnicalOpen] = useState(false);
   const reviewPolicy = error.code === "flow_review_policy_invalid";
   const catalog = runErrorCatalogText(error, t);
+  // The code's own sentence, in Swedish, when the banner says something more specific.
+  const codeText = flowErrorText(error.code, t);
   const guidance = catalog ? null : (error.user_action?.trim() ?? null);
   return (
     <Banner
@@ -207,18 +209,19 @@ export function RunFailure({
           <dl className="grid grid-cols-1 gap-x-4 gap-y-1 pt-2 text-sm sm:grid-cols-[max-content_1fr]">
             <dt className="text-ax-text-secondary">{t("flow_run_extras_failure_code")}</dt>
             <dd className="text-ax-text m-0 font-mono break-all">{error.code}</dd>
-            <dt className="text-ax-text-secondary">{t("flow_run_extras_failure_message")}</dt>
-            <dd className="text-ax-text m-0 break-words whitespace-pre-wrap">{error.message}</dd>
-            {error.consumer_action ? (
+            {codeText && codeText !== catalog ? (
               <>
-                <dt className="text-ax-text-secondary">
-                  {t("flow_run_journey_failure_consumer_action")}
-                </dt>
-                <dd lang="en" className="text-ax-text m-0 break-words">
-                  {error.consumer_action}
-                </dd>
+                <dt className="text-ax-text-secondary">{t("flow_run_extras_failure_message")}</dt>
+                <dd className="text-ax-text m-0 break-words">{codeText}</dd>
               </>
             ) : null}
+            <dt className="text-ax-text-secondary">
+              {t("flow_run_journey_failure_consumer_action")}
+            </dt>
+            <dd lang="en" className="text-ax-text m-0 flex flex-col gap-1 break-words">
+              <span className="whitespace-pre-wrap">{error.message}</span>
+              {error.consumer_action ? <span>{error.consumer_action}</span> : null}
+            </dd>
           </dl>
         </LazyCollapsible>
       </div>

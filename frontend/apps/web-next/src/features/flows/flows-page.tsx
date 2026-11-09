@@ -26,6 +26,7 @@ import { StatusLabel } from "@/components/composites/status-label";
 import { useAppContext } from "@/components/providers/app-context";
 import { DockedActions } from "@/components/shell/docked-actions";
 import { browserApi } from "@/lib/api/browser";
+import { useElementWidth } from "@/lib/hooks/use-element-width";
 import { HANDHELD_QUERY, MOBILE_QUERY, usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { useSearchDraft } from "@/lib/hooks/use-search-draft";
 import Link from "@/lib/link";
@@ -47,6 +48,12 @@ import { FlowTile } from "./tile";
 type SortKey = "updated" | "name" | "status";
 
 const DEFAULT_SORT: TableSortState<SortKey> = [{ sortKey: "updated", direction: "descending" }];
+
+/**
+ * The room the table needs for every column: the fixed ones (status, steps, owner, changed and
+ * the menu, 654 px) and a name column wide enough for a name and its description (about 270 px).
+ */
+const FULL_TABLE_MIN_WIDTH = 924;
 
 /**
  * A space's flows, as cards or a table, the last changed first: name and
@@ -79,8 +86,11 @@ export function FlowsPage() {
   // A phone in a hand runs and reviews flows; building one (many settings, prompts and
   // steps) is for a computer, so nothing here offers to.
   const handheld = useMediaQuery(HANDHELD_QUERY);
-  // Below `lg` the table has no room for every column: the steps and the owner go under the name.
-  const compact = useMediaQuery(MOBILE_QUERY);
+  // Without room for every column (below `lg`, or beside an open sidebar) the steps and the
+  // owner go under the name.
+  const narrowScreen = useMediaQuery(MOBILE_QUERY);
+  const compact =
+    useElementWidth(panelRef, (width) => width < FULL_TABLE_MIN_WIDTH) ?? narrowScreen;
 
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -126,11 +136,15 @@ export function FlowsPage() {
   const sortPlugin = useTableSortable<FlowSparse, SortKey>(sortConfig);
   const hasActions = !handheld && items.some((flow) => flow.permissions.can_delete);
 
-  function ownerLabel(flow: FlowSparse): string | null {
+  /** Whose the flow is, in words; `you` is what the viewer's own flows say. */
+  function ownerLabel(
+    flow: FlowSparse,
+    you: string | null = t("flow_list_owner_you")
+  ): string | null {
     const owner = flowOwner(flow, user.id, space.members.items);
     if (!owner) return null;
     if (owner.kind === "member") return owner.name;
-    return owner.kind === "you" ? t("flow_list_owner_you") : t("flow_list_owner_unknown");
+    return owner.kind === "you" ? you : t("flow_list_owner_unknown");
   }
 
   const createActions =
@@ -158,7 +172,8 @@ export function FlowsPage() {
       sortable: true,
       renderCell: (flow) => {
         const kind = flowKindLine(flow, t);
-        const owner = ownerLabel(flow);
+        // As on the cards, the line names the owner only when it is someone else.
+        const owner = ownerLabel(flow, null);
         const steps = t("flows_step_count", { count: flow.step_count });
         return (
           <span className="flex min-w-0 flex-col gap-0.5 py-1">
@@ -259,7 +274,8 @@ export function FlowsPage() {
       }
     >
       {members.map((flow) => (
-        <FlowTile key={flow.id} flow={flow} owner={ownerLabel(flow)} />
+        // A card names the owner only when it is someone else's.
+        <FlowTile key={flow.id} flow={flow} owner={ownerLabel(flow, null)} />
       ))}
     </ResourceCollection>
   );

@@ -136,6 +136,8 @@ def compile_http_config(
 
     custom_header_edges: dict[str, tuple[FlowResolvedInputEdge, ...]] = {}
     for index, header in enumerate(authored.custom_headers):
+        if not header.sent:
+            continue
         if header.secret:
             headers[header.name] = _credential_text(
                 header.value, field=f"custom_headers[{index}].value"

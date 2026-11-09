@@ -172,6 +172,12 @@ describe("kindRefusalText", () => {
       messages.flow_step_editor_kind_block_needs_step_before
     ],
     [
+      "a step at place 1 that reads the step before it",
+      { issue_code: "typed_io_invalid_input_source_position", step_order: 1 },
+      1,
+      messages.flow_step_editor_kind_block_needs_step_before
+    ],
+    [
       "a step before the one that takes uploads",
       { issue_code: "typed_io_audio_source_unsupported", step_order: 2, step_id: "step-1" },
       1,

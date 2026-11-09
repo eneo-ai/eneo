@@ -26,7 +26,7 @@ import {
 import { correctionSet, editRequest, knownSpeakers } from "./transcript-corrections";
 import { CorrectionsDraft, type DraftState } from "./transcript-draft";
 import { saveText } from "./transcript-export";
-import { TranscriptLines } from "./transcript-lines";
+import { TranscriptLines, type SpeakerListen } from "./transcript-lines";
 
 /** What a review asks of the transcript's draft before it approves. */
 export type TranscriptDraftHandle = {
@@ -130,6 +130,8 @@ function DraftStatusNote({
  * offers to save again or download the draft. Leaving the page, or hiding
  * it, sends what waits, and the browser warns before it closes with changes
  * not saved. The review flushes the draft before it approves (`draftRef`).
+ * Names the review proposes (`proposedNames`) show under the draft's own
+ * names as they are typed, and are not saved with the corrections.
  */
 export function ReviewDraftLines({
   flowId,
@@ -141,6 +143,8 @@ export function ReviewDraftLines({
   speakerReview,
   onUnsavedChange,
   draftRef,
+  proposedNames,
+  listenRef,
   children
 }: {
   flowId: string;
@@ -152,6 +156,9 @@ export function ReviewDraftLines({
   speakerReview: TranscriptSpeakerReview | null;
   onUnsavedChange?: (unsaved: boolean) => void;
   draftRef?: Ref<TranscriptDraftHandle>;
+  /** The speakers' names as the review has them, under the names the corrections give. */
+  proposedNames?: Readonly<Record<string, string>>;
+  listenRef?: Ref<SpeakerListen>;
   children?: React.ReactNode;
 }) {
   const t = useTranslations();
@@ -244,7 +251,14 @@ export function ReviewDraftLines({
     tellUnsaved.current?.(unsaved);
   }, [unsaved]);
 
-  const shown = useMemo(() => shownSegmentsOf(segments, state.set), [segments, state.set]);
+  const names = useMemo(
+    () => ({ ...proposedNames, ...state.set.names }),
+    [proposedNames, state.set.names]
+  );
+  const shown = useMemo(
+    () => shownSegmentsOf(segments, { ...state.set, names }),
+    [segments, state.set, names]
+  );
   return (
     <TranscriptLines
       flowId={flowId}
@@ -255,8 +269,10 @@ export function ReviewDraftLines({
       multiFile={new Set(shown.map((segment) => segment.fileIndex)).size > 1}
       speakerReview={speakerReview}
       onUnsavedChange={setEditorUnsaved}
+      listenRef={listenRef}
       editing={{
         set: state.set,
+        names,
         speakers: knownSpeakers(segments, state.set.speakerEdits),
         // A change is the draft's at once; nothing waits on the server.
         saving: false,

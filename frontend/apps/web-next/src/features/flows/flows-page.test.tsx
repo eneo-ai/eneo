@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { openMenuOnRelease, tap } from "@/test/menus";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
-import { setViewport } from "@/test/setup-dom";
+import { reportResize, setViewport } from "@/test/setup-dom";
 import { replaceUrl, router } from "@/test/navigation";
 import type { Permission } from "@/lib/auth/permissions";
 import { makeSpace } from "@/features/spaces/testing/space-fixture";
@@ -138,7 +138,7 @@ describe("FlowsPage", () => {
     expect(screen.getByRole("region", { name: "Utkast" })).toBeTruthy();
   });
 
-  it("says on each card what the flow takes in and gives back, its steps, whose it is and when it changed", () => {
+  it("says on each card what the flow takes in and gives back, its steps, whose it is when not the viewer's, and when it changed", () => {
     renderPage(dated());
     const minutes = card("Mötesprotokoll");
     expect(within(minutes).getByText("Skriver ut mötet.")).toBeTruthy();
@@ -147,7 +147,8 @@ describe("FlowsPage", () => {
     // Nobody took it over: it is its creator's.
     expect(within(minutes).getByText("Ägare: anna.lind")).toBeTruthy();
     expect(within(minutes).getByText(/^Ändrad .*2026$/)).toBeTruthy();
-    expect(within(card("Medborgarbrev")).getByText("Ägare: Du")).toBeTruthy();
+    // The viewer's own flow names no owner.
+    expect(within(card("Medborgarbrev")).queryByText(/^Ägare:/)).toBeNull();
     expect(within(card("Remissvar")).getByText("Ägare: Okänd")).toBeTruthy();
   });
 
@@ -231,6 +232,25 @@ describe("FlowsPage", () => {
     expect(within(table).queryByRole("columnheader", { name: "Ägare" })).toBeNull();
     const cell = within(table).getByRole("link", { name: "Mötesprotokoll" }).parentElement!;
     expect(within(cell).getByText("2 steg · Ägare: anna.lind")).toBeTruthy();
+    // The viewer's own flow names no owner, as on the cards.
+    const own = screen.getByRole("link", { name: "Medborgarbrev" }).parentElement!;
+    expect(within(own).getByText(/^\d+ steg$/)).toBeTruthy();
+    expect(within(own).queryByText(/Ägare/)).toBeNull();
+  });
+
+  it("moves the steps and owner under the name when the page is narrow beside an open sidebar", () => {
+    renderPage(dated());
+    chooseList();
+    const drafts = () => screen.getByRole("table", { name: "Flöden · Utkast" });
+    const page = () => drafts().closest("[tabindex='-1']")!;
+    const steps = () => within(drafts()).queryByRole("columnheader", { name: "Steg" });
+    expect(steps()).toBeTruthy();
+    act(() => reportResize(page(), { width: 761 }));
+    expect(steps()).toBeNull();
+    const cell = screen.getByRole("link", { name: "Mötesprotokoll" }).parentElement!;
+    expect(within(cell).getByText("2 steg · Ägare: anna.lind")).toBeTruthy();
+    act(() => reportResize(page(), { width: 1101 }));
+    expect(steps()).toBeTruthy();
   });
 
   it("finds a flow by its name, description or what it takes in, and keeps the search in the address", async () => {
@@ -274,6 +294,19 @@ describe("FlowsPage", () => {
     expect(screen.getByRole("button", { name: "Importera" })).toBeTruthy();
   });
 
+  it("asks for the name first and gives focus back to Nytt flöde on Avbryt", async () => {
+    renderPage([]);
+    const trigger = screen.getAllByRole("button", { name: "Nytt flöde" })[0]!;
+    trigger.focus();
+    fireEvent.click(trigger);
+    const dialog = await screen.findByRole("dialog", { name: "Nytt flöde" });
+    await waitFor(() =>
+      expect(document.activeElement).toBe(within(dialog).getByRole("textbox", { name: /Namn/ }))
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Avbryt" }));
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+  });
+
   it("creates a flow with a name and description and opens it", async () => {
     api.POST.mockResolvedValue({
       data: makeFlow({ id: "new-flow", name: "Bygglov", steps: [] }),
@@ -282,9 +315,9 @@ describe("FlowsPage", () => {
     renderPage([]);
     fireEvent.click(screen.getAllByRole("button", { name: "Nytt flöde" })[0]!);
     const dialog = await screen.findByRole("dialog", { name: "Nytt flöde" });
+    const name = within(dialog).getByRole("textbox", { name: /Namn/ });
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Skapa flöde" }));
-    const name = within(dialog).getByRole("textbox", { name: /Namn/ });
     await waitFor(() => expect(document.activeElement).toBe(name));
     expect(name.getAttribute("aria-invalid")).toBe("true");
     expect(api.POST).not.toHaveBeenCalled();

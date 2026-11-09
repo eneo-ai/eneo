@@ -5,12 +5,10 @@ import { History } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useEffect, useRef, useState } from "react";
 import { TextInput } from "@/components/astryx/text-input";
-import { StatusLabel, type StatusTone } from "@/components/composites/status-label";
-import type { Schema } from "@/lib/api/models";
 import { toastApiError } from "@/lib/api/toast";
 import { measureAudioSeconds } from "./audio-length";
 import { formatSeconds } from "./run-format";
-import { flowErrorText, refusalText } from "./run-messages";
+import { refusalText } from "./run-messages";
 import {
   fitRunLabel,
   RUN_LABEL_MAX_LENGTH,
@@ -24,8 +22,6 @@ import {
   type RunContract,
   type RuntimeInput
 } from "./runs-api";
-
-type TemplateStatus = Schema<"FlowTemplateAssetStatus">;
 
 /**
  * The run's own name: optional, one line, the run page's title. Text past
@@ -62,59 +58,6 @@ export function RunLabelField({
       isOptional
       width="100%"
     />
-  );
-}
-
-const TEMPLATE_VIEWS: Record<TemplateStatus, { tone: StatusTone; labelKey: string }> = {
-  ready: { tone: "success", labelKey: "flow_run_extras_template_ready" },
-  read_only: { tone: "accent", labelKey: "flow_run_extras_template_read_only" },
-  needs_action: { tone: "warning", labelKey: "flow_run_extras_template_needs_action" },
-  unavailable: { tone: "error", labelKey: "flow_run_extras_template_unavailable" }
-};
-
-/**
- * The Word templates the flow's steps fill, each with whether it is ready
- * for this run and, when it is not, the catalog's reason, so the person
- * sees before starting what the flow will produce documents from.
- */
-export function TemplateReadiness({
-  contract
-}: {
-  contract: Pick<RunContract, "template_readiness">;
-}) {
-  const t = useTranslations();
-  const items = contract.template_readiness ?? [];
-  if (items.length === 0) return null;
-  return (
-    <section className="flex flex-col gap-1" aria-label={t("flow_run_extras_templates_heading")}>
-      <p className="text-ax-text text-sm font-medium">{t("flow_run_extras_templates_heading")}</p>
-      <ul className="m-0 flex flex-col p-0">
-        {items.map((item) => {
-          const view = TEMPLATE_VIEWS[item.status] ?? TEMPLATE_VIEWS.unavailable;
-          const reason =
-            item.status === "ready"
-              ? null
-              : (flowErrorText(item.message_code, t) ??
-                (item.status === "read_only"
-                  ? t("flow_run_extras_template_read_only_hint")
-                  : t("flow_run_extras_template_needs_action_hint")));
-          return (
-            <li
-              key={item.step_id}
-              className="border-ax-border flex flex-col gap-0.5 border-t py-2 first:border-t-0"
-            >
-              <span className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-ax-text text-sm break-words">
-                  {item.template_name?.trim() || t("flow_run_extras_template_unnamed")}
-                </span>
-                <StatusLabel status={view.tone} label={t(view.labelKey)} />
-              </span>
-              {reason ? <span className="text-ax-text-secondary text-xs">{reason}</span> : null}
-            </li>
-          );
-        })}
-      </ul>
-    </section>
   );
 }
 

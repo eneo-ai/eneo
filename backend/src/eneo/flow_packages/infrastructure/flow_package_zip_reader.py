@@ -64,6 +64,7 @@ def read_flow_package(package_bytes: bytes) -> FlowPackageEnvelope:
         invalid_code=FlowPackageErrorCode.MANIFEST_INVALID,
     )
     require_flow_package_manifest(manifest)
+    _require_entries(payloads, REQUIRED_PACKAGE_FILES)
     draft = _parse_subdocument(
         FlowPackageFlowDraft,
         payloads[FLOW_DRAFT_PATH],
@@ -159,6 +160,10 @@ def _validate_flow_profile_entries(
             FlowPackageZipUnsafeReason.UNKNOWN_ENTRY,
             path=sorted(unexpected_files)[0],
         )
+    _require_entries(payloads, required)
+
+
+def _require_entries(payloads: Mapping[str, bytes], required: frozenset[str]) -> None:
     missing_files = required - payloads.keys()
     if missing_files:
         raise _zip_unsafe(

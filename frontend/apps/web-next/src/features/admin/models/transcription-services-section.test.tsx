@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-libra
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testQueryClient } from "@/test/render";
+import { setViewport } from "@/test/setup-dom";
 import type { Schema } from "@/lib/api/models";
 
 const api = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn(), PATCH: vi.fn(), DELETE: vi.fn() }));
@@ -15,7 +16,10 @@ const toast = vi.hoisted(() => ({
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 vi.mock("@/lib/toast", () => ({ toast }));
 
-import { TranscriptionServicesSection } from "./transcription-services-section";
+import {
+  TranscriptionServicesSection,
+  type TranscriptionServicesHandle
+} from "./transcription-services-section";
 import { TRANSCRIPTION_SERVICES_KEY, type TranscriptionService } from "./transcription-services";
 
 type Check = Schema<"TranscriptionServiceCheckPublic">;
@@ -79,6 +83,8 @@ type Init = { params?: { path?: { connection_id?: string } }; body?: unknown };
 const idOf = (init: Init) => init.params?.path?.connection_id ?? "";
 
 let list: TranscriptionService[] | null = [];
+// The section's handle: the models page's header action ("Anslut tjänst") calls it.
+const handle: { current: TranscriptionServicesHandle | null } = { current: null };
 
 beforeEach(() => {
   create.mockReset();
@@ -109,7 +115,7 @@ function renderSection(services: TranscriptionService[] | null) {
   list = services;
   const queryClient = testQueryClient();
   if (services) queryClient.setQueryData(TRANSCRIPTION_SERVICES_KEY, services);
-  renderInApp(<TranscriptionServicesSection classifications={[classification]} />, {
+  renderInApp(<TranscriptionServicesSection ref={handle} classifications={[classification]} />, {
     queryClient
   });
   return {
@@ -121,7 +127,9 @@ function renderSection(services: TranscriptionService[] | null) {
 }
 
 const row = (name: RegExp) => screen.getByRole("row", { name });
-const toggle = (name: string) => screen.getByRole("switch", { name }) as HTMLInputElement;
+/** A service's Aktiv switch, named with its column. */
+const toggle = (name: string) =>
+  screen.getByRole("switch", { name: `Aktiv: ${name}` }) as HTMLInputElement;
 
 /** Opens a service's menu from the keyboard; returns the menu. */
 function openMenu(name: string) {
@@ -166,6 +174,8 @@ it("invites a first connection when the organisation has none", async () => {
 it("shows the host, the classification and that the connection is untested", async () => {
   renderSection([service({ security_classification: classification })]);
 
+  // Connecting another is the page header's action, not a second button here.
+  expect(screen.queryByRole("button", { name: "Anslut tjänst" })).toBeNull();
   const vemsa = row(/Vemsa Sundsvall/);
   expect(vemsa.textContent).toContain("vemsa.sundsvall.se");
   expect(vemsa.textContent).toContain("Intern");
@@ -173,6 +183,26 @@ it("shows the host, the classification and that the connection is untested", asy
   const table = screen.getByRole("table", { name: "Ordtider och talaridentifiering" });
   // An iPad held upright leaves it 682 px beside the icon rail: it fits whole.
   expect(Number.parseFloat(table.style.minWidth)).toBeLessThanOrEqual(682);
+  // The switch says what it switches, not only whose it is.
+  expect(within(vemsa).getByRole("switch", { name: "Aktiv: Vemsa Sundsvall" })).toBeTruthy();
+  await act(async () => {
+    await expectNoAxeViolations(document.body);
+  });
+});
+
+it("lists the services as rows on a phone, with the connection, the switch and the menu", async () => {
+  setViewport("phone");
+  renderSection([service({ security_classification: classification })]);
+
+  expect(screen.queryByRole("table")).toBeNull();
+  const list = screen.getByRole("list", { name: "Ordtider och talaridentifiering" });
+  const vemsa = within(list).getByRole("listitem");
+  expect(vemsa.textContent).toContain("Vemsa Sundsvall");
+  expect(vemsa.textContent).toContain("vemsa.sundsvall.se");
+  expect(vemsa.textContent).toContain("Intern");
+  expect(vemsa.textContent).toContain("Inte testad");
+  expect(within(vemsa).getByRole("switch", { name: "Aktiv: Vemsa Sundsvall" })).toBeTruthy();
+  expect(within(vemsa).getByRole("button", { name: "Åtgärder för Vemsa Sundsvall" })).toBeTruthy();
   await act(async () => {
     await expectNoAxeViolations(document.body);
   });
@@ -298,7 +328,7 @@ it("shows the default and moves the mark when another service is made the defaul
 });
 
 async function connect(name: string, address: string, asDefault: boolean) {
-  fireEvent.click(screen.getByRole("button", { name: "Anslut tjänst" }));
+  act(() => handle.current!.connect());
   await screen.findByRole("dialog");
   type(/^Namn/, name);
   type(/^Adress/, address);

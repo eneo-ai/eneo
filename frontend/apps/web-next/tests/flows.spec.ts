@@ -102,8 +102,8 @@ test(
     });
     await expect(run.getByText("Uppladdad, 12 B", { exact: true })).toBeVisible();
     const runName = uniqueName("Manuell körning");
-    await run.getByRole("textbox", { name: /^Namn på körningen/ }).fill(runName);
-    await run.getByRole("button", { name: "Granska", exact: true }).click();
+    await run.getByRole("textbox", { name: /^Namn i listan över körningar/ }).fill(runName);
+    await run.getByRole("button", { name: "Nästa", exact: true }).click();
     await expect(
       run.getByRole("heading", { name: "Det här följer med i körningen" })
     ).toBeVisible();

@@ -8,7 +8,7 @@ import { Token } from "@astryxdesign/core/Token";
 import { ArrowDown, ArrowUp, Ellipsis, Plus, Workflow } from "lucide-react";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
-import { useId, useRef, useState } from "react";
+import { Fragment, useId, useRef, useState } from "react";
 import { Banner } from "@astryxdesign/core/Banner";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { EmptyState } from "@/components/composites/empty-state";
@@ -222,17 +222,19 @@ function StepCard({
         </div>
       </div>
       <MetadataList label={{ position: "start", width: "7rem" }}>
+        {/* Plain text like the rows below it; a read of a step that is gone
+            says so in words, and in the error colour. */}
         <MetadataListItem label={t("flows_step_reads")}>
-          <span className="flex flex-wrap gap-1">
-            {reads.map((read) => (
-              <Token
-                key={read.kind === "step" ? `step-${read.order}` : read.kind}
-                size="sm"
-                color={read.kind === "step" && read.step === null ? "red" : "default"}
-                label={readLabel(read, t)}
-              />
-            ))}
-          </span>
+          {reads.map((read, position) => (
+            <Fragment key={read.kind === "step" ? `step-${read.order}` : read.kind}>
+              {position > 0 ? ", " : null}
+              <span
+                className={read.kind === "step" && read.step === null ? "text-ax-error" : undefined}
+              >
+                {readLabel(read, t)}
+              </span>
+            </Fragment>
+          ))}
         </MetadataListItem>
         <MetadataListItem label={t("flows_step_takes")}>
           {inputTypeLabel(step.input_type, t)}
@@ -370,6 +372,8 @@ export function FlowStepList({
   const dismissOnCard = useSuggestionDismissal(dismissal, cardStep);
   const listHeading = () => document.getElementById(headingId);
   const readers = removing ? stepReaders(removing, steps, prompts) : [];
+  // A step another step reads would be refused: the dialog leads to the reader instead.
+  const reader = readers[0] ?? null;
 
   const addButton = (
     <Button
@@ -493,11 +497,20 @@ export function FlowStepList({
                 })
               : t("flows_remove_step_description", { step: stepLabel(removing, t) })
         }
-        confirmLabel={t("flows_step_remove")}
-        variant="destructive"
+        confirmLabel={
+          reader
+            ? t("flow_editor_tools_check_open_step_named", { step: stepLabel(reader, t) })
+            : t("flows_step_remove")
+        }
+        variant={reader ? "default" : "destructive"}
         pending={removePending}
         onConfirm={() => {
           if (!removing) return;
+          if (reader) {
+            setRemoving(null);
+            actions.onOpen(reader);
+            return;
+          }
           setRemovePending(true);
           // The dialog stays until the core has answered; a refusal is shown
           // above the definition.

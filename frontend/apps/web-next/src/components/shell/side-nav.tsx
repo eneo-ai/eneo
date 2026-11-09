@@ -32,7 +32,7 @@ function navLabelKey(variant: NavVariant) {
 export type SideNavRail = {
   /** Shown as the icon rail. */
   collapsed: boolean;
-  /** The stored choice; undefined while the width decides. */
+  /** The choice that holds at this width; undefined while the width decides. */
   chosen: boolean | undefined;
   /** Collapses or expands the nav and stores the choice. */
   change: (collapsed: boolean) => void;
@@ -41,15 +41,23 @@ export type SideNavRail = {
 /**
  * Whether the SideNav is its icon rail. The app shell owns it, so the top
  * bar's wordmark cell keeps to the SideNav's width without a CSS :has() rule.
+ *
+ * A toggle pressed during this visit holds at every width. The stored choice
+ * (`stored`, from the cookie) holds from `lg` (1024 px) only: below it an
+ * open sidebar takes over a third of an upright iPad, so a later visit starts
+ * there as the rail again. With neither, the width decides (the rail below
+ * 1280 px).
  */
-export function useSideNavRail(defaultCollapsed: boolean | undefined): SideNavRail {
-  const [chosen, setChosen] = useState(defaultCollapsed);
+export function useSideNavRail(stored: boolean | undefined): SideNavRail {
+  const [pressed, setPressed] = useState<boolean>();
+  const belowLg = useMediaQuery(`not all and ${MEDIA.lg}`);
   const isNarrow = useMediaQuery(`not all and ${MEDIA.xl}`);
+  const chosen = pressed ?? (belowLg ? undefined : stored);
   return {
     collapsed: chosen ?? isNarrow,
     chosen,
     change: (next) => {
-      setChosen(next);
+      setPressed(next);
       storeSideNavCollapsed(next);
     }
   };
@@ -63,7 +71,8 @@ export function useSideNavRail(defaultCollapsed: boolean | undefined): SideNavRa
  * (an iPad either way, a small laptop) it is the rail unless the user chose
  * otherwise, so the page keeps its room; the rail's items keep their names
  * (accessible name and tooltip). The choice is a per-browser preference
- * (`useSideNavRail`), and a stored choice wins at every width.
+ * (`useSideNavRail`) that holds from 1024 px; below that only a toggle
+ * pressed during this visit opens the nav.
  *
  * A tablet (`useTouchTablet`) has no top bar and keeps the navigation built
  * for touch instead, on every page: the wordmark and the bells, Ny

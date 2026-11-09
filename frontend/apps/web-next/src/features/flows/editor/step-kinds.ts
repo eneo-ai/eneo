@@ -141,8 +141,12 @@ function relationOf(refusal: StepKindRefusal, position: number): Relation {
 
 const FIRST_ONLY = new Set([
   "typed_io_flow_input_position_invalid",
-  "typed_io_invalid_input_source_position",
   "typed_io_multiple_flow_input_steps"
+]);
+/** Step 1 cannot read a step before it (`typed_io_invalid_input_source_position`). */
+const NEEDS_STEP_BEFORE = new Set([
+  "typed_io_missing_previous_step",
+  "typed_io_invalid_input_source_position"
 ]);
 const UPLOADS_STAY_FIRST = new Set([
   ...FIRST_ONLY,
@@ -159,7 +163,7 @@ function placeKey(code: string | null, relation: Relation): string | null {
     if (relation === "before") return "flow_step_editor_kind_block_after_outbound_step";
   }
   if (relation === "new" && FIRST_ONLY.has(code)) return "flow_step_editor_kind_block_first_only";
-  if (relation === "new" && code === "typed_io_missing_previous_step") {
+  if (relation === "new" && NEEDS_STEP_BEFORE.has(code)) {
     return "flow_step_editor_kind_block_needs_step_before";
   }
   if (relation === "after" && code === "typed_io_incompatible_type_chain") {

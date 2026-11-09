@@ -121,6 +121,7 @@ describe("KnowledgePicker", () => {
       />
     );
     fireEvent.click(screen.getByRole("button", { name: "Lägg till kunskap (den här ytan)" }));
+    expect(screen.getByRole("combobox", { name: "Sök kunskap" })).toBeTruthy();
     const option = (name: string) => screen.getByRole("option", { name: new RegExp(name) });
     expect(within(option("Trasig")).getByText("Synk misslyckades")).toBeTruthy();
     expect(within(option("Byggnad")).getByText("Synk misslyckades")).toBeTruthy();

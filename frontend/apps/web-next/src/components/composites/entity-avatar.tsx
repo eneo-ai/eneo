@@ -30,9 +30,12 @@ export type EntityAvatarProps = {
   className?: string;
 };
 
-/** Up to two initials: first letters of the first two words. */
+/**
+ * Up to two initials: first letters of the first two words that start with a
+ * letter or digit, so "Mötesanteckningar (2)" gives "M", not "M(".
+ */
 export function entityInitials(name: string): string {
-  const words = name.trim().split(/\s+/).filter(Boolean);
+  const words = name.split(/\s+/).filter((word) => /^[\p{L}\p{N}]/u.test(word));
   return words
     .slice(0, 2)
     .map((word) => Array.from(word)[0] ?? "")

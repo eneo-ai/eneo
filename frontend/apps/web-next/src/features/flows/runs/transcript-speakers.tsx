@@ -30,14 +30,22 @@ export function speakerColor(label: string): TokenColor {
   return PALETTE[hash % PALETTE.length]!;
 }
 
-/** The speaker's name, else its label, else "unknown speaker". */
+/**
+ * The speaker's name; else, for a diarization label, "Talare 1" for
+ * `SPEAKER_00` (any other label as it is); else "unknown speaker".
+ */
 export function speakerText(
   label: string | null,
   names: Record<string, string | null | undefined>,
   t: Translator
 ): string {
   if (!label) return t("flow_runs_transcript_unknown_speaker");
-  return names[label]?.trim() || label;
+  const name = names[label]?.trim();
+  if (name) return name;
+  const numbered = /^SPEAKER_(\d+)$/.exec(label);
+  return numbered
+    ? t("flow_transcript_speaker_numbered", { number: Number(numbered[1]) + 1 })
+    : label;
 }
 
 /**
@@ -51,7 +59,7 @@ export function SpeakerBadge({ label, name }: { label: string | null; name: stri
       <Token
         size="sm"
         color={label ? speakerColor(label) : "default"}
-        label={name ?? label ?? t("flow_runs_transcript_unknown_speaker")}
+        label={name ?? speakerText(label, {}, t)}
       />
       <span className="sr-only">:</span>
     </>

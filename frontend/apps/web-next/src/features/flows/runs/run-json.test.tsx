@@ -31,6 +31,11 @@ describe("JsonValue", () => {
     }
   });
 
+  it("says an answer left empty or blank has no value", () => {
+    renderInApp(<JsonValue value={{ datum: null, syfte: "", dagordning: "  " }} />);
+    expect(screen.getAllByText("Inget värde")).toHaveLength(3);
+  });
+
   it("shows a value nested deeper than three levels as a JSON block that wraps", () => {
     const { container } = renderInApp(<JsonValue value={{ a: { b: { c: { d: id } } } }} />);
     const block = container.querySelector("[data-json-block]");

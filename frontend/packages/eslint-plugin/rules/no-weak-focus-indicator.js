@@ -10,6 +10,12 @@
  *  - `outline-none` / `outline-hidden` (plain or behind a variant) without a
  *    replacement in the same class list: a ring or outline width behind a
  *    focus variant (`focus-visible:outline-2`, `focus-visible:ring-2`, …).
+ *    In Tailwind 4 both set the outline style to none, and an outline width
+ *    reads that style: `outline-none focus-visible:outline-2` draws nothing.
+ *    An outline width replaces a removal only in a state the removal does not
+ *    reach (`data-[x]:focus-visible:outline-none` beside
+ *    `focus-visible:outline-2`), or with an outline style beside it
+ *    (`focus-visible:outline-solid`).
  *
  * Use the full-strength ring instead:
  * `focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring`.
@@ -91,17 +97,41 @@ function isTranslucentRing({ variants, utility }) {
 const isOutlineRemoval = ({ utility }) =>
   utility === "outline-none" || utility === "outline-hidden";
 
-/** A focus-state ring or outline width: the visible replacement for the outline. */
-function isFocusReplacement({ variants, utility }) {
-  if (!variants.some(isFocusVariant)) return false;
-  if (
-    /^outline(?:-(?:\d+|\[[^\]]+\]|solid|dashed|dotted|double))?$/.test(utility)
-  ) {
-    return utility !== "outline-0";
-  }
+/**
+ * A focus-state replacement for the outline: `ring` (a box shadow, which no
+ * outline utility touches), `style` (an outline style, which sets the style
+ * again) or `width` (an outline width, which draws only while the outline
+ * style is not none). Null for anything else.
+ */
+function focusReplacement({ variants, utility }) {
+  if (!variants.some(isFocusVariant)) return null;
+  if (/^outline-(?:solid|dashed|dotted|double)$/.test(utility)) return "style";
+  if (/^outline(?:-(?:\d+|\[[^\]]+\]))?$/.test(utility))
+    return utility === "outline-0" ? null : "width";
   if (/^ring(?:-(?:\d+|\[[^\]]+\]))?$/.test(utility))
-    return utility !== "ring-0";
-  return false;
+    return utility === "ring-0" ? null : "ring";
+  return null;
+}
+
+/** Whether `removal` applies whenever `replacement` does: its variants are all among them. */
+const reaches = (removal, replacement) =>
+  removal.variants.every((variant) => replacement.variants.includes(variant));
+
+/** Whether a replacement in the list keeps a ring visible where `removal` applies. */
+function isReplaced(removal, tokens) {
+  // A style sets the outline back unless the removal is the narrower state.
+  const restores = (token) =>
+    focusReplacement(token) === "style" && reaches(removal, token);
+  return tokens.some((token) => {
+    const kind = focusReplacement(token);
+    if (kind === "ring") return true;
+    if (kind === "style") return restores(token);
+    if (kind !== "width") return false;
+    return (
+      !reaches(removal, token) ||
+      tokens.some((other) => restores(other) && reaches(other, token))
+    );
+  });
 }
 
 function classTokens(text) {
@@ -195,7 +225,7 @@ const rule = {
       translucentRing:
         "`{{ token }}` is a translucent focus ring (about 2:1, below the 3:1 a focus indicator needs). Use focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring.",
       outlineRemoved:
-        "`{{ token }}` removes the focus outline without a replacement in the same class list. Add focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring, or drop it.",
+        "`{{ token }}` removes the focus outline without a replacement in the same class list (in Tailwind 4 it also sets the outline style to none, so an outline width beside it draws nothing). Drop it, or add focus-visible:outline-solid beside focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring.",
     },
   },
 
@@ -264,9 +294,7 @@ const rule = {
       const attribute = root.parent;
       const exemptFromOutline =
         isClassAttribute(attribute) && isNeverTabbable(attribute.parent);
-      const hasReplacement = strings.some(({ tokens }) =>
-        tokens.some(isFocusReplacement),
-      );
+      const allTokens = strings.flatMap(({ tokens }) => tokens);
 
       for (const { node: holder, text, tokens } of strings) {
         const raw = text.split(/\s+/).filter(Boolean);
@@ -279,7 +307,7 @@ const rule = {
             });
           } else if (
             isOutlineRemoval(token) &&
-            !hasReplacement &&
+            !isReplaced(token, allTokens) &&
             !exemptFromOutline
           ) {
             context.report({

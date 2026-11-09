@@ -519,8 +519,41 @@
  *    one that is only a label (a capability, where a model runs, a run's
  *    status) is no target and keeps a label's height. A token with a link or
  *    a button (a removable filter) keeps its size.
+ *    A checkbox, a radio and a switch (its label after it) sit on their label's
+ *    first line. Astryx centres them on the label and description together,
+ *    which drops them below the label (about 22 px on touch); the theme cannot
+ *    reach those rows, so the control and the label's first line are centred
+ *    on each other here, the taller of the two setting it. A switch with its
+ *    label first (a settings row) stays centred at the row's end.
  */
 @layer components {
+  .astryx-checkbox-input,
+  .astryx-radio-list-item,
+  .astryx-switch-field {
+    --eneo-choice-box: 24px;
+    --eneo-choice-line: calc(var(--text-label-size) * var(--text-label-leading));
+  }
+  .astryx-checkbox-input[data-size="sm"],
+  .astryx-radio-list-item[data-size="sm"] {
+    --eneo-choice-box: 20px;
+  }
+  /* The row holds the control's slot, then the label and description. A radio
+     is its own row, 44 px on touch: without a description it stays centred. */
+  .astryx-checkbox-input > div:first-child,
+  .astryx-radio-list-item:has(> span:last-child > :nth-child(2)),
+  .astryx-switch-field:not([data-label-position]) > div:first-child {
+    align-items: flex-start;
+  }
+  .astryx-checkbox-input > div:first-child > div:first-child,
+  .astryx-radio-list-item:has(> span:last-child > :nth-child(2)) > span:first-child,
+  .astryx-switch-field:not([data-label-position]) > div:first-child > div:first-child {
+    margin-block-start: max(0px, (var(--eneo-choice-line) - var(--eneo-choice-box)) / 2);
+  }
+  .astryx-checkbox-input > div:first-child > div:last-child,
+  .astryx-radio-list-item:has(> span:last-child > :nth-child(2)) > span:last-child,
+  .astryx-switch-field:not([data-label-position]) > div:first-child > div:last-child {
+    padding-block-start: max(0px, (var(--eneo-choice-box) - var(--eneo-choice-line)) / 2);
+  }
   @media (pointer: coarse) {
     :where(.astryx-checkbox-input, .astryx-radio-list-item, .astryx-switch-field) input {
       min-inline-size: 44px;

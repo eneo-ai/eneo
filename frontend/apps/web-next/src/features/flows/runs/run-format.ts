@@ -93,11 +93,17 @@ export function formatCount(value: number, locale: string): string {
   return new Intl.NumberFormat(locale).format(value);
 }
 
-/** Seconds of audio as minutes and seconds: "12 min 5 s". */
+/** A duration as "45 s", "12 min 5 s" or, from an hour, "3 h 39 min": seconds are noise there. */
 export function formatSeconds(seconds: number, t: Translate): string {
   const whole = Math.max(0, Math.round(seconds));
   const minutes = Math.floor(whole / 60);
   const rest = whole % 60;
+  if (minutes >= 60) {
+    return t("flow_runs_duration_hours", {
+      hours: Math.floor(minutes / 60),
+      minutes: minutes % 60
+    });
+  }
   return minutes > 0
     ? t("flow_runs_duration_minutes", { minutes, seconds: rest })
     : t("flow_runs_duration_seconds", { seconds: rest });

@@ -1,5 +1,10 @@
 import type { ReadMeaning } from "./request-preview";
-import type { ReviewChoice } from "./step-configs";
+import {
+  httpCredential,
+  isSecretSentinel,
+  type HttpConfig,
+  type ReviewChoice
+} from "./step-configs";
 import type { ChainIssue, OutputModeIssue } from "./step-rules";
 import type { FlowPublic, InputSource, InputType, OutputMode, OutputType } from "./step-types";
 import type { VariableEntry, VariableGroup } from "./step-variables";
@@ -30,6 +35,37 @@ export function outputTypeLabel(type: OutputType, t: T): string {
 
 export function reviewChoiceLabel(choice: ReviewChoice, t: T): string {
   return t(`flow_step_review_policy_${choice}`);
+}
+
+const HTTP_AUTH_KEYS: Record<HttpConfig["auth"]["mode"], string> = {
+  none: "flow_step_editor_http_auth_none",
+  bearer_token: "flow_step_editor_http_auth_bearer",
+  api_key: "flow_step_editor_http_auth_api_key",
+  basic_auth: "flow_step_editor_http_auth_basic"
+};
+
+export function httpAuthModeLabel(mode: HttpConfig["auth"]["mode"], t: T): string {
+  return t(HTTP_AUTH_KEYS[mode]);
+}
+
+const HTTP_BODY_KEYS: Record<HttpConfig["body"]["mode"], string> = {
+  auto: "flow_step_editor_http_body_auto",
+  json_template: "flow_step_editor_http_body_json",
+  text_template: "flow_step_editor_http_body_text",
+  none: "flow_step_editor_http_body_none"
+};
+
+export function httpBodyModeLabel(mode: HttpConfig["body"]["mode"], t: T): string {
+  return t(HTTP_BODY_KEYS[mode]);
+}
+
+/** How a call signs in, and whether its credential is stored; never the credential. */
+export function httpAuthSummary(auth: HttpConfig["auth"], t: T): string {
+  const mode = httpAuthModeLabel(auth.mode, t);
+  const credential = httpCredential(auth);
+  if (credential === null) return mode;
+  if (isSecretSentinel(credential)) return t("flow_step_editor_http_credential_stored", { mode });
+  return credential ? mode : t("flow_step_editor_http_credential_missing", { mode });
 }
 
 /** The reference wording for a stored value that is no longer a valid choice here. */

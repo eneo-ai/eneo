@@ -20,6 +20,42 @@ export function stepWarningText(code: string, t: Translator): string | null {
   return t.has(key) ? t(key) : flowErrorText(code, t);
 }
 
+/** Reasons whose sentence names the template field, and those that also name the step it reads. */
+const FIELD_REASONS = new Set([
+  "unbound",
+  "unknown_source",
+  "source_failed",
+  "missing_value",
+  "not_text"
+]);
+const STEP_REASONS = new Set(["source_failed", "missing_value", "not_text"]);
+const DOCUMENT_REASONS = new Set([
+  "too_large",
+  "invalid_template",
+  "template_missing",
+  "render_refused",
+  "runtime_unavailable"
+]);
+
+/**
+ * Where a Word template fill failed and what to do, from the run error's
+ * `details.template_fill`: the field, the step it reads and the reason.
+ */
+function templateFillText(fill: unknown, t: Translator): string | null {
+  if (!fill || typeof fill !== "object") return null;
+  const { reason, field, source_step } = fill as Record<string, unknown>;
+  if (typeof reason !== "string") return null;
+  if (DOCUMENT_REASONS.has(reason)) return t(`flow_run_template_fill_${reason}`);
+  if (!FIELD_REASONS.has(reason) || typeof field !== "string" || !field) return null;
+  if (!STEP_REASONS.has(reason)) return t(`flow_run_template_fill_${reason}`, { field });
+  if (typeof source_step === "number") {
+    return t(`flow_run_template_fill_${reason}`, { field, step: source_step });
+  }
+  return reason === "source_failed"
+    ? null
+    : t(`flow_run_template_fill_${reason}_no_step`, { field });
+}
+
 /** A sentence the special codes need from their `context` or `details`. */
 function contextualText(
   code: string | null | undefined,
@@ -31,6 +67,7 @@ function contextualText(
   if (code === "flow_run_upload_pdf_exceeds_limit" && facts.reason === "extraction_capacity") {
     return t("flow_runs_refusal_pdf_extraction_busy");
   }
+  if (code === "typed_io_template_render_failed") return templateFillText(facts.template_fill, t);
   if (code === "typed_io_speaker_service_unavailable") {
     if (facts.speaker_service_gap === "not_chosen") return t("flow_runs_speakers_not_chosen");
     if (facts.speaker_service_gap === "picked_unavailable") {

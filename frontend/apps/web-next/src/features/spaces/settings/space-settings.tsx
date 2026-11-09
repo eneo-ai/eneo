@@ -663,6 +663,7 @@ function SpeakerServicesRow() {
   const catalogue = useQuery(transcriptionServiceCatalogueQueryOptions(browserApi));
   const security = useQuery(securityClassificationsQueryOptions(browserApi));
   const [savingId, setSavingId] = useState<string | null>(null);
+  const headingId = useId();
   // Read by a second press before the first one's render.
   const savingRef = useRef(false);
 
@@ -684,12 +685,21 @@ function SpeakerServicesRow() {
     setSavingId(null);
   }
 
+  // A card like the model cards beside it in this group.
   return (
-    <SettingsRow
+    <section
       id="speaker-services"
-      title={t("speaker_identification")}
-      description={t("speaker_service_space_description")}
+      aria-labelledby={headingId}
+      className="border-border flex scroll-mt-32 flex-col gap-3 rounded-lg border p-4"
     >
+      <div>
+        <h3 id={headingId} className="text-base font-semibold">
+          {t("speaker_identification")}
+        </h3>
+        <p className="text-muted-foreground mt-1 text-sm">
+          {t("speaker_service_space_description")}
+        </p>
+      </div>
       <QueryStateBoundary
         query={catalogue}
         rows={2}
@@ -709,7 +719,7 @@ function SpeakerServicesRow() {
           />
         )}
       </QueryStateBoundary>
-    </SettingsRow>
+    </section>
   );
 }
 

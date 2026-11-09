@@ -6,10 +6,9 @@ import { useAnnounce } from "@astryxdesign/core/hooks";
 import { FormLayout } from "@astryxdesign/core/FormLayout";
 import { Icon } from "@astryxdesign/core/Icon";
 import { Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
-import { List, ListItem } from "@astryxdesign/core/List";
 import { Text } from "@astryxdesign/core/Text";
 import { TextArea } from "@astryxdesign/core/TextArea";
-import { CircleCheck, Download, Minus, PackageOpen } from "lucide-react";
+import { Download, PackageOpen } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
@@ -179,6 +178,7 @@ export function FlowPackageExportDialog({
                 <FormLayout defaultOptionality="required">
                   <TextInput
                     label={t("name")}
+                    description={t("flow_package_export_name_help")}
                     value={name}
                     onChange={(value) => {
                       setName(value);
@@ -241,42 +241,25 @@ export function FlowPackageExportDialog({
                     />
                   </FormLayout>
                 </Collapsible>
-                <div className="bg-ax-sunken rounded-ax-container px-4 py-3">
-                  <List
-                    density="compact"
-                    edge="flush"
-                    header={
-                      <>
-                        <Text type="label" as="p" display="block" className="m-0">
-                          {t("flow_package_export_contents_title")}
-                        </Text>
-                        {flow.steps.length > 0 ? (
-                          <Text type="supporting" size="sm" as="p" display="block" className="m-0">
-                            {t("flow_package_export_step_count", { count: flow.steps.length })}
-                          </Text>
-                        ) : null}
-                      </>
-                    }
+                {/* What travels and what stays behind, always in view: it is what the person trusts. */}
+                <div className="bg-ax-sunken rounded-ax-container flex flex-col gap-1 px-4 py-3">
+                  <Text type="label" as="p" display="block" className="m-0">
+                    {t("flow_package_export_contents_title")}
+                  </Text>
+                  {flow.steps.length > 0 ? (
+                    <Text type="supporting" size="sm" as="p" display="block" className="m-0">
+                      {t("flow_package_export_step_count", { count: flow.steps.length })}
+                    </Text>
+                  ) : null}
+                  <Text
+                    type="supporting"
+                    size="sm"
+                    as="p"
+                    display="block"
+                    className="m-0 max-w-prose"
                   >
-                    <ListItem
-                      align="first-line"
-                      startContent={<Icon icon={CircleCheck} size="sm" color="success" />}
-                      label={
-                        <Text type="supporting" size="sm" display="block">
-                          {t("flow_editor_tools_package_export_contents_includes")}
-                        </Text>
-                      }
-                    />
-                    <ListItem
-                      align="first-line"
-                      startContent={<Icon icon={Minus} size="sm" color="secondary" />}
-                      label={
-                        <Text type="supporting" size="sm" display="block">
-                          {t("flow_editor_tools_package_export_contents_excludes")}
-                        </Text>
-                      }
-                    />
-                  </List>
+                    {t("flow_package_export_contents")}
+                  </Text>
                 </div>
                 {templateSteps > 0 ? (
                   <CheckboxInput

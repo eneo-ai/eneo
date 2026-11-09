@@ -49,6 +49,23 @@ const click = async (name: string) =>
   });
 const blocked = () => screen.getByRole("status").textContent;
 
+it("names the way back when the editor's own Avbryt opened the question", async () => {
+  function LocalEditor() {
+    const guard = useRef<LeaveConfirmationHandle>(null);
+    return (
+      <>
+        <LeaveConfirmation ref={guard} active cancelLabel="Fortsätt redigera" />
+        <button onClick={() => guard.current?.confirm(() => {})}>Avbryt</button>
+      </>
+    );
+  }
+  await renderWithRouter(<LocalEditor />, { route: "/a", routes });
+  await click("Avbryt");
+  expect(screen.getAllByRole("button", { name: "Avbryt" })).toHaveLength(1);
+  await click("Fortsätt redigera");
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+});
+
 it("shares the leave decision with an in-place reset and never runs it on teardown", async () => {
   const reset = vi.fn();
   function LocalEditor() {

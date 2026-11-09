@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { makeContract, makeInput } from "./run-fixtures";
 import {
   fitRunLabel,
+  inputsComeFirst,
   reusedInput,
   RUN_LABEL_MAX_LENGTH,
   screenAudioFiles,
@@ -10,6 +11,18 @@ import {
   takesReusableInput,
   withRunLabel
 } from "./start-run-checks";
+
+describe("inputsComeFirst", () => {
+  it("leads with required files only when every field is optional", () => {
+    const required = { required: true };
+    const optional = { required: false };
+    expect(inputsComeFirst([required], [optional, optional])).toBe(true);
+    expect(inputsComeFirst([required], [])).toBe(true);
+    expect(inputsComeFirst([required], [optional, required])).toBe(false);
+    expect(inputsComeFirst([optional], [optional])).toBe(false);
+    expect(inputsComeFirst([], [optional])).toBe(false);
+  });
+});
 
 describe("fitRunLabel", () => {
   it("keeps a name on one line", () => {

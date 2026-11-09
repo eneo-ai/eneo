@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderInApp } from "@/test/render";
 import { setViewport } from "@/test/setup-dom";
@@ -36,9 +36,14 @@ describe("FlowPackageExportDialog layout", () => {
     expect(before(advanced, screen.getByRole("textbox", { name: /Paket-ID/ }))).toBe(true);
     expect(before(advanced, screen.getByRole("textbox", { name: /Version/ }))).toBe(true);
 
-    const contents = screen.getByRole("list", { name: /Vad som ingår i paketet/ });
-    expect(within(contents).getAllByRole("listitem")).toHaveLength(2);
+    expect(screen.getByText("Vad som ingår i paketet")).toBeTruthy();
     expect(screen.getByText("Innehåller 2 steg.")).toBeTruthy();
+    expect(screen.getByText(/Körhistorik och inloggningsuppgifter följer inte med/)).toBeTruthy();
+    // No Word-template clause when there is no Word template to choose.
+    expect(screen.queryByText(/Word-mallar/)).toBeNull();
+    expect(
+      screen.getByText("Det här namnet får flödet när någon importerar paketet.")
+    ).toBeTruthy();
     // No Word templates in this flow, so there is nothing to choose.
     expect(screen.queryByRole("checkbox", { name: "Inkludera Word-mallar" })).toBeNull();
   });

@@ -1,6 +1,21 @@
 import { describe, expect, it } from "vitest";
+import messages from "@/lib/i18n/messages/sv.json";
 import { makeRunStep } from "./run-fixtures";
-import { stepInputFiles } from "./run-format";
+import { formatSeconds, stepInputFiles } from "./run-format";
+
+describe("formatSeconds", () => {
+  const t = (key: string, values: Record<string, string | number> = {}) =>
+    (messages as Record<string, string>)[key]!.replace(/\{(\w+)\}/g, (_, name: string) =>
+      String(values[name])
+    );
+
+  it("says seconds and minutes, and from an hour hours and minutes without the seconds", () => {
+    expect(formatSeconds(45, t)).toBe("45 s");
+    expect(formatSeconds(725, t)).toBe("12 min 5 s");
+    expect(formatSeconds(3599, t)).toBe("59 min 59 s");
+    expect(formatSeconds(13_115, t)).toBe("3 h 38 min");
+  });
+});
 
 describe("stepInputFiles", () => {
   it("names each file in the order of the ids, and numbers the ones without a name", () => {

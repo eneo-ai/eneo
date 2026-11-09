@@ -24,7 +24,6 @@ import {
 } from "./run-progress";
 import { RunFiles, RunInputFiles } from "./run-files";
 import { isTerminal, NOT_RUN_STEP_VIEW, stepStatusView } from "./run-status";
-import { StepAttempts } from "./run-step-attempts";
 import { StepPromptDetails } from "./run-step-details";
 import {
   StepRejectedOutput,
@@ -67,29 +66,65 @@ function stepDurationMs(result: RunStep): number | null {
   return Number.isFinite(ms) && ms >= 0 ? ms : null;
 }
 
+/** A transcript's fold: named for the speakers too when the step identified them. */
+function transcriptTitle(step: Pick<RunStepView, "speakerIdentification">, t: Translate) {
+  return step.speakerIdentification
+    ? t("flow_runs_transcript_and_speakers")
+    : t("flow_runs_transcript_heading");
+}
+
+/**
+ * The order of the earlier step that wrote the same text, for a step that put
+ * that text in a file (a document template): its text adds nothing to read.
+ */
+function sameTextAs(steps: readonly RunStepView[], index: number): number | null {
+  const result = steps[index]?.result;
+  if (result?.status !== "completed" || (result.result_files ?? []).length === 0) return null;
+  const payload = result.output_payload_json;
+  const text = outputText(payload);
+  if (text === null || outputStructured(payload) !== undefined || speakerMapping(payload)) {
+    return null;
+  }
+  const earlier = steps
+    .slice(0, index)
+    .filter((step) => step.result && outputText(step.result.output_payload_json) === text);
+  return earlier.at(-1)?.order ?? null;
+}
+
 /**
  * What a step produced, expanded on demand beside a copy button: the speakers a
  * speaker-mapping step named, a structured value (marked as JSON), or text
  * (rendered as Markdown, its line breaks kept, in a box that scrolls past a
- * height). A step whose text is its transcript shows the transcript
- * (`transcript`), open until the person folds it, as its own section did, and
- * leaves copying to the transcript's export: the text here has no corrections.
+ * height); text an earlier step wrote already (`sameAs`) is named, not shown
+ * again. A step whose text is its transcript shows the transcript
+ * (`transcript`) under `transcriptLabel`, and leaves copying to the
+ * transcript's export: the text here has no corrections. The transcript is
+ * open while the run goes on or awaits review, and closed on a run that had
+ * ended when the page showed it.
  */
 function StepOutput({
   flowId,
   runId,
   result,
-  transcript = null
+  transcript = null,
+  transcriptLabel,
+  runSettled,
+  sameAs
 }: {
   flowId: string;
   runId: string;
   result: RunStep;
   transcript?: HTMLElement | null;
+  transcriptLabel: string;
+  runSettled: boolean;
+  sameAs: number | null;
 }) {
   const t = useTranslations();
   const [toggled, setToggled] = useState<boolean | null>(null);
+  // Read once: a run that ends while it is read does not fold it.
+  const [settledAtFirst] = useState(runSettled);
   // A transcript can arrive after the card: the default follows it.
-  const open = toggled ?? transcript !== null;
+  const open = toggled ?? (transcript !== null && !settledAtFirst);
   const payload = result.output_payload_json;
   const structured = outputStructured(payload);
   const text = outputText(payload);
@@ -97,6 +132,13 @@ function StepOutput({
     return (
       <Text type="supporting" as="p">
         {t("flow_runs_output_none")}
+      </Text>
+    );
+  }
+  if (sameAs !== null && !transcript) {
+    return (
+      <Text type="supporting" as="p">
+        {t("flow_runs_step_output_same_as", { order: sameAs })}
       </Text>
     );
   }
@@ -108,7 +150,9 @@ function StepOutput({
         onOpenChange={setToggled}
         chevronPosition="start"
         trigger={
-          <span className="block py-1.5 text-sm font-medium">{t("flow_runs_step_output")}</span>
+          <span className="block py-1.5 text-sm font-medium">
+            {transcript ? transcriptLabel : t("flow_runs_step_output")}
+          </span>
         }
       >
         <VStack gap={1} paddingBlockStart={2}>
@@ -263,21 +307,27 @@ function StepInput({ result }: { result: RunStep }) {
   );
 }
 
-/** The transcript of a step whose result is something else, open from the start. */
-function StepTranscriptSection({ host }: { host: HTMLElement }) {
-  const t = useTranslations();
-  const [open, setOpen] = useState(true);
+/**
+ * The transcript of a step whose result is something else: open while the run
+ * goes on or awaits review, closed on a run that had ended when it was shown.
+ */
+function StepTranscriptSection({
+  host,
+  label,
+  runSettled
+}: {
+  host: HTMLElement;
+  label: string;
+  runSettled: boolean;
+}) {
+  const [open, setOpen] = useState(!runSettled);
   return (
     <LazyCollapsible
       className="min-w-0"
       isOpen={open}
       onOpenChange={setOpen}
       chevronPosition="start"
-      trigger={
-        <span className="block py-1.5 text-sm font-medium">
-          {t("flow_runs_transcript_heading")}
-        </span>
-      }
+      trigger={<span className="block py-1.5 text-sm font-medium">{label}</span>}
     >
       <div className="pt-2">
         <TranscriptSlot host={host} isOpen={open} />
@@ -292,8 +342,8 @@ function StepCard({
   step,
   isNext,
   notRun,
-  canReadEvidence,
   runSettled,
+  sameAs,
   transcript
 }: {
   flowId: string;
@@ -302,9 +352,10 @@ function StepCard({
   isNext: boolean;
   /** The run ended without the step starting. */
   notRun: boolean;
-  canReadEvidence: boolean;
   /** The run has ended (`isTerminal`). */
   runSettled: boolean;
+  /** The earlier step that wrote the same text (`sameTextAs`). */
+  sameAs: number | null;
   /** The element the step's transcript renders into, when it has one to show. */
   transcript: HTMLElement | null;
 }) {
@@ -320,6 +371,8 @@ function StepCard({
     tokens === null &&
     (result?.status === "completed" || result?.status === "failed") &&
     Boolean(result.started_at);
+  // A step that used no tokens (a transcription, a document) has nothing to count.
+  const shownTokens = tokens !== null && tokens > 0 ? tokens : null;
   const title = stepTitle(step, t);
   const warnings = (result?.diagnostics ?? []).filter((item) => item.severity !== "info");
   // A transcribing step's text is its transcript: shown as its result. Any
@@ -351,15 +404,15 @@ function StepCard({
             : t("flow_run_progress_running_body")}
         </p>
       ) : null}
-      {duration !== null || tokens !== null || usageNotRecorded ? (
+      {duration !== null || shownTokens !== null || usageNotRecorded ? (
         <p className="text-ax-text-secondary text-sm">
           {[
             duration !== null
               ? t("flow_runs_step_took", { time: formatSeconds(duration / 1000, t) })
               : null,
-            tokens !== null && result
+            shownTokens !== null && result
               ? t("flow_run_journey_step_tokens", {
-                  total: formatCount(tokens, locale),
+                  total: formatCount(shownTokens, locale),
                   input: formatCount(result.num_tokens_input ?? 0, locale),
                   output: formatCount(result.num_tokens_output ?? 0, locale)
                 })
@@ -404,6 +457,9 @@ function StepCard({
             runId={runId}
             result={result}
             transcript={transcriptIsResult ? transcript : null}
+            transcriptLabel={transcriptTitle(step, t)}
+            runSettled={runSettled}
+            sameAs={sameAs}
           />
           <StepSectionReading payload={result.output_payload_json} />
           <StepTemplateProvenance payload={result.output_payload_json} />
@@ -429,19 +485,16 @@ function StepCard({
           />
         </div>
       ) : null}
-      {transcript && !transcriptIsResult ? <StepTranscriptSection host={transcript} /> : null}
-      {result ? <StepTranscriptionFacts result={result} /> : null}
-      {result ? <StepInput result={result} /> : null}
-      {result ? <StepPromptDetails result={result} /> : null}
-      {canReadEvidence && result?.started_at ? (
-        <StepAttempts
-          flowId={flowId}
-          runId={runId}
-          order={step.order}
-          title={title}
+      {transcript && !transcriptIsResult ? (
+        <StepTranscriptSection
+          host={transcript}
+          label={transcriptTitle(step, t)}
           runSettled={runSettled}
         />
       ) : null}
+      {result ? <StepTranscriptionFacts result={result} /> : null}
+      {result ? <StepInput result={result} /> : null}
+      {result ? <StepPromptDetails result={result} /> : null}
     </article>
   );
 }
@@ -455,16 +508,14 @@ function StepCard({
  * it gave that was not accepted. A step of an ended run that never started
  * reads "did not run". A running step says what it is doing and the step
  * next in turn says so. A step that transcribed audio shows its transcript
- * (`transcripts`, rendered by the page). A caller who may read the evidence
- * can open each step's attempts. Each card can be gone to (`showRunStep`), as
- * the failure notice does.
+ * (`transcripts`, rendered by the page). Each card can be gone to
+ * (`showRunStep`), as the failure notice does.
  */
 export function RunSteps({
   flowId,
   runId,
   steps,
   runStatus = null,
-  canReadEvidence = false,
   transcripts
 }: {
   flowId: string;
@@ -472,8 +523,6 @@ export function RunSteps({
   steps: readonly RunStepView[];
   /** The run's status, to tell a step that never ran from one that failed. */
   runStatus?: string | null;
-  /** The core would let the caller read the run's evidence (its attempts). */
-  canReadEvidence?: boolean;
   /** By step id, the element each step's transcript renders into (`useTranscriptHosts`). */
   transcripts?: ReadonlyMap<string, HTMLElement>;
 }) {
@@ -485,7 +534,7 @@ export function RunSteps({
   const runSettled = runStatus !== null && isTerminal(runStatus);
   return (
     <ol className="m-0 flex flex-col gap-3 p-0">
-      {steps.map((step) => (
+      {steps.map((step, index) => (
         <li key={step.order} className="list-none">
           <StepCard
             flowId={flowId}
@@ -493,8 +542,8 @@ export function RunSteps({
             step={step}
             isNext={step.order === next}
             notRun={stepNeverRan(step, runStatus)}
-            canReadEvidence={canReadEvidence}
             runSettled={runSettled}
+            sameAs={sameTextAs(steps, index)}
             transcript={(step.result && transcripts?.get(step.result.step_id)) ?? null}
           />
         </li>

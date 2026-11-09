@@ -1,7 +1,8 @@
 import { Icon } from "@astryxdesign/core/Icon";
 import { IconButton } from "@astryxdesign/core/IconButton";
-import { TopNav, TopNavItem } from "@astryxdesign/core/TopNav";
-import { ArrowUpToLine, Search } from "lucide-react";
+import { TopNav, TopNavItem, TopNavMenu } from "@astryxdesign/core/TopNav";
+import { useMediaQuery } from "@astryxdesign/core/hooks";
+import { ArrowUpToLine, Building2, Search, Shield } from "lucide-react";
 import Link from "@/lib/link";
 import { usePathname } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
@@ -21,11 +22,17 @@ import { useShell } from "./shell-context";
  * (admins) Organisation, then search, Administratör, the bells and the
  * profile. The areas are links, not tabs: each is a route.
  *
+ * Beside the full SideNav in a window under 896 px the wordmark cell leaves the
+ * areas too little room: Organisation and Administratör share one "Mer" menu.
+ *
  * Like Svelte's, the bar can be hidden from the arrow on the wordmark cell and
  * comes back when the pointer reaches the top edge. Hidden, it leaves the tab
  * order, and a "Visa sidhuvudet" button (visible on focus) brings it back
  * from the keyboard (WCAG 2.1.1); each button hands focus to the other.
  */
+/** Wide enough for every area beside the full SideNav's wordmark cell (rem: it follows the font size). */
+const AREAS_FIT_QUERY = "(width >= 56rem)";
+
 export function TopBar({
   railCollapsed = false,
   hasSideNav = true,
@@ -42,6 +49,10 @@ export function TopBar({
   const { openPalette } = useShell();
   const area = areaOf(usePathname());
   const isAdmin = can("admin");
+  // Beside the full SideNav the search button covers Organisation below about 810 px (Swedish
+  // labels, measured); 896 px leaves room for longer ones.
+  const roomy = useMediaQuery(AREAS_FIT_QUERY);
+  const adminMenu = isAdmin && !railCollapsed && !roomy;
   // The area holds the current page but is not it: aria-current="true", not
   // "page" (Astryx's default), so the page's own link stays the one "page".
   const current = (of: Area) =>
@@ -156,12 +167,27 @@ export function TopBar({
               {...current("personal")}
             />
             <TopNavItem label={t("shell_area_shared")} href="/spaces/list" {...current("shared")} />
-            {isAdmin && (
-              <TopNavItem
-                label={t("organization")}
-                href="/spaces/organization/knowledge"
-                {...current("organization")}
+            {adminMenu ? (
+              <TopNavMenu
+                label={t("more")}
+                items={[
+                  // The icons the tablet's navigation gives them.
+                  {
+                    title: t("organization"),
+                    icon: <Icon icon={Building2} />,
+                    href: "/spaces/organization/knowledge"
+                  },
+                  { title: t("admin"), icon: <Icon icon={Shield} />, href: "/admin" }
+                ]}
               />
+            ) : (
+              isAdmin && (
+                <TopNavItem
+                  label={t("organization")}
+                  href="/spaces/organization/knowledge"
+                  {...current("organization")}
+                />
+              )
             )}
           </>
         }
@@ -175,7 +201,9 @@ export function TopBar({
               aria-keyshortcuts="Meta+K Control+K"
               onClick={() => openPalette()}
             />
-            {isAdmin && <TopNavItem label={t("admin")} href="/admin" {...current("admin")} />}
+            {isAdmin && !adminMenu && (
+              <TopNavItem label={t("admin")} href="/admin" {...current("admin")} />
+            )}
             <div className="ms-2 flex items-center gap-1">
               <NotificationBells />
               <ProfileMenu inTopBar withHelpCenter={!hasSideNav} />

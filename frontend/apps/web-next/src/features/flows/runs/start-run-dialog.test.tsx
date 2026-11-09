@@ -48,7 +48,8 @@ const CONTRACT = "GET /api/v1/flows/{id}/run-contract/";
 const START = "POST /api/v1/flows/{id}/runs/";
 const LIST = "GET /api/v1/flows/{id}/runs/";
 const DETAIL = "GET /api/v1/flows/{id}/runs/{run_id}/";
-const NO_INPUT = "Inget underlag är ifyllt";
+const RUN_LABEL = new RegExp(`^${messages.flow_run_extras_run_label}`);
+const NO_INPUT = messages.flow_runs_start_no_input_title;
 
 /** Answers runtime uploads as the core does, at once. */
 class FakeUpload {
@@ -289,7 +290,7 @@ describe("StartRunDialog", () => {
     pickFile(dialog, new File(["%PDF"], "brev.pdf", { type: "application/pdf" }));
     expect(await within(dialog).findByText(/Uppladdad/)).toBeTruthy();
 
-    fireEvent.click(button(dialog, "Ladda ned brev.pdf"));
+    fireEvent.click(button(dialog, "Ladda ner brev.pdf"));
     await waitFor(() =>
       expect(saved).toEqual(["/api/v1/files/file-1/download/?token=signed brev.pdf"])
     );
@@ -433,7 +434,7 @@ describe("StartRunDialog", () => {
       })
     );
     // A name for the run is no material for it.
-    fireEvent.change(within(dialog).getByLabelText(/^Namn på körningen/), {
+    fireEvent.change(within(dialog).getByLabelText(RUN_LABEL), {
       target: { value: "Prov" }
     });
     fireEvent.click(button(dialog, messages.flow_runs_summary_next));
@@ -448,6 +449,69 @@ describe("StartRunDialog", () => {
     await waitFor(() => expect(onStarted).toHaveBeenCalledWith(run));
   });
 
+  describe("a flow whose fields are all optional and whose file is not", () => {
+    const optionalFields = makeContract({
+      form_fields: [
+        { name: "motet", label: "Mötets namn", type: "text", required: false, order: 1 },
+        { name: "datum", label: "Datum", type: "date", required: false, order: 2 }
+      ],
+      steps_requiring_input: [makeInput({ step_id: "step-1", label: "Brevet", required: true })]
+    });
+    /** Whether `first` comes before `second` in the document, which is also the Tab order. */
+    const before = (first: Element, second: Element) =>
+      Boolean(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+    it("opens with the file, and the fields follow", async () => {
+      const { dialog } = await openDialog(optionalFields);
+      const file = dialog.querySelector<HTMLInputElement>("input[type=file]")!;
+      expect(before(file, within(dialog).getByLabelText(/^Mötets namn/))).toBe(true);
+      expect(
+        before(
+          within(dialog).getByLabelText(/^Mötets namn/),
+          within(dialog).getByLabelText(RUN_LABEL)
+        )
+      ).toBe(true);
+    });
+
+    it("moves focus to the first problem as the form shows them: the file before a field", async () => {
+      // The last run's date, which the field cannot read, is a problem at the field.
+      api.routes[LIST] = () => ({
+        body: {
+          count: 1,
+          items: [makeRunSummary({ id: "run-7" })],
+          has_more: false,
+          status_counts: null
+        }
+      });
+      api.routes[DETAIL] = () => ({
+        body: makeRunDetail({ id: "run-7", input_payload_json: { datum: "i morgon" } })
+      });
+      const { dialog } = await openDialog(optionalFields);
+      fireEvent.click(
+        await within(dialog).findByRole("button", { name: messages.flow_run_more_reuse })
+      );
+      await waitFor(() =>
+        expect(api.stub.calls.some((call) => call.path.endsWith("{run_id}/"))).toBe(true)
+      );
+      fireEvent.click(button(dialog, messages.flow_runs_summary_next));
+
+      expect(await within(dialog).findByText("Lägg till en fil i Brevet.")).toBeTruthy();
+      expect(
+        within(dialog)
+          .getByLabelText(/^Datum/)
+          .getAttribute("aria-invalid")
+      ).toBe("true");
+      const files = dialog.querySelector('[id$="-input-step-1-files"]')!;
+      expect(files.contains(document.activeElement)).toBe(true);
+    });
+
+    it("keeps the fields first when one of them must be filled in", async () => {
+      const { dialog } = await openDialog();
+      const file = dialog.querySelector<HTMLInputElement>("input[type=file]")!;
+      expect(before(within(dialog).getByLabelText(/^Ärende/), file)).toBe(true);
+    });
+  });
+
   it("is ready without input when the flow reads none", async () => {
     const { dialog } = await openDialog(makeContract(), null, [
       makeStep(1, { input_source: "http_get" })
@@ -457,6 +521,27 @@ describe("StartRunDialog", () => {
     const summary = within(dialog).getByRole("region", { name: messages.flow_runs_summary_title });
     expect(within(summary).getByText(messages.flow_runs_start_ready_title)).toBeTruthy();
     expect(within(summary).queryByText(NO_INPUT)).toBeNull();
+  });
+
+  it("asks for the text before the summary when a step reads it", async () => {
+    const { dialog } = await openDialog(makeContract());
+    const text = within(dialog).getByLabelText(
+      new RegExp(`^${messages.flow_runs_free_text}`)
+    ) as HTMLTextAreaElement;
+    expect(text.required || text.getAttribute("aria-required") === "true").toBe(true);
+
+    fireEvent.click(button(dialog, messages.flow_runs_summary_next));
+    expect(await within(dialog).findByText(messages.flow_runs_free_text_required)).toBeTruthy();
+    expect(
+      within(dialog).queryByRole("region", { name: messages.flow_runs_summary_title })
+    ).toBeNull();
+    expect(document.activeElement).toBe(text);
+
+    fireEvent.change(text, { target: { value: "Kommunstyrelsen beslutade i dag." } });
+    expect(within(dialog).queryByText(messages.flow_runs_free_text_required)).toBeNull();
+    fireEvent.click(button(dialog, messages.flow_runs_summary_next));
+    const summary = within(dialog).getByRole("region", { name: messages.flow_runs_summary_title });
+    expect(within(summary).getByText("Kommunstyrelsen beslutade i dag.")).toBeTruthy();
   });
 
   it("asks before closing a form with something filled in, and closes an empty one", async () => {
@@ -599,7 +684,7 @@ describe("StartRunDialog on a phone", () => {
     const { dialog } = await openDialog();
     // The fullscreen variant is another set of the dialog's own classes.
     expect(dialog.className).not.toBe(standard);
-    const next = button(dialog, "Granska");
+    const next = button(dialog, messages.flow_runs_summary_next);
     const cancel = button(dialog, "Avbryt");
     expect(next.parentElement).toBe(cancel.parentElement);
     // The primary action is on top, and first in the DOM, so Tab goes the way the eye does.
@@ -629,7 +714,7 @@ describe("StartRunDialog on a phone", () => {
     const pieces = (dialog: HTMLElement) => ({
       recording: within(dialog).getByText(messages.flow_transcript_rec_heading),
       file: dialog.querySelector<HTMLInputElement>("input[type=file]")!,
-      name: within(dialog).getByLabelText(/^Namn på körningen/)
+      name: within(dialog).getByLabelText(RUN_LABEL)
     });
 
     it("puts recording first and the run's name last on a phone", async () => {
@@ -687,11 +772,11 @@ describe("StartRunDialog on a phone", () => {
 
   it("keeps the dialog, its row of buttons and the drag wording for a mouse", async () => {
     const { dialog } = await openDialog();
-    const next = button(dialog, "Granska");
+    const next = button(dialog, messages.flow_runs_summary_next);
     const cancel = button(dialog, "Avbryt");
     expect(next.parentElement?.className).toContain("justify-end");
     expect(next.parentElement?.className).not.toContain("flex-col");
-    // A row reads left to right: Avbryt, then Granska, in Tab order too.
+    // A row reads left to right: Avbryt, then Fortsätt, in Tab order too.
     expect(Boolean(cancel.compareDocumentPosition(next) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(
       true
     );

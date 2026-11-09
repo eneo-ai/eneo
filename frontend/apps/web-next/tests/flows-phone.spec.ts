@@ -121,13 +121,13 @@ test(
       .setInputFiles({ name: "kort.wav", mimeType: "audio/wav", buffer: silenceWav(64_000) });
     expect((await uploaded).status()).toBe(201);
     // The button is in its resting colour once the upload is done (axe reads a half-faded one).
-    const next = dialog.getByRole("button", { name: "Granska", exact: true });
+    const next = dialog.getByRole("button", { name: "Nästa", exact: true });
     await expect
       .poll(() => next.evaluate((element) => getComputedStyle(element).backgroundColor))
       .toBe("rgb(26, 111, 210)");
     await fitsTheWidth(page);
     await axeFindsNothing(page);
-    await dialog.getByRole("button", { name: "Granska", exact: true }).click();
+    await dialog.getByRole("button", { name: "Nästa", exact: true }).click();
     await dialog.getByRole("button", { name: "Starta körningen", exact: true }).click();
 
     // The run: no breadcrumbs, the result before everything else, the rest folded.
@@ -167,7 +167,7 @@ test(
     expect(startBox.height).toBeGreaterThanOrEqual(44);
     expect(await y(start)).toBeLessThan(await y(dialog.getByText("Välj filer", { exact: true })));
     expect(await y(dialog.getByText("Välj filer", { exact: true }))).toBeLessThan(
-      await y(dialog.getByLabel(/^Namn på körningen/))
+      await y(dialog.getByLabel(/^Namn i listan över körningar/))
     );
     await fitsTheWidth(page);
     await resting(start);
@@ -191,7 +191,7 @@ test(
 
     // Turned sideways (past 768 px) and back, the recording goes on, and the form scrolls above its
     // footer in both.
-    const review = dialog.getByRole("button", { name: "Granska", exact: true });
+    const review = dialog.getByRole("button", { name: "Nästa", exact: true });
     await onScreen(page, review);
     await page.setViewportSize({ width: 844, height: 390 });
     await expect(stop).toBeVisible();
@@ -225,7 +225,7 @@ test.describe("on the smallest phone", () => {
     await page.getByRole("button", { name: "Kör flödet", exact: true }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog.getByRole("button", { name: "Spela in", exact: true })).toBeVisible();
-    await onScreen(page, dialog.getByRole("button", { name: "Granska", exact: true }));
+    await onScreen(page, dialog.getByRole("button", { name: "Nästa", exact: true }));
     await onScreen(page, dialog.getByRole("button", { name: "Avbryt", exact: true }));
     await fitsTheWidth(page);
   });

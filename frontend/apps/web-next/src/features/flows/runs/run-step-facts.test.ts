@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  mappedSpeakerNames,
   rejectedOutput,
   runtimeInputSummary,
   sectionReading,
@@ -198,6 +199,12 @@ describe("speakerMapping", () => {
     });
     // A name kept as the step gave it keeps the step's evidence.
     expect(withGivenNames(rows, { SPEAKER_00: "Anna Lind" })[0]).toEqual(rows[0]);
+  });
+
+  it("gives a transcription step's speakers the names its mapping step gave, and only those", () => {
+    const steps = [{ output_payload_json: { text: "Hej." } }, { output_payload_json: payload }];
+    expect(mappedSpeakerNames(steps, "step-1")).toEqual({ SPEAKER_00: "Anna Lind" });
+    expect(mappedSpeakerNames(steps, "step-2")).toEqual({});
   });
 });
 

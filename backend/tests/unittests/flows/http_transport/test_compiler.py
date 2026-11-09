@@ -88,6 +88,20 @@ def test_no_auth_produces_no_auth_headers() -> None:
 # --- Custom headers ---
 
 
+def test_custom_header_without_a_name_is_left_out() -> None:
+    cfg = _config(
+        custom_headers=[
+            CustomHeader(name="", value="", secret=False),
+            CustomHeader(name="  ", value="val", secret=True),
+            CustomHeader(name="X-Custom", value="val1", secret=False),
+        ]
+    )
+    result = compile_http_config(cfg, direction="output", method="POST")
+
+    assert result.headers["X-Custom"] == "val1"
+    assert all(name.strip() for name in result.headers)
+
+
 def test_custom_headers_included_in_result() -> None:
     headers = [
         CustomHeader(name="X-Custom", value="val1", secret=False),

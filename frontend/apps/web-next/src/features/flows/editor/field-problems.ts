@@ -25,11 +25,16 @@ export const FIELD_ANCHORS = [
   "input_config.text_processing",
   "input_config.long_material",
   "input_config.http",
+  "input_config.http.auth",
+  "input_config.http.more",
   "input_config.tool",
   "input_bindings",
   "output_mode",
   "output_type",
   "output_config.http",
+  "output_config.http.auth",
+  "output_config.http.body",
+  "output_config.http.more",
   "output_config.template",
   "output_config.speaker_mapping",
   "output_config.citation_mode",
@@ -45,6 +50,32 @@ export type FieldAnchor = (typeof FIELD_ANCHORS)[number];
 
 export type FieldProblems = Partial<Record<FieldAnchor, string>>;
 
+/** A part of the HTTP fields with an anchor of its own; the rest is shown at the address. */
+type HttpPart = "auth" | "body" | "more";
+
+/** The HTTP part a config key names (`custom_headers[0]` is a header, in the "more" fold). */
+function httpPart(key: string): HttpPart | null {
+  if (key === "auth" || key === "body") return key;
+  if (key === "timeout_seconds" || key.startsWith("custom_headers")) return "more";
+  return null;
+}
+
+/** The HTTP part a defect the core names (`context.http_error`) is about, when it is not the address. */
+const HTTP_ERROR_PARTS: Record<string, HttpPart> = {
+  HTTP_MISSING_AUTH: "auth",
+  HTTP_INVALID_BODY_JSON: "body",
+  HTTP_BODY_NOT_ALLOWED_FOR_GET: "body",
+  HTTP_TIMEOUT_OUT_OF_RANGE: "more"
+};
+
+function httpAnchor(
+  base: "input_config.http" | "output_config.http",
+  part: HttpPart | null | undefined
+): FieldAnchor {
+  const anchor = part ? `${base}.${part}` : base;
+  return (FIELD_ANCHORS as readonly string[]).includes(anchor) ? (anchor as FieldAnchor) : base;
+}
+
 /** The editor's field for a dotted path of the step's configuration. */
 export function anchorForPath(
   path: string,
@@ -56,7 +87,7 @@ export function anchorForPath(
     if (second === "runtime_input") return "input_config.runtime_input";
     if (second === "text_processing") return "input_config.text_processing";
     if (second === "long_material") return "input_config.long_material";
-    if (step.input_source === "http_get") return "input_config.http";
+    if (step.input_source === "http_get") return httpAnchor("input_config.http", httpPart(second));
     if (step.input_source === "tool") return "input_config.tool";
     return null;
   }
@@ -67,9 +98,11 @@ export function anchorForPath(
     if (step.output_mode === "template_fill") return "output_config.template";
     if (
       step.output_mode === "http_post" &&
-      (second === "" || (HTTP_CONFIG_KEYS as readonly string[]).includes(second))
+      (second === "" ||
+        (HTTP_CONFIG_KEYS as readonly string[]).includes(second) ||
+        httpPart(second) !== null)
     ) {
-      return "output_config.http";
+      return httpAnchor("output_config.http", httpPart(second));
     }
     return null;
   }
@@ -178,6 +211,27 @@ const ISSUE_MESSAGE_KEYS: Record<string, string> = {
   unsupported_input_type: "flow_validation_msg_unsupported_type"
 };
 
+/**
+ * The editor's sentence for each HTTP defect the core names: a save refusal's
+ * `context.http_error` and a connection test's `error_code` use the same codes.
+ * `HTTP_STATUS_ERROR` is absent: its sentence needs the test's status code.
+ */
+export const HTTP_ERROR_KEYS: Record<string, string> = {
+  HTTP_MISSING_URL: "flow_step_editor_http_url_missing",
+  HTTP_INVALID_URL: "flow_step_editor_http_url_invalid",
+  HTTP_VARIABLE_RESOLUTION_FAILED: "http_test_variable_resolution_failed",
+  HTTP_UNRESOLVED_STORED_SECRET: "http_test_saved_secret_unavailable",
+  HTTP_MISSING_AUTH: "http_test_auth_missing",
+  HTTP_INVALID_BODY_JSON: "http_test_body_invalid",
+  HTTP_BODY_NOT_ALLOWED_FOR_GET: "http_test_body_not_allowed",
+  HTTP_TIMEOUT_OUT_OF_RANGE: "http_test_timeout_invalid",
+  HTTP_TIMEOUT: "http_test_timeout",
+  HTTP_CONNECTION_REFUSED: "http_test_unreachable",
+  HTTP_BLOCKED_URL: "http_test_blocked",
+  HTTP_RESPONSE_TOO_LARGE: "http_test_response_too_large",
+  HTTP_CREDENTIALS_REQUIRE_HTTPS: "flow_step_editor_http_credentials_need_https"
+};
+
 export type Translator = ((key: string, values?: Record<string, string | number>) => string) & {
   has: (key: string) => boolean;
 };
@@ -254,7 +308,9 @@ export function describeSaveError(
   const context = error instanceof FlowEditorError ? error.context : {};
   const code = error.reason ?? null;
   const issueCode = contextString(context, "issue_code");
+  const httpErrorKey = HTTP_ERROR_KEYS[contextString(context, "http_error") ?? ""];
   const message =
+    (httpErrorKey ? t(httpErrorKey) : null) ??
     refusalMessage(issueCode, t) ??
     refusalMessage(code, t) ??
     (error.status === 422 ? t("flow_step_editor_value_invalid") : getErrorMessage(error, t));
@@ -269,8 +325,13 @@ export function describeSaveError(
   }
 
   const field = contextString(context, "field") ?? validationPaths(error)[0] ?? null;
+  const fieldAnchor = field ? anchorForPath(field, step.config) : null;
+  // A refusal of the whole HTTP config names its defect: show it at that part.
+  const httpErrorPart = HTTP_ERROR_PARTS[contextString(context, "http_error") ?? ""];
   const anchor =
-    (field ? anchorForPath(field, step.config) : null) ??
+    (fieldAnchor === "input_config.http" || fieldAnchor === "output_config.http"
+      ? httpAnchor(fieldAnchor, httpErrorPart)
+      : fieldAnchor) ??
     (issueCode ? CODE_ANCHORS[issueCode] : undefined) ??
     (code ? CODE_ANCHORS[code] : undefined) ??
     null;

@@ -623,6 +623,12 @@ async def test_a_bound_field_written_empty_renders_empty_and_null_stops_the_fill
             )
         assert exc_info.value.code == FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED
         assert "without a value: title" in str(exc_info.value)
+        # The run error names the field and the step it reads from.
+        assert exc_info.value.context == {
+            "template_fill_reason": "missing_value",
+            "template_field": "title",
+            "template_source_step": 1,
+        }
         file_service.save_generated_file.assert_not_awaited()
         return
 
@@ -1123,13 +1129,18 @@ async def test_execute_template_fill_step_reports_failed_upstream_step_clearly()
         template_file=template_file,
     )
 
-    with pytest.raises(TypedIOValidationException, match="failed earlier in the run"):
+    with pytest.raises(
+        TypedIOValidationException, match="failed earlier in the run"
+    ) as exc_info:
         await execute_template_fill_step(
             step=_step(),
             run=run,
             state=state,
             deps=deps,
         )
+    assert exc_info.value.context is not None
+    assert exc_info.value.context["template_fill_reason"] == "source_failed"
+    assert exc_info.value.context["template_source_step"] == 1
 
 
 @pytest.mark.asyncio
@@ -1596,3 +1607,70 @@ async def test_an_unresolved_binding_with_too_many_digits_is_named_like_any_othe
 
     assert exc_info.value.code == FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED
     deps.file_service.save_generated_file.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("runtime_code", "reason"),
+    [
+        ("RENDER_FAILED", "render_refused"),
+        ("INVALID_INPUT", "too_large"),
+        ("INVALID_TEMPLATE", "invalid_template"),
+    ],
+)
+async def test_a_runtime_refusal_says_why_in_the_run_error(
+    monkeypatch: pytest.MonkeyPatch, runtime_code: str, reason: str
+) -> None:
+    from eneo.document_templates import runtime_client
+    from eneo.flows.flow_run_error import FlowRunErrorDetails
+    from eneo.flows.runtime.docx_template_runtime import render_docx_template
+    from eneo.main.exceptions import BadRequestException
+
+    async def refuse(**_: object) -> tuple[bytes, str]:
+        raise BadRequestException("refused", context={"runtime_code": runtime_code})
+
+    monkeypatch.setattr(runtime_client, "render_document", refuse)
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await render_docx_template(
+            template_bytes=_build_summary_only_template_bytes(),
+            template_name="template.docx",
+            context={"slutsats": "- a\n- b"},
+            step_order=2,
+        )
+    assert exc_info.value.code == FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED
+    details = FlowRunErrorDetails.from_budget_context(exc_info.value.context)
+    assert details is not None and details.template_fill is not None
+    assert details.template_fill.reason == reason
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status", "body", "runtime_code"),
+    [
+        (422, b'{"code":"INVALID_INPUT"}', "INVALID_INPUT"),
+        (422, b"not json", None),
+        (200, b"x" * 64, "TOO_LARGE"),
+    ],
+)
+async def test_the_runtime_client_carries_the_refusal_code(
+    monkeypatch: pytest.MonkeyPatch, status: int, body: bytes, runtime_code: str | None
+) -> None:
+    import httpx
+
+    from eneo.document_templates import runtime_client
+    from eneo.main.exceptions import BadRequestException
+
+    monkeypatch.setattr(runtime_client, "_MAX_RENDERED_BYTES", 16)
+    docx = runtime_client._DOCX_MIMETYPE  # pyright: ignore[reportPrivateUsage]
+    transport = httpx.MockTransport(
+        lambda _: httpx.Response(status, content=body, headers={"content-type": docx})
+    )
+    async with httpx.AsyncClient(transport=transport) as client:
+        with pytest.raises(BadRequestException) as exc_info:
+            await runtime_client._render_once(  # pyright: ignore[reportPrivateUsage]
+                client, "http://runtime/documents/render", "token", {}, docx
+            )
+    context = exc_info.value.context
+    assert (context or {}).get("runtime_code") == runtime_code
+    if runtime_code is None:
+        assert context is None

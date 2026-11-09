@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { makeSpace } from "@/features/spaces/testing/space-fixture";
 import { expectNoAxeViolations } from "@/test/axe";
@@ -128,7 +128,7 @@ describe("FlowPackageImportDialog", () => {
         suggestions: [{ local_kind: "completion_model", local_id: "m-1", label: "Modell A" }],
         total_candidate_count: 1,
         eligible_candidate_count: 1,
-        model_kind: "completion",
+        model_kind: "completion_model",
         matching_preferences: {},
         policy_status: "allowed",
         used_by_steps: ["Skriv svar"]
@@ -152,13 +152,18 @@ describe("FlowPackageImportDialog", () => {
   };
 
   const BLOCKED = "Paketet kan inte importeras förrän dessa punkter är lösta.";
-  const GUIDANCE = "Gör de obligatoriska valen nedan för att kunna importera paketet.";
   const progress = (selected: number) => `${selected} av 1 obligatoriska val är gjorda.`;
 
-  function renderImport() {
+  function renderImport(onOpenChange = vi.fn()) {
     const queryClient = testQueryClient();
     queryClient.setQueryData(["spaces", "space-1"], makeSpace({}));
-    return renderInApp(<FlowPackageImportDialog open onOpenChange={vi.fn()} />, { queryClient });
+    return renderInApp(<FlowPackageImportDialog open onOpenChange={onOpenChange} />, {
+      queryClient
+    });
+  }
+
+  function planned(next: unknown) {
+    api.POST.mockImplementation(() => Promise.resolve({ data: next, response: json(200, next) }));
   }
 
   function choose(container: HTMLElement, file: File) {
@@ -171,7 +176,9 @@ describe("FlowPackageImportDialog", () => {
     const { container } = renderImport();
     // A browser reports a zip-based file under a zip type, which the picker lets through.
     choose(container, new File(["x"], "brev.zip", { type: "application/zip" }));
-    expect(await screen.findByText("Endast .eneopkg-filer kan importeras.")).toBeTruthy();
+    expect(
+      await screen.findByText("Filen är inget flödespaket. Välj en fil som slutar på .eneopkg.")
+    ).toBeTruthy();
     expect(api.POST).not.toHaveBeenCalled();
   });
 
@@ -189,15 +196,17 @@ describe("FlowPackageImportDialog", () => {
     const { container } = renderImport();
     choose(container, new File(["zip"], "brev.eneopkg", { type: "application/zip" }));
 
-    // Nothing is wrong yet: the choice lies ahead, and the reason stays by the button.
+    // Nothing is wrong yet: the choice lies ahead, and the reason stays by the button alone.
     expect(await screen.findByText(progress(0))).toBeTruthy();
-    expect(screen.getByText(GUIDANCE)).toBeTruthy();
-    expect(screen.queryByText(BLOCKED)).toBeNull();
+    expect(container.ownerDocument.querySelector(".astryx-banner")).toBeNull();
     // What the package is reads on the file's line, not as rows above the choices.
     expect(screen.getByText(/ · Version 1\.0\.0 · 2 steg$/)).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Brev" })).toBeTruthy();
     expect(screen.getByText("Besvarar brev.")).toBeTruthy();
     expect(screen.getByText("Används av: Skriv svar")).toBeTruthy();
+    // The row says what the model does here; the package's name for it is what the exporter used.
+    expect(screen.getByRole("heading", { name: "Språkmodell" })).toBeTruthy();
+    expect(screen.getByText("Paketet byggdes med Skrivmodell")).toBeTruthy();
     const importButton = screen.getByRole("button", { name: "Importera som utkast" });
     expect(
       importButton.hasAttribute("disabled") || importButton.getAttribute("aria-disabled")
@@ -207,7 +216,6 @@ describe("FlowPackageImportDialog", () => {
     fireEvent.click(screen.getByRole("combobox", { name: /Lokal resurs för Skrivmodell/ }));
     fireEvent.click(await screen.findByRole("option", { name: "Modell A" }));
     expect(await screen.findByText(progress(1))).toBeTruthy();
-    expect(screen.queryByText(GUIDANCE)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Importera som utkast" }));
 
     await waitFor(() => expect(router.push).toHaveBeenCalledWith("/spaces/space-1/flows/flow-9"));
@@ -265,23 +273,27 @@ describe("FlowPackageImportDialog", () => {
   it("shows the chosen package as a file and lets the person swap it", async () => {
     api.POST.mockImplementation(() => Promise.resolve({ data: plan, response: json(200, plan) }));
     const { container } = renderImport();
-    expect(screen.getByText("Dra hit ett flödespaket eller välj en .eneopkg-fil.")).toBeTruthy();
+    expect(screen.getByText("Dra hit ett flödespaket eller välj en fil.")).toBeTruthy();
     choose(container, new File(["zip"], "brev.eneopkg", { type: "application/zip" }));
 
     expect(await screen.findByText("brev.eneopkg")).toBeTruthy();
-    expect(screen.queryByText("Dra hit ett flödespaket eller välj en .eneopkg-fil.")).toBeNull();
+    expect(screen.queryByText("Dra hit ett flödespaket eller välj en fil.")).toBeNull();
     expect(screen.getByRole("button", { name: "Byt fil" })).toBeTruthy();
     await screen.findByText(progress(0));
 
     // A file that is no package keeps the one already chosen.
     choose(container, new File(["x"], "brev.zip", { type: "application/zip" }));
-    expect(await screen.findByText("Endast .eneopkg-filer kan importeras.")).toBeTruthy();
+    expect(
+      await screen.findByText("Filen är inget flödespaket. Välj en fil som slutar på .eneopkg.")
+    ).toBeTruthy();
     expect(screen.getByText("brev.eneopkg")).toBeTruthy();
     expect(api.POST).toHaveBeenCalledTimes(1);
 
     choose(container, new File(["zip"], "svar.eneopkg", { type: "application/zip" }));
     expect(await screen.findByText("svar.eneopkg")).toBeTruthy();
-    expect(screen.queryByText("Endast .eneopkg-filer kan importeras.")).toBeNull();
+    expect(
+      screen.queryByText("Filen är inget flödespaket. Välj en fil som slutar på .eneopkg.")
+    ).toBeNull();
     await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(2));
     await expectNoAxeViolations(container);
   }, 20_000);
@@ -300,7 +312,6 @@ describe("FlowPackageImportDialog", () => {
 
     expect(await screen.findByText(BLOCKED)).toBeTruthy();
     expect(screen.getByText("Välj en lokal resurs för Skrivmodell.")).toBeTruthy();
-    expect(screen.queryByText(GUIDANCE)).toBeNull();
     // Counting choices would promise what none can give: the footer points at the problem.
     expect(screen.getByText("Paketet kan inte importeras än: se problemen ovan.")).toBeTruthy();
     expect(screen.queryByText(progress(0))).toBeNull();
@@ -327,7 +338,6 @@ describe("FlowPackageImportDialog", () => {
     choose(container, new File(["zip"], "brev.eneopkg", { type: "application/zip" }));
 
     expect(await screen.findByText(progress(0))).toBeTruthy();
-    expect(screen.getByText(GUIDANCE)).toBeTruthy();
     expect(screen.queryByText(BLOCKED)).toBeNull();
   });
 
@@ -366,6 +376,76 @@ describe("FlowPackageImportDialog", () => {
     setViewport("phone");
     renderImport();
     expect(screen.getByRole("dialog").getAttribute("data-variant")).toBe("fullscreen");
+  });
+
+  it("says nothing more than the footer for a package that needs nothing", async () => {
+    planned({ ...plan, dependency_resolutions: [] });
+    const { container } = renderImport();
+    choose(container, new File(["zip"], "brev.eneopkg", { type: "application/zip" }));
+
+    expect(await screen.findByText("Klart att importera.")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Lokala resurser" })).toBeNull();
+    expect(container.ownerDocument.querySelector(".astryx-banner")).toBeNull();
+  });
+
+  it("says that audio and speaker settings stay behind when the flow takes audio", async () => {
+    planned({
+      ...plan,
+      dependency_resolutions: [],
+      target_state: { audio_transcription_required: true, default_transcription_model_id: "t-1" }
+    });
+    const { container } = renderImport();
+    choose(container, new File(["zip"], "brev.eneopkg", { type: "application/zip" }));
+
+    expect(await screen.findByText("Ljud- och talarinställningar följer inte med")).toBeTruthy();
+    expect(screen.getByText(/Det nya flödet får ytans standardinställningar\./)).toBeTruthy();
+    expect(screen.getByText("Klart att importera.")).toBeTruthy();
+  });
+
+  it("asks before closing over choices the person made, and closes at once without them", async () => {
+    planned(plan);
+    const onOpenChange = vi.fn();
+    const { container } = renderImport(onOpenChange);
+    choose(container, new File(["zip"], "brev.eneopkg", { type: "application/zip" }));
+    await screen.findByText(progress(0));
+
+    fireEvent.click(screen.getByRole("combobox", { name: /Lokal resurs för Skrivmodell/ }));
+    fireEvent.click(await screen.findByRole("option", { name: "Modell A" }));
+    await screen.findByText(progress(1));
+    fireEvent.click(screen.getByRole("button", { name: "Avbryt" }));
+    const confirm = await screen.findByRole("alertdialog", { name: "Stäng utan att importera?" });
+    expect(onOpenChange).not.toHaveBeenCalled();
+    fireEvent.click(within(confirm).getByRole("button", { name: "Stäng" }));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  }, 20_000);
+
+  it("closes without asking when no choice was made", async () => {
+    planned(plan);
+    const onOpenChange = vi.fn();
+    const { container } = renderImport(onOpenChange);
+    choose(container, new File(["zip"], "brev.eneopkg", { type: "application/zip" }));
+    await screen.findByText(progress(0));
+
+    fireEvent.click(screen.getByRole("button", { name: "Avbryt" }));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+
+  it("calls a broken file broken, under a title that says it was only read", async () => {
+    api.POST.mockResolvedValue({
+      error: { message: "Unsafe", code: "flow_package_zip_unsafe", context: { reason: "bad_zip" } },
+      response: json(400, {})
+    });
+    const { container } = renderImport();
+    choose(container, new File(["x"], "trasig.eneopkg", { type: "application/zip" }));
+
+    expect(await screen.findByText("Paketet kunde inte läsas")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Filen är trasig eller är inte ett flödespaket. Be avsändaren exportera paketet på nytt."
+      )
+    ).toBeTruthy();
+    expect(screen.queryByText(/importerades inte|säkerhetskontrollerna/)).toBeNull();
   });
 
   it("says why the core refused the package", async () => {

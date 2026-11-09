@@ -94,7 +94,6 @@ describe("FlowPage on a phone", () => {
   it("shows what the flow is, what it takes and gives, its runs and a docked button to run it", async () => {
     const { container } = renderPhonePage();
     expect(await screen.findByRole("heading", { level: 1, name: "Medborgarbrev" })).toBeTruthy();
-    expect(screen.getByText("Skriver ut mötet och gör ett protokoll.")).toBeTruthy();
     expect(screen.getByText("Indata: Ljud · Resultat: Word-dokument")).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Körningar" })).toBeTruthy();
     const docked = screen.getByRole("group", { name: "Åtgärder för flödet" });
@@ -107,15 +106,21 @@ describe("FlowPage on a phone", () => {
     await expectNoAxeViolations(container);
   });
 
-  it("shows how the flow is set up, read only", async () => {
+  it("puts the runs first and folds how the flow is set up, read only, below them", async () => {
     const { container } = renderPhonePage();
+    expect(await screen.findByText("Publicerad, version 2")).toBeTruthy();
     const settings = await screen.findByRole("region", { name: "Inställningar" });
-    expect(within(settings).getByText("Medborgarbrev")).toBeTruthy();
-    // What the flow is for is said here, once, above the runs.
-    expect(within(settings).getByText("Skriver ut mötet och gör ett protokoll.")).toBeTruthy();
     const runs = screen.getByRole("heading", { name: "Körningar" });
-    expect(settings.compareDocumentPosition(runs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(within(settings).queryByRole("button")).toBeNull();
+    expect(runs.compareDocumentPosition(settings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const toggle = within(settings).getByRole("button", { name: "Inställningar" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    // What the flow is for is said here, once; its name is the page's title, not a row.
+    expect(within(settings).getByText("Skriver ut mötet och gör ett protokoll.")).toBeTruthy();
+    expect(within(settings).queryByText("Namn", { selector: "dt" })).toBeNull();
+    expect(within(settings).getAllByRole("button")).toEqual([toggle]);
     expect(within(settings).queryByRole("textbox")).toBeNull();
     await expectNoAxeViolations(container);
   });
@@ -144,13 +149,13 @@ describe("FlowPage on a phone", () => {
     renderPhonePage();
     fireEvent.click(await screen.findByRole("button", { name: "Kör flödet" }));
     const dialog = await screen.findByRole("dialog", { name: "Kör Medborgarbrev" });
-    const name = await within(dialog).findByLabelText(/^Namn på körningen/);
+    const name = await within(dialog).findByLabelText(/^Namn i listan över körningar/);
     fireEvent.change(name, { target: { value: "Budgetmötet" } });
 
     // Sideways it is 844 px wide, but it is a phone still: nothing is swapped, nothing remounts.
     act(() => setViewport({ width: 844, height: 390, pointer: "coarse" }));
     expect(screen.getByRole("dialog", { name: "Kör Medborgarbrev" })).toBe(dialog);
-    expect(within(dialog).getByLabelText(/^Namn på körningen/)).toBe(name);
+    expect(within(dialog).getByLabelText(/^Namn i listan över körningar/)).toBe(name);
     expect((name as HTMLInputElement).value).toBe("Budgetmötet");
     // A phone's layout held either way: the page bar leads back to Flöden and "Kör flödet" stays
     // docked, so the page brings no breadcrumbs of its own.
@@ -188,7 +193,7 @@ describe("FlowPage on a phone", () => {
     expect(screen.getAllByRole("tab").length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole("button", { name: "Kör flödet" }));
     const dialog = await screen.findByRole("dialog", { name: "Kör Medborgarbrev" });
-    fireEvent.change(await within(dialog).findByLabelText(/^Namn på körningen/), {
+    fireEvent.change(await within(dialog).findByLabelText(/^Namn i listan över körningar/), {
       target: { value: "Budgetmötet" }
     });
 
@@ -196,9 +201,9 @@ describe("FlowPage on a phone", () => {
     // The lean page takes the workspace's place; the form stays, as does what was typed.
     expect(await screen.findByRole("group", { name: "Åtgärder för flödet" })).toBeTruthy();
     expect(screen.getByRole("dialog", { name: "Kör Medborgarbrev" })).toBe(dialog);
-    expect((within(dialog).getByLabelText(/^Namn på körningen/) as HTMLInputElement).value).toBe(
-      "Budgetmötet"
-    );
+    expect(
+      (within(dialog).getByLabelText(/^Namn i listan över körningar/) as HTMLInputElement).value
+    ).toBe("Budgetmötet");
   });
 
   it("says a flow that is not published cannot be run, and does not offer to", async () => {
@@ -206,6 +211,7 @@ describe("FlowPage on a phone", () => {
     expect(
       await screen.findByText("Flödet är inte publicerat och kan inte köras ännu.")
     ).toBeTruthy();
+    expect(screen.queryByText(/^Publicerad/)).toBeNull();
     expect(screen.queryByRole("button", { name: "Kör flödet" })).toBeNull();
   });
 

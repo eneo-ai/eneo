@@ -1634,7 +1634,7 @@ it("opens a Flows run with the parent flow's ownership and title", async () => {
   enableFlows();
   await renderRoute("/spaces/space-1/flows/flow-1/runs/run-1");
   await screen.findByRole("heading", { name: "Run flow-1/run-1" });
-  expect(document.title).toBe("Medborgarbrev · Upphandling · Eneo");
+  expect(document.title).toBe("Körning · Medborgarbrev · Upphandling · Eneo");
 });
 
 it.each(["", "/runs/run-1"])(

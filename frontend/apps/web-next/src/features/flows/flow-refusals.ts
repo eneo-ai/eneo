@@ -1,4 +1,11 @@
-import { EneoApiError, getErrorMessage } from "@/lib/api/errors";
+import {
+  EneoApiError,
+  getErrorMessage,
+  getErrorMessageForCode,
+  getErrorMessageForReason
+} from "@/lib/api/errors";
+import { refusalMessage } from "./editor/field-problems";
+import { readTemplateFill } from "./editor/step-configs";
 import type { FlowStep } from "./flows-api";
 import { stepLabel } from "./flow-labels";
 
@@ -44,6 +51,21 @@ function stepAt(steps: readonly FlowStep[], order: unknown, id?: unknown): FlowS
   );
 }
 
+/**
+ * The draft check's sentence for a step refusal the core words only in
+ * general (`flow_step_invalid`), when the check already knows the cause.
+ */
+function draftCheckSentence(
+  code: string | null | undefined,
+  step: FlowStep | null,
+  t: Translator
+): string | null {
+  if (code !== "flow_step_invalid" || step?.output_mode !== "template_fill") return null;
+  return readTemplateFill(step.output_config).templateAssetId
+    ? null
+    : t("flow_editor_tools_check_template_missing");
+}
+
 function labelAt(steps: readonly FlowStep[], order: unknown, t: Translator, id?: unknown) {
   const step = stepAt(steps, order, id);
   if (step) return stepLabel(step, t);
@@ -57,8 +79,9 @@ function labelAt(steps: readonly FlowStep[], order: unknown, t: Translator, id?:
  * refused and how to fix it, with the steps it names by their names.
  * `steps` is the draft the refused change was made against (the step orders
  * in a refusal are that draft's). Codes the app has no sentence for fall
- * back to the reference catalog's `flow_error_<code>`, then to the core's
- * own message.
+ * back to the reader's sentence for the issue or the code (the step editor's
+ * catalog), then to a general Swedish line: the core's own message is
+ * English and meant for developers, so it is never shown.
  */
 export function flowRefusalMessage(
   error: unknown,
@@ -105,14 +128,27 @@ export function flowRefusalMessage(
   if (code === NOT_PUBLISHED) return t("flows_refusal_not_published");
   if (code === "insufficient_space_permission") return t("flows_refusal_no_permission");
 
-  const catalogKey = code ? `flow_error_${code}` : null;
-  const message = catalogKey && t.has(catalogKey) ? t(catalogKey) : getErrorMessage(error, t);
-  // Publication refusals name the step they are about.
+  const issue = typeof context.issue_code === "string" ? context.issue_code : null;
+  const message =
+    refusalMessage(issue, t) ??
+    draftCheckSentence(code, stepAt(steps, context.step_order, context.step_id), t) ??
+    refusalMessage(code, t) ??
+    getErrorMessageForReason(code, t) ??
+    getErrorMessageForCode(error.code, t);
+  // Publication refusals name the step they are about; the page offers to open it.
   if (typeof context.step_order === "number") {
-    return t("flows_refusal_in_step", {
-      step: labelAt(steps, context.step_order, t),
-      message
-    });
+    const step = labelAt(steps, context.step_order, t, context.step_id);
+    return message
+      ? t("flows_refusal_in_step", { step, message })
+      : t("flows_refusal_step_generic", { step });
   }
-  return message;
+  return message ?? t("request_failed");
+}
+
+/** The step of the draft a refusal is about, for a way to open it; null when it names none. */
+export function refusalStep(error: unknown, steps: readonly FlowStep[]): FlowStep | null {
+  if (!(error instanceof EneoApiError)) return null;
+  const context = error.context ?? {};
+  if (context.step_order === undefined && context.step_id === undefined) return null;
+  return stepAt(steps, context.step_order, context.step_id);
 }

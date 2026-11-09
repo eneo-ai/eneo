@@ -447,7 +447,6 @@ function Underlag({
       {options.length > 0 && (
         <CheckboxList
           label={t("flow_step_editor_underlag_results")}
-          description={t("flow_step_editor_underlag_results_description")}
           value={options.filter((option) => chosen.has(option.key)).map((option) => option.key)}
           onChange={setRefs}
           density="compact"
@@ -637,6 +636,7 @@ export function StepInputSection({
       {draft.input_source === "http_get" && (
         <Anchor formId={formId} anchor="input_config.http">
           <HttpFields
+            formId={formId}
             flowId={flow.id}
             stepId={stepId}
             direction="input"
@@ -645,7 +645,7 @@ export function StepInputSection({
               onChange({ ...draft, input_config: withHttpConfig(draft.input_config, http) })
             }
             groups={toolGroups}
-            problem={problems["input_config.http"]}
+            problems={problems}
           />
         </Anchor>
       )}

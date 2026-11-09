@@ -12,7 +12,8 @@ export function LeaveConfirmation({
   onLeave,
   title,
   description,
-  confirmLabel
+  confirmLabel,
+  cancelLabel
 }: {
   active: boolean;
   ref?: Ref<LeaveConfirmationHandle>;
@@ -20,6 +21,7 @@ export function LeaveConfirmation({
   title?: string;
   description?: string;
   confirmLabel?: string;
+  cancelLabel?: string;
 }) {
   const t = useTranslations();
   const { blocked, leave, stay } = useLeaveConfirmation(active, onLeave);
@@ -42,6 +44,7 @@ export function LeaveConfirmation({
       title={title ?? t("unsaved_navigation_title")}
       description={description ?? t("unsaved_navigation_description")}
       confirmLabel={confirmLabel ?? t("unsaved_navigation_leave")}
+      cancelLabel={cancelLabel}
       onConfirm={() => {
         setPendingAction(null);
         if (blocked) leave();

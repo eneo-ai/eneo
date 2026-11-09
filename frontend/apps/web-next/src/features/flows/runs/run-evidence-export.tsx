@@ -80,7 +80,7 @@ export function RunEvidenceExport({
 
   if (!access.can_export_redacted && !access.can_export_raw) {
     return (
-      <p className="text-ax-text-secondary text-sm">
+      <p className="text-ax-text-secondary max-w-prose text-sm">
         {refusal(access.redacted_export_refusal_code)}
       </p>
     );
@@ -91,12 +91,12 @@ export function RunEvidenceExport({
   return (
     <div className="flex flex-col gap-3">
       {!access.can_export_redacted ? (
-        <p className="text-ax-text-secondary text-sm">
+        <p className="text-ax-text-secondary max-w-prose text-sm">
           {refusal(access.redacted_export_refusal_code)}
         </p>
       ) : (
         <div className="flex flex-col items-start gap-2">
-          <p className="text-ax-text-secondary text-sm">
+          <p className="text-ax-text-secondary max-w-prose text-sm">
             {t("flow_run_extras_export_redacted_hint")}
           </p>
           <Button
@@ -111,18 +111,22 @@ export function RunEvidenceExport({
         </div>
       )}
       {!access.can_export_raw ? (
-        <p className="text-ax-text-secondary text-sm">{refusal(access.raw_export_refusal_code)}</p>
+        <p className="text-ax-text-secondary max-w-prose text-sm">
+          {refusal(access.raw_export_refusal_code)}
+        </p>
       ) : (
         <Collapsible
           isOpen={rawOpen}
           onOpenChange={setRawOpen}
           chevronPosition="start"
           trigger={
-            <span className="text-sm font-medium">{t("flow_run_extras_export_raw_heading")}</span>
+            <span className="block py-1.5 text-sm font-medium">
+              {t("flow_run_extras_export_raw_heading")}
+            </span>
           }
         >
           {rawOpen ? (
-            <div id={reasonId} className="flex flex-col items-start gap-2 pt-2">
+            <div id={reasonId} className="flex max-w-prose flex-col items-start gap-2 pt-2">
               <TextArea
                 label={t("flow_run_extras_export_raw_reason")}
                 description={t("flow_run_extras_export_raw_hint")}

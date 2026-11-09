@@ -59,6 +59,11 @@ function answerList(items: RunListItem[], hasMore = false, statusCounts = NO_COU
 /** The query every list read sends: newest start first unless sorted otherwise. */
 const FIRST_PAGE = { limit: 25, offset: 0, sort: "started_at", order: "desc" };
 
+/** The given runs and enough others that the filters show above them (more than three). */
+function withOthers(...runs: RunListItem[]): RunListItem[] {
+  return [...runs, ...["other-1", "other-2", "other-3"].map((id) => makeRunSummary({ id }))];
+}
+
 function listCalls() {
   return state.stub.calls.filter((call) => `${call.method} ${call.path}` === LIST);
 }
@@ -167,8 +172,18 @@ describe("FlowRunsList", () => {
     expect(screen.queryByText(messages.flow_runs_empty_description)).toBeNull();
   });
 
+  it("says on a phone where to publish a flow that has no runs, not that runs will show", async () => {
+    setViewport("phone");
+    answerList([]);
+    renderInApp(<FlowRunsList flowId="flow-1" spaceRouteId="space-1" publishedVersion={null} />);
+    expect(
+      await screen.findByText(messages.flow_runs_empty_description_unpublished_phone)
+    ).toBeTruthy();
+    expect(screen.queryByText(messages.flow_runs_empty_description)).toBeNull();
+  });
+
   it("asks for the caller's own runs only when asked", async () => {
-    answerList([makeRunSummary()]);
+    answerList(withOthers(makeRunSummary()));
     renderInApp(<List />);
     await screen.findByRole("table");
     expect(listCalls()[0]?.init.params?.query).toEqual(FIRST_PAGE);
@@ -180,7 +195,7 @@ describe("FlowRunsList", () => {
   });
 
   it("asks the list endpoint for one status and says when none has it", async () => {
-    answerList([makeRunSummary()]);
+    answerList(withOthers(makeRunSummary()));
     const { container } = renderInApp(<List />);
     await screen.findByRole("table");
 
@@ -214,7 +229,7 @@ describe("FlowRunsList", () => {
   });
 
   it("searches the runs by name or starter once the typing stops", async () => {
-    answerList([makeRunSummary()]);
+    answerList(withOthers(makeRunSummary()));
     const { container } = renderInApp(<List />);
     await screen.findByRole("table");
 
@@ -247,7 +262,7 @@ describe("FlowRunsList", () => {
   });
 
   it("counts the runs per status in the status filter", async () => {
-    answerList([makeRunSummary({ status: "failed" })], false, {
+    answerList(withOthers(makeRunSummary({ status: "failed" })), false, {
       ...NO_COUNTS,
       completed: 12,
       failed: 2
@@ -297,6 +312,42 @@ describe("FlowRunsList", () => {
     const table = await screen.findByRole("table");
     const so = messages.flow_run_more_elapsed.replace("{time}", "");
     expect(within(table).getByText(new RegExp(`^1 min [56] s${so}$`))).toBeTruthy();
+  });
+
+  it("offers the review of a run waiting for one, and says how long it has waited", async () => {
+    answerList([
+      makeRunSummary({
+        id: "run-r",
+        status: "awaiting_review",
+        started_at: new Date(Date.now() - 600_000).toISOString(),
+        updated_at: new Date(Date.now() - 125_000).toISOString(),
+        finished_at: null
+      })
+    ]);
+    const { container } = renderInApp(<List />);
+    const table = await screen.findByRole("table");
+    const [, row] = within(table).getAllByRole("row");
+    const review = within(row!).getByRole("link", { name: messages.flow_runs_review_open });
+    expect(review.getAttribute("href")).toBe("/spaces/space-1/flows/flow-1/runs/run-r");
+    // Cancelling stays quiet beside the review it would throw away.
+    const cancel = within(row!).getByRole("button", { name: messages.flow_runs_cancel });
+    expect(cancel.getAttribute("data-variant")).toBe("ghost");
+    // The person's wait since the run paused, not a clock of the run working since it started.
+    const waited = messages.flow_runs_waited.replace("{time}", "");
+    expect(within(row!).getByText(new RegExp(`^${waited}2 min [56] s$`))).toBeTruthy();
+    expect(row!.textContent).not.toContain(messages.flow_run_more_elapsed.replace("{time}", ""));
+    await expectNoAxeViolations(container);
+  });
+
+  it("leaves out the filters while there is little to filter, on every screen", async () => {
+    answerList([makeRunSummary({ id: "run-1" }), makeRunSummary({ id: "run-2" })]);
+    renderInApp(<List />);
+    await screen.findByRole("table");
+    expect(screen.queryByRole("textbox", { name: messages.flow_run_journey_search })).toBeNull();
+    expect(
+      screen.queryByRole("combobox", { name: messages.flow_run_extras_status_filter })
+    ).toBeNull();
+    expect(screen.queryByRole("checkbox", { name: messages.flow_runs_only_mine })).toBeNull();
   });
 
   it("stops polling a list the person may no longer read", async () => {
@@ -409,7 +460,9 @@ describe("FlowRunsList", () => {
         : {
             body: {
               count: 1,
-              items: [makeRunSummary({ id: "run-2", status: "running", finished_at: null })],
+              items: withOthers(
+                makeRunSummary({ id: "run-2", status: "running", finished_at: null })
+              ),
               has_more: true,
               status_counts: { ...NO_COUNTS, running: 1, failed }
             }
@@ -657,9 +710,9 @@ describe("FlowRunsList", () => {
       makeRunDetail({ id: "run-new", status: "queued", run_label: "Ärende 7", started_at: null }),
       Date.now() + 60_000
     );
-    answerList([makeRunSummary({ id: "run-1", status: "completed" })], false, {
+    answerList(withOthers(makeRunSummary({ id: "run-1", status: "completed" })), false, {
       ...NO_COUNTS,
-      completed: 1
+      completed: 4
     });
     renderInApp(<List />, { queryClient });
     expect(await screen.findByRole("link", { name: "Ärende 7" })).toBeTruthy();
@@ -830,6 +883,13 @@ describe("FlowRunsList in a narrow panel", () => {
     withUsage();
     const section = measured();
     expect(await screen.findByRole("table", { name: messages.flow_runs_heading })).toBeTruthy();
+    // What a token is stays folded away until asked for.
+    const explainer = screen.getByRole("button", {
+      name: messages.flow_runs_usage_tokens_explainer_title
+    });
+    expect(explainer.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(explainer);
+    expect(explainer.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByText(messages.flow_runs_usage_tokens_explainer)).toBeTruthy();
 
     act(() => reportResize(section, { width: 560 }));
@@ -839,6 +899,19 @@ describe("FlowRunsList in a narrow panel", () => {
     expect(within(row!).getByText("Anna Lind · 1 min 5 s · Version 3")).toBeTruthy();
     expect(within(row!).getByText(/^1\s200 token$/)).toBeTruthy();
     expect(screen.queryByText(messages.flow_runs_usage_tokens_explainer)).toBeNull();
+  });
+
+  it("stacks from the first paint in a narrow panel, before the observer answers", async () => {
+    const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect");
+    onTestFinished(() => rect.mockRestore());
+    rect.mockImplementation(function (this: HTMLElement) {
+      const width = this.tagName === "SECTION" ? 560 : 0;
+      return { x: 0, y: 0, top: 0, left: 0, width, height: 0, right: width, bottom: 0 } as DOMRect;
+    });
+    withUsage();
+    measured();
+    expect(await screen.findByRole("list", { name: messages.flow_runs_heading })).toBeTruthy();
+    expect(screen.queryByRole("table")).toBeNull();
   });
 
   it("keeps the table where all its columns fit, and asks for no more room than it stacks at", async () => {

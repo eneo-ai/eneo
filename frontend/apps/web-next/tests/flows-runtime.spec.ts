@@ -53,7 +53,7 @@ test(
     expect(response.status()).toBe(201);
     expect(await uploadedSize).toBe(wav.length);
     expect(new URL(response.url()).origin).toBe(new URL(page.url()).origin);
-    await dialog.getByRole("button", { name: "Granska", exact: true }).click();
+    await dialog.getByRole("button", { name: "Nästa", exact: true }).click();
     await dialog.getByRole("button", { name: "Starta körningen", exact: true }).click();
     await expect(page).toHaveURL(/\/runs\/[^/?]+$/);
     await expect.poll(() => statuses.includes("completed"), { timeout: 90_000 }).toBe(true);

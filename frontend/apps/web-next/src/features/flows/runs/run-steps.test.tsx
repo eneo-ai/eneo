@@ -4,11 +4,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import messages from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testQueryClient } from "@/test/render";
-import { makeRunGraph, makeRunStep } from "./run-fixtures";
+import { makeResultFile, makeRunGraph, makeRunStep } from "./run-fixtures";
 import { RunLiveProgress } from "./run-live-progress";
 import { runStepViews } from "./run-progress";
 import { RunSteps } from "./run-steps";
-import { runKeys, type RunEvidence } from "./runs-api";
+import { runKeys } from "./runs-api";
 
 vi.mock("@/lib/api/browser", () => ({ browserApi: {} }));
 
@@ -53,6 +53,27 @@ describe("RunSteps", () => {
     expect(
       within(second).queryByText(new RegExp(messages.flow_run_token_usage_not_recorded))
     ).toBeNull();
+  });
+
+  it("counts no tokens for a step that used none, and still says when none were recorded", () => {
+    const steps = runStepViews(
+      makeRunGraph([
+        { order: 1, label: "Transkribera", status: "completed" },
+        { order: 2, label: "Sammanfatta", status: "completed" }
+      ]),
+      [
+        makeRunStep(1, { num_tokens_input: 0, num_tokens_output: 0 }),
+        makeRunStep(2, { num_tokens_input: null, num_tokens_output: null })
+      ]
+    );
+    renderInApp(<RunSteps flowId="flow-1" runId="run-1" steps={steps} />);
+    const first = screen.getByRole("article", { name: "Steg 1: Transkribera" });
+    expect(within(first).getByText("Tog 28 s")).toBeTruthy();
+    expect(first.textContent).not.toMatch(/token/);
+    const second = screen.getByRole("article", { name: "Steg 2: Sammanfatta" });
+    expect(
+      within(second).getByText(new RegExp(messages.flow_run_token_usage_not_recorded))
+    ).toBeTruthy();
   });
 
   it("says what a running step does and which step is next in turn", async () => {
@@ -108,6 +129,36 @@ describe("RunSteps output", () => {
     fireEvent.click(trigger);
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
     expect(document.activeElement).toBe(trigger);
+  });
+
+  it("names the earlier step instead of repeating its text in a step that made a file of it", () => {
+    const notes = "## Protokoll\n\nMötet beslutade.";
+    const steps = runStepViews(
+      makeRunGraph([
+        { order: 1, label: "Skriv protokoll", status: "completed" },
+        { order: 2, label: "Skapa Word", status: "completed" }
+      ]),
+      [
+        makeRunStep(1, { output_payload_json: { text: notes } }),
+        makeRunStep(2, {
+          output_payload_json: { text: notes },
+          result_files: [makeResultFile({ name: "protokoll.docx" })]
+        })
+      ]
+    );
+    renderInApp(<RunSteps flowId="flow-1" runId="run-1" steps={steps} />);
+    const first = screen.getByRole("article", { name: "Steg 1: Skriv protokoll" });
+    expect(
+      within(first).getByRole("button", { name: messages.flow_runs_step_output })
+    ).toBeTruthy();
+    const second = screen.getByRole("article", { name: "Steg 2: Skapa Word" });
+    expect(
+      within(second).getByText(messages.flow_runs_step_output_same_as.replace("{order}", "1"))
+    ).toBeTruthy();
+    expect(
+      within(second).queryByRole("button", { name: messages.flow_runs_step_output })
+    ).toBeNull();
+    expect(within(second).getByText("protokoll.docx")).toBeTruthy();
   });
 
   it("renders a step's text as Markdown and keeps its line breaks", async () => {
@@ -366,7 +417,7 @@ describe("RunSteps input and output", () => {
       />
     );
     const one = screen.getByRole("article", { name: "Steg 1: Transkribera" });
-    const result = within(one).getByRole("button", { name: messages.flow_runs_step_output });
+    const result = within(one).getByRole("button", { name: messages.flow_runs_transcript_heading });
     expect(result.getAttribute("aria-expanded")).toBe("true");
     expect(within(one).getByText("Transkriptet från steg 1")).toBeTruthy();
     // The transcript, not its raw lines.
@@ -436,7 +487,7 @@ describe("RunSteps input and output", () => {
   it("opens a step's result for a transcript that arrives after its card", () => {
     const { steps, transcripts } = transcribed();
     const { rerender } = renderInApp(<RunSteps flowId="flow-1" runId="run-1" steps={steps} />);
-    const result = () => screen.getByRole("button", { name: messages.flow_runs_step_output });
+    const result = () => screen.getByRole("button", { name: /Stegets resultat|Transkription/ });
     expect(result().getAttribute("aria-expanded")).toBe("false");
 
     rerender(<RunSteps flowId="flow-1" runId="run-1" steps={steps} transcripts={transcripts} />);
@@ -447,12 +498,66 @@ describe("RunSteps input and output", () => {
   it("keeps a result the person folded folded when its transcript arrives", () => {
     const { steps, transcripts } = transcribed();
     const { rerender } = renderInApp(<RunSteps flowId="flow-1" runId="run-1" steps={steps} />);
-    const result = () => screen.getByRole("button", { name: messages.flow_runs_step_output });
+    const result = () => screen.getByRole("button", { name: /Stegets resultat|Transkription/ });
     fireEvent.click(result());
     fireEvent.click(result());
 
     rerender(<RunSteps flowId="flow-1" runId="run-1" steps={steps} transcripts={transcripts} />);
     expect(result().getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("folds the transcript of a run that has ended, and keeps it open while the run awaits review", () => {
+    const { steps, transcripts } = transcribed();
+    const speaking = [{ ...steps[0]!, speakerIdentification: true }];
+    const name = messages.flow_runs_transcript_and_speakers;
+    renderInApp(
+      <RunSteps
+        flowId="flow-1"
+        runId="run-1"
+        steps={speaking}
+        runStatus="completed"
+        transcripts={transcripts}
+      />
+    );
+    expect(screen.getByRole("button", { name }).getAttribute("aria-expanded")).toBe("false");
+    cleanup();
+
+    renderInApp(
+      <RunSteps
+        flowId="flow-1"
+        runId="run-1"
+        steps={speaking}
+        runStatus="awaiting_review"
+        transcripts={transcripts}
+      />
+    );
+    expect(screen.getByRole("button", { name }).getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("keeps a transcript open when the run ends while it is read", () => {
+    const { steps, transcripts } = transcribed();
+    const { rerender } = renderInApp(
+      <RunSteps
+        flowId="flow-1"
+        runId="run-1"
+        steps={steps}
+        runStatus="running"
+        transcripts={transcripts}
+      />
+    );
+    const result = () =>
+      screen.getByRole("button", { name: messages.flow_runs_transcript_heading });
+    expect(result().getAttribute("aria-expanded")).toBe("true");
+    rerender(
+      <RunSteps
+        flowId="flow-1"
+        runId="run-1"
+        steps={steps}
+        runStatus="completed"
+        transcripts={transcripts}
+      />
+    );
+    expect(result().getAttribute("aria-expanded")).toBe("true");
   });
 });
 
@@ -568,7 +673,12 @@ describe("RunSteps step details", () => {
                 { core: { start_char: 40, end_char: 100 } }
               ]
             },
-            template_provenance: { template_name: "Beslutsmall", published_flow_version: 4 }
+            template_provenance: {
+              template_name: "Beslutsmall",
+              published_flow_version: 4,
+              template_asset_id: "asset-9",
+              template_checksum: "sha-9"
+            }
           }
         })
       ]
@@ -578,6 +688,8 @@ describe("RunSteps step details", () => {
     expect(screen.getByText(/del 1: 0–40 %, del 2: 40–100 %/)).toBeTruthy();
     expect(screen.getByText(messages.flow_run_template_provenance_label)).toBeTruthy();
     expect(screen.getByText("Beslutsmall")).toBeTruthy();
+    // The run header carries the flow's version; the template's ids are for the API, not the reader.
+    expect(screen.queryByText(/v4|asset-9|sha-9/)).toBeNull();
   });
 
   it("keeps a failed step's rejected answer closed until asked for", () => {
@@ -735,55 +847,12 @@ describe("RunSteps transcription and speakers", () => {
 });
 
 describe("RunSteps attempts", () => {
-  it("lists a step's attempts in its card when opened, for a caller who may read the evidence", async () => {
-    const queryClient = testQueryClient();
-    queryClient.setQueryData(runKeys.evidence("flow-1", "run-1", false), {
-      step_attempts: [
-        {
-          id: "a-1",
-          step_order: 1,
-          attempt_no: 1,
-          status: "failed",
-          error_code: "flow_provider_rate_limited"
-        },
-        {
-          id: "a-2",
-          step_order: 1,
-          attempt_no: 2,
-          status: "completed",
-          response_model: "model-large"
-        },
-        { id: "b-1", step_order: 2, attempt_no: 1, status: "completed" }
-      ]
-    } as unknown as RunEvidence);
-    const steps = runStepViews(
-      makeRunGraph([
-        { order: 1, label: "Sammanfatta", status: "completed" },
-        { order: 2, label: "Skriv svar", status: "completed" }
-      ]),
-      [makeRunStep(1), makeRunStep(2)]
-    );
-    const { container } = renderInApp(
-      <RunSteps flowId="flow-1" runId="run-1" steps={steps} canReadEvidence />,
-      { queryClient }
-    );
-    const card = screen.getByRole("article", { name: "Steg 1: Sammanfatta" });
-    expect(within(card).queryByRole("list", { name: /Försök i/ })).toBeNull();
-    fireEvent.click(within(card).getByRole("button", { name: messages.flow_run_more_attempts }));
-    const attempts = await within(card).findByRole("list", {
-      name: messages.flow_run_more_attempts_of.replace("{step}", "Steg 1: Sammanfatta")
-    });
-    expect(within(attempts).getAllByRole("listitem")).toHaveLength(2);
-    expect(within(attempts).getByText(/Modell model-large/)).toBeTruthy();
-    await expectNoAxeViolations(container);
-  });
-
-  it("does not offer the attempts to a caller who may not read the evidence", () => {
+  it("leaves a step's attempts to the evidence, even for a caller who may read it", () => {
     const steps = runStepViews(
       makeRunGraph([{ order: 1, label: "Sammanfatta", status: "completed" }]),
       [makeRunStep(1)]
     );
     renderInApp(<RunSteps flowId="flow-1" runId="run-1" steps={steps} />);
-    expect(screen.queryByRole("button", { name: messages.flow_run_more_attempts })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Försök" })).toBeNull();
   });
 });

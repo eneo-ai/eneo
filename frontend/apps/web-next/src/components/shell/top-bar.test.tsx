@@ -6,6 +6,7 @@ import type { Permission } from "@/lib/auth/permissions";
 import { expectNoAxeViolations } from "@/test/axe";
 import { setRoute } from "@/test/navigation";
 import { noopShell, renderInApp, testAppContext } from "@/test/render";
+import { setViewport } from "@/test/setup-dom";
 import { TopBar } from "./top-bar";
 
 vi.mock("@/lib/navigation", () => import("@/test/navigation"));
@@ -119,6 +120,27 @@ describe("TopBar", () => {
     expect(screen.getByRole("link", { name: "Eneo, till startsidan" }).getAttribute("href")).toBe(
       "/"
     );
+  });
+
+  it("groups Organisation and Administratör under Mer beside the full SideNav below 896 px", async () => {
+    setViewport({ width: 800, height: 1000, pointer: "fine" });
+    const appContext = testAppContext({ permissions: ["admin"] });
+    const { rerender } = renderInApp(<TopBar />, { appContext });
+    const nav = areas();
+    // Their two links do not fit beside the wordmark cell: the search button covered Organisation.
+    expect(within(nav).queryByRole("link", { name: "Organisation" })).toBeNull();
+    expect(within(nav).queryByRole("link", { name: "Administratör" })).toBeNull();
+    fireEvent.click(within(nav).getByRole("button", { name: "Mer" }));
+    const href = (name: string) =>
+      screen.getByRole("menuitem", { name }).closest("a")?.getAttribute("href") ??
+      screen.getByRole("menuitem", { name }).getAttribute("href");
+    await waitFor(() => expect(href("Organisation")).toBe("/spaces/organization/knowledge"));
+    expect(href("Administratör")).toBe("/admin");
+
+    // The icon rail leaves them room.
+    rerender(<TopBar railCollapsed />);
+    expect(within(areas()).getByRole("link", { name: "Organisation" })).toBeTruthy();
+    expect(within(areas()).queryByRole("button", { name: "Mer" })).toBeNull();
   });
 
   it("shows Organisation and Administratör to admins only", () => {

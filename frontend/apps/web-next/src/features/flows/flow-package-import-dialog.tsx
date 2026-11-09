@@ -21,6 +21,7 @@ import { formatBytes } from "@/lib/format";
 import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { toast } from "@/lib/toast";
 import { useSpace } from "@/features/spaces/use-space";
+import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { flowKeys } from "./flows-api";
 import {
   candidateKey,
@@ -51,6 +52,18 @@ type Translate = ReturnType<typeof useTranslations>;
 
 function kindLabel(kind: Resolution["kind"], t: Translate): string {
   return t(`flow_editor_tools_package_kind_${kind}`);
+}
+
+/**
+ * What a model or knowledge source does here ("Språkmodell"), which the row is
+ * headed by: the package's own label names what the exporter used. A Word
+ * template is headed by its file, so it has none.
+ */
+function roleLabel(resolution: Resolution, t: Translate): string | null {
+  if (resolution.kind === "model") {
+    return t(`flow_package_import_role_${resolution.model_kind}`);
+  }
+  return resolution.kind === "knowledge" ? t("flow_package_import_role_knowledge") : null;
 }
 
 function blockingText(reason: BlockingReason, t: Translate): string {
@@ -166,6 +179,7 @@ function Requirement({
   const titleId = useId();
   const problemId = useId();
   const label = resolution.slot_ref.label;
+  const role = roleLabel(resolution, t);
   const guidance = guidanceOf(resolution);
   const usedBy = resolution.used_by_steps ?? [];
   const sensitivity = resolution.data_sensitivity;
@@ -262,21 +276,33 @@ function Requirement({
           <div className="flex min-w-0 flex-1 flex-col gap-1">
             <div className="flex flex-wrap items-center gap-2">
               <Heading
-                level={4}
+                level={5}
                 id={titleId}
-                weight="semibold"
+                weight="medium"
                 wordBreak="break-word"
                 className="min-w-0 text-sm"
               >
-                {label}
+                {role ?? label}
               </Heading>
-              <Token size="sm" label={kindLabel(resolution.kind, t)} />
+              {role ? null : <Token size="sm" label={kindLabel(resolution.kind, t)} />}
               <Token
                 size="sm"
                 color={status === t("flow_editor_tools_package_required") ? "orange" : "default"}
                 label={status}
               />
             </div>
+            {role ? (
+              <Text
+                type="supporting"
+                size="sm"
+                as="p"
+                display="block"
+                wordBreak="break-word"
+                className="m-0"
+              >
+                {t("flow_package_import_built_with", { name: label })}
+              </Text>
+            ) : null}
             {usedBy.length > 0 ? (
               <Text type="supporting" size="sm" as="p" display="block" className="m-0">
                 {t("flow_editor_tools_package_used_by_steps", { steps: usedByText(usedBy, t) })}
@@ -355,13 +381,25 @@ export function FlowPackageImportDialog({
   const [templateProblems, setTemplateProblems] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [importing, setImporting] = useState(false);
-  const [failure, setFailure] = useState<string | null>(null);
+  /** A refusal, and whether reading the package (plan) or importing it failed. */
+  const [failure, setFailure] = useState<{ stage: "plan" | "import"; message: string } | null>(
+    null
+  );
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
 
   const readiness = plan ? importReadiness(plan, selections) : null;
   const blockers = plan && readiness ? realBlockers(readiness, plan) : [];
   const refused = blockers.length > 0 || readiness?.requiresTranscriptionModel === true;
   const resolutions = plan?.dependency_resolutions ?? [];
   const omittedMcp = plan?.omissions.find((item) => item.kind === "mcp_attachment")?.count ?? 0;
+  const needsReview = readiness?.canImport === true && !readiness.canPublishAfterImport;
+  // Something to say when nothing blocks: a review ahead, or audio settings the package leaves behind.
+  const importNote = !refused && (needsReview || readiness?.takesAudio === true);
+  // Choices the person made would be lost by closing: ask first.
+  const initial = plan ? initialSelections(plan) : {};
+  const hasChoices =
+    Object.keys(uploads).length > 0 ||
+    Object.entries(selections).some(([key, value]) => value !== (initial[key] ?? null));
 
   function reset() {
     planRequest.current += 1;
@@ -375,10 +413,17 @@ export function FlowPackageImportDialog({
     setFailure(null);
   }
 
+  function close() {
+    setConfirmDiscard(false);
+    reset();
+    onOpenChange(false);
+  }
+
   function requestOpenChange(next: boolean) {
     if (importing) return;
-    if (!next) reset();
-    onOpenChange(next);
+    if (next) onOpenChange(true);
+    else if (hasChoices) setConfirmDiscard(true);
+    else close();
   }
 
   async function loadPlan(
@@ -416,7 +461,7 @@ export function FlowPackageImportDialog({
           [templateSlot]: t("flow_editor_tools_package_template_not_applied", { message })
         }));
       } else {
-        flushSync(() => setFailure(t("flow_editor_tools_package_import_plan_failed", { message })));
+        flushSync(() => setFailure({ stage: "plan", message }));
         errorRef.current?.focus();
       }
     } finally {
@@ -495,156 +540,135 @@ export function FlowPackageImportDialog({
       toast.success(t("flow_editor_tools_package_import_success", { name: result.flow_name }));
       void queryClient.invalidateQueries({ queryKey: flowKeys.list(space.id) });
       setImporting(false);
-      requestOpenChange(false);
+      close();
       router.push(`/spaces/${routeId}/flows/${result.flow_id}`);
     } catch (error) {
       setImporting(false);
-      flushSync(() =>
-        setFailure(
-          t("flow_editor_tools_package_import_failed", {
-            message: packageRefusalMessage(error, t)
-          })
-        )
-      );
+      flushSync(() => setFailure({ stage: "import", message: packageRefusalMessage(error, t) }));
       errorRef.current?.focus();
     }
   }
 
   return (
-    <Dialog
-      isOpen={open}
-      onOpenChange={requestOpenChange}
-      purpose="form"
-      variant={whole ? "fullscreen" : "standard"}
-      width={760}
-      maxHeight="85dvh"
-    >
-      <Layout
-        header={
-          <DialogHeader
-            title={t("flow_editor_tools_package_import_title")}
-            subtitle={t("flow_editor_tools_package_import_description")}
-            startContent={whole ? undefined : <IconTile icon={<PackageOpen />} />}
-            onOpenChange={requestOpenChange}
-          />
-        }
-        content={
-          open ? (
-            <LayoutContent>
-              <div className="flex flex-col gap-5">
-                {file ? (
-                  <div className="flex flex-col gap-2">
-                    <Card padding={3} className="flex items-center gap-3">
-                      <IconTile icon={<FileArchive />} />
-                      <div className="flex min-w-0 flex-1 flex-col">
-                        <Text
-                          type="body"
+    <>
+      <Dialog
+        isOpen={open}
+        onOpenChange={requestOpenChange}
+        purpose="form"
+        variant={whole ? "fullscreen" : "standard"}
+        width={760}
+        maxHeight="85dvh"
+      >
+        <Layout
+          header={
+            <DialogHeader
+              title={t("flow_editor_tools_package_import_title")}
+              subtitle={t("flow_editor_tools_package_import_description")}
+              startContent={whole ? undefined : <IconTile icon={<PackageOpen />} />}
+              onOpenChange={requestOpenChange}
+            />
+          }
+          content={
+            open ? (
+              <LayoutContent>
+                <div className="flex flex-col gap-5">
+                  {file ? (
+                    <div className="flex flex-col gap-2">
+                      <Card padding={3} className="flex items-center gap-3">
+                        <IconTile icon={<FileArchive />} />
+                        <div className="flex min-w-0 flex-1 flex-col">
+                          <Text
+                            type="body"
+                            size="sm"
+                            weight="medium"
+                            as="p"
+                            display="block"
+                            wordBreak="break-all"
+                            className="m-0"
+                          >
+                            {file.name}
+                          </Text>
+                          <Text type="supporting" size="sm" as="p" display="block" className="m-0">
+                            {[
+                              formatBytes(file.size, locale),
+                              plan
+                                ? `${t("flow_editor_tools_package_version")} ${plan.package_version}`
+                                : null,
+                              plan
+                                ? t("flow_editor_tools_package_step_count", {
+                                    count: plan.package_summary.steps_count
+                                  })
+                                : null,
+                              loading ? t("flow_editor_tools_package_loading_plan") : null
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </Text>
+                        </div>
+                        {loading ? <Spinner size="sm" aria-hidden="true" /> : null}
+                        <Button
+                          ref={replaceButton}
+                          variant="ghost"
                           size="sm"
-                          weight="medium"
-                          as="p"
-                          display="block"
-                          wordBreak="break-all"
-                          className="m-0"
-                        >
-                          {file.name}
-                        </Text>
-                        <Text type="supporting" size="sm" as="p" display="block" className="m-0">
-                          {[
-                            formatBytes(file.size, locale),
-                            plan
-                              ? `${t("flow_editor_tools_package_version")} ${plan.package_version}`
-                              : null,
-                            plan
-                              ? t("flow_editor_tools_package_step_count", {
-                                  count: plan.package_summary.steps_count
-                                })
-                              : null,
-                            loading ? t("flow_editor_tools_package_loading_plan") : null
-                          ]
-                            .filter(Boolean)
-                            .join(" · ")}
-                        </Text>
-                      </div>
-                      {loading ? <Spinner size="sm" aria-hidden="true" /> : null}
-                      <Button
-                        ref={replaceButton}
-                        variant="ghost"
-                        size="sm"
-                        icon={<RefreshCw aria-hidden="true" />}
-                        label={t("flow_editor_tools_package_file_replace")}
-                        isDisabled={importing}
-                        onClick={() => replaceInput.current?.click()}
-                      />
-                      <input
-                        ref={replaceInput}
-                        type="file"
-                        accept={PACKAGE_ACCEPT}
-                        className="hidden"
-                        onChange={(event) => {
-                          const picked = event.target.files?.[0] ?? null;
-                          event.target.value = "";
-                          choosePackage(picked);
-                        }}
-                      />
-                    </Card>
-                    <FieldMessage message={fileProblem} />
-                  </div>
-                ) : (
-                  <FileInput
-                    mode="dropzone"
-                    label={t("flow_editor_tools_package_file")}
-                    isLabelHidden
-                    placeholder={t("flow_package_import_dropzone")}
-                    value={null}
-                    onChange={choosePackage}
-                    accept={PACKAGE_ACCEPT}
-                    isDisabled={importing}
-                    status={fileProblem ? { type: "error", message: fileProblem } : undefined}
-                    width="100%"
-                    controlClassName="phone:min-h-32 min-h-56"
-                  />
-                )}
-
-                {plan ? (
-                  <>
-                    <div className="flex flex-col gap-1">
-                      <Heading
-                        level={3}
-                        weight="semibold"
-                        wordBreak="break-word"
-                        className="text-sm"
-                      >
-                        {plan.package_summary.name}
-                      </Heading>
-                      {plan.package_summary.description ? (
-                        <Text type="body" size="sm" as="p" display="block" className="m-0">
-                          {plan.package_summary.description}
-                        </Text>
-                      ) : null}
+                          icon={<RefreshCw aria-hidden="true" />}
+                          label={t("flow_editor_tools_package_file_replace")}
+                          isDisabled={importing}
+                          onClick={() => replaceInput.current?.click()}
+                        />
+                        <input
+                          ref={replaceInput}
+                          type="file"
+                          accept={PACKAGE_ACCEPT}
+                          className="hidden"
+                          onChange={(event) => {
+                            const picked = event.target.files?.[0] ?? null;
+                            event.target.value = "";
+                            choosePackage(picked);
+                          }}
+                        />
+                      </Card>
+                      <FieldMessage message={fileProblem} />
                     </div>
+                  ) : (
+                    <FileInput
+                      mode="dropzone"
+                      label={t("flow_editor_tools_package_file")}
+                      isLabelHidden
+                      placeholder={t("flow_package_import_dropzone")}
+                      value={null}
+                      onChange={choosePackage}
+                      accept={PACKAGE_ACCEPT}
+                      isDisabled={importing}
+                      status={fileProblem ? { type: "error", message: fileProblem } : undefined}
+                      width="100%"
+                      controlClassName="phone:min-h-32 min-h-56"
+                    />
+                  )}
 
-                    {omittedMcp > 0 ? (
-                      <Banner
-                        status="warning"
-                        title={t("flow_editor_tools_package_import_mcp_title")}
-                        description={t("flow_editor_tools_package_import_mcp_description", {
-                          count: omittedMcp
-                        })}
-                        collapsible={false}
-                      />
-                    ) : null}
-
-                    <section className="flex flex-col gap-3">
+                  {plan ? (
+                    <>
                       <div className="flex flex-col gap-1">
-                        <Heading level={3} weight="semibold" className="text-sm">
-                          {t("flow_editor_tools_package_dependency_mapping")}
+                        <Heading level={3} weight="semibold" wordBreak="break-word">
+                          {plan.package_summary.name}
                         </Heading>
-                        <Text type="supporting" size="sm" as="p" display="block" className="m-0">
-                          {resolutions.length === 0
-                            ? t("flow_editor_tools_package_no_dependencies")
-                            : t("flow_editor_tools_package_dependency_mapping_description")}
-                        </Text>
+                        {plan.package_summary.description ? (
+                          <Text type="body" size="sm" as="p" display="block" className="m-0">
+                            {plan.package_summary.description}
+                          </Text>
+                        ) : null}
                       </div>
+
+                      {omittedMcp > 0 ? (
+                        <Banner
+                          status="warning"
+                          title={t("flow_editor_tools_package_import_mcp_title")}
+                          description={t("flow_editor_tools_package_import_mcp_description", {
+                            count: omittedMcp
+                          })}
+                          collapsible={false}
+                        />
+                      ) : null}
+
                       {refused ? (
                         <Banner
                           status="error"
@@ -667,104 +691,140 @@ export function FlowPackageImportDialog({
                           }
                           collapsible={false}
                         />
-                      ) : readiness?.canImport ? (
-                        <Banner
-                          status="success"
-                          title={
-                            readiness.canPublishAfterImport
-                              ? t("flow_editor_tools_package_can_publish_after_import")
-                              : t("flow_editor_tools_package_needs_review_after_import")
-                          }
-                          description={
-                            readiness.transcriptionModelToChoose
-                              ? t("flow_editor_tools_package_transcription_model_to_choose")
-                              : undefined
-                          }
-                          collapsible={false}
-                        />
-                      ) : (
+                      ) : importNote ? (
                         <Banner
                           status="info"
-                          title={t("flow_package_import_choose_required")}
+                          title={
+                            needsReview
+                              ? t("flow_editor_tools_package_needs_review_after_import")
+                              : t("flow_package_import_audio_title")
+                          }
+                          description={
+                            readiness?.transcriptionModelToChoose
+                              ? t("flow_editor_tools_package_transcription_model_to_choose")
+                              : readiness?.takesAudio
+                                ? t(
+                                    needsReview
+                                      ? "flow_package_import_audio_note"
+                                      : "flow_package_import_audio_body"
+                                  )
+                                : undefined
+                          }
                           collapsible={false}
                         />
-                      )}
-                      {resolutions.length > 0 ? (
-                        <ul className="border-ax-border divide-ax-border rounded-ax-container m-0 flex flex-col divide-y border p-0">
-                          {resolutions.map((resolution) => {
-                            const key = slotKey(resolution);
-                            return (
-                              <Requirement
-                                key={key}
-                                resolution={resolution}
-                                selection={selections[key] ?? null}
-                                disabled={importing || loading}
-                                templateProblem={templateProblems[key] || null}
-                                onSelect={(value) =>
-                                  setSelections((current) => ({ ...current, [key]: value }))
-                                }
-                                onTemplate={(template) => void chooseTemplate(key, template)}
-                              />
-                            );
-                          })}
-                        </ul>
                       ) : null}
-                    </section>
-                  </>
-                ) : null}
 
-                <div ref={errorRef} tabIndex={-1} className="outline-none">
-                  {failure ? (
-                    <Banner
-                      role="alert"
-                      status="error"
-                      title={t("flow_editor_tools_package_import_failed_title")}
-                      description={failure}
-                      collapsible={false}
-                    />
+                      {resolutions.length > 0 ? (
+                        <section className="flex flex-col gap-3">
+                          <div className="flex flex-col gap-1">
+                            <Heading level={4} weight="semibold" className="text-sm">
+                              {t("flow_editor_tools_package_dependency_mapping")}
+                            </Heading>
+                            <Text
+                              type="supporting"
+                              size="sm"
+                              as="p"
+                              display="block"
+                              className="m-0"
+                            >
+                              {t("flow_editor_tools_package_dependency_mapping_description")}
+                            </Text>
+                          </div>
+                          <ul className="border-ax-border divide-ax-border rounded-ax-container m-0 flex flex-col divide-y border p-0">
+                            {resolutions.map((resolution) => {
+                              const key = slotKey(resolution);
+                              return (
+                                <Requirement
+                                  key={key}
+                                  resolution={resolution}
+                                  selection={selections[key] ?? null}
+                                  disabled={importing || loading}
+                                  templateProblem={templateProblems[key] || null}
+                                  onSelect={(value) =>
+                                    setSelections((current) => ({ ...current, [key]: value }))
+                                  }
+                                  onTemplate={(template) => void chooseTemplate(key, template)}
+                                />
+                              );
+                            })}
+                          </ul>
+                        </section>
+                      ) : null}
+                    </>
                   ) : null}
+
+                  <div ref={errorRef} tabIndex={-1} className="outline-none">
+                    {failure ? (
+                      <Banner
+                        role="alert"
+                        status="error"
+                        title={
+                          failure.stage === "plan"
+                            ? t("flow_package_import_plan_failed_title")
+                            : t("flow_editor_tools_package_import_failed_title")
+                        }
+                        description={failure.message}
+                        collapsible={false}
+                      />
+                    ) : null}
+                  </div>
                 </div>
-              </div>
-            </LayoutContent>
-          ) : null
-        }
-        footer={
-          open ? (
-            <LayoutFooter>
-              <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
-                {/* Beside the buttons, so why importing waits stays in view however far the list
+              </LayoutContent>
+            ) : null
+          }
+          footer={
+            open ? (
+              <LayoutFooter>
+                <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
+                  {/* Beside the buttons, so why importing waits stays in view however far the list
                     is scrolled. */}
-                <p role="status" className="text-ax-text-secondary m-0 mr-auto text-sm">
-                  {refused
-                    ? t("flow_package_import_footer_blocked")
-                    : readiness && readiness.totalRequired > 0
-                      ? t("flow_editor_tools_package_required_progress", {
-                          selected: readiness.selectedRequired,
-                          total: readiness.totalRequired
-                        })
-                      : null}
-                </p>
-                <div className="flex flex-wrap justify-end gap-2">
-                  <Button
-                    label={t("cancel")}
-                    isDisabled={importing}
-                    onClick={() => requestOpenChange(false)}
-                  />
-                  <Button
-                    variant="primary"
-                    label={t("flow_editor_tools_package_import_as_draft")}
-                    icon={<Upload aria-hidden="true" />}
-                    isDisabled={!plan || !readiness?.canImport || loading}
-                    isLoading={importing}
-                    isInterruptible
-                    onClick={() => void submit()}
-                  />
+                  <p role="status" className="text-ax-text-secondary m-0 mr-auto text-sm">
+                    {refused
+                      ? t("flow_package_import_footer_blocked")
+                      : readiness && readiness.totalRequired > 0
+                        ? t("flow_editor_tools_package_required_progress", {
+                            selected: readiness.selectedRequired,
+                            total: readiness.totalRequired
+                          })
+                        : readiness?.canImport
+                          ? t("flow_package_import_footer_ready")
+                          : null}
+                  </p>
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <Button
+                      label={t("cancel")}
+                      isDisabled={importing}
+                      onClick={() => requestOpenChange(false)}
+                    />
+                    <Button
+                      variant="primary"
+                      label={t("flow_editor_tools_package_import_as_draft")}
+                      icon={<Upload aria-hidden="true" />}
+                      isDisabled={!plan || !readiness?.canImport || loading}
+                      isLoading={importing}
+                      isInterruptible
+                      onClick={() => void submit()}
+                    />
+                  </div>
                 </div>
-              </div>
-            </LayoutFooter>
-          ) : null
-        }
+              </LayoutFooter>
+            ) : null
+          }
+        />
+      </Dialog>
+      <ConfirmDialogControlled
+        open={confirmDiscard}
+        onOpenChange={setConfirmDiscard}
+        title={t("flow_package_import_discard_title")}
+        description={t("flow_package_import_discard_description")}
+        confirmLabel={t("flow_package_import_discard_confirm")}
+        onConfirm={() => {
+          // The confirmation hands focus back into this dialog first, so that closing this one
+          // then returns it to the button that opened it.
+          flushSync(() => setConfirmDiscard(false));
+          close();
+        }}
       />
-    </Dialog>
+    </>
   );
 }

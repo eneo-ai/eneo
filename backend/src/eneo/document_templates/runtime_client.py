@@ -254,8 +254,18 @@ async def _render_once(
         if response.status_code == 429:
             return None
         if response.status_code == 422:
+            # The runtime names why it refused; callers explain the code.
+            await response.aread()
+            try:
+                body = response.json()
+            except ValueError:
+                body = None
+            runtime_code = body.get("code") if isinstance(body, dict) else None
             raise BadRequestException(
-                "The document or template could not be rendered within its limits."
+                "The document or template could not be rendered within its limits.",
+                context={"runtime_code": str(runtime_code)[:64]}
+                if runtime_code
+                else None,
             )
         if response.status_code != 200:
             raise RuntimeUnavailable(
@@ -271,7 +281,8 @@ async def _render_once(
             size += len(chunk)
             if size > _MAX_RENDERED_BYTES:
                 raise BadRequestException(
-                    "The generated document exceeds its size limit."
+                    "The generated document exceeds its size limit.",
+                    context={"runtime_code": "TOO_LARGE"},
                 )
             chunks.append(chunk)
         return b"".join(chunks)

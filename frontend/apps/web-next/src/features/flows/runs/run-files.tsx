@@ -3,16 +3,11 @@ import { Button } from "@astryxdesign/core/Button";
 import { Download, FileText } from "lucide-react";
 import { useLocale, useTranslations } from "use-intl";
 import { useState } from "react";
-import { toastDownloadError } from "@/features/files/signed-file-url";
+import { saveUrl, toastDownloadError } from "@/features/files/signed-file-url";
 import { formatBytes } from "@/lib/format";
 import type { StepInputFile } from "./run-format";
 import { refusalText } from "./run-messages";
 import { artifactDownloadPath, inputFileDownloadPath, type RunResultFile } from "./runs-api";
-
-/** Saves a file through a short-lived signed link; the server names it. */
-function save(path: string, name?: string) {
-  Object.assign(document.createElement("a"), { href: path, download: name ?? "" }).click();
-}
 
 /** A download button that asks the core for a fresh signed link on each press. */
 export function DownloadButton({
@@ -39,7 +34,8 @@ export function DownloadButton({
         if (pending) return;
         setPending(true);
         try {
-          save(await getPath(), name);
+          // Through a short-lived signed link; without a name the server names the file.
+          saveUrl(await getPath(), name ?? "");
         } catch (error) {
           // Why the link could not be made, in the flow catalog's words, with the support ids.
           toastDownloadError(error, t, { message: refusalText(error, t) });

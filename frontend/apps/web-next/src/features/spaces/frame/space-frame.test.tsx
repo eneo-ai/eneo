@@ -2,7 +2,9 @@
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderInApp, testAppContext } from "@/test/render";
+import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
+import { browserApi } from "@/lib/api/browser";
+import { flowQueryOptions, type FlowPublic } from "@/features/flows/flows-api";
 import { setViewport } from "@/test/setup-dom";
 import { PageHeader } from "@/components/composites/page-header";
 import {
@@ -492,6 +494,32 @@ describe("SpaceFrame on a phone (decision 24)", () => {
     expect(
       screen.getByRole("link", { name: "Tillbaka till Bygglovsguiden" }).getAttribute("href")
     ).toBe("/spaces/space-1/apps/p1");
+  });
+
+  it("goes back from a flow's run to that flow's runs, named by the flow", () => {
+    setViewport("phone");
+    state.space = sharedSpace();
+    state.segments = ["flows", "f1", "runs", "r1"];
+    state.routeId = "space-1";
+    const queryClient = testQueryClient();
+    queryClient.setQueryData(flowQueryOptions(browserApi, "f1").queryKey, {
+      id: "f1",
+      name: "Protokoll från nämnden"
+    } as FlowPublic);
+    renderInApp(
+      <SpaceFrame>
+        <p>Sidans innehåll</p>
+      </SpaceFrame>,
+      {
+        queryClient,
+        appContext: testAppContext({ featureFlags: { federation: false, flows: true } })
+      }
+    );
+    expect(
+      screen
+        .getByRole("link", { name: "Tillbaka till Protokoll från nämnden" })
+        .getAttribute("href")
+    ).toBe("/spaces/space-1/flows/f1?tab=runs");
   });
 
   it("is not on a tablet, which keeps the header with every tab", () => {

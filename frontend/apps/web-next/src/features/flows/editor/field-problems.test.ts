@@ -24,7 +24,11 @@ const step = {
 
 describe("anchorForPath", () => {
   it("puts a credential of a fetching step at its HTTP settings", () => {
-    expect(anchorForPath("input_config.auth.token", step.config)).toBe("input_config.http");
+    expect(anchorForPath("input_config.auth.token", step.config)).toBe("input_config.http.auth");
+    expect(anchorForPath("input_config.url", step.config)).toBe("input_config.http");
+    expect(anchorForPath("input_config.custom_headers[0].value", step.config)).toBe(
+      "input_config.http.more"
+    );
     expect(anchorForPath("input_config.tool.arguments.q", step.config)).toBe("input_config.tool");
     expect(anchorForPath("input_bindings.question", step.config)).toBe("input_bindings");
     expect(
@@ -46,6 +50,55 @@ describe("describeSaveError", () => {
     expect(problem.anchor).toBe("input_config.http");
     expect(problem.message).toBe(messages.flow_error_typed_io_http_invalid_config);
     expect(problem.message).not.toContain("English");
+  });
+
+  it("says which HTTP setting to change when the core names the defect", () => {
+    const problem = describeSaveError(
+      refusal("typed_io_http_invalid_config", {
+        field: "input_config",
+        http_error: "HTTP_CREDENTIALS_REQUIRE_HTTPS",
+        issue_code: "flow_step_invalid",
+        step_order: 2
+      }),
+      step,
+      t
+    );
+    expect(problem.anchor).toBe("input_config.http");
+    expect(problem.message).toBe(messages.flow_step_editor_http_credentials_need_https);
+  });
+
+  it("shows an HTTP defect at the part it is about, not at the address", () => {
+    const sending = {
+      stepId: "step-2",
+      stepOrder: 2,
+      config: { input_source: "previous_step", output_mode: "http_post" } as const
+    };
+    const at = (httpError: string) =>
+      describeSaveError(
+        refusal("typed_io_http_invalid_config", {
+          field: "output_config",
+          http_error: httpError,
+          step_order: 2
+        }),
+        sending,
+        t
+      ).anchor;
+    expect(at("HTTP_INVALID_BODY_JSON")).toBe("output_config.http.body");
+    expect(at("HTTP_MISSING_AUTH")).toBe("output_config.http.auth");
+    expect(at("HTTP_TIMEOUT_OUT_OF_RANGE")).toBe("output_config.http.more");
+    expect(at("HTTP_INVALID_URL")).toBe("output_config.http");
+    // A fetching step has no body field: the address is where it is shown.
+    expect(
+      describeSaveError(
+        refusal("typed_io_http_invalid_config", {
+          field: "input_config",
+          http_error: "HTTP_BODY_NOT_ALLOWED_FOR_GET",
+          step_order: 2
+        }),
+        step,
+        t
+      ).anchor
+    ).toBe("input_config.http");
   });
 
   it("names the field of a code without a field in its context", () => {

@@ -2706,6 +2706,8 @@ def test_openapi_flow_run_public_exposes_structured_error(openapi_spec: dict) ->
         "ceiling_bytes",
         # Where and which rule a value broke in a step's input or output contract.
         "contract_violation",
+        # Which Word template field could not be filled, from which step, and why.
+        "template_fill",
     }
     violation_ref = next(
         option

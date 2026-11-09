@@ -5,7 +5,7 @@ import { TextArea } from "@astryxdesign/core/TextArea";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { TextInput } from "@/components/astryx/text-input";
 import { getErrorMessage } from "@/lib/api/errors";
@@ -37,6 +37,12 @@ export function NewFlowDialog({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [nameProblem, setNameProblem] = useState<string | null>(null);
+  // The name is what the dialog asks first. After Astryx Dialog's effects (a
+  // child's run first): it has shown the dialog and noted the opener to return
+  // to. `hasAutoFocus` would focus during the commit, before that note.
+  useEffect(() => {
+    if (open) nameRef.current?.focus();
+  }, [open]);
 
   const create = useMutation({
     mutationFn: () =>

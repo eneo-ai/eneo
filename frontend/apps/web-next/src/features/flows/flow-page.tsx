@@ -1,11 +1,17 @@
 import { Badge } from "@astryxdesign/core/Badge";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
+import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import { useAnnounce, useMediaQuery } from "@astryxdesign/core/hooks";
 import { ResizeHandle, useResizable } from "@astryxdesign/core/Resizable";
-import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
-import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import {
+  queryOptions,
+  useMutation,
+  useQuery,
+  useQueryClient,
+  useSuspenseQuery
+} from "@tanstack/react-query";
 import { goHistory, pushUrl, readUrlState, replaceUrl, useSearchParams } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
 import {
@@ -58,7 +64,7 @@ import { FlowChatPanel } from "./flow-chat-panel";
 import { FlowDraftCheck } from "./flow-draft-check-panel";
 import { FlowPackageExportDialog } from "./flow-package-export-dialog";
 import { producesLabel, stepLabel } from "./flow-labels";
-import { flowRefusalMessage, STALE_REVISION } from "./flow-refusals";
+import { flowRefusalMessage, refusalStep, STALE_REVISION } from "./flow-refusals";
 import type { SuggestionDismissal, SuggestionFix } from "./flow-suggestion-item";
 import type { SuggestionMeasure } from "./flow-suggestions-section";
 import {
@@ -84,6 +90,7 @@ import { orderWithMove, orderWithout, stepName, stepsInOrder } from "./flow-step
 import { speakerStepCandidate, speakerStepOption, speakerStepUpdate } from "./speaker-step-offer";
 import { FlowPhonePage } from "./flow-phone-page";
 import { FlowRunStarter } from "./flow-run-starter";
+import { runKeys } from "./runs/runs-api";
 import { FlowRunsList } from "./runs/runs-list";
 
 type Notice = {
@@ -91,9 +98,15 @@ type Notice = {
   status: "error" | "warning" | "info";
   title: string;
   description: string;
+  /** The step the refusal is about, which the notice offers to open. */
+  step?: FlowStep | null;
+  /** Unsaved edits held publishing back: the notice goes once they are saved or dropped. */
+  cause?: "unsaved";
 };
 type View = "definition" | "chat";
 type PageTab = "definition" | "runs";
+/** Below lg the chat is one more tab beside the definition's. */
+type NarrowTab = PageTab | "chat";
 type EditorChange = Omit<FlowEditorUpdate, "expected_revision" | "definition"> & {
   definition?: FlowDefinitionUpdate;
 };
@@ -102,6 +115,25 @@ type SettingsRequest = NonNullable<ComponentProps<typeof FlowSettings>["openRequ
 const CHAT_WIDTH_STORAGE_KEY = "eneo:flow-chat-width";
 /** How long a card the chat touched stays marked. */
 const CHAT_CHANGE_MARK_MS = 8000;
+
+/**
+ * Whether the flow has any run the caller may see: one content-free row of
+ * the runs list, under its key, so a new run refreshes it.
+ */
+function hasRunsQueryOptions(flowId: string) {
+  return queryOptions({
+    queryKey: [...runKeys.list(flowId), "any"] as const,
+    queryFn: async ({ signal }) => {
+      const page = await unwrap(
+        browserApi.GET("/api/v1/flows/{id}/runs/", {
+          params: { path: { id: flowId }, query: { limit: 1, include_status_counts: false } },
+          signal
+        })
+      );
+      return page.items.length > 0;
+    }
+  });
+}
 
 /** The page's address with ?step= set to `stepId`, or without it; other parameters stay. */
 function stepUrl(stepId: string | null): URL {
@@ -165,6 +197,10 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
   const canViewRuns = permissions.can_view_runs;
 
   const stepsHeadingRef = useRef<HTMLHeadingElement>(null);
+  const checkHeadingRef = useRef<HTMLHeadingElement>(null);
+  const runButtonRef = useRef<HTMLButtonElement>(null);
+  const publishButtonRef = useRef<HTMLButtonElement>(null);
+  const unpublishButtonRef = useRef<HTMLButtonElement>(null);
   const editorRef = useRef<HTMLElement>(null);
   const noticeKey = useRef(0);
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -186,6 +222,11 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
   // Edits on screen that are not saved: the open step's, or the settings form
   // while it is open (the two are never on screen together).
   const [unsavedEdits, setUnsavedEdits] = useState(false);
+  const onUnsavedChange = useCallback((unsaved: boolean) => {
+    setUnsavedEdits(unsaved);
+    // Saved or dropped: "save or cancel first" is no longer true.
+    if (!unsaved) setNotice((last) => (last?.cause === "unsaved" ? null : last));
+  }, []);
   const [confirmUnpublish, setConfirmUnpublish] = useState(false);
   const [exporting, setExporting] = useState(false);
   // The last ask to bring the settings up, whether their form holds changes
@@ -204,8 +245,9 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
   // The field the editor opens at when a step is opened to connect a service.
   const [requestedAnchor, setRequestedAnchor] = useState<FieldAnchor | null>(null);
   const tabsId = useId();
-  const tabId = (id: PageTab) => `${tabsId}-tab-${id}`;
+  const tabId = (id: NarrowTab) => `${tabsId}-tab-${id}`;
   const panelId = `${tabsId}-panel`;
+  const chatPanelId = `${tabsId}-chat`;
 
   /** The tab lives in ?tab=, so a run's page can link back to the list. */
   function selectTab(next: PageTab) {
@@ -213,6 +255,16 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
     if (next === "runs") url.searchParams.set("tab", "runs");
     else url.searchParams.delete("tab");
     replaceUrl(url);
+  }
+
+  /** Below lg the chat is a tab of its own: picking another shows the definition's side. */
+  function selectNarrowTab(next: NarrowTab) {
+    if (next === "chat") {
+      setView("chat");
+      return;
+    }
+    setView("definition");
+    if (next !== tab) selectTab(next);
   }
 
   /** Brings the settings up, from the runs or the chat too, at `focus` when given. */
@@ -232,7 +284,8 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
         key: noticeKey.current,
         status: stale ? "warning" : "error",
         title: stale ? t("flows_notice_stale_title") : title,
-        description: flowRefusalMessage(error, against, t)
+        description: flowRefusalMessage(error, against, t),
+        step: refusalStep(error, against)
       });
     },
     [flowId, queryClient, t]
@@ -341,31 +394,34 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
   const [measuredFlow, setMeasuredFlow] = useState<string | null>(null);
   const canMeasure = canEdit && can("flows_trace");
   const suggestionRuns = canMeasure && measuredFlow === flowId ? MEASURED_RUNS : 0;
-  const measure: SuggestionMeasure | undefined = canMeasure
-    ? {
-        runs: suggestionRuns,
-        onMeasure: () => {
-          // A press reads anew, never an answer from an earlier press.
-          forgetMeasuredSuggestions(queryClient, flowId);
-          setMeasuredFlow(flowId);
-          // The step list and the editor read the same query: this read is
-          // the one they find, and once it lands it says what it is based on.
-          queryClient
-            .query(flowSuggestionsQueryOptions(flowId, flow.draft_revision, MEASURED_RUNS))
-            .then(
-              (answer) => {
-                if (answer.runs) announce(measuredBasisText(answer.runs, answer.items.length, t));
-              },
-              // Refused or failed: the step list says why and offers to try again.
-              () => undefined
-            );
-        },
-        onPlain: () => {
-          setMeasuredFlow(null);
-          announce(t("flow_suggestions_runs_plain_done"));
+  // A flow that has never run has nothing to count: the offer waits for a run.
+  const hasRuns = useQuery({ ...hasRunsQueryOptions(flowId), enabled: canMeasure && canViewRuns });
+  const measure: SuggestionMeasure | undefined =
+    canMeasure && (hasRuns.data === true || suggestionRuns > 0)
+      ? {
+          runs: suggestionRuns,
+          onMeasure: () => {
+            // A press reads anew, never an answer from an earlier press.
+            forgetMeasuredSuggestions(queryClient, flowId);
+            setMeasuredFlow(flowId);
+            // The step list and the editor read the same query: this read is
+            // the one they find, and once it lands it says what it is based on.
+            queryClient
+              .query(flowSuggestionsQueryOptions(flowId, flow.draft_revision, MEASURED_RUNS))
+              .then(
+                (answer) => {
+                  if (answer.runs) announce(measuredBasisText(answer.runs, answer.items.length, t));
+                },
+                // Refused or failed: the step list says why and offers to try again.
+                () => undefined
+              );
+          },
+          onPlain: () => {
+            setMeasuredFlow(null);
+            announce(t("flow_suggestions_runs_plain_done"));
+          }
         }
-      }
-    : undefined;
+      : undefined;
   // The measured answers stay for the visit (no remount reads them again)
   // and go with it.
   useEffect(() => () => forgetMeasuredSuggestions(queryClient, flowId), [flowId, queryClient]);
@@ -438,6 +494,8 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
     onSuccess: (updated) => {
       saved(updated);
       announce(t("flows_published", { version: updated.published_version ?? "" }));
+      // Publicera has gone; what the flow is for now takes its place.
+      rescue(() => runButtonRef.current ?? unpublishButtonRef.current);
     },
     onError: (error) => refused(error, t("flows_notice_not_published"), steps)
   });
@@ -448,6 +506,7 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
       saved(updated);
       setConfirmUnpublish(false);
       announce(t("flows_unpublished"));
+      rescue(() => publishButtonRef.current);
     },
     onError: (error) => {
       setConfirmUnpublish(false);
@@ -518,23 +577,37 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
     }
   }, [announce, flowId, queryClient, t]);
 
-  /** Publishes the saved draft; with no steps, or edits not yet saved, says what to do first. */
+  /**
+   * Publishes the saved draft. A draft the page already knows cannot be
+   * published is not sent: a notice says why (it is an alert, so it is read
+   * out too). Edits not yet saved hold it back until saved or dropped; an
+   * empty list or a problem also takes focus to what to fix (the step list,
+   * or "Före publicering").
+   */
   function requestPublish() {
     if (publish.isPending) return;
-    const blocked =
-      steps.length === 0
-        ? t("flows_publish_needs_steps")
-        : unsavedEdits
-          ? t("flows_publish_unsaved")
-          : null;
-    if (blocked) {
+    const hold = (description: string, status: Notice["status"], cause?: Notice["cause"]) => {
       noticeKey.current += 1;
       setNotice({
         key: noticeKey.current,
-        status: "error",
+        status,
         title: t("flows_notice_not_published"),
-        description: blocked
+        description,
+        cause
       });
+    };
+    if (unsavedEdits) {
+      hold(t("flows_publish_unsaved"), "error", "unsaved");
+      return;
+    }
+    if (steps.length === 0) {
+      hold(t("flows_publish_needs_steps"), "warning");
+      stepsHeadingRef.current?.focus();
+      return;
+    }
+    if (draftProblems) {
+      hold(t("flow_editor_tools_check_problems", { count: draftProblems }), "warning");
+      checkHeadingRef.current?.focus();
       return;
     }
     publish.mutate();
@@ -654,6 +727,9 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
   // The step view hides the tabs: "Alla steg" is its way back to the list.
   const editorOpen = tab === "definition" && openedStep?.id !== undefined;
   const showTabs = canViewRuns && !editorOpen;
+  // Below lg the definition's side is a tab's panel while it shows, and the
+  // chat is the panel of its own tab.
+  const panelIsTabbed = beside ? showTabs : view === "definition";
   const menuSteps = steps.flatMap((step) =>
     step.id
       ? [
@@ -702,37 +778,119 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
   });
   const speakerOption = speakerCandidate ? speakerStepOption(speakerKinds.data) : null;
 
-  const actions =
-    mayEdit || canPublish || canRun ? (
-      <div className="flex flex-wrap items-center gap-2">
-        {mayEdit ? (
-          <Button
-            label={t("flow_editor_tools_package_export")}
-            onClick={() => setExporting(true)}
-          />
-        ) : null}
-        {canPublish && isPublished ? (
-          <Button
-            label={t("unpublish")}
-            onClick={() => setConfirmUnpublish(true)}
-            isLoading={unpublish.isPending}
-            isInterruptible
-          />
-        ) : null}
-        {canPublish && !isPublished ? (
-          <Button
-            label={t("publish")}
-            variant="primary"
-            onClick={requestPublish}
-            isLoading={publish.isPending}
-            isInterruptible
-          />
-        ) : null}
-        {canRun ? (
-          <Button label={t("flow_runs_start")} variant="primary" onClick={onStart} />
-        ) : null}
-      </div>
-    ) : undefined;
+  // The action for what the flow is now goes first: a run of a published
+  // flow, publishing a draft. Exporting is rare, so it waits in "Fler åtgärder".
+  // Publicera is the page's primary action only once it can succeed: an empty
+  // draft's is adding a step, and one with problems is fixing them.
+  const publishReady = steps.length > 0 && !draftProblems;
+  // "Inställningar" leads to the settings from where they are not on screen:
+  // the runs, or the chat below lg. Beside them their section has its own.
+  const settingsElsewhere = !editorOpen && (tab === "runs" || (!beside && view === "chat"));
+  const actions = (
+    <div className="flex flex-wrap items-center gap-2">
+      {canRun ? (
+        <Button
+          ref={runButtonRef}
+          label={t("flow_runs_start")}
+          variant="primary"
+          onClick={onStart}
+        />
+      ) : null}
+      {canPublish && !isPublished ? (
+        <Button
+          ref={publishButtonRef}
+          label={t("publish")}
+          variant={publishReady ? "primary" : "secondary"}
+          onClick={requestPublish}
+          isLoading={publish.isPending}
+          isInterruptible
+        />
+      ) : null}
+      {settingsElsewhere ? (
+        <Button label={t("flows_settings_heading")} onClick={() => openSettings()} />
+      ) : null}
+      {canPublish && isPublished ? (
+        <Button
+          ref={unpublishButtonRef}
+          label={t("unpublish")}
+          onClick={() => setConfirmUnpublish(true)}
+          isLoading={unpublish.isPending}
+          isInterruptible
+        />
+      ) : null}
+      {mayEdit ? (
+        <MoreMenu
+          label={t("flow_page_more_actions")}
+          alignment="end"
+          items={[{ label: t("flow_page_export_package"), onClick: () => setExporting(true) }]}
+        />
+      ) : null}
+    </div>
+  );
+
+  const settings = (
+    <FlowSettings
+      key="settings"
+      flow={flow}
+      canEdit={canEdit}
+      transcription={transcription}
+      onSave={saveSettings}
+      onEditingChange={onUnsavedChange}
+      openRequest={settingsRequest}
+      classification={space.security_classification}
+      onDirtyChange={setSettingsDirty}
+    />
+  );
+  const stepList = (
+    <FlowStepList
+      key="steps"
+      flowId={flow.id}
+      draftRevision={flow.draft_revision}
+      steps={steps}
+      canEdit={canEdit}
+      mayEdit={mayEdit}
+      changes={chatChanges}
+      onAskChat={askChat}
+      suggestionFix={suggestionFix}
+      dismissal={suggestionDismissal}
+      measure={measure}
+      headingRef={stepsHeadingRef}
+      onOpen={openStep}
+      onMove={moveStep}
+      onRemove={removeStep}
+      onAdd={(position) => setAddAt(position)}
+      speakerOffer={
+        speakerCandidate?.id && speakerOption
+          ? {
+              stepId: speakerCandidate.id,
+              pending: edit.isPending,
+              onAccept: () => addSpeakerStep(speakerCandidate, speakerOption)
+            }
+          : null
+      }
+    />
+  );
+  // One order, empty or not: what stands before publishing, the steps (what
+  // a flow is built from), then its settings. Until it has a step there is
+  // nothing to check. Keyed, so the parts stay mounted when the first step
+  // lands (an open settings form keeps what is typed in it).
+  const definition = [
+    canEdit && steps.length > 0 ? (
+      <FlowDraftCheck
+        key="check"
+        flow={flow}
+        suggestionRuns={suggestionRuns}
+        transcription={transcription}
+        onOpenStep={openStep}
+        onRepair={repairReference}
+        onOpenSettings={openSettings}
+        onProblemCount={setDraftProblems}
+        headingRef={checkHeadingRef}
+      />
+    ) : null,
+    stepList,
+    settings
+  ];
 
   return (
     <FlowReferences
@@ -742,7 +900,7 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
       composer={composer}
     >
       <div className="flex min-w-0 flex-1 flex-col lg:min-h-0">
-        <div className="border-ax-border flex flex-col gap-3 border-b px-6 pt-4 pb-3">
+        <div className="border-ax-border flex flex-col gap-3 border-b px-6 pt-4 pb-3 max-lg:border-b-0 max-lg:pb-1">
           <PageHeader
             title={flow.name}
             description={flow.description?.trim() || undefined}
@@ -762,9 +920,6 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
                 {settingsDirty ? (
                   <Badge variant="warning" label={t("flow_page_settings_unsaved")} />
                 ) : null}
-                {editorOpen ? null : (
-                  <Button label={t("flows_settings_heading")} onClick={() => openSettings()} />
-                )}
                 {actions}
               </>
             }
@@ -776,23 +931,65 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
               status={notice.status}
               title={notice.title}
               description={notice.description}
+              endContent={
+                notice.step?.id && notice.step.id !== openedStep?.id ? (
+                  <Button
+                    label={t("flow_editor_tools_check_open_step")}
+                    aria-label={t("flow_editor_tools_check_open_step_named", {
+                      step: stepLabel(notice.step, t)
+                    })}
+                    size="sm"
+                    onClick={() => notice.step && openStep(notice.step)}
+                  />
+                ) : undefined
+              }
               isDismissable
               dismissLabel={t("flows_notice_dismiss")}
               onDismiss={() => setNotice(null)}
             />
           ) : null}
-          <div className="lg:hidden">
-            <SegmentedControl
-              label={t("flows_view_label")}
-              value={view}
-              onChange={(next) => setView(next as View)}
-              layout="fill"
-            >
-              <SegmentedControlItem value="definition" label={t("flows_view_definition")} />
-              <SegmentedControlItem value="chat" label={t("flows_view_chat")} />
-            </SegmentedControl>
-          </div>
         </div>
+        {/* Below lg one row of tabs holds the definition, the runs and the
+            chat (the runs leave while a step is open). It stays in reach
+            while the definition scrolls, except where a bar of its own
+            already sticks there: a phone's layout (the space's PageBar) and
+            an open step (its bar). data-page-bar keeps focus and scrolled-to
+            content clear of it (app-shell.tsx). */}
+        {beside ? null : (
+          <div
+            {...(editorOpen ? {} : { "data-page-bar": "" })}
+            className={cn("bg-ax-surface z-10 px-6", !editorOpen && "wide:sticky wide:top-0")}
+          >
+            <TabList
+              role="tablist"
+              aria-label={t("flow_runs_tabs_label")}
+              value={view === "chat" ? "chat" : tab}
+              onChange={(value) => selectNarrowTab(value as NarrowTab)}
+              hasDivider
+            >
+              <Tab
+                id={tabId("definition")}
+                value="definition"
+                label={t("flow_runs_tab_definition")}
+                panelId={panelId}
+              />
+              {showTabs ? (
+                <Tab
+                  id={tabId("runs")}
+                  value="runs"
+                  label={t("flow_runs_tab_runs")}
+                  panelId={panelId}
+                />
+              ) : null}
+              <Tab
+                id={tabId("chat")}
+                value="chat"
+                label={t("flows_view_chat")}
+                panelId={chatPanelId}
+              />
+            </TabList>
+          </div>
+        )}
 
         <div
           ref={beside ? row : null}
@@ -808,7 +1005,7 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
               view !== "definition" && "max-lg:hidden"
             )}
           >
-            {showTabs ? (
+            {beside && showTabs ? (
               <TabList
                 role="tablist"
                 aria-label={t("flow_runs_tabs_label")}
@@ -831,9 +1028,9 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
               </TabList>
             ) : null}
             <div
-              role={showTabs ? "tabpanel" : undefined}
+              role={panelIsTabbed ? "tabpanel" : undefined}
               id={panelId}
-              aria-labelledby={showTabs ? tabId(tab) : undefined}
+              aria-labelledby={panelIsTabbed ? tabId(tab) : undefined}
               className={cn("flex min-w-0 flex-col", editorOpen ? "lg:min-h-0 lg:flex-1" : "gap-6")}
             >
               {tab === "runs" ? (
@@ -863,7 +1060,7 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
                       announce(t("flows_step_saved", { step: stepLabel(openedStep, t) }));
                     }}
                     onCancel={closeStep}
-                    onUnsavedChange={setUnsavedEdits}
+                    onUnsavedChange={onUnsavedChange}
                     navigation={{
                       position: openedIndex + 1,
                       count: steps.length,
@@ -877,67 +1074,17 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
               ) : (
                 <>
                   {isPublished ? (
+                    // The header's badge names the version; this says what it means here.
                     <Banner
                       status="info"
-                      title={t("flows_published_title", { version: flow.published_version ?? "" })}
+                      title={t("flows_published_read_only")}
                       description={
-                        canUnpublishToEdit
-                          ? t("flows_published_description")
-                          : t("flows_published_read_only")
+                        canUnpublishToEdit ? t("flows_published_description") : undefined
                       }
                       collapsible={false}
                     />
                   ) : null}
-                  <FlowSettings
-                    flow={flow}
-                    canEdit={canEdit}
-                    transcription={transcription}
-                    onSave={saveSettings}
-                    onEditingChange={setUnsavedEdits}
-                    openRequest={settingsRequest}
-                    stepCount={steps.length}
-                    problemCount={draftProblems}
-                    classification={space.security_classification}
-                    onDirtyChange={setSettingsDirty}
-                  />
-                  {canEdit ? (
-                    <FlowDraftCheck
-                      flow={flow}
-                      suggestionRuns={suggestionRuns}
-                      transcription={transcription}
-                      onOpenStep={openStep}
-                      onRepair={repairReference}
-                      onOpenSettings={openSettings}
-                      onAddStep={() => setAddAt(steps.length + 1)}
-                      onProblemCount={setDraftProblems}
-                    />
-                  ) : null}
-                  <FlowStepList
-                    flowId={flow.id}
-                    draftRevision={flow.draft_revision}
-                    steps={steps}
-                    canEdit={canEdit}
-                    mayEdit={mayEdit}
-                    changes={chatChanges}
-                    onAskChat={askChat}
-                    suggestionFix={suggestionFix}
-                    dismissal={suggestionDismissal}
-                    measure={measure}
-                    headingRef={stepsHeadingRef}
-                    onOpen={openStep}
-                    onMove={moveStep}
-                    onRemove={removeStep}
-                    onAdd={(position) => setAddAt(position)}
-                    speakerOffer={
-                      speakerCandidate?.id && speakerOption
-                        ? {
-                            stepId: speakerCandidate.id,
-                            pending: edit.isPending,
-                            onAccept: () => addSpeakerStep(speakerCandidate, speakerOption)
-                          }
-                        : null
-                    }
-                  />
+                  {definition}
                 </>
               )}
             </div>
@@ -953,7 +1100,10 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
             />
           )}
           <section
-            aria-label={t("flows_chat_heading")}
+            id={chatPanelId}
+            role={beside ? undefined : "tabpanel"}
+            aria-labelledby={beside ? undefined : tabId("chat")}
+            aria-label={beside ? t("flows_chat_heading") : undefined}
             style={beside ? { width: chat.size } : undefined}
             className={cn(
               "border-ax-border flex h-[85dvh] min-h-[28rem] min-w-0 flex-col border-t lg:h-auto lg:min-h-0 lg:shrink-0 lg:border-t-0",
@@ -979,9 +1129,17 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
               if (!open) setAddAt(null);
             }}
             onSaved={(updated) => {
+              const position = addAt ?? steps.length + 1;
               saved(updated);
               setAddAt(null);
               announce(t("flows_step_added"));
+              // The first step's "Lägg till steg" leaves with the empty list: focus goes to the step.
+              const added = stepsInOrder(updated).find((step) => step.step_order === position);
+              rescue(
+                () =>
+                  (added?.id ? document.getElementById(stepControlId(added.id, "open")) : null) ??
+                  stepsHeadingRef.current
+              );
             }}
           />
         ) : null}

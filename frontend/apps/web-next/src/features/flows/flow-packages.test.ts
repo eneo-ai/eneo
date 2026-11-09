@@ -143,6 +143,18 @@ describe("import readiness", () => {
       requiresTranscriptionModel: true
     });
   });
+
+  it("says when the flow takes audio, whose settings the package does not carry", () => {
+    const audio = plan([], {
+      target_state: { audio_transcription_required: true, default_transcription_model_id: "t-1" }
+    });
+    expect(importReadiness(audio, {})).toMatchObject({
+      canImport: true,
+      takesAudio: true,
+      transcriptionModelToChoose: false
+    });
+    expect(importReadiness(plan([]), {}).takesAudio).toBe(false);
+  });
 });
 
 describe("package refusals", () => {
@@ -170,6 +182,21 @@ describe("package refusals", () => {
         t
       )
     ).toContain("Saknade taggar: namn, datum.");
+  });
+
+  it("tells a broken file from an unsafe one", () => {
+    expect(
+      packageRefusalMessage(refusal("flow_package_zip_unsafe", { reason: "bad_zip" }), t)
+    ).toBe(catalog.flow_editor_tools_package_error_flow_package_zip_damaged);
+    expect(
+      packageRefusalMessage(
+        refusal("flow_package_zip_unsafe", { reason: "missing_required_entry" }),
+        t
+      )
+    ).toBe(catalog.flow_editor_tools_package_error_flow_package_zip_damaged);
+    expect(
+      packageRefusalMessage(refusal("flow_package_zip_unsafe", { reason: "path_traversal" }), t)
+    ).toBe(catalog.flow_editor_tools_package_error_flow_package_zip_unsafe);
   });
 
   it("falls back to the server's message for a code the catalog does not know", () => {

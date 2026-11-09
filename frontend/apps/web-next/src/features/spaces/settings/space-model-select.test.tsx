@@ -192,8 +192,10 @@ describe("SpaceModelSelect", () => {
       { id: "live", name: "Pianissimo", org: "Nord AI", supports_realtime: on }
     ]);
     openCard();
-    const marker = screen.queryByRole("img", { name: "Livetranskribering" });
-    expect(Boolean(marker)).toBe(on);
+    // In words, not only a hover tooltip: read with the switch, seen without a pointer.
+    expect(Boolean(screen.queryByText("Livetranskribering"))).toBe(on);
+    const toggle = screen.getByRole("switch", { name: "Pianissimo" });
+    expect(describedText(toggle)).toBe(on ? "Livetranskribering" : "");
     await expectNoAxeViolations(container);
   });
 
@@ -251,3 +253,12 @@ describe("SpaceModelSelect", () => {
     expect(screen.queryByRole("switch", { name: "Aurora" })).toBeNull();
   });
 });
+
+/** What an element's aria-describedby points at, as read. */
+function describedText(element: Element): string {
+  return (element.getAttribute("aria-describedby") ?? "")
+    .split(" ")
+    .filter(Boolean)
+    .map((id) => document.getElementById(id)?.textContent ?? "")
+    .join(" ");
+}

@@ -6,7 +6,7 @@ import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Info, RefreshCw } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal, flushSync } from "react-dom";
 import { Banner } from "@astryxdesign/core/Banner";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
@@ -34,7 +34,7 @@ import { JsonValue } from "./run-json";
 import { refusalText, runErrorText } from "./run-messages";
 import { outputText, progressSignature, runStepViews, type RunStepView } from "./run-progress";
 import { RunLiveProgress } from "./run-live-progress";
-import { RunKnowledge } from "./run-knowledge";
+import { RunKnowledge, searchedKnowledge } from "./run-knowledge";
 import { starterName } from "./run-starter";
 import {
   RunSteps,
@@ -47,6 +47,7 @@ import { RunText } from "./run-text";
 import { RunUsage, RunUsageBrief } from "./run-usage";
 import { RunTrace } from "./run-trace";
 import { RunTranscript, useTranscriptHosts } from "./run-transcript";
+import { mappedSpeakerNames } from "./run-step-facts";
 import { reviewTranscriptTarget, transcriptTargets } from "./transcript";
 import { reviewDraftOf } from "./review-draft";
 import {
@@ -178,7 +179,7 @@ function RunInput({ flow, run }: { flow: FlowPublic; run: RunDetail }) {
   // Free text is sent as `{ text }`: no field to name, only the text.
   const { text } = payload;
   if (entries.length === 1 && !labels.has("text") && typeof text === "string" && text.trim()) {
-    return <StepText text={text} label={t("flow_runs_input_heading")} plain />;
+    return <StepText text={text} label={t("flow_runs_form_answers_heading")} plain />;
   }
   return (
     <JsonValue
@@ -296,31 +297,29 @@ function Section({
 }
 
 /**
- * A section a phone folds away: the result is what the page is for, and the
- * steps, what was asked, what it cost and the rest are one tap below it. From
- * a phone's width up it is the plain section, open, as before.
+ * A section folded away: the result is what the page is for, and what was
+ * asked, what it cost and the evidence are one tap below it, at every width.
  */
 function FoldSection({
   title,
+  defaultIsOpen = false,
   isOpen,
   onOpenChange,
   children
 }: {
   title: string;
+  defaultIsOpen?: boolean;
   isOpen?: boolean;
   onOpenChange?: (open: boolean) => void;
   children: React.ReactNode;
 }) {
-  const phone = usePhoneScreen();
-  if (!phone) return <Section title={title}>{children}</Section>;
   return (
     <section aria-label={title} className="border-ax-border border-t pt-1">
       <Collapsible
-        // A thumb's height, not the text's.
-        trigger={
-          <span className="inline-flex min-h-6 items-center pointer-coarse:min-h-11">{title}</span>
-        }
-        defaultIsOpen={false}
+        // A thumb's height, not the text's. Block-level: Astryx trims the trigger's label to its
+        // cap height, which an inline box's own min-height cannot get past (it measured 17 px).
+        trigger={<span className="flex min-h-6 items-center pointer-coarse:min-h-11">{title}</span>}
+        defaultIsOpen={defaultIsOpen}
         isOpen={isOpen}
         onOpenChange={onOpenChange}
         className="w-full"
@@ -352,7 +351,7 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
   const spaceName = useSpaceDisplayName();
   const sections = useSpaceSections();
   // A phone has the space's header above the page already: no breadcrumbs here, no gutter of
-  // its own (the space's frame gives one), and the sections after the result folded.
+  // its own (the space's frame gives one), and the steps folded.
   const phone = usePhoneScreen();
   const { data: flow } = useSuspenseQuery(flowQueryOptions(browserApi, flowId));
   const [clock] = useState(() => createPollClock());
@@ -449,6 +448,11 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
       : null;
   // Each transcript shows once: in its step, or in the review while one is about a transcript.
   const transcripts = reviewTranscript ? [] : transcriptTargets(steps.data);
+  // Each step's transcript speakers as the run's speaker-mapping step named them.
+  const mappedNames = useMemo(() => {
+    const all = steps.data ?? [];
+    return new Map(all.map((step) => [step.step_id, mappedSpeakerNames(all, step.step_id)]));
+  }, [steps.data]);
   const transcriptHost = useTranscriptHosts();
   // The first status the page shows sets the default; finishing must not fold what someone is
   // reading. A run with a transcript opens its steps on a phone too: the transcript is in them.
@@ -518,15 +522,20 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
     : null;
   const offersRedispatch = summary !== undefined && canRedispatch(summary, now);
 
+  // A finished run no longer changes: reading it again is offered only after a read failed.
+  const offersRefresh = !settled || [progress, detail, steps].some((read) => read.isError);
+
   const actions = summary ? (
     <div className="flex flex-wrap items-center gap-2">
-      <Button
-        label={t("flow_run_more_refresh")}
-        icon={<RefreshCw aria-hidden="true" />}
-        onClick={() => void refreshNow()}
-        isLoading={refreshing}
-        isInterruptible
-      />
+      {offersRefresh ? (
+        <Button
+          label={t("flow_run_more_refresh")}
+          icon={<RefreshCw aria-hidden="true" />}
+          onClick={() => void refreshNow()}
+          isLoading={refreshing}
+          isInterruptible
+        />
+      ) : null}
       {offersRedispatch ? (
         <Button
           label={t("flow_runs_redispatch")}
@@ -557,12 +566,17 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
     </div>
   ) : undefined;
 
-  const stepsSection = summary ? (
-    <FoldSection
-      title={t("flow_runs_steps_heading")}
-      isOpen={stepsOpen ?? false}
-      onOpenChange={setStepsOpen}
-    >
+  const pendingDeliveries = (run?.webhook_deliveries ?? []).filter(
+    (delivery) => delivery.delivery_status === "pending"
+  );
+  const deliveryUnderWay =
+    pendingDeliveries.length === 0
+      ? null
+      : pendingDeliveries.some((delivery) => delivery.delivery_attempts > 0)
+        ? "retrying"
+        : "sending";
+  const stepsBody = summary ? (
+    <>
       {blockingError(steps) ? (
         <ListError
           error={steps.error}
@@ -572,21 +586,32 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
         />
       ) : (
         <>
-          <RunLiveProgress summary={summary} steps={stepViews} />
+          <RunLiveProgress summary={summary} steps={stepViews} delivery={deliveryUnderWay} />
           <RunSteps
             flowId={flowId}
             runId={runId}
             steps={stepViews}
             runStatus={status}
-            canReadEvidence={run?.evidence_access.can_read_evidence ?? false}
             transcripts={
               new Map(transcripts.map((target) => [target.stepId, transcriptHost(target.stepId)]))
             }
           />
         </>
       )}
-    </FoldSection>
+    </>
   ) : null;
+  // The steps fold on a phone only: from a tablet up they are the page's body, open.
+  const stepsSection = !stepsBody ? null : phone ? (
+    <FoldSection
+      title={t("flow_runs_steps_heading")}
+      isOpen={stepsOpen ?? false}
+      onOpenChange={setStepsOpen}
+    >
+      {stepsBody}
+    </FoldSection>
+  ) : (
+    <Section title={t("flow_runs_steps_heading")}>{stepsBody}</Section>
+  );
   // Rendered here, where nothing moves, and shown in the steps (`useTranscriptHosts`).
   const transcriptViews = transcripts.map((target) => {
     const result = steps.data?.find((step) => step.step_id === target.stepId);
@@ -599,6 +624,7 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
         mayEdit={can("flows_manage")}
         runCompleted={status === "completed"}
         runRevision={summary?.revision ?? null}
+        proposedNames={mappedNames.get(target.stepId)}
         // A transcribing step whose transcript has no lines still shows what it wrote.
         fallback={
           text && stepViews.find((step) => step.order === target.stepOrder)?.transcribeOnly ? (
@@ -611,6 +637,9 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
     );
   });
 
+  // On a phone a run waiting for review leads with the decision: refreshing or cancelling the
+  // whole run comes after the review panel, not between the title and it.
+  const actionsAfterReview = phone && awaitingReview;
   const view = status ? runStatusView(status) : null;
   const duration = summary ? runDurationMs(summary) : null;
 
@@ -638,10 +667,12 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
                   { label: spaceName, href: spaceLandingHref(sections, routeId) },
                   { label: t("flows"), href: `/spaces/${routeId}/flows` },
                   { label: flow.name, href: `/spaces/${routeId}/flows/${flowId}?tab=runs` },
-                  { label: title, current: true }
+                  // The h1 below names the run in full; the trail only says where it is, so it
+                  // stays on one line beside the icon rail.
+                  { label: t("flow_runs_run_title_plain"), current: true }
                 ]
           }
-          actions={actions}
+          actions={actionsAfterReview ? undefined : actions}
         />
         {summary && view ? (
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
@@ -663,16 +694,6 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
               {t("flow_runs_started_by_named", { name: starterName(summary, t) })}
             </span>
             {run ? <RunUsageBrief run={run} /> : null}
-            <RunId
-              label={t("flow_run_more_run_id")}
-              value={summary.id}
-              hint={t("flow_run_more_run_id_hint")}
-            />
-            <RunId
-              label={t("flow_run_more_trace_id")}
-              value={summary.trace_id}
-              hint={t("flow_run_more_trace_id_hint")}
-            />
           </div>
         ) : null}
         {offers?.retryHeldBack === "version_changed" ? (
@@ -752,6 +773,7 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
                 }
               />
             ) : null}
+            {actionsAfterReview ? actions : null}
             <Section
               title={t("flow_runs_result_heading")}
               action={
@@ -778,7 +800,7 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
             </Section>
             {stepsSection}
             {transcriptViews}
-            {run?.evidence_access.can_read_evidence ? (
+            {run?.evidence_access.can_read_evidence && searchedKnowledge(stepViews) ? (
               <FoldSection title={t("flow_runs_knowledge_heading")}>
                 <RunKnowledge
                   flowId={flowId}
@@ -790,7 +812,7 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
             ) : null}
             {run ? (
               <>
-                <FoldSection title={t("flow_runs_input_heading")}>
+                <FoldSection title={t("flow_runs_form_answers_heading")}>
                   <RunInput flow={flow} run={run} />
                 </FoldSection>
                 {run.token_usage || run.transcription_usage ? (
@@ -799,7 +821,13 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
                   </FoldSection>
                 ) : null}
                 {run.webhook_deliveries.length > 0 ? (
-                  <FoldSection title={t("flow_run_extras_webhook_heading")}>
+                  // Open while a delivery has not landed or was given up: that is what the run waits on.
+                  <FoldSection
+                    title={t("flow_run_extras_webhook_heading")}
+                    defaultIsOpen={run.webhook_deliveries.some(
+                      (delivery) => delivery.delivery_status !== "delivered"
+                    )}
+                  >
                     <RunWebhookDeliveries
                       deliveries={run.webhook_deliveries}
                       stepName={(order) =>
@@ -813,25 +841,38 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
                 ) : null}
               </>
             ) : null}
-            {summary && phone ? (
-              run?.evidence_access.can_read_evidence ? (
-                <FoldSection title={t("flow_run_extras_trace_heading")}>
+            {summary ? (
+              // The support ids are for support, not the first screen: with the evidence, or,
+              // for someone who may not read it, under their own fold.
+              <FoldSection
+                title={
+                  run?.evidence_access.can_read_evidence
+                    ? t("flow_run_extras_trace_heading")
+                    : t("flow_run_extras_failure_technical")
+                }
+              >
+                <div className="flex flex-col gap-4">
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+                    <RunId
+                      label={t("flow_run_more_run_id")}
+                      value={summary.id}
+                      hint={t("flow_run_more_run_id_hint")}
+                    />
+                    <RunId
+                      label={t("flow_run_more_trace_id")}
+                      value={summary.trace_id}
+                      hint={t("flow_run_more_trace_id_hint")}
+                    />
+                  </div>
                   <RunTrace
                     flow={flow}
                     summary={summary}
                     steps={stepViews}
-                    access={run.evidence_access}
+                    access={run?.evidence_access}
                     headingHidden
                   />
-                </FoldSection>
-              ) : null
-            ) : summary ? (
-              <RunTrace
-                flow={flow}
-                summary={summary}
-                steps={stepViews}
-                access={run?.evidence_access}
-              />
+                </div>
+              </FoldSection>
             ) : null}
           </>
         )}

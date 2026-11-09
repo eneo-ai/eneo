@@ -1,13 +1,15 @@
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
+import { Divider } from "@astryxdesign/core/Divider";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { Heading } from "@astryxdesign/core/Heading";
 import { Text } from "@astryxdesign/core/Text";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Volume2 } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { useId, useRef, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { TextInput } from "@/components/astryx/text-input";
 import { ClientTime } from "@/components/composites/client-time";
@@ -19,7 +21,9 @@ import { focusFirstControl } from "./run-form-fields";
 import { JsonValue } from "./run-json";
 import { ReviewTranscript } from "./run-transcript";
 import type { TranscriptTarget } from "./transcript";
+import type { SpeakerListen } from "./transcript-lines";
 import type { TranscriptDraftHandle } from "./transcript-review-draft";
+import { speakerText } from "./transcript-speakers";
 import { isStaleRefusal, refusalText } from "./run-messages";
 import {
   changedFields,
@@ -159,35 +163,60 @@ function FieldsEditor({
   );
 }
 
+/**
+ * A name per speaker, each beside a button that plays the speaker through the
+ * transcript's player (`onListen`, absent without a transcript), with why the
+ * step proposed the name under its label.
+ */
 function SpeakersEditor({
   baseId,
   speakers,
-  onChange
+  onChange,
+  onListen
 }: {
   baseId: string;
   speakers: DraftSpeaker[];
   onChange: (speakers: DraftSpeaker[]) => void;
+  onListen: ((label: string) => void) | null;
 }) {
   const t = useTranslations();
   return (
-    <div id={`${baseId}-editor`} className="flex flex-col gap-3">
-      <p className="text-ax-text-secondary text-sm">{t("flow_runs_review_speakers_hint")}</p>
+    <div id={`${baseId}-editor`} className="flex max-w-prose flex-col gap-3">
+      <p className="text-ax-text-secondary max-w-prose text-sm">
+        {t("flow_runs_review_speakers_hint")}
+      </p>
       {speakers.map((speaker) => {
         const evidence =
           typeof speaker.rest.evidence === "string" ? speaker.rest.evidence.trim() : "";
         return (
-          <TextInput
-            key={speaker.label}
-            label={t("flow_runs_review_speaker_name", { label: speaker.label })}
-            description={evidence || undefined}
-            value={speaker.name}
-            onChange={(name) =>
-              onChange(
-                speakers.map((item) => (item.label === speaker.label ? { ...item, name } : item))
-              )
-            }
-            width="100%"
-          />
+          <div key={speaker.label} className="flex items-end gap-2">
+            <TextInput
+              label={t("flow_runs_review_speaker_name", {
+                label: speakerText(speaker.label, {}, t)
+              })}
+              description={
+                evidence ? t("flow_runs_review_speaker_evidence", { evidence }) : undefined
+              }
+              value={speaker.name}
+              onChange={(name) =>
+                onChange(
+                  speakers.map((item) => (item.label === speaker.label ? { ...item, name } : item))
+                )
+              }
+              containerClassName="min-w-0 flex-1"
+            />
+            {onListen ? (
+              <Button
+                label={t("flow_transcript_sample_listen", {
+                  name: speakerText(speaker.label, { [speaker.label]: speaker.name }, t)
+                })}
+                icon={<Volume2 aria-hidden="true" />}
+                onClick={() => onListen(speaker.label)}
+              >
+                {t("flow_runs_review_speaker_listen")}
+              </Button>
+            ) : null}
+          </div>
         );
       })}
     </div>
@@ -195,8 +224,9 @@ function SpeakersEditor({
 }
 
 /**
- * The row of decision buttons. On a phone it is docked at the bottom, under the
- * thumb: a reviewer reads a long draft and the decision must not wait at its end.
+ * The row of decision buttons. A reviewer reads a long draft and the decision
+ * must not wait at its end: on a phone it is docked at the bottom, under the
+ * thumb; wider, it sticks to the bottom of the view while the review scrolls.
  */
 function DecisionBar({ children }: { children: React.ReactNode }) {
   const t = useTranslations();
@@ -204,7 +234,13 @@ function DecisionBar({ children }: { children: React.ReactNode }) {
   return phone ? (
     <DockedActions label={t("flow_runs_review_actions")}>{children}</DockedActions>
   ) : (
-    <div className="flex flex-wrap gap-2">{children}</div>
+    <div
+      role="group"
+      aria-label={t("flow_runs_review_actions")}
+      className="border-ax-border bg-ax-card sticky bottom-0 z-10 -mx-4 flex flex-wrap gap-2 border-t px-4 py-3"
+    >
+      {children}
+    </div>
   );
 }
 
@@ -252,6 +288,21 @@ export function ReviewPanel({
   const [approvalHeld, setApprovalHeld] = useState<string | null>(null);
   // The transcript's corrections are a draft that saves itself: approval sends it first.
   const transcriptDraft = useRef<TranscriptDraftHandle>(null);
+  /** Plays a speaker through the transcript's player, from the speaker's name. */
+  const listen = useRef<SpeakerListen>(null);
+  // The names as typed show in the transcript at once (a name its corrections give wins).
+  const typedNames = useMemo(
+    () =>
+      draft.kind === "speakers"
+        ? Object.fromEntries(
+            draft.speakers.flatMap((speaker): [string, string][] => {
+              const name = speaker.name.trim();
+              return name ? [[speaker.label, name]] : [];
+            })
+          )
+        : undefined,
+    [draft]
+  );
   const [savingTranscript, setSavingTranscript] = useState(false);
 
   /** True, and says why at the edit, when the transcript has an edit not saved yet. */
@@ -399,7 +450,8 @@ export function ReviewPanel({
   return (
     <section
       aria-labelledby={headingId}
-      className="border-ax-border bg-ax-card rounded-ax-element flex flex-col gap-4 border p-4"
+      // Whatever scrolls into view (a focused field, a played line) stops above the decision bar.
+      className="border-ax-border bg-ax-card rounded-ax-element flex flex-col gap-4 border p-4 [&_*]:scroll-mb-24"
     >
       <div className="flex flex-col gap-1">
         <h2 id={headingId} className="text-ax-text text-lg font-semibold break-words">
@@ -418,7 +470,7 @@ export function ReviewPanel({
       <div
         ref={summaryRef}
         tabIndex={-1}
-        className="focus-visible:outline-ring rounded-ax-inner outline-none focus-visible:outline-2 focus-visible:outline-offset-2"
+        className="focus-visible:outline-ring rounded-ax-inner focus-visible:outline-2 focus-visible:outline-offset-2"
       >
         {options.expired && !options.canResume ? (
           <Banner
@@ -476,6 +528,7 @@ export function ReviewPanel({
           baseId={baseId}
           speakers={draft.speakers}
           onChange={(speakers) => setDraft({ ...draft, speakers })}
+          onListen={transcript ? (label) => listen.current?.play(label) : null}
         />
       ) : draft.kind === "fields" ? (
         <FieldsEditor
@@ -514,7 +567,7 @@ export function ReviewPanel({
       ) : null}
 
       {transcript ? (
-        <div id={`${baseId}-transcript`} className="flex flex-col gap-2">
+        <div id={`${baseId}-transcript`} className="flex flex-col gap-2 [&>p]:max-w-prose">
           <Heading level={3}>{t("flow_transcript_review_heading")}</Heading>
           <Text type="supporting" as="p">
             {options.canDecide
@@ -528,6 +581,8 @@ export function ReviewPanel({
             mayEdit={options.canDecide}
             onUnsavedChange={setTranscriptUnsaved}
             draftRef={transcriptDraft}
+            proposedNames={typedNames}
+            listenRef={listen}
           />
         </div>
       ) : null}
@@ -628,16 +683,21 @@ export function ReviewPanel({
               }}
             />
           ) : null}
-          <Button
-            ref={rejectButton}
-            label={t("flow_runs_review_reject")}
-            variant="destructive"
-            onClick={() => {
-              if (busy) return;
-              flushSync(() => setRejecting(true));
-              focusFirstControl(`${baseId}-reason`);
-            }}
-          />
+          {/* Set apart from the approvals, so a slip of the thumb does not reject. */}
+          <div className="ms-1 flex gap-3">
+            <Divider orientation="vertical" />
+            <Button
+              ref={rejectButton}
+              label={t("flow_runs_review_reject")}
+              variant="destructive"
+              width="100%"
+              onClick={() => {
+                if (busy) return;
+                flushSync(() => setRejecting(true));
+                focusFirstControl(`${baseId}-reason`);
+              }}
+            />
+          </div>
         </DecisionBar>
       ) : null}
       {options.canResume ? (

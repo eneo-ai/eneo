@@ -20,7 +20,8 @@ import { History, Search } from "lucide-react";
 import Link from "@/lib/link";
 import { useRouter } from "@/lib/navigation";
 import { useLocale, useTranslations } from "use-intl";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Collapsible } from "@/components/astryx/collapsible";
 import { Table } from "@/components/astryx/table";
 import { TextInput } from "@/components/astryx/text-input";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
@@ -51,6 +52,7 @@ import { useStartedRuns, withStartedRuns } from "./runs-optimistic";
 import {
   canRedispatch,
   createPollClock,
+  isAwaitingReview,
   listNeedsPolling,
   listSignature,
   runDurationMs,
@@ -81,7 +83,7 @@ const DEFAULT_SORT: RunsSort = { key: "started_at", order: "desc" };
 const SEARCH_DELAY_MS = 300;
 /** The room the table's six columns need; with less, the rows stack as on a phone. */
 export const RUNS_TABLE_WIDTH = 936;
-/** Runs a phone shows at a glance: filters above them would take more room than they do. */
+/** Runs shown at a glance: filters above them would take more room than they do. */
 const FEW_RUNS = 3;
 
 // Where a run's own page is; kept here for the screens that link to runs.
@@ -253,7 +255,14 @@ export function FlowRunsList({
   const phone = usePhoneScreen();
   // So does a panel beside the chat: what counts is the room here, not the window's.
   const sectionRef = useRef<HTMLElement>(null);
-  const narrow = useElementWidth(sectionRef, (width) => width < RUNS_TABLE_WIDTH) ?? false;
+  // The observer answers after the first paint; measured before it, the table never flashes.
+  const [firstNarrow, setFirstNarrow] = useState<boolean | null>(null);
+  useLayoutEffect(() => {
+    const width = sectionRef.current?.getBoundingClientRect().width ?? 0;
+    if (width > 0) setFirstNarrow(width < RUNS_TABLE_WIDTH);
+  }, []);
+  const narrow =
+    useElementWidth(sectionRef, (width) => width < RUNS_TABLE_WIDTH) ?? firstNarrow ?? false;
   const stacked = phone || narrow;
   const person = { canRun: can("flows_run"), userId: user.id, publishedVersion };
   const [mine, setMine] = useState(false);
@@ -286,16 +295,11 @@ export function FlowRunsList({
     runs.dataUpdatedAt
   );
   const items = shown.items;
-  // A phone with next to nothing to filter has no use for the three controls: they would be most
-  // of its screen. A search that finds little keeps them, and so does the list on its way back
+  // A list with next to nothing to filter has no use for the three controls: they would take more
+  // room than the runs. A search that finds little keeps them, and so does the list on its way back
   // from one (`isPlaceholderData`), or the field being typed in would go.
   const showFilters =
-    !phone ||
-    items.length > FEW_RUNS ||
-    search !== "" ||
-    status !== null ||
-    mine ||
-    runs.isPlaceholderData;
+    items.length > FEW_RUNS || search !== "" || status !== null || mine || runs.isPlaceholderData;
 
   // Announces each run that moved on since the last answer; comparing with
   // what was seen makes a repeated pass over the same answer a no-op.
@@ -323,15 +327,27 @@ export function FlowRunsList({
     count === undefined ? "" : ` (${formatCount(count, locale)})`;
   const total = counts ? Object.values(counts).reduce((sum, count) => sum + count, 0) : undefined;
 
-  /** A run's state, with the actions its state allows: send it again, try it again, cancel it. */
+  /**
+   * A run's state, with the actions its state allows: review it (on its page), send it again, try
+   * it again, cancel it.
+   */
   const statusCell = (run: Row) => {
     const redispatch = canRedispatch(run, runs.dataUpdatedAt);
     const offers = runActions(run, person);
+    const review = isAwaitingReview(run.status);
     return (
       <span className="flex flex-col items-start gap-1">
         <RunStatus status={run.status} purpose={run.purpose} />
-        {redispatch || offers.retry || offers.cancel ? (
+        {review || redispatch || offers.retry || offers.cancel ? (
           <span className="flex flex-wrap gap-1">
+            {review ? (
+              <Button
+                label={t("flow_runs_review_open")}
+                variant="primary"
+                size="sm"
+                href={runHref(spaceRouteId, flowId, run.id)}
+              />
+            ) : null}
             {redispatch ? <RedispatchButton flowId={flowId} run={run} /> : null}
             {offers.retry ? (
               <RetryRunButton
@@ -351,6 +367,7 @@ export function FlowRunsList({
                   rescue(() => document.getElementById(linkId(run.id)) ?? headingRef.current)
                 }
                 size="sm"
+                variant={review ? "ghost" : "destructive"}
               />
             ) : null}
           </span>
@@ -358,10 +375,18 @@ export function FlowRunsList({
       </span>
     );
   };
-  /** How long a run took, or took so far; null when it has not started. */
+  /** How long a run took, took so far, or has waited for its review; null when it has not started. */
   const durationOrNull = (run: Row) => {
     const ms = runDurationMs(run);
     if (ms !== null) return formatSeconds(ms / 1000, t);
+    if (isAwaitingReview(run.status)) {
+      // The person's wait, not the run working: from the run's last change, which for a paused
+      // run is when it paused, as of the list's last read.
+      const waited = runs.dataUpdatedAt - Date.parse(run.updated_at);
+      return Number.isFinite(waited) && waited >= 0
+        ? t("flow_runs_waited", { time: formatSeconds(waited / 1000, t) })
+        : null;
+    }
     // A run still going: how long so far, as of the list's last read.
     const elapsed = runElapsedMs(run, runs.dataUpdatedAt);
     return elapsed === null
@@ -374,7 +399,7 @@ export function FlowRunsList({
   const columns: TableColumn<Row>[] = [
     {
       key: "started_at",
-      header: t("flow_run_journey_column_run"),
+      header: t("flow_runs_column_started"),
       width: proportional(3),
       sortable: true,
       renderCell: (run) => (
@@ -422,12 +447,17 @@ export function FlowRunsList({
   const capped = !runs.hasNextPage && runs.data?.pages.at(-1)?.has_more === true;
 
   return (
-    <section ref={sectionRef} aria-labelledby={headingId} className="flex flex-col gap-3">
+    <section
+      ref={sectionRef}
+      aria-labelledby={headingId}
+      // The sort buttons are 24 px tall with a mouse as well (WCAG 2.5.8); touch gets 44 from globals.css 9b.
+      className="flex flex-col gap-3 [&_.astryx-table-header-cell_button]:min-h-6"
+    >
       <Heading
         id={headingId}
         ref={headingRef}
         tabIndex={-1}
-        className="text-ax-text focus-visible:outline-ring text-lg font-semibold outline-none focus-visible:outline-2 focus-visible:outline-offset-2"
+        className="text-ax-text focus-visible:outline-ring text-lg font-semibold focus-visible:outline-2 focus-visible:outline-offset-2"
       >
         {t("flow_runs_heading")}
       </Heading>
@@ -492,8 +522,13 @@ export function FlowRunsList({
               ? t("flow_run_journey_search_empty")
               : status
                 ? t("flow_run_extras_status_empty")
-                : publishedVersion === null && !phone
-                  ? t("flow_runs_empty_description_unpublished")
+                : publishedVersion === null
+                  ? // A phone cannot publish: it says where that is done.
+                    t(
+                      phone
+                        ? "flow_runs_empty_description_unpublished_phone"
+                        : "flow_runs_empty_description_unpublished"
+                    )
                   : t("flow_runs_empty_description")
           }
         />
@@ -541,9 +576,20 @@ export function FlowRunsList({
             />
           )}
           {!stacked && items.some((run) => run.token_usage) ? (
-            <p className="text-ax-text-secondary m-0 max-w-prose text-xs">
-              {t("flow_runs_usage_tokens_explainer")}
-            </p>
+            <Collapsible
+              trigger={
+                // As tall as a step's folds (32 px); a bare span is trimmed to the text's cap height.
+                <span className="block py-1.5 text-sm">
+                  {t("flow_runs_usage_tokens_explainer_title")}
+                </span>
+              }
+              defaultIsOpen={false}
+              chevronPosition="start"
+            >
+              <p className="text-ax-text-secondary m-0 max-w-prose pt-1 text-sm">
+                {t("flow_runs_usage_tokens_explainer")}
+              </p>
+            </Collapsible>
           ) : null}
           <LoadMore query={runs} label={t("flow_runs_show_more")} />
           {capped ? (

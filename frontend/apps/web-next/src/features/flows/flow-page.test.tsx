@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-libra
 import { Suspense } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
+import { openMenuOnRelease, tap } from "@/test/menus";
 import type { Permission } from "@/lib/auth/permissions";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
 import { resetNavigation, setRoute } from "@/test/navigation";
@@ -351,12 +352,31 @@ const OPENING_POSTS = [
   "/api/v1/flows/{id}/security-classification/preview"
 ];
 
+/** A finished run of the flow: a flow with one has something to measure the suggestions over. */
+const RUN = {
+  id: "run-1",
+  flow_id: "flow-1",
+  flow_version: 3,
+  tenant_id: "tenant-1",
+  trace_id: "trace-1",
+  status: "completed",
+  purpose: "production",
+  principal_type: "user",
+  revision: 3,
+  dispatch_attempt_count: 1,
+  created_at: "2026-10-21T08:00:00Z",
+  started_at: "2026-10-21T08:00:02Z",
+  finished_at: "2026-10-21T08:01:07Z",
+  updated_at: "2026-10-21T08:01:07Z"
+};
+
 /** What the page posted, by path. */
 const posted = () => api.POST.mock.calls.map(([path]) => path);
 
 beforeEach(() => {
   state.flow = ok(makeFlow({ steps }));
   state.suggestions = suggestions(4, []);
+  state.runs = ok({ count: 1, items: [RUN], has_more: false });
   state.inserted = [];
   state.dirty = false;
   // Without edit access the chat is not offered; most tests are about the definition.
@@ -365,6 +385,9 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  // Astryx's own announcements (an empty flow's empty state) leave a live
+  // region with role="alert" on the body, which a later test's alert query would find.
+  document.querySelectorAll("[data-astryx-live-region]").forEach((region) => region.remove());
   vi.clearAllMocks();
   resetNavigation();
   window.history.replaceState(null, "", "/");
@@ -422,7 +445,7 @@ describe("FlowPage", () => {
     act(() => setViewport(NARROW_WINDOW));
     expect(screen.queryByRole("separator", { name: "Ändra storlek på chatten" })).toBeNull();
     // The chat is one of the tabbed views there, laid out by the stylesheet alone.
-    expect(screen.getByRole("region", { name: "Chatt om flödet" }).style.width).toBe("");
+    expect(screen.getByRole("tabpanel", { name: messages.flows_view_chat }).style.width).toBe("");
   });
 
   it("moves a step through the editor, fenced on the revision on screen", async () => {
@@ -607,18 +630,46 @@ describe("FlowPage", () => {
     expect(api.POST).toHaveBeenCalledWith("/api/v1/flows/{id}/publish/", {
       params: { path: { id: "flow-1" }, query: { expected_revision: 4 } }
     });
+    // The step it names is one press away.
+    fireEvent.click(within(alert).getByRole("button", { name: "Öppna Steg 2: Skriv svar" }));
+    expect(await screen.findByText("Redigerar step-2")).toBeTruthy();
   });
 
-  it("puts the settings above the check and the steps, and the header brings them up", async () => {
+  it("puts focus on Kör flödet once published, where Publicera was", async () => {
+    state.publish = ok(makeFlow({ steps, published_version: 1 }));
     renderPage();
-    const settings = screen.getByRole("region", { name: messages.flows_settings_heading });
-    const before = (later: Element) =>
-      settings.compareDocumentPosition(later) & Node.DOCUMENT_POSITION_FOLLOWING;
-    expect(before(draftCheck())).toBeTruthy();
-    expect(before(stepsRegion())).toBeTruthy();
+    const publish = screen.getByRole("button", { name: "Publicera" });
+    publish.focus();
+    fireEvent.click(publish);
+    const run = await screen.findByRole("button", { name: "Kör flödet" });
+    await waitFor(() => expect(document.activeElement).toBe(run));
+  });
 
-    fireEvent.click(screen.getByRole("button", { name: messages.flows_settings_heading }));
-    expect(await screen.findByRole("button", { name: messages.flows_settings_save })).toBeTruthy();
+  it("keeps one order, empty or not: the check, the steps, then the settings", () => {
+    const settingsLast = () => {
+      const settings = screen.getByRole("region", { name: messages.flows_settings_heading });
+      return stepsRegion().compareDocumentPosition(settings) & Node.DOCUMENT_POSITION_FOLLOWING;
+    };
+    renderPage();
+    expect(
+      draftCheck().compareDocumentPosition(stepsRegion()) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    expect(settingsLast()).toBeTruthy();
+    cleanup();
+    renderPage(makeFlow({ steps: [] }));
+    expect(settingsLast()).toBeTruthy();
+  });
+
+  it("offers the header's way to the settings only where they are not on screen", async () => {
+    renderPage();
+    // Beside the definition the section's own "Ändra inställningar" is the way.
+    expect(screen.queryByRole("button", { name: messages.flows_settings_heading })).toBeNull();
+    const edit = screen.getByRole("button", { name: messages.flows_settings_edit });
+    edit.focus();
+    fireEvent.click(edit);
+    // Its button has left with the summary: focus is on the form's first field.
+    const name = await screen.findByRole("textbox", { name: /^Namn/ });
+    await waitFor(() => expect(document.activeElement).toBe(name));
   });
 
   it("leaves the runs for the settings the header asks for, once", async () => {
@@ -676,6 +727,8 @@ describe("FlowPage", () => {
     expect(posted()).not.toContain("/api/v1/flows/{id}/publish/");
 
     fireEvent.click(screen.getByRole("button", { name: messages.cancel }));
+    // Nothing is left unsaved, so the notice that said so goes.
+    await waitFor(() => expect(screen.queryByText(messages.flows_publish_unsaved)).toBeNull());
     fireEvent.click(screen.getByRole("button", { name: "Publicera" }));
     await waitFor(() => expect(posted()).toContain("/api/v1/flows/{id}/publish/"));
   });
@@ -702,6 +755,10 @@ describe("FlowPage", () => {
     expect(
       await screen.findByRole("button", { name: "Flytta ner Steg 1: Sammanfatta" })
     ).toBeTruthy();
+    // Avpublicera has gone: focus is on Publicera, not left on the page.
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole("button", { name: "Publicera" }))
+    );
   });
 
   it("offers a run of a published flow to someone who may run it", async () => {
@@ -717,18 +774,35 @@ describe("FlowPage", () => {
     expect(screen.getByText("Ett publicerat flöde kan inte ändras.")).toBeTruthy();
   });
 
-  it("ends the header's actions with the primary one, published or not", () => {
-    const comesAfter = (first: string, last: string) =>
+  it("starts the header's actions with the primary one, published or not", () => {
+    const comesBefore = (first: string, last: string) =>
       screen
         .getByRole("button", { name: first })
         .compareDocumentPosition(screen.getByRole("button", { name: last })) &
       Node.DOCUMENT_POSITION_FOLLOWING;
     renderPage(makeFlow({ steps, published_version: 3 }));
-    expect(comesAfter(messages.flow_editor_tools_package_export, "Kör flödet")).toBeTruthy();
-    expect(comesAfter("Avpublicera", "Kör flödet")).toBeTruthy();
+    expect(comesBefore("Kör flödet", "Avpublicera")).toBeTruthy();
     cleanup();
     renderPage(makeFlow({ steps }));
-    expect(comesAfter(messages.flow_editor_tools_package_export, "Publicera")).toBeTruthy();
+    expect(comesBefore("Publicera", "Fler åtgärder")).toBeTruthy();
+  });
+
+  it("makes Publicera the primary action only once the draft has a step", () => {
+    const isPrimary = () =>
+      screen.getByRole("button", { name: "Publicera" }).getAttribute("data-variant");
+    renderPage(makeFlow({ steps: [] }));
+    expect(isPrimary()).toBe("secondary");
+    cleanup();
+    renderPage(makeFlow({ steps }));
+    expect(isPrimary()).toBe("primary");
+  });
+
+  it("keeps the export in Fler åtgärder, where it opens the export", async () => {
+    renderPage();
+    expect(screen.queryByRole("button", { name: "Exportera" })).toBeNull();
+    const menu = await openMenuOnRelease(screen.getByRole("button", { name: "Fler åtgärder" }));
+    tap(within(menu).getByRole("menuitem", { name: "Exportera som paket" }));
+    expect(await screen.findByRole("dialog", { name: /Exportera/ })).toBeTruthy();
   });
 
   it("offers no run of a draft, nor to someone who may not run the flow", () => {
@@ -752,7 +826,7 @@ describe("FlowPage", () => {
     renderPage(makeFlow({ steps, permissions: viewOnly }), ["flows_view", "flows_manage"]);
 
     expect(screen.getByRole("button", { name: "Visa Steg 1: Sammanfatta" })).toBeTruthy();
-    for (const name of [/Flytta/, "Publicera", "Exportera", "Lägg till steg"]) {
+    for (const name of [/Flytta/, "Publicera", "Fler åtgärder", "Lägg till steg"]) {
       expect(screen.queryByRole("button", { name })).toBeNull();
     }
     // Without the runs to read there is one view, so no tabs.
@@ -775,23 +849,6 @@ describe("FlowPage", () => {
   });
 
   it("lists the flow's runs in their own tab and remembers it in the address", async () => {
-    const run = {
-      id: "run-1",
-      flow_id: "flow-1",
-      flow_version: 3,
-      tenant_id: "tenant-1",
-      trace_id: "trace-1",
-      status: "completed",
-      purpose: "production",
-      principal_type: "user",
-      revision: 3,
-      dispatch_attempt_count: 1,
-      created_at: "2026-10-21T08:00:00Z",
-      started_at: "2026-10-21T08:00:02Z",
-      finished_at: "2026-10-21T08:01:07Z",
-      updated_at: "2026-10-21T08:01:07Z"
-    };
-    state.runs = ok({ count: 1, items: [run], has_more: false });
     const { container } = renderPage(makeFlow({ steps, published_version: 3 }));
 
     fireEvent.click(screen.getByRole("tab", { name: "Körningar" }));
@@ -876,13 +933,38 @@ describe("FlowPage", () => {
     expect(await screen.findByRole("button", { name: "Ny konversation" })).toBeTruthy();
   });
 
+  it("holds the definition, the runs and the chat in one row of tabs below lg", async () => {
+    setViewport(NARROW_WINDOW);
+    renderPage();
+    const tablist = screen.getByRole("tablist", { name: messages.flow_runs_tabs_label });
+    for (const name of ["Definition", "Körningar", messages.flows_view_chat]) {
+      expect(within(tablist).getByRole("tab", { name })).toBeTruthy();
+    }
+    expect(screen.queryByRole("radiogroup")).toBeNull();
+    const chat = screen.getByRole("tabpanel", { name: messages.flows_view_chat });
+    const definition = screen.getByRole("region", { name: "Flödet" });
+
+    const chatTab = screen.getByRole("tab", { name: messages.flows_view_chat });
+    fireEvent.click(chatTab);
+    // The selected tab controls the chat's panel, and the hidden definition is no tab's panel.
+    expect(document.getElementById(chatTab.getAttribute("aria-controls") ?? "")).toBe(chat);
+    expect(screen.getAllByRole("tabpanel")).toEqual([chat]);
+    expect(chat.className).not.toContain("max-lg:hidden");
+    expect(definition.className).toContain("max-lg:hidden");
+    // The settings are off screen here: the header leads back to them.
+    fireEvent.click(screen.getByRole("button", { name: messages.flows_settings_heading }));
+    expect(await screen.findByRole("button", { name: messages.flows_settings_save })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Definition", selected: true })).toBeTruthy();
+    expect(definition.className).not.toContain("max-lg:hidden");
+  });
+
   it("hands a suggestion to the chat, bringing the chat into view on a phone, unsent", async () => {
     state.chat = ok({ ...CHAT, editing: false });
     state.suggestions = suggestions(4, [DUPLICATE_READ]);
     setViewport(NARROW_WINDOW);
     const { container } = renderPage();
     const definition = screen.getByRole("region", { name: "Flödet" });
-    const chat = screen.getByRole("region", { name: "Chatt om flödet" });
+    const chat = screen.getByRole("tabpanel", { name: messages.flows_view_chat });
     expect(chat.className).toContain("max-lg:hidden");
 
     fireEvent.click(await screen.findByRole("button", { name: /^1 förslag/ }));
@@ -969,6 +1051,27 @@ describe("FlowPage", () => {
     ).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Räkna med de senaste körningarna" })).toBeNull();
     expect(suggestionRuns()).toEqual([0]);
+  });
+
+  it("offers no measuring of a flow that has never run, and says what the suggestions rest on", async () => {
+    state.suggestions = suggestions(4, [DUPLICATE_READ]);
+    state.runs = ok({ count: 0, items: [], has_more: false });
+    renderPage(makeFlow({ steps }), ["flows_view", "flows_manage", "flows_trace"]);
+    expect(
+      await within(stepsRegion()).findByText("1 förslag kan göra flödet enklare eller billigare")
+    ).toBeTruthy();
+    await waitFor(() =>
+      expect(api.GET).toHaveBeenCalledWith("/api/v1/flows/{id}/runs/", expect.anything())
+    );
+    expect(screen.queryByRole("button", { name: "Räkna med de senaste körningarna" })).toBeNull();
+    cleanup();
+
+    state.runs = ok({ count: 1, items: [RUN], has_more: false });
+    renderPage(makeFlow({ steps }), ["flows_view", "flows_manage", "flows_trace"]);
+    expect(
+      await screen.findByRole("button", { name: "Räkna med de senaste körningarna" })
+    ).toBeTruthy();
+    expect(screen.getByText(messages.flow_suggestions_runs_context)).toBeTruthy();
   });
 
   it("measures the suggestions on a press for the visit, and again only for a new revision", async () => {
@@ -1303,7 +1406,7 @@ describe("FlowPage", () => {
     state.suggestions = suggestions(4, [DUPLICATE_READ]);
     setViewport(NARROW_WINDOW);
     renderPage();
-    const chat = screen.getByRole("region", { name: "Chatt om flödet" });
+    const chat = screen.getByRole("tabpanel", { name: messages.flows_view_chat });
 
     const card = screen.getByRole("article", { name: "Steg 2 Skriv svar" });
     fireEvent.click(await within(card).findByRole("button", { name: /^1 förslag/ }));

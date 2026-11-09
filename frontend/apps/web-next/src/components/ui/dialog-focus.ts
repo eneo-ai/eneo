@@ -98,9 +98,12 @@ export function useReturnFocus(open: boolean, triggerRef: React.RefObject<HTMLEl
   React.useEffect(trackFocus, []);
 
   // Layout effect: runs before Astryx's showModal() moves focus into the dialog.
+  // Once per opening: StrictMode runs it again after the dialog's title took
+  // focus, and a dialog that mounts open (a key per opening) would then
+  // return focus to its own hidden title.
   React.useLayoutEffect(() => {
     openRef.current = open;
-    if (open) targetRef.current = returnTarget() ?? triggerRef.current;
+    if (open) targetRef.current ??= returnTarget() ?? triggerRef.current;
   }, [open, triggerRef]);
 
   // Passive effect: runs after Astryx Dialog (a child) has closed and refocused.

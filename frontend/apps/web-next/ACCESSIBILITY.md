@@ -98,7 +98,10 @@ says "Radix" it means the legacy shadcn primitives in `src/components/ui`.
 - Custom focus styles use the full-strength ring: `focus-visible:outline-2`,
   `focus-visible:outline-offset-2`, `focus-visible:outline-ring`. Never an
   alpha ring (`ring-ring/50`, the legacy shadcn halo, is about 2:1 on white)
-  and never `outline-none` without a replacement.
+  and never `outline-none` without a replacement. In Tailwind 4 `outline-none`
+  and `outline-hidden` also set the outline style to none, which the width
+  reads: beside them `focus-visible:outline-2` draws nothing. Leave them out,
+  or add `focus-visible:outline-solid`.
 - The focused element is never covered by sticky or docked UI: the header, the
   docked chat composer, toolbars, toasts, cookie-style banners. Give the scroll
   container padding for them (`scroll-pt-*`, `scroll-pb-*` equal to the sticky

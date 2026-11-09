@@ -5,7 +5,7 @@ import { useId, type ReactNode, type Ref } from "react";
 import { formatBytes } from "@/lib/format";
 import { fieldLabel } from "./run-contract";
 import { inputLabel } from "./run-file-inputs";
-import { summaryIsEmpty, type StartSummary } from "./start-run-checks";
+import { inputsComeFirst, summaryIsEmpty, type StartSummary } from "./start-run-checks";
 
 /**
  * The start dialog's last step: what the run is sent (its name, the fields
@@ -31,13 +31,32 @@ export function StartRunSummary({
   const headingId = useId();
   // The run's name is no material for it.
   const filled = summary.fields.length > 0 || summary.freeText !== null || summary.files.length > 0;
+  // In the form's order: files first where the form shows them first.
+  const filesFirst = inputsComeFirst(
+    summary.files.map(({ input }) => input),
+    summary.fields.map(({ field }) => field)
+  );
+  const files = summary.files.map(({ input, files: stored }) => (
+    <MetadataListItem key={input.step_id} label={inputLabel(input, t)}>
+      <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
+        {stored.map((file) => (
+          <li key={file.key} className="flex flex-wrap items-baseline gap-x-2">
+            <span className="min-w-0 break-words">{file.name}</span>
+            <span className="text-ax-text-secondary text-xs tabular-nums">
+              {formatBytes(file.size, locale)}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </MetadataListItem>
+  ));
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-4">
       <h3
         id={headingId}
         ref={headingRef}
         tabIndex={-1}
-        className="text-ax-text focus-visible:outline-ring m-0 text-base font-semibold outline-none focus-visible:outline-2 focus-visible:outline-offset-2"
+        className="text-ax-text focus-visible:outline-ring m-0 text-base font-semibold focus-visible:outline-2 focus-visible:outline-offset-2"
       >
         {t("flow_runs_summary_title")}
       </h3>
@@ -57,6 +76,7 @@ export function StartRunSummary({
               <span className="break-words">{summary.runLabel}</span>
             </MetadataListItem>
           ) : null}
+          {filesFirst ? files : null}
           {summary.fields.map(({ field, value }) => (
             <MetadataListItem key={field.name} label={fieldLabel(field)}>
               <span className="break-words">{value}</span>
@@ -67,20 +87,7 @@ export function StartRunSummary({
               <span className="break-words whitespace-pre-wrap">{summary.freeText}</span>
             </MetadataListItem>
           ) : null}
-          {summary.files.map(({ input, files }) => (
-            <MetadataListItem key={input.step_id} label={inputLabel(input, t)}>
-              <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
-                {files.map((file) => (
-                  <li key={file.key} className="flex flex-wrap items-baseline gap-x-2">
-                    <span className="min-w-0 break-words">{file.name}</span>
-                    <span className="text-ax-text-secondary text-xs tabular-nums">
-                      {formatBytes(file.size, locale)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </MetadataListItem>
-          ))}
+          {filesFirst ? null : files}
         </MetadataList>
       )}
     </section>

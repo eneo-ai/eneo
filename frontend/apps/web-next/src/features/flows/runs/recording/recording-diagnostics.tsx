@@ -86,7 +86,13 @@ export function RecordingDiagnostics({ report }: { report: () => RecordingReport
 
   return (
     <Collapsible
-      trigger={<span className="text-sm">{t("flow_transcript_rec_diag_show")}</span>}
+      // Support's tool, not the person's: a quiet line, not a section of its own.
+      trigger={
+        <span className="text-ax-text-secondary text-sm font-normal">
+          {t("flow_transcript_rec_diag_show")}
+        </span>
+      }
+      chevronPosition="start"
       isOpen={open}
       onOpenChange={(next) => {
         if (next) setText(reportText(report()));

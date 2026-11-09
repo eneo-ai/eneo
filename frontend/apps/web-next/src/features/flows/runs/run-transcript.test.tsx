@@ -75,7 +75,7 @@ function answerTranscript() {
   });
 }
 
-function renderTranscript() {
+function renderTranscript(proposedNames?: Record<string, string>) {
   const queryClient = testQueryClient();
   queryClient.setQueryData(["spaces", "space-1"], makeSpace({}));
   return renderInApp(
@@ -85,6 +85,7 @@ function renderTranscript() {
       target={TARGET}
       mayEdit
       runCompleted
+      proposedNames={proposedNames}
       fallback={<p>{STEP_TEXT}</p>}
     />,
     { queryClient, appContext: testAppContext({ permissions: ["flows_view", "flows_manage"] }) }
@@ -141,6 +142,44 @@ describe("RunTranscript", () => {
     );
     expect(screen.queryByText(messages.flow_runs_transcript_failed)).toBeNull();
     expect(screen.queryByText(STEP_TEXT)).toBeNull();
+  });
+
+  it("names the speakers as the run's speaker-mapping step did until someone names them here", async () => {
+    renderTranscript({ SPEAKER_01: "Erik" });
+
+    const lines = await screen.findByRole("list", { name: messages.flow_runs_transcript_lines });
+    expect(within(lines).getByText("Erik")).toBeTruthy();
+    expect(within(lines).queryByText("Talare 2")).toBeNull();
+    const field = screen.getByLabelText<HTMLInputElement>("Namn för Talare 2");
+    expect(field.value).toBe("Erik");
+
+    // The step's name is no change to save; a name given here is.
+    fireEvent.submit(field.closest("form")!);
+    expect(state.stub.calls.filter((call) => call.method === "PUT")).toHaveLength(0);
+  });
+
+  it("shows a name given here over the step's, and a name cleared here as none", async () => {
+    state.routes[CORRECTIONS] = () => ({
+      body: [
+        {
+          step_id: "step-1",
+          revision: 2,
+          segments_hash: "hash-1",
+          schema_version: 3,
+          stale: false,
+          occurrences: [],
+          speaker_edits: [],
+          speaker_names: { SPEAKER_01: "Erik Svensson", SPEAKER_02: null }
+        }
+      ]
+    });
+    renderTranscript({ SPEAKER_01: "Erik", SPEAKER_02: "Anna" });
+
+    const lines = await screen.findByRole("list", { name: messages.flow_runs_transcript_lines });
+    expect(within(lines).getByText("Erik Svensson")).toBeTruthy();
+    expect(screen.getByLabelText<HTMLInputElement>("Namn för Talare 2").value).toBe(
+      "Erik Svensson"
+    );
   });
 
   it("asks before the app's own links leave a correction not saved yet", async () => {

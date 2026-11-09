@@ -84,6 +84,12 @@ class CustomHeader(BaseModel):
     value: SecretValue = ""
     secret: StrictBool = False
 
+    @property
+    def sent(self) -> bool:
+        """A row the author left without a name is no header: it is not sent,
+        validated or counted as a credential."""
+        return bool(self.name.strip())
+
 
 def _default_custom_headers() -> list[CustomHeader]:
     return []
@@ -108,7 +114,7 @@ class HttpAuthoredConfig(BaseModel):
     @property
     def has_declared_credentials(self) -> bool:
         return not isinstance(self.auth, HttpAuthNone) or any(
-            header.secret for header in self.custom_headers
+            header.secret and header.sent for header in self.custom_headers
         )
 
     def interpolated_template_sites(self) -> list[tuple[ConfigPath, str]]:
@@ -130,7 +136,7 @@ class HttpAuthoredConfig(BaseModel):
         candidates.extend(
             (("custom_headers", index, "value"), header.value)
             for index, header in enumerate(self.custom_headers)
-            if not header.secret
+            if header.sent and not header.secret
         )
         if self.body.mode in (HttpBodyMode.JSON_TEMPLATE, HttpBodyMode.TEXT_TEMPLATE):
             candidates.append((("body", "template"), self.body.template))

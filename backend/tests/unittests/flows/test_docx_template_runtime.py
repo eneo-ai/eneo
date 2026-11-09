@@ -564,3 +564,33 @@ async def test_extract_docx_text_reads_control_content_and_skips_page_furniture(
 
 def test_extract_docx_template_text_preview_returns_readable_text() -> None:
     assert "Sammanfattning" in extract_docx_template_text_preview(_rapport())
+
+
+async def test_render_leaves_braces_placeholders_blank_like_the_builtin_template() -> (
+    None
+):
+    # The built-in template carries {{organisation}} in its header and
+    # {{title}} in its footer next to its content control; a flow fills the
+    # control and leaves the page furniture blank instead of failing.
+    document = Document()
+    document.sections[0].header.paragraphs[0].text = "{{organisation}}"
+    document.sections[0].footer.paragraphs[0].text = "{{title}}"
+    append_rich_control(document, tag="content", label="Innehåll", hint="Text")
+    buffer = io.BytesIO()
+    document.save(buffer)
+
+    rendered, _, text = await render_docx_template(
+        template_bytes=buffer.getvalue(),
+        template_name="mall.docx",
+        context={"content": "- a\n- b"},
+        step_order=2,
+    )
+
+    assert "a" in text
+    with zipfile.ZipFile(io.BytesIO(rendered)) as archive:
+        furniture = "".join(
+            archive.read(name).decode()
+            for name in archive.namelist()
+            if name.startswith(("word/header", "word/footer"))
+        )
+    assert "{{" not in furniture

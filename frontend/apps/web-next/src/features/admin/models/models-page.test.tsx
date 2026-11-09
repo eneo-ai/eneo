@@ -252,6 +252,8 @@ describe("ModelsPage", () => {
     const types = screen.getByRole("radiogroup", { name: "Modelltyp" });
     expect(within(types).getByRole("radio", { name: "Alla (5)" })).toBeTruthy();
     expect(within(types).getByRole("radio", { name: "Chatt (2)" })).toBeTruthy();
+    // A type with no models at all is not offered.
+    expect(within(types).queryByRole("radio", { name: /^Transkription/ })).toBeNull();
 
     fireEvent.click(within(types).getByRole("radio", { name: "Inbäddning (1)" }));
 
@@ -472,6 +474,64 @@ describe("ModelsPage", () => {
       await within(panel).findByText("Ingen tjänst för ordtider och talare ansluten")
     ).toBeTruthy();
     expect(within(panel).getByRole("button", { name: "Anslut tjänst" })).toBeTruthy();
+    // Its own action only: adding a provider belongs to the providers.
+    expect(screen.queryByRole("button", { name: "Lägg till leverantör" })).toBeNull();
+  });
+
+  it("keeps a header action on the services tab: Anslut tjänst, once, opening the connect dialog", async () => {
+    renderPage();
+    api.GET.mockImplementation((path: string) =>
+      ok(
+        path === "/api/v1/admin/transcription-services/"
+          ? {
+              items: [
+                {
+                  id: "s1",
+                  name: "Vemsa Sundsvall",
+                  endpoint_url: "https://vemsa.sundsvall.se",
+                  is_enabled: true,
+                  is_default: true,
+                  security_classification: null,
+                  space_count: 0,
+                  last_check: null,
+                  created_at: "2026-10-01T00:00:00Z",
+                  updated_at: "2026-10-01T00:00:00Z"
+                }
+              ],
+              has_more: false
+            }
+          : {}
+      )
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: "Ordtider och talaridentifiering" }));
+
+    // The header holds the tab's action (the tab strip stays put); the list adds none of its own.
+    expect(await within(screen.getByRole("tabpanel")).findByText("Vemsa Sundsvall")).toBeTruthy();
+    const connect = screen.getAllByRole("button", { name: "Anslut tjänst" });
+    expect(connect).toHaveLength(1);
+    expect(screen.getByRole("tabpanel").contains(connect[0]!)).toBe(false);
+    fireEvent.click(connect[0]!);
+    expect(await screen.findByRole("dialog", { name: /Anslut/ })).toBeTruthy();
+  });
+
+  it("offers no connection when the services list failed to load", async () => {
+    renderPage();
+    api.GET.mockImplementation((path: string) =>
+      path === "/api/v1/admin/transcription-services/"
+        ? Promise.resolve({
+            error: { message: "Service unavailable" },
+            response: new Response("{}", { status: 503 })
+          })
+        : ok({})
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: "Ordtider och talaridentifiering" }));
+
+    expect(
+      await screen.findByText("Tjänsterna för ordtider och talare kunde inte läsas in.")
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Anslut tjänst" })).toBeNull();
   });
 
   it("removes an embedding model's security class: Ingen is sent as null", async () => {

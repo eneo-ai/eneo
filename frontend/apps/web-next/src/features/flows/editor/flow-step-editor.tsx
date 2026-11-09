@@ -360,11 +360,17 @@ function StepEditorSession({
   // A requested field gets focus once the form is there: the page opened
   // the step to configure it (a connection the chat pointed at).
   const formReady = session !== null;
+  // A field can still be loading (the Word templates are fetched): it is
+  // tried each frame for about two seconds.
   useEffect(() => {
     if (!initialAnchor || !formReady) return;
-    const frame = requestAnimationFrame(() => {
-      focusAnchor(formId, initialAnchor);
-    });
+    let tries = 0;
+    let frame = 0;
+    const attempt = () => {
+      if (focusAnchor(formId, initialAnchor) || ++tries > 120) return;
+      frame = requestAnimationFrame(attempt);
+    };
+    frame = requestAnimationFrame(attempt);
     return () => cancelAnimationFrame(frame);
   }, [initialAnchor, formReady, formId]);
   const newerElsewhere =
@@ -686,7 +692,7 @@ function StepEditorSession({
         {latest.published_version != null && !readOnly && (
           <Banner status="info" title={t("flow_step_editor_published")} collapsible={false} />
         )}
-        <StepReadOnly flow={flow} step={draft} assistant={assistantDraft} />
+        <StepReadOnly flow={flow} step={draft} stepOrder={stepOrder} assistant={assistantDraft} />
         <div>
           <Button label={t("close")} onClick={onCancel} />
         </div>
@@ -722,7 +728,7 @@ function StepEditorSession({
         <div
           ref={summaryRef}
           tabIndex={-1}
-          className="focus-visible:outline-ring flex flex-col gap-3 outline-none focus-visible:outline-2 focus-visible:outline-offset-2"
+          className="focus-visible:outline-ring flex flex-col gap-3 focus-visible:outline-2 focus-visible:outline-offset-2"
         >
           {stale && (
             <Banner
@@ -843,12 +849,12 @@ function StepEditorSession({
                 sectionId={`${formId}-output`}
                 flow={flow}
                 stepId={stepId}
+                stepOrder={stepOrder}
                 draft={draft}
                 isLast={isLast}
                 onChange={changeStep}
                 problems={shownProblems}
                 groups={groups}
-                wholeValueGroups={wholeValueGroups}
                 onContractProposed={(contract) => {
                   // The advanced section shows the accepted contract, not text typed before it.
                   setContractDrafts((drafts) => ({ ...drafts, output_contract: undefined }));
@@ -926,7 +932,15 @@ function StepEditorSession({
         />
       </div>
 
-      <LeaveConfirmation active={unsaved} onLeave={uploads.release} />
+      {/* "Avbryt" on the save bar and every other way out ask the same: leave the step's edits. */}
+      <LeaveConfirmation
+        active={unsaved}
+        onLeave={uploads.release}
+        title={t("flow_step_editor_discard_title")}
+        description={t("flow_step_editor_discard_description")}
+        confirmLabel={t("flow_step_editor_discard")}
+        cancelLabel={t("flow_step_editor_keep_editing")}
+      />
     </section>
   );
 }

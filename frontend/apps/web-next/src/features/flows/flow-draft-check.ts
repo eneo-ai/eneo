@@ -9,6 +9,7 @@
  * Pure and unit-tested.
  */
 import { stepConnections } from "./chat/connections";
+import type { FieldAnchor } from "./editor/field-problems";
 import { removedReads } from "./editor/reference-repair";
 import {
   hasHttpConfig,
@@ -23,6 +24,7 @@ import {
   chainIssue,
   outputModeIssue,
   stepUsesModel,
+  templateReadiness,
   type ChainIssue,
   type OutputModeIssue
 } from "./editor/step-rules";
@@ -43,8 +45,9 @@ export type StepProblem =
   | { code: "chain"; issue: ChainIssue }
   | { code: "output_mode"; issue: OutputModeIssue }
   | { code: "name_missing" }
-  | { code: "http_url_missing" }
-  | { code: "http_credential_missing" }
+  | { code: "prompt_missing" }
+  | { code: "http_url_missing"; anchor: FieldAnchor }
+  | { code: "http_credential_missing"; anchor: FieldAnchor }
   | { code: "tool_missing" }
   | { code: "tool_unavailable" }
   | { code: "tool_refused"; refusal: NonNullable<ToolOption["refusal"]> }
@@ -55,7 +58,7 @@ export type StepProblem =
   | { code: "template_structured" }
   | { code: "speaker_participants_missing" }
   | { code: "model_missing" }
-  | { code: "deleted_reference" }
+  | { code: "deleted_reference"; anchor: FieldAnchor }
   | { code: "classification"; violation: NonNullable<StepClassification["violation"]> };
 
 export type FlowProblem =
@@ -78,16 +81,50 @@ export type DraftFacts = {
   transcription: TranscriptionResources;
 };
 
+/** The editor field that fixes a problem, for "Öppna steget" to focus; null for the step's top. */
+export function problemAnchor(problem: StepProblem): FieldAnchor | null {
+  switch (problem.code) {
+    case "chain":
+      return "input_source";
+    case "output_mode":
+      return "output_mode";
+    case "name_missing":
+      return "user_description";
+    case "prompt_missing":
+      return "prompt";
+    case "http_url_missing":
+    case "http_credential_missing":
+    case "deleted_reference":
+      return problem.anchor;
+    case "tool_missing":
+    case "tool_unavailable":
+    case "tool_refused":
+    case "tool_arguments_missing":
+      return "input_config.tool";
+    case "template_missing":
+    case "template_unbound":
+    case "template_orphaned":
+    case "template_structured":
+      return "output_config.template";
+    case "speaker_participants_missing":
+      return "output_config.speaker_mapping";
+    case "model_missing":
+      return "completion_model";
+    case "classification":
+      return null;
+  }
+}
+
 /**
- * The step still reads a step a change removed (`step_2_deleted`), in its
- * underlag, its tool arguments or its prompt.
+ * Where the step still reads a step a change removed (`step_2_deleted`): its
+ * underlag, its tool arguments or its prompt; null when it reads none.
  */
 function deletedReference(
   step: FlowStep,
   steps: readonly FlowStep[],
   assistant: FlowAssistant | undefined
-): boolean {
-  if (removedReads(step, steps).length > 0) return true;
+): FieldAnchor | null {
+  if (removedReads(step, steps).length > 0) return "input_bindings";
   const readsRemoved = (text: string) =>
     tokensOf(text).some((token) => readTarget(token, step, steps).kind === "deleted");
   const tool = readToolConfig(step.input_config);
@@ -95,13 +132,14 @@ function deletedReference(
     tool &&
     Object.values(tool.arguments).some((value) => typeof value === "string" && readsRemoved(value))
   ) {
-    return true;
+    return "input_config.tool";
   }
-  return readsRemoved(assistant?.prompt?.text ?? "");
+  return readsRemoved(assistant?.prompt?.text ?? "") ? "prompt" : null;
 }
 
 function stepProblems(
   step: FlowStep,
+  flow: Pick<FlowPublic, "steps" | "metadata_json">,
   ordered: readonly FlowStep[],
   facts: DraftFacts
 ): StepProblem[] {
@@ -126,19 +164,20 @@ function stepProblems(
     const url = hasHttpConfig(step.input_config)
       ? readHttpConfig(step.input_config, "input").url
       : "";
-    if (!url.trim()) problems.push({ code: "http_url_missing" });
+    if (!url.trim()) problems.push({ code: "http_url_missing", anchor: "input_config.http" });
   }
   if (step.output_mode === "http_post") {
     const url = hasHttpConfig(step.output_config)
       ? readHttpConfig(step.output_config, "output").url
       : "";
-    if (!url.trim()) problems.push({ code: "http_url_missing" });
+    if (!url.trim()) problems.push({ code: "http_url_missing", anchor: "output_config.http" });
   }
   // The auth mode is declared before the credential exists (the chat builds
   // it that way); publish waits for the key, token or password.
-  if (stepConnections(step).some((connection) => connection.host && !connection.configured)) {
-    problems.push({ code: "http_credential_missing" });
-  }
+  const waiting = stepConnections(step).find(
+    (connection) => connection.host && !connection.configured
+  );
+  if (waiting) problems.push({ code: "http_credential_missing", anchor: waiting.anchor });
 
   if (step.input_source === "tool") {
     const tool = readToolConfig(step.input_config);
@@ -172,7 +211,13 @@ function stepProblems(
       if (Object.values(bindings).some(isStructuredTemplateBinding)) {
         problems.push({ code: "template_structured" });
       }
-      if (template.placeholders.some((name) => !(name in bindings))) {
+      // A field filled from a source the flow no longer has is as unfilled as
+      // one never chosen: the editor's field count says the same.
+      if (
+        templateReadiness(step, flow)
+          .unbound.map((name) => bindings[name])
+          .some((binding) => binding === undefined || !isStructuredTemplateBinding(binding))
+      ) {
         problems.push({ code: "template_unbound" });
       }
       if (
@@ -192,10 +237,20 @@ function stepProblems(
   }
 
   const assistant = facts.assistants.get(step.assistant_id);
+  // The editor's own exception: a speaker step names speakers without an instruction.
+  if (
+    stepUsesModel(step) &&
+    step.output_mode !== "speaker_mapping" &&
+    assistant &&
+    !assistant.prompt?.text?.trim()
+  ) {
+    problems.push({ code: "prompt_missing" });
+  }
   if (stepUsesModel(step) && assistant && !assistant.completion_model) {
     problems.push({ code: "model_missing" });
   }
-  if (deletedReference(step, ordered, assistant)) problems.push({ code: "deleted_reference" });
+  const removed = deletedReference(step, ordered, assistant);
+  if (removed) problems.push({ code: "deleted_reference", anchor: removed });
 
   const classification =
     facts.classification?.find((item) => item.step_id === step.id) ??
@@ -234,7 +289,7 @@ export function checkDraft(
   return {
     flow: problems,
     steps: ordered
-      .map((step) => ({ step, problems: stepProblems(step, ordered, facts) }))
+      .map((step) => ({ step, problems: stepProblems(step, flow, ordered, facts) }))
       .filter((entry) => entry.problems.length > 0)
   };
 }

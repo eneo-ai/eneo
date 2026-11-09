@@ -327,6 +327,24 @@ function StepKnowledgeTrace({
 }
 
 /**
+ * Whether a step of the run was set up to search knowledge, from what each
+ * step that ran recorded (`rag` in its input): the run's own version, read
+ * without the audited evidence. A mapped step's record has no status of its
+ * own (its calls have), so it counts.
+ */
+export function searchedKnowledge(steps: readonly RunStepView[]): boolean {
+  return steps.some(({ result }) => {
+    const rag = result?.input_payload_json?.rag;
+    if (typeof rag !== "object" || rag === null) return false;
+    const status = (rag as { status?: unknown }).status;
+    return (
+      typeof status !== "string" ||
+      showsKnowledgeTrace({ status, chunks: 0, durationMs: null, errorType: null }, 0)
+    );
+  });
+}
+
+/**
  * What the run's steps found in their knowledge: per step how the search
  * went, how long it took and what it found, each source with how relevant
  * it was and the mapped call it came from, searchable when there are many;

@@ -12,6 +12,7 @@ import {
   useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -28,6 +29,7 @@ import {
   wordsByLine,
   type PlacedWord
 } from "./transcript-playback";
+import { speakerText } from "./transcript-speakers";
 
 /**
  * The line playing, by position in the lines, and its word; -1 for none.
@@ -114,8 +116,16 @@ export type Playback = {
   uncertain: number;
   /** The id of the element that shows line `position`, for following playback. */
   lineId: (position: number) => string;
-  /** The player above the lines. */
+  /**
+   * The player's controls above the lines, kept in reach while the lines
+   * scroll (sticky). They hold their place before the audio is played, so
+   * starting it moves nothing, and publish their height as
+   * `--transcript-player-h` on the element they sit in, for what follows
+   * to keep clear of them.
+   */
   player: React.ReactNode;
+  /** The player's settings (speed, following, shortcuts), under `player` in the lines' flow. */
+  settings: React.ReactNode;
 };
 
 const NO_WORDS: ReadonlyMap<number, PlacedWord[]> = new Map();
@@ -214,9 +224,7 @@ export function useTranscriptPlayback({
               lines,
               file,
               (position) =>
-                lines[position]?.name ??
-                lines[position]?.label ??
-                t("flow_runs_transcript_unknown_speaker")
+                lines[position]?.name ?? speakerText(lines[position]?.label ?? null, {}, t)
             )
           )}`
         : undefined,
@@ -294,20 +302,43 @@ export function useTranscriptPlayback({
     return () => clearTimeout(timer);
   }, [src, expiresAt, file]);
 
-  // The shortcuts listen only while focus is somewhere in the player.
-  const box = useRef<HTMLDivElement>(null);
+  // The shortcuts listen only while focus is somewhere in the player or its settings.
+  const bar = useRef<HTMLDivElement>(null);
+  const settingsBox = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const element = box.current;
-    if (!element) return;
+    const boxes = [bar.current, settingsBox.current].filter(
+      (element): element is HTMLDivElement => element !== null
+    );
     const enter = () => setFocused(true);
     const leave = (event: FocusEvent) => {
-      if (!element.contains(event.relatedTarget as Node | null)) setFocused(false);
+      const to = event.relatedTarget as Node | null;
+      if (!boxes.some((element) => element.contains(to))) setFocused(false);
     };
-    element.addEventListener("focusin", enter);
-    element.addEventListener("focusout", leave);
+    for (const element of boxes) {
+      element.addEventListener("focusin", enter);
+      element.addEventListener("focusout", leave);
+    }
     return () => {
-      element.removeEventListener("focusin", enter);
-      element.removeEventListener("focusout", leave);
+      for (const element of boxes) {
+        element.removeEventListener("focusin", enter);
+        element.removeEventListener("focusout", leave);
+      }
+    };
+  }, []);
+
+  // The bar's height, for what scrolls under it to stop below it (WCAG 2.4.11).
+  useLayoutEffect(() => {
+    const element = bar.current;
+    const host = element?.parentElement;
+    if (!element || !host) return;
+    const publish = () =>
+      host.style.setProperty("--transcript-player-h", `${element.offsetHeight}px`);
+    const observer = new ResizeObserver(publish);
+    observer.observe(element);
+    publish();
+    return () => {
+      observer.disconnect();
+      host.style.removeProperty("--transcript-player-h");
     };
   }, []);
 
@@ -319,7 +350,9 @@ export function useTranscriptPlayback({
 
   function track(element: HTMLAudioElement) {
     const time = element.currentTime;
-    if (stopAt.current !== null && time >= stopAt.current) {
+    // A sample plays where the person is (beside a name, say): the lines do not follow it.
+    const until = stopAt.current;
+    if (until !== null && time >= until) {
       stopAt.current = null;
       element.pause();
     }
@@ -329,7 +362,7 @@ export function useTranscriptPlayback({
     const playing = marks.current();
     if (line === playing.line && word === playing.word) return;
     marks.set(line, word);
-    if (follow && line !== playing.line && line >= 0 && !element.paused) {
+    if (follow && until === null && line !== playing.line && line >= 0 && !element.paused) {
       const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       document
         .getElementById(lineId(line))
@@ -340,27 +373,25 @@ export function useTranscriptPlayback({
   if (fileCount === 0) return null;
 
   const player = (
-    <div ref={box} className="flex flex-col gap-2">
-      {problem ? (
-        <Banner
-          status="error"
-          title={t("flow_transcript_audio_failed")}
-          description={problem}
-          collapsible={false}
-        />
+    <div
+      ref={bar}
+      role="group"
+      aria-label={t("flow_transcript_player_label")}
+      aria-describedby={shortcutsId}
+      // A strip with a rule under it, not a card in the card. Below the page bar where one
+      // sticks (app-shell keeps focus clear of it the same way).
+      className="border-ax-border bg-ax-card phone:group-has-[[data-phone-page-bar]]/shell:top-14 sticky top-0 z-10 flex flex-wrap items-center gap-x-2 gap-y-1 border-b py-2 max-lg:group-has-[[data-page-bar]]/shell:top-14"
+    >
+      {fileCount > 1 ? (
+        <div className="basis-full px-1">
+          <Text type="supporting">
+            {t("flow_transcript_audio_part", { part: file + 1, count: fileCount })}
+          </Text>
+        </div>
       ) : null}
-      {src ? (
-        <div
-          role="group"
-          aria-label={t("flow_transcript_player_label")}
-          aria-describedby={shortcutsId}
-          className="flex flex-col gap-2"
-        >
-          {fileCount > 1 ? (
-            <Text type="supporting">
-              {t("flow_transcript_audio_part", { part: file + 1, count: fileCount })}
-            </Text>
-          ) : null}
+      {/* As tall as the audio element, so the button it replaces holds its place. */}
+      <div className="flex min-h-14 min-w-0 flex-1 items-center">
+        {src ? (
           <audio
             ref={audio}
             src={src}
@@ -401,80 +432,7 @@ export function useTranscriptPlayback({
             <track kind="captions" label={t("flow_runs_transcript_heading")} src={captionsSrc} />
             {t("flow_transcript_audio_unsupported")}
           </audio>
-          <div className="flex flex-wrap items-center gap-1">
-            <IconButton
-              label={t("flow_transcript_audio_back", { seconds: NUDGE_SECONDS })}
-              icon={<RotateCcw aria-hidden="true" />}
-              variant="ghost"
-              size="sm"
-              onClick={() => skip(-NUDGE_SECONDS)}
-            />
-            <IconButton
-              label={t("flow_transcript_audio_forward", { seconds: NUDGE_SECONDS })}
-              icon={<RotateCw aria-hidden="true" />}
-              variant="ghost"
-              size="sm"
-              onClick={() => skip(NUDGE_SECONDS)}
-            />
-            {fileCount > 1 ? (
-              <>
-                <Button
-                  label={t("flow_transcript_audio_previous_part")}
-                  icon={<ChevronLeft aria-hidden="true" />}
-                  variant="ghost"
-                  size="sm"
-                  isDisabled={file === 0}
-                  onClick={() => goToPart(file - 1)}
-                />
-                <Button
-                  label={t("flow_transcript_audio_next_part")}
-                  endContent={<ChevronRight aria-hidden="true" />}
-                  variant="ghost"
-                  size="sm"
-                  isDisabled={file + 1 >= fileCount}
-                  onClick={() => goToPart(file + 1)}
-                />
-              </>
-            ) : null}
-          </div>
-          <div className="flex flex-wrap items-end gap-3">
-            <Selector
-              label={t("flow_transcript_audio_rate")}
-              value={String(rate)}
-              onChange={(value) => {
-                const next = Number(value);
-                if (!Number.isFinite(next)) return;
-                setRate(next);
-                if (audio.current) audio.current.playbackRate = next;
-              }}
-              options={PLAYBACK_RATES.map((value) => ({
-                value: String(value),
-                label: t("flow_transcript_audio_rate_value", { rate: value })
-              }))}
-              size="sm"
-            />
-            <CheckboxInput
-              label={t("flow_transcript_audio_follow")}
-              value={follow}
-              onChange={setFollow}
-              size="sm"
-            />
-          </div>
-          {/* Keys j, k and l: a touch screen has no keyboard to press them on. The
-              player still points at it with aria-describedby, so a screen reader hears it. */}
-          <div className="pointer-coarse:hidden">
-            <Text type="supporting" as="p" id={shortcutsId}>
-              {t.rich("flow_transcript_audio_shortcuts", {
-                j: () => <Kbd keys="j" />,
-                k: () => <Kbd keys="k" />,
-                l: () => <Kbd keys="l" />,
-                seconds: SKIP_SECONDS
-              })}
-            </Text>
-          </div>
-        </div>
-      ) : (
-        <div>
+        ) : (
           <Button
             label={t("flow_transcript_audio_play")}
             icon={<Play aria-hidden="true" />}
@@ -484,8 +442,94 @@ export function useTranscriptPlayback({
               if (!loading) void load(0, 0);
             }}
           />
-        </div>
-      )}
+        )}
+      </div>
+      <div className="flex flex-wrap items-center gap-1">
+        <IconButton
+          label={t("flow_transcript_audio_back", { seconds: NUDGE_SECONDS })}
+          icon={<RotateCcw aria-hidden="true" />}
+          variant="ghost"
+          size="sm"
+          isDisabled={!src}
+          onClick={() => skip(-NUDGE_SECONDS)}
+        />
+        <IconButton
+          label={t("flow_transcript_audio_forward", { seconds: NUDGE_SECONDS })}
+          icon={<RotateCw aria-hidden="true" />}
+          variant="ghost"
+          size="sm"
+          isDisabled={!src}
+          onClick={() => skip(NUDGE_SECONDS)}
+        />
+        {fileCount > 1 ? (
+          <>
+            <Button
+              label={t("flow_transcript_audio_previous_part")}
+              icon={<ChevronLeft aria-hidden="true" />}
+              variant="ghost"
+              size="sm"
+              isDisabled={!src || file === 0}
+              onClick={() => goToPart(file - 1)}
+            />
+            <Button
+              label={t("flow_transcript_audio_next_part")}
+              endContent={<ChevronRight aria-hidden="true" />}
+              variant="ghost"
+              size="sm"
+              isDisabled={!src || file + 1 >= fileCount}
+              onClick={() => goToPart(file + 1)}
+            />
+          </>
+        ) : null}
+      </div>
+    </div>
+  );
+
+  const settings = (
+    <div ref={settingsBox} className="flex flex-col gap-2">
+      {problem ? (
+        <Banner
+          status="error"
+          title={t("flow_transcript_audio_failed")}
+          description={problem}
+          collapsible={false}
+        />
+      ) : null}
+      <div className="flex flex-wrap items-end gap-3">
+        <Selector
+          label={t("flow_transcript_audio_rate")}
+          value={String(rate)}
+          onChange={(value) => {
+            const next = Number(value);
+            if (!Number.isFinite(next)) return;
+            setRate(next);
+            if (audio.current) audio.current.playbackRate = next;
+          }}
+          options={PLAYBACK_RATES.map((value) => ({
+            value: String(value),
+            label: t("flow_transcript_audio_rate_value", { rate: value })
+          }))}
+          size="sm"
+        />
+        <CheckboxInput
+          label={t("flow_transcript_audio_follow")}
+          value={follow}
+          onChange={setFollow}
+          size="sm"
+        />
+      </div>
+      {/* Keys j, k and l: a touch screen has no keyboard to press them on. The
+          player still points at it with aria-describedby, so a screen reader hears it. */}
+      <div className="max-w-prose pointer-coarse:hidden">
+        <Text type="supporting" as="p" id={shortcutsId}>
+          {t.rich("flow_transcript_audio_shortcuts", {
+            j: () => <Kbd keys="j" />,
+            k: () => <Kbd keys="k" />,
+            l: () => <Kbd keys="l" />,
+            seconds: SKIP_SECONDS
+          })}
+        </Text>
+      </div>
     </div>
   );
 
@@ -495,6 +539,7 @@ export function useTranscriptPlayback({
     words: placed,
     uncertain,
     lineId,
-    player
+    player,
+    settings
   };
 }

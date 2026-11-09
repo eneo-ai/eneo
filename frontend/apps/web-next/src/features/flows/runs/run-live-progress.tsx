@@ -31,14 +31,18 @@ function Elapsed({ startedAt, ticking }: { startedAt: string; ticking: boolean }
  * it is doing, a progress bar over the steps that ended, and the time since
  * it started, counted up while it runs. Shown only while the run moves (the
  * status capability's `should_poll`); a finished run's header says how
- * long it took.
+ * long it took. Every step done and the run still under way: the result is
+ * on its way to a receiver (`delivery`), sent or sent again.
  */
 export function RunLiveProgress({
   summary,
-  steps
+  steps,
+  delivery = null
 }: {
   summary: Pick<RunSummary, "status" | "started_at">;
   steps: readonly RunStepView[];
+  /** A delivery to a receiver that has not landed: on its way, or tried again after a miss. */
+  delivery?: "sending" | "retrying" | null;
 }) {
   const t = useTranslations();
   const progress = runStepProgress(steps);
@@ -52,7 +56,13 @@ export function RunLiveProgress({
       ? t(runStatusView(summary.status).labelKey)
       : progress.running > 0
         ? t("flow_run_progress_running_summary")
-        : t("flow_run_progress_pending_summary");
+        : delivery && progress.ended === progress.total
+          ? t(
+              delivery === "retrying"
+                ? "flow_run_progress_delivery_retrying_summary"
+                : "flow_run_progress_delivery_summary"
+            )
+          : t("flow_run_progress_pending_summary");
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">

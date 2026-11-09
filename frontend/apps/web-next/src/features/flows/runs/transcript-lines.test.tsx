@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { useState } from "react";
+import { createRef, useState, type Ref } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import messages from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
@@ -13,7 +13,7 @@ import {
   type TranscriptTarget
 } from "./transcript";
 import { correctionSet, knownSpeakers, type CorrectionSet } from "./transcript-corrections";
-import { TranscriptLines } from "./transcript-lines";
+import { TranscriptLines, type SpeakerListen } from "./transcript-lines";
 import { captionsFor, textRuns, wordsByLine } from "./transcript-playback";
 import { partAttributes } from "./transcript-selection";
 
@@ -86,13 +86,15 @@ function Harness({
   audio = target,
   lines = segments,
   speakerReview = null,
-  initial
+  initial,
+  listenRef
 }: {
   saves: CorrectionSet[];
   audio?: TranscriptTarget;
   lines?: TranscriptSegment[];
   speakerReview?: TranscriptSpeakerReview | null;
   initial?: CorrectionSet;
+  listenRef?: Ref<SpeakerListen>;
 }) {
   const [set, setSet] = useState<CorrectionSet>(() => initial ?? correctionSet(null, lines));
   const shown = shownSegments(lines, {
@@ -109,6 +111,7 @@ function Harness({
       sourceHash="hash-1"
       multiFile={false}
       speakerReview={speakerReview}
+      listenRef={listenRef}
       editing={{
         set,
         speakers: knownSpeakers(lines, set.speakerEdits),
@@ -162,13 +165,10 @@ afterEach(() => {
 describe("TranscriptLines", () => {
   it("shows each speaker as a named badge, never by colour alone", () => {
     const { lines } = renderLines();
-    expect(within(lines).getAllByText("SPEAKER_00")).toHaveLength(2);
-    expect(within(lines).getAllByText("SPEAKER_01")).toHaveLength(2);
+    expect(within(lines).getAllByText("Talare 1")).toHaveLength(2);
+    expect(within(lines).getAllByText("Talare 2")).toHaveLength(2);
     expect(
-      within(lines)
-        .getAllByText("SPEAKER_00")[0]!
-        .closest("[data-color]")
-        ?.getAttribute("data-color")
+      within(lines).getAllByText("Talare 1")[0]!.closest("[data-color]")?.getAttribute("data-color")
     ).toBe("blue");
   });
 
@@ -237,7 +237,7 @@ describe("TranscriptLines", () => {
     // It shows in the line where the marked text ends.
     expect(toolbar.closest("li")?.textContent).toContain("Tack Sugary, bra.");
     await expectNoAxeViolations(document.body);
-    fireEvent.click(within(toolbar).getByRole("button", { name: "SPEAKER_01" }));
+    fireEvent.click(within(toolbar).getByRole("button", { name: "Talare 2" }));
 
     await waitFor(() => expect(saves).toHaveLength(1));
     expect(saves[0]!.speakerEdits).toEqual([
@@ -268,7 +268,7 @@ describe("TranscriptLines", () => {
     const text = within(lines).getByText("Hur mår du?").firstChild!;
     mark(text, 0, text, 3);
     const toolbar = await screen.findByRole("toolbar");
-    fireEvent.keyDown(within(toolbar).getByRole("button", { name: "SPEAKER_00" }), {
+    fireEvent.keyDown(within(toolbar).getByRole("button", { name: "Talare 1" }), {
       key: "Escape"
     });
     await waitFor(() => expect(screen.queryByRole("toolbar")).toBeNull());
@@ -330,10 +330,10 @@ describe("TranscriptLines", () => {
   it("changes a line's speaker from its badge, and resets it", async () => {
     const { saves, lines } = renderLines();
     const menu = openMenu(
-      within(lines).getByRole("button", { name: "SPEAKER_00, byt talare för raden 0:05" })
+      within(lines).getByRole("button", { name: "Talare 1, byt talare för raden 0:05" })
     );
     await expectNoAxeViolations(document.body);
-    fireEvent.click(within(menu).getByRole("menuitemradio", { name: "SPEAKER_01" }));
+    fireEvent.click(within(menu).getByRole("menuitemradio", { name: "Talare 2" }));
     await waitFor(() => expect(saves).toHaveLength(1));
     expect(saves[0]!.speakerEdits).toEqual([
       {
@@ -349,7 +349,7 @@ describe("TranscriptLines", () => {
 
     const again = openMenu(
       await within(lines).findByRole("button", {
-        name: "SPEAKER_01, ändrad från SPEAKER_00, byt talare för raden 0:05"
+        name: "Talare 2, ändrad från Talare 1, byt talare för raden 0:05"
       })
     );
     fireEvent.click(
@@ -362,22 +362,20 @@ describe("TranscriptLines", () => {
   it("offers a speaker made from one line's badge in every other line's badge", async () => {
     const { saves, lines } = renderLines();
     const menu = openMenu(
-      within(lines).getByRole("button", { name: "SPEAKER_00, byt talare för raden 0:05" })
+      within(lines).getByRole("button", { name: "Talare 1, byt talare för raden 0:05" })
     );
-    fireEvent.click(within(menu).getByRole("menuitemradio", { name: "Ny talare (SPEAKER_02)" }));
+    fireEvent.click(within(menu).getByRole("menuitemradio", { name: "Ny talare (Talare 3)" }));
     await waitFor(() => expect(saves).toHaveLength(1));
     await within(lines).findByRole("button", {
-      name: "SPEAKER_02, ändrad från SPEAKER_00, byt talare för raden 0:05"
+      name: "Talare 3, ändrad från Talare 1, byt talare för raden 0:05"
     });
 
     // Another line, not rendered again by marking text, still knows the new speaker.
     const other = openMenu(
-      within(lines).getByRole("button", { name: "SPEAKER_01, byt talare för raden 0:15" })
+      within(lines).getByRole("button", { name: "Talare 2, byt talare för raden 0:15" })
     );
-    expect(within(other).getByRole("menuitemradio", { name: "SPEAKER_02" })).toBeTruthy();
-    expect(
-      within(other).getByRole("menuitemradio", { name: "Ny talare (SPEAKER_03)" })
-    ).toBeTruthy();
+    expect(within(other).getByRole("menuitemradio", { name: "Talare 3" })).toBeTruthy();
+    expect(within(other).getByRole("menuitemradio", { name: "Ny talare (Talare 4)" })).toBeTruthy();
   });
 
   it("leaves a whole turn to someone to check from its badge", async () => {
@@ -385,7 +383,7 @@ describe("TranscriptLines", () => {
     fireEvent.click(screen.getByRole("button", { name: messages.flow_transcript_view_turns }));
     const turns = await screen.findByRole("list", { name: messages.flow_transcript_turns_list });
     const menu = openMenu(
-      within(turns).getByRole("button", { name: "SPEAKER_01, byt talare för repliken 0:10" })
+      within(turns).getByRole("button", { name: "Talare 2, byt talare för repliken 0:10" })
     );
     fireEvent.click(
       within(menu).getByRole("menuitemradio", {
@@ -418,9 +416,9 @@ describe("TranscriptLines", () => {
     );
     await waitFor(() => expect(saves).toHaveLength(1));
     const menu = openMenu(
-      within(lines).getByRole("button", { name: "SPEAKER_01, byt talare för raden 0:10" })
+      within(lines).getByRole("button", { name: "Talare 2, byt talare för raden 0:10" })
     );
-    fireEvent.click(within(menu).getByRole("menuitemradio", { name: "SPEAKER_00" }));
+    fireEvent.click(within(menu).getByRole("menuitemradio", { name: "Talare 1" }));
     await waitFor(() => expect(saves).toHaveLength(2));
 
     fireEvent.click(await screen.findByRole("button", { name: messages.flow_transcript_undo }));
@@ -513,10 +511,10 @@ describe("TranscriptLines", () => {
     });
     expect(text).toBe(
       [
-        "[00:00:00 - 00:00:04] SPEAKER_00: Välkommen Sugary.",
-        "[00:00:05 - 00:00:09] SPEAKER_00: Hur mår du?",
-        "[00:00:10 - 00:00:14] SPEAKER_01: Tack Sugary, bra.",
-        "[00:00:15 - 00:00:19] SPEAKER_01: Sugari kommer sen.",
+        "[00:00:00 - 00:00:04] Talare 1: Välkommen Sugary.",
+        "[00:00:05 - 00:00:09] Talare 1: Hur mår du?",
+        "[00:00:10 - 00:00:14] Talare 2: Tack Sugary, bra.",
+        "[00:00:15 - 00:00:19] Talare 2: Sugari kommer sen.",
         ""
       ].join("\n")
     );
@@ -606,7 +604,7 @@ describe("TranscriptLines with audio", () => {
     const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
     const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
     renderLines(audioTarget);
-    fireEvent.click(screen.getByRole("button", { name: "Lyssna på SPEAKER_01" }));
+    fireEvent.click(screen.getByRole("button", { name: "Lyssna på Talare 2" }));
     const audio = await screen.findByLabelText<HTMLAudioElement>(
       messages.flow_transcript_audio_label
     );
@@ -621,6 +619,21 @@ describe("TranscriptLines with audio", () => {
     });
     fireEvent.timeUpdate(audio);
     expect(pause).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves the samples to the name rows while speakers are named", async () => {
+    answerAudio();
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
+    const listen = createRef<SpeakerListen>();
+    renderInApp(<Harness saves={[]} audio={audioTarget} listenRef={listen} />);
+    await screen.findByLabelText(messages.flow_transcript_player_label);
+    expect(screen.queryByRole("group", { name: messages.flow_transcript_samples })).toBeNull();
+    act(() => listen.current?.play("SPEAKER_01"));
+    const audio = await screen.findByLabelText<HTMLAudioElement>(
+      messages.flow_transcript_audio_label
+    );
+    fireEvent.loadedMetadata(audio);
+    expect(audio.currentTime).toBe(9.5);
   });
 
   it("skips five seconds either way and moves between the recording's parts", async () => {
@@ -1075,7 +1088,7 @@ describe("TranscriptLines, marking text in a long transcript", { timeout: 30_000
     mark(textAt(list, 20), 0, textAt(list, 20), 5);
     const toolbar = await screen.findByRole("toolbar");
     expect(toolbar.closest("li")).toBe(list.children[20]);
-    fireEvent.click(within(toolbar).getByRole("button", { name: "SPEAKER_00" }));
+    fireEvent.click(within(toolbar).getByRole("button", { name: "Talare 1" }));
 
     await waitFor(() => expect(saves).toHaveLength(1));
     expect(saves[0]!.speakerEdits).toEqual([

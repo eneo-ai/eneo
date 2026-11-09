@@ -116,6 +116,17 @@ export function takesReusableInput(
   return (contract.form_fields ?? []).length > 0 || takesFreeText(contract);
 }
 
+/**
+ * Whether the run's files (or recording) lead the start form: some are required and every field
+ * is optional, so the fields follow as extras. The form and its summary keep this order.
+ */
+export function inputsComeFirst(
+  inputs: readonly Pick<RuntimeInput, "required">[],
+  fields: readonly Pick<RunFormField, "required">[]
+): boolean {
+  return inputs.some((input) => input.required) && fields.every((field) => !field.required);
+}
+
 /** What the run is sent, as the summary before starting lists it. */
 export type StartSummary = {
   /** The run's name, or null when it has none. */

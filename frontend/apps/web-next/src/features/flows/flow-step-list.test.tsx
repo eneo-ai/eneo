@@ -338,11 +338,15 @@ describe("FlowStepList", () => {
     const dialog = await screen.findByRole("alertdialog", { name: "Ta bort steget?" });
     expect(
       within(dialog).getByText(
-        "Steg 3: Granska läser Steg 1: Sammanfatta. Ändra först vad de läser, annars nekas borttagningen."
+        "Steg 3: Granska läser Steg 1: Sammanfatta. Ändra först vad som läses där, sedan går steget att ta bort."
       )
     ).toBeTruthy();
-    fireEvent.click(within(dialog).getByRole("button", { name: "Ta bort steg" }));
-    await waitFor(() => expect(actions.onRemove).toHaveBeenCalledWith(steps[0]));
+    // Removing it would be refused: the dialog offers the reader, never the removal.
+    expect(within(dialog).queryByRole("button", { name: "Ta bort steg" })).toBeNull();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Öppna Steg 3: Granska" }));
+    expect(actions.onOpen).toHaveBeenCalledWith(steps[2]);
+    expect(actions.onRemove).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
   });
 
   it("folds each step's suggestions into one quiet row with their count", async () => {

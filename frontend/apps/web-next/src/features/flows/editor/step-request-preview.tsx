@@ -16,14 +16,22 @@ import { answerShape, modelParameters, previewParts, type PreviewPart } from "./
 import {
   argumentText,
   hasHttpConfig,
+  headerSent,
   readHttpConfig,
   readInputBindings,
   readLongMaterial,
   readTextProcessingMode,
   readToolConfig,
-  sourceRefStepOrder
+  sourceRefStepOrder,
+  type HttpConfig
 } from "./step-configs";
-import { inputSourceLabel, meaningLabel, stepLabel } from "./step-labels";
+import {
+  httpAuthSummary,
+  httpBodyModeLabel,
+  inputSourceLabel,
+  meaningLabel,
+  stepLabel
+} from "./step-labels";
 import { stepUsesModel } from "./step-rules";
 import type { AssistantConfig, FlowPublic, StepConfig } from "./step-types";
 
@@ -96,12 +104,14 @@ function RequestPreview({
   const usesModel = stepUsesModel(draft);
   const bindings = readInputBindings(draft.input_bindings);
   const tool = draft.input_source === "tool" ? readToolConfig(draft.input_config) : null;
-  const http =
+  const httpIn =
     draft.input_source === "http_get" && hasHttpConfig(draft.input_config)
-      ? { method: "GET", config: readHttpConfig(draft.input_config, "input") }
-      : draft.output_mode === "http_post" && hasHttpConfig(draft.output_config)
-        ? { method: "POST", config: readHttpConfig(draft.output_config, "output") }
-        : null;
+      ? readHttpConfig(draft.input_config, "input")
+      : null;
+  const httpOut =
+    draft.output_mode === "http_post" && hasHttpConfig(draft.output_config)
+      ? readHttpConfig(draft.output_config, "output")
+      : null;
   const model = space.completion_models.find((item) => item.id === assistant.completion_model_id);
   const parameters = modelParameters(assistant.completion_model_kwargs);
   const knowledge = [
@@ -193,36 +203,8 @@ function RequestPreview({
             ))}
           </MetadataList>
         ) : null}
-        {http ? (
-          <MetadataList label={{ position: "start", width: "8rem" }}>
-            <MetadataListItem label={t("flow_editor_tools_preview_http_address")}>
-              <span className="flex flex-wrap items-baseline gap-1">
-                <code className="font-mono text-xs">{http.method}</code>
-                <Template parts={previewParts(http.config.url, stepOrder, flow)} flow={flow} />
-              </span>
-            </MetadataListItem>
-            <MetadataListItem label={t("flow_step_editor_http_auth")}>
-              {http.config.auth.mode === "none"
-                ? t("flow_editor_tools_preview_http_no_auth")
-                : t("flow_step_editor_secret_stored")}
-            </MetadataListItem>
-            {http.config.custom_headers.length > 0 ? (
-              <MetadataListItem label={t("flow_editor_tools_preview_http_headers")}>
-                {http.config.custom_headers
-                  .map((header) => header.name)
-                  .filter(Boolean)
-                  .join(", ")}
-              </MetadataListItem>
-            ) : null}
-            {http.config.body.template ? (
-              <MetadataListItem label={t("flow_editor_tools_preview_http_body")}>
-                <Template
-                  parts={previewParts(http.config.body.template, stepOrder, flow)}
-                  flow={flow}
-                />
-              </MetadataListItem>
-            ) : null}
-          </MetadataList>
+        {httpIn ? (
+          <HttpCall config={httpIn} method="GET" stepOrder={stepOrder} flow={flow} />
         ) : null}
       </section>
 
@@ -231,7 +213,7 @@ function RequestPreview({
           title={t("flow_editor_tools_preview_model_title")}
           label={{ position: "start", width: "8rem" }}
         >
-          <MetadataListItem label={t("completion_model")}>
+          <MetadataListItem label={t("flow_step_editor_model")}>
             {model ? modelDisplayName(model) : t("flow_step_editor_model_unknown")}
           </MetadataListItem>
           <MetadataListItem label={t("flow_editor_tools_preview_parameters")}>
@@ -289,7 +271,61 @@ function RequestPreview({
           </Text>
         )}
       </section>
+
+      {httpOut ? (
+        <section className="flex flex-col gap-2">
+          <Text type="label" as="h3" display="block" className="m-0">
+            {t("flow_editor_tools_preview_http_destination")}
+          </Text>
+          <HttpCall config={httpOut} method="POST" stepOrder={stepOrder} flow={flow} />
+        </section>
+      ) : null}
     </div>
+  );
+}
+
+/** An HTTP call as it goes out: address, how it signs in, headers and, for a POST, its body. */
+function HttpCall({
+  config,
+  method,
+  stepOrder,
+  flow
+}: {
+  config: HttpConfig;
+  method: "GET" | "POST";
+  stepOrder: number;
+  flow: FlowPublic;
+}) {
+  const t = useTranslations();
+  const headers = config.custom_headers.filter(headerSent).map((header) => header.name);
+  const template =
+    config.body.mode === "json_template" || config.body.mode === "text_template"
+      ? (config.body.template ?? "")
+      : "";
+  return (
+    <MetadataList label={{ position: "start", width: "8rem" }}>
+      {/* No method: "Skickas till" and the material line already say which way it goes. */}
+      <MetadataListItem label={t("flow_editor_tools_preview_http_address")}>
+        <Template parts={previewParts(config.url, stepOrder, flow)} flow={flow} />
+      </MetadataListItem>
+      <MetadataListItem label={t("flow_step_editor_http_auth")}>
+        {httpAuthSummary(config.auth, t)}
+      </MetadataListItem>
+      {headers.length > 0 ? (
+        <MetadataListItem label={t("flow_editor_tools_preview_http_headers")}>
+          {headers.join(", ")}
+        </MetadataListItem>
+      ) : null}
+      {method === "POST" ? (
+        <MetadataListItem label={t("flow_editor_tools_preview_http_body")}>
+          {template.trim() ? (
+            <Template parts={previewParts(template, stepOrder, flow)} flow={flow} />
+          ) : (
+            httpBodyModeLabel(config.body.mode, t)
+          )}
+        </MetadataListItem>
+      ) : null}
+    </MetadataList>
   );
 }
 

@@ -1,5 +1,4 @@
 import { Button } from "@astryxdesign/core/Button";
-import { FieldLabel } from "@astryxdesign/core/Field";
 import { FileInput } from "@astryxdesign/core/FileInput";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { NumberInput } from "@astryxdesign/core/NumberInput";
@@ -8,8 +7,9 @@ import { Text } from "@astryxdesign/core/Text";
 import { useQuery } from "@tanstack/react-query";
 import { History, Paperclip, Sparkles, X } from "lucide-react";
 import { useLocale, useTranslations } from "use-intl";
-import { useId, useState } from "react";
+import { useState } from "react";
 import { ModelSelector } from "@/components/ai-elements/model-selector";
+import { Collapsible } from "@/components/astryx/collapsible";
 import { useAppContext } from "@/components/providers/app-context";
 import {
   BEHAVIOUR_LIST,
@@ -81,74 +81,110 @@ function ModelSettings({
     else if (behaviour !== "custom") onChange({ ...kwargs, temperature: 1 });
   }
 
+  // The model's own settings most steps leave at its default: folded until one is set. The open
+  // state comes from the draft (the editor remounts per saved revision), never from memory.
+  const changed = specific.filter((name) => kwargs[name] != null).length;
+  const presets = supportsBehaviorPresets(model);
+  // A problem with no preset field to show it at is shown under the fold and opens it once,
+  // in the same render; the author can fold it again.
+  const unplaced = presets ? undefined : problem;
+  const [moreOpen, setMoreOpen] = useState(changed > 0 || Boolean(unplaced));
+  const [seenProblem, setSeenProblem] = useState(unplaced);
+  if (seenProblem !== unplaced) {
+    setSeenProblem(unplaced);
+    if (unplaced) setMoreOpen(true);
+  }
+
   if (!model) return null;
-  return (
-    <Anchor formId={formId} anchor="completion_model_kwargs" className="grid gap-4 sm:grid-cols-2">
-      {supportsBehaviorPresets(model) && (
+  const specificFields = specific.map((name) => {
+    const capability = kwargCapability(model, name);
+    const current = kwargs[name] ?? null;
+    if (isSelectKwarg(name)) {
+      return (
         <Selector
-          label={t("model_behaviour")}
-          description={t("select_preset_behavior")}
-          options={BEHAVIOUR_LIST.map((value) => ({
-            value,
-            label:
-              value === "creative"
-                ? t("creative")
-                : value === "default"
-                  ? t("default_behavior")
-                  : value === "deterministic"
-                    ? t("deterministic")
-                    : t("custom")
-          }))}
-          value={behaviour}
-          onChange={(value) => selectBehaviour(value as ModelBehaviour)}
-          status={problemStatus(problem)}
+          key={name}
+          label={modelKwargLabel(name, t)}
+          options={[
+            { value: DEFAULT_VALUE, label: t("default_behavior") },
+            ...(capability?.options ?? []).map((option) => ({
+              value: option,
+              label: modelKwargOptionLabel(option, t)
+            }))
+          ]}
+          value={typeof current === "string" ? current : DEFAULT_VALUE}
+          onChange={(value) => set(name, value === DEFAULT_VALUE ? null : value)}
         />
-      )}
-      {supportsBehaviorPresets(model) && behaviour === "custom" && (
-        <NumberInput
-          label={t("temperature")}
-          value={typeof kwargs.temperature === "number" ? kwargs.temperature : null}
-          onChange={(value) => set("temperature", value ?? null)}
-          min={temperature?.minimum ?? 0}
-          max={temperature?.maximum ?? 2}
-          step={temperature?.step ?? 0.05}
-          hasClear
-        />
-      )}
-      {specific.map((name) => {
-        const capability = kwargCapability(model, name);
-        const current = kwargs[name] ?? null;
-        if (isSelectKwarg(name)) {
-          return (
-            <Selector
-              key={name}
-              label={modelKwargLabel(name, t)}
-              options={[
-                { value: DEFAULT_VALUE, label: t("default_behavior") },
-                ...(capability?.options ?? []).map((option) => ({
-                  value: option,
-                  label: modelKwargOptionLabel(option, t)
-                }))
-              ]}
-              value={typeof current === "string" ? current : DEFAULT_VALUE}
-              onChange={(value) => set(name, value === DEFAULT_VALUE ? null : value)}
-            />
-          );
-        }
-        return (
-          <NumberInput
-            key={name}
-            label={modelKwargLabel(name, t)}
-            value={typeof current === "number" ? current : null}
-            onChange={(value) => set(name, value ?? null)}
-            min={capability?.minimum ?? 0}
-            max={capability?.maximum ?? null}
-            step={capability?.step ?? 0.05}
-            placeholder={t("default_behavior")}
-            hasClear
+      );
+    }
+    return (
+      <NumberInput
+        key={name}
+        label={modelKwargLabel(name, t)}
+        value={typeof current === "number" ? current : null}
+        onChange={(value) => set(name, value ?? null)}
+        min={capability?.minimum ?? 0}
+        max={capability?.maximum ?? null}
+        step={capability?.step ?? 0.05}
+        placeholder={t("default_behavior")}
+        hasClear
+      />
+    );
+  });
+  return (
+    <Anchor formId={formId} anchor="completion_model_kwargs" className="flex flex-col gap-4">
+      {presets && (
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Selector
+            label={t("model_behaviour")}
+            description={t("select_preset_behavior")}
+            options={BEHAVIOUR_LIST.map((value) => ({
+              value,
+              label:
+                value === "creative"
+                  ? t("creative")
+                  : value === "default"
+                    ? t("default_behavior")
+                    : value === "deterministic"
+                      ? t("deterministic")
+                      : t("custom")
+            }))}
+            value={behaviour}
+            onChange={(value) => selectBehaviour(value as ModelBehaviour)}
+            status={problemStatus(problem)}
           />
-        );
-      })}
+          {behaviour === "custom" && (
+            <NumberInput
+              label={t("temperature")}
+              value={typeof kwargs.temperature === "number" ? kwargs.temperature : null}
+              onChange={(value) => set("temperature", value ?? null)}
+              min={temperature?.minimum ?? 0}
+              max={temperature?.maximum ?? 2}
+              step={temperature?.step ?? 0.05}
+              hasClear
+            />
+          )}
+        </div>
+      )}
+      {specific.length > 0 && (
+        <Collapsible
+          isOpen={moreOpen}
+          onOpenChange={setMoreOpen}
+          chevronPosition="start"
+          trigger={
+            <span className="flex flex-col gap-0.5 py-1 text-start">
+              <Text weight="medium">{t("flow_step_editor_model_more")}</Text>
+              <Text type="supporting" size="sm">
+                {changed > 0
+                  ? t("flow_step_editor_model_more_in_use", { count: changed })
+                  : t("flow_step_editor_model_more_description")}
+              </Text>
+            </span>
+          }
+        >
+          <div className="grid gap-4 pt-3 sm:grid-cols-2">{specificFields}</div>
+        </Collapsible>
+      )}
+      <FieldMessage message={unplaced} />
     </Anchor>
   );
 }
@@ -287,7 +323,6 @@ export function StepAiSection({
   const announce = useAnnounce();
   const { space } = useSpace();
   const { tenant } = useAppContext();
-  const modelSelectorId = useId();
   const [showHistory, setShowHistory] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
   // Offered as in Svelte: when the help assistant is there, and turned off
@@ -395,9 +430,8 @@ export function StepAiSection({
       />
 
       <Anchor formId={formId} anchor="completion_model" className="flex flex-col gap-2">
-        <FieldLabel label={t("completion_model")} inputID={modelSelectorId} />
         <ModelSelector
-          id={modelSelectorId}
+          field={{ label: t("flow_step_editor_model") }}
           models={space.completion_models}
           selectedId={assistant.completion_model_id ?? ""}
           onSelect={(id) => onAssistantChange({ completion_model_id: id })}

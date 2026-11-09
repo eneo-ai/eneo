@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
+import { reportResize, setViewport } from "@/test/setup-dom";
 import { makeFlow, makeStep } from "./flow-fixtures";
 import { FlowSettings, SettingsSummary } from "./flow-settings";
 import type { TranscriptionResources } from "./flow-transcription";
@@ -106,7 +107,12 @@ describe("FlowSettings", () => {
     expect(
       (within(field).getByRole("textbox", { name: /Tekniskt namn/ }) as HTMLInputElement).value
     ).toBe("ärendetyp");
-    fireEvent.click(screen.getByRole("switch", { name: /Nedladdning av bevisunderlag/ }));
+    // The download switch is a group of its own, not one of the transcription's settings.
+    fireEvent.click(
+      within(screen.getByRole("region", { name: "Bevisunderlag" })).getByRole("switch", {
+        name: /Nedladdning av bevisunderlag/
+      })
+    );
     await expectNoAxeViolations(container);
     fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
 
@@ -264,6 +270,51 @@ describe("FlowSettings", () => {
     expect(document.getElementById(row.getAttribute("aria-labelledby")!)?.textContent).toBe(
       "Fält 1"
     );
+  });
+
+  it("folds a technical name that follows its label, and opens it when it needs a look", async () => {
+    const onSave = vi.fn(async () => true);
+    const typed = makeFlow({
+      metadata_json: {
+        form_schema: {
+          fields: [
+            { name: "diarienummer", label: "Diarienummer", type: "text" },
+            { name: "arende_id", label: "Ärende", type: "text" }
+          ]
+        }
+      }
+    });
+    renderInApp(
+      <FlowSettings flow={typed} canEdit transcription={noTranscription} onSave={onSave} />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Ändra inställningar" }));
+    const nameToggle = (group: string) =>
+      within(screen.getByRole("group", { name: group })).getByRole("button", {
+        name: /^Stegen läser fältet som/
+      });
+    // The trigger says how the steps read the field, so the name itself can stay folded.
+    expect(nameToggle("Diarienummer").textContent).toContain("{{flow_input.diarienummer}}");
+    expect(nameToggle("Diarienummer").getAttribute("aria-expanded")).toBe("false");
+    // A name typed apart from its label is shown.
+    expect(nameToggle("Ärende").getAttribute("aria-expanded")).toBe("true");
+    // The run-name role stays in view either way.
+    expect(
+      within(screen.getByRole("group", { name: "Diarienummer" })).getByRole("checkbox", {
+        name: /Namnge körningen efter fältet/
+      })
+    ).toBeTruthy();
+
+    // A new field's name follows its label, folded; left empty it opens before the save
+    // moves focus to it.
+    fireEvent.click(screen.getByRole("button", { name: "Lägg till fält" }));
+    expect(nameToggle("Fält 3").getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
+    expect(nameToggle("Fält 3").getAttribute("aria-expanded")).toBe("true");
+    const name = within(screen.getByRole("group", { name: "Fält 3" })).getByRole("textbox", {
+      name: /Tekniskt namn/
+    });
+    await waitFor(() => expect(document.activeElement).toBe(name));
+    expect(onSave).not.toHaveBeenCalled();
   });
 
   it("sends a renamed field's saved name, so the steps' reads follow it", async () => {
@@ -469,62 +520,38 @@ describe("FlowSettings", () => {
       })
     );
   }, 20_000);
-  it("sums up the flow: steps, fields, transcription, download and the check", () => {
-    const { rerender } = renderInApp(
-      <FlowSettings
-        flow={flow}
-        canEdit={false}
-        transcription={noTranscription}
-        onSave={vi.fn()}
-        stepCount={7}
-        problemCount={null}
-      />
+  it("sums up the flow without what the page's header and step list already say", () => {
+    renderInApp(
+      <FlowSettings flow={flow} canEdit={false} transcription={noTranscription} onSave={vi.fn()} />
     );
-    expect(rowValue("Steg")).toBe("7");
     expect(rowValue("Formulärfält")).toContain("1");
-    expect(rowValue("Transkribering")).toBe("På");
+    expect(screen.getByRole("heading", { level: 3, name: "Transkribering" })).toBeTruthy();
     expect(rowValue("Nedladdning av bevisunderlag")).toBe("Av");
-    // Unchecked says nothing rather than a guess.
-    expect(screen.queryByText("Kontroll")).toBeNull();
-
-    rerender(
-      <FlowSettings
-        flow={flow}
-        canEdit={false}
-        transcription={noTranscription}
-        onSave={vi.fn()}
-        problemCount={0}
-      />
-    );
-    expect(rowValue("Kontroll")).toBe("Inga kända fel");
-
-    rerender(
-      <FlowSettings
-        flow={flow}
-        canEdit={false}
-        transcription={noTranscription}
-        onSave={vi.fn()}
-        problemCount={3}
-      />
-    );
-    expect(rowValue("Kontroll")).toBe("3 problem");
+    // The header names and describes the flow, and the step list follows.
+    for (const repeated of ["Namn", "Beskrivning", "Steg"]) {
+      expect(screen.queryByText(repeated, { selector: "dt" })).toBeNull();
+    }
   });
 
   it("sums up a flow for a page without the space's transcription resources", () => {
-    renderInApp(<SettingsSummary flow={audioFlow} stepCount={2} problemCount={0} />);
+    renderInApp(<SettingsSummary flow={audioFlow} />);
     expect(rowValue("Transkribering")).toBe("På");
     // No model list here: a chosen model is not called unavailable.
     expect(screen.queryByText("Transkriberingsmodell")).toBeNull();
+    // Standing alone it says what the flow is for and how many steps it has, but not its name.
+    expect(rowValue("Beskrivning")).toBe("Sammanfattar och besvarar brev.");
     expect(rowValue("Steg")).toBe("2");
-    expect(rowValue("Kontroll")).toBe("Inga kända fel");
+    expect(screen.queryByText("Namn", { selector: "dt" })).toBeNull();
   });
 
   it("always offers transcription: off in the read view, a switch in the form", async () => {
     const onSave = vi.fn(async () => true);
     const textFlow = makeFlow();
     renderInApp(<FlowSettings flow={textFlow} canEdit transcription={resources} onSave={onSave} />);
-    expect(rowValue("Transkribering")).toBe("Av");
+    // Rows with nothing to say are left out: no transcription, no run form.
+    expect(screen.queryByText("Transkribering")).toBeNull();
     expect(screen.queryByText("Transkriberingsmodell")).toBeNull();
+    expect(screen.queryByText("Formulärfält")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Ändra inställningar" }));
     expect(
@@ -554,9 +581,43 @@ describe("FlowSettings", () => {
       }
     });
     renderInApp(<FlowSettings flow={on} canEdit transcription={resources} onSave={vi.fn()} />);
-    expect(rowValue("Transkribering")).toBe("På");
+    // Under their own heading, which says it is on: no separate "På" row.
+    expect(screen.getByRole("heading", { level: 3, name: "Transkribering" })).toBeTruthy();
+    expect(screen.queryByText("Transkribering", { selector: "dt" })).toBeNull();
     expect(rowValue("Transkriberingsmodell")).toBe("Tal till text");
     expect(rowValue("Språk")).toBe("English");
+  });
+
+  it("puts the labels above the values on a phone, beside them on a wider screen", () => {
+    const { unmount } = renderInApp(<SettingsSummary flow={flow} />);
+    // Beside: the label is a cell of the list's own two-column grid.
+    expect(screen.getByText("Steg").closest("dt")?.parentElement?.tagName).toBe("DL");
+    unmount();
+
+    setViewport("phone");
+    renderInApp(<SettingsSummary flow={flow} />);
+    // Above: each label and value are stacked in a row of their own.
+    expect(screen.getByText("Steg").closest("dt")?.parentElement?.tagName).toBe("DIV");
+    expect(rowValue("Steg")).toBe("2");
+  });
+
+  it("puts the labels above the values wherever the summary itself is narrow", () => {
+    renderInApp(<SettingsSummary flow={flow} />);
+    const placed = () => screen.getByText("Steg").closest("dt")?.parentElement?.tagName;
+    expect(placed()).toBe("DL");
+    // The summary measures itself, so its own width (an element around the
+    // list) is what counts, whatever the window's.
+    const resize = (width: number) =>
+      act(() => {
+        for (let node = screen.getByText("Steg").parentElement; node; node = node.parentElement) {
+          reportResize(node, { width });
+        }
+      });
+    // A column beside the chat and the sidebar on a wide screen: too narrow for a label column.
+    resize(420);
+    expect(placed()).toBe("DIV");
+    resize(640);
+    expect(placed()).toBe("DL");
   });
 
   it("asks before leaving only while the form differs from the saved flow", async () => {

@@ -226,6 +226,8 @@ export type BlockingReason = {
 export type ImportReadiness = {
   canImport: boolean;
   canPublishAfterImport: boolean;
+  /** The flow takes audio: its transcription, live-text and speaker settings stay behind. */
+  takesAudio: boolean;
   /** The space has no transcription model the flow could use: nothing can be imported. */
   requiresTranscriptionModel: boolean;
   /** Imported without a model: its author chooses one before publishing. */
@@ -294,6 +296,7 @@ export function importReadiness(plan: ImportPlan, selections: Selections): Impor
   return {
     canImport,
     canPublishAfterImport: canImport && plan.can_publish_after_import,
+    takesAudio,
     requiresTranscriptionModel,
     transcriptionModelToChoose:
       takesAudio &&
@@ -328,6 +331,9 @@ function contextOf(error: unknown): Record<string, unknown> {
   return error instanceof EneoApiError && error.context ? error.context : {};
 }
 
+/** Why an archive is refused when the file is broken or no package, rather than unsafe. */
+const DAMAGED_ZIP_REASONS = new Set(["bad_zip", "missing_required_entry"]);
+
 /**
  * A refused export or import as a sentence: the package catalog's sentence
  * for its code, else the flow catalog's, else the server's message. An
@@ -343,6 +349,12 @@ export function packageRefusalMessage(error: unknown, t: Translator): string {
     context.reason === "form_field_type_unsupported"
   ) {
     message = t("flow_editor_tools_package_error_form_field_type_unsupported");
+  } else if (
+    code === "flow_package_zip_unsafe" &&
+    typeof context.reason === "string" &&
+    DAMAGED_ZIP_REASONS.has(context.reason)
+  ) {
+    message = t("flow_editor_tools_package_error_flow_package_zip_damaged");
   } else if (code && t.has(`flow_editor_tools_package_error_${code}`)) {
     message = t(`flow_editor_tools_package_error_${code}`);
   } else if (code && t.has(`flow_error_${code}`)) {

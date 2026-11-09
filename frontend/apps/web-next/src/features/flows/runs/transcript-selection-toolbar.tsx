@@ -68,7 +68,7 @@ export function SelectionToolbar({
               />
             ))}
             <Button
-              label={t("flow_transcript_speaker_new", { label: newLabel })}
+              label={t("flow_transcript_speaker_new", { label: speakerText(newLabel, {}, t) })}
               size="sm"
               variant="ghost"
               onClick={choose(newLabel)}

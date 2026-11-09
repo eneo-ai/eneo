@@ -33,7 +33,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function Scalar({ value }: { value: unknown }) {
   const t = useTranslations();
-  if (value === null || value === undefined) {
+  // An answer left blank reads as no value, not as nothing.
+  if (value === null || value === undefined || (typeof value === "string" && !value.trim())) {
     return <span className="text-ax-text-secondary">{t("flow_runs_value_empty")}</span>;
   }
   if (typeof value === "boolean") return <>{value ? t("yes") : t("no")}</>;

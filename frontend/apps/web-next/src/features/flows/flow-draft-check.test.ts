@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { makeAssistant } from "./editor/testing/fixtures";
-import { checkDraft, problemCount, type DraftFacts } from "./flow-draft-check";
+import { checkDraft, problemAnchor, problemCount, type DraftFacts } from "./flow-draft-check";
 import { makeFlow, makeStep } from "./flow-fixtures";
 
 const none: DraftFacts = {
@@ -41,7 +41,7 @@ describe("checkDraft", () => {
     });
     const check = checkDraft(flow, none);
     expect(check.steps.map(({ step, problems }) => [step.step_order, problems])).toEqual([
-      [1, [{ code: "http_url_missing" }]],
+      [1, [{ code: "http_url_missing", anchor: "input_config.http" }]],
       [2, [{ code: "template_unbound" }, { code: "template_orphaned" }]],
       [3, [{ code: "name_missing" }, { code: "tool_missing" }]]
     ]);
@@ -69,7 +69,7 @@ describe("checkDraft", () => {
     });
     expect(
       checkDraft(flow, none).steps.map(({ step, problems }) => [step.step_order, problems])
-    ).toEqual([[1, [{ code: "http_credential_missing" }]]]);
+    ).toEqual([[1, [{ code: "http_credential_missing", anchor: "input_config.http" }]]]);
   });
 
   it("judges with what the core answered: models, tools and the classification", () => {
@@ -129,6 +129,96 @@ describe("checkDraft", () => {
     ]);
   });
 
+  it("blocks an AI step without an instruction, as the editor warns, but not a speaker step", () => {
+    const flow = makeFlow({
+      steps: [makeStep(1), makeStep(2, { output_mode: "speaker_mapping", output_type: "json" })]
+    });
+    const blank = (id: string) =>
+      makeAssistant({ id, prompt: { text: "  ", description: null } } as never);
+    const check = checkDraft(flow, {
+      ...none,
+      assistants: new Map([
+        ["assistant-1", blank("assistant-1")],
+        ["assistant-2", blank("assistant-2")]
+      ])
+    });
+    const first = check.steps.find(({ step }) => step.step_order === 1)?.problems ?? [];
+    expect(first).toEqual([{ code: "prompt_missing" }]);
+    expect(problemAnchor(first[0]!)).toBe("prompt");
+    expect(
+      check.steps
+        .find(({ step }) => step.step_order === 2)
+        ?.problems.some((problem) => problem.code === "prompt_missing") ?? false
+    ).toBe(false);
+  });
+
+  it("counts a Word field filled from a source the flow no longer has as unfilled", () => {
+    const template = (bindings: Record<string, string>) =>
+      makeFlow({
+        metadata_json: {
+          form_schema: { fields: [{ name: "namn", label: "Namn", type: "text" }] }
+        },
+        steps: [
+          makeStep(1, {
+            output_mode: "template_fill",
+            output_type: "docx",
+            output_config: { template_asset_id: "t-1", placeholders: ["namn", "datum"], bindings }
+          })
+        ]
+      });
+    const codes = (bindings: Record<string, string>) =>
+      checkDraft(template(bindings), none).steps.flatMap(({ problems }) =>
+        problems.map((problem) => problem.code)
+      );
+    expect(codes({ namn: "{{flow_input.namn}}", datum: "{{datum}}" })).toEqual([]);
+    expect(codes({ namn: "{{flow_input.arende}}", datum: "" })).toEqual(["template_unbound"]);
+  });
+
+  it("reads a Word field's binding as the run does, not as the picker writes it", () => {
+    const codes = (binding: string) =>
+      checkDraft(
+        makeFlow({
+          steps: [
+            makeStep(1, { user_description: "Beslut" }),
+            makeStep(2, {
+              output_mode: "template_fill",
+              output_type: "docx",
+              output_config: {
+                template_asset_id: "t-1",
+                placeholders: ["innehall"],
+                bindings: { innehall: binding }
+              }
+            })
+          ]
+        }),
+        none
+      )
+        .steps.find(({ step }) => step.step_order === 2)
+        ?.problems.map((problem) => problem.code) ?? [];
+    // Spaces inside the braces, the previous step's alias and the run's text input all read a value.
+    for (const binding of [
+      "{{ datum }}",
+      " {{ step_1.output.text }} ",
+      "{{föregående_steg}}",
+      "{{flow_input.text}}"
+    ]) {
+      expect(codes(binding), binding).toEqual([]);
+    }
+    // A step that is gone, or that is not earlier, fills nothing.
+    expect(codes("{{step_9.output.text}}")).toEqual(["template_unbound"]);
+    expect(codes("{{ step_2.output.text }}")).toEqual(["template_unbound"]);
+  });
+
+  it("opens each problem at the field that fixes it", () => {
+    expect(problemAnchor({ code: "template_missing" })).toBe("output_config.template");
+    expect(problemAnchor({ code: "model_missing" })).toBe("completion_model");
+    expect(problemAnchor({ code: "tool_missing" })).toBe("input_config.tool");
+    expect(problemAnchor({ code: "name_missing" })).toBe("user_description");
+    expect(problemAnchor({ code: "http_url_missing", anchor: "output_config.http" })).toBe(
+      "output_config.http"
+    );
+  });
+
   it("finds a read of a removed step in the underlag, the tool arguments and the prompt", () => {
     const flow = makeFlow({
       steps: [
@@ -159,12 +249,14 @@ describe("checkDraft", () => {
     expect(
       check.steps.map(({ step, problems }) => [
         step.step_order,
-        problems.some((problem) => problem.code === "deleted_reference")
+        problems.flatMap((problem) =>
+          problem.code === "deleted_reference" ? [problemAnchor(problem)] : []
+        )
       ])
     ).toEqual([
-      [1, true],
-      [2, true],
-      [3, true]
+      [1, ["input_bindings"]],
+      [2, ["input_config.tool"]],
+      [3, ["prompt"]]
     ]);
   });
 

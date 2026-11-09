@@ -158,7 +158,8 @@ export function CancelRunButton({
   runId,
   report,
   onCancelled,
-  size
+  size,
+  variant = "destructive"
 }: {
   flowId: string;
   runId: string;
@@ -169,6 +170,8 @@ export function CancelRunButton({
    */
   onCancelled: () => void;
   size?: "sm" | "md";
+  /** Ghost where cancelling sits beside the action the run is waiting for. */
+  variant?: "destructive" | "ghost";
 }) {
   const t = useTranslations();
   const announce = useAnnounce();
@@ -212,7 +215,7 @@ export function CancelRunButton({
     <>
       <Button
         label={t("flow_runs_cancel")}
-        variant="destructive"
+        variant={variant}
         size={size}
         onClick={() => setConfirming(true)}
         isLoading={cancel.isPending}

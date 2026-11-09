@@ -248,6 +248,22 @@ describe("FlowStepEditor", () => {
     expect(field.getAttribute("aria-valuemax") ?? field.max).toBeFalsy();
   });
 
+  it("keeps an HTTP time limit above the default ceiling: the deployment's own limit decides", async () => {
+    const flow = httpFlow();
+    const step = flow.steps[0]!;
+    renderEditor({
+      ...flow,
+      steps: [{ ...step, input_config: { ...(step.input_config as object), timeout_seconds: 180 } }]
+    });
+    const field = (await screen.findByLabelText(
+      new RegExp(`^${messages.flow_step_editor_http_timeout}`)
+    )) as HTMLInputElement;
+    expect(field.value).toBe("180");
+    expect(field.getAttribute("aria-valuemax") ?? field.max).toBeFalsy();
+    fireEvent.change(field, { target: { value: "240" } });
+    expect(field.value).toBe("240");
+  });
+
   it("shows an AI step's task, input, result and control as labelled sections", async () => {
     const { container } = renderEditor(makeFlow());
     await nameField();
@@ -255,16 +271,132 @@ describe("FlowStepEditor", () => {
       messages.flow_step_editor_ai_title,
       messages.flow_step_editor_input_title,
       messages.flow_step_editor_output_title,
-      messages.flow_step_editor_control_title,
-      messages.flow_step_editor_advanced_title
+      messages.flow_step_editor_control_title
     ]) {
       expect(screen.getByRole("heading", { level: 3, name: heading })).toBeTruthy();
     }
+    expect(
+      screen.getByRole("region", { name: messages.flow_step_editor_advanced_title })
+    ).toBeTruthy();
+    // Where the organisation does not classify, the control section holds only the review choice.
+    expect(screen.queryByText(/Säkerhetsklassning är inte påslagen/)).toBeNull();
     expect((screen.getByLabelText(/^Instruktion/) as HTMLTextAreaElement).value).toBe(
       "Sammanfatta ärendet."
     );
     await expectNoAxeViolations(container);
   }, 20_000);
+
+  it("folds Avancerat while its settings are the defaults, and opens it on one in use", async () => {
+    renderEditor(makeFlow());
+    await nameField();
+    const folded = screen.getByRole("button", {
+      name: new RegExp(`^${messages.flow_step_editor_advanced_title}`)
+    });
+    expect(folded.getAttribute("aria-expanded")).toBe("false");
+    expect(folded.textContent).toContain(messages.flow_step_editor_advanced_description);
+    cleanup();
+
+    renderEditor(makeFlow({ steps: [makeStep({ timeout_seconds: 120 })] }));
+    await nameField();
+    const open = screen.getByRole("button", {
+      name: new RegExp(`^${messages.flow_step_editor_advanced_title}`)
+    });
+    expect(open.getAttribute("aria-expanded")).toBe("true");
+    expect(open.textContent).toContain("1 egen inställning används");
+  });
+
+  it("folds the model's own settings until one is set, and keeps the behaviour in view", async () => {
+    const tunable = {
+      ...makeSpace(),
+      completion_models: [
+        {
+          id: "model-1",
+          name: "claude-haiku",
+          nickname: "Haiku 4.5",
+          supported_model_kwargs: {
+            temperature: { supported: true, minimum: 0, maximum: 2, step: 0.05 },
+            top_p: { supported: true, minimum: 0, maximum: 1, step: 0.05 }
+          }
+        }
+      ]
+    } as unknown as ReturnType<typeof makeSpace>;
+    const more = () =>
+      screen.getByRole("button", { name: new RegExp(`^${messages.flow_step_editor_model_more}`) });
+
+    renderEditor(makeFlow(), { space: tunable });
+    await nameField();
+    expect(screen.getByText(messages.model_behaviour)).toBeTruthy();
+    expect(more().getAttribute("aria-expanded")).toBe("false");
+    expect(more().textContent).toContain(messages.flow_step_editor_model_more_description);
+    fireEvent.click(more());
+    expect(more().getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByLabelText(new RegExp(`^${messages.top_p}`))).toBeTruthy();
+    cleanup();
+
+    routeBasics(makeAssistant({ completion_model_kwargs: { top_p: 0.5 } }));
+    renderEditor(makeFlow(), { space: tunable });
+    await nameField();
+    await waitFor(() => expect(more().getAttribute("aria-expanded")).toBe("true"));
+    expect(more().textContent).toContain("1 ändrad inställning");
+  });
+
+  it("shows a model settings refusal without presets, opens the fold once and lets it close", async () => {
+    const noPresets = {
+      ...makeSpace(),
+      completion_models: [
+        {
+          id: "model-1",
+          name: "claude-haiku",
+          nickname: "Haiku 4.5",
+          supported_model_kwargs: { top_p: { supported: true, minimum: 0, maximum: 1, step: 0.05 } }
+        }
+      ]
+    } as unknown as ReturnType<typeof makeSpace>;
+    api.routes[EDITOR] = () => ({
+      status: 400,
+      body: {
+        message: "Step 1: top_p is out of range",
+        code: "flow_step_model_kwargs_invalid",
+        context: { field: "completion_model_kwargs", step_order: 1 },
+        eneo_error_code: 9000
+      }
+    });
+    const more = () =>
+      screen.getByRole("button", { name: new RegExp(`^${messages.flow_step_editor_model_more}`) });
+    renderEditor(makeFlow(), { space: noPresets });
+    fireEvent.change(await nameField(), { target: { value: "Sammanfatta ärendet" } });
+    expect(more().getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
+
+    await waitFor(() => expect(more().getAttribute("aria-expanded")).toBe("true"));
+    const message = await screen.findByText(/top_p is out of range/);
+    fireEvent.click(more());
+    expect(more().getAttribute("aria-expanded")).toBe("false");
+    expect(message.isConnected).toBe(true);
+  });
+
+  it("opens Avancerat on a refusal inside it before focus moves to the field", async () => {
+    api.routes[EDITOR] = () => ({
+      status: 400,
+      body: {
+        message: "Step 1: timeout_seconds is too long",
+        code: "flow_step_timeout_too_long",
+        context: { field: "timeout_seconds", step_order: 1 },
+        eneo_error_code: 9000
+      }
+    });
+    renderEditor(makeFlow());
+    fireEvent.change(await nameField(), { target: { value: "Sammanfatta ärendet" } });
+    const trigger = screen.getByRole("button", {
+      name: new RegExp(`^${messages.flow_step_editor_advanced_title}`)
+    });
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
+
+    const field = screen.getByLabelText(new RegExp(`^${messages.flow_step_editor_timeout}`));
+    await waitFor(() => expect(document.activeElement).toBe(field));
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+  });
 
   it("saves a renamed step as one fenced edit with only the name", async () => {
     const saved = makeFlow({
@@ -631,7 +763,7 @@ describe("FlowStepEditor", () => {
       name: messages.flow_editor_tools_preview_title
     });
     expect(dialog.textContent).toContain("https://api.example.org/a");
-    expect(dialog.textContent).toContain(messages.flow_step_editor_secret_stored);
+    expect(dialog.textContent).toContain("Token · sparad");
     expect(dialog.textContent).not.toContain("$secret");
   });
 
@@ -653,9 +785,15 @@ describe("FlowStepEditor", () => {
     expect(dialog.textContent).toContain("beslut");
     expect(dialog.textContent).toContain("Tal");
     await expectNoAxeViolations(container);
+    const advanced = screen.getByRole("button", {
+      name: new RegExp(`^${messages.flow_step_editor_advanced_title}`)
+    });
+    expect(advanced.getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(
       screen.getByRole("button", { name: messages.flow_editor_tools_contract_example_accept })
     );
+    // The accepted contract shows in Avancerat, which opens on it.
+    expect(advanced.getAttribute("aria-expanded")).toBe("true");
     fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
 
     await waitFor(() => expect(onSaved).toHaveBeenCalled());
@@ -1186,9 +1324,51 @@ describe("FlowStepEditor", () => {
       ]
     });
     const { container } = renderEditor(template);
-    expect(await screen.findByText(messages.flow_step_editor_template_field_missing)).toBeTruthy();
-    expect(screen.getByText("0 av 1 fält är kopplade.")).toBeTruthy();
+    expect(
+      await screen.findByText(
+        "0 av 1 fält är klara. Välj vad som ska stå i resten, eller Lämna tomt."
+      )
+    ).toBeTruthy();
+    // The field is a combobox that names what fills it.
+    const field = screen.getByRole("combobox", { name: "Namn" });
+    expect(field.textContent).toContain(messages.flow_step_editor_template_field_unbound);
     await expectNoAxeViolations(container);
+    // Today's date fills a field too; the core resolves it when the step runs.
+    fireEvent.click(field);
+    expect(
+      within(await screen.findByRole("listbox", { name: "Namn" })).getByRole("option", {
+        name: /^Dagens datum/
+      })
+    ).toBeTruthy();
+  }, 20_000);
+
+  it("lists what fills each Word template field in the read view, as the step itself reads it", async () => {
+    const flow = makeFlow({
+      metadata_json: { form_schema: { fields: [{ name: "namn", label: "Namn", type: "text" }] } },
+      steps: [
+        makeStep({
+          output_mode: "template_fill",
+          output_type: "docx",
+          output_config: {
+            template_asset_id: "asset-1",
+            template_name: "Beslut.docx",
+            placeholders: ["namn", "datum", "beslut", "senare"],
+            bindings: { namn: "{{flow_input.namn}}", datum: "", senare: "{{step_2.output.text}}" }
+          }
+        }),
+        makeStep({ id: "step-2", assistant_id: "assistant-2", step_order: 2 })
+      ]
+    });
+    renderEditor(flow, { readOnly: true });
+    expect(await screen.findByText("namn: Namn")).toBeTruthy();
+    expect(
+      screen.getByText(`datum: ${messages.flow_step_editor_template_field_left_empty}`)
+    ).toBeTruthy();
+    expect(
+      screen.getByText(`beslut: ${messages.flow_step_editor_template_field_none}`)
+    ).toBeTruthy();
+    // A later step's answer is not there when this step runs.
+    expect(screen.getByText("senare: Steg 2 finns inte")).toBeTruthy();
   }, 20_000);
 
   it.each([
@@ -1244,13 +1424,13 @@ describe("FlowStepEditor", () => {
       );
       // The template list has loaded and the chosen template shows.
       await screen.findAllByText("Beslut.docx");
-      const download = () => screen.queryByRole("button", { name: "Ladda ned Beslut.docx" });
+      const download = () => screen.queryByRole("button", { name: "Ladda ner Beslut.docx" });
       if (!offered) {
         expect(download()).toBeNull();
         click.mockRestore();
         return;
       }
-      fireEvent.click(await screen.findByRole("button", { name: "Ladda ned Beslut.docx" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Ladda ner Beslut.docx" }));
       await waitFor(() =>
         expect(saved).toEqual(["/api/v1/files/file-1/download/?token=signed Beslut.docx"])
       );

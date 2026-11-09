@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import messages from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testAppContext } from "@/test/render";
+import { reportResize, setViewport } from "@/test/setup-dom";
 import { makeFlow } from "../flow-fixtures";
 import { runStepViews } from "./run-progress";
 import { makeRunGraph, makeRunSummary } from "./run-fixtures";
@@ -273,7 +274,43 @@ describe("RunTrace", () => {
     expect(document.activeElement).toBe(trigger);
   });
 
-  it("keeps a recorded zero distinct from a missing token count", async () => {
+  it("lists each call as a row on a phone, where six columns do not fit", async () => {
+    setViewport("phone");
+    state.routes[EVIDENCE] = () => ({ body: evidence() });
+    const { container } = renderTrace();
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_run_extras_trace_show }));
+    const list = await screen.findByRole("list", { name: messages.flow_run_extras_calls_heading });
+    expect(
+      screen.queryByRole("table", { name: messages.flow_run_extras_calls_heading })
+    ).toBeNull();
+    const [row] = within(list).getAllByRole("listitem");
+    expect(within(row!).getByText("Steg 2: Skriv svar, försök 1")).toBeTruthy();
+    expect(within(row!).getByText("Text · model-large-2026")).toBeTruthy();
+    expect(within(row!).getByText(messages.flow_run_extras_call_completed)).toBeTruthy();
+    expect(within(row!).getByText(/1\s200 token/)).toBeTruthy();
+    await expectNoAxeViolations(container);
+  });
+
+  it("lists the calls as rows where the table's columns do not fit, as on an upright iPad", async () => {
+    state.routes[EVIDENCE] = () => ({ body: evidence() });
+    renderTrace();
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_run_extras_trace_show }));
+    const table = await screen.findByRole("table", {
+      name: messages.flow_run_extras_calls_heading
+    });
+    // Its columns' floors fit an upright iPad's width, not 1440 px.
+    expect(Number.parseFloat(table.style.minWidth)).toBeLessThanOrEqual(768);
+    const place = table.closest("div.flex.flex-col.gap-2")!;
+    act(() => reportResize(place, { width: 768 }));
+    expect(
+      screen.getByRole("table", { name: messages.flow_run_extras_calls_heading })
+    ).toBeTruthy();
+    act(() => reportResize(place, { width: 477 }));
+    expect(screen.queryByRole("table")).toBeNull();
+    expect(screen.getByRole("list", { name: messages.flow_run_extras_calls_heading })).toBeTruthy();
+  });
+
+  it("counts no tokens for an attempt that used none, apart from one whose count is missing", async () => {
     const response = evidence();
     response.step_attempts[0]!.num_tokens_input = 0;
     response.step_attempts[0]!.num_tokens_output = 0;
@@ -282,7 +319,10 @@ describe("RunTrace", () => {
     renderTrace();
     fireEvent.click(screen.getByRole("button", { name: messages.flow_run_extras_trace_show }));
     const attempts = await screen.findByRole("list", { name: "Steg 2: Skriv svar" });
-    expect(within(attempts).getByText(/0 token \(0 in, 0 ut\)/)).toBeTruthy();
+    expect(within(attempts).queryByText(/0 token \(0 in, 0 ut\)/)).toBeNull();
+    expect(
+      within(attempts).queryByText(new RegExp(messages.flow_run_token_usage_not_recorded))
+    ).toBeNull();
     expect(within(attempts).getByText(/200 token \(– in, 200 ut\) \(ofullständigt\)/)).toBeTruthy();
   });
 

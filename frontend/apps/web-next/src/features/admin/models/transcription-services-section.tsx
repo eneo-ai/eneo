@@ -6,6 +6,7 @@ import {
   DropdownMenuItem
 } from "@astryxdesign/core/DropdownMenu";
 import { Heading } from "@astryxdesign/core/Heading";
+import { List, ListItem } from "@astryxdesign/core/List";
 import { Switch } from "@astryxdesign/core/Switch";
 import { pixel, proportional, type TableColumn } from "@astryxdesign/core/Table";
 import { Text } from "@astryxdesign/core/Text";
@@ -14,7 +15,15 @@ import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AudioLines, MoreHorizontal, Pencil, Plug, Plus, Trash2 } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { useCallback, useId, useRef, useState, type RefObject } from "react";
+import {
+  useCallback,
+  useId,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type Ref,
+  type RefObject
+} from "react";
 import { Table } from "@/components/astryx/table";
 import { ClientTime } from "@/components/composites/client-time";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
@@ -26,6 +35,7 @@ import type { SecurityClassification } from "@/features/admin/security-classific
 import { useRemovalMutation } from "@/features/spaces/removal";
 import { browserApi } from "@/lib/api/browser";
 import { toastApiError } from "@/lib/api/toast";
+import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { describeCheck } from "./transcription-service-check";
 import { TranscriptionServiceDialog } from "./transcription-service-dialog";
 import {
@@ -73,6 +83,9 @@ function host(url: string): string {
   }
 }
 
+/** Opens the connect dialog: the page's header action for this tab ("Anslut tjänst"). */
+export type TranscriptionServicesHandle = { connect: () => void };
+
 /**
  * The organisation's services for word timings and speaker identification
  * (such as Vemsa), on the models page. This list owns every change: each is
@@ -82,17 +95,19 @@ function host(url: string): string {
  * administrator sees it.
  */
 export function TranscriptionServicesSection({
-  classifications
+  classifications,
+  ref
 }: {
   classifications: SecurityClassification[];
+  ref?: Ref<TranscriptionServicesHandle>;
 }) {
   const t = useTranslations();
   const announce = useAnnounce();
   const queryClient = useQueryClient();
   const headingId = useId();
-  const headingRef = useRef<HTMLHeadingElement>(null);
   const query = useQuery(transcriptionServicesQueryOptions(browserApi));
   const services = query.data ?? [];
+  const phone = usePhoneScreen();
 
   const [checking, checkingRef, setChecking] = useIdSet();
   // Services with a change in flight; their other changes wait for it.
@@ -241,8 +256,7 @@ export function TranscriptionServicesSection({
       checkRuns.current.delete(id);
       setChecking(id, false);
       setRemoving(null);
-    },
-    focusTarget: headingRef
+    }
   });
 
   function openDialog(service: TranscriptionService | null) {
@@ -251,6 +265,8 @@ export function TranscriptionServicesSection({
     setDialogKey((key) => key + 1);
     setDialogOpen(true);
   }
+
+  useImperativeHandle(ref, () => ({ connect: () => openDialog(null) }));
 
   const editing = editingId ? services.find((service) => service.id === editingId) : undefined;
 
@@ -269,6 +285,112 @@ export function TranscriptionServicesSection({
     />
   );
 
+  function classification(service: TranscriptionService) {
+    return service.security_classification ? (
+      <Badge label={service.security_classification.name} />
+    ) : (
+      <span className="text-ax-text-secondary text-sm">
+        {t("speaker_service_classification_none")}
+      </span>
+    );
+  }
+
+  function connection(service: TranscriptionService) {
+    if (checking.has(service.id)) {
+      return <StatusLabel status="accent" label={t("speaker_service_testing")} isPulsing />;
+    }
+    const check = service.last_check;
+    if (!check) {
+      return (
+        <span className="text-ax-text-secondary text-sm">{t("speaker_service_not_tested")}</span>
+      );
+    }
+    const summary = describeCheck(check, t);
+    return (
+      <div className="flex flex-col items-start gap-0.5">
+        <StatusLabel
+          status={summary.tone === "info" ? "neutral" : summary.tone}
+          label={summary.label}
+        />
+        {/* What the service does for flows, or why it failed, then when that was seen. */}
+        <Text type="supporting" size="sm">
+          {summary.note ? `${summary.note} · ` : null}
+          {t.rich("speaker_service_checked_at", {
+            time: () => <ClientTime value={check.checked_at} format="relative" />
+          })}
+        </Text>
+      </div>
+    );
+  }
+
+  function activeSwitch(service: TranscriptionService) {
+    return (
+      // The track centred in its 44 px touch box, level with the row's menu.
+      <div className="[&>*]:flex [&>*]:items-center pointer-coarse:[&>*]:min-h-11">
+        <Switch
+          // Named with its column, so it is not heard as a switch that is the service.
+          label={t("speaker_service_active_label", { name: service.name })}
+          isLabelHidden
+          value={service.is_enabled}
+          // Saving, it keeps focus and ignores a press (Astryx's busy state).
+          onChange={(enabled) => void setEnabled(service, enabled)}
+          isLoading={busy.has(service.id)}
+        />
+      </div>
+    );
+  }
+
+  function rowMenu(service: TranscriptionService) {
+    const label = t("speaker_service_actions", { name: service.name });
+    return (
+      <DropdownMenu
+        button={{
+          label,
+          tooltip: label,
+          icon: <MoreHorizontal className="size-4" aria-hidden="true" />,
+          isIconOnly: true,
+          variant: "ghost",
+          size: "sm"
+        }}
+        hasChevron={false}
+        alignment="end"
+      >
+        <DropdownMenuItem
+          icon={Pencil}
+          label={t("edit")}
+          isDisabled={busy.has(service.id)}
+          onClick={() => openDialog(service)}
+        />
+        {/* Never disabled while it runs: another check simply starts again. */}
+        <DropdownMenuItem
+          icon={Plug}
+          label={t("speaker_service_test")}
+          onClick={() => void runCheck(service.id)}
+        />
+        <DropdownMenuDivider />
+        <DropdownMenuItem
+          icon={Trash2}
+          label={t("remove")}
+          variant="destructive"
+          isDisabled={busy.has(service.id)}
+          onClick={() => setRemoving(service)}
+        />
+      </DropdownMenu>
+    );
+  }
+
+  function nameLine(service: TranscriptionService) {
+    return (
+      <span className="flex flex-wrap items-center gap-2">
+        <span className="font-medium break-words">{service.name}</span>
+        {service.is_default && <Badge variant="blue" label={t("speaker_service_default_badge")} />}
+      </span>
+    );
+  }
+
+  const where = (service: TranscriptionService) =>
+    `${host(service.endpoint_url)} · ${spaceUsage(service.space_count)}`;
+
   // The columns fit 640 px, so the table fits whole beside the icon rail on an
   // iPad held upright (682 px) and beside the open sidebar on a laptop.
   const columns: TableColumn<TranscriptionService>[] = [
@@ -278,14 +400,9 @@ export function TranscriptionServicesSection({
       width: proportional(1, { minWidth: 176 }),
       renderCell: (service) => (
         <div className="flex min-w-0 flex-col gap-0.5">
-          <span className="flex flex-wrap items-center gap-2">
-            <span className="font-medium break-words">{service.name}</span>
-            {service.is_default && (
-              <Badge variant="blue" label={t("speaker_service_default_badge")} />
-            )}
-          </span>
+          {nameLine(service)}
           <Text type="supporting" maxLines={2}>
-            {host(service.endpoint_url)} · {spaceUsage(service.space_count)}
+            {where(service)}
           </Text>
         </div>
       )
@@ -294,126 +411,38 @@ export function TranscriptionServicesSection({
       key: "classification",
       header: t("speaker_service_column_classification"),
       width: pixel(128),
-      renderCell: (service) =>
-        service.security_classification ? (
-          <Badge label={service.security_classification.name} />
-        ) : (
-          <span className="text-ax-text-secondary text-sm">
-            {t("speaker_service_classification_none")}
-          </span>
-        )
+      renderCell: classification
     },
     {
       key: "connection",
       header: t("speaker_service_column_connection"),
       width: pixel(200),
-      renderCell: (service) => {
-        if (checking.has(service.id)) {
-          return <StatusLabel status="accent" label={t("speaker_service_testing")} isPulsing />;
-        }
-        const check = service.last_check;
-        if (!check) {
-          return (
-            <span className="text-ax-text-secondary text-sm">
-              {t("speaker_service_not_tested")}
-            </span>
-          );
-        }
-        const summary = describeCheck(check, t);
-        return (
-          <div className="flex flex-col items-start gap-0.5">
-            <StatusLabel
-              status={summary.tone === "info" ? "neutral" : summary.tone}
-              label={summary.label}
-            />
-            {/* What the service does for flows, or why it failed, then when that was seen. */}
-            <Text type="supporting" size="sm">
-              {summary.note ? `${summary.note} · ` : null}
-              {t.rich("speaker_service_checked_at", {
-                time: () => <ClientTime value={check.checked_at} format="relative" />
-              })}
-            </Text>
-          </div>
-        );
-      }
+      renderCell: connection
     },
     {
       key: "active",
       header: t("speaker_service_column_active"),
       width: pixel(72),
-      renderCell: (service) => (
-        // The track centred in its 44 px touch box, level with the row's menu.
-        <div className="[&>*]:flex [&>*]:items-center pointer-coarse:[&>*]:min-h-11">
-          <Switch
-            label={service.name}
-            isLabelHidden
-            value={service.is_enabled}
-            // Saving, it keeps focus and ignores a press (Astryx's busy state).
-            onChange={(enabled) => void setEnabled(service, enabled)}
-            isLoading={busy.has(service.id)}
-          />
-        </div>
-      )
+      renderCell: activeSwitch
     },
     {
       key: "actions",
       header: <VisuallyHidden>{t("actions")}</VisuallyHidden>,
       width: pixel(64),
       align: "end",
-      renderCell: (service) => {
-        const label = t("speaker_service_actions", { name: service.name });
-        return (
-          <DropdownMenu
-            button={{
-              label,
-              tooltip: label,
-              icon: <MoreHorizontal className="size-4" aria-hidden="true" />,
-              isIconOnly: true,
-              variant: "ghost",
-              size: "sm"
-            }}
-            hasChevron={false}
-            alignment="end"
-          >
-            <DropdownMenuItem
-              icon={Pencil}
-              label={t("edit")}
-              isDisabled={busy.has(service.id)}
-              onClick={() => openDialog(service)}
-            />
-            {/* Never disabled while it runs: another check simply starts again. */}
-            <DropdownMenuItem
-              icon={Plug}
-              label={t("speaker_service_test")}
-              onClick={() => void runCheck(service.id)}
-            />
-            <DropdownMenuDivider />
-            <DropdownMenuItem
-              icon={Trash2}
-              label={t("remove")}
-              variant="destructive"
-              isDisabled={busy.has(service.id)}
-              onClick={() => setRemoving(service)}
-            />
-          </DropdownMenu>
-        );
-      }
+      renderCell: rowMenu
     }
   ];
 
   return (
-    <section aria-labelledby={headingId} className="flex flex-col gap-4 pt-4">
+    <section aria-labelledby={headingId} className="flex flex-col gap-4">
       <header>
-        <Heading
-          level={2}
-          id={headingId}
-          ref={headingRef}
-          tabIndex={-1}
-          className="focus-visible:outline-ring rounded-ax-inner text-base focus-visible:outline-2 focus-visible:outline-offset-2"
-        >
+        {/* The selected tab already says it on screen; the heading names the
+            section, table and list for a screen reader. */}
+        <Heading level={2} id={headingId} className="sr-only">
           {t("speaker_identification")}
         </Heading>
-        <Text type="supporting" className="mt-1 block max-w-3xl">
+        <Text type="supporting" className="block max-w-prose text-pretty">
           {t("speaker_service_intro")}
         </Text>
       </header>
@@ -428,21 +457,47 @@ export function TranscriptionServicesSection({
               headingLevel={3}
               actions={connect}
             />
-          ) : (
-            <>
-              <TableFrame>
-                <Table
-                  data={list}
-                  columns={columns}
-                  idKey="id"
-                  aria-labelledby={headingId}
-                  pinnedColumn="name"
-                  pinnedEndColumn="actions"
+          ) : phone ? (
+            // Five columns do not fit a phone: rows that keep the name, the
+            // connection, the switch and the menu in view.
+            <List hasDividers edge="flush" aria-labelledby={headingId}>
+              {list.map((service) => (
+                <ListItem
+                  key={service.id}
+                  align="start"
+                  label={nameLine(service)}
+                  description={
+                    <span className="flex flex-col items-start gap-1.5">
+                      <span className="[overflow-wrap:anywhere]">{where(service)}</span>
+                      {/* Without its column header, the class says what it is. */}
+                      <span>
+                        {t("speaker_service_column_classification")}:{" "}
+                        {service.security_classification?.name ??
+                          t("speaker_service_classification_none")}
+                      </span>
+                      {connection(service)}
+                    </span>
+                  }
+                  endContent={
+                    <span className="flex items-center gap-1">
+                      {activeSwitch(service)}
+                      {rowMenu(service)}
+                    </span>
+                  }
                 />
-              </TableFrame>
-              {/* Under the list, as the models' "Lägg till leverantör" is on its tab. */}
-              <div className="flex justify-center">{connect}</div>
-            </>
+              ))}
+            </List>
+          ) : (
+            <TableFrame>
+              <Table
+                data={list}
+                columns={columns}
+                idKey="id"
+                aria-labelledby={headingId}
+                pinnedColumn="name"
+                pinnedEndColumn="actions"
+              />
+            </TableFrame>
           )
         }
       </QueryStateBoundary>

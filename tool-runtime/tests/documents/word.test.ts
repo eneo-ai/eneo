@@ -379,6 +379,21 @@ describe("filling templates", () => {
       "No value was given for: datum, sammanfattning, bakgrund.",
     );
   });
+  test("a list fills a template that has no part relationships yet", async () => {
+    const zip = await JSZip.loadAsync(await controlTemplate(REPORT_BODY));
+    for (const name of Object.keys(zip.files))
+      if (!zip.files[name]!.dir && !["[Content_Types].xml", "_rels/.rels", "word/document.xml"].includes(name))
+        zip.remove(name);
+    const bare = Buffer.from(await zip.generateAsync({ type: "nodebuffer" }));
+    const { buffer } = await fillTemplateDocx(bare, {
+      titel: "t",
+      datum: "d",
+      sammanfattning: "- a\n- b",
+      bakgrund: "",
+    });
+    expect(await partOf(buffer, "word/_rels/document.xml.rels")).toContain("numbering.xml");
+    expect(await partOf(buffer, "word/document.xml")).toMatch(/<w:numPr>[^]*?>a</);
+  });
   test("a text control takes one line unless it is a multi-line plain text control", async () => {
     const multiline = textControl("flera", "Flera", "f").replace(
       "<w:text/>",

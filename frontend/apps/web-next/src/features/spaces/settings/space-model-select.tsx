@@ -7,7 +7,6 @@ import { ProviderLogo } from "@/components/ai-elements/provider-logo";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Switch } from "@/components/ui/switch";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   formatCostPerMillionTokens,
   formatCostPerMinute,
@@ -78,30 +77,29 @@ function ModelLifecycleStatus({ lifecycle }: { lifecycle: ModelLifecycle }) {
   );
 }
 
-function CapabilityIcons({ model }: { model: SelectableModel }) {
-  const t = useTranslations();
-  const items = [
+/**
+ * What the model can do, as words under its name: an icon alone had its name
+ * only in a hover tooltip, out of reach for the keyboard and touch.
+ */
+function capabilitiesOf(model: SelectableModel, t: ReturnType<typeof useTranslations>) {
+  return [
     model.vision ? { Icon: Eye, text: t("model_label_vision") } : null,
     model.reasoning ? { Icon: Brain, text: t("model_label_reasoning") } : null,
     model.supports_tool_calling ? { Icon: Wrench, text: t("model_label_tool_calling") } : null,
     model.supports_realtime ? { Icon: AudioLines, text: t("live_transcription_support") } : null
   ].filter((item): item is { Icon: typeof Eye; text: string } => item !== null);
+}
 
-  if (items.length === 0) return null;
-
+function Capabilities({ items, id }: { items: ReturnType<typeof capabilitiesOf>; id: string }) {
   return (
-    <span className="flex items-center gap-1.5">
+    <ul id={id} className="text-ax-text-secondary mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-xs">
       {items.map(({ Icon, text }) => (
-        <Tooltip key={text}>
-          <TooltipTrigger asChild>
-            <span className="text-muted-foreground inline-flex">
-              <Icon className="size-4" role="img" aria-label={text} />
-            </span>
-          </TooltipTrigger>
-          <TooltipContent>{text}</TooltipContent>
-        </Tooltip>
+        <li key={text} className="inline-flex items-center gap-1">
+          <Icon className="size-3.5 shrink-0" aria-hidden="true" />
+          {text}
+        </li>
       ))}
-    </span>
+    </ul>
   );
 }
 
@@ -372,8 +370,14 @@ export function SpaceModelSelect({
                         lifecycle.kind === "active"
                           ? undefined
                           : `${reasonPrefix}-${model.id}-lifecycle`;
+                      const capabilities = capabilitiesOf(model, t);
+                      const capabilitiesId =
+                        capabilities.length > 0
+                          ? `${reasonPrefix}-${model.id}-capabilities`
+                          : undefined;
                       const reasons =
-                        [reasonId, lifecycleId].filter(Boolean).join(" ") || undefined;
+                        [reasonId, lifecycleId, capabilitiesId].filter(Boolean).join(" ") ||
+                        undefined;
                       return (
                         <div
                           key={model.id}
@@ -383,6 +387,9 @@ export function SpaceModelSelect({
                             <span className="block text-sm font-medium break-words">
                               {label(model)}
                             </span>
+                            {capabilitiesId && (
+                              <Capabilities items={capabilities} id={capabilitiesId} />
+                            )}
                             {(reasonId || lifecycleId) && (
                               <div className="mt-0.5 flex flex-col gap-1">
                                 {lifecycleId && (
@@ -398,7 +405,6 @@ export function SpaceModelSelect({
                               </div>
                             )}
                           </div>
-                          <CapabilityIcons model={model} />
                           {cost && (
                             <span className="text-muted-foreground bg-muted inline-flex items-center rounded-md border px-1.5 py-0.5 font-mono text-[11px] tabular-nums">
                               {cost}

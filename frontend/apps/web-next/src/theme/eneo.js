@@ -615,6 +615,12 @@ export const eneoTheme = {
               "base": {
                 "minHeight": "44px"
               }
+            },
+            "date-input-toggle-icon": {
+              "base": {
+                "minHeight": "44px",
+                "minWidth": "44px"
+              }
             }
           }
         }

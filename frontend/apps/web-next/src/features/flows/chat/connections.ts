@@ -1,5 +1,11 @@
 import type { FieldAnchor } from "../editor/field-problems";
-import { isSecretSentinel, readHttpConfig, type HttpConfig } from "../editor/step-configs";
+import {
+  headerSent,
+  httpCredential,
+  isSecretSentinel,
+  readHttpConfig,
+  type HttpConfig
+} from "../editor/step-configs";
 import type { FlowStep } from "../editor/step-types";
 
 /**
@@ -25,19 +31,6 @@ function hostOf(url: string): string {
   }
 }
 
-function credentialOf(auth: HttpConfig["auth"]): unknown {
-  switch (auth.mode) {
-    case "bearer_token":
-      return auth.token;
-    case "api_key":
-      return auth.key;
-    case "basic_auth":
-      return auth.password;
-    default:
-      return null;
-  }
-}
-
 const stored = (value: unknown) =>
   isSecretSentinel(value) || (typeof value === "string" && value.length > 0);
 
@@ -47,10 +40,12 @@ function connectionOf(
   anchor: FieldAnchor
 ): StepConnection {
   const http = readHttpConfig(config, direction);
-  const credential = credentialOf(http.auth);
+  const credential = httpCredential(http.auth);
   const secretsStored =
     (http.auth.mode === "none" || stored(credential)) &&
-    http.custom_headers.filter((header) => header.secret).every((header) => stored(header.value));
+    http.custom_headers
+      .filter((header) => header.secret && headerSent(header))
+      .every((header) => stored(header.value));
   return {
     direction,
     anchor,

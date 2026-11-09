@@ -39,14 +39,16 @@ import {
   type EditRequest
 } from "./transcript-corrections";
 import { CorrectionHistory, RegenerateFromTranscript } from "./transcript-history";
-import { TranscriptLines } from "./transcript-lines";
+import { TranscriptLines, type SpeakerListen } from "./transcript-lines";
 import { ReviewDraftLines, type TranscriptDraftHandle } from "./transcript-review-draft";
 import { runHref } from "./runs-list";
+import { speakerText } from "./transcript-speakers";
 import {
   parseSegments,
   shownSegments,
   speakerLabels,
   speakerNamesRequest,
+  withProposedNames,
   type TranscriptCorrections,
   type TranscriptTarget
 } from "./transcript";
@@ -58,6 +60,7 @@ function SpeakerNames({
   target,
   labels,
   corrections,
+  proposedNames,
   sourceHash
 }: {
   flowId: string;
@@ -65,6 +68,8 @@ function SpeakerNames({
   target: TranscriptTarget;
   labels: string[];
   corrections: TranscriptCorrections | null;
+  /** The names a speaker-mapping step gave, shown until a name is given here. */
+  proposedNames?: Readonly<Record<string, string>>;
   sourceHash: string;
 }) {
   const t = useTranslations();
@@ -72,7 +77,7 @@ function SpeakerNames({
   const queryClient = useQueryClient();
   const formId = useId();
   const summaryRef = useRef<HTMLDivElement>(null);
-  const saved = corrections?.speaker_names ?? {};
+  const saved = withProposedNames(corrections, proposedNames)?.speaker_names ?? {};
   const [names, setNames] = useState<Record<string, string>>(() =>
     Object.fromEntries(labels.map((label) => [label, saved[label] ?? ""]))
   );
@@ -117,7 +122,7 @@ function SpeakerNames({
       <div
         ref={summaryRef}
         tabIndex={-1}
-        className="focus-visible:outline-ring rounded-ax-inner outline-none focus-visible:outline-2 focus-visible:outline-offset-2"
+        className="focus-visible:outline-ring rounded-ax-inner focus-visible:outline-2 focus-visible:outline-offset-2"
       >
         {problem ? (
           <Banner
@@ -133,7 +138,7 @@ function SpeakerNames({
         {labels.map((label) => (
           <TextInput
             key={label}
-            label={t("flow_runs_transcript_name_for", { label })}
+            label={t("flow_runs_transcript_name_for", { label: speakerText(label, {}, t) })}
             value={names[label] ?? ""}
             onChange={(value) => setNames((current) => ({ ...current, [label]: value }))}
             width="100%"
@@ -175,10 +180,12 @@ function StepTranscript({
   mayEdit,
   runCompleted,
   runRevision,
+  proposedNames,
   review = false,
   fallback,
   onUnsavedChange,
-  draftRef
+  draftRef,
+  listenRef
 }: {
   flowId: string;
   runId: string;
@@ -186,6 +193,8 @@ function StepTranscript({
   mayEdit: boolean;
   runCompleted: boolean;
   runRevision: number | null;
+  /** The names a speaker-mapping step gave the speakers, under the ones given here. */
+  proposedNames?: Readonly<Record<string, string>>;
   /** Shown in a review checkpoint: the lines can be corrected before the run goes on. */
   review?: boolean;
   /** Shown under the reason when the transcript has no lines to show or cannot be read. */
@@ -193,6 +202,8 @@ function StepTranscript({
   onUnsavedChange?: (unsaved: boolean) => void;
   /** In a review: the draft of the corrections, which the review flushes before approving. */
   draftRef?: Ref<TranscriptDraftHandle>;
+  /** Plays a speaker through the transcript's player from elsewhere on the page. */
+  listenRef?: Ref<SpeakerListen>;
 }) {
   const t = useTranslations();
   const announce = useAnnounce();
@@ -223,7 +234,11 @@ function StepTranscript({
   // poll, Refresh) hands the lines on as they were and their memos hold.
   const raw = source.data?.status === "present" ? source.data.segments : null;
   const segments = useMemo(() => (raw ? parseSegments(raw) : []), [raw]);
-  const shown = useMemo(() => shownSegments(segments, corrections), [segments, corrections]);
+  const named = useMemo(
+    () => withProposedNames(corrections, proposedNames),
+    [corrections, proposedNames]
+  );
+  const shown = useMemo(() => shownSegments(segments, named), [segments, named]);
 
   // A failed read again keeps what was read, and with it the corrections being made.
   const failed = [correctionsRead, source].find(blockingError);
@@ -263,6 +278,8 @@ function StepTranscript({
           speakerReview={source.data.speakerReview}
           onUnsavedChange={onUnsavedChange}
           draftRef={draftRef}
+          proposedNames={proposedNames}
+          listenRef={listenRef}
         />
       </>
     );
@@ -279,10 +296,11 @@ function StepTranscript({
         multiFile={multiFile}
         speakerReview={source.data.speakerReview}
         onUnsavedChange={onUnsavedChange}
+        listenRef={listenRef}
         editing={
           editable
             ? {
-                set: correctionSet(corrections, segments),
+                set: correctionSet(named, segments),
                 speakers: knownSpeakers(segments, corrections?.speaker_edits ?? []),
                 saving: save.isPending,
                 save: async (next, done) => {
@@ -341,6 +359,7 @@ function StepTranscript({
             target={target}
             labels={labels}
             corrections={corrections}
+            proposedNames={proposedNames}
             sourceHash={source.data.sourceHash}
           />
         ) : null}
@@ -365,6 +384,7 @@ export function RunTranscript({
   mayEdit,
   runCompleted,
   runRevision = null,
+  proposedNames,
   fallback
 }: {
   flowId: string;
@@ -374,6 +394,8 @@ export function RunTranscript({
   runCompleted: boolean;
   /** The run's revision, which starting a run from its reviewed transcript is fenced by. */
   runRevision?: number | null;
+  /** The names the run's speaker-mapping step gave (`mappedSpeakerNames`). */
+  proposedNames?: Readonly<Record<string, string>>;
   fallback?: ReactNode;
 }) {
   const [unsaved, setUnsaved] = useState(false);
@@ -387,6 +409,7 @@ export function RunTranscript({
         mayEdit={mayEdit}
         runCompleted={runCompleted}
         runRevision={runRevision}
+        proposedNames={proposedNames}
         fallback={fallback}
         onUnsavedChange={setUnsaved}
       />
@@ -456,7 +479,8 @@ export function TranscriptSlot({ host, isOpen }: { host: HTMLElement; isOpen: bo
  * who may decide the review corrects its lines and speakers before
  * approving, as a draft that saves itself, and the corrections are saved
  * with the run, so they hold for the steps after the review and for the
- * finished run.
+ * finished run. The names the review gives the speakers show in it as they
+ * are typed, and a speaker can be played from the review (`listenRef`).
  */
 export function ReviewTranscript({
   flowId,
@@ -464,7 +488,9 @@ export function ReviewTranscript({
   target,
   mayEdit,
   onUnsavedChange,
-  draftRef
+  draftRef,
+  proposedNames,
+  listenRef
 }: {
   flowId: string;
   runId: string;
@@ -474,6 +500,9 @@ export function ReviewTranscript({
   onUnsavedChange?: (unsaved: boolean) => void;
   /** The corrections' draft, which the review flushes before it approves. */
   draftRef?: Ref<TranscriptDraftHandle>;
+  /** The speakers' names as the review has them; a name the corrections give wins. */
+  proposedNames?: Readonly<Record<string, string>>;
+  listenRef?: Ref<SpeakerListen>;
 }) {
   return (
     <StepTranscript
@@ -484,8 +513,10 @@ export function ReviewTranscript({
       runCompleted={false}
       runRevision={null}
       review
+      proposedNames={proposedNames}
       onUnsavedChange={onUnsavedChange}
       draftRef={draftRef}
+      listenRef={listenRef}
     />
   );
 }

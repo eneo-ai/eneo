@@ -176,6 +176,14 @@ function Price({
 }
 
 /**
+ * A provider's table narrower than its every column (an iPad held upright, a
+ * laptop beside the open sidebar): the type and capabilities columns give way
+ * and show under the model's name, so the price stays in view. The width is
+ * the card's (`@container/models` in provider-card.tsx), not the window's.
+ */
+export const COMPACT_HIDDEN = "@max-[54rem]/models:hidden";
+
+/**
  * One model: its switch, name with badges, and menu with the dialogs it
  * opens. A table row from 768 px; on a phone a list row (decision 31) with
  * where the model is hosted and the class it is approved for, the switch and
@@ -453,16 +461,21 @@ export function ModelRow({
               {technicalId}
             </Text>
           )}
+          {/* In a narrow table (COMPACT_HIDDEN) the type and capabilities go under the name. */}
+          <div className="text-ax-text-secondary hidden flex-wrap items-center gap-x-2 gap-y-1 pt-0.5 text-sm @max-[54rem]/models:flex">
+            {showKind ? <span>{typeLabel(kind)}</span> : null}
+            <Capabilities model={model} label={t("capabilities")} />
+          </div>
         </div>
       </TableCell>
 
       {showKind && (
-        <TableCell>
+        <TableCell className={COMPACT_HIDDEN}>
           <span className="text-ax-text-secondary">{typeLabel(kind)}</span>
         </TableCell>
       )}
 
-      <TableCell>
+      <TableCell className={COMPACT_HIDDEN}>
         <Capabilities model={model} />
       </TableCell>
 
@@ -481,7 +494,11 @@ export function ModelRow({
         </TableCell>
       )}
 
-      <TableCell className="bg-ax-card sticky end-0 text-end">{menu}</TableCell>
+      {/* Opaque over what scrolls under it, with the row's hover tint on top (Astryx's own
+          sticky cells do the same with --table-row-overlay). */}
+      <TableCell className="bg-ax-card sticky end-0 [background-image:linear-gradient(var(--table-row-overlay,transparent),var(--table-row-overlay,transparent))] text-end">
+        {menu}
+      </TableCell>
     </TableRow>
   );
 }

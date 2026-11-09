@@ -4,7 +4,7 @@ import { EneoApiError } from "@/lib/api/errors";
 import en from "@/lib/i18n/messages/en.json";
 import sv from "@/lib/i18n/messages/sv.json";
 import { makeStep } from "./flow-fixtures";
-import { flowRefusalMessage } from "./flow-refusals";
+import { flowRefusalMessage, refusalStep } from "./flow-refusals";
 
 /** The app's real catalog, looked up by any key as the refusals do. */
 const translator = (locale: string, messages: Record<string, string>) =>
@@ -136,8 +136,52 @@ describe("flowRefusalMessage", () => {
     expect(message).toBe(`Steg 2: Skriv svar: ${t("flow_error_typed_io_tool_not_allowed")}`);
   });
 
-  it("falls back to the core's message for a code without a sentence", () => {
-    expect(flowRefusalMessage(refusal("something_new", {}, "Nope."), steps, t)).toBe("Nope.");
+  it("says a publication refusal in the editor's words for the issue the core names", () => {
+    // The core's own message is English: "Step 2: output_config must be an object…".
+    const error = refusal(
+      "flow_step_invalid",
+      { issue_code: "template_fill_requires_docx", step_order: 2 },
+      "Step 2: output_config must be an object for output_mode 'template_fill'."
+    );
+    expect(flowRefusalMessage(error, steps, t)).toBe(
+      `Steg 2: Skriv svar: ${t("flow_validation_msg_template_fill_requires_docx")}`
+    );
+  });
+
+  it("says the draft check's sentence for a template step refused without its file", () => {
+    const template = makeStep(2, {
+      user_description: "Fyll i mall",
+      output_mode: "template_fill",
+      output_type: "docx",
+      output_config: { bindings: {} }
+    });
+    const error = refusal(
+      "flow_step_invalid",
+      { step_order: 2 },
+      "Step 2: output_config.template_asset_id must be a UUID."
+    );
+    expect(flowRefusalMessage(error, [steps[0]!, template], t)).toBe(
+      `Steg 2: Fyll i mall: ${t("flow_editor_tools_check_template_missing")}`
+    );
+  });
+
+  it("never shows the core's English message: a code without a sentence gets a Swedish one", () => {
+    expect(flowRefusalMessage(refusal("something_new", {}, "Nope."), steps, t)).toBe(
+      t("request_failed")
+    );
+    expect(flowRefusalMessage(refusal("something_new", { step_order: 2 }, "Nope."), steps, t)).toBe(
+      "Något i Steg 2: Skriv svar behöver ändras. Öppna steget för att se vad."
+    );
     expect(flowRefusalMessage(new Error("network"), steps, t)).toBe(t("request_failed"));
+  });
+});
+
+describe("refusalStep", () => {
+  it("finds the step a refusal names, by id first, for the notice to open", () => {
+    expect(refusalStep(refusal("x", { step_id: "step-2", step_order: 1 }), steps)).toBe(steps[1]);
+    expect(refusalStep(refusal("x", { step_order: 1 }), steps)).toBe(steps[0]);
+    expect(refusalStep(refusal("x", { step_order: 9 }), steps)).toBeNull();
+    expect(refusalStep(refusal("x"), steps)).toBeNull();
+    expect(refusalStep(new Error("network"), steps)).toBeNull();
   });
 });

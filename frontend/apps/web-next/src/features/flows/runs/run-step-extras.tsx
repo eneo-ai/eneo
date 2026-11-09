@@ -85,33 +85,17 @@ export function StepRejectedOutput({ payload }: { payload: RunStep["output_paylo
   );
 }
 
-/** The document template a step filled: its name and version, with its file ids for support. */
+/** The Word template a step filled, by its name. The run header carries the flow's version. */
 export function StepTemplateProvenance({ payload }: { payload: RunStep["output_payload_json"] }) {
   const t = useTranslations();
   const template = templateProvenance(payload);
   if (!template) return null;
-  const ids = [
-    template.assetId ? t("flow_run_template_asset_badge", { id: template.assetId }) : null,
-    template.fileId ? t("flow_run_template_file_badge", { id: template.fileId }) : null,
-    template.checksum
-  ].filter(Boolean);
   return (
     <div className="flex flex-col gap-0.5">
       <p className="text-ax-text m-0 text-sm font-medium">
         {t("flow_run_template_provenance_label")}
       </p>
-      <p className="text-ax-text m-0 text-sm break-words">
-        {template.name}
-        {template.version !== null ? (
-          <span className="text-ax-text-secondary">
-            {" "}
-            · {t("flow_run_template_version_badge", { version: template.version })}
-          </span>
-        ) : null}
-      </p>
-      {ids.length > 0 ? (
-        <p className="text-ax-text-secondary m-0 font-mono text-xs break-all">{ids.join(" · ")}</p>
-      ) : null}
+      <p className="text-ax-text m-0 text-sm break-words">{template.name}</p>
     </div>
   );
 }

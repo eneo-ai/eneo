@@ -1,10 +1,11 @@
 import { Button } from "@astryxdesign/core/Button";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useId, useRef, useState } from "react";
 import { PageHeader } from "@/components/composites/page-header";
+import { blockingError } from "@/components/composites/query-state";
 import { securityClassificationsQueryOptions } from "@/features/admin/security-classifications/security-classifications";
 import { browserApi } from "@/lib/api/browser";
 import { RemovalFocusScope } from "@/features/spaces/removal";
@@ -13,7 +14,11 @@ import { MigrationHistoryPanel } from "./migration-history-panel";
 import { adminModelsQueryOptions } from "./models";
 import { PricingVisibilityToggle } from "./pricing-visibility-toggle";
 import { ProviderOverview } from "./provider-overview";
-import { TranscriptionServicesSection } from "./transcription-services-section";
+import {
+  TranscriptionServicesSection,
+  type TranscriptionServicesHandle
+} from "./transcription-services-section";
+import { transcriptionServicesQueryOptions } from "./transcription-services";
 
 type ModelsTab = "models" | "speakers" | "history" | "settings";
 const TABS: ModelsTab[] = ["models", "speakers", "history", "settings"];
@@ -25,7 +30,7 @@ const TABS: ModelsTab[] = ["models", "speakers", "history", "settings"];
  * of a transcript and label its speakers; "Migreringshistorik" lists past
  * migrations; "Inställningar" holds the org-wide pricing visibility. "Lägg
  * till leverantör" and each provider's "Lägg till modell" open the same
- * add-model wizard.
+ * add-model wizard; on the services tab the header's action is "Anslut tjänst".
  */
 export function ModelsPage() {
   const t = useTranslations();
@@ -38,6 +43,12 @@ export function ModelsPage() {
   const [visited, setVisited] = useState<ReadonlySet<ModelsTab>>(() => new Set(["models"]));
   const [wizardOpen, setWizardOpen] = useState(false);
   const [wizardProviderId, setWizardProviderId] = useState<string | undefined>(undefined);
+  const services = useRef<TranscriptionServicesHandle>(null);
+  // The section's own list (shared cache): a list that failed to load offers no connection.
+  const servicesQuery = useQuery({
+    ...transcriptionServicesQueryOptions(browserApi),
+    enabled: tab === "speakers"
+  });
 
   const baseId = useId();
   const panelId = `${baseId}-panel`;
@@ -73,13 +84,23 @@ export function ModelsPage() {
         title={t("models")}
         description={t("admin_models_description")}
         tour="admin-models"
+        // Each tab keeps an action here, so the tab strip stays put when switching tabs.
         actions={
-          <Button
-            variant="primary"
-            label={t("add_provider")}
-            icon={<Plus className="size-4" aria-hidden="true" />}
-            onClick={openAddProvider}
-          />
+          tab !== "speakers" ? (
+            <Button
+              variant="primary"
+              label={t("add_provider")}
+              icon={<Plus className="size-4" aria-hidden="true" />}
+              onClick={openAddProvider}
+            />
+          ) : blockingError(servicesQuery) ? undefined : (
+            <Button
+              variant="primary"
+              label={t("speaker_service_connect")}
+              icon={<Plus className="size-4" aria-hidden="true" />}
+              onClick={() => services.current?.connect()}
+            />
+          )
         }
       />
 
@@ -128,7 +149,10 @@ export function ModelsPage() {
         {visited.has("speakers") && (
           <div hidden={tab !== "speakers"}>
             <RemovalFocusScope target={panelRef}>
-              <TranscriptionServicesSection classifications={security.security_classifications} />
+              <TranscriptionServicesSection
+                ref={services}
+                classifications={security.security_classifications}
+              />
             </RemovalFocusScope>
           </div>
         )}

@@ -63,6 +63,10 @@ describe("StartRunDialog extras", () => {
       within(dialog).getByLabelText(new RegExp(`^${messages.flow_run_extras_run_label}`)),
       { target: { value: "  Ärende 2026-114 " } }
     );
+    // The flow's first step reads the free text: the form asks for it before the summary.
+    fireEvent.change(within(dialog).getByRole("textbox", { name: /^Text/ }), {
+      target: { value: "Underlag" }
+    });
     fireEvent.click(within(dialog).getByRole("button", { name: messages.flow_runs_summary_next }));
     expect(within(dialog).getByText("Ärende 2026-114")).toBeTruthy();
     fireEvent.click(within(dialog).getByRole("button", { name: messages.flow_runs_start_submit }));
@@ -75,7 +79,27 @@ describe("StartRunDialog extras", () => {
     });
   });
 
-  it("shows each template the flow fills and whether it is ready", async () => {
+  it("says nothing about templates that are ready", async () => {
+    const { dialog } = await openDialog(
+      makeContract({
+        template_readiness: [
+          { step_id: "step-1", template_name: "Beslutsmall", status: "ready" },
+          { step_id: "step-2", template_name: "Brevmall", status: "read_only" }
+        ]
+      })
+    );
+    expect(within(dialog).queryByText(/Beslutsmall|Brevmall/)).toBeNull();
+    expect(within(dialog).queryByRole("alert")).toBeNull();
+  });
+
+  it("keeps no empty box in the form's gap rhythm until a problem shows", async () => {
+    const { dialog } = await openDialog(makeContract());
+    const form = dialog.querySelector("form")!;
+    // Each empty child would add a second gap between two sections.
+    expect([...form.children].filter((child) => child.innerHTML === "")).toEqual([]);
+  });
+
+  it("names each template that keeps the flow from running, with what to do", async () => {
     const { dialog } = await openDialog(
       makeContract({
         template_readiness: [
@@ -85,17 +109,19 @@ describe("StartRunDialog extras", () => {
             template_name: "Brevmall",
             status: "needs_action",
             message_code: "flow_template_no_controls"
-          }
+          },
+          { step_id: "step-3", template_name: "Kallelse", status: "unavailable" }
         ]
       })
     );
-    const templates = within(dialog).getByRole("region", {
-      name: messages.flow_run_extras_templates_heading
-    });
-    const rows = within(templates).getAllByRole("listitem");
-    expect(within(rows[0]!).getByText(messages.flow_run_extras_template_ready)).toBeTruthy();
-    expect(within(rows[1]!).getByText(messages.flow_run_extras_template_needs_action)).toBeTruthy();
-    expect(within(rows[1]!).getByText(messages.flow_error_flow_template_no_controls)).toBeTruthy();
+    expect(within(dialog).getByText(messages.flow_runs_template_blocked_title)).toBeTruthy();
+    expect(
+      within(dialog).getByText(
+        `Mallen Brevmall: ${messages.flow_error_flow_template_no_controls} ` +
+          "Mallen Kallelse går inte att använda just nu. Be den som redigerar flödet att åtgärda den."
+      )
+    ).toBeTruthy();
+    expect(within(dialog).queryByText(/Beslutsmall/)).toBeNull();
     await expectNoAxeViolations(document.body);
   });
 
@@ -122,7 +148,7 @@ describe("StartRunDialog extras", () => {
 
     expect(
       await within(dialog).findByText(
-        "mote.mp3 är 90 min 0 s lång. Steget kan transkribera högst 60 min 0 s per fil. Dela upp ljudet eller välj en kortare fil."
+        "mote.mp3 är 1 h 30 min lång. Steget kan transkribera högst 1 h 0 min per fil. Dela upp ljudet eller välj en kortare fil."
       )
     ).toBeTruthy();
     expect(upload).not.toHaveBeenCalled();

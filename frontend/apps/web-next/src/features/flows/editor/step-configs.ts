@@ -300,6 +300,9 @@ export const HTTP_CONFIG_KEYS = [
 
 export type HttpHeader = { name: string; value: SecretValue; secret: boolean };
 
+/** A row the author left without a name is no header: it is not sent, checked or counted. */
+export const headerSent = (header: HttpHeader) => header.name.trim() !== "";
+
 export type HttpConfig = {
   url: string;
   auth:
@@ -327,6 +330,20 @@ export function defaultHttpConfig(direction: "input" | "output"): HttpConfig {
 function secretOf(value: unknown): SecretValue {
   if (typeof value === "string") return value;
   return isSecretSentinel(value) ? { $secret: "stored" } : "";
+}
+
+/** The credential the auth mode signs in with (token, key or password); null without one. */
+export function httpCredential(auth: HttpConfig["auth"]): SecretValue | null {
+  switch (auth.mode) {
+    case "bearer_token":
+      return auth.token;
+    case "api_key":
+      return auth.key;
+    case "basic_auth":
+      return auth.password;
+    default:
+      return null;
+  }
 }
 
 export function readHttpConfig(config: unknown, direction: "input" | "output"): HttpConfig {

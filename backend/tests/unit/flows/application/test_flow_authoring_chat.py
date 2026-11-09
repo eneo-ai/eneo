@@ -156,7 +156,7 @@ def test_the_instructions_leave_unpublishing_to_the_person() -> None:
     instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
 
     assert "you have no tool to unpublish it" in instructions
-    assert '"Avpublicera för att ändra" in the editor' in instructions
+    assert 'the "Avpublicera" button at the top of the flow page' in instructions
     assert "only after the person has unpublished it in the editor" in instructions
 
 
@@ -213,7 +213,8 @@ async def test_a_change_to_a_published_flow_is_refused_before_anything_happens(
     with pytest.raises(BadRequestException) as refused:
         await flow_authoring_chat.require_authoring_edit(MagicMock(), chat, draft=True)
     assert refused.value.code == "flow_published"
-    assert "Avpublicera för att ändra" in str(refused.value)
+    assert '"Avpublicera" button' in str(refused.value)
+    assert "Avpublicera för att ändra" not in str(refused.value)
 
     # Publishing itself is not a draft change and passes the same flow.
     await flow_authoring_chat.require_authoring_edit(MagicMock(), chat)

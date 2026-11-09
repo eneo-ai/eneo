@@ -158,7 +158,9 @@ def _http_connection(
         credential = _credential_state(auth.password)
     else:
         credential = "none"
-    secret_headers = [header for header in http.custom_headers if header.secret]
+    secret_headers = [
+        header for header in http.custom_headers if header.secret and header.sent
+    ]
     headers_stored = all(
         _credential_state(header.value) == "stored" for header in secret_headers
     )

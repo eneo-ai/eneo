@@ -637,7 +637,6 @@ def test_non_flow_manifest_is_rejected_before_flow_profile_entries(
 
 def test_unknown_entry_is_rejected() -> None:
     docs = _package_docs()
-    docs.pop(reader.PROVENANCE_PATH)
     docs["unknown.json"] = {}
 
     assert_zip_unsafe(
@@ -655,6 +654,23 @@ def test_missing_required_entry_is_rejected() -> None:
         _zip_docs(docs),
         FlowPackageZipUnsafeReason.MISSING_REQUIRED_ENTRY,
         path=reader.PROVENANCE_PATH,
+    )
+
+
+@pytest.mark.parametrize(
+    "missing_path",
+    [reader.FLOW_DRAFT_PATH, reader.REQUIREMENTS_PATH],
+)
+def test_missing_entry_read_before_profile_check_is_rejected(
+    missing_path: str,
+) -> None:
+    docs = _package_docs()
+    docs.pop(missing_path)
+
+    assert_zip_unsafe(
+        _zip_docs(docs),
+        FlowPackageZipUnsafeReason.MISSING_REQUIRED_ENTRY,
+        path=missing_path,
     )
 
 

@@ -35,7 +35,8 @@ import { toast } from "@/lib/toast";
 import { DeleteBlockedDialog } from "./delete-blocked-dialog";
 import { deleteProvider, PROVIDERS_KEY } from "./model-providers";
 import { ModelDialogs, type ModelSelection } from "./model-dialogs";
-import { ModelRow } from "./model-row";
+import { cn } from "@/lib/utils";
+import { COMPACT_HIDDEN, ModelRow } from "./model-row";
 import { MODELS_KEY } from "./models";
 import { ProviderConnectionStatus } from "./provider-connection-status";
 import { ProviderEditDialog } from "./provider-management";
@@ -107,24 +108,30 @@ function ModelTable({
   // column takes what is left and long ids truncate instead of widening the
   // table. Below the min width the table scrolls inside its own region.
   // Each set width is also a min width (AGENTS.md → Tables). Without the
-  // security column the table fits an iPad held sideways; held upright,
-  // beside the icon rail, it scrolls.
+  // security column the table fits an iPad held sideways; narrower, the type
+  // and capabilities fold under the name (COMPACT_HIDDEN) and it fits an iPad
+  // held upright beside the icon rail.
   return (
     <Table
       aria-labelledby={labelledBy}
       hasHover
-      className={securityEnabled ? "min-w-212 table-fixed" : "min-w-180 table-fixed"}
+      className={cn(
+        "table-fixed",
+        securityEnabled
+          ? "min-w-154 @min-[54rem]/models:min-w-212"
+          : "min-w-120 @min-[54rem]/models:min-w-180"
+      )}
     >
       <TableHeader>
         <TableRow className="bg-ax-sunken [&>th]:text-xs">
           {sortableHeader("enabled", t("active"), "w-18 min-w-18")}
           {sortableHeader("name", t("model"))}
           {showKind && (
-            <TableHeaderCell scope="col" className="w-30 min-w-30">
+            <TableHeaderCell scope="col" className={cn("w-30 min-w-30", COMPACT_HIDDEN)}>
               {t("type")}
             </TableHeaderCell>
           )}
-          <TableHeaderCell scope="col" className="w-44 min-w-44">
+          <TableHeaderCell scope="col" className={cn("w-44 min-w-44", COMPACT_HIDDEN)}>
             {t("admin_models_column_capabilities")}
           </TableHeaderCell>
           <TableHeaderCell scope="col" className="w-38 min-w-38 text-end">
@@ -319,7 +326,7 @@ export function ProviderCard({
             </div>
           ) : null}
           {phone !== true ? (
-            <div className="max-md:hidden">
+            <div className="@container/models max-md:hidden">
               <ModelTable
                 models={models}
                 onModelAction={setModelSelection}

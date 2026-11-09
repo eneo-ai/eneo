@@ -283,6 +283,79 @@ class FlowRunContractViolation(BaseModel):
             return None
 
 
+TemplateFillFailure: TypeAlias = Literal[
+    "unbound",
+    "unknown_source",
+    "source_failed",
+    "missing_value",
+    "not_text",
+    "too_large",
+    "invalid_template",
+    "template_missing",
+    "render_refused",
+    "runtime_unavailable",
+]
+
+
+def template_fill_context(
+    reason: TemplateFillFailure,
+    *,
+    field: str | None = None,
+    source_step: int | None = None,
+) -> dict[str, object]:
+    """The error context a template fill failure carries into the run error."""
+
+    return {
+        "template_fill_reason": reason,
+        "template_field": field,
+        "template_source_step": source_step,
+    }
+
+
+class FlowRunTemplateFill(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    reason: TemplateFillFailure = Field(
+        description=(
+            "Why a Word template could not be filled: a field without a binding "
+            "(unbound), a binding to a source that does not exist (unknown_source) "
+            "or to a step that failed (source_failed), a source that produced "
+            "nothing (missing_value) or structured data (not_text), content over "
+            "the document limits (too_large), a template that is no longer "
+            "fillable (invalid_template) or no longer stored (template_missing), "
+            "content the document runtime refused (render_refused), or the "
+            "runtime being unavailable (runtime_unavailable)."
+        )
+    )
+    field: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=200,
+        description="The template field (content control tag) concerned, when one is.",
+    )
+    source_step: int | None = Field(
+        default=None,
+        ge=1,
+        strict=True,
+        description="The step the field reads from, when the binding names one.",
+    )
+
+    @classmethod
+    def from_context(cls, context: Mapping[str, object]) -> FlowRunTemplateFill | None:
+        if "template_fill_reason" not in context:
+            return None
+        try:
+            return cls.model_validate(
+                {
+                    "reason": context.get("template_fill_reason"),
+                    "field": context.get("template_field"),
+                    "source_step": context.get("template_source_step"),
+                }
+            )
+        except ValidationError:
+            return None
+
+
 _SPEAKER_SERVICE_GAPS = {gap.value: gap for gap in SpeakerServiceGap}
 
 
@@ -355,6 +428,10 @@ class FlowRunErrorDetails(BaseModel):
         default=None,
         max_length=TRANSCRIPTION_SERVICE_REASON_MAX_LENGTH,
         description="Bounded human-readable transcription service reason. Never parse this text to classify a failure.",
+    )
+    template_fill: FlowRunTemplateFill | None = Field(
+        default=None,
+        description="Where and why a Word template could not be filled, for `typed_io_template_render_failed`.",
     )
     tool_refusal: Annotated[
         UnattendedToolRefusal | None, BeforeValidator(_known_tool_refusal)
@@ -446,6 +523,7 @@ class FlowRunErrorDetails(BaseModel):
 
         details = cls(
             contract_violation=FlowRunContractViolation.from_context(context),
+            template_fill=FlowRunTemplateFill.from_context(context),
             transcription_failure_kind=kind
             if isinstance(kind, TranscriptionFailureKind)
             else None,

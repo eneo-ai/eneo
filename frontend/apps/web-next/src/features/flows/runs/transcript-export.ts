@@ -10,7 +10,8 @@ import type { ShownSegment } from "./transcript";
 export type ExportWords = {
   /** "Del 2": the heading of a recording's second file. */
   part: (number: number) => string;
-  unknownSpeaker: string;
+  /** A speaker without a name, as the reader sees it: "Talare 1", "Okänd talare". */
+  speaker: (label: string | null) => string;
   unsureSpeaker: string;
 };
 
@@ -35,7 +36,7 @@ export function transcriptText(shown: readonly ShownSegment[], words: ExportWord
     for (const part of segment.parts) {
       const text = part.text.trim();
       if (!text) continue;
-      const name = part.name ?? part.speaker ?? words.unknownSpeaker;
+      const name = part.name ?? words.speaker(part.speaker);
       const unsure =
         part.decision === "unresolved" || (segment.parts.length === 1 && segment.unsure);
       out.push(`${time} ${unsure ? `${name} (${words.unsureSpeaker})` : name}: ${text}`);

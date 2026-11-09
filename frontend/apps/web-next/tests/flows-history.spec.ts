@@ -124,8 +124,8 @@ async function completedRun(
       buffer: Buffer.from(file.text)
     });
     await expect(dialog.getByText(/^Uppladdad, /)).toBeVisible();
-    await dialog.getByRole("textbox", { name: /^Namn på körningen/ }).fill(label);
-    await dialog.getByRole("button", { name: "Granska", exact: true }).click();
+    await dialog.getByRole("textbox", { name: /^Namn i listan över körningar/ }).fill(label);
+    await dialog.getByRole("button", { name: "Nästa", exact: true }).click();
     const created = page.waitForResponse(
       (response) =>
         response.url().endsWith(`/api/v1/flows/${flow.id}/runs/`) &&

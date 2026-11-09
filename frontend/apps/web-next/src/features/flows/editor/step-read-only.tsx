@@ -5,6 +5,7 @@ import { useTranslations } from "use-intl";
 import { useSpace } from "@/features/spaces/use-space";
 import { knownClassifications, levelName } from "./classification-names";
 import { securityClassificationsQueryOptions, toolOptionsQueryOptions } from "./editor-api";
+import { previewParts } from "./request-preview";
 import {
   hasHttpConfig,
   readCitationsOn,
@@ -18,8 +19,11 @@ import {
   sourceRefStepOrder
 } from "./step-configs";
 import {
+  httpAuthSummary,
+  httpBodyModeLabel,
   inputSourceLabel,
   inputTypeLabel,
+  meaningLabel,
   outputModeLabel,
   outputTypeLabel,
   reviewChoiceLabel,
@@ -63,10 +67,12 @@ function ToolName({
 export function StepReadOnly({
   flow,
   step,
+  stepOrder,
   assistant
 }: {
   flow: FlowPublic;
   step: StepConfig;
+  stepOrder: number;
   assistant: AssistantConfig | null;
 }) {
   const t = useTranslations();
@@ -78,6 +84,14 @@ export function StepReadOnly({
   const tool = readToolConfig(step.input_config);
   const template = readTemplateFill(step.output_config);
   const review = reviewChoiceOf(step.review_policy);
+  const httpIn =
+    step.input_source === "http_get" && hasHttpConfig(step.input_config)
+      ? readHttpConfig(step.input_config, "input")
+      : null;
+  const httpOut =
+    step.output_mode === "http_post" && hasHttpConfig(step.output_config)
+      ? readHttpConfig(step.output_config, "output")
+      : null;
   const model = assistant?.completion_model_id
     ? space.completion_models.find((candidate) => candidate.id === assistant.completion_model_id)
     : null;
@@ -87,6 +101,18 @@ export function StepReadOnly({
           "name" in item && item.name ? item.name : "url" in item ? String(item.url) : item.id
       )
     : [];
+  // What fills a template field, as a reference pill in the editor names it.
+  const templateSource = (binding: string | undefined) =>
+    binding === undefined
+      ? t("flow_step_editor_template_field_none")
+      : binding === ""
+        ? t("flow_step_editor_template_field_left_empty")
+        : previewParts(binding, stepOrder, flow)
+            .map((part) =>
+              part.kind === "text" ? part.text : meaningLabel(part.meaning, part.token, flow, t)
+            )
+            .join("")
+            .trim();
   const yes = t("flow_step_editor_yes");
   const no = t("flow_step_editor_no");
 
@@ -120,17 +146,16 @@ export function StepReadOnly({
             </MetadataListItem>
           </>
         )}
-        {step.input_source === "http_get" && hasHttpConfig(step.input_config) && (
-          <MetadataListItem label={t("flow_step_editor_http_url_get")}>
-            {readHttpConfig(step.input_config, "input").url}
-          </MetadataListItem>
-        )}
-        {step.input_source === "http_get" &&
-          readHttpConfig(step.input_config, "input").auth.mode !== "none" && (
-            <MetadataListItem label={t("flow_step_editor_http_auth")}>
-              {t("flow_step_editor_secret_stored")}
+        {httpIn && (
+          <>
+            <MetadataListItem label={t("flow_step_editor_http_url_get")}>
+              <span className="break-all">{httpIn.url}</span>
             </MetadataListItem>
-          )}
+            <MetadataListItem label={t("flow_step_editor_http_auth")}>
+              {httpAuthSummary(httpIn.auth, t)}
+            </MetadataListItem>
+          </>
+        )}
         {step.input_source === "tool" && (
           <MetadataListItem label={t("flow_step_editor_tool")}>
             {tool ? (
@@ -176,7 +201,7 @@ export function StepReadOnly({
               {assistant.prompt.trim() || t("flow_step_editor_instruction_none")}
             </Paragraph>
           </MetadataListItem>
-          <MetadataListItem label={t("completion_model")}>
+          <MetadataListItem label={t("flow_step_editor_model")}>
             {model ? model.nickname?.trim() || model.name : t("flow_step_editor_model_unknown")}
           </MetadataListItem>
           <MetadataListItem label={t("knowledge")}>
@@ -197,20 +222,36 @@ export function StepReadOnly({
         <MetadataListItem label={t("flow_step_output_type")}>
           {outputTypeLabel(step.output_type, t)}
         </MetadataListItem>
-        {step.output_mode === "http_post" && hasHttpConfig(step.output_config) && (
-          <MetadataListItem label={t("flow_step_editor_http_url_post")}>
-            {readHttpConfig(step.output_config, "output").url}
-          </MetadataListItem>
+        {httpOut && (
+          <>
+            <MetadataListItem label={t("flow_step_editor_http_url_post")}>
+              <span className="break-all">{httpOut.url}</span>
+            </MetadataListItem>
+            <MetadataListItem label={t("flow_step_editor_http_auth")}>
+              {httpAuthSummary(httpOut.auth, t)}
+            </MetadataListItem>
+            <MetadataListItem label={t("flow_step_editor_http_body")}>
+              {httpBodyModeLabel(httpOut.body.mode, t)}
+            </MetadataListItem>
+          </>
         )}
         {step.output_mode === "template_fill" && (
           <MetadataListItem label={t("flow_step_editor_template")}>
-            {template.templateName
-              ? t("flow_step_editor_template_summary", {
-                  name: template.templateName,
-                  bound: template.placeholders.filter((name) => name in template.bindings).length,
-                  total: template.placeholders.length
-                })
-              : t("flow_step_editor_template_none")}
+            {template.templateName ?? t("flow_step_editor_template_none")}
+          </MetadataListItem>
+        )}
+        {step.output_mode === "template_fill" && template.placeholders.length > 0 && (
+          <MetadataListItem label={t("flow_step_editor_template_fields")}>
+            <ul className="m-0 flex list-none flex-col gap-1 p-0">
+              {template.placeholders.map((name) => (
+                <li key={name}>
+                  {t("flow_step_editor_template_field_reads", {
+                    field: name,
+                    source: templateSource(template.bindings[name])
+                  })}
+                </li>
+              ))}
+            </ul>
           </MetadataListItem>
         )}
         {readCitationsOn(step.output_config) && (

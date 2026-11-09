@@ -112,24 +112,24 @@ export function StepOutputSection({
   sectionId,
   flow,
   stepId,
+  stepOrder,
   draft,
   isLast,
   onChange,
   problems,
   groups,
-  wholeValueGroups,
   onContractProposed
 }: {
   formId: string;
   sectionId: string;
   flow: FlowPublic;
   stepId: string;
+  stepOrder: number;
   draft: StepConfig;
   isLast: boolean;
   onChange: (next: StepConfig) => void;
   problems: FieldProblems;
   groups: VariableGroup[];
-  wholeValueGroups: VariableGroup[];
   /** An output contract the author accepted from an example answer. */
   onContractProposed: (contract: JsonObject) => void;
 }) {
@@ -180,7 +180,13 @@ export function StepOutputSection({
         </Anchor>
       </div>
 
-      <Text type="supporting" size="sm" as="p" display="block" className="m-0">
+      <Text
+        type="supporting"
+        size="sm"
+        as="p"
+        display="block"
+        className="m-0 max-w-prose text-pretty"
+      >
         {t(`flow_step_editor_output_mode_help_${draft.output_mode}`)}
       </Text>
 
@@ -203,6 +209,7 @@ export function StepOutputSection({
       {draft.output_mode === "http_post" && (
         <Anchor formId={formId} anchor="output_config.http">
           <HttpFields
+            formId={formId}
             flowId={flow.id}
             stepId={stepId}
             direction="output"
@@ -211,7 +218,7 @@ export function StepOutputSection({
               onChange({ ...draft, output_config: withHttpConfig(draft.output_config, http) })
             }
             groups={groups}
-            problem={problems["output_config.http"]}
+            problems={problems}
           />
         </Anchor>
       )}
@@ -219,10 +226,11 @@ export function StepOutputSection({
       {draft.output_mode === "template_fill" && (
         <Anchor formId={formId} anchor="output_config.template">
           <TemplateFillFields
-            flowId={flow.id}
+            flow={flow}
+            stepOrder={stepOrder}
             draft={draft}
             onChange={(output_config) => onChange({ ...draft, output_config })}
-            groups={wholeValueGroups}
+            groups={groups}
             problem={problems["output_config.template"]}
           />
         </Anchor>
@@ -245,7 +253,16 @@ export function StepOutputSection({
       )}
 
       {(supportsCitations(draft) || readCitationsOn(draft.output_config)) && (
-        <Anchor formId={formId} anchor="output_config.citation_mode">
+        <Anchor
+          formId={formId}
+          anchor="output_config.citation_mode"
+          // Below the HTTP connection test, a rule keeps the switch out of the test.
+          className={
+            draft.output_mode === "http_post"
+              ? "border-ax-border flex flex-col gap-3 border-t pt-4"
+              : undefined
+          }
+        >
           <Switch
             label={t("flow_step_citation_mode")}
             description={t("flow_step_citation_mode_desc")}

@@ -49,7 +49,7 @@ export function SpeakerMenu({
   onReset: () => void;
 }) {
   const t = useTranslations();
-  const shown = name ?? label ?? t("flow_runs_transcript_unknown_speaker");
+  const shown = name ?? speakerText(label, {}, t);
   return (
     <DropdownMenu
       button={{
@@ -64,7 +64,11 @@ export function SpeakerMenu({
             : t("flow_transcript_speaker_menu_changed", { name: shown, context }),
         variant: "ghost",
         size: "sm",
-        className: "h-auto min-h-6 px-0.5 py-0 align-baseline",
+        // 44 px on touch, like the line's time beside it, and as wide for a short name ("Bo").
+        // The negative margin keeps the line as tall as its text, so a touch screen reads the
+        // lines evenly too.
+        className:
+          "h-auto min-h-6 px-0.5 py-0 align-baseline pointer-coarse:-my-2.5 pointer-coarse:min-h-11 pointer-coarse:min-w-11",
         children: (
           <Token
             size="sm"
@@ -94,7 +98,7 @@ export function SpeakerMenu({
         ))}
         <DropdownMenuRadioItem
           value={newLabel}
-          label={t("flow_transcript_speaker_new", { label: newLabel })}
+          label={t("flow_transcript_speaker_new", { label: speakerText(newLabel, {}, t) })}
         />
         <DropdownMenuRadioItem
           value={NO_SPEAKER}

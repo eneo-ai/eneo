@@ -10,13 +10,16 @@ import { useMutation } from "@tanstack/react-query";
 import { CircleAlert, CircleCheck, KeyRound, Plus, Trash2 } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useId, useState } from "react";
+import { Collapsible } from "@/components/astryx/collapsible";
 import { TextInput } from "@/components/astryx/text-input";
+import { tokensOf } from "../flow-steps";
 import { isJsonObject } from "./step-types";
 import { testHttp, type HttpTestResponse } from "./editor-api";
-import { FieldMessage, problemStatus, VariablePicker } from "./editor-fields";
+import { Anchor, FieldMessage, problemStatus, VariablePicker } from "./editor-fields";
 import { TemplateTextArea } from "./reference-text-area";
-import { describeSaveError } from "./field-problems";
+import { describeSaveError, HTTP_ERROR_KEYS, type FieldProblems } from "./field-problems";
 import {
+  headerSent,
   httpUrlProblem,
   isSecretSentinel,
   type HttpBodyMode,
@@ -24,6 +27,7 @@ import {
   type HttpHeader,
   type SecretValue
 } from "./step-configs";
+import { httpAuthModeLabel, httpBodyModeLabel } from "./step-labels";
 import { insertToken, type VariableGroup } from "./step-variables";
 
 /**
@@ -111,6 +115,8 @@ function HeaderRow({
   onRemove: () => void;
 }) {
   const t = useTranslations();
+  // The core leaves a row without a name out of the request.
+  const unnamed = !header.name.trim() && header.value !== "";
   return (
     <li className="border-ax-border rounded-ax-element flex flex-col gap-3 border p-3">
       <div className="grid gap-3 sm:grid-cols-2">
@@ -119,6 +125,11 @@ function HeaderRow({
           value={header.name}
           onChange={(name) => onChange({ ...header, name })}
           autoComplete="off"
+          status={
+            unnamed
+              ? { type: "warning", message: t("flow_step_editor_http_header_name_missing") }
+              : undefined
+          }
         />
         {header.secret ? (
           <SecretField
@@ -161,24 +172,49 @@ function HeaderRow({
   );
 }
 
-const TEST_ERROR_KEYS: Record<NonNullable<HttpTestResponse["error_code"]>, string> = {
-  HTTP_MISSING_URL: "http_test_needs_url",
-  HTTP_INVALID_URL: "flow_step_editor_http_url_invalid",
-  HTTP_VARIABLE_RESOLUTION_FAILED: "http_test_variable_resolution_failed",
-  HTTP_UNRESOLVED_STORED_SECRET: "http_test_saved_secret_unavailable",
-  HTTP_MISSING_AUTH: "http_test_auth_missing",
-  HTTP_INVALID_BODY_JSON: "http_test_body_invalid",
-  HTTP_BODY_NOT_ALLOWED_FOR_GET: "http_test_body_not_allowed",
-  HTTP_TIMEOUT_OUT_OF_RANGE: "http_test_timeout_invalid",
-  HTTP_TIMEOUT: "flow_error_typed_io_http_timeout",
-  HTTP_CONNECTION_REFUSED: "flow_error_typed_io_http_connection_error",
-  HTTP_BLOCKED_URL: "flow_error_typed_io_http_ssrf_blocked",
-  HTTP_RESPONSE_TOO_LARGE: "flow_error_typed_io_http_response_too_large",
-  HTTP_STATUS_ERROR: "flow_error_typed_io_http_non_success",
-  HTTP_CREDENTIALS_REQUIRE_HTTPS: "http_test_credentials_require_https"
-};
+type Translate = ReturnType<typeof useTranslations>;
 
-type TestOutcome = { ok: boolean; message: string; preview: string | null };
+/** What a failed test says to change; a status code names the likely cause. */
+function testFailure(result: HttpTestResponse, t: Translate): string {
+  const status = result.status_code;
+  if (result.error_code === "HTTP_STATUS_ERROR" && status) {
+    if (status === 401 || status === 403) return t("http_test_status_auth", { status });
+    if (status === 404) return t("http_test_status_not_found", { status });
+    return t("http_test_status_error", { status });
+  }
+  const key = result.error_code ? HTTP_ERROR_KEYS[result.error_code] : undefined;
+  return key ? t(key) : (result.error_message ?? t("http_test_unknown_error"));
+}
+
+/**
+ * The test values to fill in: an empty value for each reference the call reads,
+ * nested as the reference names it (`{{step_1.output}}` is `step_1` › `output`).
+ */
+export function sampleTestVariables(config: HttpConfig): string {
+  // Without a prototype, a reference named `__proto__` is a key like any other.
+  const sample: Record<string, unknown> = Object.create(null);
+  for (const token of tokensOf(JSON.stringify(config))) {
+    const path = token.split(".");
+    let node = sample;
+    path.forEach((key, index) => {
+      if (index === path.length - 1) {
+        if (!(key in node)) node[key] = "";
+        return;
+      }
+      const next = node[key];
+      if (typeof next !== "object" || next === null) node[key] = Object.create(null);
+      node = node[key] as Record<string, unknown>;
+    });
+  }
+  return JSON.stringify(sample, null, 2);
+}
+
+type TestOutcome = {
+  ok: boolean;
+  title: string;
+  detail: string | null;
+  preview: string | null;
+};
 
 /**
  * One test request with the step's settings as they stand in the form. The
@@ -200,14 +236,16 @@ function HttpTest({
   const t = useTranslations();
   const announce = useAnnounce();
   const previewId = useId();
-  const [variables, setVariables] = useState("{}");
+  // Follows the call's references until the author edits it.
+  const [editedVariables, setVariables] = useState<string | null>(null);
+  const variables = editedVariables ?? sampleTestVariables(config);
   const [variablesProblem, setVariablesProblem] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<TestOutcome | null>(null);
   const templated = JSON.stringify(config).includes("{{");
 
   function report(next: TestOutcome) {
     setOutcome(next);
-    announce(next.message);
+    announce(next.detail ? `${next.title}. ${next.detail}` : next.title);
   }
 
   const test = useMutation({
@@ -224,35 +262,32 @@ function HttpTest({
         result.success
           ? {
               ok: true,
-              message: result.status_code
+              title: result.status_code
                 ? `${t("http_test_success")} (${result.status_code})`
                 : t("http_test_success"),
+              detail: null,
               preview: result.response_preview ?? null
             }
           : {
               ok: false,
-              message: `${t("http_test_failed_prefix")}: ${
-                result.error_code
-                  ? t(TEST_ERROR_KEYS[result.error_code])
-                  : (result.error_message ?? t("http_test_unknown_error"))
-              }`,
+              title: t("http_test_failed_prefix"),
+              detail: testFailure(result, t),
               preview: result.response_preview ?? null
             }
       ),
     onError: (error) =>
       report({
         ok: false,
-        message: `${t("http_test_failed_prefix")}: ${
-          describeSaveError(
-            error,
-            {
-              stepId,
-              stepOrder: 0,
-              config: { input_source: "http_get", output_mode: "http_post" }
-            },
-            t
-          ).message
-        }`,
+        title: t("http_test_failed_prefix"),
+        detail: describeSaveError(
+          error,
+          {
+            stepId,
+            stepOrder: 0,
+            config: { input_source: "http_get", output_mode: "http_post" }
+          },
+          t
+        ).message,
         preview: null
       })
   });
@@ -260,7 +295,7 @@ function HttpTest({
   function run() {
     if (test.isPending) return;
     if (!config.url.trim()) {
-      report({ ok: false, message: t("http_test_needs_url"), preview: null });
+      report({ ok: false, title: t("http_test_needs_url"), detail: null, preview: null });
       return;
     }
     let testVariables: Record<string, unknown> = {};
@@ -279,9 +314,15 @@ function HttpTest({
   }
 
   return (
-    <div className="border-ax-border rounded-ax-container flex flex-col gap-3 border p-3">
-      <Text type="supporting" size="sm" as="p" display="block" className="m-0">
-        {t("http_test_desc")}
+    <div className="border-ax-border flex flex-col gap-3 border-t pt-4">
+      <Text
+        type="supporting"
+        size="sm"
+        as="p"
+        display="block"
+        className="m-0 max-w-prose text-pretty"
+      >
+        {t(direction === "input" ? "http_test_desc_input" : "http_test_desc_output")}
       </Text>
       {templated && (
         <TextArea
@@ -289,7 +330,7 @@ function HttpTest({
           description={t("http_test_variables_help")}
           value={variables}
           onChange={setVariables}
-          rows={3}
+          rows={Math.min(8, Math.max(3, variables.split("\n").length))}
           hasSpellCheck={false}
           controlClassName="font-mono"
           status={problemStatus(variablesProblem)}
@@ -316,7 +357,10 @@ function HttpTest({
             ) : (
               <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
             )}
-            <span>{outcome.message}</span>
+            <span className="flex flex-col gap-0.5">
+              <span className="font-semibold">{outcome.title}</span>
+              {outcome.detail && <span>{outcome.detail}</span>}
+            </span>
           </p>
           {outcome.preview && (
             <div className="flex flex-col gap-1">
@@ -345,30 +389,58 @@ function HttpTest({
  * read run values; credentials may not, and are never shown once stored.
  */
 export function HttpFields({
+  formId,
   flowId,
   stepId,
   direction,
   config,
   onChange,
   groups,
-  problem
+  problems
 }: {
+  formId: string;
   flowId: string;
   stepId: string;
   direction: "input" | "output";
   config: HttpConfig;
   onChange: (config: HttpConfig) => void;
   groups: VariableGroup[];
-  problem?: string;
+  problems: FieldProblems;
 }) {
   const t = useTranslations();
+  // A refused save lands at the part it is about (`field-problems.ts`).
+  const base = direction === "input" ? "input_config.http" : "output_config.http";
+  const problem = problems[base];
+  const authProblem = problems[`${base}.auth`];
+  const bodyProblem = direction === "output" ? problems["output_config.http.body"] : undefined;
+  const moreProblem = problems[`${base}.more`];
+  const bodyTemplated =
+    config.body.mode === "json_template" || config.body.mode === "text_template";
   const urlId = useId();
+  const moreId = useId();
   const [showUrlProblem, setShowUrlProblem] = useState(false);
   const urlProblem = httpUrlProblem(config.url);
   const auth = config.auth;
+  const url = config.url.trim();
+  // The core sends a credential only to https:// with the host written out.
   const insecureWithCredentials =
-    (auth.mode !== "none" || config.custom_headers.some((header) => header.secret)) &&
-    /^http:\/\//i.test(config.url.trim());
+    (auth.mode !== "none" ||
+      config.custom_headers.some((header) => header.secret && headerSent(header))) &&
+    url !== "" &&
+    !/^https:\/\/[^/?#{]+(?:[/?#]|$)/i.test(url);
+  const localUrlProblem = !showUrlProblem
+    ? null
+    : urlProblem === "missing"
+      ? t("flow_step_editor_http_url_missing")
+      : urlProblem === "invalid"
+        ? t("flow_step_editor_http_url_invalid")
+        : null;
+  const urlError = problem ?? localUrlProblem;
+
+  const inUse =
+    config.custom_headers.filter(headerSent).length + (config.timeout_seconds !== 30 ? 1 : 0);
+  // Folded while the defaults hold; settings in use open it.
+  const [moreOpen, setMoreOpen] = useState(inUse > 0);
 
   function setAuthMode(mode: HttpConfig["auth"]["mode"]) {
     if (mode === auth.mode) return;
@@ -400,18 +472,18 @@ export function HttpFields({
           }
           description={t("flow_step_editor_http_url_description")}
           value={config.url}
-          onChange={(url) => onChange({ ...config, url })}
+          onChange={(next) => onChange({ ...config, url: next })}
           onBlur={() => setShowUrlProblem(true)}
           autoComplete="off"
           isRequired
-          status={problemStatus(
-            problem ??
-              (showUrlProblem && urlProblem === "missing"
-                ? t("flow_step_editor_http_url_missing")
-                : showUrlProblem && urlProblem === "invalid"
-                  ? t("flow_step_editor_http_url_invalid")
-                  : null)
-          )}
+          status={
+            urlError
+              ? { type: "error", message: urlError }
+              : insecureWithCredentials
+                ? // The core refuses to save it: an error, not a warning.
+                  { type: "error", message: t("flow_step_editor_http_credentials_need_https") }
+                : undefined
+          }
         />
         <div>
           <VariablePicker
@@ -421,160 +493,192 @@ export function HttpFields({
             }
           />
         </div>
-        {insecureWithCredentials && (
-          <Text type="supporting" size="sm" as="p" display="block" className="text-ax-warning m-0">
-            {t("flow_step_editor_http_credentials_need_https")}
-          </Text>
-        )}
       </div>
 
-      <Selector
-        label={t("flow_step_editor_http_auth")}
-        options={[
-          { value: "none", label: t("flow_step_editor_http_auth_none") },
-          { value: "bearer_token", label: t("flow_step_editor_http_auth_bearer") },
-          { value: "api_key", label: t("flow_step_editor_http_auth_api_key") },
-          { value: "basic_auth", label: t("flow_step_editor_http_auth_basic") }
-        ]}
-        value={auth.mode}
-        onChange={(value) => setAuthMode(value as HttpConfig["auth"]["mode"])}
-      />
-      {auth.mode === "bearer_token" && (
-        <SecretField
-          label={t("flow_step_editor_http_token")}
-          value={auth.token}
-          onChange={(token) => onChange({ ...config, auth: { ...auth, token } })}
+      <Anchor formId={formId} anchor={`${base}.auth`} className="flex flex-col gap-4">
+        <Selector
+          label={t("flow_step_editor_http_auth")}
+          options={(["none", "bearer_token", "api_key", "basic_auth"] as const).map((mode) => ({
+            value: mode,
+            label: httpAuthModeLabel(mode, t)
+          }))}
+          value={auth.mode}
+          onChange={(value) => setAuthMode(value as HttpConfig["auth"]["mode"])}
         />
-      )}
-      {auth.mode === "api_key" && (
-        <div className="grid gap-4 sm:grid-cols-2">
-          <TextInput
-            label={t("flow_step_editor_http_api_key_header")}
-            value={auth.header_name}
-            onChange={(header_name) => onChange({ ...config, auth: { ...auth, header_name } })}
-            autoComplete="off"
-            isRequired
-          />
+        {auth.mode === "bearer_token" && (
           <SecretField
-            label={t("flow_step_editor_http_api_key")}
-            value={auth.key}
-            onChange={(key) => onChange({ ...config, auth: { ...auth, key } })}
-          />
-        </div>
-      )}
-      {auth.mode === "basic_auth" && (
-        <div className="grid gap-4 sm:grid-cols-2">
-          <TextInput
-            label={t("flow_step_editor_http_username")}
-            value={auth.username}
-            onChange={(username) => onChange({ ...config, auth: { ...auth, username } })}
-            autoComplete="off"
-            isRequired
-          />
-          <SecretField
-            label={t("flow_step_editor_http_password")}
-            value={auth.password}
-            onChange={(password) => onChange({ ...config, auth: { ...auth, password } })}
-          />
-        </div>
-      )}
-
-      <div className="flex flex-col gap-2">
-        <Text type="label" as="p" display="block" className="m-0">
-          {t("flow_step_editor_http_headers")}
-        </Text>
-        {config.custom_headers.length > 0 && (
-          <ul className="m-0 flex list-none flex-col gap-2 p-0">
-            {config.custom_headers.map((header, index) => (
-              <HeaderRow
-                // Headers have no identity of their own; their place is it.
-                key={index}
-                header={header}
-                index={index}
-                onChange={(next) =>
-                  onChange({
-                    ...config,
-                    custom_headers: config.custom_headers.map((candidate, at) =>
-                      at === index ? next : candidate
-                    )
-                  })
-                }
-                onRemove={() =>
-                  onChange({
-                    ...config,
-                    custom_headers: config.custom_headers.filter((_, at) => at !== index)
-                  })
-                }
-              />
-            ))}
-          </ul>
-        )}
-        <div>
-          <Button
-            label={t("flow_step_editor_http_header_add")}
-            variant="secondary"
-            size="sm"
-            icon={<Plus className="size-4" aria-hidden="true" />}
-            onClick={() =>
-              onChange({
-                ...config,
-                custom_headers: [...config.custom_headers, { name: "", value: "", secret: false }]
-              })
-            }
-          />
-        </div>
-      </div>
-
-      <div className="grid gap-4 sm:grid-cols-2">
-        <NumberInput
-          label={t("flow_step_editor_http_timeout")}
-          value={config.timeout_seconds}
-          onChange={(value) => onChange({ ...config, timeout_seconds: value ?? 30 })}
-          min={1}
-          isIntegerOnly
-          units={t("flow_step_editor_seconds_unit")}
-        />
-        {direction === "input" && (
-          <Selector
-            label={t("flow_step_editor_http_response_format")}
-            options={[
-              { value: "text", label: t("flow_type_text") },
-              { value: "json", label: t("flow_type_json") }
-            ]}
-            value={config.response_format ?? "text"}
-            onChange={(value) =>
-              onChange({ ...config, response_format: value === "json" ? "json" : "text" })
-            }
+            label={t("flow_step_editor_http_token")}
+            value={auth.token}
+            onChange={(token) => onChange({ ...config, auth: { ...auth, token } })}
+            status={problemStatus(authProblem)}
           />
         )}
-        {direction === "output" && (
+        {auth.mode === "api_key" && (
+          <div className="grid gap-4 sm:grid-cols-2">
+            <TextInput
+              label={t("flow_step_editor_http_api_key_header")}
+              value={auth.header_name}
+              onChange={(header_name) => onChange({ ...config, auth: { ...auth, header_name } })}
+              autoComplete="off"
+              isRequired
+            />
+            <SecretField
+              label={t("flow_step_editor_http_api_key")}
+              value={auth.key}
+              onChange={(key) => onChange({ ...config, auth: { ...auth, key } })}
+              status={problemStatus(authProblem)}
+            />
+          </div>
+        )}
+        {auth.mode === "basic_auth" && (
+          <div className="grid gap-4 sm:grid-cols-2">
+            <TextInput
+              label={t("flow_step_editor_http_username")}
+              value={auth.username}
+              onChange={(username) => onChange({ ...config, auth: { ...auth, username } })}
+              autoComplete="off"
+              isRequired
+            />
+            <SecretField
+              label={t("flow_step_editor_http_password")}
+              value={auth.password}
+              onChange={(password) => onChange({ ...config, auth: { ...auth, password } })}
+              status={problemStatus(authProblem)}
+            />
+          </div>
+        )}
+      </Anchor>
+
+      {direction === "input" ? (
+        <Selector
+          label={t("flow_step_editor_http_response_format")}
+          description={t("flow_step_editor_http_response_format_description")}
+          options={[
+            { value: "text", label: t("flow_type_text") },
+            { value: "json", label: t("flow_type_json") }
+          ]}
+          value={config.response_format ?? "text"}
+          onChange={(value) =>
+            onChange({ ...config, response_format: value === "json" ? "json" : "text" })
+          }
+        />
+      ) : (
+        <Anchor formId={formId} anchor="output_config.http.body" className="flex flex-col gap-4">
           <Selector
             label={t("flow_step_editor_http_body")}
-            options={[
-              { value: "auto", label: t("flow_step_editor_http_body_auto") },
-              { value: "json_template", label: t("flow_step_editor_http_body_json") },
-              { value: "text_template", label: t("flow_step_editor_http_body_text") },
-              { value: "none", label: t("flow_step_editor_http_body_none") }
-            ]}
+            description={t("flow_step_editor_http_body_description")}
+            options={(["auto", "json_template", "text_template", "none"] as const).map((mode) => ({
+              value: mode,
+              label: httpBodyModeLabel(mode, t)
+            }))}
             value={config.body.mode}
             onChange={(value) =>
               onChange({ ...config, body: { ...config.body, mode: value as HttpBodyMode } })
             }
+            // With a template, the problem is shown at the template.
+            status={problemStatus(bodyTemplated ? undefined : bodyProblem)}
           />
-        )}
-      </div>
-      {direction === "output" &&
-        (config.body.mode === "json_template" || config.body.mode === "text_template") && (
-          <TemplateTextArea
-            label={t("flow_step_editor_http_body_template")}
-            description={t("flow_step_editor_http_body_template_description")}
-            value={config.body.template ?? ""}
-            onChange={(template) => onChange({ ...config, body: { ...config.body, template } })}
-            groups={groups}
-            rows={6}
-            code
-          />
-        )}
+          {bodyTemplated && (
+            <TemplateTextArea
+              label={t("flow_step_editor_http_body_template")}
+              description={t("flow_step_editor_http_body_template_description")}
+              value={config.body.template ?? ""}
+              onChange={(template) => onChange({ ...config, body: { ...config.body, template } })}
+              groups={groups}
+              rows={6}
+              code
+              status={problemStatus(bodyProblem)}
+            />
+          )}
+        </Anchor>
+      )}
+
+      <Anchor formId={formId} anchor={`${base}.more`}>
+        <section aria-labelledby={moreId}>
+          <Collapsible
+            // A refused save about a setting in here opens it.
+            isOpen={moreOpen || Boolean(moreProblem)}
+            onOpenChange={setMoreOpen}
+            chevronPosition="start"
+            trigger={
+              <span className="flex flex-col gap-0.5 py-1 text-start">
+                <Text id={moreId} type="label">
+                  {t("flow_step_editor_http_more_title")}
+                </Text>{" "}
+                <Text type="supporting" size="sm">
+                  {inUse > 0
+                    ? t("flow_step_editor_advanced_in_use", { count: inUse })
+                    : t("flow_step_editor_http_more_description")}
+                </Text>
+              </span>
+            }
+          >
+            <div className="flex flex-col gap-4 pt-3">
+              <FieldMessage message={moreProblem} />
+              <div className="flex flex-col gap-2">
+                <Text type="label" as="p" display="block" className="m-0">
+                  {t("flow_step_editor_http_headers")}
+                </Text>
+                {config.custom_headers.length > 0 && (
+                  <ul className="m-0 flex list-none flex-col gap-2 p-0">
+                    {config.custom_headers.map((header, index) => (
+                      <HeaderRow
+                        // Headers have no identity of their own; their place is it.
+                        key={index}
+                        header={header}
+                        index={index}
+                        onChange={(next) =>
+                          onChange({
+                            ...config,
+                            custom_headers: config.custom_headers.map((candidate, at) =>
+                              at === index ? next : candidate
+                            )
+                          })
+                        }
+                        onRemove={() =>
+                          onChange({
+                            ...config,
+                            custom_headers: config.custom_headers.filter((_, at) => at !== index)
+                          })
+                        }
+                      />
+                    ))}
+                  </ul>
+                )}
+                <div>
+                  <Button
+                    label={t("flow_step_editor_http_header_add")}
+                    variant="secondary"
+                    size="sm"
+                    icon={<Plus className="size-4" aria-hidden="true" />}
+                    onClick={() =>
+                      onChange({
+                        ...config,
+                        custom_headers: [
+                          ...config.custom_headers,
+                          { name: "", value: "", secret: false }
+                        ]
+                      })
+                    }
+                  />
+                </div>
+              </div>
+              <NumberInput
+                label={t("flow_step_editor_http_timeout")}
+                description={t("flow_step_editor_http_timeout_description")}
+                value={config.timeout_seconds}
+                onChange={(value) => onChange({ ...config, timeout_seconds: value ?? 30 })}
+                // The ceiling is the deployment's (flow_http_max_timeout_seconds):
+                // the core refuses a longer one on save, at this field.
+                min={1}
+                isIntegerOnly
+                units={t("flow_step_editor_seconds_unit")}
+              />
+            </div>
+          </Collapsible>
+        </section>
+      </Anchor>
+
       <HttpTest flowId={flowId} stepId={stepId} direction={direction} config={config} />
     </div>
   );

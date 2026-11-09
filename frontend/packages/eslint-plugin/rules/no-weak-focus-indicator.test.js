@@ -19,6 +19,8 @@ const removed = (token) => ({ messageId: "outlineRemoved", data: { token } });
 
 const RING =
   "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
+// An outline style beside the width: what draws the ring next to outline-none.
+const RING_SOLID = `focus-visible:outline-solid ${RING}`;
 
 ruleTester.run("no-weak-focus-indicator", rule, {
   valid: [
@@ -29,16 +31,17 @@ ruleTester.run("no-weak-focus-indicator", rule, {
       code: '<button className="outline-none focus-visible:ring-2 focus-visible:ring-ring" />',
     },
     {
-      code: `<input className={cn("outline-none", "${RING}", className)} />`,
+      code: `<input className={cn("outline-none", "${RING_SOLID}", className)} />`,
     },
     {
-      code: `const button = cva("inline-flex outline-none", { variants: { variant: { default: "${RING}" } } });`,
+      code: `const button = cva("inline-flex outline-none", { variants: { variant: { default: "${RING_SOLID}" } } });`,
     },
     {
-      code: '<div className={open ? "outline-hidden focus-visible:outline-2" : "focus-visible:outline-2 outline-hidden"} />',
+      code: '<div className={open ? "outline-hidden focus-visible:outline-solid focus-visible:outline-2" : "focus-visible:outline-2 outline-hidden focus-visible:outline-solid"} />',
     },
+    // A removal in a state the width does not reach leaves the ring drawn.
     {
-      code: '<div className={`outline-none ${active ? "focus-within:outline-2" : ""}`} />',
+      code: `<input className="data-[slot=input-group-control]:focus-visible:outline-none ${RING}" />`,
     },
     {
       code: '<input className="focus:outline-none focus:ring-2 focus:ring-ring" />',
@@ -115,6 +118,25 @@ ruleTester.run("no-weak-focus-indicator", rule, {
         removed("outline-none"),
         translucent("focus-visible:ring-ring/50"),
       ],
+    },
+    // In Tailwind 4 outline-none also sets the outline style to none, which the
+    // width reads: the ring is never drawn.
+    {
+      code: `<input className={cn("outline-none", "${RING}", className)} />`,
+      errors: [removed("outline-none")],
+    },
+    {
+      code: '<div className={`outline-none ${active ? "focus-within:outline-2" : ""}`} />',
+      errors: [removed("outline-none")],
+    },
+    {
+      code: '<button className="focus-visible:outline-none focus-visible:outline-2" />',
+      errors: [removed("focus-visible:outline-none")],
+    },
+    // An outline style the removal outlasts brings nothing back.
+    {
+      code: '<button className="focus-visible:outline-solid focus-visible:aria-pressed:outline-none focus-visible:aria-pressed:outline-2" />',
+      errors: [removed("focus-visible:aria-pressed:outline-none")],
     },
     // A width alone (focus-visible:outline-offset-2) or a colour is no ring.
     {

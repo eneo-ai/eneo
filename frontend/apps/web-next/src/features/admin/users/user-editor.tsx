@@ -313,9 +313,8 @@ function UserEditorForm({
           </div>
         ) : (
           // A choice applied on save, so a checkbox: a switch acts at once.
-          // The box sits on its label's line, not centred on the description;
-          // the whole block is the target.
-          <div className="relative [&_.astryx-checkbox-input>div]:items-start [&_label]:after:absolute [&_label]:after:inset-0">
+          // The whole block is the target.
+          <div className="relative [&_label]:after:absolute [&_label]:after:inset-0">
             <CheckboxInput
               label={t("admin_password_replace")}
               description={t("admin_password_replace_desc") + oneTimeHint}

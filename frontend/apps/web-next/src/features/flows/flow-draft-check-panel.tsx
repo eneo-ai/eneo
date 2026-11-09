@@ -1,11 +1,12 @@
 import { Button } from "@astryxdesign/core/Button";
 import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";
 import { useAnnounce } from "@astryxdesign/core/hooks";
+import { Spinner } from "@astryxdesign/core/Spinner";
 import { Heading, Text } from "@astryxdesign/core/Text";
 import { useQueries, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { Lightbulb } from "lucide-react";
+import { CircleCheck, Lightbulb } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { useEffect, useId, useRef } from "react";
+import { useEffect, useId, useRef, type RefObject } from "react";
 import { Banner } from "@astryxdesign/core/Banner";
 import { useFocusRescue } from "@/lib/focus-rescue";
 import {
@@ -20,6 +21,7 @@ import {
   repairOptions,
   type RemovedRead
 } from "./editor/reference-repair";
+import type { FieldAnchor } from "./editor/field-problems";
 import { savedFlowPreviewRequest } from "./editor/step-draft";
 import {
   chainIssueText,
@@ -39,6 +41,7 @@ import type { FlowPublic, FlowStep } from "./flows-api";
 import { stepLabel } from "./flow-labels";
 import {
   checkDraft,
+  problemAnchor,
   problemCount,
   type DraftCheck,
   type DraftFacts,
@@ -63,6 +66,8 @@ function stepProblemText(problem: StepProblem, t: Translate): string {
       return outputModeIssueText(problem.issue, t);
     case "name_missing":
       return t("flow_step_editor_name_required");
+    case "prompt_missing":
+      return t("flow_step_editor_instruction_missing");
     case "http_url_missing":
       return t("flow_step_editor_http_url_missing");
     case "http_credential_missing":
@@ -218,8 +223,11 @@ function RemovedReadRepair({
  * "Före publicering": what would stop the draft from being published, per
  * step, worked out again whenever the draft changes. Each step's problems
  * link to the step in the editor; the flow's own lead to where they are
- * fixed: the settings field (`onOpenSettings`), or a first step (`onAddStep`).
- * The page is told the problem count (`onProblemCount`). A read of a removed step in a step's
+ * fixed: the settings field (`onOpenSettings`). A flow without steps has no
+ * check: the page shows its empty step list instead.
+ * A clean draft is one quiet line, "Redo att publicera"; only problems get a
+ * banner. The page is told the problem count (`onProblemCount`) and can put
+ * focus on the heading (`headingRef`). A read of a removed step in a step's
  * underlag can be replaced here in one choice (`onRepair` saves it). The
  * core's suggestions are not listed here, they sit on the step cards: while
  * the draft has some, one line says how many (the dismissed ones not
@@ -233,8 +241,8 @@ export function FlowDraftCheck({
   onOpenStep,
   onRepair,
   onOpenSettings,
-  onAddStep,
-  onProblemCount
+  onProblemCount,
+  headingRef: pageHeadingRef
 }: {
   flow: FlowPublic;
   /**
@@ -245,22 +253,24 @@ export function FlowDraftCheck({
   suggestionRuns?: number;
   /** The space's transcription models and services. */
   transcription: TranscriptionResources;
-  onOpenStep: (step: FlowStep) => void;
+  /** Opens the step at the field that fixes its first problem (`anchor`), or at its top. */
+  onOpenStep: (step: FlowStep, anchor: FieldAnchor | null) => void;
   /** Saves the step's repaired underlag; resolves to whether it was saved. */
   onRepair?: (step: FlowStep, inputBindings: JsonObject | null) => Promise<boolean>;
   /** Opens the flow's settings at the field that fixes a flow problem. */
   onOpenSettings?: (field: SettingsField) => void;
-  /** Adds a first step to a flow that has none. */
-  onAddStep?: () => void;
   /** Told the problem count, or null while the draft is being checked or could not be. */
   onProblemCount?: (count: number | null) => void;
+  /** The heading, for the page to bring the check into view and focus (Publicera does). */
+  headingRef?: RefObject<HTMLHeadingElement | null>;
 }) {
   const t = useTranslations();
   const announce = useAnnounce();
   const queryClient = useQueryClient();
   const rescue = useFocusRescue();
   const headingId = useId();
-  const headingRef = useRef<HTMLHeadingElement>(null);
+  const ownHeadingRef = useRef<HTMLHeadingElement>(null);
+  const headingRef = pageHeadingRef ?? ownHeadingRef;
   const modelSteps = flow.steps.filter((step) => stepUsesModel(step) && step.assistant_id);
   const assistants = useQueries({
     queries: modelSteps.map((step) => flowAssistantQueryOptions(flow.id, step.assistant_id))
@@ -337,6 +347,7 @@ export function FlowDraftCheck({
         <Button
           label={t("flow_editor_tools_check_again")}
           size="sm"
+          variant="ghost"
           isLoading={pending}
           isInterruptible
           onClick={() => {
@@ -344,21 +355,22 @@ export function FlowDraftCheck({
           }}
         />
       </div>
-      {pending ? (
-        // The clean result's shape, so what follows does not move when it lands.
-        <Banner
-          status="info"
-          title={t("flow_editor_tools_check_running")}
-          description={t("flow_editor_tools_check_clean_description")}
-          collapsible={false}
-        />
+      {pending || (count === 0 && !unchecked) ? (
+        // One quiet line, the same while it checks, so what follows does not move when it lands.
+        <div className="flex min-h-6 items-center gap-2">
+          {pending ? (
+            <Spinner size="md" aria-hidden="true" />
+          ) : (
+            <CircleCheck aria-hidden="true" className="text-ax-success size-4 shrink-0" />
+          )}
+          <Text size="sm" as="p" display="block" className="m-0">
+            {pending ? t("flow_editor_tools_check_running") : t("flow_editor_tools_check_clean")}
+          </Text>
+        </div>
       ) : count === 0 ? (
         <Banner
-          status={unchecked ? "warning" : "success"}
-          title={
-            unchecked ? t("flow_editor_tools_check_incomplete") : t("flow_editor_tools_check_clean")
-          }
-          description={t("flow_editor_tools_check_clean_description")}
+          status="warning"
+          title={t("flow_editor_tools_check_incomplete")}
           collapsible={false}
         />
       ) : (
@@ -378,9 +390,7 @@ export function FlowDraftCheck({
                       label: t("flow_editor_tools_check_open_settings"),
                       run: () => onOpenSettings(field)
                     }
-                  : problem.code === "no_steps" && onAddStep
-                    ? { label: t("flows_add_step"), run: onAddStep }
-                    : null;
+                  : null;
               return (
                 <li
                   key={problem.code}
@@ -412,7 +422,9 @@ export function FlowDraftCheck({
                       aria-label={t("flow_editor_tools_check_open_step_named", { step: label })}
                       size="sm"
                       variant="ghost"
-                      onClick={() => onOpenStep(step)}
+                      onClick={() =>
+                        onOpenStep(step, problems[0] ? problemAnchor(problems[0]) : null)
+                      }
                     />
                   </div>
                   <ul className="text-ax-text m-0 flex list-disc flex-col gap-0.5 pl-5 text-sm">

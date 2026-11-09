@@ -175,6 +175,8 @@ describe("EntityAvatar", () => {
   it("derives initials from the first two words", () => {
     expect(entityInitials("Ärende hantering Sundsvall")).toBe("ÄH");
     expect(entityInitials("  eneo ")).toBe("E");
+    expect(entityInitials("Mötesanteckningar (2)")).toBe("M");
+    expect(entityInitials("– Rapport 2026")).toBe("R2");
   });
 
   it("uses a deterministic categorical tone per id", () => {

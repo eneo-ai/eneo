@@ -144,15 +144,8 @@ function Classification({
       : [])
   ];
 
-  if (!enabled && override === null) {
-    return (
-      <Anchor formId={formId} anchor="output_classification_override">
-        <Text type="supporting" size="sm" as="p" display="block" className="m-0">
-          {t("flow_step_editor_classification_off")}
-        </Text>
-      </Anchor>
-    );
-  }
+  // Nothing to decide where the organisation does not classify.
+  if (!enabled && override === null) return null;
 
   return (
     <Anchor formId={formId} anchor="output_classification_override">

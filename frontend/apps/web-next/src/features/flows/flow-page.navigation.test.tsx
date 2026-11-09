@@ -12,7 +12,7 @@ import { makeSpace } from "@/features/spaces/testing/space-fixture";
 import { renderWithRouter } from "@/test/router";
 import { testAppContext, testQueryClient } from "@/test/render";
 import messages from "@/lib/i18n/messages/sv.json";
-import { makeAssistant } from "./editor/testing/fixtures";
+import { makeAssistant, makeKindOption, makeKindPlace } from "./editor/testing/fixtures";
 import { makeFlow, makeStep } from "./flow-fixtures";
 import { FlowPage } from "./flow-page";
 import { flowKeys, type FlowPublic } from "./flows-api";
@@ -101,9 +101,9 @@ async function changeName() {
 }
 async function chooseLeave() {
   const dialog = await screen.findByRole("alertdialog", {
-    name: messages.unsaved_navigation_title
+    name: messages.flow_step_editor_discard_title
   });
-  fireEvent.click(within(dialog).getByRole("button", { name: messages.unsaved_navigation_leave }));
+  fireEvent.click(within(dialog).getByRole("button", { name: messages.flow_step_editor_discard }));
 }
 
 it("uses native Back/Forward and All steps returns across the visited steps", async () => {
@@ -148,22 +148,75 @@ it("opens the settings at the field that fixes what the check found", async () =
   );
 });
 
-it("puts what the check found in the settings summary", async () => {
+it("says what the check found once, in Före publicering, not again in the settings", async () => {
   flow = makeFlow({
     steps: [makeStep(1, { input_type: "audio", output_mode: "transcribe_only" })],
     metadata_json: { wizard: { transcription_enabled: true } }
   });
   await renderPage();
-  const settings = await screen.findByRole("region", { name: messages.flows_settings_heading });
-  expect(await within(settings).findByText("1 problem")).toBeTruthy();
+  const check = await screen.findByRole("region", { name: "Före publicering" });
+  expect(await within(check).findByText("1 sak hindrar publicering")).toBeTruthy();
 });
 
-it("adds a first step from the check of a flow that has none", async () => {
-  flow = makeFlow({ steps: [] });
+it("sends no publish the check already refuses: says so, and focus goes to what it found", async () => {
+  flow = makeFlow({
+    steps: [makeStep(1, { input_type: "audio", output_mode: "transcribe_only" })],
+    metadata_json: { wizard: { transcription_enabled: true } }
+  });
   await renderPage();
   const check = await screen.findByRole("region", { name: "Före publicering" });
-  fireEvent.click(await within(check).findByRole("button", { name: "Lägg till steg" }));
-  expect(await screen.findByRole("dialog", { name: "Lägg till steg" })).toBeTruthy();
+  await within(check).findByText("1 sak hindrar publicering");
+  await click(messages.publish);
+  expect(document.activeElement).toBe(
+    within(check).getByRole("heading", { name: "Före publicering" })
+  );
+  expect(api.stub.calls.some((call) => call.path === "/api/v1/flows/{id}/publish/")).toBe(false);
+  // Said on screen, not only read out: a mouse user sees why nothing happened.
+  const notice = screen.getByText(messages.flows_notice_not_published).closest('[role="alert"]');
+  expect(notice?.textContent).toContain("1 sak hindrar publicering");
+});
+
+it("opens a flow without steps on its steps, and sends no publish of it", async () => {
+  flow = makeFlow({ steps: [] });
+  await renderPage();
+  const steps = await screen.findByRole("region", { name: "Steg" });
+  const settings = screen.getByRole("region", { name: messages.flows_settings_heading });
+  expect(steps.compareDocumentPosition(settings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  // Nothing to check before there is a step: the empty list says what to do, once.
+  expect(screen.queryByRole("region", { name: "Före publicering" })).toBeNull();
+  expect(screen.getAllByRole("button", { name: "Lägg till steg" })).toHaveLength(1);
+
+  await click(messages.publish);
+  expect(document.activeElement).toBe(within(steps).getByRole("heading", { name: "Steg" }));
+  expect(api.stub.calls.some((call) => call.path === "/api/v1/flows/{id}/publish/")).toBe(false);
+  const notice = screen.getByText(messages.flows_notice_not_published).closest('[role="alert"]');
+  expect(notice?.textContent).toContain(messages.flows_publish_needs_steps);
+});
+
+it("adds the first step from the empty list and puts focus on it", async () => {
+  flow = makeFlow({ steps: [] });
+  const added = makeFlow({
+    draft_revision: 5,
+    steps: [makeStep(1, { user_description: "Sammanfatta" })]
+  });
+  api.routes["GET /api/v1/flows/{id}/step-kinds/"] = () => ({
+    body: {
+      flow_id: "flow-1",
+      draft_revision: 4,
+      insertions: [makeKindPlace(1, [makeKindOption("ai")])],
+      steps: []
+    }
+  });
+  api.routes["PATCH /api/v1/flows/{id}/editor/"] = () => ({ body: added });
+  await renderPage();
+  await click("Lägg till steg");
+  const dialog = await screen.findByRole("dialog", { name: "Lägg till steg" });
+  await within(dialog).findByRole("radio", { name: new RegExp(messages.flow_step_editor_kind_ai) });
+  fireEvent.click(
+    within(dialog).getByRole("button", { name: messages.flow_step_editor_add_submit })
+  );
+  const open = await screen.findByRole("button", { name: "Redigera Steg 1: Sammanfatta" });
+  await waitFor(() => expect(document.activeElement).toBe(open));
 });
 
 it("closes a direct step link in the same flow without traversing earlier history", async () => {
@@ -186,9 +239,11 @@ it.each(["Back", "Alla steg", "Nästa steg: Skriv svar"])(
     };
     await navigate();
     const dialog = await screen.findByRole("alertdialog", {
-      name: messages.unsaved_navigation_title
+      name: messages.flow_step_editor_discard_title
     });
-    fireEvent.click(within(dialog).getByRole("button", { name: messages.cancel }));
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: messages.flow_step_editor_keep_editing })
+    );
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
     expect(((await nameField()) as HTMLInputElement).value).toBe("Eget utkast");
     expect(router.state.location.search).toEqual({ step: "step-1" });
@@ -219,6 +274,8 @@ it("publishes only what is saved: unsaved step edits hold Publicera back and say
   await click(messages.cancel);
   await chooseLeave();
   await screen.findByRole("button", { name: "Redigera Steg 1: Sammanfatta" });
+  // The edits are dropped, so "save or cancel first" is gone with them.
+  await waitFor(() => expect(screen.queryByText(messages.flows_publish_unsaved)).toBeNull());
   await click(messages.publish);
   await waitFor(() => expect(publishes()).toHaveLength(1));
 });
@@ -247,7 +304,7 @@ it("releases a pending navigation after the current draft is saved", async () =>
     expect(patch).toHaveBeenCalledWith(expect.stringContaining("/editor/"), expect.anything())
   );
   act(() => history.back());
-  await screen.findByRole("alertdialog", { name: messages.unsaved_navigation_title });
+  await screen.findByRole("alertdialog", { name: messages.flow_step_editor_discard_title });
   await act(async () => saved());
   await waitFor(() => expect(router.state.location.search).toEqual({}));
   expect(screen.queryByRole("alertdialog")).toBeNull();
@@ -278,9 +335,11 @@ it("keeps an unsaved upload on Stay and releases it only when leaving the editor
   await screen.findByText("underlag.txt");
   await click(messages.cancel);
   const dialog = await screen.findByRole("alertdialog", {
-    name: messages.unsaved_navigation_title
+    name: messages.flow_step_editor_discard_title
   });
-  fireEvent.click(within(dialog).getByRole("button", { name: messages.cancel }));
+  fireEvent.click(
+    within(dialog).getByRole("button", { name: messages.flow_step_editor_keep_editing })
+  );
   await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
   expect(api.stub.calls.filter((call) => call.method === "DELETE")).toEqual([]);
   await click(messages.cancel);

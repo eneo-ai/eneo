@@ -147,6 +147,22 @@ describe("AddStepDialog", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
+  it("selects the default name on focus, so typing replaces it, and leaves a typed name alone", async () => {
+    const { dialog } = await openDialog();
+    await within(dialog).findByRole("radio", {
+      name: new RegExp(messages.flow_step_editor_kind_ai)
+    });
+    const name = within(dialog).getByLabelText(/^Stegnamn/) as HTMLInputElement;
+    name.setSelectionRange(name.value.length, name.value.length);
+    fireEvent.focus(name);
+    expect([name.selectionStart, name.selectionEnd]).toEqual([0, name.value.length]);
+
+    fireEvent.change(name, { target: { value: "Sammanfatta" } });
+    name.setSelectionRange(3, 3);
+    fireEvent.focus(name);
+    expect([name.selectionStart, name.selectionEnd]).toEqual([3, 3]);
+  });
+
   it("explains a taken name at the field instead of adding", async () => {
     const { dialog } = await openDialog();
     await within(dialog).findByRole("radio", {

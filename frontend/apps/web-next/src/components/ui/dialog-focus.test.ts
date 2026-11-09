@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { fireEvent, renderHook } from "@testing-library/react";
+import { useEffect } from "react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { returnTarget, trackFocus, useReturnFocus } from "./dialog-focus";
 
@@ -91,6 +92,30 @@ describe("useReturnFocus", () => {
     expect(document.activeElement).toBe(byId("inside"));
     return { hook, dialog };
   }
+
+  it("keeps the opener when StrictMode runs the effects again with the dialog open", () => {
+    html(
+      `<button id="edit">Redigera</button><dialog id="dialog"><button id="inside">Stäng</button></dialog>`
+    );
+    byId("edit").focus();
+    const dialog = byId("dialog") as HTMLDialogElement;
+    const hook = renderHook(
+      ({ open }) => {
+        useReturnFocus(open, noTrigger);
+        // As Astryx Dialog: showModal() after the layout effects, focus moves inside.
+        useEffect(() => {
+          if (open && !dialog.open) dialog.showModal();
+        }, [open]);
+      },
+      { initialProps: { open: true }, reactStrictMode: true }
+    );
+    expect(document.activeElement).toBe(byId("inside"));
+    dialog.close();
+
+    hook.rerender({ open: false });
+
+    expect(document.activeElement).toBe(byId("edit"));
+  });
 
   it("does not report when the dialog returned focus itself", () => {
     const { hook, dialog } = openFromEdit();

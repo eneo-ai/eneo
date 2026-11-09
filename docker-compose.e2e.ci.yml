@@ -22,6 +22,9 @@ x-e2e-backend-environment:
   TOOL_RUNTIME_URL: http://e2e-tool-runtime:3010
   TOOL_RUNTIME_TOKEN: e2e-tool-runtime-token-not-a-secret
   FILE_REFERENCE_BASE_URL: http://e2e-backend:8000
+  # Eneo's own loopback MCP servers (the Flow assistant's tools, tool-mode knowledge): the
+  # backend's own port, by the host name those servers accept.
+  INTERNAL_MCP_BASE_URL: http://localhost:8000
   MCP_APPS_ENABLED: "true"
   MCP_APP_CONTENT_BASE_URL: ${E2E_APP_CONTENT_ORIGIN:-http://127.0.0.1:8124}
   PUBLIC_ORIGIN: http://localhost:4173

@@ -52,6 +52,16 @@ describe("stepConnections", () => {
       }
     });
     expect(stepConnections(header)[0]).toMatchObject({ configured: false });
+    // A row without a name is not sent, so its credential is not waited for.
+    const unnamed = makeStep(2, {
+      output_mode: "http_post",
+      output_config: {
+        url: "https://hooks.example.se/in",
+        auth: { mode: "none" },
+        custom_headers: [{ name: " ", value: "", secret: true }]
+      }
+    });
+    expect(stepConnections(unnamed)[0]).toMatchObject({ configured: true });
     expect(stepConnections(makeStep(2, { output_mode: "http_post" }))[0]).toMatchObject({
       host: "",
       configured: false

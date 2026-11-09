@@ -432,9 +432,10 @@ export type SuggestionMeasure = {
 };
 
 /**
- * Below the summary: "Räkna med de senaste körningarna" while the
- * suggestions judge the definition alone; once measured, what the numbers
- * are based on ("Baserat på 8 körningar.") and the way back. It is one
+ * Below the summary: what the suggestions are based on, the definition
+ * ("Förslagen bygger på hur flödet är byggt.", with "Räkna med de senaste
+ * körningarna") or, once measured, the runs ("Baserat på 8 körningar.", with
+ * the way back). The page offers it only to a flow that has runs. It is one
  * button whose label changes in place, so focus stays on it; while the
  * first measured answer loads it shows that it is busy and ignores another
  * press.
@@ -461,11 +462,10 @@ export function SuggestionsMeasure({
 
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-      {answered ? (
-        <Text type="supporting" size="sm" as="p" display="block" className="m-0 leading-6">
-          {measuredBasisText(runs, found, t)}
-        </Text>
-      ) : null}
+      {/* What the suggestions are based on: the definition, or the runs counted. */}
+      <Text type="supporting" size="sm" as="p" display="block" className="m-0 leading-6">
+        {answered ? measuredBasisText(runs, found, t) : t("flow_suggestions_runs_context")}
+      </Text>
       <Button
         label={backToPlain ? t("flow_suggestions_runs_plain") : t("flow_suggestions_runs_measure")}
         size="sm"

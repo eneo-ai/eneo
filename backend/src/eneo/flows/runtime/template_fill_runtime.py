@@ -4,7 +4,7 @@ import hashlib
 import json
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, cast
 from uuid import UUID
 
@@ -20,6 +20,7 @@ from eneo.flows.domain.runtime import (
     StepExecutionOutput,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_run_error import template_fill_context
 from eneo.flows.flow_run_provenance import (
     FlowResolvedInputEdge,
     FlowResolvedInputFlowInputSource,
@@ -63,6 +64,8 @@ class PreparedTemplateFillStep:
     resolved_bindings: dict[str, str | None]
     persisted_text: str
     resolved_input_edges: tuple[FlowResolvedInputEdge, ...]
+    # The step each binding reads from, when its expression names one.
+    binding_steps: dict[str, int | None] = field(default_factory=dict[str, int | None])
 
 
 @dataclass(frozen=True)
@@ -147,6 +150,10 @@ async def prepare_template_fill_step(
             template_blob=template_blob,
             placeholders=tuple(placeholders),
             resolved_bindings=resolved.values,
+            binding_steps={
+                name: _referenced_step_order(expression)
+                for name, expression in bindings.items()
+            },
             persisted_text=persisted_text,
             resolved_input_edges=resolved.edges,
         )
@@ -197,6 +204,13 @@ async def complete_template_fill_step(
             len(blob),
         )
     except TypedIOValidationException as exc:
+        # The renderer knows the field; the binding knows the step it reads.
+        context = exc.context
+        field_name = (context or {}).get("template_field")
+        if context is not None and isinstance(field_name, str):
+            context["template_source_step"] = context.get(
+                "template_source_step"
+            ) or prepared.binding_steps.get(field_name)
         deps.logger.info(
             "flow_executor.template_fill.validation_failed run_id=%s step_order=%d stage=%s code=%s message=%s",
             run.id,
@@ -394,6 +408,7 @@ async def _load_template_file(
         raise TypedIOValidationException(
             "The published DOCX template asset is no longer available. Re-publish the flow with a current template.",
             code=FlowApiErrorCode.TEMPLATE_NOT_ACCESSIBLE.value,
+            context=template_fill_context("template_missing"),
         ) from exc
 
     try:
@@ -411,11 +426,13 @@ async def _load_template_file(
         raise TypedIOValidationException(
             "The published DOCX template asset file is no longer available. Re-publish the flow with a current template.",
             code=FlowApiErrorCode.TEMPLATE_NOT_ACCESSIBLE.value,
+            context=template_fill_context("template_missing"),
         )
     if template_file.blob is None:
         raise TypedIOValidationException(
             "The published DOCX template could not be read because the saved file content is missing. Re-upload the template and publish the flow again.",
             code=FlowApiErrorCode.TEMPLATE_MISSING_CONTENT.value,
+            context=template_fill_context("template_missing"),
         )
     if template_checksum and template_file.checksum != template_checksum:
         raise TypedIOValidationException(
@@ -461,6 +478,7 @@ def _resolve_template_bindings(
                 )
                 resolved[placeholder] = _template_binding_text(
                     placeholder=placeholder,
+                    source_step=_referenced_step_order(expression),
                     value=raw_value,
                     from_run_input=any(
                         isinstance(edge.source, FlowResolvedInputFlowInputSource)
@@ -479,10 +497,20 @@ def _resolve_template_bindings(
                 raise TypedIOValidationException(
                     f"Template binding '{placeholder}' could not be resolved because step {failed_step_order} failed earlier in the run.",
                     code=FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED.value,
+                    context=template_fill_context(
+                        "source_failed",
+                        field=placeholder,
+                        source_step=failed_step_order,
+                    ),
                 ) from exc
             raise TypedIOValidationException(
                 f"Template binding '{placeholder}' could not be resolved: {exc}",
                 code=FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED.value,
+                context=template_fill_context(
+                    "unknown_source",
+                    field=placeholder,
+                    source_step=_referenced_step_order(expression),
+                ),
             ) from exc
     return ResolvedTemplateBindings(
         values=resolved,
@@ -542,7 +570,7 @@ def _optional_string(value: Any) -> str | None:
 
 
 def _template_binding_text(
-    *, placeholder: str, value: Any, from_run_input: bool
+    *, placeholder: str, source_step: int | None, value: Any, from_run_input: bool
 ) -> str | None:
     """Text for a binding that consists of one complete expression.
 
@@ -567,8 +595,16 @@ def _template_binding_text(
             f"Template binding '{placeholder}' resolved to structured data. Bind a "
             "text field of the step instead of the whole JSON result.",
             code=FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED.value,
+            context=template_fill_context(
+                "not_text", field=placeholder, source_step=source_step
+            ),
         )
     return str(value)
+
+
+def _referenced_step_order(expression: str) -> int | None:
+    match = _STEP_REFERENCE_PATTERN.search(expression)
+    return decimal_number(match.group(1)) if match else None
 
 
 def _failed_step_order_for_expression(

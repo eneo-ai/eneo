@@ -182,6 +182,10 @@ export function ProviderOverview({
     () => countByKind(sections, { search, security }),
     [sections, search, security]
   );
+  const existing = useMemo(
+    () => countByKind(sections, { search: "", security: "all" }),
+    [sections]
+  );
   const viewerToday = useProviderNotices().today;
   const attention = useMemo(
     () => modelsAttention(sections, { viewerToday }),
@@ -217,7 +221,10 @@ export function ProviderOverview({
   }
 
   const phone = useMediaQuery(PHONE_QUERY);
-  const kindOptions = KIND_FILTERS.map((filter) => ({
+  // A type the organisation has no model of is noise; the chosen one stays, so it can be left.
+  const kindOptions = KIND_FILTERS.filter(
+    (filter) => filter === "all" || filter === kind || existing[filter] > 0
+  ).map((filter) => ({
     value: filter,
     label: t("admin_models_kind_filter_option", {
       label: filter === "all" ? t("all") : typeLabel(filter),

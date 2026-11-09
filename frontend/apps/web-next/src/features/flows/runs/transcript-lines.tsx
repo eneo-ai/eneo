@@ -11,7 +11,17 @@ import { ToggleButton, ToggleButtonGroup } from "@astryxdesign/core/ToggleButton
 import { Token } from "@astryxdesign/core/Token";
 import { Download, Pencil, Undo2, Volume2 } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useId,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+  type Ref
+} from "react";
 import { flushSync } from "react-dom";
 import { Banner } from "@astryxdesign/core/Banner";
 import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
@@ -52,11 +62,27 @@ import type { TranscriptSpeakerReview } from "./runs-api";
 /** What editing a transcript's lines needs: the saved set, and a save that says what went wrong. */
 export type LineEditing = {
   set: CorrectionSet;
+  /**
+   * The names the speakers show by, when not the set's own: a review's
+   * draft shows the names typed in the review under them, unsaved.
+   */
+  names?: CorrectionSet["names"];
   /** Every speaker label of the transcript and its speaker edits. */
   speakers: string[];
   /** Saves the set; null when it was saved, else why not, as a sentence. */
   save: (next: CorrectionSet, done: string) => Promise<string | null>;
   saving: boolean;
+};
+
+/** The names the speakers show by while the transcript is edited. */
+function editingNames(editing: LineEditing): CorrectionSet["names"] {
+  return editing.names ?? editing.set.names;
+}
+
+/** Plays a speaker of the transcript from elsewhere on the page, through its player. */
+export type SpeakerListen = {
+  /** Plays a short sample of the speaker with this label. */
+  play: (label: string) => void;
 };
 
 type Translator = ReturnType<typeof useTranslations>;
@@ -70,11 +96,6 @@ function placeTime(fileIndex: number, start: number, multiFile: boolean, t: Tran
 
 const NEW_SPEAKER = "__new__";
 const NO_SPEAKER = "__none__";
-
-function speakerName(label: string | null, names: Record<string, string | null>, t: Translator) {
-  if (!label) return t("flow_runs_transcript_unknown_speaker");
-  return names[label]?.trim() || label;
-}
 
 /**
  * Gives a line, or the part of it marked in the text field, to another
@@ -163,9 +184,12 @@ function SpeakerEditor({
         options={[
           ...others.map((label) => ({
             value: label,
-            label: speakerName(label, editing.set.names, t)
+            label: speakerText(label, editingNames(editing), t)
           })),
-          { value: NEW_SPEAKER, label: t("flow_transcript_speaker_new", { label: newLabel }) },
+          {
+            value: NEW_SPEAKER,
+            label: t("flow_transcript_speaker_new", { label: speakerText(newLabel, {}, t) })
+          },
           { value: NO_SPEAKER, label: t("flow_runs_transcript_unknown_speaker") }
         ]}
         width="100%"
@@ -194,7 +218,7 @@ function SpeakerEditor({
         {segment.unsure ? (
           <Button
             label={t("flow_transcript_speaker_confirm", {
-              name: speakerName(segment.label, editing.set.names, t)
+              name: speakerText(segment.label, editingNames(editing), t)
             })}
             variant="primary"
             isInterruptible
@@ -523,7 +547,7 @@ function TimeButton({
     <button
       type="button"
       aria-current={active ? "time" : undefined}
-      className="text-ax-text-secondary hover:bg-ax-hover hover:text-ax-text focus-visible:outline-ring rounded-ax-inner min-h-6 self-start px-1 text-left text-xs tabular-nums outline-none focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11"
+      className="text-ax-text-secondary hover:bg-ax-hover hover:text-ax-text focus-visible:outline-ring rounded-ax-inner min-h-6 self-start px-1 text-left text-xs tabular-nums focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11"
       onClick={onPlay}
     >
       <span className="sr-only">{t("flow_transcript_play_from")} </span>
@@ -939,7 +963,7 @@ function SpeakerSamples({
   onPlay
 }: {
   shown: readonly ShownSegment[];
-  onPlay: (fileIndex: number, time: number, until?: number) => void;
+  onPlay: (line: ShownSegment) => void;
 }) {
   const t = useTranslations();
   const headingId = useId();
@@ -961,7 +985,7 @@ function SpeakerSamples({
           icon={<Volume2 aria-hidden="true" />}
           size="sm"
           variant="ghost"
-          onClick={() => onPlay(line.fileIndex, Math.max(0, line.start - 0.5), line.end + 0.5)}
+          onClick={() => onPlay(line)}
         />
       ))}
     </div>
@@ -985,6 +1009,7 @@ export function TranscriptLines({
   editing: given,
   speakerReview = null,
   onUnsavedChange,
+  listenRef,
   children
 }: {
   flowId: string;
@@ -1001,6 +1026,8 @@ export function TranscriptLines({
    * correction waiting for its other places), so a review can hold its approval.
    */
   onUnsavedChange?: (unsaved: boolean) => void;
+  /** Lets the page play a speaker's sample through this transcript's player. */
+  listenRef?: Ref<SpeakerListen>;
   children?: React.ReactNode;
 }) {
   const t = useTranslations();
@@ -1227,7 +1254,7 @@ export function TranscriptLines({
       editing
         ? {
             speakers: editing.speakers,
-            names: editing.set.names,
+            names: editingNames(editing),
             newLabel: nextSpeakerLabel(editing.speakers),
             saving: editing.saving,
             change: changeSpeaker
@@ -1311,7 +1338,7 @@ export function TranscriptLines({
         <SelectionToolbar
           lines={new Set(picked.map((span) => span.segmentIndex)).size}
           speakers={editing.speakers}
-          names={editing.set.names}
+          names={editingNames(editing)}
           newLabel={nextSpeakerLabel(editing.speakers)}
           saving={editing.saving}
           problem={pickProblem}
@@ -1326,6 +1353,23 @@ export function TranscriptLines({
     []
   );
   const seek = playback ? seekLatest : null;
+  /** A speaker's line, from just before it starts to just after it ends. */
+  const playSample = useCallback(
+    (line: ShownSegment) =>
+      latest.current.seek?.(line.fileIndex, Math.max(0, line.start - 0.5), line.end + 0.5),
+    []
+  );
+  useImperativeHandle(
+    listenRef,
+    () => ({
+      play(label) {
+        // A speaker heard only where the service was unsure is still heard.
+        const line = sampleLine(shown, label) ?? shown.find((segment) => segment.label === label);
+        if (line) playSample(line);
+      }
+    }),
+    [shown, playSample]
+  );
 
   return (
     <div className="flex flex-col gap-4">
@@ -1352,178 +1396,184 @@ export function TranscriptLines({
         }}
       />
       {playback?.player}
-      {playback ? <SpeakerSamples shown={shown} onPlay={playback.seek} /> : null}
-      {playback && playback.uncertain > 0 ? (
-        <Text type="supporting" as="p">
-          {t("flow_transcript_uncertain_words", { count: playback.uncertain })}
-        </Text>
-      ) : null}
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <ToggleButtonGroup
-          label={t("flow_transcript_view_label")}
-          value={view}
-          onChange={(next) => {
-            if (next === "lines" || next === "turns") {
-              setOpen(null);
-              setOpenTurn(null);
-              setDirty(false);
-              setPicked(null);
-              setView(next);
-            }
-          }}
-          size="sm"
-        >
-          <ToggleButton value="lines" label={t("flow_transcript_view_lines")} />
-          <ToggleButton value="turns" label={t("flow_transcript_view_turns")} />
-        </ToggleButtonGroup>
-        <div className="flex flex-wrap items-center gap-3">
-          {canUndo ? (
+      {/* While the player sticks above them, focus and following playback stop below it
+          (WCAG 2.4.11). */}
+      <div className="flex flex-col gap-4 [&_*]:scroll-mt-[calc(var(--transcript-player-h,0px)+0.5rem)] [&>p]:max-w-prose">
+        {playback?.settings}
+        {/* Naming speakers puts a listen button on each name row instead. */}
+        {playback && !listenRef ? <SpeakerSamples shown={shown} onPlay={playSample} /> : null}
+        {playback && playback.uncertain > 0 ? (
+          <Text type="supporting" as="p">
+            {t("flow_transcript_uncertain_words", { count: playback.uncertain })}
+          </Text>
+        ) : null}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <ToggleButtonGroup
+            label={t("flow_transcript_view_label")}
+            value={view}
+            onChange={(next) => {
+              if (next === "lines" || next === "turns") {
+                setOpen(null);
+                setOpenTurn(null);
+                setDirty(false);
+                setPicked(null);
+                setView(next);
+              }
+            }}
+            size="sm"
+          >
+            <ToggleButton value="lines" label={t("flow_transcript_view_lines")} />
+            <ToggleButton value="turns" label={t("flow_transcript_view_turns")} />
+          </ToggleButtonGroup>
+          <div className="flex flex-wrap items-center gap-3">
+            {canUndo ? (
+              <Button
+                label={t("flow_transcript_undo")}
+                icon={<Undo2 aria-hidden="true" />}
+                size="sm"
+                variant="ghost"
+                onClick={() => void undoLast()}
+              />
+            ) : null}
+            {corrected > 0 ? (
+              <Text type="supporting">
+                {t("flow_transcript_corrected_count", { count: corrected })}
+              </Text>
+            ) : null}
             <Button
-              label={t("flow_transcript_undo")}
-              icon={<Undo2 aria-hidden="true" />}
+              label={t("flow_transcript_export")}
+              icon={<Download aria-hidden="true" />}
               size="sm"
               variant="ghost"
-              onClick={() => void undoLast()}
+              onClick={() =>
+                saveText(
+                  transcriptText(shown, {
+                    part: (number) => t("flow_transcript_audio_part_heading", { part: number }),
+                    speaker: (label) => speakerText(label, {}, t),
+                    unsureSpeaker: t("flow_transcript_speaker_unresolved")
+                  }),
+                  t("flow_transcript_export_file")
+                )
+              }
             />
-          ) : null}
-          {corrected > 0 ? (
-            <Text type="supporting">
-              {t("flow_transcript_corrected_count", { count: corrected })}
-            </Text>
-          ) : null}
-          <Button
-            label={t("flow_transcript_export")}
-            icon={<Download aria-hidden="true" />}
-            size="sm"
-            variant="ghost"
-            onClick={() =>
-              saveText(
-                transcriptText(shown, {
-                  part: (number) => t("flow_transcript_audio_part_heading", { part: number }),
-                  unknownSpeaker: t("flow_runs_transcript_unknown_speaker"),
-                  unsureSpeaker: t("flow_transcript_speaker_unresolved")
-                }),
-                t("flow_transcript_export_file")
-              )
-            }
-          />
+          </div>
         </div>
-      </div>
-      {editing ? (
-        <Text type="supporting" as="p">
-          {view === "turns"
-            ? t("flow_transcript_view_turns_hint")
-            : t("flow_transcript_selection_intro")}
-        </Text>
-      ) : null}
-      {menuProblem ? (
-        <Banner
-          status="error"
-          title={t("flow_transcript_speaker_not_saved")}
-          description={menuProblem}
-          collapsible={false}
-        />
-      ) : null}
-      <div ref={area}>
-        {view === "turns" ? (
-          <TurnList
-            turns={turns}
-            multiFile={multiFile}
-            marks={playback?.marks ?? null}
-            onSeek={seek}
-            turnId={turnId}
-            canEdit={editing !== null}
-            openTurn={openTurn}
-            onEdit={openTurnEditor}
-            choice={speakerChoice}
-            lines={byIndex}
-            editor={(turn, time) =>
-              editing ? (
-                <TurnEditor
-                  turn={turn}
-                  time={time}
-                  editing={editing}
-                  lines={byIndex}
-                  rawLines={rawLines}
-                  onSuggest={(next, suggestions) => {
-                    const id = turnId(turn);
-                    flushSync(() => {
-                      setOpenTurn(null);
-                      setDirty(false);
-                      setSuggesting({ next, suggestions, lineId: id, problem: null });
-                    });
-                  }}
-                  onDirty={setDirty}
-                  onClose={() => closeTurnEditor(turnId(turn))}
-                />
-              ) : null
-            }
-            toolbarAt={
-              lastPicked === undefined
-                ? -1
-                : turns.findLastIndex((turn) =>
-                    turn.parts.some((part) => part.segmentIndex === lastPicked)
-                  )
-            }
-            toolbar={toolbar}
+        {editing ? (
+          <Text type="supporting" as="p">
+            {view === "turns"
+              ? t("flow_transcript_view_turns_hint")
+              : t("flow_transcript_selection_intro")}
+          </Text>
+        ) : null}
+        {menuProblem ? (
+          <Banner
+            status="error"
+            title={t("flow_transcript_speaker_not_saved")}
+            description={menuProblem}
+            collapsible={false}
           />
-        ) : (
-          <ol aria-label={t("flow_runs_transcript_lines")} className="m-0 flex flex-col p-0">
-            {shown.map((segment, position) => {
-              const id = lineId(position, segment);
-              const isEditing = open === segment.index;
-              return (
-                <SegmentLine
-                  key={segment.index}
-                  id={id}
-                  segment={segment}
-                  multiFile={multiFile}
-                  position={position}
-                  marks={playback?.marks ?? null}
-                  words={playback?.words.get(segment.index)}
-                  seek={seek}
-                  canEdit={editing !== null}
-                  isEditing={isEditing}
-                  onEdit={openEditor}
-                  editor={
-                    editing && isEditing ? (
-                      <LineEditor
-                        segment={segment}
-                        time={placeTime(segment.fileIndex, segment.start, multiFile, t)}
-                        editing={editing}
-                        lines={rawLines}
-                        onSuggest={(next, suggestions) => {
-                          flushSync(() => {
-                            setOpen(null);
-                            setDirty(false);
-                            setSuggesting({ next, suggestions, lineId: id, problem: null });
-                          });
-                        }}
-                        onDirty={setDirty}
-                        onClose={() => closeEditor(id)}
-                      />
-                    ) : null
-                  }
-                  toolbar={segment.index === lastPicked ? toolbar : null}
-                  choice={speakerChoice}
-                  lines={byIndex}
-                />
-              );
-            })}
-          </ol>
-        )}
+        ) : null}
+        <div ref={area}>
+          {view === "turns" ? (
+            <TurnList
+              turns={turns}
+              multiFile={multiFile}
+              marks={playback?.marks ?? null}
+              onSeek={seek}
+              turnId={turnId}
+              canEdit={editing !== null}
+              openTurn={openTurn}
+              onEdit={openTurnEditor}
+              choice={speakerChoice}
+              lines={byIndex}
+              editor={(turn, time) =>
+                editing ? (
+                  <TurnEditor
+                    turn={turn}
+                    time={time}
+                    editing={editing}
+                    lines={byIndex}
+                    rawLines={rawLines}
+                    onSuggest={(next, suggestions) => {
+                      const id = turnId(turn);
+                      flushSync(() => {
+                        setOpenTurn(null);
+                        setDirty(false);
+                        setSuggesting({ next, suggestions, lineId: id, problem: null });
+                      });
+                    }}
+                    onDirty={setDirty}
+                    onClose={() => closeTurnEditor(turnId(turn))}
+                  />
+                ) : null
+              }
+              toolbarAt={
+                lastPicked === undefined
+                  ? -1
+                  : turns.findLastIndex((turn) =>
+                      turn.parts.some((part) => part.segmentIndex === lastPicked)
+                    )
+              }
+              toolbar={toolbar}
+            />
+          ) : (
+            <ol aria-label={t("flow_runs_transcript_lines")} className="m-0 flex flex-col p-0">
+              {shown.map((segment, position) => {
+                const id = lineId(position, segment);
+                const isEditing = open === segment.index;
+                return (
+                  <SegmentLine
+                    key={segment.index}
+                    id={id}
+                    segment={segment}
+                    multiFile={multiFile}
+                    position={position}
+                    marks={playback?.marks ?? null}
+                    words={playback?.words.get(segment.index)}
+                    seek={seek}
+                    canEdit={editing !== null}
+                    isEditing={isEditing}
+                    onEdit={openEditor}
+                    editor={
+                      editing && isEditing ? (
+                        <LineEditor
+                          segment={segment}
+                          time={placeTime(segment.fileIndex, segment.start, multiFile, t)}
+                          editing={editing}
+                          lines={rawLines}
+                          onSuggest={(next, suggestions) => {
+                            flushSync(() => {
+                              setOpen(null);
+                              setDirty(false);
+                              setSuggesting({ next, suggestions, lineId: id, problem: null });
+                            });
+                          }}
+                          onDirty={setDirty}
+                          onClose={() => closeEditor(id)}
+                        />
+                      ) : null
+                    }
+                    toolbar={segment.index === lastPicked ? toolbar : null}
+                    choice={speakerChoice}
+                    lines={byIndex}
+                  />
+                );
+              })}
+            </ol>
+          )}
+        </div>
+        {editing && suggesting ? (
+          <SuggestionsDialog
+            suggestions={suggesting.suggestions}
+            lines={byIndex}
+            multiFile={multiFile}
+            saving={editing.saving}
+            problem={suggesting.problem}
+            onConfirm={(chosen) => void saveSuggested(chosen)}
+            onSkip={() => void saveSuggested([])}
+          />
+        ) : null}
       </div>
-      {editing && suggesting ? (
-        <SuggestionsDialog
-          suggestions={suggesting.suggestions}
-          lines={byIndex}
-          multiFile={multiFile}
-          saving={editing.saving}
-          problem={suggesting.problem}
-          onConfirm={(chosen) => void saveSuggested(chosen)}
-          onSkip={() => void saveSuggested([])}
-        />
-      ) : null}
     </div>
   );
 }

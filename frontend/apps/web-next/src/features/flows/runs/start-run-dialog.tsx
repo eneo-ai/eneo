@@ -9,7 +9,7 @@ import { TextArea } from "@astryxdesign/core/TextArea";
 import { useAnnounce, useMediaQuery } from "@astryxdesign/core/hooks";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
-import { useId, useImperativeHandle, useRef, useState, type Ref } from "react";
+import { Fragment, useId, useImperativeHandle, useRef, useState, type Ref } from "react";
 import { flushSync } from "react-dom";
 import { blockingError, ListError, RefreshError } from "@/components/composites/query-state";
 import { LoadingState } from "@/components/composites/loading-state";
@@ -60,13 +60,8 @@ import {
   type RunCreateRequest,
   type RunPublic
 } from "./runs-api";
-import { startSummary, withRunLabel, type StartSummary } from "./start-run-checks";
-import {
-  RunLabelField,
-  ReuseLastInput,
-  TemplateReadiness,
-  useAudioLengthCheck
-} from "./start-run-extras";
+import { inputsComeFirst, startSummary, withRunLabel, type StartSummary } from "./start-run-checks";
+import { RunLabelField, ReuseLastInput, useAudioLengthCheck } from "./start-run-extras";
 import { StartRunSummary } from "./start-run-summary";
 import { useRuntimeUploads } from "./use-runtime-uploads";
 
@@ -127,14 +122,20 @@ function ContractNotices({ flow, contract }: { flow: FlowPublic; contract: RunCo
         <Banner
           status="error"
           title={t("flow_runs_template_blocked_title")}
+          // Each template that blocks the run, by name, with what to do about it.
           description={templates
-            .map(
-              (item) =>
-                flowErrorText(item.message_code, t) ??
-                (item.template_name
-                  ? t("flow_runs_template_blocked_named", { name: item.template_name })
-                  : t("flow_runs_template_blocked"))
-            )
+            .map((item) => {
+              const name = item.template_name?.trim();
+              const reason = flowErrorText(item.message_code, t);
+              if (reason) {
+                return name
+                  ? t("flow_runs_template_blocked_named_reason", { name, reason })
+                  : reason;
+              }
+              return name
+                ? t("flow_runs_template_blocked_named", { name })
+                : t("flow_runs_template_blocked");
+            })
             .join(" ")}
           collapsible={false}
         />
@@ -155,7 +156,6 @@ function ContractNotices({ flow, contract }: { flow: FlowPublic; contract: RunCo
           collapsible={false}
         />
       ) : null}
-      <TemplateReadiness contract={contract} />
     </>
   );
 }
@@ -222,7 +222,13 @@ function StartRunForm({
   const freeTextForm = takesFreeText(contract);
   const labels = contract.transcription?.speaker_labels;
   const blocked = blockingTemplates(contract).length > 0 || speakersBlockRun(contract);
+  // In reading and Tab order alike.
+  const inputsFirst = inputsComeFirst(inputs, fields);
 
+  // A step reads the free text: a run without it has nothing to work with.
+  const freeTextNeeded = freeTextForm && takesInput(flow, contract);
+  const freeTextAnchor = `${formId}-free-text`;
+  const freeTextMissing = submitted && freeTextNeeded && !freeText.trim();
   const fieldIssues = submitted ? fieldProblems(fields, values) : {};
   const inputIssues = submitted ? inputProblems(contract, uploads) : {};
   const tooManyInAll = submitted && exceedsAggregate(contract, uploads);
@@ -351,23 +357,27 @@ function StartRunForm({
       setSubmitted(true);
       setFormProblem(null);
     });
-    const firstField = fields.find((field) => foundFields[field.name]);
-    if (firstField) {
-      focusFirstControl(fieldAnchorId(formId, firstField.name));
-      return;
-    }
-    // A recording still running is not a file yet.
-    const recording = inputs.find((input) => recorders.current.get(input.step_id)?.busy());
-    if (recording) {
-      flushSync(() => setStopFirst(recording.step_id));
-      focusFirstControl(inputAnchorId(formId, recording.step_id));
-      return;
-    }
-    const firstInput = inputs.find((input) => foundInputs[input.step_id]);
-    if (firstInput) {
-      focusFirstControl(inputFileAnchorId(formId, firstInput.step_id));
-      return;
-    }
+    // Focus goes to the first problem in the order the form shows them.
+    const focusField = () => {
+      // A free-text form has no other fields.
+      if (freeTextNeeded && !freeText.trim()) return focusFirstControl(freeTextAnchor);
+      const firstField = fields.find((field) => foundFields[field.name]);
+      if (firstField) focusFirstControl(fieldAnchorId(formId, firstField.name));
+      return Boolean(firstField);
+    };
+    const focusInput = () => {
+      // A recording still running is not a file yet.
+      const recording = inputs.find((input) => recorders.current.get(input.step_id)?.busy());
+      if (recording) {
+        flushSync(() => setStopFirst(recording.step_id));
+        focusFirstControl(inputAnchorId(formId, recording.step_id));
+        return true;
+      }
+      const firstInput = inputs.find((input) => foundInputs[input.step_id]);
+      if (firstInput) focusFirstControl(inputFileAnchorId(formId, firstInput.step_id));
+      return Boolean(firstInput);
+    };
+    if (inputsFirst ? focusInput() || focusField() : focusField() || focusInput()) return;
     if (exceedsAggregate(contract, uploads)) {
       showFormProblem(
         t("flow_runs_too_many_files_in_all", { count: contract.aggregate_max_files ?? 0 })
@@ -415,36 +425,8 @@ function StartRunForm({
   }
 
   const maxSpeakerOption = contract.transcription?.max_speakers;
-
-  return (
-    // Kept while the summary shows: the uploads and recordings live in it.
-    <form
-      id={formId}
-      hidden={reviewing}
-      noValidate
-      onSubmit={submit}
-      className="flex flex-col gap-5"
-    >
-      <ContractNotices flow={flow} contract={contract} />
-      <div
-        ref={summaryRef}
-        tabIndex={-1}
-        className="focus-visible:outline-ring outline-none focus-visible:outline-2 focus-visible:outline-offset-2"
-      >
-        {formProblem || tooManyInAll ? (
-          <Banner
-            role="alert"
-            status="error"
-            title={t("flow_runs_not_started")}
-            description={
-              formProblem ??
-              t("flow_runs_too_many_files_in_all", { count: contract.aggregate_max_files ?? 0 })
-            }
-            collapsible={false}
-          />
-        ) : null}
-      </div>
-
+  const fieldsBlock = (
+    <Fragment key="fields">
       <ReuseLastInput
         flowId={flow.id}
         contract={contract}
@@ -467,16 +449,27 @@ function StartRunForm({
       ))}
 
       {freeTextForm ? (
-        <TextArea
-          label={t("flow_runs_free_text")}
-          description={t("flow_runs_free_text_hint")}
-          value={freeText}
-          onChange={setFreeText}
-          rows={5}
-          width="100%"
-        />
+        <div id={freeTextAnchor}>
+          <TextArea
+            label={t("flow_runs_free_text")}
+            description={t("flow_runs_free_text_hint")}
+            value={freeText}
+            onChange={setFreeText}
+            rows={5}
+            width="100%"
+            status={
+              freeTextMissing
+                ? { type: "error", message: t("flow_runs_free_text_required") }
+                : undefined
+            }
+            {...(freeTextNeeded ? { isRequired: true } : { isOptional: true })}
+          />
+        </div>
       ) : null}
-
+    </Fragment>
+  );
+  const inputsBlock = (
+    <Fragment key="inputs">
       {inputs.map((input) => (
         <RunFileInput
           key={input.step_id}
@@ -561,6 +554,41 @@ function StartRunForm({
           width="100%"
         />
       ) : null}
+    </Fragment>
+  );
+
+  return (
+    // Kept while the summary shows: the uploads and recordings live in it.
+    <form
+      id={formId}
+      hidden={reviewing}
+      noValidate
+      onSubmit={submit}
+      className="flex flex-col gap-5"
+    >
+      <ContractNotices flow={flow} contract={contract} />
+      {/* Only there with a problem: an empty box would add a second gap to the form's rhythm. */}
+      {formProblem || tooManyInAll ? (
+        <div
+          ref={summaryRef}
+          tabIndex={-1}
+          className="focus-visible:outline-ring focus-visible:outline-2 focus-visible:outline-offset-2"
+        >
+          <Banner
+            role="alert"
+            status="error"
+            title={t("flow_runs_not_started")}
+            description={
+              formProblem ??
+              t("flow_runs_too_many_files_in_all", { count: contract.aggregate_max_files ?? 0 })
+            }
+            collapsible={false}
+          />
+        </div>
+      ) : null}
+
+      {/* Keyed: a contract read again keeps each block, and a running recording, mounted. */}
+      {inputsFirst ? [inputsBlock, fieldsBlock] : [fieldsBlock, inputsBlock]}
       {/* What the run is called is optional: it comes last, so the form opens with the input. */}
       <RunLabelField value={runLabel} onChange={setRunLabel} />
     </form>

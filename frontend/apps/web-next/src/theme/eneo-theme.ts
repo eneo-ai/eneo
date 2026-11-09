@@ -305,7 +305,10 @@ export const eneoTheme = defineTheme({
             "selector-search": { base: { minHeight: "44px" } },
             "selector-option-row": { base: { minHeight: "44px" } },
             "dropdown-menu-item": { base: { minHeight: "44px" } },
-            "collapsible-trigger": { base: { minHeight: "44px" } }
+            "collapsible-trigger": { base: { minHeight: "44px" } },
+            // A DateInput's calendar button has no theme target and is as large as its glyph:
+            // the glyph's box gives it 44 px.
+            "date-input-toggle-icon": { base: { minHeight: "44px", minWidth: "44px" } }
           }
         }
       }

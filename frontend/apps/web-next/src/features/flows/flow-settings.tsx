@@ -8,14 +8,18 @@ import { Selector } from "@astryxdesign/core/Selector";
 import { Switch } from "@astryxdesign/core/Switch";
 import { Heading, Text } from "@astryxdesign/core/Text";
 import { TextArea } from "@astryxdesign/core/TextArea";
-import { ArrowDown, ArrowUp, CircleCheck, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
+import { Collapsible } from "@/components/astryx/collapsible";
 import { TextInput } from "@/components/astryx/text-input";
 import { EmptyState } from "@/components/composites/empty-state";
 import { LeaveConfirmation } from "@/components/composites/leave-confirmation";
 import { useAppContext } from "@/components/providers/app-context";
+import { useElementWidth } from "@/lib/hooks/use-element-width";
+import { usePhoneScreen } from "@/lib/hooks/use-media-match";
+import { EditorSection } from "./editor/editor-fields";
 import { FlowRetentionDialog, FlowRetentionSummary } from "./flow-retention";
 import type { FlowDefinitionUpdate, FlowPublic } from "./flows-api";
 import {
@@ -104,29 +108,30 @@ function savedValues(draft: SettingsDraft): string {
 
 type SpaceClassification = { name: string; security_level: number };
 
+/** The label column beside the values: the longest label ("Nedladdning av bevisunderlag") fits on one line. */
+const SUMMARY_LABEL_WIDTH = "13rem";
+/** Below this width (px) the summary puts its labels on top: the label column plus room for a value. */
+const SUMMARY_SIDE_LABELS_MIN = 448;
+
 /**
- * The read view: the flow at a glance, what a run asks for, how its audio is
- * transcribed and whether its evidence may be downloaded. Without
- * `transcription` (a page that has not read the space) it says only whether
- * the flow transcribes.
+ * The read view: what a run asks for, how its audio is transcribed and whether
+ * its evidence may be downloaded. Without `transcription` (a page that has not
+ * read the space) it says only whether the flow transcribes. The page's title
+ * names the flow, so the list does not; rows with nothing to say (no run form,
+ * no transcription) are left out.
  */
 export function SettingsSummary({
   flow,
   transcription,
-  stepCount,
-  problemCount,
-  classification,
-  onChangeRetention
+  hideIdentity = false,
+  classification
 }: {
   flow: FlowPublic;
   transcription?: TranscriptionResources;
-  stepCount?: number;
-  /** The draft check's problem count; null while unchecked. */
-  problemCount?: number | null;
+  /** Leaves out the description and the step count, for a page whose header and step list say them. */
+  hideIdentity?: boolean;
   /** The space's security classification, when it has one. */
   classification?: SpaceClassification | null;
-  /** Offers to change the retention, for someone who may. */
-  onChangeRetention?: () => void;
 }) {
   const t = useTranslations();
   const fields = formFieldsOf(flow.metadata_json);
@@ -135,20 +140,32 @@ export function SettingsSummary({
   ).length;
   const settings = transcriptionSettingsOf(flow.metadata_json);
   const transcribes = flowTakesAudio(flow.steps) || settings.enabled;
-  return (
-    <MetadataList label={{ position: "start", width: "11rem" }}>
-      <MetadataListItem label={t("name")}>{flow.name}</MetadataListItem>
-      <MetadataListItem label={t("description")}>
-        {flow.description?.trim() || (
-          <span className="text-ax-text-secondary">{t("flows_no_description")}</span>
-        )}
-      </MetadataListItem>
-      <MetadataListItem label={t("flows_settings_steps")}>
-        {stepCount ?? flow.steps.length}
-      </MetadataListItem>
-      <MetadataListItem label={t("flows_settings_form_fields")}>
-        {fields.length}
-        {fields.length > 0 ? (
+  // Labels go on top wherever the summary itself is narrow (a phone, or a
+  // column beside the chat and the sidebar), not only on a phone; until it
+  // is measured, the screen decides.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const phone = usePhoneScreen();
+  const narrow = useElementWidth(rootRef, (width) => width < SUMMARY_SIDE_LABELS_MIN) ?? phone;
+  const label = narrow
+    ? ({ position: "top" } as const)
+    : ({ position: "start", width: SUMMARY_LABEL_WIDTH } as const);
+  // The transcription's own settings under their heading, after the rest, so they scan as one.
+  const transcriptionDetails = transcribes && transcription;
+  const list = (
+    <MetadataList label={label}>
+      {hideIdentity ? null : (
+        <>
+          <MetadataListItem label={t("description")}>
+            {flow.description?.trim() || (
+              <span className="text-ax-text-secondary">{t("flows_no_description")}</span>
+            )}
+          </MetadataListItem>
+          <MetadataListItem label={t("flows_settings_steps")}>{flow.steps.length}</MetadataListItem>
+        </>
+      )}
+      {fields.length > 0 ? (
+        <MetadataListItem label={t("flows_settings_form_fields")}>
+          {fields.length}
           <ul className="text-ax-text-secondary mt-0.5 flex flex-col gap-0.5">
             {fields.map((field) => (
               <li key={field.key}>
@@ -162,18 +179,12 @@ export function SettingsSummary({
               </li>
             ))}
           </ul>
-        ) : null}
-      </MetadataListItem>
-      <MetadataListItem label={t("flow_editor_tools_transcription_heading")}>
-        {t(transcribes ? "flow_editor_tools_on" : "flow_editor_tools_off")}
-      </MetadataListItem>
-      {transcribes && transcription ? (
-        <TranscriptionSummary
-          settings={settings}
-          resources={transcription}
-          required={speakersRequired(flow.steps)}
-          modelMissing={transcriptionModelMissing(settings, flow.steps)}
-        />
+        </MetadataListItem>
+      ) : null}
+      {transcribes && !transcriptionDetails ? (
+        <MetadataListItem label={t("flow_editor_tools_transcription_heading")}>
+          {t("flow_editor_tools_on")}
+        </MetadataListItem>
       ) : null}
       <MetadataListItem label={t("flows_evidence_export")}>
         {t(
@@ -184,11 +195,6 @@ export function SettingsSummary({
       </MetadataListItem>
       <MetadataListItem label={t("flows_retention_heading")}>
         <FlowRetentionSummary flow={flow} />
-        {onChangeRetention ? (
-          <span className="mt-1 block">
-            <Button label={t("flows_retention_change")} size="sm" onClick={onChangeRetention} />
-          </span>
-        ) : null}
       </MetadataListItem>
       {classification ? (
         <MetadataListItem label={t("flows_classification_heading")}>
@@ -200,19 +206,29 @@ export function SettingsSummary({
           </span>
         </MetadataListItem>
       ) : null}
-      {problemCount == null ? null : (
-        <MetadataListItem label={t("flows_settings_check")}>
-          {problemCount === 0 ? (
-            <span className="inline-flex items-center gap-1.5">
-              <CircleCheck className="text-ax-success size-4 shrink-0" aria-hidden="true" />
-              {t("flows_settings_check_ok")}
-            </span>
-          ) : (
-            t("flows_settings_check_problems", { count: problemCount })
-          )}
-        </MetadataListItem>
-      )}
     </MetadataList>
+  );
+  return (
+    <div ref={rootRef} className="flex min-w-0 flex-col gap-6">
+      {list}
+      {transcriptionDetails ? (
+        <MetadataList
+          label={label}
+          title={
+            <Heading level={3} weight="semibold" className="text-base">
+              {t("flow_editor_tools_transcription_heading")}
+            </Heading>
+          }
+        >
+          <TranscriptionSummary
+            settings={settings}
+            resources={transcriptionDetails}
+            required={speakersRequired(flow.steps)}
+            modelMissing={transcriptionModelMissing(settings, flow.steps)}
+          />
+        </MetadataList>
+      ) : null}
+    </div>
   );
 }
 
@@ -246,6 +262,12 @@ function FormFieldRow({
   const nameProblem = problems.find((problem) => problem.part === "name");
   const optionsProblem = problems.find((problem) => problem.part === "options");
   const role = roleFor(field.type);
+  const token = `{{flow_input.${field.name.trim() || "…"}}}`;
+  // Following the label the name needs no look; one typed by hand, or with a problem, does.
+  const typedName =
+    field.nameEdited && field.name.trim() !== suggestedFieldName(field.label, existingNames);
+  const [nameToggled, setNameToggled] = useState<boolean | null>(null);
+  const nameOpen = nameProblem !== undefined || (nameToggled ?? typedName);
 
   return (
     <div
@@ -297,19 +319,33 @@ function FormFieldRow({
         }
         autoComplete="off"
       />
-      <TextInput
-        label={t("flows_form_field_name")}
-        description={t("flows_form_field_name_hint", {
-          token: `{{flow_input.${field.name.trim() || "…"}}}`
-        })}
-        value={field.name}
-        onChange={(name) => onChange({ ...field, name, nameEdited: true })}
-        isRequired
-        autoComplete="off"
-        status={
-          nameProblem ? { type: "error", message: t(PROBLEM_KEYS[nameProblem.problem]) } : undefined
+      <Collapsible
+        isOpen={nameOpen}
+        onOpenChange={setNameToggled}
+        chevronPosition="start"
+        trigger={
+          <span className="text-ax-text-secondary flex min-w-0 flex-wrap items-baseline gap-x-1.5 py-1 text-start text-sm font-normal">
+            {t("flows_form_field_name_trigger")}
+            <code className="text-ax-text min-w-0 break-all">{token}</code>
+          </span>
         }
-      />
+      >
+        <div className="pt-2">
+          <TextInput
+            label={t("flows_form_field_name")}
+            description={t("flows_form_field_name_hint")}
+            value={field.name}
+            onChange={(name) => onChange({ ...field, name, nameEdited: true })}
+            isRequired
+            autoComplete="off"
+            status={
+              nameProblem
+                ? { type: "error", message: t(PROBLEM_KEYS[nameProblem.problem]) }
+                : undefined
+            }
+          />
+        </div>
+      </Collapsible>
       <Selector
         label={t("flows_form_field_type")}
         value={field.type}
@@ -371,8 +407,6 @@ export function FlowSettings({
   onSave,
   onEditingChange,
   openRequest,
-  stepCount,
-  problemCount,
   classification,
   onDirtyChange
 }: {
@@ -389,10 +423,6 @@ export function FlowSettings({
    * new object asks again.
    */
   openRequest?: SettingsOpenRequest;
-  /** Shown in the read view. */
-  stepCount?: number;
-  /** The draft check's problem count (null while unchecked), shown in the read view. */
-  problemCount?: number | null;
   /** The space's security classification, when it has one. */
   classification?: SpaceClassification | null;
   /** Told true while the open form differs from the flow it was loaded from. */
@@ -401,12 +431,14 @@ export function FlowSettings({
   const t = useTranslations();
   const { can } = useAppContext();
   const [retentionOpen, setRetentionOpen] = useState(false);
+  const mayChangeRetention = can("retention_manage");
   const announce = useAnnounce();
   const headingId = useId();
   const formId = useId();
+  const evidenceHeadingId = useId();
   const sectionRef = useRef<HTMLElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
-  const editButtonRef = useRef<HTMLDivElement>(null);
+  const editButtonRef = useRef<HTMLButtonElement>(null);
   const reloadRef = useRef<HTMLButtonElement>(null);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -489,6 +521,12 @@ export function FlowSettings({
     setEditing(true);
   }
 
+  /** "Ändra inställningar": its button leaves with the summary, so focus goes to the form's first field. */
+  function openForm() {
+    flushSync(startEditing);
+    focusField("name");
+  }
+
   /**
    * Scrolls to a field of the form and focuses it; a transcription field not
    * on screen falls back to the first control there. Read-only, the section.
@@ -517,7 +555,7 @@ export function FlowSettings({
   function stopEditing() {
     setEditing(false);
     // The form is gone; its "Ändra" button takes focus back.
-    requestAnimationFrame(() => editButtonRef.current?.querySelector("button")?.focus());
+    requestAnimationFrame(() => editButtonRef.current?.focus());
   }
 
   function addField() {
@@ -618,9 +656,25 @@ export function FlowSettings({
         <Heading level={2} id={headingId} weight="semibold" className="text-lg">
           {t("flows_settings_heading")}
         </Heading>
-        {canEdit && !editing ? (
-          <div ref={editButtonRef}>
-            <Button label={t("flows_settings_edit")} size="sm" onClick={startEditing} />
+        {/* Every way to change the settings sits here, each named for what it
+            changes; retention has its own dialog, open on a published flow too. */}
+        {!editing && (canEdit || mayChangeRetention) ? (
+          <div className="flex flex-wrap items-center gap-2">
+            {canEdit ? (
+              <Button
+                ref={editButtonRef}
+                label={t("flows_settings_edit")}
+                size="sm"
+                onClick={openForm}
+              />
+            ) : null}
+            {mayChangeRetention ? (
+              <Button
+                label={t("flows_retention_change")}
+                size="sm"
+                onClick={() => setRetentionOpen(true)}
+              />
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -628,10 +682,8 @@ export function FlowSettings({
         <SettingsSummary
           flow={flow}
           transcription={transcription}
-          stepCount={stepCount}
-          problemCount={problemCount}
+          hideIdentity
           classification={classification}
-          onChangeRetention={can("retention_manage") ? () => setRetentionOpen(true) : undefined}
         />
       ) : (
         <form
@@ -639,7 +691,7 @@ export function FlowSettings({
           ref={formRef}
           onSubmit={submit}
           noValidate
-          className="border-ax-border bg-ax-card rounded-ax-container flex max-w-3xl flex-col gap-4 border p-4"
+          className="flex max-w-3xl flex-col gap-4"
         >
           {stale ? (
             <Banner
@@ -679,11 +731,11 @@ export function FlowSettings({
               rows={3}
             />
           </div>
-          <fieldset className="flex flex-col gap-3">
-            <legend className="text-ax-text mb-1 text-sm font-semibold">
-              {t("flows_form_heading")}
+          <fieldset className="border-ax-border flex flex-col gap-3 border-t pt-5">
+            <legend className="float-left w-full p-0">
+              <Heading level={3}>{t("flows_form_heading")}</Heading>
             </legend>
-            <Text type="supporting" size="sm" as="p" display="block" className="m-0">
+            <Text type="supporting" size="sm" as="p" display="block" className="m-0 max-w-prose">
               {t("flows_form_description")}
             </Text>
             {fields.length === 0 ? (
@@ -743,12 +795,14 @@ export function FlowSettings({
             onChange={setTranscriptionDraft}
             onMaxSpeakersInvalid={setMaxSpeakersInvalid}
           />
-          <Switch
-            label={t("flows_evidence_export")}
-            description={t("flows_evidence_export_hint")}
-            value={allowExport}
-            onChange={setAllowExport}
-          />
+          <EditorSection id={evidenceHeadingId} title={t("flows_evidence_heading")}>
+            <Switch
+              label={t("flows_evidence_export")}
+              description={t("flows_evidence_export_hint")}
+              value={allowExport}
+              onChange={setAllowExport}
+            />
+          </EditorSection>
           <div className="flex flex-wrap justify-end gap-2">
             <Button label={t("cancel")} onClick={stopEditing} />
             <Button

@@ -259,6 +259,26 @@ export function speakerMapping(
 }
 
 /**
+ * The names the speaker-mapping step of a run gave the speakers of one
+ * transcription step's transcript, as the run went on with them (after its
+ * review, when the step was reviewed). The transcript shows them until a
+ * person names a speaker there.
+ */
+export function mappedSpeakerNames(
+  steps: readonly Pick<RunStep, "output_payload_json">[],
+  transcriptStepId: string
+): Record<string, string> {
+  for (const step of steps) {
+    const mapping = speakerMapping(step.output_payload_json);
+    if (mapping?.sourceStepId !== transcriptStepId) continue;
+    return Object.fromEntries(
+      mapping.rows.flatMap((row) => (row.name ? [[row.label, row.name]] : []))
+    );
+  }
+  return {};
+}
+
+/**
  * The rows with the names a person gave later (kept with the transcript's
  * corrections): a string replaces the step's name, null clears it, a label
  * left out keeps it. A row keeps the step's confidence and evidence while it

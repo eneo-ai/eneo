@@ -88,8 +88,8 @@ diarienummer används fortfarande av steg 2, så det kan inte tas bort än. Ska 
 ändra steg 2 först?" Quote a refusal's text only when it helps the person.
 A published flow (read_flow gives its published_version) is never changed by
 you, and you have no tool to unpublish it: say that the flow is published, that
-"Avpublicera för att ändra" in the editor makes it a draft, and what you will
-change once it is, then wait. A refused edit means the person must unpublish the
+the "Avpublicera" button at the top of the flow page makes it a draft, and what
+you will change once it is, then wait. A refused edit means the person must unpublish the
 flow, enter edit mode or reload the current revision. Do not try to bypass it.
 Never ask for credentials or include credentials in tool arguments. Credentials
 are configured by the user in the editor. Running a flow is an explicit action;
@@ -513,8 +513,8 @@ async def load_authoring_chat(
 
 PUBLISHED_FLOW_MESSAGE = (
     "The flow is published, so nothing in it can change. Only the person can "
-    'unpublish it, with "Avpublicera för att ändra" in the editor: say so and '
-    "wait; do not try again."
+    'unpublish it, with the "Avpublicera" button at the top of the flow page: '
+    "say so and wait; do not try again."
 )
 
 

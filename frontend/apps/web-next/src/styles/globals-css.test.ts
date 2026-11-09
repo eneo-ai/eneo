@@ -191,6 +191,42 @@ describe("globals.css", () => {
     expect(inputs?.[1]).toMatchObject({ "min-inline-size": "44px", "min-block-size": "44px" });
   });
 
+  it("sets a checkbox, a radio and a switch on their label's first line, not the middle of label and description", () => {
+    const components = declarationsOf("components");
+    const radio = ".astryx-radio-list-item:has(> span:last-child > :nth-child(2))";
+    const switchRow = ".astryx-switch-field:not([data-label-position]) > div:first-child";
+    const rows = [".astryx-checkbox-input > div:first-child", radio, switchRow].join(", ");
+    expect(components.get(rows)).toMatchObject({ "align-items": "flex-start" });
+    // The shorter of the control and the label's line is centred on the other.
+    expect(
+      components.get(".astryx-checkbox-input, .astryx-radio-list-item, .astryx-switch-field")
+    ).toMatchObject({
+      "--eneo-choice-box": "24px",
+      "--eneo-choice-line": "calc(var(--text-label-size) * var(--text-label-leading))"
+    });
+    expect(
+      components.get(
+        '.astryx-checkbox-input[data-size="sm"], .astryx-radio-list-item[data-size="sm"]'
+      )
+    ).toMatchObject({ "--eneo-choice-box": "20px" });
+    const slots = [
+      ".astryx-checkbox-input > div:first-child > div:first-child",
+      `${radio} > span:first-child`,
+      `${switchRow} > div:first-child`
+    ].join(", ");
+    const texts = [
+      ".astryx-checkbox-input > div:first-child > div:last-child",
+      `${radio} > span:last-child`,
+      `${switchRow} > div:last-child`
+    ].join(", ");
+    expect(components.get(slots)?.["margin-block-start"]).toContain(
+      "var(--eneo-choice-line) - var(--eneo-choice-box)"
+    );
+    expect(components.get(texts)?.["padding-block-start"]).toContain(
+      "var(--eneo-choice-box) - var(--eneo-choice-line)"
+    );
+  });
+
   it("keeps phones and tablets steady: no pull-to-refresh, no blur, the theme's drawer timing, safe areas", () => {
     // selector → declarations of every rule in @layer components (it beats
     // Astryx's own styles in astryx-base whatever their specificity).

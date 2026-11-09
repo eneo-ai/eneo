@@ -234,6 +234,25 @@ export function clockTime(seconds: number): string {
 }
 
 /**
+ * The corrections with the names a speaker-mapping step gave (`proposed`)
+ * under the names a person gave here: a name given here, or cleared here
+ * (null), wins. The same corrections when there is nothing to add.
+ */
+export function withProposedNames<
+  T extends Pick<TranscriptCorrections, "occurrences" | "speaker_edits" | "speaker_names">
+>(
+  corrections: T | null,
+  proposed: Readonly<Record<string, string>> | undefined
+): Pick<TranscriptCorrections, "occurrences" | "speaker_edits" | "speaker_names"> | null {
+  if (!proposed || Object.keys(proposed).length === 0) return corrections;
+  return {
+    occurrences: corrections?.occurrences ?? [],
+    speaker_edits: corrections?.speaker_edits ?? [],
+    speaker_names: { ...proposed, ...(corrections?.speaker_names ?? {}) }
+  };
+}
+
+/**
  * The edit request that sets the speakers' names and keeps every other
  * saved correction as it is (the endpoint replaces the whole set).
  */

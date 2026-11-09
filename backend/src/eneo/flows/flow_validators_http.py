@@ -108,11 +108,12 @@ def validate_authored_http_config(
         credentials_required=credentials_required,
     )
     if errors:
+        # `http_error` names the defect so the editor can say what to change.
         raise FlowStepValidationError(
             f"Step {step_order}: {label} validation failed: {errors[0].value}",
             step_order=step_order,
             code=FlowApiErrorCode.TYPED_IO_HTTP_INVALID_CONFIG.value,
-            context={"field": label},
+            context={"field": label, "http_error": errors[0].value},
         )
     templated = secret_fields_holding_templates(authored)
     if templated:

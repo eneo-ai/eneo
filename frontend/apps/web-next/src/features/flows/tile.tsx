@@ -10,7 +10,8 @@ import { flowKindLine } from "./flow-labels";
 /**
  * Card for a flow; the card opens the flow, where it is run. The tokens say
  * what it takes in and gives back, how many steps it has, whose it is
- * (`owner`, from `flowOwner`) and when it last changed. It shows no state:
+ * (`owner`, given only when it is someone else's) and when it last changed.
+ * It shows no state:
  * those who manage flows see them grouped by it, and others see published
  * flows only.
  */
@@ -19,7 +20,7 @@ export function FlowTile({
   owner
 }: {
   flow: FlowSparse;
-  /** Whose the flow is, in words; null when it does not say. */
+  /** Whose the flow is, in words; null for the viewer's own flows and when it does not say. */
   owner: string | null;
 }) {
   const t = useTranslations();

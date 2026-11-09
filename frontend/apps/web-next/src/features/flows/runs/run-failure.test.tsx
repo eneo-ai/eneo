@@ -65,6 +65,31 @@ describe("RunFailure", () => {
     expect(screen.getByText("Do not auto-retry.")).toBeTruthy();
   });
 
+  it("says which Word template field failed and from which step, the English only for integrations", () => {
+    const english = "Step 2: The DOCX template could not be rendered with the step output.";
+    renderInApp(
+      <RunFailure
+        error={error({
+          code: "typed_io_template_render_failed",
+          message: english,
+          details: {
+            template_fill: { reason: "missing_value", field: "sammanfattning", source_step: 1 }
+          } as RunErrorWithGuidance["details"]
+        })}
+      />
+    );
+    expect(
+      screen.getByText(
+        "Fältet ”sammanfattning” i Word-mallen fick inget värde från steg 1. Låt steget skriva något, välj en annan källa eller lämna fältet tomt med avsikt."
+      )
+    ).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("button", { name: messages.flow_run_extras_failure_technical })
+    );
+    expect(screen.getByText(messages.flow_error_typed_io_template_render_failed)).toBeTruthy();
+    expect(screen.getByText(english).closest("dd")?.getAttribute("lang")).toBe("en");
+  });
+
   it("names the steps a refused review policy concerns", async () => {
     const { container } = renderInApp(
       <RunFailure

@@ -6,6 +6,7 @@ import {
   readSpeakerMapping,
   readTemplateFill,
   readToolConfig,
+  isStructuredTemplateBinding,
   defaultHttpConfig,
   hasHttpConfig,
   readHttpConfig,
@@ -26,7 +27,18 @@ import {
   readLongMaterial,
   withLongMaterial
 } from "./step-configs";
-import type { InputSource, InputType, OutputMode, OutputType, StepConfig } from "./step-types";
+import type {
+  FlowPublic,
+  FlowStep,
+  InputSource,
+  InputType,
+  OutputMode,
+  OutputType,
+  StepConfig
+} from "./step-types";
+import { templateParts } from "../flow-steps";
+import { readMeaning, readTone } from "./request-preview";
+import type { VariableEntry } from "./step-variables";
 
 /**
  * The choices each setting of a saved step offers at its place, and what
@@ -516,9 +528,65 @@ export function stepUsesModel(step: Pick<StepConfig, "output_mode">): boolean {
   return outputModeUsesCompletionModel(step.output_mode);
 }
 
-/** Whether a template step has chosen a template and bound every placeholder. */
-export function templateReadiness(step: Pick<StepConfig, "output_config">) {
+/** Whether a reference can fill a whole Word field: one value, not a whole structured answer. */
+export function fillsTemplateField(entry: VariableEntry): boolean {
+  return (
+    entry.kind.type !== "previous_step" &&
+    entry.kind.type !== "section_index" &&
+    !isStructuredTemplateBinding(`{{${entry.token}}}`)
+  );
+}
+
+/**
+ * The reference a Word field's binding reads (`{{ step_1.output.text }}`
+ * reads `step_1.output.text`), or null when the binding is not exactly one.
+ */
+export function templateBindingToken(binding: string): string | null {
+  const parts = templateParts(binding.trim());
+  const part = parts[0];
+  return parts.length === 1 && part?.kind === "read" ? part.token : null;
+}
+
+/**
+ * Whether a Word field's binding reads one value the run has at this step,
+ * as the editor reads every reference: spaces inside the braces and the
+ * `föregående_steg` alias read as written; a step or form field that is
+ * gone, or a whole structured answer, does not fill a field.
+ */
+export function bindsTemplateField(
+  binding: string,
+  stepOrder: number,
+  flow: Pick<FlowPublic, "steps" | "metadata_json">
+): boolean {
+  const token = templateBindingToken(binding);
+  return (
+    token !== null &&
+    !isStructuredTemplateBinding(binding) &&
+    readTone(readMeaning(token, stepOrder, flow)) === "reads"
+  );
+}
+
+/**
+ * Whether a template step has chosen a template, and the placeholders that
+ * have no value the flow has: not chosen, or a source the flow no longer has
+ * (`{{flow_input.arende}}` after the form field went). "" (left empty) counts
+ * as a value, as in the editor's field count.
+ */
+export function templateReadiness(
+  step: Pick<FlowStep, "output_config" | "step_order">,
+  flow: Pick<FlowPublic, "steps" | "metadata_json">
+) {
   const config = readTemplateFill(step.output_config);
-  const bound = config.placeholders.filter((name) => name in config.bindings).length;
-  return { hasTemplate: config.templateAssetId !== null, total: config.placeholders.length, bound };
+  const unbound = config.placeholders.filter((name) => {
+    const binding = config.bindings[name];
+    return (
+      binding === undefined ||
+      (binding !== "" && !bindsTemplateField(binding, step.step_order, flow))
+    );
+  });
+  return {
+    hasTemplate: config.templateAssetId !== null,
+    total: config.placeholders.length,
+    unbound
+  };
 }

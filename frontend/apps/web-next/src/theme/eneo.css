@@ -793,6 +793,11 @@
     .astryx-collapsible-trigger {
     min-height: 44px;
   }
+
+    .astryx-date-input-toggle-icon {
+    min-height: 44px;
+    min-width: 44px;
+  }
   }
 }
 }
