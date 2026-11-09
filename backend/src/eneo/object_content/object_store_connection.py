@@ -53,7 +53,9 @@ from eneo.object_content.s3_object_store import (
     ObjectStoreError,
     ObjectStoreFailureKind,
     ObjectStoreIntegrityError,
+    ObjectStoreKeepsVersionsError,
     ObjectStoreNotFoundError,
+    ObjectStorePermissionError,
     ObjectStoreProbeCleanupError,
     ObjectStoreUnavailableError,
     S3ObjectStore,
@@ -310,6 +312,10 @@ class ObjectStoreProbeIntegrityFailed(ObjectStoreConnectionError):
 
 class ObjectStoreProbeCleanupFailed(ObjectStoreConnectionError):
     code = "object_store_probe_cleanup_failed"
+
+
+class ObjectStoreProbeKeepsVersions(ObjectStoreConnectionError):
+    code = "object_store_probe_keeps_versions"
 
 
 def _stored(row: ObjectStoreConnections) -> StoredObjectStoreConnection:
@@ -2061,6 +2067,18 @@ class ObjectStoreConnectionService:
             raise error
         if isinstance(error, ObjectStoreConnectionError):
             raise error
+        if isinstance(error, ObjectContentConfigurationError) and isinstance(
+            error.__cause__, (ObjectStoreKeepsVersionsError, ObjectStorePermissionError)
+        ):
+            ObjectStoreConnectionService._raise_probe_error(error.__cause__)
+        if isinstance(error, ObjectStoreKeepsVersionsError):
+            raise ObjectStoreProbeKeepsVersions(
+                "Object storage keeps old versions of deleted objects"
+            ) from error
+        if isinstance(error, ObjectStorePermissionError):
+            raise ObjectStoreProbeAuthenticationFailed(
+                "Object-storage authentication or permission check failed"
+            ) from error
         if isinstance(error, ObjectContentConfigurationError):
             raise ObjectStoreProbeBindingMismatch(
                 "Object storage does not match PostgreSQL"
