@@ -16,6 +16,7 @@ afterEach(() => {
   cleanup();
   api.POST.mockReset();
   api.DELETE.mockReset();
+  toastErrors.mockReset();
 });
 
 const first = {
@@ -346,6 +347,40 @@ it("names the file whose upload failed, since the server's message does not", as
   await waitFor(() =>
     expect(toastErrors).toHaveBeenCalledExactlyOnceWith(expect.any(Error), expect.any(Function), {
       fileName: "new.txt"
+    })
+  );
+});
+
+it("names the second file when the first uploads and the second fails", async () => {
+  api.POST.mockResolvedValueOnce({
+    data: { id: "new", name: "first.txt", mimetype: "text/plain", size: 4 },
+    response: new Response("{}")
+  }).mockRejectedValueOnce(new Error("The file is corrupted or malformed"));
+  api.DELETE.mockResolvedValue({ response: new Response(null, { status: 204 }) });
+  const { container } = renderInApp(
+    <ResourceAttachmentsSection
+      attachments={[first]}
+      allowedAttachments={{
+        ...restrictions,
+        accepted_file_types: [{ mimetype: "text/plain", extensions: [".txt"], size_limit: 1000 }]
+      }}
+      description="Files"
+      attachmentMode={attachmentMode}
+      onSave={vi.fn()}
+    />
+  );
+  fireEvent.change(container.querySelector('input[type="file"]')!, {
+    target: {
+      files: [
+        new File(["test"], "first.txt", { type: "text/plain" }),
+        new File(["test"], "second.txt", { type: "text/plain" })
+      ]
+    }
+  });
+
+  await waitFor(() =>
+    expect(toastErrors).toHaveBeenCalledExactlyOnceWith(expect.any(Error), expect.any(Function), {
+      fileName: "second.txt"
     })
   );
 });
