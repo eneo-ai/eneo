@@ -8,6 +8,7 @@ never retried through a weaker path.
 
 import asyncio
 import json
+import secrets
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -34,7 +35,9 @@ from eneo.authentication.oidc.profile import (
     load_profile,
 )
 from eneo.authentication.oidc.transaction import (
+    OidcChannel,
     OidcTransaction,
+    code_challenge,
     save_transaction,
     take_transaction,
 )
@@ -383,6 +386,8 @@ async def test_the_verified_authentication_carries_the_provider_facts(monkeypatc
     )
     transaction = OidcTransaction.start(
         "login",
+        channel="api",
+        binding_challenge=None,
         redirect_uri=REDIRECT_URI,
         tenant_id="tenant",
         tenant_slug="example",
@@ -412,9 +417,19 @@ async def test_the_verified_authentication_carries_the_provider_facts(monkeypatc
     assert verified.identity().email == "user@example.com"
 
 
+TRANSACTION_KEY = "oidc:transaction:"
+
+
 class FailingRedis(FakeRedis):
+    """Every command on a sign-in transaction fails."""
+
     async def setex(self, key: str, ttl: int, value: str) -> None:
         raise ConnectionError("redis unavailable")
+
+    async def get(self, key: str) -> str | None:
+        if key.startswith(TRANSACTION_KEY):
+            raise ConnectionError("redis unavailable")
+        return await super().get(key)
 
     async def getdel(self, key: str) -> str | None:
         raise ConnectionError("redis unavailable")
@@ -448,6 +463,178 @@ class PendingRedis(FakeRedis):
         return await super().getdel(key)
 
 
+class SilentOnceRedis(FakeRedis):
+    """Shares a store; the first ``command`` on a sign-in transaction never
+    answers, either before it ran or, with ``after_running``, after it ran.
+    Later calls answer."""
+
+    def __init__(self, store: dict[str, str], command: str, after_running: bool):
+        super().__init__()
+        self._store = store
+        self._command = command
+        self._after_running = after_running
+        self._silent = True
+        self.commands: list[str] = []
+
+    async def _call(self, command: str, key: str, run):
+        self.commands.append(command)
+        if (
+            command != self._command
+            or not key.startswith(TRANSACTION_KEY)
+            or not self._silent
+        ):
+            return run()
+        self._silent = False
+        if self._after_running:
+            run()
+        await asyncio.Event().wait()
+
+    async def setex(self, key: str, ttl: int, value: str) -> None:
+        self.commands.append("setex")
+        await super().setex(key, ttl, value)
+
+    async def get(self, key: str) -> str | None:
+        return await self._call("get", key, lambda: self._store.get(key))
+
+    async def getdel(self, key: str) -> str | None:
+        return await self._call("getdel", key, lambda: self._store.pop(key, None))
+
+
+class SilentDebugFlagRedis(FakeRedis):
+    """A store that never answers a read of the debug flag."""
+
+    async def get(self, key: str) -> str | None:
+        from eneo.observability import debug_toggle
+
+        if key == debug_toggle.FLAG_KEY:
+            await asyncio.Event().wait()
+        return await super().get(key)
+
+
+def _transaction(
+    channel: OidcChannel = "api", binding_challenge: str | None = None
+) -> OidcTransaction:
+    return OidcTransaction.start(
+        "login",
+        channel=channel,
+        binding_challenge=binding_challenge,
+        redirect_uri=REDIRECT_URI,
+        tenant_id="tenant",
+        tenant_slug="example",
+        config_version=None,
+        issuer="https://idp.example.org",
+        iss_parameter_supported=False,
+    )
+
+
+async def _stored(**fields: Any) -> tuple[FakeRedis, OidcTransaction]:
+    store = FakeRedis()
+    transaction = _transaction(**fields)
+    await save_transaction(store, transaction, ttl_seconds=600)
+    return store, transaction
+
+
+class TestRedemption:
+    """Only whoever started a transaction redeems it. A refused redemption
+    leaves it in the store, so a holder of a leaked state cannot cancel the
+    owner's sign-in."""
+
+    async def test_the_starters_verifier_redeems_a_bound_transaction(self):
+        verifier = secrets.token_urlsafe(32)
+        store, started = await _stored(binding_challenge=code_challenge(verifier))
+
+        taken = await take_transaction(
+            store, started.id, channel="api", binding_verifier=verifier
+        )
+
+        assert taken == started
+        assert store._store == {}
+
+    @pytest.mark.parametrize("presented", ["missing", "other"])
+    async def test_a_bound_transaction_refuses_another_verifier_and_stays(
+        self, presented
+    ):
+        verifier = secrets.token_urlsafe(32)
+        store, started = await _stored(binding_challenge=code_challenge(verifier))
+
+        with pytest.raises(OidcTransactionInvalidError):
+            await take_transaction(
+                store,
+                started.id,
+                channel="api",
+                binding_verifier=(
+                    None if presented == "missing" else secrets.token_urlsafe(32)
+                ),
+            )
+
+        assert (
+            await take_transaction(
+                store, started.id, channel="api", binding_verifier=verifier
+            )
+            == started
+        )
+
+    async def test_an_unbound_transaction_refuses_a_verifier_and_stays(self):
+        store, started = await _stored()
+
+        with pytest.raises(OidcTransactionInvalidError):
+            await take_transaction(
+                store,
+                started.id,
+                channel="api",
+                binding_verifier=secrets.token_urlsafe(32),
+            )
+
+        assert (
+            await take_transaction(
+                store, started.id, channel="api", binding_verifier=None
+            )
+            == started
+        )
+
+    @pytest.mark.parametrize(
+        ("started_on", "taken_on"), [("browser", "api"), ("api", "browser")]
+    )
+    async def test_a_transaction_is_redeemed_only_on_its_channel(
+        self, started_on, taken_on
+    ):
+        verifier = secrets.token_urlsafe(32)
+        store, started = await _stored(
+            channel=started_on, binding_challenge=code_challenge(verifier)
+        )
+
+        with pytest.raises(OidcTransactionInvalidError):
+            await take_transaction(
+                store, started.id, channel=taken_on, binding_verifier=verifier
+            )
+
+        assert (
+            await take_transaction(
+                store, started.id, channel=started_on, binding_verifier=verifier
+            )
+            == started
+        )
+
+    def test_a_browser_transaction_is_always_bound(self):
+        with pytest.raises(ValueError):
+            _transaction(channel="browser")
+
+    @pytest.mark.parametrize("field", ["channel", "binding_challenge"])
+    async def test_a_transaction_without_its_redeemer_is_invalid(self, field):
+        """One written before the transaction named its redeemer never falls
+        back to an unbound API redemption."""
+        store, started = await _stored()
+        (key,) = store._store
+        stored = json.loads(store._store[key])
+        del stored[field]
+        store._store[key] = json.dumps(stored)
+
+        with pytest.raises(OidcTransactionInvalidError):
+            await take_transaction(
+                store, started.id, channel="api", binding_verifier=None
+            )
+
+
 class TestStoreDeadline:
     """Every Redis call of a sign-in has a deadline; the shared pool sets no
     command timeout, so a silent connection would otherwise hold it forever."""
@@ -464,27 +651,41 @@ class TestStoreDeadline:
         with pytest.raises(OidcLoginUnavailableError):
             await asyncio.wait_for(login.initiate(), 2)
 
-    async def test_a_silent_getdel_counts_as_used(self, monkeypatch):
-        """Its outcome is unknown, so the transaction is never written back."""
+    @pytest.mark.parametrize(
+        ("command", "after_running", "owner_can_retry"),
+        [("get", False, True), ("getdel", False, True), ("getdel", True, False)],
+        ids=["read-unanswered", "delete-not-run", "delete-ran-reply-lost"],
+    )
+    async def test_an_unanswered_redemption_is_never_restored(
+        self, monkeypatch, command, after_running, owner_can_retry
+    ):
+        """The callback stops and nothing writes the transaction back. Whether a
+        later callback can still redeem it depends only on whether Redis ran
+        the delete; it is single use either way."""
         provider = FakeOidcProvider()
         login = Login(monkeypatch, provider, existing_email="user@example.com")
         started = await login.initiate()
         answer = provider.authorize(started.authorization_url)
-        silent = PendingRedis("getdel", store=login.redis._store)
+        callback = CallbackRequest(code=answer.code, state=started.state)
+        silent = SilentOnceRedis(login.redis._store, command, after_running)
         login.container._redis_client = silent
 
         with pytest.raises(OidcLoginUnavailableError):
             await asyncio.wait_for(
-                federation_router.auth_callback(
-                    CallbackRequest(code=answer.code, state=started.state),
-                    login.container,
-                ),
-                2,
+                federation_router.auth_callback(callback, login.container), 2
             )
 
-        assert "setex" not in silent.commands
         assert _token_posts(provider) == 0
         assert login.audit.logged_events == []
+        assert "setex" not in silent.commands
+        if owner_can_retry:
+            assert login.signed_in_user(
+                await federation_router.auth_callback(callback, login.container)
+            )
+            assert _token_posts(provider) == 1
+        with pytest.raises(OidcTransactionInvalidError):
+            await federation_router.auth_callback(callback, login.container)
+        assert _token_posts(provider) == (1 if owner_can_retry else 0)
 
     async def test_a_silent_debug_read_does_not_hold_up_sign_in(self, monkeypatch):
         from eneo.observability import debug_toggle
@@ -495,32 +696,25 @@ class TestStoreDeadline:
         login = Login(
             monkeypatch, FakeOidcProvider(), existing_email="user@example.com"
         )
-        login.container._redis_client = PendingRedis("get")
+        login.container._redis_client = SilentDebugFlagRedis()
 
         assert login.signed_in_user(await asyncio.wait_for(login.sign_in(), 2))
 
-    @pytest.mark.parametrize("command", ["setex", "getdel"])
+    @pytest.mark.parametrize("command", ["setex", "get", "getdel"])
     async def test_cancelling_a_waiting_call_stays_a_cancellation(
         self, monkeypatch, command
     ):
         monkeypatch.setattr(oidc_transaction, "STORE_TIMEOUT_SECONDS", 30)
-        store = PendingRedis(command)
+        transaction = _transaction()
+        stored = FakeRedis()
+        await save_transaction(stored, transaction, ttl_seconds=600)
+        store = PendingRedis(command, store=stored._store)
         if command == "setex":
-            call = save_transaction(
-                store,
-                OidcTransaction.start(
-                    "login",
-                    redirect_uri=REDIRECT_URI,
-                    tenant_id="tenant",
-                    tenant_slug="example",
-                    config_version=None,
-                    issuer="https://idp.example.org",
-                    iss_parameter_supported=False,
-                ),
-                ttl_seconds=600,
-            )
+            call = save_transaction(store, transaction, ttl_seconds=600)
         else:
-            call = take_transaction(store, "transaction")
+            call = take_transaction(
+                store, transaction.id, channel="api", binding_verifier=None
+            )
         task = asyncio.ensure_future(call)
         await asyncio.sleep(0)
 
@@ -815,6 +1009,30 @@ class TestProfileDefaults:
     def test_unusable_configured_keys_are_refused(self, config):
         with pytest.raises(OidcProviderError):
             self._profile(**config)
+
+    @pytest.mark.parametrize("source", ["discovered", "stored"])
+    def test_a_templated_issuer_is_refused(self, source):
+        """A multi-tenant endpoint's issuer (Entra ``common``) names no
+        directory, so no ID token could ever match it."""
+        templated = "https://login.microsoftonline.com/{tenantid}/v2.0"
+
+        with pytest.raises(OidcProviderError, match="template"):
+            if source == "discovered":
+                self._profile({"issuer": templated}, issuer=None)
+            else:
+                self._profile(issuer=templated)
+
+    @pytest.mark.parametrize("source", ["discovered", "stored"])
+    def test_a_literal_issuer_is_accepted(self, source):
+        issuer = "https://login.microsoftonline.com/a1b2c3d4/v2.0"
+
+        profile = (
+            self._profile({"issuer": issuer}, issuer=None)
+            if source == "discovered"
+            else self._profile(issuer=issuer)
+        )
+
+        assert profile.issuer == issuer
 
     def test_the_stored_issuer_wins_over_discovery(self):
         profile = self._profile({"issuer": "https://elsewhere.example"})

@@ -43,3 +43,38 @@ test("the callback sends no iss when the provider sent none", async () => {
     state: "state"
   });
 });
+
+test("initiate forwards a binding challenge whenever one is given", async () => {
+  const { auth, calls } = recordingAuth();
+
+  await auth.initiateAuth({ tenant: "city", bindingChallenge: "challenge" });
+  await auth.initiateAuth({ tenant: "city", bindingChallenge: "" });
+  await auth.initiateAuth({ tenant: "city" });
+
+  assert.deepEqual(
+    calls.map((call) => call.options.params.query),
+    [
+      { tenant: "city", binding_challenge: "challenge" },
+      // The backend refuses an empty challenge; it must not become an unbound sign-in.
+      { tenant: "city", binding_challenge: "" },
+      { tenant: "city" }
+    ]
+  );
+});
+
+test("the callback forwards a binding verifier whenever one is given", async () => {
+  const { auth, calls } = recordingAuth();
+
+  await auth.handleAuthCallback({ code: "code", state: "state", bindingVerifier: "verifier" });
+  await auth.handleAuthCallback({ code: "code", state: "state", bindingVerifier: "" });
+  await auth.handleAuthCallback({ code: "code", state: "state" });
+
+  assert.deepEqual(
+    calls.map((call) => call.options.requestBody["application/json"]),
+    [
+      { code: "code", state: "state", binding_verifier: "verifier" },
+      { code: "code", state: "state", binding_verifier: "" },
+      { code: "code", state: "state" }
+    ]
+  );
+});

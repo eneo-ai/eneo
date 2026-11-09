@@ -1,17 +1,9 @@
 """The authorization request Eneo sends the person's browser to."""
 
-import base64
-import hashlib
 from urllib.parse import urlencode
 
 from eneo.authentication.oidc.profile import OidcProfile
-from eneo.authentication.oidc.transaction import OidcTransaction
-
-
-def code_challenge(code_verifier: str) -> str:
-    """The PKCE S256 challenge of a verifier (RFC 7636 4.2)."""
-    digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
-    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+from eneo.authentication.oidc.transaction import OidcTransaction, code_challenge
 
 
 def build_authorization_request(

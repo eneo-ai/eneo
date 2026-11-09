@@ -45,6 +45,17 @@ DISCOVERY_RETRY_SECONDS = 30
 
 _TOKEN_AUTH_METHODS = ("client_secret_post", "client_secret_basic")
 
+TEMPLATED_ISSUER_GUIDANCE = (
+    "The provider's issuer is a template; use your own directory's discovery endpoint"
+)
+
+
+def is_templated_issuer(issuer: str) -> bool:
+    """An issuer with a placeholder, as a multi-tenant endpoint's discovery
+    names it (Entra ``common``: ``.../{tenantid}/v2.0``). No ID token can
+    match it, and URIs never contain an unescaped brace (RFC 3986)."""
+    return "{" in issuer or "}" in issuer
+
 
 class OidcProviderError(Exception):
     """The provider's config or discovery cannot be used to sign in."""
@@ -224,8 +235,11 @@ def build_profile(
         if isinstance(mapping, Mapping)
         else None
     )
+    issuer = resolve("issuer", "Failed to resolve the provider's issuer")
+    if is_templated_issuer(issuer):
+        raise OidcProviderError(TEMPLATED_ISSUER_GUIDANCE)
     return OidcProfile(
-        issuer=resolve("issuer", "Failed to resolve the provider's issuer"),
+        issuer=issuer,
         client_id=client_id,
         client_secret=client_secret,
         authorization_endpoint=resolve(

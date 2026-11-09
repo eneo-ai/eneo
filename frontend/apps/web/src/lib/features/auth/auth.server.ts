@@ -230,28 +230,41 @@ export function resolveOptionalLoginStateDestination(state: string | null): stri
  * Bind generic OIDC authentication to the browser that started it, whether or
  * not it has a post-login destination. Unsafe or oversized destinations are
  * discarded without weakening the mandatory attempt binding.
+ *
+ * The cookie also keeps the binding verifier, whose S256 hash the backend
+ * stored at initiate. The attempt id travels in the state and is readable by
+ * anyone who sees the callback URL; the verifier never leaves this server and
+ * the browser's HttpOnly cookie, so a leaked code and state cannot be redeemed
+ * elsewhere.
  */
 type OidcLoginAttempt = {
   attemptId: string;
   destination: string | null;
   expiresAt: number;
+  bindingVerifier: string;
 };
 
 export type OidcLoginAttemptResult =
-  | { status: "matched"; destination: string | null }
+  | { status: "matched"; destination: string | null; bindingVerifier: string }
   | { status: "missing" | "invalid" | "expired" | "mismatch" };
 
 const OIDC_ATTEMPT_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+// The verifier format of RFC 7636 4.1, which the backend also enforces.
+const OIDC_BINDING_VERIFIER_PATTERN = /^[A-Za-z0-9._~-]{43,128}$/;
 
 export function startOidcLoginAttempt(
   cookies: Cookies,
   destination: unknown,
   attemptId: string,
-  expiresAt: number
+  expiresAt: number,
+  bindingVerifier: string
 ): void {
   if (!OIDC_ATTEMPT_ID_PATTERN.test(attemptId)) {
     throw new Error("Invalid OIDC login attempt ID");
+  }
+  if (!OIDC_BINDING_VERIFIER_PATTERN.test(bindingVerifier)) {
+    throw new Error("Invalid OIDC binding verifier");
   }
   const maxAge = expiresAt - Math.floor(Date.now() / 1000);
   if (!Number.isSafeInteger(expiresAt) || maxAge <= 0) {
@@ -261,7 +274,8 @@ export function startOidcLoginAttempt(
   const attempt: OidcLoginAttempt = {
     attemptId,
     destination: resolveValidatedLoginDestination(destination),
-    expiresAt
+    expiresAt,
+    bindingVerifier
   };
 
   try {
@@ -315,7 +329,10 @@ export async function consumeOidcLoginAttempt(
         resolveValidatedLoginDestination(candidate.destination) === null) ||
       !("expiresAt" in candidate) ||
       typeof candidate.expiresAt !== "number" ||
-      !Number.isSafeInteger(candidate.expiresAt)
+      !Number.isSafeInteger(candidate.expiresAt) ||
+      !("bindingVerifier" in candidate) ||
+      typeof candidate.bindingVerifier !== "string" ||
+      !OIDC_BINDING_VERIFIER_PATTERN.test(candidate.bindingVerifier)
     ) {
       clearOidcLoginAttempt(cookies);
       return { status: "invalid" };
@@ -323,7 +340,8 @@ export async function consumeOidcLoginAttempt(
     attempt = {
       attemptId: candidate.attemptId,
       destination: resolveValidatedLoginDestination(candidate.destination),
-      expiresAt: candidate.expiresAt
+      expiresAt: candidate.expiresAt,
+      bindingVerifier: candidate.bindingVerifier
     };
   } catch {
     clearOidcLoginAttempt(cookies);
@@ -351,7 +369,11 @@ export async function consumeOidcLoginAttempt(
   }
 
   clearOidcLoginAttempt(cookies);
-  return { status: "matched", destination: attempt.destination };
+  return {
+    status: "matched",
+    destination: attempt.destination,
+    bindingVerifier: attempt.bindingVerifier
+  };
 }
 
 export function clearOidcLoginAttempt(cookies: Cookies): void {

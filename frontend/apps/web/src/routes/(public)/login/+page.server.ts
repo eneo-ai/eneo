@@ -2,6 +2,7 @@ import { env } from "$env/dynamic/private";
 import { getBackendUrl } from "$lib/core/environment.server";
 import {
   clearOidcLoginAttempt,
+  createCodePair,
   encodeState,
   parseJwt,
   startOidcLoginAttempt,
@@ -70,6 +71,8 @@ export const actions: Actions = {
 
     const attemptId = crypto.randomUUID();
     const frontendState = encodeState({ loginMethod: "oidc", next: destination, attemptId });
+    // The backend keeps the hash; the secret stays in this browser's HttpOnly cookie.
+    const binding = await createCodePair();
     let authorizationUrl: string;
     let unavailable = false;
     try {
@@ -77,6 +80,7 @@ export const actions: Actions = {
       if (!backendUrl) throw new Error("Missing backend URL");
       const initiateUrl = new URL(`${backendUrl.replace(/\/$/, "")}/api/v1/auth/initiate`);
       initiateUrl.searchParams.set("state", frontendState);
+      initiateUrl.searchParams.set("binding_challenge", binding.codeChallenge);
       if (tenant !== null) initiateUrl.searchParams.set("tenant", tenant);
       const response = await event.fetch(initiateUrl);
       if (!response.ok) {
@@ -116,7 +120,13 @@ export const actions: Actions = {
       authorizationUrl = responseData.authorization_url;
       // Start the binding when authentication begins. Failed initiation and
       // GET requests for an error page preserve another tab's attempt.
-      startOidcLoginAttempt(event.cookies, destination, attemptId, statePayload.exp);
+      startOidcLoginAttempt(
+        event.cookies,
+        destination,
+        attemptId,
+        statePayload.exp,
+        binding.codeVerifier
+      );
     } catch (error) {
       console.error("[OIDC] Failed to initiate authentication", {
         reason: error instanceof Error ? error.message : "Unknown error"
