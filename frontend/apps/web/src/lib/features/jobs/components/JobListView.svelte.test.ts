@@ -46,6 +46,42 @@ describe("JobListView failure presentation", () => {
       .not.toBeInTheDocument();
   });
 
+  it("explains a failed sync recorded by its code without text", async () => {
+    render(JobListView, {
+      jobs: [
+        failedJob({
+          name: "Intranät",
+          task: "pull_sharepoint_content",
+          failure_code: "processing_failed"
+        })
+      ],
+      title: "Integrations"
+    });
+
+    await page.getByRole("button", { name: /Intranät/ }).click();
+
+    await expect
+      .element(page.getByText(m.job_failure_task_failed(), { exact: true }))
+      .toBeVisible();
+  });
+
+  it("keeps the recorded text of an earlier failed sync", async () => {
+    render(JobListView, {
+      jobs: [
+        failedJob({
+          name: "Intranät",
+          task: "pull_sharepoint_content",
+          result_location: "Behörighet saknas"
+        })
+      ],
+      title: "Integrations"
+    });
+
+    await page.getByRole("button", { name: /Intranät/ }).click();
+
+    await expect.element(page.getByText("Behörighet saknas", { exact: true })).toBeVisible();
+  });
+
   it("shows transcription guidance when no speech can be extracted", async () => {
     render(JobListView, {
       jobs: [

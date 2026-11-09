@@ -53,10 +53,12 @@ logger = get_logger(__name__)
 
 
 class IntegrationSyncError(Exception):
-    """A failed sync as its job reports it to the person who started it.
+    """A failed sync, raised in place of its cause.
 
-    The job keeps this message; the cause, with its URLs and SQL, stays in
-    the logs only.
+    The job records only a failure code, which both apps explain to the
+    person who started the sync, and logs name exception types and where
+    they were raised. The message is the cause without URL queries,
+    credentials or SQL, so a handler that still prints it shows no more.
     """
 
     def __init__(self, cause: Exception) -> None:

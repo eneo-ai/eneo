@@ -19,7 +19,10 @@
     if (job.task === "upload_info_blob" || job.task === "transcription") {
       return getJobFailureMessage(job.failure_code, job.task);
     }
-    return job.result_location ?? null;
+    // A failure of another task records only its code; one recorded
+    // earlier keeps its cleaned text.
+    if (job.result_location) return job.result_location;
+    return job.failure_code ? getJobFailureMessage(job.failure_code, job.task) : null;
   }
 </script>
 
