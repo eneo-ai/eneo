@@ -442,7 +442,9 @@ docker compose run --rm backend run-cron --until-complete run_retention
 ```
 
 The command runs the registered tasks in its own process, round after round, and
-prints each round's outcome and the number of rows removed. Retention is complete
+prints each round's outcome and the number of rows removed. Every round runs
+against the time the command started, so rows that fall due while it runs are
+left to the scheduled run. Retention is complete
 when every step of every task has finished a pass that began after the latest
 removal, because a removal can make other rows due (a removed question can leave
 its session empty). A pass resumed from a cursor stored before the restore does
@@ -468,7 +470,8 @@ Exit code 0 means retention is complete and storage is confirmed or pending. Exi
 code 1 means it is not: the output names each task and reason, such as a missing
 report (the task raised; see the log), an execution held by another process (stop
 the workers), an outcome other than `succeeded` or `partial`, a blocked reason
-other than "no longer due" or "not old enough", a step that made no progress, or a
+other than "no longer due" or "not old enough", a step that made no progress,
+"still removing after 10000 rounds" (run the command again: it continues), or a
 storage line other than `confirmed` or `pending`. A task turned off by its setting
 also fails the readback, since nothing shows that its work is done. Resolve the
 cause and run the command again.

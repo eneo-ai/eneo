@@ -7,11 +7,14 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+from typing import Any
+from uuid import UUID
 
 import pytest
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from eneo.data_retention.infrastructure import retention_worker
 from eneo.database.database import sessionmanager
 from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
@@ -75,6 +78,70 @@ async def test_the_readback_removes_due_history_and_then_completes(
     assert not await _exists(Sessions, chat_id)
     assert any(line.startswith("retention: complete") for line in lines), lines
     assert "storage: confirmed" in lines
+
+
+async def test_rows_that_fall_due_while_it_runs_are_left_to_the_scheduled_run(
+    retention_session: AsyncSession,
+    object_content: None,
+    test_tenant,
+    admin_user,
+    completion_model_factory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The clock moves while the readback runs. On a busy installation a row
+    falls due between almost every two rounds, and each removal needs another
+    pass of every step, so every round runs against the time the readback
+    started."""
+    assistant = await _assistant(
+        retention_session,
+        completion_model_factory,
+        tenant_id=test_tenant.id,
+        user_id=admin_user.id,
+    )
+    chat = await _session(
+        retention_session, user_id=admin_user.id, created_at=datetime.now(timezone.utc)
+    )
+    tenant_id, chat_id, assistant_id = test_tenant.id, chat.id, assistant.id
+    # A removal in the first round makes the readback run another.
+    await _question(
+        retention_session,
+        tenant_id=tenant_id,
+        session_id=chat_id,
+        assistant_id=assistant_id,
+        created_at=datetime.now(timezone.utc) - timedelta(days=60),
+    )
+    await retention_session.commit()
+    run_tasks = retention_worker.run_registered_tasks
+    falling_due: list[UUID] = []
+
+    async def a_row_falls_due_by_the_next_round(*args: Any, **kwargs: Any) -> Any:
+        if len(falling_due) < 3:
+            async with sessionmanager.session() as session, session.begin():
+                clock = (
+                    await session.execute(sa.select(sa.func.clock_timestamp()))
+                ).scalar_one()
+                question = await _question(
+                    session,
+                    tenant_id=tenant_id,
+                    session_id=chat_id,
+                    assistant_id=assistant_id,
+                    created_at=clock - timedelta(days=30),
+                )
+                falling_due.append(question.id)
+        return await run_tasks(*args, **kwargs)
+
+    monkeypatch.setattr(
+        retention_worker, "run_registered_tasks", a_row_falls_due_by_the_next_round
+    )
+    lines: list[str] = []
+
+    assert await read_back_retention(emit=lines.append) is True
+
+    assert any(line.startswith("retention: complete") for line in lines), lines
+    assert falling_due
+    assert [await _exists(Questions, row) for row in falling_due] == [True] * len(
+        falling_due
+    )
 
 
 async def test_a_locked_empty_session_fails_the_readback_until_it_is_released(

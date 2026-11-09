@@ -7,8 +7,10 @@ is left, then drives the object-content reconciliation and reports separately
 whether the store has confirmed every removal. Bytes that no content names
 any more are known only from a listing of the store, so removal is confirmed
 only after a listing in full that began after this readback started. The
-readback continues the listing under way rather than restarting it. It
-prints counts and reasons, never content.
+readback continues the listing under way rather than restarting it. Every
+round runs against the time the readback started: rows that fall due while it
+runs are left to the scheduled run. It prints counts and reasons, never
+content.
 
 Exit 0: retention is complete (storage confirmed or pending). Exit 1: it is
 not, or storage was not reachable or failed under it.
@@ -18,14 +20,16 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from typing import cast
 
 from eneo.data_retention.application.retention_readback import (
     RetentionReadback,
     RetentionReadbackFailed,
 )
 from eneo.data_retention.application.retention_runner import RetentionRunReport
-from eneo.data_retention.infrastructure.retention_worker import run_retention
+from eneo.data_retention.infrastructure.retention_worker import (
+    database_now,
+    run_retention_at,
+)
 from eneo.database.database import sessionmanager
 from eneo.main.config import get_settings
 from eneo.main.retention_tasks import retention_task_registrations
@@ -44,6 +48,11 @@ Emit = Callable[[str], None]
 # ponytail: fixed ceiling; a larger store ends as pending, so make it a
 # setting when one does.
 _STORAGE_PASSES = 20_000
+# Against one time the work is finite: each round removes up to every task's
+# budget, and a removal needs one more round. The ceiling ends a readback
+# that keeps removing; running the command again continues.
+# ponytail: fixed ceiling; make it a setting when an installation needs more.
+_ROUNDS = 10_000
 
 
 async def read_back_retention(*, emit: Emit) -> bool:
@@ -52,11 +61,14 @@ async def read_back_retention(*, emit: Emit) -> bool:
         registration.name
         for registration in retention_task_registrations(get_settings())
     )
+    now = await database_now()
     rounds = 0
     try:
         while True:
+            if rounds == _ROUNDS:
+                raise RetentionReadbackFailed([f"still removing after {rounds} rounds"])
             rounds += 1
-            reports = cast(list[RetentionRunReport], await run_retention({}))
+            reports = await run_retention_at(now)
             for report in reports:
                 emit(_describe(rounds, report))
             if readback.add_round(reports):

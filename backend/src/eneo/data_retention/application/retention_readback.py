@@ -12,8 +12,9 @@ report (it raised), a claim another execution holds, an execution that did not
 end as succeeded or partial, an error, or blocked work. A reason that means
 the work is not due yet does not.
 
-The data does not change while it runs, so every pass ends, and a round
-without progress fails: no removal, no unfinished step moved, and either
+Every round runs against the time the readback started, with traffic and
+workers stopped, so nothing falls due under it and every pass ends, and a
+round without progress fails: no removal, no unfinished step moved, and either
 nothing moved at all or a finished step ran another whole pass meanwhile
 (the budget then never reaches the steps after it).
 """
