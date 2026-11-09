@@ -256,11 +256,16 @@ async def _render_once(
         if response.status_code == 422:
             # The runtime names why it refused; callers explain the code.
             await response.aread()
+            body: object
             try:
                 body = response.json()
             except ValueError:
                 body = None
-            runtime_code = body.get("code") if isinstance(body, dict) else None
+            runtime_code = (
+                cast(dict[str, object], body).get("code")
+                if isinstance(body, dict)
+                else None
+            )
             raise BadRequestException(
                 "The document or template could not be rendered within its limits.",
                 context={"runtime_code": str(runtime_code)[:64]}
