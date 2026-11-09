@@ -6,6 +6,7 @@ deadline limits (``eneo.files.bounded_extraction``). Skip reasons and their
 codes are owned by ``eneo.integration.domain.skip_reasons``.
 """
 
+import logging
 import tempfile
 from dataclasses import dataclass
 from logging import getLogger
@@ -39,6 +40,7 @@ from eneo.integration.domain.skip_reasons import (
 )
 from eneo.integration.infrastructure.content_service.types import SharePointItem
 from eneo.main import process_scratch
+from eneo.observability.error_log import log_error
 
 logger = getLogger(__name__)
 
@@ -471,7 +473,13 @@ async def extract_sharepoint_content(
         except ExtractionError as e:
             return ExtractionResult.error(e.message, content_type)
         except Exception as e:
-            logger.error(f"Unexpected extraction error for '{filename}': {e}")
+            log_error(
+                logger,
+                logging.ERROR,
+                "Unexpected extraction error for '%s'",
+                filename,
+                error=e,
+            )
             return ExtractionResult.error(
                 f"{type(e).__name__} while extracting {kind}", content_type
             )
