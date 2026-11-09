@@ -74,6 +74,8 @@ if TYPE_CHECKING:
         ListObjectsV2RequestTypeDef,
         ListObjectVersionsOutputTypeDef,
         ListObjectVersionsRequestTypeDef,
+        ListPartsOutputTypeDef,
+        ListPartsRequestTypeDef,
     )
 
 
@@ -160,6 +162,9 @@ class _DelayedMultipartAbortClient:
         return self._delegate.list_multipart_uploads(
             **cast("ListMultipartUploadsRequestTypeDef", request)
         )
+
+    def list_parts(self, **request: object) -> "ListPartsOutputTypeDef":
+        return self._delegate.list_parts(**cast("ListPartsRequestTypeDef", request))
 
 
 class _TruncatedObjectInventoryClient:

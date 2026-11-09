@@ -462,7 +462,7 @@ objects at the default page size:
 | `storage: pending N (held H, retrying R, waiting W)` | Payloads are still kept by a minimum retention or a hold, wait for a retry after a failure, or were not reached yet. A payload the listing found is deleted once a second listing has seen it after its grace period (one hour by default): run the command again after that. Not confirmed erasure |
 | `storage: pending N (...), store not listed in full` | No listing that began after the readback started completed within its passes. Run the command again: it continues the listing. Not confirmed erasure |
 | `storage: not reachable (code)` | The store could not be checked |
-| `storage: failed (...)` | A store operation failed during reconciliation |
+| `storage: failed (...)` | A store operation failed or could not be confirmed during reconciliation, such as an aborted upload whose parts are still listed |
 
 Exit code 0 means retention is complete and storage is confirmed or pending. Exit
 code 1 means it is not: the output names each task and reason, such as a missing

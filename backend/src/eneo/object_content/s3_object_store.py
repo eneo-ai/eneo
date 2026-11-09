@@ -130,6 +130,8 @@ class MultipartUploadPage:
 
 MultipartStarted = Callable[[str], Awaitable[None]]
 _MutationResultT = TypeVar("_MutationResultT")
+# Error codes for an upload that no longer exists.
+_NO_SUCH_UPLOAD = frozenset({"404", "NoSuchUpload", "NotFound"})
 
 
 async def _run_mutation(
@@ -1415,11 +1417,51 @@ class S3ObjectStore:
                 ),
             )
         except ClientError as error:
-            if _client_error_code(error) in {"404", "NoSuchUpload", "NotFound"}:
+            if _client_error_code(error) in _NO_SUCH_UPLOAD:
                 return
             raise ObjectStoreUnavailableError("Multipart abort failed") from error
         except BotoCoreError as error:
             raise ObjectStoreUnavailableError("Multipart abort failed") from error
+        await self._require_no_part_left(key, upload_id, operation_checkpoint)
+
+    async def _require_no_part_left(
+        self,
+        key: str,
+        upload_id: str,
+        operation_checkpoint: OperationCheckpoint | None,
+    ) -> None:
+        """Confirm an abort only when the upload keeps no part.
+
+        A part upload in flight during the abort can still complete and keep
+        its bytes; the S3 API documents listing the parts to confirm an
+        abort. A part left, or a listing that does not say it is complete,
+        keeps the abort unconfirmed, and reconciliation aborts it again later.
+        """
+        try:
+            if operation_checkpoint is not None:
+                await operation_checkpoint()
+            result = await asyncio.to_thread(
+                self._client.list_parts,
+                Bucket=self._settings.bucket,
+                Key=key,
+                UploadId=upload_id,
+                MaxParts=1,
+            )
+        except ClientError as error:
+            if _client_error_code(error) in _NO_SUCH_UPLOAD:
+                return
+            raise ObjectStoreUnavailableError(
+                "Multipart abort could not be confirmed"
+            ) from error
+        except BotoCoreError as error:
+            raise ObjectStoreUnavailableError(
+                "Multipart abort could not be confirmed"
+            ) from error
+        listing = cast(Mapping[str, object], result)
+        if listing.get("Parts") or listing.get("IsTruncated") is not False:
+            raise ObjectStoreUnavailableError(
+                "Multipart abort left a part of the upload"
+            )
 
     def _require_owned_key(self, key: str) -> None:
         prefix = self._settings.object_key_prefix
