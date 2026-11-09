@@ -181,7 +181,9 @@ class DataRetentionService:
                 query = sa.delete(record_table).where(record_table.id.in_(batch_ids))  # type: ignore[attr-defined]
                 result = await self.session.execute(query)
                 batch_deleted = affected_row_count(result)
-                files_deleted = await delete_unused_root_files(self.session, file_ids)
+                files_deleted = len(
+                    await delete_unused_root_files(self.session, file_ids)
+                )
 
             total_deleted += batch_deleted
             total_files_deleted += files_deleted

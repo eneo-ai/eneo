@@ -29,9 +29,11 @@ from datetime import timedelta
 from uuid import UUID
 
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import UUID as PostgreSQLUUID
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.dml import ReturningDelete
 
-from eneo.database.affected_rows import affected_row_count
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.object_content_table import (
     FileContentReferences,
@@ -57,15 +59,42 @@ class UnusedFileSweepResult:
 async def delete_unused_root_files(
     session: AsyncSession,
     candidate_file_ids: Iterable[UUID],
-) -> int:
-    """Delete candidate root Files, with their derived Files, once unused."""
+) -> frozenset[UUID]:
+    """Delete candidate root Files, with their derived Files, once unused.
+
+    Returns the ids of the deleted roots.
+    """
     unused_ids = await FileUsageRepository(session).lock_unused_root_families(
         candidate_file_ids
     )
     if not unused_ids:
-        return 0
-    result = await session.execute(sa.delete(Files).where(Files.id.in_(unused_ids)))
-    return affected_row_count(result)
+        return frozenset()
+    deleted = await session.scalars(delete_roots_statement(unused_ids))
+    return frozenset(deleted.all())
+
+
+def delete_roots_statement(
+    root_ids: Iterable[UUID],
+) -> ReturningDelete[tuple[UUID]]:
+    """Delete root Files by id; derived Files cascade with their root.
+
+    The ids travel as one array bind, since a large retention batch would
+    otherwise exceed the driver's limit of 32,767 bind parameters.
+    """
+    return (
+        sa.delete(Files)
+        .where(
+            Files.id
+            == sa.any_(
+                sa.bindparam(
+                    "root_file_ids",
+                    value=list(root_ids),
+                    type_=ARRAY(PostgreSQLUUID(as_uuid=True)),
+                )
+            )
+        )
+        .returning(Files.id)
+    )
 
 
 async def sweep_unused_files(
@@ -103,10 +132,8 @@ async def sweep_unused_files(
             if dry_run:
                 result.files += len(unused_ids)
             else:
-                deleted = await session.execute(
-                    sa.delete(Files).where(Files.id.in_(unused_ids))
-                )
-                result.files += affected_row_count(deleted)
+                deleted = await session.scalars(delete_roots_statement(unused_ids))
+                result.files += len(deleted.all())
     result.files_by_tenant = dict(sorted(tenants.items()))
     return result
 
