@@ -36,9 +36,12 @@ from eneo.database.tables.users_table import Users
 from eneo.jobs import job_manager as job_manager_module
 from eneo.jobs.job_manager import JobManager
 from eneo.main.config import get_settings, set_settings
+from eneo.main.exceptions import ErrorCodes
 from eneo.main.logging import OTELJSONFormatter
+from eneo.tenants.tenant import TenantBase
 from eneo.users import user_service as user_service_module
 from eneo.users.identity_binding_repo import IdentityConflictError
+from eneo.users.user_repo import UsersRepository
 from tests.fake_oidc_provider import FakeOidcProvider
 from tests.integration.test_federation_tenant_admin import (
     SECRET,
@@ -398,6 +401,78 @@ async def test_a_removed_account_signs_in_again_once_an_admin_reactivates_it(
     assert (await _rows())["users"] == before["users"]
     assert await _bindings() == {(account, CLIENT, "person-leaver")}
     assert await _bound_methods(account) == ["email_match"]
+
+
+@pytest.mark.parametrize("taken", ["before the reactivation", "after its check"])
+async def test_a_removed_account_whose_email_is_live_again_is_not_reactivated(
+    client, db_container, patch_auth_service_jwt, monkeypatch, taken
+):
+    """Only one live account may hold an email address, in any organisation.
+    Another organisation (SCIM, sign-in) may take the address of a removed
+    account, also while it is being reactivated; reactivating it is then a
+    conflict, not a 500."""
+    async with db_container() as container:
+        admin = await container.user_repo().get_user_by_email(EMAIL)
+        token = container.auth_service().create_access_token_for_user(admin)
+        other = await container.tenant_repo().add(
+            TenantBase(name=f"reuse-{uuid4().hex[:8]}")
+        )
+    admin_headers = {"Authorization": f"Bearer {token}"}
+    email = "leaver@example.com"
+    created = await client.post(
+        "/api/v1/admin/users/",
+        json={"email": email, "username": "leaver"},
+        headers=admin_headers,
+    )
+    assert created.status_code in (200, 201), created.text
+    removed = await client.delete("/api/v1/admin/users/leaver", headers=admin_headers)
+    assert removed.status_code == 200, removed.text
+
+    async def take_address() -> None:
+        async with sessionmanager.session() as session, session.begin():
+            await session.execute(
+                sa.insert(Users).values(
+                    email=email,
+                    username="successor",
+                    state="active",
+                    tenant_id=other.id,
+                )
+            )
+
+    if taken == "before the reactivation":
+        await take_address()
+    else:
+        lookup = UsersRepository.get_users_by_email
+
+        async def look_up_then_lose_the_race(self, address, *, limit):
+            found = await lookup(self, address, limit=limit)
+            await take_address()
+            return found
+
+        monkeypatch.setattr(
+            UsersRepository, "get_users_by_email", look_up_then_lose_the_race
+        )
+
+    reactivated = await client.post(
+        "/api/v1/admin/users/leaver/reactivate", headers=admin_headers
+    )
+
+    assert reactivated.status_code == 400, reactivated.text
+    assert reactivated.json()["eneo_error_code"] == ErrorCodes.UNIQUE_USER_ERROR
+    assert await _accounts(email) == [
+        ("leaver", "deleted", False),
+        ("successor", "active", True),
+    ]
+
+
+async def _accounts(email: str) -> list[tuple[str, str, bool]]:
+    async with sessionmanager.session() as session, session.begin():
+        rows = await session.execute(
+            sa.select(Users.username, Users.state, Users.deleted_at.is_(None))
+            .where(Users.email == email)
+            .order_by(Users.username)
+        )
+        return [tuple(row) for row in rows.tuples()]
 
 
 @pytest.mark.parametrize("change", ["pairwise", "pairwise-with-window", "one-subject"])
