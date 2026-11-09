@@ -6,12 +6,15 @@ longer than its conversation's period allows. New conversations get the time
 of their creation from the database.
 """
 
+from collections.abc import Generator
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 import psycopg2
 import pytest
+from testcontainers.postgres import PostgresContainer
 
 from alembic import command
 from alembic.config import Config
@@ -22,35 +25,49 @@ PRE_REVISION = "202611091000"
 REVISION = "202611091200"
 
 
-@pytest.fixture(autouse=True)
-def cleanup_database():
+@pytest.fixture(scope="session", autouse=True)
+def override_settings_for_session() -> Generator[None, None, None]:
     yield
 
 
 @pytest.fixture(autouse=True)
-def seed_default_models():
+def cleanup_database() -> Generator[None, None, None]:
+    yield
+
+
+@pytest.fixture(autouse=True)
+def seed_default_models() -> Generator[None, None, None]:
+    yield
+
+
+@pytest.fixture(autouse=True)
+def encryption_service() -> Generator[None, None, None]:
     yield
 
 
 @pytest.fixture
-def migration_db(test_settings):
-    backend_dir = Path(__file__).parent.parent.parent.parent
-    config = Config(str(backend_dir / "alembic.ini"))
-    config.set_main_option("sqlalchemy.url", test_settings.sync_database_url)
-    connection = psycopg2.connect(
-        host=test_settings.postgres_host,
-        port=test_settings.postgres_port,
-        dbname=test_settings.postgres_db,
-        user=test_settings.postgres_user,
-        password=test_settings.postgres_password,
+def migration_db() -> Generator[tuple[Any, Config], None, None]:
+    """A database of its own: the shared one is already at head, where an
+    upgrade to the earlier revision changes nothing."""
+    postgres = PostgresContainer(
+        image="pgvector/pgvector:pg16",
+        username="session_text_times",
+        password="session_text_times_password",
+        dbname="session_text_times",
     )
-    connection.autocommit = True
-    command.upgrade(config, PRE_REVISION)
-    try:
-        yield connection, config
-    finally:
-        command.upgrade(config, "head")
-        connection.close()
+    with postgres:
+        database_url = postgres.get_connection_url()
+        backend_dir = Path(__file__).resolve().parents[3]
+        config = Config(str(backend_dir / "alembic.ini"))
+        config.set_main_option("script_location", str(backend_dir / "alembic"))
+        config.set_main_option("sqlalchemy.url", database_url)
+        command.upgrade(config, PRE_REVISION)
+        connection = psycopg2.connect(database_url.replace("+psycopg2", ""))
+        connection.autocommit = True
+        try:
+            yield connection, config
+        finally:
+            connection.close()
 
 
 def _seed(connection, *, created_at: datetime, asked_at: datetime) -> str:
