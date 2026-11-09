@@ -242,16 +242,24 @@ class SessionRepository:
         return await self.delegate.add(session)
 
     async def update(
-        self, session: SessionUpdate, *, title_from_turns: bool = False
+        self, session: SessionUpdate, *, title_from_turns_at: int | None = None
     ) -> SessionInDB | None:
         """None also for a copy whose source was removed: it stays unchanged.
 
         A name the user sets starts its own retention time. A title made from
-        the turns can quote any of them, so it keeps the time of the oldest
-        question still there and is due no later than that question.
+        the turns read at history revision `title_from_turns_at` can quote any
+        of them. It is written only while that revision holds: a removal raises
+        it, so a title that may quote a removed turn is dropped and None is
+        returned. A written title keeps the time of the oldest question, so it
+        is due no later than that question.
         """
         name_set_at: sa.ColumnElement[datetime] = sa.func.now()
-        if title_from_turns:
+        written: list[sa.ColumnElement[bool]] = [
+            Sessions.id == session.id,
+            copy_session_valid(Sessions.id.expression),
+        ]
+        if title_from_turns_at is not None:
+            written.append(Sessions.history_revision == title_from_turns_at)
             oldest_question = (
                 sa.select(sa.func.min(Questions.created_at))
                 .where(Questions.session_id == Sessions.id)
@@ -266,10 +274,7 @@ class SessionRepository:
                 **session.model_dump(exclude_unset=True, exclude={"id"}),
                 name_set_at=name_set_at,
             )
-            .where(
-                Sessions.id == session.id,
-                copy_session_valid(Sessions.id.expression),
-            )
+            .where(*written)
             .returning(Sessions)
         )
         updated = await self.session.scalar(stmt)

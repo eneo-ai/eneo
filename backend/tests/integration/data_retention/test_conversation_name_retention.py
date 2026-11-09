@@ -136,6 +136,14 @@ async def _texts(
     return row.name, row.feedback_value, row.feedback_text
 
 
+async def _revision(session: AsyncSession, identifier: UUID) -> int:
+    return (
+        await session.execute(
+            sa.select(Sessions.history_revision).where(Sessions.id == identifier)
+        )
+    ).scalar_one()
+
+
 async def _audit_text(session: AsyncSession) -> str:
     rows = (await session.scalars(sa.select(AuditLog))).all()
     return "\n".join(f"{row.description} {row.log_metadata}" for row in rows)
@@ -453,7 +461,8 @@ async def test_a_title_made_late_from_the_turns_goes_with_their_oldest_question(
     await retention_session.flush()
     repository = SessionRepository(retention_session)
     await repository.update(
-        SessionUpdate(id=titled, name="Title made today"), title_from_turns=True
+        SessionUpdate(id=titled, name="Title made today"),
+        title_from_turns_at=await _revision(retention_session, titled),
     )
     await repository.update(SessionUpdate(id=renamed, name="Name set today"))
 
@@ -461,6 +470,55 @@ async def test_a_title_made_late_from_the_turns_goes_with_their_oldest_question(
 
     assert (await _texts(retention_session, titled))[0] == ""
     assert (await _texts(retention_session, renamed))[0] == "Name set today"
+
+
+async def test_a_title_made_while_a_turn_it_read_is_removed_is_not_stored(
+    retention_session: AsyncSession, test_tenant, admin_user, completion_model_factory
+):
+    """The model may quote any turn it was given. A turn removed while it
+    runs raises the conversation's history revision, and a title made from
+    the earlier revision is dropped instead of bringing the turn back."""
+    model_id = (await completion_model_factory(retention_session, "gpt-4")).id
+    space = await _space(retention_session, tenant_id=test_tenant.id)
+    assistant = await _assistant(
+        retention_session,
+        model_id,
+        space=space,
+        user_id=admin_user.id,
+        days=30,
+    )
+    titled, _, _ = await _conversation(
+        retention_session,
+        user_id=admin_user.id,
+        assistant_id=assistant.id,
+        created_days_ago=31,
+        named_days_ago=31,
+    )
+    for days in (31, 5):
+        retention_session.add(
+            Questions(
+                question="Question",
+                answer="Answer",
+                num_tokens_question=1,
+                num_tokens_answer=1,
+                tenant_id=test_tenant.id,
+                assistant_id=assistant.id,
+                session_id=titled,
+                created_at=_ago(days),
+                updated_at=_ago(days),
+            )
+        )
+    await retention_session.flush()
+    read_at = await _revision(retention_session, titled)
+
+    await run_registered_retention(retention_session)
+    stored = await SessionRepository(retention_session).update(
+        SessionUpdate(id=titled, name="Title quoting the removed turn"),
+        title_from_turns_at=read_at,
+    )
+
+    assert stored is None
+    assert (await _texts(retention_session, titled))[0] == ""
 
 
 async def test_a_held_conversation_keeps_its_name_and_is_reported(

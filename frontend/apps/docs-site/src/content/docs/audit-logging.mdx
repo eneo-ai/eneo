@@ -129,7 +129,8 @@ A conversation's name is its first question, a title made from its turns or a na
 its user chose, and its feedback text can quote the turns. A chosen name and feedback
 text keep the time they were last written. A title made from the turns keeps the time
 of the oldest question still there when it was made, so it goes no later than that
-question, however late it was made. Once that time is older than the conversation's period, conversation
+question, however late it was made; a title whose turns lost one to removal while it
+was being made is not stored. Once that time is older than the conversation's period, conversation
 history replaces the name with an empty one, which both apps show as Untitled, and
 removes the feedback text; the feedback vote stays. This holds whether or not the
 conversation's questions are still there, so a name chosen later is kept as long as
