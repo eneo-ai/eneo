@@ -149,6 +149,10 @@ Some endpoints override this mapping. For example, certain POST endpoints that a
 
 **Resource-level** (feature-gated): If the key has `resource_permissions` configured, per-resource-type permissions are checked for `assistants`, `apps`, `spaces`, `knowledge`, `conversations`, `files`, `jobs`, and `prompts`. For `sk_` keys, the top-level `permission` is derived from the highest configured resource permission when the key is created or updated. For `pk_` keys, every resource permission is capped to `none` or `read`, and `jobs`/`prompts` are rejected.
 
+When resource permission enforcement is enabled, submitting uploaded file IDs to a chat, app, service, or token preflight also requires `files: read`. Reading or continuing a conversation containing earlier user uploads requires the same permission, even if the new question has no attachments. A key with `files: none` receives `403` with code `insufficient_resource_permission`.
+
+Assistant-configured knowledge remains available through the assistant's access policy, and conversations containing only generated output files can still be continued without a file resource grant. A file ID or an `eneo-file:` handle does not grant access on its own. Signed download links remain short-lived bearer credentials: anyone holding a valid link can use it until it expires.
+
 ### 7. Scope Enforcement
 
 On scope-enforced routes, the system verifies that the key's scope covers the requested resource. See [Scope & Permissions](#scope--permissions) for details.

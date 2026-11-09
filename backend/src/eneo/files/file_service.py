@@ -8,6 +8,10 @@ from uuid import UUID
 from fastapi import UploadFile
 from starlette.datastructures import Headers
 
+from eneo.authentication.api_key_resolver import (
+    ApiKeyValidationError,
+    check_resource_permission,
+)
 from eneo.files.file_content_loader import FileContentLoader
 from eneo.files.file_models import (
     File,
@@ -67,6 +71,25 @@ from eneo.object_content.content_service import (
 )
 from eneo.object_content.deployment_policy import UploadAdmissionSnapshot
 from eneo.users.user import UserInDB
+
+
+def require_file_read_permission(user: UserInDB) -> None:
+    """Authorize user-selected files, including uploads replayed from history.
+
+    A user-owned API key shares its owner's identity, but must also hold the
+    file resource grant. Assistant-configured knowledge and generated outputs
+    are authorized through their respective owners instead.
+    """
+    if user.active_api_key is None:
+        return
+    try:
+        check_resource_permission(user.active_api_key, "files", "read")
+    except ApiKeyValidationError as exc:
+        raise UnauthorizedException(
+            exc.message,
+            code=exc.code,
+            context=dict(exc.context) if exc.context is not None else None,
+        ) from exc
 
 
 def require_requested_files(file_ids: Iterable[UUID], files: Sequence[File]) -> None:
@@ -583,6 +606,8 @@ class FileService:
         file_ids: list[UUID],
         include_transcription: bool = True,
     ) -> list[File]:
+        if file_ids:
+            require_file_read_permission(self._authenticated_user())
         metadata = await self.repo.get_list_by_id_and_user(
             ids=file_ids,
             user_id=self._authenticated_user().id,

@@ -2,11 +2,33 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
+import pytest
 from sqlalchemy.dialects import postgresql
 
 from eneo.questions.question import MessageFeedback
 from eneo.sessions.session import SessionInDB, SessionUpdate
 from eneo.sessions.sessions_repo import OwnedChatPartner, SessionRepository
+
+
+@pytest.mark.parametrize("file_id", [None, uuid4()])
+async def test_upload_probe_checks_only_readable_user_upload_relationships(file_id):
+    session = AsyncMock()
+    session.scalar.return_value = file_id
+    repo = SessionRepository(session)
+    session_id = uuid4()
+
+    assert await repo.has_user_uploads(session_id) is (file_id is not None)
+
+    query = session.scalar.call_args.args[0]
+    sql = str(
+        query.compile(
+            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+        )
+    )
+    assert "questions_files.type = 'user'" in sql
+    assert f"questions.session_id = '{session_id}'" in sql
+    assert "content_derivations" in sql
+    assert "LIMIT 1" in sql
 
 
 async def test_hydrates_all_info_blobs_without_file_loader(monkeypatch):
