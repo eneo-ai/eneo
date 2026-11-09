@@ -40,7 +40,6 @@ SIGNING_ALGORITHM_ALLOWLIST = frozenset(
 DEFAULT_SIGNING_ALGORITHMS = ("RS256",)
 # The scopes an IdP config gets when it names none; stored configs keep theirs.
 DEFAULT_SCOPES = ("openid", "email", "profile")
-DISCOVERY_FETCH_TIMEOUT_SECONDS = 5
 DISCOVERY_RETRY_SECONDS = 30
 
 _TOKEN_AUTH_METHODS = ("client_secret_post", "client_secret_basic")
@@ -127,9 +126,7 @@ async def fetch_discovery(url: str, *, ttl_seconds: int) -> dict[str, object]:
 
 async def _download_discovery(url: str) -> dict[str, object]:
     try:
-        async with aiohttp_client().get(
-            url, timeout=aiohttp.ClientTimeout(total=DISCOVERY_FETCH_TIMEOUT_SECONDS)
-        ) as resp:
+        async with aiohttp_client().get(url) as resp:
             if resp.status != 200:
                 logger.error(
                     f"Failed to fetch OIDC discovery document: HTTP {resp.status}",

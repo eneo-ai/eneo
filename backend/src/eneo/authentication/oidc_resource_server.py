@@ -14,7 +14,6 @@ import time
 from typing import TYPE_CHECKING, Any
 
 import jwt
-from aiohttp import ClientTimeout
 
 from eneo.main.aiohttp_client import aiohttp_client
 from eneo.main.config import get_settings
@@ -29,7 +28,6 @@ logger = get_logger(__name__)
 # Asymmetric signature algorithms accepted for IdP access tokens.
 RS256_FAMILY = ["RS256", "RS384", "RS512"]
 JWKS_REFRESH_COOLDOWN_SECONDS = 30
-JWKS_FETCH_TIMEOUT_SECONDS = 5
 
 
 class JWKSFetchError(Exception):
@@ -37,9 +35,7 @@ class JWKSFetchError(Exception):
 
 
 async def _fetch_json(url: str) -> dict[str, Any]:
-    async with aiohttp_client().get(
-        url, timeout=ClientTimeout(total=JWKS_FETCH_TIMEOUT_SECONDS)
-    ) as resp:
+    async with aiohttp_client().get(url) as resp:
         if resp.status != 200:
             raise JWKSFetchError(f"HTTP {resp.status} fetching {url}")
         return await resp.json()

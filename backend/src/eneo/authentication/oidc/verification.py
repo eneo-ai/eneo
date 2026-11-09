@@ -7,6 +7,7 @@ when a stronger one fails.
 """
 
 import base64
+import re
 import secrets
 import time
 from collections.abc import Mapping
@@ -83,6 +84,21 @@ def _refuse(
     return OidcResponseNotVerifiedError(message)
 
 
+# An OAuth error code (RFC 6749 section 5.2) is a short token. What else a
+# provider writes, its description, its URI or a body that is not JSON, can
+# name the person signing in, so it is never logged.
+_OAUTH_ERROR_CODE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
+
+
+def _oauth_error(body: object) -> str | None:
+    if not isinstance(body, Mapping):
+        return None
+    error = cast(Mapping[str, object], body).get("error")
+    if isinstance(error, str) and _OAUTH_ERROR_CODE.fullmatch(error):
+        return error
+    return None
+
+
 async def _exchange_code(
     profile: OidcProfile, transaction: OidcTransaction, code: str, correlation_id: str
 ) -> Mapping[str, object]:
@@ -109,17 +125,16 @@ async def _exchange_code(
             try:
                 error_body: object = await resp.json()
             except Exception:
-                error_body = await resp.text()
-            logger.error(
-                f"Token exchange failed: HTTP {resp.status}",
-                extra={
-                    "http_status": resp.status,
-                    "token_endpoint": profile.token_endpoint,
-                    "error_response": error_body,
-                    "auth_method": profile.token_endpoint_auth_method,
-                    "correlation_id": correlation_id,
-                },
-            )
+                error_body = None
+            failure: dict[str, object] = {
+                "http_status": resp.status,
+                "token_endpoint": profile.token_endpoint,
+                "auth_method": profile.token_endpoint_auth_method,
+                "correlation_id": correlation_id,
+            }
+            if (oauth_error := _oauth_error(error_body)) is not None:
+                failure["oauth_error"] = oauth_error
+            logger.error(f"Token exchange failed: HTTP {resp.status}", extra=failure)
             raise _refuse(
                 "token_exchange_failed",
                 correlation_id,
