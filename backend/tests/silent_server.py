@@ -3,7 +3,8 @@
 ``silent_server`` accepts connections and never answers. ``freezing_redis``
 answers what arq's startup and an enqueue send until it has answered a chosen
 command, then answers nothing more on any connection until it is thawed: a
-Redis that froze in the middle of a transaction.
+Redis that froze in the middle of a transaction. It can also leave one
+command unanswered and answer the rest: a reply lost on the way.
 """
 
 import asyncio
@@ -33,9 +34,10 @@ async def silent_server() -> AsyncIterator[int]:
 class FreezingRedis:
     """What the test controls: the port, the freeze and the commands seen."""
 
-    def __init__(self, freeze_after: bytes) -> None:
+    def __init__(self, freeze_after: bytes | None, unanswered: bytes | None) -> None:
         self.port = 0
-        self.freeze_after: bytes | None = freeze_after
+        self.freeze_after = freeze_after
+        self.unanswered = unanswered
         self.frozen = False
         self.commands: list[bytes] = []
 
@@ -66,8 +68,10 @@ async def _command(reader: asyncio.StreamReader) -> list[bytes]:
 
 
 @contextlib.asynccontextmanager
-async def freezing_redis(*, freeze_after: bytes) -> AsyncIterator[FreezingRedis]:
-    redis = FreezingRedis(freeze_after)
+async def freezing_redis(
+    *, freeze_after: bytes | None = None, unanswered: bytes | None = None
+) -> AsyncIterator[FreezingRedis]:
+    redis = FreezingRedis(freeze_after, unanswered)
     writers: list[asyncio.StreamWriter] = []
 
     async def serve(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
@@ -80,7 +84,7 @@ async def freezing_redis(*, freeze_after: bytes) -> AsyncIterator[FreezingRedis]
                 arguments = await _command(reader)
                 name = arguments[0].upper()
                 redis.commands.append(name)
-                if redis.frozen:
+                if redis.frozen or name == redis.unanswered:
                     continue
                 if name == b"MULTI":
                     writer.write(b"+OK\r\n")
