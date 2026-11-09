@@ -265,7 +265,7 @@ The endpoints, under `/api/v1/admin`. `{user_id}` is the account's `id` from `GE
 | `POST /identity-migration-windows` | `{"from_issuer", "from_audience", "to_issuer", "to_audience", "closes_at"}` | `201` `{"id", "from_issuer", "from_audience", "to_issuer", "to_audience", "closes_at", "created_at"}` |
 | `DELETE /identity-migration-windows/{id}` | | The closed window, `404` when no open window has the id |
 
-The three user routes answer `404` when the id names no active account of your organisation. `allowed_until` and `closes_at` are times with a time zone, in the future and at most 30 days ahead; anything else answers `422`.
+The three user routes answer `404` when the id names no account of your organisation, or names a deleted one. `allowed_until` and `closes_at` are times with a time zone, in the future and at most 30 days ahead; anything else answers `422`.
 
 ### Upgrading to account binding
 

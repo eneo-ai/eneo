@@ -517,7 +517,7 @@ class AdminService:
         )
 
     async def _tenant_account(self, user_id: UUID) -> UserInDB:
-        """The caller's tenant's active account with this id.
+        """The caller's tenant's account with this id, unless it is deleted.
 
         By id, not by username: usernames are not unique, so a username can
         name more than one account. Another tenant's account is not found.
