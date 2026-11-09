@@ -18,7 +18,7 @@ from alembic.config import Config
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
-PRE_REVISION = "202611081500"
+PRE_REVISION = "202611091000"
 REVISION = "202611091200"
 
 
