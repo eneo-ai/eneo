@@ -180,6 +180,21 @@ def _no_concrete_references() -> ColumnElement[bool]:
     )
 
 
+def _orphan_key_is_live() -> ColumnElement[bool]:
+    """A content that is not tombstoned still names the orphan candidate's key."""
+    return exists(
+        select(ObjectStoreObjects.content_id)
+        .join(
+            ObjectContents,
+            ObjectContents.id == ObjectStoreObjects.content_id,
+        )
+        .where(
+            ObjectStoreObjects.object_key == ObjectContentOrphanCandidates.object_key,
+            ObjectContents.state != ContentState.TOMBSTONED.value,
+        )
+    )
+
+
 def _retention_clear(now: datetime) -> ColumnElement[bool]:
     """Neither a minimum retention nor an active hold keeps the content."""
     active_hold = exists(
@@ -831,18 +846,6 @@ class ObjectContentReconciliationRepository:
         limit: int,
     ) -> tuple[OrphanDeleteLease, ...]:
         now = await self._database_now()
-        live_row_exists = exists(
-            select(ObjectStoreObjects.content_id)
-            .join(
-                ObjectContents,
-                ObjectContents.id == ObjectStoreObjects.content_id,
-            )
-            .where(
-                ObjectStoreObjects.object_key
-                == ObjectContentOrphanCandidates.object_key,
-                ObjectContents.state != ContentState.TOMBSTONED.value,
-            )
-        )
         rows = (
             await self._session.scalars(
                 select(ObjectContentOrphanCandidates)
@@ -854,7 +857,7 @@ class ObjectContentReconciliationRepository:
                         ObjectContentOrphanCandidates.lease_until.is_(None),
                         ObjectContentOrphanCandidates.lease_until <= now,
                     ),
-                    ~live_row_exists,
+                    ~_orphan_key_is_live(),
                 )
                 .order_by(
                     ObjectContentOrphanCandidates.eligible_after,
