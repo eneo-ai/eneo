@@ -2208,6 +2208,7 @@
   "flow_step_editor_template_field_empty": "Leave empty",
   "flow_step_editor_template_field_unknown": "This is no longer in the flow. Choose something else.",
   "flow_step_editor_template_field_gone": "A choice that no longer exists",
+  "flow_step_editor_template_field_list": "A multiple-choice or list field holds several values, but a Word field takes one. Choose a text answer or another form field.",
   "flow_step_editor_template_field_reads": "{field}: {source}",
   "flow_step_editor_template_field_left_empty": "Left empty",
   "flow_step_editor_template_field_none": "Nothing chosen",

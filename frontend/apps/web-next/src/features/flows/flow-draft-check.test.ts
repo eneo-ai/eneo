@@ -178,6 +178,15 @@ describe("checkDraft", () => {
     const codes = (binding: string) =>
       checkDraft(
         makeFlow({
+          metadata_json: {
+            form_schema: {
+              fields: [
+                { name: "namn", label: "Namn", type: "text" },
+                { name: "deltagare", label: "Deltagare", type: "list" },
+                { name: "val", label: "Val", type: "multiselect" }
+              ]
+            }
+          },
           steps: [
             makeStep(1, { user_description: "Beslut" }),
             makeStep(2, {
@@ -200,13 +209,17 @@ describe("checkDraft", () => {
       "{{ datum }}",
       " {{ step_1.output.text }} ",
       "{{föregående_steg}}",
-      "{{flow_input.text}}"
+      "{{flow_input.text}}",
+      "{{flow_input.namn}}"
     ]) {
       expect(codes(binding), binding).toEqual([]);
     }
     // A step that is gone, or that is not earlier, fills nothing.
     expect(codes("{{step_9.output.text}}")).toEqual(["template_unbound"]);
     expect(codes("{{ step_2.output.text }}")).toEqual(["template_unbound"]);
+    // A list or several choices hold more than one value; a Word field takes one.
+    expect(codes("{{flow_input.deltagare}}")).toEqual(["template_unbound"]);
+    expect(codes("{{ flow_input.val }}")).toEqual(["template_unbound"]);
   });
 
   it("opens each problem at the field that fixes it", () => {

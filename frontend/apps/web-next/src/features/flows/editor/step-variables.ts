@@ -41,6 +41,14 @@ export function formFieldsOf(flow: Pick<FlowPublic, "metadata_json">): FormField
   });
 }
 
+/**
+ * Whether a form field holds one value (text, number, date, one choice), not
+ * several (a list, a multiple choice); the core's `_SCALAR_FORM_FIELD_TYPES`.
+ */
+export function formFieldHoldsOneValue(type: string): boolean {
+  return ["text", "number", "date", "select"].includes(type);
+}
+
 /** Whether a form field's name can be read as `{{flow_input.<name>}}`. */
 export function formFieldIsReadable(name: string): boolean {
   const key = name.trim().toLowerCase();
@@ -73,7 +81,7 @@ export type VariableEntry = {
   token: string;
   /** What the entry is: a form field's label, or a kind of value. */
   kind:
-    | { type: "field"; label: string }
+    | { type: "field"; label: string; fieldType: string }
     | { type: "upload" }
     | { type: "transcription" }
     | { type: "date" }
@@ -115,7 +123,7 @@ export function variableGroups(params: {
     .filter((field) => formFieldIsReadable(field.name))
     .map((field): VariableEntry => ({
       token: `flow_input.${field.name}`,
-      kind: { type: "field", label: field.label }
+      kind: { type: "field", label: field.label, fieldType: field.type }
     }));
   if (fields.length > 0) groups.push({ type: "fields", entries: fields });
 

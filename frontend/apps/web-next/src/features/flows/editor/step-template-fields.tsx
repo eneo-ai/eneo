@@ -36,7 +36,12 @@ import {
   variableGroupTitle
 } from "./step-labels";
 import { readMeaning } from "./request-preview";
-import { bindsTemplateField, fillsTemplateField, templateBindingToken } from "./step-rules";
+import {
+  bindsTemplateField,
+  fillsTemplateField,
+  templateBindingListField,
+  templateBindingToken
+} from "./step-rules";
 import type { FlowPublic, JsonObject, StepConfig, TemplateInspection } from "./step-types";
 import type { VariableGroup } from "./step-variables";
 
@@ -57,6 +62,7 @@ export function suggestedBindings(
   const sources = new Map<string, string | null>();
   for (const group of groups) {
     for (const entry of group.entries) {
+      if (!fillsTemplateField(entry)) continue;
       const name =
         entry.kind.type === "field"
           ? entry.kind.label
@@ -339,6 +345,8 @@ export function TemplateFillFields({
           {placeholders.map((placeholder) => {
             const binding = config.bindings[placeholder.name];
             const unknown = binding !== undefined && binding !== "" && !binds(binding);
+            // A list or multiple-choice field holds several values; a Word field takes one.
+            const list = unknown ? templateBindingListField(binding, flow) : null;
             // A binding written otherwise than the picker writes it (`{{ datum }}`) shows as
             // the choice it reads; one the picker does not offer (`{{föregående_steg}}`) as
             // what it reads, never as code.
@@ -362,7 +370,12 @@ export function TemplateFillFields({
                   { value: EMPTY, label: t("flow_step_editor_template_field_empty") },
                   // The reference itself is code; the author sees only that the choice is gone.
                   ...(unknown
-                    ? [{ value: binding, label: t("flow_step_editor_template_field_gone") }]
+                    ? [
+                        {
+                          value: binding,
+                          label: list ? list.label : t("flow_step_editor_template_field_gone")
+                        }
+                      ]
                     : []),
                   ...(unlisted ? [unlisted] : []),
                   ...sources.sections
@@ -383,9 +396,11 @@ export function TemplateFillFields({
                 status={
                   binding && isStructuredTemplateBinding(binding)
                     ? { type: "error", message: t("flow_template_fill_json_warning") }
-                    : unknown
-                      ? { type: "error", message: t("flow_step_editor_template_field_unknown") }
-                      : undefined
+                    : list
+                      ? { type: "error", message: t("flow_step_editor_template_field_list") }
+                      : unknown
+                        ? { type: "error", message: t("flow_step_editor_template_field_unknown") }
+                        : undefined
                 }
                 width="100%"
               />

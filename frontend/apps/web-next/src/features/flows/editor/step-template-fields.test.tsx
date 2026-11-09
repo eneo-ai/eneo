@@ -26,14 +26,22 @@ afterEach(() => {
 });
 
 const flow = makeFlow({
-  metadata_json: { form_schema: { fields: [{ name: "namn", label: "Namn", type: "text" }] } },
+  metadata_json: {
+    form_schema: {
+      fields: [
+        { name: "namn", label: "Namn", type: "text" },
+        { name: "deltagare", label: "Deltagare", type: "list" }
+      ]
+    }
+  },
   steps: [makeStep(1, { user_description: "Beslut" }), makeStep(2)]
 });
 const groups = variableGroups({ flow, stepOrder: 2 });
 
 describe("suggestedBindings", () => {
   it("binds placeholders named like a form field, an earlier step or today's date", () => {
-    expect(suggestedBindings(["Namn", "beslut", "Datum", "Okänt"], groups)).toEqual({
+    // A list holds several values: a Word field named like it is left for the author.
+    expect(suggestedBindings(["Namn", "beslut", "Datum", "Okänt", "Deltagare"], groups)).toEqual({
       Namn: "{{flow_input.namn}}",
       beslut: "{{step_1.output.text}}",
       Datum: "{{datum}}"
@@ -304,5 +312,27 @@ describe("TemplateFillFields choices", () => {
     expect(screen.getByRole("combobox", { name: "namn" }).textContent).toContain("Beslut");
     expect(screen.queryByText(messages.flow_step_editor_template_field_unknown)).toBeNull();
     expect(screen.queryByText(/\{\{/)).toBeNull();
+  });
+
+  it("says a list cannot fill a Word field, and does not offer one", async () => {
+    api.routes["GET /api/v1/flows/{id}/template-files/"] = () => ({
+      body: [asset("asset-1", "Beslut.docx")]
+    });
+    api.routes["GET /api/v1/flows/{id}/template-inspect/"] = () => ({ body: inspected });
+    renderTemplate({
+      template_asset_id: "asset-1",
+      template_name: "Beslut.docx",
+      placeholders: ["datum", "namn", "okant"],
+      bindings: { datum: "{{datum}}", namn: "{{flow_input.deltagare}}", okant: "" }
+    });
+    expect(await screen.findByText(messages.flow_step_editor_template_field_list)).toBeTruthy();
+    expect(screen.getByText(/^2 av 3 fält är klara\./)).toBeTruthy();
+    const namn = screen.getByRole("combobox", { name: "namn" });
+    expect(namn.textContent).toContain("Deltagare");
+    expect(screen.queryByText(messages.flow_step_editor_template_field_unknown)).toBeNull();
+    fireEvent.click(screen.getByRole("combobox", { name: "okant" }));
+    const options = within(await screen.findByRole("listbox", { name: "okant" }));
+    expect(options.getByRole("option", { name: "Namn" })).toBeTruthy();
+    expect(options.queryByRole("option", { name: "Deltagare" })).toBeNull();
   });
 });

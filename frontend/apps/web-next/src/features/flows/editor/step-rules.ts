@@ -38,7 +38,12 @@ import type {
 } from "./step-types";
 import { templateParts } from "../flow-steps";
 import { readMeaning, readTone } from "./request-preview";
-import type { VariableEntry } from "./step-variables";
+import {
+  formFieldHoldsOneValue,
+  formFieldsOf,
+  type FormField,
+  type VariableEntry
+} from "./step-variables";
 
 /**
  * The choices each setting of a saved step offers at its place, and what
@@ -528,11 +533,15 @@ export function stepUsesModel(step: Pick<StepConfig, "output_mode">): boolean {
   return outputModeUsesCompletionModel(step.output_mode);
 }
 
-/** Whether a reference can fill a whole Word field: one value, not a whole structured answer. */
+/**
+ * Whether a reference can fill a whole Word field: one value, not a whole
+ * structured answer or a form field that holds several (a list).
+ */
 export function fillsTemplateField(entry: VariableEntry): boolean {
   return (
     entry.kind.type !== "previous_step" &&
     entry.kind.type !== "section_index" &&
+    !(entry.kind.type === "field" && !formFieldHoldsOneValue(entry.kind.fieldType)) &&
     !isStructuredTemplateBinding(`{{${entry.token}}}`)
   );
 }
@@ -547,11 +556,23 @@ export function templateBindingToken(binding: string): string | null {
   return parts.length === 1 && part?.kind === "read" ? part.token : null;
 }
 
+/** The form field a binding reads when that field holds several values (a list), or null. */
+export function templateBindingListField(
+  binding: string,
+  flow: Pick<FlowPublic, "metadata_json">
+): FormField | null {
+  const token = templateBindingToken(binding);
+  if (!token?.startsWith("flow_input.")) return null;
+  const name = token.slice("flow_input.".length);
+  const field = formFieldsOf(flow).find((candidate) => candidate.name === name);
+  return field && !formFieldHoldsOneValue(field.type) ? field : null;
+}
+
 /**
  * Whether a Word field's binding reads one value the run has at this step,
  * as the editor reads every reference: spaces inside the braces and the
  * `föregående_steg` alias read as written; a step or form field that is
- * gone, or a whole structured answer, does not fill a field.
+ * gone, a list, or a whole structured answer does not fill a field.
  */
 export function bindsTemplateField(
   binding: string,
@@ -562,6 +583,7 @@ export function bindsTemplateField(
   return (
     token !== null &&
     !isStructuredTemplateBinding(binding) &&
+    templateBindingListField(binding, flow) === null &&
     readTone(readMeaning(token, stepOrder, flow)) === "reads"
   );
 }

@@ -2208,6 +2208,7 @@
   "flow_step_editor_template_field_empty": "Lämna tomt",
   "flow_step_editor_template_field_unknown": "Det här finns inte längre i flödet. Välj något annat.",
   "flow_step_editor_template_field_gone": "Ett val som inte längre finns",
+  "flow_step_editor_template_field_list": "Ett fält med flera val eller en lista rymmer flera värden, men ett Word-fält tar ett. Välj ett textsvar eller ett annat formulärfält.",
   "flow_step_editor_template_field_reads": "{field}: {source}",
   "flow_step_editor_template_field_left_empty": "Lämnas tomt",
   "flow_step_editor_template_field_none": "Inget valt",
