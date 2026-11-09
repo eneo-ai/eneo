@@ -122,6 +122,18 @@ async def test_the_move_stores_the_env_settings_without_contacting_the_provider(
 
 
 @pytest.mark.asyncio
+async def test_the_audit_names_the_move_not_the_super_api_key():
+    service, _, audit_service = _make_service()
+
+    await service.migrate_env_oidc_to_tenant_federation()
+
+    # An operator runs the script on the server; no API key is involved.
+    metadata = audit_service.log.await_args.kwargs["metadata"]
+    assert metadata["via"] == "env_oidc_migration_script"
+    assert metadata["actor"] == {"type": "sysadmin", "via": "env_oidc_migration_script"}
+
+
+@pytest.mark.asyncio
 async def test_the_move_keeps_the_tenants_redirect_settings():
     tenant = _make_tenant(
         federation_config={

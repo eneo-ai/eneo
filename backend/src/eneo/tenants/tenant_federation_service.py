@@ -65,6 +65,8 @@ DEFAULT_CLAIMS_MAPPING = {
 _REGISTRATION_FIELDS = ("provider", "client_id", "client_secret", "discovery_endpoint")
 _DOMAIN_PATTERN = re.compile(r"^[a-z0-9]+([\-\.]{1}[a-z0-9]+)*\.[a-z]{2,}$")
 _OPERATOR_ACTOR = {"type": "sysadmin", "via": "eneo_super_api_key"}
+# The operator runs the move on the server; no API key is involved.
+_ENV_MOVE_VIA = "env_oidc_migration_script"
 
 
 def _validate_domains(domains: list[str] | None) -> list[str] | None:
@@ -893,6 +895,7 @@ class TenantFederationService:
             user=None,
             secret_replaced=True,
             description=f"The OIDC_* settings of {tenant.name} were moved into Eneo",
+            via=_ENV_MOVE_VIA,
         )
         return federation_config
 
@@ -1098,6 +1101,7 @@ class TenantFederationService:
         user: Optional["UserInDB"],
         secret_replaced: bool,
         description: str,
+        via: str = "super_api_key",
     ) -> None:
         await self.tenant_repo.update_federation_config(
             tenant_id=tenant.id, federation_config=new
@@ -1109,6 +1113,7 @@ class TenantFederationService:
             user=user,
             secret_replaced=secret_replaced,
             description=description,
+            via=via,
         )
 
     async def _audit(
@@ -1120,9 +1125,11 @@ class TenantFederationService:
         user: Optional["UserInDB"],
         secret_replaced: bool,
         description: str,
+        via: str = "super_api_key",
     ) -> None:
         """FEDERATION_UPDATED in the caller's transaction: if this write fails,
-        the settings change rolls back with it."""
+        the settings change rolls back with it. ``via`` names the system door
+        when no user made the change."""
         target: dict[str, Any] = {
             "tenant_id": str(tenant.id),
             "tenant_name": tenant.name,
@@ -1133,11 +1140,16 @@ class TenantFederationService:
         }
         if not new:
             target["action"] = "deleted"
+        operator = (
+            _OPERATOR_ACTOR
+            if via == "super_api_key"
+            else {"type": "sysadmin", "via": via}
+        )
         metadata: dict[str, Any] = {
-            "actor": _OPERATOR_ACTOR if user is None else AuditMetadata.actor(user),
+            "actor": operator if user is None else AuditMetadata.actor(user),
             "target": target,
             "changes": federation_changes(old, new, secret_replaced=secret_replaced),
-            "via": "super_api_key" if user is None else "admin",
+            "via": via if user is None else "admin",
         }
         await self.audit_service.log(
             tenant_id=tenant.id,
