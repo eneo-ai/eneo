@@ -27,6 +27,7 @@ from eneo.database.database import sessionmanager
 from eneo.main.config import Settings, get_settings
 from eneo.main.container.container import Container
 from eneo.main.retention_tasks import retention_task_registrations
+from eneo.observability.error_log import log_error
 from eneo.worker.worker import Worker
 
 logger = logging.getLogger(__name__)
@@ -125,8 +126,14 @@ async def run_registered_tasks(
                 report = await runner.run(registration.build(session))
             else:
                 report = await runner.skip(registration.name)
-        except Exception:
-            logger.exception("Retention task %s raised; continuing.", registration.name)
+        except Exception as exc:
+            log_error(
+                logger,
+                logging.ERROR,
+                "Retention task %s raised; continuing",
+                registration.name,
+                error=exc,
+            )
             continue
         logger.info(
             "Retention task %s finished: %s",

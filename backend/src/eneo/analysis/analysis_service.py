@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from time import perf_counter
@@ -33,6 +34,7 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from eneo.main.logging import get_logger
+from eneo.observability.error_log import log_error
 from eneo.questions.question import MessageFeedback, Question
 from eneo.questions.questions_repo import QuestionRepository
 from eneo.roles.permissions import Permission, validate_permissions
@@ -234,9 +236,12 @@ class AnalysisService:
         summaries: list[str] = []
         for i, result in enumerate(results):
             if isinstance(result, BaseException):
-                logger.warning(
+                log_error(
+                    logger,
+                    logging.WARNING,
                     "analysis_chunk_failed",
-                    extra={"chunk_index": i + 1, "error": str(result)},
+                    error=result,
+                    extra={"chunk_index": i + 1},
                 )
             elif result:
                 summaries.append(result)

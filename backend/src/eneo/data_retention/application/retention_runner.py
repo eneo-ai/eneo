@@ -81,6 +81,7 @@ from eneo.data_retention.domain.retention import (
     retention_run_audit_id,
     retention_summary,
 )
+from eneo.observability.error_log import log_error
 
 logger = logging.getLogger(__name__)
 
@@ -444,11 +445,14 @@ class RetentionRunner:
                     error_code.value,
                 )
             else:
-                logger.exception(
+                log_error(
+                    logger,
+                    logging.ERROR,
                     "Retention task %s chunk %s failed: %s",
                     task.name,
                     progress.batch_seq,
                     error_code.value,
+                    error=exc,
                 )
 
         reporter = overdue_reporter(task)
@@ -608,8 +612,14 @@ class RetentionRunner:
                     logger.warning(
                         "Retention task %s was superseded; no overdue snapshot.", name
                     )
-        except Exception:
-            logger.exception("Retention task %s could not record overdue work.", name)
+        except Exception as exc:
+            log_error(
+                logger,
+                logging.ERROR,
+                "Retention task %s could not record overdue work",
+                name,
+                error=exc,
+            )
 
     async def _audit_run(
         self,
