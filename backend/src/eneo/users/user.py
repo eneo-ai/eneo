@@ -255,6 +255,8 @@ class UserUpdate(BaseModel):
     credential_version: Optional[int] = Field(default=None, ge=0)
     password_changed_at: Optional[datetime] = None
     password_change_required: Optional[bool] = None
+    # Set to None to clear: an administrator reactivating a removed account.
+    deleted_at: Optional[datetime] = None
 
     roles: Optional[list[ModelId]] = None
 

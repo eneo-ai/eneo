@@ -366,6 +366,40 @@ async def test_a_bound_account_takes_no_new_pair_by_email(
     assert [c["error_message"] for c in _conflicts(enqueued)] == ["account_bound"]
 
 
+@pytest.mark.parametrize("entry", ["generic", "browser"])
+async def test_a_removed_account_signs_in_again_once_an_admin_reactivates_it(
+    client, sign_in, provider, db_container, entry
+):
+    async with db_container() as container:
+        admin = await container.user_repo().get_user_by_email(EMAIL)
+        token = container.auth_service().create_access_token_for_user(admin)
+    admin_headers = {"Authorization": f"Bearer {token}"}
+    member = "leaver@example.com"
+    created = await client.post(
+        "/api/v1/admin/users/",
+        json={"email": member, "username": "leaver"},
+        headers=admin_headers,
+    )
+    assert created.status_code in (200, 201), created.text
+    provider.token_claims["email"] = member
+    assert await sign_in(entry, "person-leaver") == SIGNED_IN
+    account = UUID(created.json()["id"])
+    before = await _rows()
+
+    removed = await client.delete("/api/v1/admin/users/leaver", headers=admin_headers)
+    assert removed.status_code == 200, removed.text
+    reactivated = await client.post(
+        "/api/v1/admin/users/leaver/reactivate", headers=admin_headers
+    )
+    assert reactivated.status_code == 200, reactivated.text
+
+    assert await sign_in(entry, "person-leaver") == SIGNED_IN
+    # Through its binding: no new account, binding or email match.
+    assert (await _rows())["users"] == before["users"]
+    assert await _bindings() == {(account, CLIENT, "person-leaver")}
+    assert await _bound_methods(account) == ["email_match"]
+
+
 @pytest.mark.parametrize("change", ["pairwise", "pairwise-with-window", "one-subject"])
 async def test_a_client_id_change_by_an_admin_needs_a_window_for_pairwise_subjects(
     client, sign_in, provider, enqueued, db_container, admin_user, change

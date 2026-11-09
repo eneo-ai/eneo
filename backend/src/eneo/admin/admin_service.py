@@ -45,6 +45,7 @@ from eneo.users.user import (
     UserAdminView,
     UserInDB,
     UserState,
+    UserUpdate,
     UserUpdatePublic,
 )
 from eneo.users.user_repo import UsersRepository
@@ -344,8 +345,13 @@ class AdminService:
         return result
 
     @validate_permissions(Permission.ADMIN)
-    async def reactivate_tenant_user(self, username: str) -> UserInDB:
-        """Reactivate user from any state (INACTIVE or DELETED)"""
+    async def reactivate_tenant_user(self, username: str) -> tuple[UserState, UserInDB]:
+        """Reactivate a user from any state (INACTIVE or DELETED).
+
+        Returns the state the user had and the reactivated user. A removed
+        account's deletion timestamp is cleared in the same update: sign-in
+        skips removed accounts, so a reactivated one must not stay one.
+        """
         logger.info(
             f"Admin user {self.user.username} reactivating user {username} in tenant {self.user.tenant_id}"
         )
@@ -374,14 +380,16 @@ class AdminService:
                 f"Clearing deletion timestamp for user {username} during reactivation"
             )
 
-        result = await self.user_service.update_user(
-            user_in_db.id, UserUpdatePublic(state=UserState.ACTIVE)
+        result = await self.user_repo.update(
+            UserUpdate(id=user_in_db.id, state=UserState.ACTIVE, deleted_at=None)
         )
+        if result is None:
+            raise NotFoundException(f"User '{username}' not found in your tenant")
 
         logger.info(
             f"Successfully reactivated user {username} in tenant {self.user.tenant_id}"
         )
-        return result
+        return user_in_db.state, result
 
     @validate_permissions(Permission.ADMIN)
     async def get_inactive_tenant_users(self) -> list[UserStateListItem]:
