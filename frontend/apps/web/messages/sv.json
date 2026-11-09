@@ -1430,6 +1430,7 @@
   "explore_conversations": "Utforska konversationer",
   "insights_select_conversation": "Välj en konversation.",
   "insights_conversation_no_messages": "Den här konversationen innehåller inga meddelanden.",
+  "insights_question_no_log": "Frågan har ingen logg. Den loggades inte, eller så tömdes loggen när innehåll gallrades.",
   "no_previous_sessions_found": "Inga tidigare sessioner hittades",
   "show_only_10_spaces": "Visa endast 10 ytor",
   "show_all_spaces": "Visa alla {count} ytor",

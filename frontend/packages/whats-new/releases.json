@@ -133,6 +133,20 @@
             "en": "Every nightly retention run writes to the audit log: how many questions, app runs, sessions and files were removed, what was kept and why, and whether the run finished or stopped at its limit. The log never contains the content itself. Your operator can pause each retention task and set its limits.",
             "sv": "Varje nattlig gallringskörning skriver till granskningsloggen: hur många frågor, appkörningar, sessioner och filer som togs bort, vad som behölls och varför, och om körningen blev klar eller stoppade vid sin gräns. Loggen innehåller aldrig själva innehållet. Driftansvarig kan pausa varje gallringsuppgift och ställa in dess gränser."
           }
+        },
+        {
+          "id": "insights-question-logs-follow-retention",
+          "type": "improved",
+          "area": "admin",
+          "audience": "admin",
+          "title": {
+            "en": "Keep removed questions out of question logs",
+            "sv": "Slipp gallrade frågor i frågeloggarna"
+          },
+          "body": {
+            "en": "When retention removes a question or someone deletes it, Eneo empties every log that held it, also the logs of later questions in the same conversation. Questions asked before this version have no log, and the question details in Insights tell you so instead of offering to try again.",
+            "sv": "När gallringen tar bort en fråga eller någon raderar den tömmer Eneo varje logg som innehöll den, även loggarna för senare frågor i samma konversation. Frågor som ställdes före den här versionen har ingen logg, och frågedetaljerna under Insikter talar om det för dig i stället för att erbjuda ett nytt försök."
+          }
         }
       ]
     },

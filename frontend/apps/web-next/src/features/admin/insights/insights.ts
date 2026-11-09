@@ -1,6 +1,6 @@
 import { queryOptions } from "@tanstack/react-query";
 import type { EneoClient } from "@/lib/api/browser";
-import { unwrap } from "@/lib/api/errors";
+import { EneoApiError, unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { insightRangeParams, type InsightRange } from "@/features/insights/insights-range";
 import { isoDate, type IsoDate } from "@/lib/calendar-date";
@@ -20,18 +20,28 @@ export type AssistantInsightFilters = InsightsRange & { includeFollowups: boolea
 
 export const ASSISTANT_INSIGHT_QUESTION_LIMIT = 100;
 
-/** Logs are loaded only while their details dialog is mounted. Backend resource access stays authoritative. */
+/**
+ * Logs are loaded only while their details dialog is mounted. Backend resource access stays authoritative.
+ * `null`: the question has no log. It was not logged, or its log was emptied when content was removed;
+ * the API answers 400 for both, and a retry cannot change that.
+ */
 export function questionLogQueryOptions(api: EneoClient, questionId: string) {
   return queryOptions({
     queryKey: ["admin-insights-question-log", questionId],
     gcTime: 0,
-    queryFn: ({ signal }): Promise<Schema<"MessageLogging">> =>
-      unwrap(
-        api.GET("/api/v1/logging/{message_id}/", {
-          params: { path: { message_id: questionId } },
-          signal
-        })
-      )
+    queryFn: async ({ signal }): Promise<Schema<"MessageLogging"> | null> => {
+      try {
+        return await unwrap(
+          api.GET("/api/v1/logging/{message_id}/", {
+            params: { path: { message_id: questionId } },
+            signal
+          })
+        );
+      } catch (error) {
+        if (error instanceof EneoApiError && error.status === 400) return null;
+        throw error;
+      }
+    }
   });
 }
 

@@ -1432,6 +1432,7 @@
   "explore_conversations": "Explore conversations",
   "insights_select_conversation": "Please select a conversation.",
   "insights_conversation_no_messages": "This conversation does not have any messages.",
+  "insights_question_no_log": "This question has no log. It was not logged, or its log was emptied when content was removed.",
   "no_previous_sessions_found": "No previous sessions found",
   "show_only_10_spaces": "Show only 10 spaces",
   "show_all_spaces": "Show all {count} spaces",
