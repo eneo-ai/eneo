@@ -9,6 +9,8 @@ import { ResourceAttachmentsSection } from "./resource-attachments-section";
 vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 const api = vi.hoisted(() => ({ POST: vi.fn(), DELETE: vi.fn() }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
+const toastErrors = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/api/toast", () => ({ toastApiError: toastErrors }));
 
 afterEach(() => {
   cleanup();
@@ -320,6 +322,31 @@ it("keeps existing files unchanged while a native upload is pending", async () =
       { id: "first", inline_text: false },
       { id: "new", inline_text: false }
     ])
+  );
+});
+
+it("names the file whose upload failed, since the server's message does not", async () => {
+  api.POST.mockRejectedValue(new Error("The file is corrupted or malformed"));
+  const { container } = renderInApp(
+    <ResourceAttachmentsSection
+      attachments={[first]}
+      allowedAttachments={{
+        ...restrictions,
+        accepted_file_types: [{ mimetype: "text/plain", extensions: [".txt"], size_limit: 1000 }]
+      }}
+      description="Files"
+      attachmentMode={attachmentMode}
+      onSave={vi.fn()}
+    />
+  );
+  fireEvent.change(container.querySelector('input[type="file"]')!, {
+    target: { files: [new File(["test"], "new.txt", { type: "text/plain" })] }
+  });
+
+  await waitFor(() =>
+    expect(toastErrors).toHaveBeenCalledExactlyOnceWith(expect.any(Error), expect.any(Function), {
+      fileName: "new.txt"
+    })
   );
 });
 

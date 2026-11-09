@@ -387,8 +387,10 @@ export function ResourceAttachmentsSection({
 
     if (!beginOperation("upload")) return;
     const added: Attachment[] = [];
+    let uploading: File | undefined;
     try {
       for (const file of plan.accepted) {
+        uploading = file;
         const body = new FormData();
         body.append("upload_file", file);
         const uploaded = await unwrap(
@@ -409,6 +411,7 @@ export function ResourceAttachmentsSection({
           ...(attachmentMode ? { inline_text: false } : {})
         });
       }
+      uploading = undefined;
       if (added.length > 0) {
         const previous = files;
         const next = [...previous, ...added];
@@ -417,7 +420,7 @@ export function ResourceAttachmentsSection({
       }
     } catch (error) {
       if (added.length > 0) void deleteUploadedFiles(added);
-      toastApiError(error, t);
+      toastApiError(error, t, { fileName: uploading?.name });
     } finally {
       endOperation();
     }
