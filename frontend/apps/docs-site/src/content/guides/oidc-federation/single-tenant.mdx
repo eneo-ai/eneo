@@ -6,28 +6,40 @@ import { Callout, Steps, Tabs, Cards } from 'nextra/components'
 
 ---
 
-## Choose Your Configuration Method
+## Choose Where the Settings Live
 
 <Cards>
-  <Cards.Card title="Environment Variables" href="#environment-variable-configuration">
-    Configure via `OIDC_*` variables in the backend `.env`. Simple setup, but requires a backend restart to change settings.
+  <Cards.Card title="Settings stored in Eneo (recommended)" href="#api-configuration">
+    `FEDERATION_ENABLED=true` with `ENCRYPTION_KEY` and `ENEO_SUPER_API_KEY`. The operator registers the identity provider once through the sysadmin API. After that the organisation's administrators change the client ID, client secret and allowed email domains under **Administration › Sign-in (SSO)**, without a restart, and every change is audited.
   </Cards.Card>
-  <Cards.Card title="Sysadmin API" href="#api-configuration">
-    Configure via the federation API with `FEDERATION_ENABLED=true`. Update OIDC settings at runtime and restrict logins to specific email domains.
+  <Cards.Card title="Settings in the server configuration" href="#environment-variable-configuration">
+    `OIDC_*` variables in the backend `.env`, for configuration as code. Their shape is fixed, every change needs a restart, and administrators cannot change anything in Eneo.
   </Cards.Card>
 </Cards>
 
 <Callout type="info">
-  Not sure which to choose? Start with **Environment Variables** - it's simpler. Switch to the API later if you need runtime updates.
+  New installations should store the settings in Eneo. Existing installations keep working unchanged on upgrade; to switch, [move the settings into Eneo](#move-the-settings-into-eneo).
 </Callout>
 
-Both methods use the same login flow: the login page redirects straight to your IdP, and the IdP sends the user back to `{PUBLIC_ORIGIN}/login/callback`.
+Both modes use the same login flow: the login page redirects straight to your IdP, and the IdP sends the user back to `{PUBLIC_ORIGIN}/login/callback`.
+
+### How the two modes differ
+
+- `FEDERATION_ENABLED` alone chooses the mode. The backend reads it at startup, so changing it needs a restart. Eneo never combines the two modes or falls back from one to the other.
+- **Stored in Eneo** (`FEDERATION_ENABLED=true`): browser sign-in uses only the provider stored on the tenant. `OIDC_DISCOVERY_ENDPOINT`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` and `OIDC_ALLOWED_DOMAINS` are ignored, and the backend logs the names of any that are still set when it starts. Until the operator registers a provider, the login page offers only the username and password form.
+- **Server configuration** (`FEDERATION_ENABLED=false`, the default in code): browser sign-in uses only the `OIDC_*` variables and ignores anything stored on the tenant. The Sign-in page says that the operator manages sign-in in the server configuration.
+- Both modes use `PUBLIC_ORIGIN` for the redirect URI (a stored `canonical_public_origin` takes precedence), and the `OIDC_RESOURCE_SERVER_*`, `OIDC_ACCEPTED_*`, `OIDC_TENANT_ID` and TTL settings. Access tokens accepted with `OIDC_RESOURCE_SERVER_ENABLED` use the stored allowed domains, or `OIDC_ALLOWED_DOMAINS` when the stored list is empty.
+- Deleting the stored settings (`DELETE /api/v1/sysadmin/tenants/{tenant_id}/federation`) turns single sign-on off for the organisation. Eneo does not fall back to the `OIDC_*` variables.
+
+<Callout type="info">
+  If single sign-on stops working in either mode, people with a local password can still sign in at `/login?showUsernameAndPassword=true`. `init_db.py` creates the first owner with a local password, and password sign-in does not depend on these settings. With the settings stored in Eneo, an administrator can then correct them on the Sign-in page, or the operator through the [sysadmin API](#updating-the-api-configuration).
+</Callout>
 
 ---
 
 ## Environment Variable Configuration
 
-Use environment variables to configure OIDC. This is the default mode (`FEDERATION_ENABLED=false`) and there is no separate enable flag: OIDC is active as soon as `OIDC_DISCOVERY_ENDPOINT` and `OIDC_CLIENT_SECRET` are set.
+Use environment variables to keep the identity provider in the server configuration, for example when it is managed as code. This is the default in code (`FEDERATION_ENABLED=false`) and there is no separate enable flag: OIDC is active as soon as `OIDC_DISCOVERY_ENDPOINT`, `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET` are all set. With one of them missing, the login page offers only the username and password form.
 
 ### Prerequisites
 
@@ -160,7 +172,7 @@ To update your OIDC settings:
 1. Edit the `OIDC_*` variables in your `.env` file
 2. Restart the backend: `docker compose restart backend`
 
-If you need to change settings without restarting, use the [API configuration](#api-configuration) instead.
+If you need to change settings without restarting, use the [API configuration](#api-configuration) instead. To let the organisation's administrators change the client ID, client secret and allowed email domains themselves, [move the settings into Eneo](#move-the-settings-into-eneo).
 
 <Callout type="info">
   Set `OIDC_ALLOWED_DOMAINS` to a JSON array such as `["your-company.com"]` to restrict global OIDC logins by email domain. The default `[]` applies no domain filter to existing active members, but prevents creation of new accounts through JIT.
@@ -170,13 +182,7 @@ If you need to change settings without restarting, use the [API configuration](#
 
 ## API Configuration
 
-Configure OIDC via the sysadmin API for runtime updates without restarting the backend. This is the same mechanism as [multi-tenant federation](/guides/oidc-federation/multi-tenant), used with a single tenant.
-
-### When to use the API
-
-- You want to update OIDC settings or rotate client secrets without a restart
-- You manage configuration through automation
-- You want to restrict logins to specific email domains (`allowed_domains`)
+Store the settings in Eneo, the recommended mode for new installations. The operator registers the identity provider once through the sysadmin API; after that the organisation's administrators [change the settings in Eneo](#change-the-settings-in-eneo) without a restart. This is the same mechanism as [multi-tenant federation](/guides/oidc-federation/multi-tenant), used with a single tenant.
 
 ### Prerequisites
 
@@ -209,7 +215,7 @@ Generate an encryption key:
 uv run python -m eneo.cli.generate_encryption_key
 ```
 
-Restart the backend after setting these variables. With `FEDERATION_ENABLED=true` the `OIDC_*` variables are ignored.
+Restart the backend after setting these variables. With `FEDERATION_ENABLED=true` the `OIDC_*` sign-in variables are ignored, as described in [How the two modes differ](#how-the-two-modes-differ).
 
 ### Register your application in the IdP
 
@@ -248,6 +254,8 @@ This fetches the discovery document and checks that `issuer`, `authorization_end
 
 Visit your Eneo instance. With exactly one active tenant the login page redirects to your IdP automatically, exactly as in the environment-variable setup. If you later add a second active tenant, Eneo switches to the [multi-tenant login flow](/guides/oidc-federation/multi-tenant#tenant-resolution) (tenant selector or `?tenant={slug}`).
 
+From now on, the organisation's administrators can [change the settings in Eneo](#change-the-settings-in-eneo).
+
 </Steps>
 
 ### Updating the API configuration
@@ -276,6 +284,61 @@ curl "https://your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/federation" \
 <Callout type="info">
   Client secrets are never returned in GET responses - they're masked for security.
 </Callout>
+
+---
+
+## Change the settings in Eneo
+
+With the settings stored in Eneo, the organisation's administrators open **Administration › Sign-in (SSO)**. The page always applies to their own organisation.
+
+- **Shown, set by the operator:** the discovery URL, issuer, redirect URIs (each with a copy button, to register at the identity provider), scopes and client authentication method. The operator changes the discovery URL and the redirect settings through the [sysadmin API](#configure-via-api); the issuer and client authentication method come from the provider's discovery document, and the scopes are Eneo's defaults.
+- **Changed by the administrator:** the provider's display name, client ID, client secret and allowed email domains, one per line. The secret is never shown: the page says when it was saved, and **Replace secret** opens an empty field. Under the domains the page says whether new accounts are created at first sign-in ([JIT](#user-provisioning)) and links to that setting on the administration overview.
+
+Next to **Save changes** the page names the settings changed but not saved, and **Undo changes** restores the saved values. Saving asks for confirmation:
+
+- A new display name only is confirmed plainly: it appears in the [audit log](/guides/audit-logging) and does not change sign-in.
+- A new client ID, secret or domain list is flagged, because a wrong value can stop people signing in through SSO, and the confirmation says what each change does. A new client ID can cut people off from their existing accounts: Eneo finds an account by the email address the identity provider sends, so the new client must send the same email address for each person. Replacing the secret is the routine change. A new secret must already be valid at the identity provider. For the domains it names the ones added and removed: removed domains can no longer sign in, and active accounts in added ones can, and where [JIT](#user-provisioning) is on, a person there with a verified email address gets an account at first sign-in. A first list refuses everyone outside it and lets JIT create accounts inside it; an empty list checks no domain, so every active member can sign in, and JIT creates no accounts.
+
+Each saved change is written to the audit log. The change applies from the next sign-in, and people already signed in stay signed in; after a change to who can sign in, the page suggests trying SSO in a private window before signing out. If another administrator saved in the meantime, the save is refused and the page offers to load their values.
+
+While sign-in is configured with `OIDC_*` variables, the page only says that the operator manages it in the server configuration, and links to [Move the settings into Eneo](#move-the-settings-into-eneo).
+
+## Move the settings into Eneo
+
+Nothing changes on upgrade: an installation configured with `OIDC_*` variables keeps signing in the same way. Moving the settings into Eneo, so that administrators can [change them themselves](#change-the-settings-in-eneo), is a manual step that the operator runs once; Eneo never runs it at startup.
+
+<Steps>
+### Turn on federation mode
+
+Set `FEDERATION_ENABLED=true` and `ENCRYPTION_KEY` as in [Enable federation mode](#enable-federation-mode), keep the `OIDC_*` variables, and restart the backend. OIDC sign-in has no configuration until the next step has run.
+
+### Run the move
+
+From `backend/`, with the backend's environment:
+
+```bash
+uv run python scripts/migrate_env_oidc_to_tenant_federation.py
+```
+
+The move stores the settings through the same checks, encryption and audit as the [sysadmin API](#configure-via-api), but never contacts the identity provider: sign-in reads the issuer and endpoints from the discovery document, as it did with the `OIDC_*` variables, so the move also works while the provider is unreachable. `Federation migration applied.` means that `OIDC_DISCOVERY_ENDPOINT`, `OIDC_CLIENT_ID`, the encrypted `OIDC_CLIENT_SECRET` and `OIDC_ALLOWED_DOMAINS` are stored on the only active tenant, with any redirect origin or path it already had, and the change is in the audit log. The same people can sign in, and JIT creates accounts for the same domains, as before. The provider's display name starts as `default`.
+
+`Federation migration skipped.` means nothing changed: federation is off, an `OIDC_*` value is missing, there is not exactly one active tenant, or the tenant already has a federation configuration.
+
+`Federation migration failed:` stores nothing and says why, never with the client secret: a value is refused as it would be by the API, for example a client secret shorter than 8 characters or an invalid domain, or other settings were stored while the move ran.
+
+### Check sign-in
+
+Sign in through your IdP. The `OIDC_*` sign-in variables are now ignored and can be removed.
+
+</Steps>
+
+### Check a move made with an earlier version
+
+Earlier versions of the move did not copy `OIDC_ALLOWED_DOMAINS`, so the stored domain list stayed empty: existing members could still sign in, but JIT stopped creating accounts. Running the move again does not repair this, because a tenant with settings is skipped. Check it by hand:
+
+1. Read the stored list, under **Administration › Sign-in (SSO)** or with `GET /api/v1/sysadmin/tenants/{tenant_id}/federation` (`allowed_domains`).
+2. Compare it with `OIDC_ALLOWED_DOMAINS` in the backend's environment, if you still have it.
+3. If the stored list is empty and should not be, enter the domains on the Sign-in page or send them with [`PATCH`](#updating-the-api-configuration). Leave a list that an administrator has changed since the move; Eneo never changes it for you.
 
 ---
 
@@ -326,7 +389,7 @@ For push-based provisioning from your directory (deactivation, groups), see [SCI
 | `OIDC_DISCOVERY_ENDPOINT` | Yes (env method) | IdP's OIDC discovery URL |
 | `OIDC_CLIENT_ID` | Yes (env method) | OAuth client ID |
 | `OIDC_CLIENT_SECRET` | Yes (env method) | OAuth client secret |
-| `FEDERATION_ENABLED` | - | `false` (default) uses the `OIDC_*` variables; `true` uses the API configuration. `FEDERATION_PER_TENANT_ENABLED` is a deprecated alias |
+| `FEDERATION_ENABLED` | - | `true` (recommended for new installations) uses the settings stored in Eneo; `false` (default in code) uses the `OIDC_*` variables. Read at startup, so a change needs a restart. `FEDERATION_PER_TENANT_ENABLED` is a deprecated alias |
 | `ENCRYPTION_KEY` | Yes (API method) | Fernet key for encrypting secrets |
 | `ENEO_SUPER_API_KEY` | Yes (API method) | API key for the sysadmin endpoints, sent as `X-API-Key` |
 

@@ -519,9 +519,9 @@ From `config.py`:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `federation_enabled` (`FEDERATION_ENABLED`) | `false` | `false`: IdP from `OIDC_*` env vars; `true`: per-tenant config via the sysadmin API |
+| `federation_enabled` (`FEDERATION_ENABLED`) | `false` | The only mode selector, read at startup. `true` (recommended for new installations): the IdP settings stored on the tenant, registered through the sysadmin API and changed by administrators under **Administration › Sign-in (SSO)**; the `OIDC_*` sign-in settings are ignored and logged by name at startup. `false`: the IdP from the `OIDC_*` env vars. There is no fallback between the modes |
 | `federation_per_tenant_enabled` (`FEDERATION_PER_TENANT_ENABLED`) | - | Deprecated alias for `FEDERATION_ENABLED`; logs a warning at startup, `FEDERATION_ENABLED` wins when both are set |
-| `oidc_discovery_endpoint`, `oidc_client_id`, `oidc_client_secret` | - | Global IdP used when `FEDERATION_ENABLED=false`; active when discovery endpoint and client secret are both set |
+| `oidc_discovery_endpoint`, `oidc_client_id`, `oidc_client_secret` | - | Global IdP used when `FEDERATION_ENABLED=false`; active when the discovery endpoint, client ID and client secret are all set (`has_env_oidc_client`) |
 | `oidc_allowed_domains` (`OIDC_ALLOWED_DOMAINS`) | `[]` | Global OIDC email-domain restriction; non-empty and matching domains are required for JIT |
 | `public_origin` (`PUBLIC_ORIGIN`) | - | Origin used to build `redirect_uri` when the tenant has no `canonical_public_origin`; must be `https://` (or `http://localhost`) without a path |
 | `encryption_key` (`ENCRYPTION_KEY`) | - | Fernet key; required when `FEDERATION_ENABLED=true` |
@@ -545,7 +545,7 @@ All paths are relative to `/api/v1/sysadmin` and return `404 Federation is not e
 | `PUT` | `/tenants/{tenant_id}/federation` | Provide a complete config (replaces the current one) |
 | `PATCH` | `/tenants/{tenant_id}/federation` | Update individual fields of an existing config |
 | `GET` | `/tenants/{tenant_id}/federation` | View config (secrets masked) |
-| `DELETE` | `/tenants/{tenant_id}/federation` | Remove config |
+| `DELETE` | `/tenants/{tenant_id}/federation` | Remove config; turns single sign-on off for the tenant (no fallback to `OIDC_*`) |
 | `POST` | `/tenants/{tenant_id}/federation/test` | Test IdP discovery endpoint |
 
 **Authentication:** `X-API-Key` header with the super admin API key (`ENEO_SUPER_API_KEY`).
