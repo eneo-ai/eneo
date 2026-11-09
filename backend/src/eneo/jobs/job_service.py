@@ -161,21 +161,15 @@ class JobService:
 
         return await self.job_repo.update_job(job_id, job_update)
 
-    async def fail_job(
-        self,
-        job_id: UUID,
-        error_message: str | None = None,
-        *,
-        failure_code: JobFailureCode | None = None,
-    ):
+    async def fail_job(self, job_id: UUID, *, failure_code: JobFailureCode):
+        """Store a failure as its code, never its text: an error can quote what
+        the job worked on. Both apps explain the code."""
         job_update = JobUpdate(
             status=Status.FAILED,
             finished_at=datetime.now(timezone.utc),
-            result_location=error_message,
+            result_location=None,
+            failure_code=failure_code,
         )
-        if failure_code is not None:
-            job_update.failure_code = failure_code
-
         return await self.job_repo.update_job(job_id, job_update)
 
     async def get_running_jobs(self):

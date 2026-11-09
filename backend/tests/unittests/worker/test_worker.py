@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections.abc import Callable
 from typing import Any
 from unittest.mock import AsyncMock
@@ -6,9 +7,12 @@ from uuid import uuid4
 
 import pytest
 from arq.worker import Function, create_worker
+from sqlalchemy.exc import IntegrityError
 
 from eneo.jobs.job_manager import CRAWLER_QUEUE_NAME, DEFAULT_QUEUE_NAME
+from eneo.jobs.job_models import JobFailureCode
 from eneo.main.config import get_settings
+from eneo.main.exceptions import TenantQuotaExceededException
 from eneo.websites.application.crawl_dispatch import CrawlReconciliationResult
 from eneo.worker import arq as worker_arq
 from eneo.worker import routes as worker_routes
@@ -306,19 +310,15 @@ async def test_commit_failure_records_the_job_failure_in_a_fresh_session(
 
     # The task body succeeded inside the transaction that was then lost...
     task_job_service.complete_job.assert_awaited_once_with(job_id, "done")
-    # ...so the failure is written where it survives.
+    # ...so the failure is written where it survives, as its code.
     recovery_container.job_service.return_value.fail_job.assert_awaited_once_with(
-        job_id, "storage quota exceeded"
+        job_id, failure_code=JobFailureCode.PROCESSING_FAILED
     )
 
 
-async def test_commit_failure_is_recorded_without_the_statement(monkeypatch) -> None:
-    """The recorded text is served to users as the failure message of an
-    integration task, so a database error must not carry its SQL."""
+def _recovery_worker(monkeypatch, job_service: AsyncMock):
     from types import SimpleNamespace
     from unittest.mock import MagicMock
-
-    from sqlalchemy.exc import IntegrityError
 
     from eneo.worker import worker as worker_module
 
@@ -330,21 +330,75 @@ async def test_commit_failure_is_recorded_without_the_statement(monkeypatch) -> 
         SimpleNamespace(session=lambda: _AsyncContext(db)),
     )
     container = MagicMock()
-    container.job_service.return_value = AsyncMock()
+    container.job_service.return_value = job_service
     worker = worker_module.Worker()
 
     async def create_container(session, user_id=None):
         return container
 
     monkeypatch.setattr(worker, "_create_container", create_container)
-    error = IntegrityError(
-        "INSERT INTO info_blobs (title) VALUES (%(title)s)",
-        {"title": "Lönelista 2026"},
-        Exception("duplicate key"),
+    return worker
+
+
+@pytest.mark.parametrize(
+    ("error", "code"),
+    [
+        pytest.param(
+            IntegrityError(
+                "INSERT INTO info_blobs (title) VALUES (%(title)s)",
+                {"title": "Lönelista 2026"},
+                Exception("duplicate key"),
+            ),
+            JobFailureCode.PROCESSING_FAILED,
+            id="database",
+        ),
+        pytest.param(
+            TenantQuotaExceededException("Lönelista 2026 does not fit"),
+            JobFailureCode.TENANT_QUOTA_EXCEEDED,
+            id="quota",
+        ),
+    ],
+)
+async def test_a_commit_failure_is_recorded_as_its_code_without_text(
+    monkeypatch, error: Exception, code: JobFailureCode
+) -> None:
+    """A commit error can carry SQL with bound values; the job record keeps
+    only the failure code, which both apps explain."""
+    job_service = AsyncMock()
+    worker = _recovery_worker(monkeypatch, job_service)
+    job_id = uuid4()
+
+    await worker._fail_job_after_commit_error(job_id, None, error)
+
+    job_service.fail_job.assert_awaited_once_with(job_id, failure_code=code)
+
+
+async def test_a_failure_that_cannot_be_recorded_is_logged_without_its_text(
+    monkeypatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from eneo.worker import worker as worker_module
+
+    async def refused(*_, **__):
+        try:
+            raise ValueError("inner Lönelista 2026")
+        except ValueError as inner:
+            raise RuntimeError("outer Lönelista 2026") from inner
+
+    worker = _recovery_worker(monkeypatch, AsyncMock(fail_job=refused))
+    worker_module.logger.addHandler(caplog.handler)
+    try:
+        with caplog.at_level(logging.DEBUG):
+            await worker._fail_job_after_commit_error(
+                uuid4(), None, RuntimeError("commit refused: Lönelista 2026")
+            )
+    finally:
+        worker_module.logger.removeHandler(caplog.handler)
+
+    assert caplog.records
+    for record in caplog.records:
+        assert not record.exc_info and not record.stack_info, record.getMessage()
+        assert "Lönelista" not in repr(record.__dict__), record.getMessage()
+    assert any(
+        getattr(record, "error_type", None) == "RuntimeError <- ValueError"
+        for record in caplog.records
     )
-
-    await worker._fail_job_after_commit_error(uuid4(), None, error)
-
-    container.job_service.return_value.fail_job.assert_awaited_once()
-    message = container.job_service.return_value.fail_job.await_args.args[1]
-    assert message == "Database error"
