@@ -73,6 +73,7 @@ Eneo-issued browser, internal MCP and module tokens share one identity contract:
 | `tenant_id` | UUID of the account's organization when the token was issued |
 | `credential_version` | Required integer matching the account's current credential version |
 | `auth_method` | `password` when the session started with the local password login; absent for federated and exchanged sessions |
+| `session_ref` | Optional stable id of the [server-side session](#server-side-sessions) the token belongs to: a lowercase UUID. A session token carries it beside `sid`; an internal MCP or module token minted in a browser session carries it alone, and a module token refresh keeps it. Without a session the claim is absent, never null |
 | `iss`, `aud`, `iat`, `exp` | Required issuer, audience, issue time and expiry |
 | `sub`, `username` | Email and optional display name; never used to select the account |
 
@@ -109,7 +110,8 @@ authenticates, as the cookie or as Bearer, only while the session exists.
 - **Expired sessions** admit nothing; a nightly job deletes them.
 - **No session**: provider access tokens, API keys, system tokens, and
   internal MCP and module tokens. They work as before, and sign-out does not
-  affect them.
+  affect them. An internal MCP or module token minted in a browser session
+  names that session (`session_ref`), but signing out does not end it.
 
 An API client that signs in with `POST /api/v1/users/login/token/` holds a
 session token as well. `POST /api/v1/users/logout/`, with that token as

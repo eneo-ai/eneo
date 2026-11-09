@@ -1042,6 +1042,7 @@ def patch_auth_service_jwt(monkeypatch, test_settings):
         expires_in: float | None = None,
         extra_claims: dict[str, object] | None = None,
         auth_method=None,
+        derived_from=None,
     ) -> str:
         return original_create_token(
             self,
@@ -1053,6 +1054,7 @@ def patch_auth_service_jwt(monkeypatch, test_settings):
             else test_settings.jwt_expiry_time,
             extra_claims=extra_claims,
             auth_method=auth_method,
+            derived_from=derived_from,
         )
 
     def patched_get_jwt_payload(

@@ -38,6 +38,10 @@ def auth_service(monkeypatch):
     return AuthService()
 
 
+def _raw_claims(token: str) -> dict[str, object]:
+    return jwt.decode(token, options={"verify_signature": False})
+
+
 async def test_can_create_access_token_successfully(auth_service: AuthService):
     access_token = auth_service.create_access_token_for_user(
         user=TEST_USER,
@@ -549,6 +553,45 @@ async def test_scoped_mcp_token_is_not_a_session(session_service):
     )
     with pytest.raises(AuthenticationException):
         await service.authenticate(token=token)
+
+
+async def test_an_mcp_token_minted_in_a_browser_session_carries_its_session_ref(
+    session_service,
+):
+    service, users = session_service
+    users[TEST_USER.id] = TEST_USER
+    ref = uuid4()
+    auth = service.auth_service
+
+    token = auth.create_scoped_mcp_token(
+        TEST_USER,
+        assistant_id=uuid4(),
+        derived_from=CredentialFacts(kind="browser_session", session_ref=ref),
+    )
+
+    assert _raw_claims(token)["session_ref"] == str(ref)
+    user = await service.authenticate_internal_mcp_token(token)
+    assert user.credential == CredentialFacts(kind="derived", session_ref=ref)
+    # One minted with an API key names no session: the claim is absent.
+    keyed = auth.create_scoped_mcp_token(
+        TEST_USER, assistant_id=uuid4(), derived_from=CredentialFacts(kind="api_key")
+    )
+    assert "session_ref" not in _raw_claims(keyed)
+
+
+async def test_an_mcp_token_without_a_session_has_no_session_ref(session_service):
+    service, users = session_service
+    users[TEST_USER.id] = TEST_USER
+    assistant_id = uuid4()
+
+    token = service.auth_service.create_scoped_mcp_token(
+        TEST_USER, assistant_id=assistant_id
+    )
+
+    assert "session_ref" not in _raw_claims(token)
+    assert assistant_id_from_token(token) == assistant_id
+    user = await service.authenticate_internal_mcp_token(token)
+    assert user.credential == CredentialFacts(kind="derived")
 
 
 async def test_session_token_is_not_a_scoped_mcp_token(session_service):
