@@ -372,7 +372,7 @@ unavailable.
 | `no_execution` | The task has no execution record |
 | `no_overdue_snapshot` | The task reports overdue work but no execution has written a snapshot |
 | `latest_outcome`, `error_code`, `blocked_reasons` | From the latest execution; blocked reasons read `<step>.<reason>` |
-| `limiting_settings` | Settings whose limit kept due data in the latest execution, for example `retention_conversations_max_unit_rows` for `unit_exceeds_budget`; raising it lets a later execution remove the data |
+| `limiting_settings` | Settings whose limit kept due data in the latest execution, for example `retention_conversations_max_unit_rows` for `unit_exceeds_budget`; raising the named settings lets a later execution remove the data |
 
 `error_code` names why an execution did not succeed:
 

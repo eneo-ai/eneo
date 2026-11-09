@@ -494,17 +494,31 @@ async def test_a_question_is_charged_for_each_log_its_removal_clears(
     assert await cost(second) == 2
 
 
+@pytest.mark.parametrize(
+    "files_per_run,limiting",
+    [
+        pytest.param(None, ("retention_conversations_max_unit_rows",), id="rows"),
+        pytest.param(
+            1,
+            ("retention_conversations_max_unit_rows", "retention_max_files_per_run"),
+            id="rows and files",
+        ),
+    ],
+)
 async def test_a_question_whose_later_logs_exceed_the_unit_budget_is_kept_and_named(
     client: AsyncClient,
     db_container,
     admin_user: UserInDB,
     owner_token: str,
     retention_session: AsyncSession,
+    files_per_run: int | None,
+    limiting: tuple[str, ...],
 ):
     """Logs are cleared in the unit that removes the question, never in
     batches: access to their content ends with it. A question whose later logs
-    do not fit the unit is kept, and health names the setting to raise.
-    Mutants: the question is removed past the budget; health names nothing."""
+    do not fit the unit is kept, and health names the settings to raise.
+    Mutants: the question is removed past the budget; health names nothing, or
+    only one of two settings."""
     assistant_id = await _insight_assistant(client, owner_token)
     first, *_ = await _logged_conversation(
         db_container,
@@ -513,9 +527,11 @@ async def test_a_question_whose_later_logs_exceed_the_unit_budget_is_kept_and_na
         turns=[(f"question {turn}", f"answer {turn}") for turn in range(4)],
     )
     await _make_due(retention_session, assistant_id, first)
-    small = get_settings().model_copy(
-        update={"retention_conversations_max_unit_rows": 4}
-    )
+    update: dict[str, int] = {"retention_conversations_max_unit_rows": 4}
+    if files_per_run is not None:
+        # Three rows per file fund less than the unit, so health names both.
+        update["retention_max_files_per_run"] = files_per_run
+    small = get_settings().model_copy(update=update)
 
     report = await run_registered_retention(retention_session, settings=small)
 
@@ -525,7 +541,7 @@ async def test_a_question_whose_later_logs_exceed_the_unit_budget_is_kept_and_na
     [history] = [
         task for task in health.tasks if task.name == CONVERSATION_HISTORY_TASK
     ]
-    assert history.limiting_settings == ("retention_conversations_max_unit_rows",)
+    assert history.limiting_settings == limiting
 
 
 @pytest.mark.parametrize(
