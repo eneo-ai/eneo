@@ -7642,5 +7642,8 @@
   "shell_top_nav_label": "Main areas",
   "show_header": "Show header",
   "shell_space_nav_label": "Space menu",
-  "shell_palette_catalog": "All assistants and apps"
+  "shell_palette_catalog": "All assistants and apps",
+  "federation_admin_saving_leave_title": "Still saving",
+  "federation_admin_saving_leave_description": "The save continues if you leave, but you will not see whether it succeeds.",
+  "federation_admin_saving_leave_confirm": "Leave page"
 }

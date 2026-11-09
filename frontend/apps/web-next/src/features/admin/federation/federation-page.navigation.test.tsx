@@ -109,15 +109,18 @@ it("keeps the edits while a save is under way, so a failed save can be tried aga
   await act(async () => {
     void router.navigate({ to: "/admin/settings" });
   });
-  await screen.findByRole("alertdialog", { name: sv.unsaved_navigation_title });
+  // The save is already sent: the dialog says it keeps running, not that the edits are lost.
+  const leave = await screen.findByRole("alertdialog", {
+    name: sv.federation_admin_saving_leave_title
+  });
+  expect(leave.textContent).toContain(sv.federation_admin_saving_leave_description);
+  expect(leave.textContent).not.toContain(sv.unsaved_navigation_description);
+  expect(
+    within(leave).getByRole("button", { name: sv.federation_admin_saving_leave_confirm })
+  ).toBeTruthy();
   expect(router.state.location.pathname).toBe("/admin/federation");
   await act(async () => {
-    fireEvent.click(
-      within(screen.getByRole("alertdialog", { name: sv.unsaved_navigation_title })).getByRole(
-        "button",
-        { name: "Avbryt" }
-      )
-    );
+    fireEvent.click(within(leave).getByRole("button", { name: "Avbryt" }));
   });
   await act(async () => fail());
 

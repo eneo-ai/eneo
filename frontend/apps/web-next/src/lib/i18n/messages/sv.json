@@ -7642,5 +7642,8 @@
   "shell_top_nav_label": "Huvudområden",
   "show_header": "Visa sidhuvudet",
   "shell_space_nav_label": "Ytans meny",
-  "shell_palette_catalog": "Alla assistenter och appar"
+  "shell_palette_catalog": "Alla assistenter och appar",
+  "federation_admin_saving_leave_title": "Sparningen pågår",
+  "federation_admin_saving_leave_description": "Sparningen fortsätter även om du lämnar sidan, men då ser du inte om den lyckas.",
+  "federation_admin_saving_leave_confirm": "Lämna sidan"
 }

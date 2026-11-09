@@ -510,8 +510,17 @@ function FederationForm({
           ) : null}
         </div>
       </ConfirmDialogControlled>
-      {/* Until the save's outcome is known: a failed save keeps the draft to try again. */}
-      <LeaveConfirmation active={changed.length > 0 || save.isPending} />
+      {/* Until the save's outcome is known: a failed save keeps the draft to try again.
+          A save already sent finishes either way, so then the dialog says that instead.
+          Staying returns focus to Save: the dialog may have opened from the save
+          dialog's button, which a failed save removes meanwhile. */}
+      <LeaveConfirmation
+        active={changed.length > 0 || save.isPending}
+        onStay={() => rescueFocus(() => saveRef.current)}
+        title={save.isPending ? t("federation_admin_saving_leave_title") : undefined}
+        description={save.isPending ? t("federation_admin_saving_leave_description") : undefined}
+        confirmLabel={save.isPending ? t("federation_admin_saving_leave_confirm") : undefined}
+      />
     </>
   );
 }
