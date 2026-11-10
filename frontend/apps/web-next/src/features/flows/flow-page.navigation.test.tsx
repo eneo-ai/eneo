@@ -211,10 +211,8 @@ it("adds the first step from the empty list and puts focus on it", async () => {
   await renderPage();
   await click("Lägg till steg");
   const dialog = await screen.findByRole("dialog", { name: "Lägg till steg" });
-  await within(dialog).findByRole("radio", { name: new RegExp(messages.flow_step_editor_kind_ai) });
-  fireEvent.click(
-    within(dialog).getByRole("button", { name: messages.flow_step_editor_add_submit })
-  );
+  await within(dialog).findByRole("radio", { name: "Sammanfatta" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till Sammanfatta" }));
   const open = await screen.findByRole("button", { name: "Redigera Steg 1: Sammanfatta" });
   await waitFor(() => expect(document.activeElement).toBe(open));
 });

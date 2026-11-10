@@ -26,13 +26,14 @@ test(
     const flowUrl = page.url();
     await page.getByRole("button", { name: "Lägg till steg", exact: true }).first().click();
     const add = page.getByRole("dialog", { name: "Lägg till steg", exact: true });
-    await add.getByRole("radio", { name: "Sätt ihop text utan AI", exact: true }).check();
-    await add.getByRole("textbox", { name: /^Stegnamn/ }).fill("Manuellt steg");
-    await add.getByRole("button", { name: "Lägg till steget", exact: true }).click();
+    await add.getByRole("radio", { name: "Sätt ihop text", exact: true }).check();
+    await add.getByRole("button", { name: "Lägg till Sätt ihop text", exact: true }).click();
     await expect(add).toBeHidden();
-    await page.getByRole("button", { name: /Redigera.*Manuellt steg/ }).click();
+    // The step is named after its kind; the editor renames it.
+    await page.getByRole("button", { name: /Redigera.*Sätt ihop text/ }).click();
     const editorName = page.getByRole("textbox", { name: /^Stegnamn/ });
-    await expect(editorName).toHaveValue("Manuellt steg");
+    await expect(editorName).toHaveValue("Sätt ihop text");
+    await editorName.fill("Manuellt steg");
     await page
       .getByRole("textbox", { name: /^Egen text till steget/ })
       .fill("Det manuella flödet fungerar.");

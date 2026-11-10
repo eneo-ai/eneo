@@ -489,7 +489,7 @@ describe("suggestionText with the draft's steps", () => {
       }),
       "Modellen sätter bara ihop texten som steget får",
       "I 3 av de 4 senaste körningarna var 96\u00a0% av stegets svar hämtat ord för ord ur " +
-        "underlaget, med bara lite egen text. Ett steg av typen ”Sätt ihop text utan AI” kan " +
+        "underlaget, med bara lite egen text. Ett steg av typen ”Sätt ihop text” kan " +
         "göra samma sak utan modell"
     ],
     [

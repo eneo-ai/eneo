@@ -27,26 +27,9 @@ export type NewStepOptions = {
   format?: DocumentFormat;
   url?: string;
   tool?: { mcp_server_id: string; tool_id: string; arguments: Record<string, unknown> } | null;
-  /** The instruction the step's AI starts with (`starterInstructionKey`). */
+  /** The instruction the step's AI starts with (a task's `prompt`, step-tasks.ts). */
   prompt?: string;
 };
-
-/**
- * The catalog key of the instruction a new step of this kind starts with, the
- * starters of the Svelte step picker (`flowStepTemplates.ts`): an AI step
- * summarizes text and writes text from the JSON of the step before it, a step
- * that answers in a fixed format extracts the details. Kinds without AI, and
- * the speaker and outbound HTTP kinds, which had no starter, get none.
- */
-export function starterInstructionKey(
-  option: Pick<StepKindOption, "kind" | "configuration">
-): string | null {
-  if (option.kind === "structured") return "flow_template_extract_prompt";
-  if (option.kind !== "ai") return null;
-  return option.configuration.input_type === "json"
-    ? "flow_template_render_text_prompt"
-    : "flow_template_summarize_prompt";
-}
 
 /** The option of `kind` at `place`, or null when the place does not offer it. */
 export function kindOption(

@@ -526,7 +526,7 @@ export function suggestionText(
         explanation: t("flow_suggestion_deterministic_candidate_explanation", {
           ...heldRuns(params),
           share: numberOr(params.output_verbatim_ratio, 0),
-          kind: t("flow_step_editor_kind_compose")
+          kind: t("flow_add_step_compose")
         })
       };
     // Measured against what the model catalogue knows, only with `runs`.
