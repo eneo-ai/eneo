@@ -705,3 +705,120 @@ async def test_a_disabled_frequent_task_is_not_probed(
     [task] = (await _health()).tasks
 
     assert (task.status, task.disabled) == (RetentionHealthStatus.DISABLED, True)
+
+
+class _Held(_DueItems):
+    """Keeps its one due item under a hold, reported as an observation."""
+
+    observation_keys = frozenset({"held"})
+
+    async def _remove(self, batch: RetentionBatch) -> RetentionStepResult:
+        return RetentionStepResult(
+            rows=1,
+            effects=(RetentionTenantEffect(tenant_id=None, counts={"held": 1}),),
+            exhausted=True,
+        )
+
+
+class _Stuck(_DueItems):
+    """Keeps its one due item for a blocked reason that is not 'not due'."""
+
+    blocked_keys = frozenset({"stuck"})
+
+    async def _remove(self, batch: RetentionBatch) -> RetentionStepResult:
+        return RetentionStepResult(rows=1, blocked={"stuck": 1}, exhausted=True)
+
+
+async def _read_back(
+    monkeypatch: pytest.MonkeyPatch, registration: RetentionTaskRegistration
+) -> tuple[bool, list[str]]:
+    """The readback's retention verdict over one registration, through the
+    worker's own run; the object store's part is outside this test."""
+    from eneo.main import retention_readback
+
+    def registrations(
+        settings: Settings, *, now: datetime | None = None
+    ) -> tuple[RetentionTaskRegistration, ...]:
+        return (registration,)
+
+    async def storage_confirmed(emit: Callable[[str], None]) -> bool:
+        return True
+
+    for module in (retention_readback, retention_worker):
+        monkeypatch.setattr(module, "retention_task_registrations", registrations)
+    monkeypatch.setattr(retention_readback, "_read_back_storage", storage_confirmed)
+    lines: list[str] = []
+    complete = await retention_readback.read_back_retention(emit=lines.append)
+    return complete, lines
+
+
+async def test_the_readback_runs_a_frequent_task_with_nothing_due(
+    test_tenant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The readback runs every task through the nightly path, so a frequent
+    task with nothing due still reports a finished pass.
+
+    Mutant: the readback asks the probe, gets no report and fails."""
+    now = await _database_now()
+    await _items("tests.quiet", 1, finished=now)
+
+    complete, lines = await _read_back(
+        monkeypatch,
+        _frequent("tests.quiet", lambda s: _DueItems(s, "tests.quiet", now=now)),
+    )
+
+    assert complete, lines
+    assert await _left("tests.quiet") == 1
+
+
+async def test_a_hold_is_an_observation_that_the_readback_accepts(
+    test_tenant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Held content stays and is counted on the job row; it does not fail the
+    readback.
+
+    Mutant: a hold is reported as a blocked reason, audited per chunk and
+    failing every readback while it lasts."""
+    now = await _database_now()
+    await _items("tests.held", 1, finished=now - 2 * _AFTER)
+
+    complete, lines = await _read_back(
+        monkeypatch,
+        _frequent("tests.held", lambda s: _Held(s, "tests.held", now=now)),
+    )
+
+    assert complete, lines
+    async with _committed() as session:
+        counts = await session.scalar(
+            sa.select(RetentionJobRuns.counts)
+            .where(RetentionJobRuns.task == "tests.held")
+            .order_by(RetentionJobRuns.started_at.desc())
+            .limit(1)
+        )
+    assert counts == {"items.held": 1}
+
+
+@pytest.mark.parametrize("case", ["blocked", "disabled"])
+async def test_the_readback_still_fails_on_blocked_or_turned_off_work(
+    test_tenant, monkeypatch: pytest.MonkeyPatch, case: str
+) -> None:
+    """Mutants: a reason the task does not declare as not due is accepted; a
+    turned-off task, which leaves its due work in place, is accepted."""
+    now = await _database_now()
+    await _items("tests.stuck", 1, finished=now - 2 * _AFTER)
+
+    complete, lines = await _read_back(
+        monkeypatch,
+        _frequent(
+            "tests.stuck",
+            lambda s: _Stuck(s, "tests.stuck", now=now),
+            enabled=case != "disabled",
+        ),
+    )
+
+    assert not complete
+    assert lines[-1] == (
+        "  tests.stuck: blocked items.stuck 1"
+        if case == "blocked"
+        else "  tests.stuck: skipped (disabled_by_deployment_setting)"
+    )
