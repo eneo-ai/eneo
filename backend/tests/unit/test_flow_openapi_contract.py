@@ -58,10 +58,11 @@ from tests.unit.api_key_test_utils import flatten_routes
 FLOW_SETTINGS_PATH_PREFIX = "/api/v1/settings/flow-"
 
 
-def test_create_run_documents_live_transcript_binding_conflict(openapi_spec):
+def test_a_live_transcript_that_cannot_be_bound_does_not_refuse_the_run(openapi_spec):
     operation = openapi_spec["paths"]["/api/v1/flows/{id}/runs/"]["post"]
-    response = operation["responses"]["409"]
-    assert "flow_run_live_transcript_already_bound" in str(response)
+    assert "409" not in operation["responses"]
+    step = openapi_spec["components"]["schemas"]["FlowRunStepPublic"]["properties"]
+    assert "not_received" in str(step["live_fallback_reason"])
 
 
 def test_text_processing_contract_fields_are_typed(openapi_spec):
@@ -772,7 +773,7 @@ REQUIRED_ERROR_RESPONSES: dict[tuple[str, str], set[str]] = {
     (
         "/api/v1/flows/{id}/runs/",
         "post",
-    ): {"400", "403", "404", "409", "422"},
+    ): {"400", "403", "404", "422"},
     (
         "/api/v1/flows/{id}/runs/{run_id}/steps/",
         "get",
@@ -3138,7 +3139,13 @@ def test_openapi_flow_run_create_schema_documents_step_file_routing(
     create_properties = schemas.get("FlowRunCreateRequest", {}).get("properties", {})
     step_run_input = schemas.get("StepRunInput", {}).get("properties", {})
 
-    assert set(step_run_input) == {"file_ids", "live_transcript_id", "single_recording"}
+    assert set(step_run_input) == {
+        "file_ids",
+        "live_transcript_id",
+        "single_recording",
+        "streamed",
+    }
+    assert "streamed" in step_run_input["live_transcript_id"]["description"]
     assert "one recording" in step_run_input["single_recording"]["description"]
     assert {"type": "string", "format": "uuid"} in step_run_input["live_transcript_id"][
         "anyOf"

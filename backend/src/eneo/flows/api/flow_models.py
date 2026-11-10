@@ -90,6 +90,7 @@ from eneo.flows.domain.flow_step_attempt_input import (
     attempt_tool_call_state,
     parse_flow_step_attempt_input,
 )
+from eneo.flows.domain.live_fallback import LiveFallbackReason
 from eneo.flows.domain.long_material import LongMaterialConfig, LongMaterialCoverage
 from eneo.flows.domain.one_line_text import ONE_LINE_TEXT_MAX_CHARS
 from eneo.flows.domain.provider_call import (
@@ -1021,13 +1022,25 @@ class FlowPublic(FlowSparsePublic):
 class StepRunInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    streamed: bool = Field(
+        default=False,
+        description=(
+            "The step's audio was streamed to a live transcription session while "
+            "it was recorded, so its live text is the requested transcript. Send it "
+            "for that recording whether or not a `live_transcript_id` came back, "
+            "and only for audio steps with files. When the live text cannot be "
+            "used, the transcription model transcribes the files and the step's "
+            "result gives `live_fallback_reason`."
+        ),
+    )
     live_transcript_id: UUID | None = Field(
         default=None,
         description=(
-            "Clean live-session transcript for this step's single audio file. "
-            "It must match the run's user, flow, published version, step, and model. "
-            "Admission binds it to that file; execution uses it when timing and "
-            "decoded duration permit, otherwise it transcribes the file."
+            "The `transcript_id` of the live session that heard this step's audio; "
+            "only with `streamed`. It goes with the step's one file, or with every "
+            "part in recording order and `single_recording`. Admission binds it to "
+            "the files. A transcript that cannot be bound does not refuse the run: "
+            "the step records why in `live_fallback_reason`."
         ),
     )
     single_recording: bool = Field(
@@ -2322,6 +2335,50 @@ class FlowRunStepPublic(BaseModel):
             "Whether the run submitted this step's files as the parts of one "
             "recording (`single_recording`). Send it again when starting a new "
             "run with the same files, where the run contract offers it."
+        ),
+    )
+    transcript_origin: Literal["live", "batch"] | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "transcript_origin",
+            AliasPath("input_payload_json", "transcription", "transcript_origin"),
+        ),
+        description=(
+            "Who wrote the step's transcript, once it is written: `live` for the "
+            "text streamed while the audio was recorded, `batch` for the "
+            "transcription model. Null for a step that transcribed nothing or has "
+            "not finished transcribing."
+        ),
+    )
+    live_fallback_reason: LiveFallbackReason | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "live_fallback_reason",
+            AliasPath("input_payload_json", "transcription", "live_fallback_reason"),
+        ),
+        description=(
+            "Why the transcription model transcribes audio that was streamed "
+            "(`streamed`) instead of using its live text. Set as soon as the step "
+            "decides, so a running, failed or cancelled step has it too. "
+            "`not_received`: the run named no live transcript. `not_found`, "
+            "`already_bound`, `files_mismatch`: the run could not bind it to the "
+            "files, as it was missing or expired, bound to other files, or not one "
+            "file or every part in order. `unavailable`: the model that streamed it "
+            "is no longer available to the flow. `no_timing`: the live text has no "
+            "timing. `duration_mismatch`: the files are not the length of the audio "
+            "the session heard. Null when the audio was not streamed or its live "
+            "text was used."
+        ),
+    )
+    transcript_model_name: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "transcript_model_name",
+            AliasPath("input_payload_json", "transcription", "model"),
+        ),
+        description=(
+            "Name of the model that wrote the step's transcript, or that the step "
+            "chose to write it when `live_fallback_reason` is set."
         ),
     )
     output_payload_json: dict[str, Any] | None = None

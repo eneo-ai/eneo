@@ -8,6 +8,7 @@ from pydantic import TypeAdapter
 from typing_extensions import NotRequired, TypedDict
 
 from eneo.flows.domain.flow import FlowPersistedJsonObject
+from eneo.flows.domain.live_fallback import LiveTranscriptRefusal
 from eneo.flows.domain.step_output import FileBackedStepText, InlineTranscript
 from eneo.main.models import NOT_PROVIDED, NotProvided
 
@@ -32,7 +33,12 @@ MAX_SPEAKERS_KEY = "max_speakers"
 class StepInputFacts(TypedDict):
     """What a run settled about one step's submitted files."""
 
+    # The step's audio was streamed while it was recorded: its live text is the
+    # requested transcript.
+    streamed: NotRequired[bool]
     live_transcript_id: NotRequired[UUID]
+    # Why admission could not bind the live transcript to the step's files.
+    live_transcript_refusal: NotRequired[LiveTranscriptRefusal]
     # The step's files are the ordered parts of one recording.
     single_recording: NotRequired[bool]
     # The longest recording the step's audio was admitted under: its transcription
@@ -141,6 +147,33 @@ def read_single_recording_steps(
     )
 
 
+def read_streamed_steps(
+    input_payload_json: FlowPersistedJsonObject | None,
+) -> frozenset[UUID]:
+    return frozenset(
+        step_id
+        for step_id, facts in _read_step_input_facts(input_payload_json).items()
+        if facts.get("streamed")
+    )
+
+
+def _with_step_fact(
+    input_payload_json: FlowPersistedJsonObject | None,
+    key: str,
+    values: Mapping[UUID, object],
+) -> FlowPersistedJsonObject:
+    payload = dict(input_payload_json or {})
+    if not values:
+        return payload
+    step_facts = dict(
+        cast(dict[str, dict[str, object]], payload.get(STEP_INPUTS_KEY) or {})
+    )
+    for step_id, value in values.items():
+        step_facts[str(step_id)] = {**step_facts.get(str(step_id), {}), key: value}
+    payload[STEP_INPUTS_KEY] = step_facts
+    return payload
+
+
 def with_admitted_audio_seconds(
     input_payload_json: FlowPersistedJsonObject | None,
     admitted: Mapping[UUID, int],
@@ -148,19 +181,27 @@ def with_admitted_audio_seconds(
     """The payload with the limit each audio step was admitted under. Server
     policy, not the caller's request: it is added after the replay check and never
     enters the idempotency fingerprint."""
-    payload = dict(input_payload_json or {})
-    if not admitted:
-        return payload
-    step_facts = dict(
-        cast(dict[str, dict[str, object]], payload.get(STEP_INPUTS_KEY) or {})
-    )
-    for step_id, seconds in admitted.items():
-        step_facts[str(step_id)] = {
-            **step_facts.get(str(step_id), {}),
-            "audio_max_duration_seconds": seconds,
-        }
-    payload[STEP_INPUTS_KEY] = step_facts
-    return payload
+    return _with_step_fact(input_payload_json, "audio_max_duration_seconds", admitted)
+
+
+def with_live_transcript_refusals(
+    input_payload_json: FlowPersistedJsonObject | None,
+    refusals: Mapping[UUID, LiveTranscriptRefusal],
+) -> FlowPersistedJsonObject:
+    """The payload with why admission could not bind each refused live transcript.
+    An outcome, not the caller's request: it is added after the replay check and
+    never enters the idempotency fingerprint."""
+    return _with_step_fact(input_payload_json, "live_transcript_refusal", refusals)
+
+
+def read_live_transcript_refusals(
+    input_payload_json: FlowPersistedJsonObject | None,
+) -> dict[UUID, LiveTranscriptRefusal]:
+    return {
+        step_id: facts["live_transcript_refusal"]
+        for step_id, facts in _read_step_input_facts(input_payload_json).items()
+        if "live_transcript_refusal" in facts
+    }
 
 
 def read_admitted_audio_seconds(
@@ -200,6 +241,7 @@ def build_initial_run_input_envelope(
     max_speakers: int | None | NotProvided = NOT_PROVIDED,
     live_transcript_ids: dict[UUID, UUID] | None = None,
     single_recording_steps: frozenset[UUID] = frozenset(),
+    streamed_steps: frozenset[UUID] = frozenset(),
 ) -> FlowPersistedJsonObject:
     payload = dict(normalized_inline_payload or {})
     payload[EXPECTED_FLOW_VERSION_KEY] = flow_version
@@ -214,6 +256,8 @@ def build_initial_run_input_envelope(
         )
     for step_id in single_recording_steps:
         step_facts.setdefault(str(step_id), {})["single_recording"] = True
+    for step_id in streamed_steps:
+        step_facts.setdefault(str(step_id), {})["streamed"] = True
     if step_facts:
         payload[STEP_INPUTS_KEY] = step_facts
     return payload

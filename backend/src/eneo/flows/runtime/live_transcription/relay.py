@@ -175,6 +175,14 @@ async def relay_live_session(
                     # Without a recording id the text is shown only: the
                     # client need not wait for it once the recording ends.
                     "keeps_transcript": grant is not None and grant.keeps_transcript,
+                    # From the client's stop until the transcript is stored or
+                    # the session gives up: the final commit's send, the final
+                    # text, then its write.
+                    "finish_within_seconds": math.ceil(
+                        UPSTREAM_SEND_TIMEOUT_SECONDS
+                        + final_text_timeout_seconds
+                        + LIVE_TRANSCRIPT_WRITE_TIMEOUT_SECONDS
+                    ),
                 },
             )
             return await _run(

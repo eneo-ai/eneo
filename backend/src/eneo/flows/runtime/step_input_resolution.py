@@ -96,6 +96,7 @@ from eneo.flows.runtime.step_deadline import record_step_phase
 from eneo.flows.runtime.transcription_runtime import (
     AudioRuntimeDeps,
     AudioRuntimeRequest,
+    RecordAttemptLiveFallback,
     resolve_transcribe_and_attach_audio_input,
 )
 from eneo.flows.source_identity import RUNTIME_SOURCE_EXTRACTION_WARNINGS_FIELD
@@ -162,6 +163,7 @@ class StepInputResolutionDeps:
     variable_resolver: Any
     resolve_http_input_source_text: Callable[..., Awaitable[FlowOutsideInputResolution]]
     resolve_tool_input: ResolveToolInputFn
+    record_live_fallback: RecordAttemptLiveFallback
     file_service: FileService
     transcribers: "FlowTranscribers | None"
     flow_repo: "FlowRepository"
@@ -384,6 +386,7 @@ async def resolve_step_input(
                 transcription_call_observer=deps.transcription_call_observer,
                 stage_transcript_source=deps.stage_transcript_source,
                 stage_run_transcript=deps.stage_run_transcript,
+                record_live_fallback=deps.record_live_fallback,
             )
             record_step_phase(FlowStepPhase.TRANSCRIPTION)
             audio_resolution = await resolve_transcribe_and_attach_audio_input(

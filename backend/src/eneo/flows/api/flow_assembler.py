@@ -53,6 +53,7 @@ from eneo.flows.domain.flow import (
     FlowStep,
     FlowStepResult,
 )
+from eneo.flows.domain.flow_step_attempt_input import FlowStepAttemptLiveFallback
 from eneo.flows.domain.step_output import (
     FileBackedStepText,
     StepOutputMetadataError,
@@ -280,6 +281,7 @@ class FlowAssembler:
         runtime_input_single_recording: bool = False,
         result_files: Sequence[FlowRunStepResultFile] = (),
         transcript_source: "TranscriptSourceReference | None" = None,
+        live_fallback: FlowStepAttemptLiveFallback | None = None,
     ) -> FlowRunStepPublic:
         input_payload = result.input_payload_json
         if transcript_source is not None:
@@ -291,8 +293,20 @@ class FlowAssembler:
                     "segments_hash": transcript_source.source_hash,
                 },
             }
-        return FlowRunStepPublic.model_validate(result).model_copy(
+        step = FlowRunStepPublic.model_validate(result)
+        # Until the transcript is written, the decision the current attempt
+        # stored before transcribing says why the live text was not used.
+        fallback = (
+            {
+                "live_fallback_reason": live_fallback.reason,
+                "transcript_model_name": live_fallback.model_name,
+            }
+            if live_fallback is not None and step.transcript_origin is None
+            else {}
+        )
+        return step.model_copy(
             update={
+                **fallback,
                 "input_payload_json": input_payload,
                 "diagnostics": _project_step_diagnostics(result),
                 "runtime_input_file_ids": list(runtime_input_file_ids),

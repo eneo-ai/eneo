@@ -36,6 +36,8 @@ from eneo.flows.domain.flow_run_exceptions import (
     FlowRunNotFoundError,
 )
 from eneo.flows.domain.flow_run_listing import FlowRunListing
+from eneo.flows.domain.flow_step_attempt_input import FlowStepAttemptLiveFallback
+from eneo.flows.domain.live_fallback import LiveTranscriptRefusal
 from eneo.flows.domain.mapped_execution_policy import (
     resolve_flow_mapped_execution_policy_from_source,
 )
@@ -79,7 +81,9 @@ from eneo.flows.flow_run_input_envelope import (
     read_live_transcript_ids,
     read_semantic_flow_input_payload,
     read_single_recording_steps,
+    read_streamed_steps,
     with_admitted_audio_seconds,
+    with_live_transcript_refusals,
 )
 from eneo.flows.flow_run_input_payload import (
     normalize_and_validate_flow_run_payload,
@@ -97,8 +101,8 @@ from eneo.flows.flow_run_step_inputs import (
     normalize_step_inputs_payload,
     runtime_file_not_bound_to_flow_error,
     validate_audio_lengths,
-    validate_live_transcript_inputs,
     validate_single_recording_inputs,
+    validate_streamed_inputs,
     validate_submitted_step_inputs,
 )
 from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
@@ -147,6 +151,7 @@ class FlowRunStepResultWithFiles:
     runtime_input_file_ids: Sequence[UUID]
     result_files: Sequence[FlowRunStepResultFile]
     runtime_input_files: Sequence[FlowRunStepInputFileRef] = ()
+    live_fallback: FlowStepAttemptLiveFallback | None = None
 
 
 @dataclass(frozen=True)
@@ -512,6 +517,7 @@ class FlowRunService:
                 single_recording_steps=read_single_recording_steps(
                     prepared.input_payload_json
                 ),
+                streamed_steps=read_streamed_steps(prepared.input_payload_json),
                 max_speakers=settle_max_speakers(
                     max_speakers,
                     steps=steps,
@@ -541,25 +547,45 @@ class FlowRunService:
                 projection["step_id"]: projection["file_ids"]
                 for projection in prepared.step_input_files
             }
+            single_recording_steps = read_single_recording_steps(
+                prepared.input_payload_json
+            )
             model_id = parse_transcription_config(
                 {"wizard": published.definition.metadata().wizard}
             ).streaming_model_id
             live_repo = LiveTranscriptRepository(self.flow_run_repo.session)
+            refusals: dict[UUID, LiveTranscriptRefusal] = {}
             for step_id, transcript_id in sorted(
                 live_transcript_ids.items(), key=lambda item: item[1]
             ):
-                await live_repo.bind(
-                    transcript_id,
-                    file_ids=file_ids_by_step[step_id],
-                    scope=LiveTranscriptScope(
-                        tenant_id=self.user.tenant_id,
-                        user_id=principal.principal_user_id,
-                        flow_id=flow_id,
-                        flow_version=published.flow_version,
-                        step_id=step_id,
-                        model_id=model_id,
-                    ),
+                file_ids = file_ids_by_step[step_id]
+                # Several files are one recording's parts only with single_recording.
+                refusal: LiveTranscriptRefusal | None = (
+                    "files_mismatch"
+                    if len(file_ids) > 1 and step_id not in single_recording_steps
+                    else await live_repo.bind(
+                        transcript_id,
+                        file_ids=file_ids,
+                        scope=LiveTranscriptScope(
+                            tenant_id=self.user.tenant_id,
+                            user_id=principal.principal_user_id,
+                            flow_id=flow_id,
+                            flow_version=published.flow_version,
+                            step_id=step_id,
+                            model_id=model_id,
+                        ),
+                    )
                 )
+                if refusal is not None:
+                    refusals[step_id] = refusal
+            # The streamed audio is transcribed by the transcription model instead,
+            # and the step shows why.
+            prepared = replace(
+                prepared,
+                input_payload_json=with_live_transcript_refusals(
+                    prepared.input_payload_json, refusals
+                ),
+            )
         created_run = await self._create_persisted_run(
             flow=published.flow,
             flow_version=published.flow_version,
@@ -672,6 +698,7 @@ class FlowRunService:
         step_input_file_projections: list[FlowRunStepInputFileProjection] = []
         live_transcript_ids: dict[UUID, UUID] = {}
         single_recording_steps: frozenset[UUID] = frozenset()
+        streamed_steps: frozenset[UUID] = frozenset()
         admit_audio: Callable[[], Awaitable[dict[UUID, int]]] | None = None
         if step_inputs is not None or definition.has_required_runtime_input():
             runtime_steps = definition.runtime_steps()
@@ -687,11 +714,10 @@ class FlowRunService:
             single_recording_steps = validate_single_recording_inputs(
                 step_inputs=step_inputs or {}, specs=runtime_specs
             )
-            live_transcript_ids = validate_live_transcript_inputs(
+            streamed_steps, live_transcript_ids = validate_streamed_inputs(
                 step_inputs=step_inputs or {},
                 normalized_step_inputs=normalized_step_inputs,
                 specs=runtime_specs,
-                single_recording_steps=single_recording_steps,
             )
             await validate_submitted_step_inputs(
                 flow_id=flow_id,
@@ -736,6 +762,7 @@ class FlowRunService:
             max_speakers=max_speakers,
             live_transcript_ids=live_transcript_ids,
             single_recording_steps=single_recording_steps,
+            streamed_steps=streamed_steps,
         )
         ensure_inline_payload_size_allowed(
             flow_id=flow_id,
@@ -1225,6 +1252,9 @@ class FlowRunService:
             step_results=step_results,
         )
         result_files_by_step_result_id = _result_files_by_step_result_id(result_files)
+        live_fallbacks = await self.flow_run_repo.list_current_attempt_live_fallbacks(
+            run_id=run.id, tenant_id=self.user.tenant_id
+        )
         views: list[FlowRunStepResultWithFiles] = []
         for result in step_results:
             result_id = result.id
@@ -1254,6 +1284,7 @@ class FlowRunService:
                     runtime_input_files=tuple(
                         file for file in runtime_input_files if file.name is not None
                     ),
+                    live_fallback=live_fallbacks.get(result.step_id),
                 )
             )
         return tuple(views)

@@ -21,6 +21,8 @@
  * counted it when the part's recorder started; the transcript then stands for
  * exactly those parts, in that order. `ready` says whether the core keeps this
  * session's text (`keeps_transcript`); text it does not keep holds nothing up.
+ * It also says how long after the stop the final text may take
+ * (`finish_within_seconds`): the socket is kept that long, and no longer.
  * A session that drops while the recording goes on is connected again, up to
  * three times: the text then goes on as a draft only.
  *
@@ -44,14 +46,8 @@ export const MAX_QUEUED_FRAMES = 150;
 const MAX_BUFFERED_BYTES = 1024 * 1024;
 /** The worklet answers a flush within a render quantum; one that has not by then took its audio with it. */
 export const FLUSH_TIMEOUT_MS = 1_000;
-/** How long a run waits for the final text of a recording heard whole. */
-export const FINAL_TEXT_WAIT_MS = 20_000;
-/** A backstop just past the core's own wait for the final text (60 s). */
-const FINAL_TEXT_TIMEOUT_MS = 65_000;
 /** The waits before each new connection after a drop; then the live text stays interrupted. */
 export const RECONNECT_DELAYS_MS = [1_000, 2_000, 4_000] as const;
-/** The most part starts a stop may name (the core's bound). */
-const MAX_PART_STARTS = 99;
 
 /**
  * `unavailable`: the first session never started listening. `reconnecting`:
@@ -84,7 +80,7 @@ export type RecorderAudioGraph = {
 export type LiveTicket = { ticket: string; websocket_path: string };
 
 type ServerMessage =
-  | { type: "ready"; keeps_transcript: boolean }
+  | { type: "ready"; keeps_transcript: boolean; finish_within_seconds?: number }
   | { type: "transcript.delta"; text: string }
   | { type: "transcript.done"; text: string; transcript_id?: string }
   | { type: "error"; code: string; message?: string; retryable?: boolean };
@@ -96,6 +92,10 @@ export type LiveTranscriptDeps = {
   socketUrl: (path: string) => string;
   /** Why a refused session route refused, for `errorCode`. */
   refusalReason?: (error: unknown) => string;
+  /** The most parts the step's files hold (its `max_files`): a transcript of more is not kept. */
+  maxParts?: number;
+  /** The stored transcript came for parts that were all handed over, as their entry keys. */
+  onTranscript?: (id: string, keys: readonly string[]) => void;
   createSocket?: (url: string, protocols: string[]) => WebSocket;
   createNode?: (
     context: BaseAudioContext,
@@ -117,8 +117,8 @@ const IDLE: LiveSnapshot = {
 export class LiveTranscript {
   #snapshot: LiveSnapshot = IDLE;
   #listeners = new Set<() => void>();
-  #deps: Required<Omit<LiveTranscriptDeps, "refusalReason">> &
-    Pick<LiveTranscriptDeps, "refusalReason">;
+  #deps: Required<Omit<LiveTranscriptDeps, "refusalReason" | "onTranscript">> &
+    Pick<LiveTranscriptDeps, "refusalReason" | "onTranscript">;
 
   #socket: WebSocket | null = null;
   #node: AudioWorkletNode | null = null;
@@ -126,7 +126,6 @@ export class LiveTranscript {
   #context: BaseAudioContext | null = null;
   #queue: ArrayBuffer[] = [];
   #stopTimer: ReturnType<typeof setTimeout> | undefined;
-  #finishingTimer: ReturnType<typeof setTimeout> | undefined;
   #reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   #settledWaiters: (() => void)[] = [];
   /** Bumped whenever the recording's sessions end, so late promises and messages are ignored. */
@@ -146,6 +145,8 @@ export class LiveTranscript {
   #partKeys: (string | null)[] = [];
   #whole = false;
   #transcriptId: string | null = null;
+  /** How long the final text may take after the stop, as the session's `ready` said. */
+  #finishWithinMs = 0;
 
   constructor(deps: LiveTranscriptDeps) {
     this.#deps = {
@@ -153,6 +154,7 @@ export class LiveTranscript {
       createNode: (context, name, options) => new AudioWorkletNode(context, name, options),
       workletUrl: PCM16_WORKLET_URL,
       newRecordingId: () => crypto.randomUUID(),
+      maxParts: Infinity,
       ...deps
     };
   }
@@ -182,11 +184,6 @@ export class LiveTranscript {
     const id = this.#transcriptId;
     if (!id || keys.length !== this.#partCount || keys.length !== this.#partKeys.length) return;
     return keys.every((key, index) => key === this.#partKeys[index]) ? id : undefined;
-  }
-
-  /** The core refused this transcript for the run: it is not offered again. */
-  refuse(id: string): void {
-    if (this.#transcriptId === id) this.#transcriptId = null;
   }
 
   /** Settles once no final text is awaited (it came, or the wait ran out). */
@@ -262,6 +259,7 @@ export class LiveTranscript {
   /** A part of the recording was handed over to the form, as the entry `key`. */
   addPart(key: string | undefined): void {
     this.#partKeys.push(key ?? null);
+    this.#announceTranscript();
   }
 
   /**
@@ -291,10 +289,7 @@ export class LiveTranscript {
       this.#teardown();
       return;
     }
-    if (this.#whole) {
-      this.#set({ ...this.#snapshot, finishing: true });
-      this.#finishingTimer = setTimeout(() => this.#stopFinishing(), FINAL_TEXT_WAIT_MS);
-    }
+    if (this.#whole) this.#set({ ...this.#snapshot, finishing: true });
     const node = this.#node;
     if (!node) {
       this.#sendStop(socket);
@@ -418,7 +413,7 @@ export class LiveTranscript {
     this.#detachAudio();
     if (socket !== this.#socket || socket.readyState !== WebSocket.OPEN) return;
     const starts = this.#validPartStarts();
-    if (starts.length > MAX_PART_STARTS) this.lose();
+    if (starts.length + 1 > this.#deps.maxParts) this.lose();
     this.#partCount = starts.length + 1;
     // A recording not heard whole names no count, and the core keeps no text.
     const stop = this.#whole
@@ -429,7 +424,7 @@ export class LiveTranscript {
         }
       : { type: "stop" };
     socket.send(JSON.stringify(stop));
-    this.#stopTimer = setTimeout(() => this.#teardown(), FINAL_TEXT_TIMEOUT_MS);
+    this.#stopTimer = setTimeout(() => this.#teardown(), this.#finishWithinMs);
   }
 
   /**
@@ -455,6 +450,8 @@ export class LiveTranscript {
         if (status === "reconnecting" && this.#socket) this.#flush(this.#socket);
         // A preview the core does not keep is a draft from the start.
         if (!message.keeps_transcript) this.lose();
+        const within = message.finish_within_seconds;
+        this.#finishWithinMs = typeof within === "number" && within > 0 ? within * 1000 : 0;
         this.#set({ ...this.#snapshot, status: "listening", errorCode: null });
         return;
       }
@@ -470,6 +467,7 @@ export class LiveTranscript {
           this.#transcriptId = message.transcript_id;
         }
         this.#end("session_ended");
+        this.#announceTranscript();
         return;
       case "error":
         this.#dropped(message.code, message.retryable === true);
@@ -557,8 +555,16 @@ export class LiveTranscript {
     if (this.#snapshot.status !== "finished" && this.#context?.state !== "running") this.lose();
   };
 
+  /** Tells `onTranscript` once the stored transcript and every part it stands for are known. */
+  #announceTranscript() {
+    const id = this.#transcriptId;
+    const keys = this.#partKeys;
+    if (!id || keys.length === 0 || keys.length !== this.#partCount) return;
+    if (keys.some((key) => key === null)) return;
+    this.#deps.onTranscript?.(id, keys as string[]);
+  }
+
   #stopFinishing() {
-    clearTimeout(this.#finishingTimer);
     if (this.#snapshot.finishing) this.#set({ ...this.#snapshot, finishing: false });
     for (const resolve of this.#settledWaiters.splice(0)) resolve();
   }

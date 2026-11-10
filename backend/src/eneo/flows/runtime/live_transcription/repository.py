@@ -11,13 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from eneo.database.database import sessionmanager
 from eneo.database.tables.flow_tables import FlowLiveTranscripts, Flows
 from eneo.database.tables.tenant_table import Tenants
-from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.domain.live_fallback import LiveTranscriptRefusal
 from eneo.flows.runtime.live_transcription.tickets import LiveTranscriptionGrant
-from eneo.main.exceptions import (
-    BadRequestException,
-    ConflictException,
-    NotFoundException,
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,39 +73,29 @@ class LiveTranscriptRepository:
         *,
         file_ids: Sequence[UUID],
         scope: LiveTranscriptScope,
-    ) -> None:
-        """Bind the transcript to the files of its recording, in recording order."""
+    ) -> LiveTranscriptRefusal | None:
+        """Bind the transcript to the files of its recording, in recording order.
+
+        Returns why it cannot be bound, or None once it is. A transcript of another
+        owner, flow version, step or model is not found, like a missing one."""
         row = await self.get(
             transcript_id, tenant_id=scope.tenant_id, lock_for_binding=True
         )
-        not_found = NotFoundException(
-            "Live transcript not found.",
-            code=FlowApiErrorCode.RUN_LIVE_TRANSCRIPT_NOT_FOUND.value,
-        )
         if row is None or not scope.matches(row):
-            raise not_found
+            return "not_found"
         if list(row.bound_file_ids) == list(file_ids):
             # A retry of a run over these files keeps its transcript, expired or not.
-            return
+            return None
         if row.bound_file_id is not None:
-            raise ConflictException(
-                "Live transcript is already bound to other files.",
-                code=FlowApiErrorCode.RUN_LIVE_TRANSCRIPT_ALREADY_BOUND.value,
-            )
+            return "already_bound"
         if row.expires_at is not None and row.expires_at <= datetime.now(timezone.utc):
-            raise not_found
+            return "not_found"
         if len(file_ids) != len(row.part_start_samples) + 1:
-            raise BadRequestException(
-                "A live transcript needs every part of its recording, in order.",
-                code=FlowApiErrorCode.RUN_LIVE_TRANSCRIPT_FILES_MISMATCH.value,
-                context={
-                    "parts": len(row.part_start_samples) + 1,
-                    "files": len(file_ids),
-                },
-            )
+            return "files_mismatch"
         row.bound_file_id = file_ids[0]
         row.bound_file_ids = list(file_ids)
         await self.session.flush()
+        return None
 
     async def create(
         self,

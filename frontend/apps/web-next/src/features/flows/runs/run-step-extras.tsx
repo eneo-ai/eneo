@@ -1,4 +1,5 @@
 import { LazyCollapsible } from "@/components/astryx/collapsible";
+import { Banner } from "@astryxdesign/core/Banner";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { Token } from "@astryxdesign/core/Token";
 import { useLocale, useTranslations } from "use-intl";
@@ -16,6 +17,56 @@ import {
 import type { RunStep } from "./runs-api";
 
 const INPUT_FORMATS: ReadonlySet<string> = new Set(["audio", "document", "file"]);
+
+type LiveFallbackReason = NonNullable<RunStep["live_fallback_reason"]>;
+
+const LIVE_FALLBACK_REASON_KEYS = {
+  not_received: "flow_run_live_fallback_not_received",
+  not_found: "flow_run_live_fallback_not_found",
+  already_bound: "flow_run_live_fallback_already_bound",
+  files_mismatch: "flow_run_live_fallback_files_mismatch",
+  unavailable: "flow_run_live_fallback_unavailable",
+  no_timing: "flow_run_live_fallback_no_timing",
+  duration_mismatch: "flow_run_live_fallback_duration_mismatch"
+} as const satisfies Record<LiveFallbackReason, string>;
+
+/**
+ * Why a step's streamed audio was not written by its live text, and which
+ * model transcribes it instead, in the open on the step: on a step that
+ * failed or was cancelled too. It says the files were transcribed only once
+ * the transcript is written; until then, that they are being or were to be.
+ */
+export function StepLiveFallback({
+  result
+}: {
+  result: Pick<
+    RunStep,
+    "status" | "live_fallback_reason" | "transcript_origin" | "transcript_model_name"
+  >;
+}) {
+  const t = useTranslations();
+  const reason = result.live_fallback_reason;
+  if (!reason) return null;
+  const model = result.transcript_model_name;
+  const transcribed = model
+    ? t(
+        result.transcript_origin === "batch"
+          ? "flow_run_live_fallback_transcribed"
+          : result.status === "running"
+            ? "flow_run_live_fallback_transcribing"
+            : "flow_run_live_fallback_planned",
+        { model }
+      )
+    : null;
+  // A state that lasts: no live region (AGENTS.md, Banner).
+  return (
+    <Banner
+      status="info"
+      title={t("flow_run_live_fallback_title")}
+      description={[t(LIVE_FALLBACK_REASON_KEYS[reason]), transcribed].filter(Boolean).join(" ")}
+    />
+  );
+}
 
 /**
  * How a step read long material: in one go, or part by part, where each part

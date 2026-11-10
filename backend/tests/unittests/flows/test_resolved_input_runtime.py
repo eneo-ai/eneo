@@ -389,6 +389,7 @@ def _resolution_deps(
     return StepInputResolutionDeps(
         stage_transcript_source=MagicMock(),
         stage_run_transcript=MagicMock(),
+        record_live_fallback=AsyncMock(),
         commit=AsyncMock(),
         apply_output_cap=AsyncMock(side_effect=lambda **kw: (kw["text"], [])),
         variable_resolver=FlowVariableResolver(),

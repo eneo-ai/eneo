@@ -9,6 +9,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from eneo.flows.domain.canonical_json_hash import SHA256_HEX_PATTERN
+from eneo.flows.domain.live_fallback import LiveFallbackReason
 from eneo.flows.domain.step_output import StepMaterialReference
 from eneo.flows.flow_run_error import NullablePublicTerminalErrorCode
 from eneo.json_types import JsonObject
@@ -111,9 +112,9 @@ class FlowStepAttemptToolCallStart(_FlowStepAttemptInputModel):
 
 
 FlowToolCallOutcome: TypeAlias = Literal["answered", "failed"]
-# What a write of tool-call evidence did: stored it on the open attempt, or
-# found the attempt already closed and changed nothing.
-FlowStepAttemptToolCallWrite: TypeAlias = Literal["written", "attempt_closed"]
+# What a write of evidence during the attempt did: stored it on the open
+# attempt, or found the attempt already closed and changed nothing.
+FlowStepAttemptEvidenceWrite: TypeAlias = Literal["written", "attempt_closed"]
 # How a reader names an attempt's tool call: a call with a stored result has
 # its outcome; one without a result is in progress while the attempt is open
 # and interrupted once it is closed (the worker died or the run ended first).
@@ -158,6 +159,22 @@ class FlowStepAttemptToolCallResult(_FlowStepAttemptInputModel):
         return self
 
 
+class FlowStepAttemptLiveFallback(_FlowStepAttemptInputModel):
+    """Why the attempt's streamed audio is transcribed by the transcription model
+    instead of written by its live text, stored and committed before that model
+    is called. It proves the decision, not that the transcription succeeded."""
+
+    reason: LiveFallbackReason = Field(
+        description="Why the live text could not be used."
+    )
+    model_id: UUID = Field(
+        description="The transcription model that transcribes the audio instead."
+    )
+    model_name: str = Field(
+        min_length=1, description="That model's name when the attempt chose it."
+    )
+
+
 class FlowStepAttemptInput(_FlowStepAttemptInputModel):
     schema_version: Literal["flow-step-attempt-input.v1"] = (
         FLOW_STEP_ATTEMPT_INPUT_SCHEMA_VERSION
@@ -168,6 +185,7 @@ class FlowStepAttemptInput(_FlowStepAttemptInputModel):
     execution_inputs: tuple[FlowStepAttemptExecutionInput, ...] | None = None
     tool_call_start: FlowStepAttemptToolCallStart | None = None
     tool_call_result: FlowStepAttemptToolCallResult | None = None
+    live_fallback: FlowStepAttemptLiveFallback | None = None
 
     @model_validator(mode="after")
     def _contains_attempt_input_evidence(self) -> FlowStepAttemptInput:
@@ -177,6 +195,7 @@ class FlowStepAttemptInput(_FlowStepAttemptInputModel):
             and self.completion_configuration is None
             and self.execution_inputs is None
             and self.tool_call_start is None
+            and self.live_fallback is None
         ):
             raise ValueError("attempt input must contain at least one tracked field")
         if self.tool_call_result is not None and self.tool_call_start is None:
@@ -428,6 +447,7 @@ def merge_flow_step_attempt_input(
         "execution_inputs",
         "tool_call_start",
         "tool_call_result",
+        "live_fallback",
     ):
         existing_value = getattr(existing, field)
         incoming_value = getattr(incoming, field)

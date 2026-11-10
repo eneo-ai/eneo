@@ -234,6 +234,7 @@ async def list_flow_run_steps(
                     in single_recording_steps,
                     result_files=view.result_files,
                     transcript_source=transcript_sources.get(view.step_result.step_id),
+                    live_fallback=view.live_fallback,
                 )
                 for view in step_result_views
             ]

@@ -172,6 +172,7 @@ async def _resolve(
             commit=AsyncMock(),
             stage_transcript_source=lambda reference, source: staged.append(source),
             stage_run_transcript=lambda reference, transcript: None,
+            record_live_fallback=AsyncMock(),
         ),
     )
     return resolved, staged[0], with_service

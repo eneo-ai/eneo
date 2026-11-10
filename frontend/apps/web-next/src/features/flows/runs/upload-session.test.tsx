@@ -138,7 +138,7 @@ it("keeps a recorded part when a file is picked for a step that takes one", asyn
   const input = makeInput({ step_id: "step-1", max_files: 1, accepted_mimetypes: ["audio/webm"] });
   act(() =>
     hook.result.current.add(input, [new File(["audio"], "del-1.webm", { type: "audio/webm" })], {
-      recording: { sessionId: "rec-1", index: 0, durationMs: 1000 },
+      recording: { sessionId: "rec-1", index: 0, durationMs: 1000, streamed: false },
       label: "Inspelning"
     })
   );

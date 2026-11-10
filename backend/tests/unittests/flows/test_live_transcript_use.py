@@ -9,6 +9,8 @@ import pytest
 from eneo.database.tables.flow_tables import FlowLiveTranscripts
 from eneo.files.transcriber import TranscribedAudio
 from eneo.files.transcript import TranscriptSegment, TranscriptWord
+from eneo.flows.domain.flow_run_exceptions import FlowStepAttemptClosed
+from eneo.flows.domain.flow_step_attempt_input import FlowStepAttemptLiveFallback
 from eneo.flows.flow_run_error import TranscriptionFailureKind
 from eneo.flows.runtime.audio_spool import SpooledAudio
 from eneo.flows.runtime.flow_run_actor import FlowRunActor
@@ -52,7 +54,10 @@ def live_audio(user, monkeypatch, spool_contract):
         user=user,
         payload={
             "step_inputs": {
-                str(step.step_id): {"live_transcript_id": str(transcript_id)}
+                str(step.step_id): {
+                    "streamed": True,
+                    "live_transcript_id": str(transcript_id),
+                }
             },
             "speaker_labels": False,
             "max_speakers": 3,
@@ -154,8 +159,10 @@ def live_audio(user, monkeypatch, spool_contract):
             (reference, source)
         ),
         stage_run_transcript=lambda reference, transcript: None,
+        record_live_fallback=AsyncMock(),
     )
     return SimpleNamespace(
+        model=model,
         row=row,
         lookup=lookup,
         registry=registry,
@@ -183,6 +190,7 @@ async def test_live_segments_skip_asr_and_have_their_words_timed(
     assert result.transcription_metadata["transcript_origin"] == "live"
     assert result.transcription_metadata["word_timing"] == {"status": "done"}
     assert "live_fallback_reason" not in result.transcription_metadata
+    case.deps.record_live_fallback.assert_not_awaited()
     reference, prepared = case.staged[0]
     assert result.transcription_metadata["source"] == reference.model_dump(mode="json")
     assert prepared.source.segments == [
@@ -292,8 +300,12 @@ async def test_streamed_passages_are_trimmed_and_empty_ones_dropped(live_audio, 
         ("duration", "duration_mismatch", False),
         ("no_segments", "no_timing", False),
         ("no_segments", "no_timing", True),
-        ("missing", "unavailable", False),
-        ("different_file", "unavailable", False),
+        ("missing", "not_found", False),
+        ("foreign", "not_found", False),
+        ("different_file", "files_mismatch", False),
+        ("not_received", "not_received", False),
+        ("refused", "already_bound", False),
+        ("model_removed", "unavailable", False),
     ],
 )
 async def test_unusable_live_transcript_calls_batch_once(
@@ -308,23 +320,60 @@ async def test_unusable_live_transcript_calls_batch_once(
         return await original_measure(self)
 
     monkeypatch.setattr(SpooledAudio, "measure_duration", measure)
-    case.request.run.input_payload_json["speaker_labels"] = labels
+    payload = case.request.run.input_payload_json
+    payload["speaker_labels"] = labels
+    facts = payload["step_inputs"][str(case.request.step.step_id)]
     if condition == "duration":
         case.row.received_audio_seconds = 45
     elif condition == "no_segments":
         case.row.segments = None
     elif condition == "missing":
         case.lookup.return_value = None
-    else:
+    elif condition == "foreign":
+        case.row.user_id = uuid4()
+    elif condition == "different_file":
         case.row.bound_file_ids = [uuid4()]
+    elif condition == "not_received":
+        del facts["live_transcript_id"]
+    elif condition == "refused":
+        facts["live_transcript_refusal"] = "already_bound"
+    else:
+        # The model that streamed the text was removed after the recording.
+        live_model_id = uuid4()
+        case.request.version_metadata["wizard"]["transcription_live_model"] = {
+            "id": str(live_model_id)
+        }
+        case.row.model_id = live_model_id
+
+    async def record(**kwargs):
+        # The decision is stored before the transcription model is called.
+        case.registry.transcribe_from_filepath.assert_not_awaited()
+
+    case.deps.record_live_fallback.side_effect = record
     result = await resolve_transcribe_and_attach_audio_input(
         request=case.request, deps=case.deps
     )
     case.registry.transcribe_from_filepath.assert_awaited_once()
+    assert (
+        case.registry.transcribe_from_filepath.await_args.kwargs["transcription_model"]
+        is case.model
+    )
     if condition == "no_segments" and not labels:
         assert measured == [], "no timing is known before any decode"
+    if condition in {"not_received", "refused"}:
+        case.lookup.assert_not_awaited()
     assert result.transcription_metadata["transcript_origin"] == "batch"
     assert result.transcription_metadata["live_fallback_reason"] == reason
+    case.deps.record_live_fallback.assert_awaited_once()
+    recorded = case.deps.record_live_fallback.await_args.kwargs
+    assert (recorded["run"], recorded["step_id"], recorded["attempt_no"]) == (
+        case.request.run,
+        case.request.step.step_id,
+        case.request.attempt_no,
+    )
+    assert recorded["fallback"] == FlowStepAttemptLiveFallback(
+        reason=reason, model_id=case.model.id, model_name="Whisper"
+    )
     if labels:
         case.remote.label_speakers.assert_awaited_once()
         assert (
@@ -396,3 +445,57 @@ async def test_the_run_tells_transcription_whether_the_files_are_one_recording(
         )
 
     assert transcribe.await_args.kwargs["single_recording"] is marked
+
+
+async def test_audio_that_was_not_streamed_has_no_live_reason(live_audio):
+    case = live_audio
+    case.request.run.input_payload_json["step_inputs"] = {}
+    result = await resolve_transcribe_and_attach_audio_input(
+        request=case.request, deps=case.deps
+    )
+    case.registry.transcribe_from_filepath.assert_awaited_once()
+    case.lookup.assert_not_awaited()
+    assert result.transcription_metadata["transcript_origin"] == "batch"
+    assert "live_fallback_reason" not in result.transcription_metadata
+    case.deps.record_live_fallback.assert_not_awaited()
+
+
+async def test_a_failed_step_keeps_the_recorded_fallback(live_audio):
+    # The transcription model wrote the text; the speaker service then failed.
+    case = live_audio
+    case.request.run.input_payload_json["speaker_labels"] = True
+    case.row.segments = None
+    case.remote.label_speakers.side_effect = TranscriptionProviderRejectedError(
+        "refused", failure_kind=TranscriptionFailureKind.INTERNAL
+    )
+    with pytest.raises(TranscriptionFailure):
+        await resolve_transcribe_and_attach_audio_input(
+            request=case.request, deps=case.deps
+        )
+    case.registry.transcribe_from_filepath.assert_awaited_once()
+    assert case.deps.record_live_fallback.await_args.kwargs[
+        "fallback"
+    ] == FlowStepAttemptLiveFallback(
+        reason="no_timing", model_id=case.model.id, model_name="Whisper"
+    )
+
+
+@pytest.mark.parametrize("condition", ["no_segments", "duration"])
+async def test_a_closed_attempt_stops_before_the_transcription_model(
+    live_audio, condition
+):
+    case = live_audio
+    if condition == "duration":
+        case.row.received_audio_seconds = 45
+    else:
+        case.row.segments = None
+    case.deps.record_live_fallback.side_effect = FlowStepAttemptClosed(
+        run_id=case.request.run.id,
+        step_id=case.request.step.step_id,
+        attempt_no=case.request.attempt_no,
+    )
+    with pytest.raises(FlowStepAttemptClosed):
+        await resolve_transcribe_and_attach_audio_input(
+            request=case.request, deps=case.deps
+        )
+    case.registry.transcribe_from_filepath.assert_not_awaited()

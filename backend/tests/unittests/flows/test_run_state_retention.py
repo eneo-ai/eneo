@@ -1440,7 +1440,7 @@ async def test_mapped_assembly_reads_each_call_and_the_first_calls_context(
     assert per_item_calls[1]["num_tokens_output"] > 0
     assert [call[0] for call in run_repo.mock_calls] == ["activate_step_attempt"]
     assert _activation_digest(run_repo) == (
-        "84aa5de9b86ca20ce92a7042d61554fba78bf20549294589eedebb21496c87c5"
+        "e8890fff6a0a49171eec357d4c407a364a14e65402364443601d59ebe6015ce6"
     )
 
 

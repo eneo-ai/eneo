@@ -36,6 +36,7 @@ from eneo.flows.flow_run_input_envelope import (
     read_semantic_flow_input_payload,
     read_single_recording_steps,
     read_speaker_labels_choice,
+    read_streamed_steps,
 )
 from eneo.flows.flow_run_payload_validation import ensure_inline_payload_size_allowed
 from eneo.flows.flow_run_step_inputs import FlowRunStepInputFiles
@@ -317,6 +318,7 @@ class FlowRunRetryService:
             return _replay_result(existing, source.id)
         live_transcript_ids = read_live_transcript_ids(source.input_payload_json)
         single_recording_steps = read_single_recording_steps(source.input_payload_json)
+        streamed_steps = read_streamed_steps(source.input_payload_json)
         created = await self.run_service.create_run(
             flow_id=flow_id,
             run_label=source.run_label,
@@ -324,6 +326,8 @@ class FlowRunRetryService:
                 source.input_payload_json
             ),
             expected_flow_version=source.flow_version,
+            # A step the retry executes again asks for the live text it asked for
+            # before; a reused step keeps its transcript and asks for none.
             step_inputs={
                 step.step_id: FlowRunStepInputFiles(
                     file_ids=tuple(files[step.id]),
@@ -333,6 +337,10 @@ class FlowRunRetryService:
                         else None
                     ),
                     single_recording=step.step_id in single_recording_steps,
+                    streamed=(
+                        step.step_id in streamed_steps
+                        and step.step_order >= first_executed_step_order
+                    ),
                 )
                 for step in steps
                 if files.get(step.id)

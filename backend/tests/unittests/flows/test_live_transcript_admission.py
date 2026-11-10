@@ -8,11 +8,7 @@ import pytest
 from eneo.database.tables.flow_tables import FlowLiveTranscripts
 from eneo.flows.api.flow_models import StepRunInput
 from eneo.flows.flow_run_step_inputs import FlowRunStepInputFiles
-from eneo.main.exceptions import (
-    BadRequestException,
-    ConflictException,
-    NotFoundException,
-)
+from eneo.main.exceptions import BadRequestException
 from tests.unittests.flows.test_flow_run_service import (
     _access_policy,
     _flow,
@@ -27,8 +23,7 @@ from tests.unittests.flows.test_flow_run_service import (
 from tests.unittests.flows.test_flow_transcription import _audio_file
 
 
-@pytest.fixture
-def admission(user):
+def _admission_case(user, *, input_format="audio"):
     model_id = uuid4()
     flow = _flow(
         user=user,
@@ -41,13 +36,15 @@ def admission(user):
     )
     step = flow.steps[0].model_copy(
         update={
-            "input_type": "audio",
+            "input_type": input_format,
             "output_type": "text",
-            "output_mode": "transcribe_only",
+            "output_mode": (
+                "transcribe_only" if input_format == "audio" else "pass_through"
+            ),
             "input_config": {
                 "runtime_input": {
                     "enabled": True,
-                    "input_format": "audio",
+                    "input_format": input_format,
                     "max_files": 3,
                 }
             },
@@ -113,8 +110,20 @@ def admission(user):
     )
 
 
+@pytest.fixture
+def admission(user):
+    return _admission_case(user)
+
+
 async def _submit(
-    case, *, file_ids=None, transcript_id=None, key=None, single_recording=False
+    case,
+    *,
+    file_ids=None,
+    live=True,
+    transcript_id=None,
+    key=None,
+    single_recording=False,
+    streamed=True,
 ):
     return await case.service.create_run(
         flow_id=case.flow.id,
@@ -125,22 +134,61 @@ async def _submit(
                 file_ids=tuple(
                     file_ids if file_ids is not None else [case.files[0].id]
                 ),
-                live_transcript_id=transcript_id or case.row.id,
+                live_transcript_id=(transcript_id or case.row.id) if live else None,
                 single_recording=single_recording,
+                streamed=streamed,
             )
         },
     )
 
 
-def test_run_request_accepts_a_live_transcript_uuid():
+def _recorded(case):
+    """What the created run recorded about the step's live text."""
+    payload = case.repo.create.await_args.kwargs["input_payload_json"]
+    facts = payload["step_inputs"][str(case.step.id)]
+    return {
+        key: value
+        for key, value in facts.items()
+        if key != "audio_max_duration_seconds"
+    }
+
+
+def test_run_request_accepts_streamed_audio_with_a_live_transcript():
     transcript_id, file_id = uuid4(), uuid4()
     value = StepRunInput.model_validate(
         {
             "file_ids": [str(file_id)],
+            "streamed": True,
             "live_transcript_id": str(transcript_id),
         }
     )
-    assert value.live_transcript_id == transcript_id
+    assert (value.streamed, value.live_transcript_id) == (True, transcript_id)
+
+
+async def test_a_live_transcript_without_streamed_is_refused(admission):
+    case = admission
+    with pytest.raises(BadRequestException) as error:
+        await _submit(case, streamed=False)
+    assert error.value.code == "flow_run_live_transcript_requires_streamed"
+    case.repo.create.assert_not_awaited()
+
+
+async def test_streamed_needs_the_files_of_an_audio_step(admission, user):
+    with pytest.raises(BadRequestException) as error:
+        await _submit(admission, file_ids=[], live=False)
+    assert error.value.code == "flow_run_streamed_requires_audio_files"
+    documents = _admission_case(user, input_format="document")
+    with pytest.raises(BadRequestException) as error:
+        await _submit(documents, live=False)
+    assert error.value.code == "flow_run_streamed_requires_audio_files"
+    documents.repo.create.assert_not_awaited()
+
+
+async def test_streamed_audio_without_a_transcript_is_admitted(admission):
+    case = admission
+    await _submit(case, live=False)
+    assert _recorded(case) == {"streamed": True}
+    case.repo.session.scalar.assert_not_awaited()
 
 
 @pytest.mark.parametrize(
@@ -155,7 +203,7 @@ def test_run_request_accepts_a_live_transcript_uuid():
         "expires_at",
     ],
 )
-async def test_foreign_or_expired_live_transcript_refuses_without_binding(
+async def test_a_foreign_or_expired_live_transcript_is_recorded_as_not_found(
     admission, field
 ):
     case = admission
@@ -167,21 +215,21 @@ async def test_foreign_or_expired_live_transcript_refuses_without_binding(
         else uuid4()
     )
     setattr(case.row, field, value)
-    with pytest.raises(NotFoundException) as error:
-        await _submit(case)
-    assert error.value.code == "flow_run_live_transcript_not_found"
+    await _submit(case)
+    # Nothing of the foreign transcript is recorded beyond the caller's own id.
+    assert _recorded(case) == {
+        "streamed": True,
+        "live_transcript_id": str(case.row.id),
+        "live_transcript_refusal": "not_found",
+    }
     assert case.row.bound_file_id is None
-    case.repo.create.assert_not_awaited()
 
 
-@pytest.mark.parametrize("count", [0, 2])
-async def test_a_live_transcript_needs_one_file_or_one_recording(admission, count):
+async def test_several_files_are_one_recording_only_with_single_recording(admission):
     case = admission
-    with pytest.raises(BadRequestException) as error:
-        await _submit(case, file_ids=[file.id for file in case.files[:count]])
-    assert error.value.code == "flow_run_live_transcript_files_mismatch"
+    await _submit(case, file_ids=[file.id for file in case.files])
+    assert _recorded(case)["live_transcript_refusal"] == "files_mismatch"
     assert case.row.bound_file_id is None
-    case.repo.create.assert_not_awaited()
 
 
 async def test_the_parts_of_a_streamed_recording_bind_in_recording_order(admission):
@@ -191,11 +239,12 @@ async def test_the_parts_of_a_streamed_recording_bind_in_recording_order(admissi
     await _submit(case, file_ids=parts, single_recording=True)
     await _submit(case, file_ids=parts, single_recording=True)
     assert (case.row.bound_file_id, case.row.bound_file_ids) == (parts[0], parts)
-    assert case.repo.create.await_count == 2
+    assert "live_transcript_refusal" not in _recorded(case)
     # The same files in another order are other audio.
-    with pytest.raises(ConflictException) as error:
-        await _submit(case, file_ids=parts[::-1], single_recording=True)
-    assert error.value.code == "flow_run_live_transcript_already_bound"
+    await _submit(case, file_ids=parts[::-1], single_recording=True)
+    assert _recorded(case)["live_transcript_refusal"] == "already_bound"
+    assert case.row.bound_file_ids == parts
+    assert case.repo.create.await_count == 3
 
 
 @pytest.mark.parametrize("part_start_samples", [[], [16000, 32000]])
@@ -204,25 +253,20 @@ async def test_a_live_transcript_binds_only_every_part_of_its_recording(
 ):
     case = admission
     case.row.part_start_samples = part_start_samples
-    with pytest.raises(BadRequestException) as error:
-        await _submit(
-            case, file_ids=[file.id for file in case.files], single_recording=True
-        )
-    assert error.value.code == "flow_run_live_transcript_files_mismatch"
-    assert error.value.context == {"parts": len(part_start_samples) + 1, "files": 2}
+    await _submit(
+        case, file_ids=[file.id for file in case.files], single_recording=True
+    )
+    assert _recorded(case)["live_transcript_refusal"] == "files_mismatch"
     assert case.row.bound_file_id is None
-    case.repo.create.assert_not_awaited()
 
 
-async def test_live_transcript_cannot_be_rebound(admission):
+async def test_a_live_transcript_bound_to_other_files_is_not_rebound(admission):
     case = admission
     case.row.bound_file_id = case.files[1].id
     case.row.bound_file_ids = [case.files[1].id]
-    with pytest.raises(ConflictException) as error:
-        await _submit(case)
-    assert error.value.code == "flow_run_live_transcript_already_bound"
+    await _submit(case)
+    assert _recorded(case)["live_transcript_refusal"] == "already_bound"
     assert case.row.bound_file_ids == [case.files[1].id]
-    case.repo.create.assert_not_awaited()
 
 
 async def test_live_transcript_binds_and_same_file_retry_is_accepted(admission):
@@ -232,8 +276,10 @@ async def test_live_transcript_binds_and_same_file_retry_is_accepted(admission):
     assert case.row.bound_file_id == case.files[0].id
     assert case.row.bound_file_ids == [case.files[0].id]
     assert case.repo.create.await_count == 2
-    step_facts = case.repo.create.await_args.kwargs["input_payload_json"]["step_inputs"]
-    assert step_facts[str(case.step.id)]["live_transcript_id"] == str(case.row.id)
+    assert _recorded(case) == {
+        "streamed": True,
+        "live_transcript_id": str(case.row.id),
+    }
 
 
 async def test_an_expired_transcript_already_bound_to_this_file_is_accepted(admission):
@@ -244,18 +290,52 @@ async def test_an_expired_transcript_already_bound_to_this_file_is_accepted(admi
     case.row.expires_at = datetime.now(timezone.utc) - timedelta(days=1)
     await _submit(case)
     assert case.row.bound_file_id == case.files[0].id
-    case.repo.create.assert_awaited_once()
+    assert "live_transcript_refusal" not in _recorded(case)
 
 
-async def test_live_transcript_identity_is_part_of_idempotent_replay(admission):
+async def test_the_binding_outcome_is_not_part_of_the_request_fingerprint(admission):
+    case = admission
+    await _submit(case)
+    bound = case.repo.create.await_args.kwargs["request_fingerprint"]
+    case.row.bound_file_ids = [case.files[1].id]
+    await _submit(case)
+    assert _recorded(case)["live_transcript_refusal"] == "already_bound"
+    assert case.repo.create.await_args.kwargs["request_fingerprint"] == bound
+
+
+async def test_a_replay_returns_the_run_before_binding_is_reconsidered(admission):
     case = admission
     first = await _submit(case, key="live-recording")
     fingerprint = case.repo.create.await_args.kwargs["request_fingerprint"]
     case.repo.get_idempotent_run.return_value = (first.run, fingerprint)
+    # The response was lost; meanwhile the transcript expired and the model went.
+    case.row.expires_at = datetime.now(timezone.utc) - timedelta(days=1)
+    case.row.model_id = uuid4()
+    case.repo.session.scalar.reset_mock()
     repeated = await _submit(case, key="live-recording")
-    assert repeated.run.id == first.run.id
-    assert repeated.created is False
+    assert (repeated.run.id, repeated.created) == (first.run.id, False)
+    case.repo.session.scalar.assert_not_awaited()
+    case.repo.create.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    "change",
+    [{"transcript_id": uuid4()}, {"live": False}],
+)
+async def test_the_request_fingerprint_covers_the_live_transcript(admission, change):
+    case = admission
+    first = await _submit(case, key="live-recording")
+    fingerprint = case.repo.create.await_args.kwargs["request_fingerprint"]
+    case.repo.get_idempotent_run.return_value = (first.run, fingerprint)
     with pytest.raises(BadRequestException) as error:
-        await _submit(case, key="live-recording", transcript_id=uuid4())
+        await _submit(case, key="live-recording", **change)
     assert error.value.code == "flow_run_idempotency_conflict"
     case.repo.create.assert_awaited_once()
+
+
+async def test_the_request_fingerprint_covers_streamed(admission):
+    case = admission
+    await _submit(case, live=False)
+    streamed = case.repo.create.await_args.kwargs["request_fingerprint"]
+    await _submit(case, live=False, streamed=False)
+    assert case.repo.create.await_args.kwargs["request_fingerprint"] != streamed

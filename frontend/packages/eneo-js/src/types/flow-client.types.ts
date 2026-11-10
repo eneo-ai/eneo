@@ -29,15 +29,19 @@ flows.runs.create({
   idempotencyKey: "flow-run:request-1",
   step_inputs: { "step-1": { file_ids: ["file-1"] } }
 });
-// A clean live session's stored transcript, beside the step's one audio file.
+// A streamed recording, with a clean live session's stored transcript beside its one audio file.
 flows.runs.deriveUploadIntentIdempotencyKey({
   flowId: "flow-1",
-  step_inputs: { "step-1": { file_ids: ["file-1"], live_transcript_id: "transcript-1" } }
+  step_inputs: {
+    "step-1": { file_ids: ["file-1"], streamed: true, live_transcript_id: "transcript-1" }
+  }
 });
 flows.runs.create({
   flow: { id: "flow-1" },
   idempotencyKey: "flow-run:request-2",
-  step_inputs: { "step-1": { file_ids: ["file-1"], live_transcript_id: "transcript-1" } }
+  step_inputs: {
+    "step-1": { file_ids: ["file-1"], streamed: true, live_transcript_id: "transcript-1" }
+  }
 });
 // The parts of one recording, in recording order.
 flows.runs.create({

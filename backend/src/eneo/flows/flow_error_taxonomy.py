@@ -168,13 +168,6 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Send a level the model's supported_model_kwargs offer for reasoning_effort, or null for the model's default.",
         user_action="Choose a level the model offers.",
     ),
-    FlowApiErrorCode.RUN_LIVE_TRANSCRIPT_FILES_MISMATCH: _entry(
-        category="Run input",
-        surfaced_through="API error response",
-        cause="A live transcript was submitted beside files that are not every part of its recording.",
-        consumer_action="Submit the recording's parts in order, with single_recording for several, or omit live_transcript_id.",
-        user_action="Start the run again so the uploaded files are transcribed.",
-    ),
     FlowApiErrorCode.RUN_SINGLE_RECORDING_REQUIRES_AUDIO_STEP: _entry(
         category="Run input",
         surfaced_through="API error response",
@@ -182,19 +175,19 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Set single_recording only on audio steps.",
         user_action="Start the run again; if it keeps failing, contact support.",
     ),
-    FlowApiErrorCode.RUN_LIVE_TRANSCRIPT_NOT_FOUND: _entry(
+    FlowApiErrorCode.RUN_STREAMED_REQUIRES_AUDIO_FILES: _entry(
         category="Run input",
         surfaced_through="API error response",
-        cause="The live transcript is unavailable for this run.",
-        consumer_action="Omit live_transcript_id to transcribe the uploaded audio.",
-        user_action="Start the run with the uploaded recording again.",
+        cause="streamed was set on a step that does not take audio, or without files.",
+        consumer_action="Set streamed only with the audio files of an audio step that were streamed while recorded.",
+        user_action="Start the run again; if it keeps failing, contact support.",
     ),
-    FlowApiErrorCode.RUN_LIVE_TRANSCRIPT_ALREADY_BOUND: _entry(
+    FlowApiErrorCode.RUN_LIVE_TRANSCRIPT_REQUIRES_STREAMED: _entry(
         category="Run input",
         surfaced_through="API error response",
-        cause="The live transcript is already bound to a different file.",
-        consumer_action="Reuse the original file or omit live_transcript_id for another file.",
-        user_action="Use the original uploaded recording or transcribe the new file.",
+        cause="A live transcript was submitted for audio that is not marked as streamed.",
+        consumer_action="Send live_transcript_id together with streamed: true.",
+        user_action="Start the run again; if it keeps failing, contact support.",
     ),
     FlowApiErrorCode.FLOW_NOT_PUBLISHED: _entry(
         category="Flow access",

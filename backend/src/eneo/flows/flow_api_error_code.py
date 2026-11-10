@@ -123,12 +123,11 @@ class FlowApiErrorCode(StrEnum):
     RUNTIME_FILE_EMPTY = "flow_runtime_file_empty"
     RUNTIME_FILE_ATTACHED = "flow_runtime_file_attached"
     LIVE_TRANSCRIPTION_UNAVAILABLE = "flow_live_transcription_unavailable"
-    RUN_LIVE_TRANSCRIPT_FILES_MISMATCH = "flow_run_live_transcript_files_mismatch"
-    RUN_LIVE_TRANSCRIPT_NOT_FOUND = "flow_run_live_transcript_not_found"
     RUN_SINGLE_RECORDING_REQUIRES_AUDIO_STEP = (
         "flow_run_single_recording_requires_audio_step"
     )
-    RUN_LIVE_TRANSCRIPT_ALREADY_BOUND = "flow_run_live_transcript_already_bound"
+    RUN_STREAMED_REQUIRES_AUDIO_FILES = "flow_run_streamed_requires_audio_files"
+    RUN_LIVE_TRANSCRIPT_REQUIRES_STREAMED = "flow_run_live_transcript_requires_streamed"
     EVIDENCE_AUDIT_LOGGING_FAILED = "flow_evidence_audit_logging_failed"
     EVIDENCE_EXPORT_REASON_REQUIRED = "flow_evidence_export_reason_required"
     EVIDENCE_EXPORT_TOO_LARGE = "flow_evidence_export_too_large"

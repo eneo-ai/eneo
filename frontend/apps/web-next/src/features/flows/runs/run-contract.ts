@@ -1,5 +1,6 @@
 import { calendarDate } from "@/lib/calendar-date";
 import { EneoApiError } from "@/lib/api/errors";
+import type { LiveTranscriptRef } from "./recording/recording-store";
 import type { RunContract, RunCreateRequest, RunFormField, RuntimeInput } from "./runs-api";
 
 /**
@@ -55,6 +56,10 @@ export type RecordingPartInfo = {
   /** The part's place in the recording, from 0. */
   index: number;
   durationMs: number;
+  /** Its audio was streamed for live text while it was recorded. */
+  streamed: boolean;
+  /** The live transcript kept on the device with the recording's parts, after a reload. */
+  liveTranscript?: LiveTranscriptRef;
 };
 
 export type UploadsByStep = Record<string, readonly UploadEntry[]>;
@@ -194,6 +199,22 @@ export function recordedAsOne(uploads: readonly UploadEntry[] | undefined): bool
   return first !== undefined && rest.length > 0 && rest.every((session) => session === first);
 }
 
+/**
+ * The live transcript kept with a recording continued after a reload, when
+ * the step's stored files are every part it stands for, in recording order.
+ */
+function keptLiveTranscript(uploads: readonly UploadEntry[] | undefined): string | undefined {
+  const parts = (uploads ?? []).filter((entry) => entry.state === "done" && entry.fileId);
+  const kept = parts[0]?.recording?.liveTranscript;
+  if (!kept || kept.parts !== parts.length) return;
+  const same = parts.every(
+    (entry, at) =>
+      entry.recording?.liveTranscript?.id === kept.id &&
+      (at === 0 || entry.recording.index > parts[at - 1]!.recording!.index)
+  );
+  return same ? kept.id : undefined;
+}
+
 /** Whether a step's files can be sent, and if not, why. */
 export function inputProblem(
   input: RuntimeInput,
@@ -296,8 +317,7 @@ export type RunChoices = {
   maxSpeakers: number | null;
   /**
    * The stored live transcript of a step whose files are the parts of a
-   * recording the live text heard whole, by step id: the run uses it instead
-   * of transcribing the files again.
+   * recording the live text heard whole in this form, by step id.
    */
   liveTranscripts?: Readonly<Record<string, string>>;
 };
@@ -315,15 +335,22 @@ export function runRequest(contract: RunContract, choices: RunChoices): RunCreat
         (contract.transcription?.single_recording === true &&
           input.input_format === "audio" &&
           recordedAsOne(uploads));
+      // Streamed audio asks for its live text: the run uses it, or says why it could not.
+      const streamed = (uploads ?? []).some(
+        (entry) => entry.state === "done" && entry.fileId && entry.recording?.streamed
+      );
       // Several parts go with the transcript only as one recording.
       const liveTranscript =
-        fileIds.length === 1 || single ? choices.liveTranscripts?.[input.step_id] : null;
+        streamed && (fileIds.length === 1 || single)
+          ? (choices.liveTranscripts?.[input.step_id] ?? keptLiveTranscript(uploads))
+          : undefined;
       return [
         [
           input.step_id,
           {
             file_ids: fileIds,
             ...(single ? { single_recording: true } : {}),
+            ...(streamed ? { streamed: true } : {}),
             ...(liveTranscript ? { live_transcript_id: liveTranscript } : {})
           }
         ]
@@ -341,39 +368,6 @@ export function runRequest(contract: RunContract, choices: RunChoices): RunCreat
     ...(choices.maxSpeakers !== null && offersMaxSpeakers(contract, choices.speakerLabels)
       ? { max_speakers: choices.maxSpeakers }
       : {})
-  };
-}
-
-/** The core's refusals of a live transcript for a run (gone, bound to other files, not every part). */
-const LIVE_TRANSCRIPT_REFUSALS: ReadonlySet<string> = new Set([
-  "flow_run_live_transcript_not_found",
-  "flow_run_live_transcript_already_bound",
-  "flow_run_live_transcript_files_mismatch"
-]);
-
-/**
- * The same request without its live transcripts, when the core refused one:
- * the run then transcribes the files. Null for any other refusal, or for a
- * request that names none.
- */
-export function withoutRefusedLiveTranscripts(
-  request: RunCreateRequest,
-  error: unknown
-): RunCreateRequest | null {
-  const inputs = request.step_inputs;
-  const refused = error instanceof EneoApiError && LIVE_TRANSCRIPT_REFUSALS.has(error.reason ?? "");
-  if (!refused || !inputs || !Object.values(inputs).some((input) => input.live_transcript_id)) {
-    return null;
-  }
-  return {
-    ...request,
-    step_inputs: Object.fromEntries(
-      Object.entries(inputs).map(([stepId, input]) => {
-        const plain = { ...input };
-        delete plain.live_transcript_id;
-        return [stepId, plain];
-      })
-    )
   };
 }
 

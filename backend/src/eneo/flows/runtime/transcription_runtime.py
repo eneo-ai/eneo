@@ -4,12 +4,14 @@ import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from hashlib import sha256
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 from uuid import UUID
 
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.domain.outcome import Outcome
+from eneo.flows.domain.flow_step_attempt_input import FlowStepAttemptLiveFallback
+from eneo.flows.domain.live_fallback import LiveFallbackReason
 from eneo.flows.domain.runtime import RuntimeStep, StepDiagnostic
 from eneo.flows.domain.step_output import (
     FileBackedStepText,
@@ -25,9 +27,11 @@ from eneo.flows.flow_run_input_envelope import (
     FLOW_INPUT_TRANSCRIPTION_KEY,
     FlowRunInputEnvelopePatch,
     read_live_transcript_ids,
+    read_live_transcript_refusals,
     read_max_speakers,
     read_single_recording_steps,
     read_speaker_labels_choice,
+    read_streamed_steps,
 )
 from eneo.flows.runtime.flow_run_actor import FlowRunActor
 from eneo.flows.runtime.live_transcription.repository import (
@@ -40,12 +44,14 @@ from .audio_spool import OpenAudioDownload
 from .transcription import (
     REDUCED_PRECISION_ALIGNMENTS,
     FlowTranscribers,
+    StreamedAudio,
     TranscriptSourcePreparation,
     resolve_and_transcribe_audio_for_step,
 )
 
 if TYPE_CHECKING:
     from eneo.audit.application.audit_service import AuditService
+    from eneo.database.tables.flow_tables import FlowLiveTranscripts
     from eneo.files.audio import AudioDecodeLimits
     from eneo.files.file_models import FileInfo
     from eneo.flows.domain.flow import FlowRun
@@ -59,6 +65,9 @@ if TYPE_CHECKING:
         ProviderCallObserver,
     )
     from eneo.spaces.space_repo import SpaceRepository
+    from eneo.transcription_models.domain.transcription_model import (
+        TranscriptionModel,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +100,20 @@ class AudioRuntimeRequest:
     decode_limits: "AudioDecodeLimits | None" = None
 
 
+class RecordAttemptLiveFallback(Protocol):
+    """Stores on the step's attempt why its streamed audio is transcribed by the
+    transcription model, and commits it before that model is called."""
+
+    async def __call__(
+        self,
+        *,
+        run: "FlowRun",
+        step_id: UUID,
+        attempt_no: int,
+        fallback: FlowStepAttemptLiveFallback,
+    ) -> None: ...
+
+
 @dataclass(frozen=True)
 class AudioRuntimeDeps:
     transcribers: FlowTranscribers
@@ -110,6 +133,7 @@ class AudioRuntimeDeps:
     stage_run_transcript: Callable[
         [TranscriptSourceReference, InlineTranscript | None], None
     ]
+    record_live_fallback: RecordAttemptLiveFallback
     transcription_call_observer: "ProviderCallObserver | None" = None
 
 
@@ -238,31 +262,66 @@ async def log_audio_transcribed_audit(
         )
 
 
+async def _live_transcript(
+    request: AudioRuntimeRequest, deps: AudioRuntimeDeps
+) -> FlowLiveTranscripts | LiveFallbackReason:
+    """The live transcript the run bound to a streamed step's files, or why it
+    has none."""
+    payload = request.run.input_payload_json
+    step_id = request.step.step_id
+    refusal = read_live_transcript_refusals(payload).get(step_id)
+    if refusal is not None:
+        return refusal
+    live_id = read_live_transcript_ids(payload).get(step_id)
+    if live_id is None:
+        return "not_received"
+    row = await LiveTranscriptRepository(deps.flow_run_repo.session).get(
+        live_id, tenant_id=request.run.tenant_id
+    )
+    scope = LiveTranscriptScope(
+        tenant_id=request.run.tenant_id,
+        user_id=request.run.principal_user_id,
+        flow_id=request.run.flow_id,
+        flow_version=request.run.flow_version,
+        step_id=step_id,
+        model_id=parse_transcription_config(
+            request.version_metadata
+        ).streaming_model_id,
+    )
+    if row is None or not scope.matches(row):
+        return "not_found"
+    return row
+
+
+async def _streamed_audio(
+    request: AudioRuntimeRequest, deps: AudioRuntimeDeps
+) -> StreamedAudio | None:
+    if request.step.step_id not in read_streamed_steps(request.run.input_payload_json):
+        return None
+
+    async def record_fallback(
+        reason: LiveFallbackReason, model: "TranscriptionModel"
+    ) -> None:
+        await deps.record_live_fallback(
+            run=request.run,
+            step_id=request.step.step_id,
+            attempt_no=request.attempt_no,
+            fallback=FlowStepAttemptLiveFallback(
+                reason=reason, model_id=model.id, model_name=model.name
+            ),
+        )
+
+    return StreamedAudio(
+        transcript=await _live_transcript(request, deps),
+        record_fallback=record_fallback,
+    )
+
+
 async def resolve_transcribe_and_attach_audio_input(
     *,
     request: AudioRuntimeRequest,
     deps: AudioRuntimeDeps,
 ) -> AudioRuntimeResolution:
-    live_id = read_live_transcript_ids(request.run.input_payload_json).get(
-        request.step.step_id
-    )
-    live_transcript = None
-    if live_id is not None:
-        live_transcript = await LiveTranscriptRepository(
-            deps.flow_run_repo.session
-        ).get(live_id, tenant_id=request.run.tenant_id)
-        scope = LiveTranscriptScope(
-            tenant_id=request.run.tenant_id,
-            user_id=request.run.principal_user_id,
-            flow_id=request.run.flow_id,
-            flow_version=request.run.flow_version,
-            step_id=request.step.step_id,
-            model_id=parse_transcription_config(
-                request.version_metadata
-            ).streaming_model_id,
-        )
-        if live_transcript is not None and not scope.matches(live_transcript):
-            live_transcript = None
     transcription_result = await resolve_and_transcribe_audio_for_step(
         version_metadata=request.version_metadata,
         flow_repo=deps.flow_repo,
@@ -280,8 +339,7 @@ async def resolve_transcribe_and_attach_audio_input(
         max_speakers=read_max_speakers(request.run.input_payload_json),
         speaker_labels=read_speaker_labels_choice(request.run.input_payload_json),
         source_preparation=request.source_preparation,
-        live_transcript=live_transcript,
-        live_transcript_requested=live_id is not None,
+        streamed=await _streamed_audio(request, deps),
         single_recording=request.step.step_id
         in read_single_recording_steps(request.run.input_payload_json),
         decode_limits=request.decode_limits,

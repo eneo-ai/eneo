@@ -2,22 +2,29 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { runInNewContext } from "node:vm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { FINAL_TEXT_WAIT_MS, LiveTranscript, RECONNECT_DELAYS_MS } from "./live-transcript";
+import { LiveTranscript, RECONNECT_DELAYS_MS, type LiveTranscriptDeps } from "./live-transcript";
 import { FakeNode, FakeSocket, TICKET, fakeGraph, installLiveFakes } from "./testing/live-fakes";
 
-function makeLive(openSession = vi.fn(() => Promise.resolve(TICKET))) {
+function makeLive(
+  openSession = vi.fn(() => Promise.resolve(TICKET)),
+  deps: Partial<LiveTranscriptDeps> = {}
+) {
   const live = new LiveTranscript({
     openSession,
     socketUrl: (path) => `wss://app.example${path}`,
     createSocket: (url, protocols) => new FakeSocket(url, protocols) as unknown as WebSocket,
     createNode: () => new FakeNode() as unknown as AudioWorkletNode,
-    newRecordingId: () => "recording-0001"
+    newRecordingId: () => "recording-0001",
+    ...deps
   });
   return { live, openSession };
 }
 
 /** Starts a session and lets the socket open and say ready. */
-async function listening(live: LiveTranscript, { keepsTranscript = true } = {}) {
+async function listening(
+  live: LiveTranscript,
+  { keepsTranscript = true, finishWithinSeconds = 45 } = {}
+) {
   await live.start(fakeGraph());
   await vi.waitFor(() => expect(FakeSocket.instances.length).toBeGreaterThan(0));
   const socket = FakeSocket.instances.at(-1)!;
@@ -26,7 +33,8 @@ async function listening(live: LiveTranscript, { keepsTranscript = true } = {}) 
     type: "ready",
     sample_rate: 16000,
     max_seconds: 18000,
-    keeps_transcript: keepsTranscript
+    keeps_transcript: keepsTranscript,
+    finish_within_seconds: finishWithinSeconds
   });
   return { socket, node: FakeNode.instances.at(-1)! };
 }
@@ -97,14 +105,76 @@ describe("LiveTranscript", () => {
     expect(live.transcriptId).toBeNull();
   });
 
-  it("stops waiting for the final text after its bound", async () => {
+  it("waits for the final text as long as the core said, from the stop, and uses a late one", async () => {
     const { live } = makeLive();
-    await listening(live);
+    const { socket, node } = await listening(live, { finishWithinSeconds: 45 });
+    node.frame(1);
+    vi.useFakeTimers();
+    live.stop();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(socket.texts).toEqual([{ type: "stop", produced_samples: 1600 }]);
+    await vi.advanceTimersByTimeAsync(44_999);
+    expect(live.getSnapshot().finishing).toBe(true);
+    expect(socket.close).not.toHaveBeenCalled();
+
+    socket.receive({ type: "transcript.done", text: "", transcript_id: "tr-1" });
+    await live.settled();
+    expect(live.transcriptId).toBe("tr-1");
+  });
+
+  it("gives up on the final text once the core's time has passed", async () => {
+    const { live } = makeLive();
+    const { socket, node } = await listening(live, { finishWithinSeconds: 45 });
+    node.frame(1);
     vi.useFakeTimers();
     live.stop();
     const settled = live.settled();
-    await vi.advanceTimersByTimeAsync(FINAL_TEXT_WAIT_MS);
+    await vi.advanceTimersByTimeAsync(45_000);
     await settled;
+    expect(live.getSnapshot().finishing).toBe(false);
+    expect(socket.close).toHaveBeenCalled();
+    socket.receive({ type: "transcript.done", text: "", transcript_id: "tr-1" });
+    expect(live.transcriptId).toBeNull();
+  });
+
+  it("names the stored transcript with the parts it stands for once both are known", async () => {
+    const onTranscript = vi.fn();
+    const { live } = makeLive(undefined, { onTranscript });
+    const { socket, node } = await listening(live);
+    node.frame(1);
+    live.markPart();
+    node.frame(2);
+    live.addPart("a");
+    live.stop();
+    await vi.waitFor(() => expect(socket.texts).toHaveLength(1));
+    socket.receive({ type: "transcript.done", text: "", transcript_id: "tr-1" });
+    expect(onTranscript).not.toHaveBeenCalled();
+    live.addPart("b");
+    expect(onTranscript).toHaveBeenCalledExactlyOnceWith("tr-1", ["a", "b"]);
+  });
+
+  it("names no transcript for parts the form did not take", async () => {
+    const onTranscript = vi.fn();
+    const { live } = makeLive(undefined, { onTranscript });
+    const { socket, node } = await listening(live);
+    node.frame(1);
+    live.addPart(undefined);
+    live.stop();
+    await vi.waitFor(() => expect(socket.texts).toHaveLength(1));
+    socket.receive({ type: "transcript.done", text: "", transcript_id: "tr-1" });
+    expect(onTranscript).not.toHaveBeenCalled();
+  });
+
+  it("keeps no transcript of more parts than the step has file slots for", async () => {
+    const { live } = makeLive(undefined, { maxParts: 2 });
+    const { socket, node } = await listening(live);
+    node.frame(1);
+    live.markPart();
+    node.frame(2);
+    live.markPart();
+    node.frame(3);
+    live.stop();
+    await vi.waitFor(() => expect(socket.texts).toEqual([{ type: "stop" }]));
     expect(live.getSnapshot().finishing).toBe(false);
   });
 

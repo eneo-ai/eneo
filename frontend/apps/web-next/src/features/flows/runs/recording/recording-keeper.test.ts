@@ -55,7 +55,8 @@ describe("RecordingKeeper", () => {
       mimeType: "audio/webm",
       durationMs: 90_000,
       capturedAt: START,
-      contract: CONTRACT
+      contract: CONTRACT,
+      streamed: false
     });
 
     expect(kept).toBe("device");
@@ -81,7 +82,11 @@ describe("RecordingKeeper", () => {
 
   it("rebuilds the part the page left mid-recording from its journal", async () => {
     const { keeper, db } = setup();
-    const journal = keeper.journalFor("step-1", () => CONTRACT);
+    const journal = keeper.journalFor(
+      "step-1",
+      () => CONTRACT,
+      () => false
+    );
     journal.begin(part(1));
     journal.append(part(1), new Blob(["a"], { type: "audio/webm" }), 1_000);
     journal.append(part(1), new Blob(["b"], { type: "audio/webm" }), 2_000);
@@ -104,9 +109,89 @@ describe("RecordingKeeper", () => {
     expect(db.chunks.size).toBe(0);
   });
 
+  it("keeps whether a part was streamed, also for a part rebuilt from its journal", async () => {
+    const { keeper } = setup();
+    const journal = keeper.journalFor(
+      "step-1",
+      () => CONTRACT,
+      () => true
+    );
+    journal.begin(part(0));
+    journal.append(part(0), new Blob(["a"], { type: "audio/webm" }), 1_000);
+    journal.leave(part(0));
+    await settle();
+    await keeper.scan("step-1");
+    const [rebuilt] = await keeper.readSession("step-1", "rec-1");
+    expect(rebuilt).toMatchObject({ interrupted: true, streamed: true });
+  });
+
+  it("keeps the stored live transcript with the parts it stands for, once they are stored", async () => {
+    const { keeper } = setup();
+    const keep = (index: number) =>
+      keeper.keepPart("step-1", {
+        sessionId: "rec-1",
+        index,
+        blob: new Blob(["audio"], { type: "audio/webm" }),
+        mimeType: "audio/webm",
+        durationMs: 1_000,
+        capturedAt: START,
+        contract: CONTRACT,
+        streamed: true
+      });
+    void keep(0);
+    void keep(1);
+    await keeper.keepLiveTranscript(
+      "step-1",
+      [
+        { sessionId: "rec-1", index: 0 },
+        { sessionId: "rec-1", index: 1 }
+      ],
+      "tr-1"
+    );
+    const parts = await keeper.readSession("step-1", "rec-1");
+    expect(parts.map((stored) => stored.liveTranscript)).toEqual([
+      { id: "tr-1", parts: 2 },
+      { id: "tr-1", parts: 2 }
+    ]);
+  });
+
+  it("keeps no live transcript when a part it stands for is not on the device", async () => {
+    const { keeper, db } = setup();
+    vi.spyOn(db, "putPart").mockRejectedValueOnce(new Error("QuotaExceededError"));
+    const keep = (index: number) =>
+      keeper.keepPart("step-1", {
+        sessionId: "rec-1",
+        index,
+        blob: new Blob(["audio"], { type: "audio/webm" }),
+        mimeType: "audio/webm",
+        durationMs: 1_000,
+        capturedAt: START,
+        contract: CONTRACT,
+        streamed: true
+      });
+    void keep(0);
+    void keep(1);
+    await keeper.keepLiveTranscript(
+      "step-1",
+      [
+        { sessionId: "rec-1", index: 0 },
+        { sessionId: "rec-1", index: 1 }
+      ],
+      "tr-1"
+    );
+    const parts = await keeper.readSession("step-1", "rec-1");
+    expect(parts).toHaveLength(1);
+    expect(parts[0]).toMatchObject({ streamed: true });
+    expect(parts[0]!.liveTranscript).toBeUndefined();
+  });
+
   it("drops the journal of a part that was stored", async () => {
     const { keeper, db } = setup();
-    const journal = keeper.journalFor("step-1", () => CONTRACT);
+    const journal = keeper.journalFor(
+      "step-1",
+      () => CONTRACT,
+      () => false
+    );
     journal.begin(part(0));
     journal.append(part(0), new Blob(["a"]), 1_000);
     await settle();
@@ -117,7 +202,8 @@ describe("RecordingKeeper", () => {
       mimeType: "audio/webm",
       durationMs: 1_000,
       capturedAt: START,
-      contract: CONTRACT
+      contract: CONTRACT,
+      streamed: false
     });
     expect(db.journals.size).toBe(0);
     expect(db.chunks.size).toBe(0);
@@ -125,7 +211,11 @@ describe("RecordingKeeper", () => {
 
   it("leaves alone a part another tab still records", async () => {
     const { keeper, db, lockManager } = setup();
-    const journal = keeper.journalFor("step-1", () => CONTRACT);
+    const journal = keeper.journalFor(
+      "step-1",
+      () => CONTRACT,
+      () => false
+    );
     journal.begin(part(0));
     journal.append(part(0), new Blob(["a"]), 1_000);
     await settle();
@@ -144,11 +234,23 @@ describe("RecordingKeeper", () => {
 
   it("journals nothing without Web Locks, or for audio a cut-off file of which would not play", async () => {
     const withoutLocks = setup({ locks: false });
-    withoutLocks.keeper.journalFor("step-1", () => CONTRACT).begin(part(0));
+    withoutLocks.keeper
+      .journalFor(
+        "step-1",
+        () => CONTRACT,
+        () => false
+      )
+      .begin(part(0));
     expect(withoutLocks.keeper.degradation("step-1")).toBe("unavailable");
 
     const mp4 = setup();
-    mp4.keeper.journalFor("step-1", () => CONTRACT).begin({ ...part(0), mimeType: "audio/mp4" });
+    mp4.keeper
+      .journalFor(
+        "step-1",
+        () => CONTRACT,
+        () => false
+      )
+      .begin({ ...part(0), mimeType: "audio/mp4" });
     expect(mp4.keeper.degradation("step-1")).toBe("unavailable");
     expect(mp4.db.journals.size).toBe(0);
   });
@@ -156,7 +258,11 @@ describe("RecordingKeeper", () => {
   it("says when storage falls behind, and keeps what it wrote", async () => {
     const { keeper, db } = setup();
     const appendChunk = vi.spyOn(db, "appendChunk").mockReturnValue(new Promise(() => undefined));
-    const journal = keeper.journalFor("step-1", () => CONTRACT);
+    const journal = keeper.journalFor(
+      "step-1",
+      () => CONTRACT,
+      () => false
+    );
     journal.begin(part(0));
     for (let chunk = 0; chunk <= JOURNAL_MAX_PENDING_CHUNKS + 1; chunk += 1) {
       journal.append(part(0), new Blob(["a"]), chunk * 1_000);
@@ -175,7 +281,8 @@ describe("RecordingKeeper", () => {
       mimeType: "audio/webm",
       durationMs: 1_000,
       capturedAt: START,
-      contract: CONTRACT
+      contract: CONTRACT,
+      streamed: false
     });
     expect(kept).toBe("tab");
     expect(keeper.keeping("step-1", "rec-1", 0)).toBe("tab");
@@ -183,7 +290,11 @@ describe("RecordingKeeper", () => {
 
   it("forgets a recording thrown away: its parts, its journal and parts handed over late", async () => {
     const { keeper, db } = setup();
-    const journal = keeper.journalFor("step-1", () => CONTRACT);
+    const journal = keeper.journalFor(
+      "step-1",
+      () => CONTRACT,
+      () => false
+    );
     await keeper.keepPart("step-1", {
       sessionId: "rec-1",
       index: 0,
@@ -191,7 +302,8 @@ describe("RecordingKeeper", () => {
       mimeType: "audio/webm",
       durationMs: 1_000,
       capturedAt: START,
-      contract: CONTRACT
+      contract: CONTRACT,
+      streamed: false
     });
     journal.begin(part(1));
     journal.append(part(1), new Blob(["a"]), 1_000);
@@ -207,7 +319,8 @@ describe("RecordingKeeper", () => {
       mimeType: "audio/webm",
       durationMs: 1_000,
       capturedAt: START,
-      contract: CONTRACT
+      contract: CONTRACT,
+      streamed: false
     });
     await settle();
     expect(db.parts.size).toBe(0);
@@ -224,7 +337,8 @@ describe("RecordingKeeper", () => {
       mimeType: "audio/webm",
       durationMs: 1_000,
       capturedAt: START,
-      contract: CONTRACT
+      contract: CONTRACT,
+      streamed: false
     });
     later(RECORDING_TTL_MS + 2_000);
     expect((await keeper.scan("step-1")).saved).toEqual([]);
@@ -241,7 +355,13 @@ describe("RecordingKeeper", () => {
     const keeper = new RecordingKeeper("flow-1", null, null);
     expect(keeper.available).toBe(false);
     expect(await keeper.scan("step-1")).toEqual({ saved: [], incomplete: false });
-    keeper.journalFor("step-1", () => CONTRACT).begin(part(0));
+    keeper
+      .journalFor(
+        "step-1",
+        () => CONTRACT,
+        () => false
+      )
+      .begin(part(0));
     expect(keeper.degradation("step-1")).toBe("failed");
   });
 });

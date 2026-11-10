@@ -174,6 +174,7 @@ async def test_empty_chunk_intervals_reach_audio_runtime_diagnostics(
             commit=AsyncMock(),
             stage_transcript_source=lambda reference, source: None,
             stage_run_transcript=lambda reference, transcript: None,
+            record_live_fallback=AsyncMock(),
         ),
     )
 
@@ -1688,6 +1689,7 @@ async def test_resolve_transcribe_attach_updates_payload_context_and_audits(
     deps = AudioRuntimeDeps(
         stage_transcript_source=lambda reference, source: None,
         stage_run_transcript=lambda reference, transcript: staged.append(transcript),
+        record_live_fallback=AsyncMock(),
         commit=AsyncMock(),
         apply_output_cap=AsyncMock(side_effect=lambda **kw: (kw["text"], [])),
         transcribers=transcribers,
@@ -1786,6 +1788,7 @@ async def test_resolve_transcribe_attach_swallow_audit_errors(
     deps = AudioRuntimeDeps(
         stage_transcript_source=lambda reference, source: None,
         stage_run_transcript=lambda reference, transcript: staged.append(transcript),
+        record_live_fallback=AsyncMock(),
         commit=AsyncMock(),
         apply_output_cap=AsyncMock(side_effect=lambda **kw: (kw["text"], [])),
         transcribers=AsyncMock(),

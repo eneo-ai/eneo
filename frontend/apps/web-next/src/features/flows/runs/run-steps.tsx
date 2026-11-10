@@ -27,6 +27,7 @@ import { RunFiles, RunInputFiles } from "./run-files";
 import { isTerminal, NOT_RUN_STEP_VIEW, stepStatusView } from "./run-status";
 import { StepPromptDetails } from "./run-step-details";
 import {
+  StepLiveFallback,
   StepRejectedOutput,
   StepRuntimeInputSummary,
   StepSectionReading,
@@ -445,6 +446,7 @@ function StepCard({
       {result?.status === "failed" && !notRun ? (
         <StepRejectedOutput payload={result.output_payload_json} />
       ) : null}
+      {result ? <StepLiveFallback result={result} /> : null}
       {warnings.length > 0 ? (
         <ul className="text-ax-text m-0 flex max-w-prose flex-col gap-1 p-0 text-sm">
           {/* A code's text says nothing of the case, so two of one code read as one line. */}

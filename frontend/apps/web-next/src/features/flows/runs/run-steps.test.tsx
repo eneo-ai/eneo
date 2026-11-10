@@ -8,7 +8,7 @@ import { makeResultFile, makeRunGraph, makeRunStep } from "./run-fixtures";
 import { RunLiveProgress } from "./run-live-progress";
 import { runStepViews } from "./run-progress";
 import { RunSteps } from "./run-steps";
-import { runKeys } from "./runs-api";
+import { runKeys, type RunStep } from "./runs-api";
 
 vi.mock("@/lib/api/browser", () => ({ browserApi: {} }));
 
@@ -334,6 +334,53 @@ describe("RunSteps warnings", () => {
     renderInApp(<RunSteps flowId="flow-1" runId="run-1" steps={steps} />);
     const card = screen.getByRole("article", { name: "Steg 1: Hämta ärendet" });
     expect(card.textContent).not.toMatch(/[Tt]oken/);
+  });
+});
+
+describe("A streamed step whose live text was not used", () => {
+  function card(status: NonNullable<RunStep["status"]>, step: Partial<RunStep>) {
+    const steps = runStepViews(makeRunGraph([{ order: 1, label: "Transkribera", status }]), [
+      makeRunStep(1, { status, ...step })
+    ]);
+    renderInApp(<RunSteps flowId="flow-1" runId="run-1" steps={steps} />);
+    return screen.getByRole("article", { name: "Steg 1: Transkribera" });
+  }
+
+  it("says why, and that the transcription model transcribed the audio", async () => {
+    const shown = card("completed", {
+      transcript_origin: "batch",
+      live_fallback_reason: "not_received",
+      transcript_model_name: "KB-Whisper"
+    });
+    expect(within(shown).getByText(messages.flow_run_live_fallback_title)).toBeTruthy();
+    expect(
+      within(shown).getByText(
+        `${messages.flow_run_live_fallback_not_received} Ljudfilerna transkriberades med KB-Whisper i stället.`
+      )
+    ).toBeTruthy();
+    await expectNoAxeViolations(document.body);
+  });
+
+  it("claims no transcription on a step that failed or was cancelled", () => {
+    for (const status of ["failed", "cancelled"] as const) {
+      const shown = card(status, {
+        transcript_origin: null,
+        live_fallback_reason: "duration_mismatch",
+        transcript_model_name: "KB-Whisper",
+        error_code: "typed_io_transcription_failed"
+      });
+      expect(
+        within(shown).getByText(
+          `${messages.flow_run_live_fallback_duration_mismatch} Ljudfilerna skulle transkriberas med KB-Whisper i stället.`
+        )
+      ).toBeTruthy();
+      cleanup();
+    }
+  });
+
+  it("says nothing when the live text was used or the audio was not streamed", () => {
+    const shown = card("completed", { transcript_origin: "live", live_fallback_reason: null });
+    expect(within(shown).queryByText(messages.flow_run_live_fallback_title)).toBeNull();
   });
 });
 

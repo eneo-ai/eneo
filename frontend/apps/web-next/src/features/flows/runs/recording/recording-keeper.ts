@@ -145,6 +145,8 @@ export class RecordingKeeper {
   /** Recordings forgotten: their late chunks and parts are not kept. */
   #forgotten = new Set<string>();
   #keeping = new Map<string, PartKeeping>();
+  /** Each part handed to `keepPart`, by its key, until it is stored or not. */
+  #storing = new Map<string, Promise<PartKeeping>>();
   #listeners = new Set<() => void>();
   #degraded = new Map<string, JournalDegradation>();
   #version = 0;
@@ -187,8 +189,12 @@ export class RecordingKeeper {
     return this.#keeping.get(partKey({ flowId: this.#flowId, stepId, sessionId, index }));
   }
 
-  /** The journal a step's recorder writes its parts to. */
-  journalFor(stepId: string, contract: () => ContractSnapshot): RecorderJournal {
+  /** The journal a step's recorder writes its parts to; `streamed` as of the part's start. */
+  journalFor(
+    stepId: string,
+    contract: () => ContractSnapshot,
+    streamed: () => boolean
+  ): RecorderJournal {
     const address = (part: JournalPart): PartAddress => ({
       flowId: this.#flowId,
       stepId,
@@ -206,7 +212,8 @@ export class RecordingKeeper {
           ...address(part),
           mimeType: part.mimeType,
           capturedAt: part.capturedAt,
-          contract: contract()
+          contract: contract(),
+          streamed: streamed()
         };
         this.#journal.begin(meta);
       },
@@ -227,9 +234,43 @@ export class RecordingKeeper {
    * still finds it; the part's journal then goes. Resolves with where the
    * part is kept.
    */
-  async keepPart(
+  keepPart(
     stepId: string,
-    part: Omit<StoredPart, "flowId" | "stepId" | "interrupted">
+    part: Omit<StoredPart, "flowId" | "stepId" | "interrupted" | "liveTranscript">
+  ): Promise<PartKeeping> {
+    const storing = this.#store(stepId, part);
+    this.#storing.set(
+      partKey({ flowId: this.#flowId, stepId, sessionId: part.sessionId, index: part.index }),
+      storing
+    );
+    return storing;
+  }
+
+  /**
+   * Keeps the core's stored live transcript with the recorded parts it stands
+   * for, in order, once they are stored: a reload then still finds it. None
+   * of them keeps it when one is not on the device.
+   */
+  async keepLiveTranscript(
+    stepId: string,
+    parts: readonly Pick<PartAddress, "sessionId" | "index">[],
+    id: string
+  ): Promise<void> {
+    const addresses = parts.map((part) => ({ flowId: this.#flowId, stepId, ...part }));
+    await Promise.all(addresses.map((address) => this.#storing.get(partKey(address))));
+    if (!this.#db || addresses.some((address) => this.#isForgotten(stepId, address.sessionId))) {
+      return;
+    }
+    try {
+      await this.#db.setLiveTranscript(addresses, { id, parts: addresses.length });
+    } catch {
+      // A run started after a reload then has no live text for these parts, and says so.
+    }
+  }
+
+  async #store(
+    stepId: string,
+    part: Omit<StoredPart, "flowId" | "stepId" | "interrupted" | "liveTranscript">
   ): Promise<PartKeeping> {
     const address: PartAddress = {
       flowId: this.#flowId,
@@ -416,7 +457,8 @@ export class RecordingKeeper {
             durationMs,
             capturedAt: meta.capturedAt,
             interrupted: true,
-            contract: meta.contract
+            contract: meta.contract,
+            streamed: meta.streamed
           });
         } catch {
           return false;

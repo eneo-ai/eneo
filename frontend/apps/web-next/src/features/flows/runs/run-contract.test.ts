@@ -15,7 +15,7 @@ import {
   runRequest,
   speakersBlockRun,
   takesFreeText,
-  withoutRefusedLiveTranscripts,
+  type RecordingPartInfo,
   type UploadEntry
 } from "./run-contract";
 import { makeContract, makeInput } from "./run-fixtures";
@@ -208,7 +208,7 @@ describe("runRequest", () => {
   it("sends the parts of one recording made in the form as one, without asking", () => {
     const part = (fileId: string, index: number): UploadEntry => ({
       ...done(fileId),
-      recording: { sessionId: "rec-1", index, durationMs: 60_000 }
+      recording: { sessionId: "rec-1", index, durationMs: 60_000, streamed: false }
     });
     const parts = [part("f1", 0), part("f2", 1)];
     expect(recordedAsOne(parts)).toBe(true);
@@ -225,83 +225,83 @@ describe("runRequest", () => {
     expect(body.step_inputs).toEqual({ s1: { file_ids: ["f1", "f2"], single_recording: true } });
   });
 
-  it("sends a live transcript with the step's one file, or with every part of one recording", () => {
+  describe("a streamed recording", () => {
     const choices = {
       values: { ärende: "Bygglov" },
       freeText: "",
       singleRecording: new Set<string>(),
       speakerLabels: null,
-      maxSpeakers: null,
-      liveTranscripts: { s1: "transcript-1" }
+      maxSpeakers: null
     };
-    const part = (fileId: string, index: number): UploadEntry => ({
+    const part = (
+      fileId: string,
+      index: number,
+      recording: Partial<RecordingPartInfo> = {}
+    ): UploadEntry => ({
       ...done(fileId),
-      recording: { sessionId: "rec-1", index, durationMs: 60_000 }
+      recording: { sessionId: "rec-1", index, durationMs: 60_000, streamed: true, ...recording }
     });
     const parts = [part("f1", 0), part("f2", 1), part("f3", 2)];
-    expect(runRequest(contract, { ...choices, uploads: { s1: [done("f1")] } }).step_inputs).toEqual(
-      { s1: { file_ids: ["f1"], live_transcript_id: "transcript-1" } }
-    );
-    expect(runRequest(contract, { ...choices, uploads: { s1: parts } }).step_inputs).toEqual({
-      s1: {
+    const stepInput = (uploads: UploadEntry[], liveTranscripts?: Record<string, string>) =>
+      runRequest(contract, { ...choices, uploads: { s1: uploads }, liveTranscripts }).step_inputs;
+
+    it("goes with its live transcript: of its one file, or of every part of one recording", () => {
+      expect(stepInput([part("f1", 0)], { s1: "transcript-1" })).toEqual({
+        s1: { file_ids: ["f1"], streamed: true, live_transcript_id: "transcript-1" }
+      });
+      expect(stepInput(parts, { s1: "transcript-1" })).toEqual({
+        s1: {
+          file_ids: ["f1", "f2", "f3"],
+          single_recording: true,
+          streamed: true,
+          live_transcript_id: "transcript-1"
+        }
+      });
+    });
+
+    it("is sent as streamed when no live transcript came, so the run says why", () => {
+      // The wait ran out, the session never started, or its transcript was not kept.
+      expect(stepInput(parts)).toEqual({
+        s1: { file_ids: ["f1", "f2", "f3"], single_recording: true, streamed: true }
+      });
+      // Parts the flow cannot take as one recording go without the transcript.
+      const apart = makeContract({
+        ...contract,
+        transcription: { ...contract.transcription!, single_recording: false }
+      });
+      expect(
+        runRequest(apart, { ...choices, uploads: { s1: parts }, liveTranscripts: { s1: "t" } })
+          .step_inputs
+      ).toEqual({ s1: { file_ids: ["f1", "f2", "f3"], streamed: true } });
+    });
+
+    it("takes the live transcript kept with a recording continued after a reload", () => {
+      const kept = { id: "tr-kept", parts: 3 };
+      const continued = parts.map((entry, index) =>
+        part(entry.fileId!, index, { liveTranscript: kept })
+      );
+      expect(stepInput(continued)?.s1).toMatchObject({
+        streamed: true,
+        live_transcript_id: "tr-kept"
+      });
+      // Not every part it stands for is on the form: the run goes without it.
+      expect(stepInput(continued.slice(0, 2))?.s1).not.toHaveProperty("live_transcript_id");
+      expect(stepInput([...continued.slice(0, 2), part("f3", 2)])?.s1).toEqual({
         file_ids: ["f1", "f2", "f3"],
         single_recording: true,
-        live_transcript_id: "transcript-1"
-      }
+        streamed: true
+      });
     });
-    // Separate files, or parts the flow cannot take as one recording, go without it.
-    expect(
-      runRequest(contract, { ...choices, uploads: { s1: [done("f1"), done("f2")] } }).step_inputs
-    ).toEqual({ s1: { file_ids: ["f1", "f2"] } });
-    const apart = makeContract({
-      ...contract,
-      transcription: { ...contract.transcription!, single_recording: false }
-    });
-    expect(runRequest(apart, { ...choices, uploads: { s1: parts } }).step_inputs).toEqual({
-      s1: { file_ids: ["f1", "f2", "f3"] }
-    });
-  });
-});
 
-describe("withoutRefusedLiveTranscripts", () => {
-  const request = {
-    expected_flow_version: 7,
-    input_payload_json: {},
-    step_inputs: {
-      s1: { file_ids: ["f1", "f2"], single_recording: true, live_transcript_id: "tr-1" },
-      s2: { file_ids: ["f3"] }
-    }
-  };
-  const refusal = (reason: string) => new EneoApiError("Refused", { status: 409, reason });
-
-  it.each([
-    "flow_run_live_transcript_not_found",
-    "flow_run_live_transcript_already_bound",
-    "flow_run_live_transcript_files_mismatch"
-  ])("sends the same files and choices without the live transcript after %s", (reason) => {
-    expect(withoutRefusedLiveTranscripts(request, refusal(reason))).toEqual({
-      expected_flow_version: 7,
-      input_payload_json: {},
-      step_inputs: {
-        s1: { file_ids: ["f1", "f2"], single_recording: true },
-        s2: { file_ids: ["f3"] }
-      }
+    it("leaves picked files, and a recording made without live text, as they are", () => {
+      expect(stepInput([done("f1")], { s1: "transcript-1" })).toEqual({
+        s1: { file_ids: ["f1"] }
+      });
+      const plain = parts.map((entry, index) => part(entry.fileId!, index, { streamed: false }));
+      expect(stepInput(plain)).toEqual({
+        s1: { file_ids: ["f1", "f2", "f3"], single_recording: true }
+      });
     });
-    // The request asked is left as it was.
-    expect(request.step_inputs.s1.live_transcript_id).toBe("tr-1");
-  });
-
-  it("leaves any other refusal, and a request without a live transcript, as they are", () => {
-    expect(withoutRefusedLiveTranscripts(request, refusal("flow_run_stale_version"))).toBeNull();
-    expect(withoutRefusedLiveTranscripts(request, new Error("offline"))).toBeNull();
-    const plain = withoutRefusedLiveTranscripts(
-      request,
-      refusal("flow_run_live_transcript_not_found")
-    )!;
-    // Sent again without it, a second live refusal is not answered by a third request.
-    expect(
-      withoutRefusedLiveTranscripts(plain, refusal("flow_run_live_transcript_not_found"))
-    ).toBeNull();
   });
 });
 

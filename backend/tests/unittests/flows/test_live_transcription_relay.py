@@ -112,6 +112,8 @@ async def test_the_preview_streams_committed_text_and_ends_with_the_full_transcr
             "sample_rate": 16000,
             "max_seconds": 60,
             "keeps_transcript": False,
+            # From stop: the final commit's send, the final text, its write.
+            "finish_within_seconds": 10 + 30 + 5,
         },
         {"type": "transcript.delta", "text": "Hej"},
         {"type": "transcript.delta", "text": " världen"},

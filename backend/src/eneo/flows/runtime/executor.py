@@ -4,7 +4,7 @@ import asyncio
 import logging
 import os
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from contextlib import AbstractAsyncContextManager
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
@@ -49,7 +49,9 @@ from eneo.flows.domain.flow import (
 from eneo.flows.domain.flow_run_exceptions import FlowStepAttemptClosed
 from eneo.flows.domain.flow_step_attempt_input import (
     FlowStepAttemptCompletionConfiguration,
+    FlowStepAttemptEvidenceWrite,
     FlowStepAttemptExecutionInput,
+    FlowStepAttemptLiveFallback,
     FlowStepAttemptStart,
     FlowStepAttemptToolCallResult,
     FlowStepAttemptToolCallStart,
@@ -2912,6 +2914,7 @@ class FlowRunExecutor:
             variable_resolver=self.variable_resolver,
             resolve_http_input_source_text=self._resolve_http_input_source_text,
             resolve_tool_input=partial(self._resolve_tool_input, attempt_no=attempt_no),
+            record_live_fallback=self._record_live_fallback,
             file_service=self.file_service,
             transcribers=self.transcribers,
             flow_repo=self.flow_repo,
@@ -3075,26 +3078,19 @@ class FlowRunExecutor:
             start: FlowStepAttemptToolCallStart,
             result: FlowStepAttemptToolCallResult | None,
         ) -> None:
-            try:
-                written = await self.flow_run_repo.write_attempt_tool_call_evidence(
+            await self._commit_attempt_evidence(
+                self.flow_run_repo.write_attempt_tool_call_evidence(
                     run_id=run.id,
                     step_id=step.step_id,
                     attempt_no=attempt_no,
                     tenant_id=run.tenant_id,
                     start=start,
                     result=result,
-                )
-                if written == "attempt_closed":
-                    raise FlowStepAttemptClosed(
-                        run_id=run.id, step_id=step.step_id, attempt_no=attempt_no
-                    )
-                await self._commit()
-            except (asyncio.CancelledError, Exception):
-                # Releases the run and attempt row locks the write took, so
-                # no other writer waits on them while the read audits how it
-                # ended.
-                await self._rollback()
-                raise
+                ),
+                run_id=run.id,
+                step_id=step.step_id,
+                attempt_no=attempt_no,
+            )
 
         return await resolve_tool_input_runtime(
             step=step,
@@ -3105,6 +3101,49 @@ class FlowRunExecutor:
             counted_server_levels=counted_server_levels,
             record_call=record_call,
         )
+
+    async def _record_live_fallback(
+        self,
+        *,
+        run: FlowRun,
+        step_id: UUID,
+        attempt_no: int,
+        fallback: FlowStepAttemptLiveFallback,
+    ) -> None:
+        await self._commit_attempt_evidence(
+            self.flow_run_repo.write_attempt_live_fallback(
+                run_id=run.id,
+                step_id=step_id,
+                attempt_no=attempt_no,
+                tenant_id=run.tenant_id,
+                fallback=fallback,
+            ),
+            run_id=run.id,
+            step_id=step_id,
+            attempt_no=attempt_no,
+        )
+
+    async def _commit_attempt_evidence(
+        self,
+        write: Awaitable[FlowStepAttemptEvidenceWrite],
+        *,
+        run_id: UUID,
+        step_id: UUID,
+        attempt_no: int,
+    ) -> None:
+        """Commit evidence of work the attempt is about to do, before it does it;
+        an attempt closed under the step stops it."""
+        try:
+            if await write == "attempt_closed":
+                raise FlowStepAttemptClosed(
+                    run_id=run_id, step_id=step_id, attempt_no=attempt_no
+                )
+            await self._commit()
+        except (asyncio.CancelledError, Exception):
+            # Releases the run and attempt row locks the write took, so no other
+            # writer waits on them while the read audits how it ended.
+            await self._rollback()
+            raise
 
     async def _tool_preflight(
         self, steps: list[RuntimeStep], *, run: FlowRun, state: RunExecutionState

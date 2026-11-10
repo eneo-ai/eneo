@@ -27,6 +27,9 @@ export type PartAddress = {
   index: number;
 };
 
+/** The core's stored live transcript of a recording, and how many parts it stands for. */
+export type LiveTranscriptRef = { id: string; parts: number };
+
 /** A finished part on the device. */
 export type StoredPart = PartAddress & {
   blob: Blob;
@@ -37,6 +40,10 @@ export type StoredPart = PartAddress & {
   /** Rebuilt from its journal: the page went away while it recorded. */
   interrupted: boolean;
   contract: ContractSnapshot;
+  /** Its audio was streamed for live text while it was recorded. */
+  streamed: boolean;
+  /** The live transcript that stands for this part and the rest of its recording's parts. */
+  liveTranscript?: LiveTranscriptRef;
 };
 
 /** The part being recorded, as its journal knows it without reading audio. */
@@ -44,6 +51,7 @@ export type JournalMeta = PartAddress & {
   mimeType: string;
   capturedAt: number;
   contract: ContractSnapshot;
+  streamed: boolean;
   /** Wall-clock time of the last chunk written, for expiry. */
   lastChunkAt: number;
 };
@@ -56,6 +64,11 @@ export type RecordingDatabase = {
   putPart(part: StoredPart): Promise<void>;
   /** A step's stored parts, in address order. */
   listParts(flowId: string, stepId: string): Promise<StoredPart[]>;
+  /**
+   * Adds the live transcript to every one of these stored parts, or to none
+   * when one is not stored; false then.
+   */
+  setLiveTranscript(addresses: PartAddress[], liveTranscript: LiveTranscriptRef): Promise<boolean>;
   /** Whether the part is stored and reads back; null when that is not known in time. */
   hasPart(address: PartAddress, size?: number): Promise<boolean | null>;
   deletePart(address: PartAddress): Promise<void>;
@@ -154,6 +167,12 @@ export function memoryRecordings(): RecordingDatabase & {
         .filter(([key]) => inRange(key, stepPrefix(flowId, stepId)))
         .map(([, part]) => part)
         .sort(compareAddress);
+    },
+    async setLiveTranscript(addresses, liveTranscript) {
+      const stored = addresses.map((address) => parts.get(partKey(address)));
+      if (stored.some((part) => !part)) return false;
+      for (const part of stored) parts.set(partKey(part!), { ...part!, liveTranscript });
+      return true;
     },
     async hasPart(address, size) {
       const part = parts.get(partKey(address));
@@ -334,6 +353,20 @@ export function indexedDbRecordings(): RecordingDatabase | null {
     },
     async listParts(flowId, stepId) {
       return (await getAll<StoredPart>(PARTS, stepPrefix(flowId, stepId))).sort(compareAddress);
+    },
+    async setLiveTranscript(addresses, liveTranscript) {
+      const db = await open();
+      return transaction(db, [PARTS], "readwrite", async (tx) => {
+        const store = tx.objectStore(PARTS);
+        const stored = await Promise.all(
+          addresses.map((address) =>
+            request(store.get(partKey(address)) as IDBRequest<StoredPart | undefined>)
+          )
+        );
+        if (stored.some((part) => !part)) return false;
+        for (const part of stored) store.put({ ...part!, liveTranscript }, partKey(part!));
+        return true;
+      });
     },
     async hasPart(address, size) {
       const db = await open();

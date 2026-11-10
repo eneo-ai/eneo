@@ -172,6 +172,7 @@ function keptPart(index: number, overrides: Partial<StoredPart> = {}): StoredPar
       maxFileSizeBytes: null,
       acceptedMimetypes: ["audio/webm", "audio/mp4"]
     },
+    streamed: false,
     ...overrides
   };
 }
@@ -479,7 +480,7 @@ describe("RunRecorder in the start dialog", () => {
     expect(socket.url).toBe("ws://localhost:3000/api/v1/live-transcription");
     act(() => {
       socket.open();
-      socket.receive({ type: "ready", keeps_transcript: true });
+      socket.receive({ type: "ready", keeps_transcript: true, finish_within_seconds: 45 });
       FakeNode.instances[0]!.frame(1);
       socket.receive({ type: "transcript.delta", text: "Välkomna till mötet" });
     });
@@ -507,17 +508,19 @@ describe("RunRecorder in the start dialog", () => {
     });
     await waitFor(() => expect(onStarted).toHaveBeenCalled());
     expect(startBody()?.step_inputs).toEqual({
-      "step-1": { file_ids: ["file-1"], live_transcript_id: "tr-1" }
+      "step-1": { file_ids: ["file-1"], streamed: true, live_transcript_id: "tr-1" }
     });
   });
 
   /** Opens the dialog with live text, records, and lets its socket say ready. */
   async function recordLive({
     keepsTranscript,
-    partSeconds
+    partSeconds,
+    finishWithinSeconds = 45
   }: {
     keepsTranscript: boolean;
     partSeconds?: number;
+    finishWithinSeconds?: number;
   }) {
     installBrowser({ live: true });
     grantMicrophone();
@@ -530,7 +533,11 @@ describe("RunRecorder in the start dialog", () => {
     await waitFor(() => expect(FakeSocket.instances).toHaveLength(1));
     act(() => {
       FakeSocket.instances[0]!.open();
-      FakeSocket.instances[0]!.receive({ type: "ready", keeps_transcript: keepsTranscript });
+      FakeSocket.instances[0]!.receive({
+        type: "ready",
+        keeps_transcript: keepsTranscript,
+        finish_within_seconds: finishWithinSeconds
+      });
       FakeNode.instances[0]!.frame(1);
     });
     return { ...opened, socket: FakeSocket.instances[0]! };
@@ -546,7 +553,7 @@ describe("RunRecorder in the start dialog", () => {
   }
 
   it("starts at once without a stored transcript when the core does not keep the live text", async () => {
-    // A separate live model: the text is a preview and the run transcribes the audio again.
+    // The text is a preview: the run transcribes the streamed audio and says why.
     const { dialog, onStarted, socket } = await recordLive({ keepsTranscript: false });
     fireEvent.click(button(dialog, messages.flow_transcript_rec_stop));
     await within(dialog).findByText(/^Inspelning, del 1/);
@@ -556,7 +563,9 @@ describe("RunRecorder in the start dialog", () => {
     // Nothing waits for the final text, so a late one cannot name the run's transcript.
     startThenFinalText(dialog, socket, "tr-1");
     await waitFor(() => expect(onStarted).toHaveBeenCalled());
-    expect(startBody()?.step_inputs).toEqual({ "step-1": { file_ids: ["file-1"] } });
+    expect(startBody()?.step_inputs).toEqual({
+      "step-1": { file_ids: ["file-1"], streamed: true }
+    });
   });
 
   it("uses the stored transcript of a recording that was paused and went on", async () => {
@@ -579,7 +588,7 @@ describe("RunRecorder in the start dialog", () => {
     startThenFinalText(dialog, socket, "tr-1");
     await waitFor(() => expect(onStarted).toHaveBeenCalled());
     expect(startBody()?.step_inputs).toEqual({
-      "step-1": { file_ids: ["file-1"], live_transcript_id: "tr-1" }
+      "step-1": { file_ids: ["file-1"], streamed: true, live_transcript_id: "tr-1" }
     });
   });
 
@@ -612,6 +621,7 @@ describe("RunRecorder in the start dialog", () => {
       "step-1": {
         file_ids: ["file-1", "file-2"],
         single_recording: true,
+        streamed: true,
         live_transcript_id: "tr-1"
       }
     });
@@ -632,7 +642,7 @@ describe("RunRecorder in the start dialog", () => {
     const second = FakeSocket.instances[1]!;
     act(() => {
       second.open();
-      second.receive({ type: "ready", keeps_transcript: true });
+      second.receive({ type: "ready", keeps_transcript: true, finish_within_seconds: 45 });
       FakeNode.instances.at(-1)!.frame(2);
     });
     fireEvent.click(button(dialog, messages.flow_transcript_rec_stop));
@@ -644,99 +654,76 @@ describe("RunRecorder in the start dialog", () => {
     startThenFinalText(dialog, second, "tr-2");
     await waitFor(() => expect(onStarted).toHaveBeenCalled());
     expect(startBody()?.step_inputs).toEqual({
-      "step-1": { file_ids: ["file-1", "file-2"], single_recording: true }
+      "step-1": { file_ids: ["file-1", "file-2"], single_recording: true, streamed: true }
     });
   });
 
-  /** The run requests the dialog sent: each body and its idempotency key. */
-  function startRequests() {
-    return api.stub.calls
-      .filter((item) => item.method === "POST" && item.path.endsWith("/runs/"))
-      .map((item) => {
-        const init = item.init as {
-          body?: { step_inputs?: unknown };
-          params?: { header?: Record<string, string> };
-        };
-        return {
-          stepInputs: init.body?.step_inputs,
-          key: init.params?.header?.["Idempotency-Key"]
-        };
-      });
-  }
-
-  /** The core answers the run requests in turn: a refusal by its code, or the run. */
-  function answerRuns(...answers: (string | null)[]) {
-    let asked = 0;
-    api.routes[START] = () => {
-      const code = answers[asked++] ?? null;
-      return code
-        ? { status: 409, body: { message: "Refused", code } }
-        : { status: 201, body: { id: "run-1", status: "queued" } };
-    };
-  }
-
-  /** Records a recording the live text heard whole, and stops it. */
-  async function recordWhole() {
-    const recorded = await recordLive({ keepsTranscript: true });
-    fireEvent.click(button(recorded.dialog, messages.flow_transcript_rec_stop));
-    await within(recorded.dialog).findByText(/^Inspelning, del 1/);
+  it("sends the recording as streamed when the live text never started", async () => {
+    installBrowser({ live: true });
+    grantMicrophone();
+    api.routes[LIVE] = () => ({ status: 503, body: { message: "Unavailable" } });
+    const { dialog, onStarted } = await openDialog(audioContract(true));
+    await recordAndStop(dialog);
     await waitFor(() => expect(FakeUpload.sent).toHaveLength(1));
-    await waitFor(() => expect(recorded.socket.texts).toHaveLength(1));
-    return recorded;
-  }
 
-  const withTranscript = { "step-1": { file_ids: ["file-1"], live_transcript_id: "tr-1" } };
-  const withoutTranscript = { "step-1": { file_ids: ["file-1"] } };
-  const refusalMessage = (code: string) =>
-    (messages as Record<string, string>)[`flow_error_${code}`];
-
-  it.each([
-    "flow_run_live_transcript_not_found",
-    "flow_run_live_transcript_already_bound",
-    "flow_run_live_transcript_files_mismatch"
-  ])("starts the run without the live transcript once the core refuses it: %s", async (code) => {
-    const { dialog, onStarted, socket } = await recordWhole();
-    answerRuns(code);
-    startThenFinalText(dialog, socket, "tr-1");
-    await waitFor(() => expect(onStarted).toHaveBeenCalled());
-
-    const [refused, plain] = startRequests();
-    expect(startRequests()).toHaveLength(2);
-    expect(refused?.stepInputs).toEqual(withTranscript);
-    expect(plain?.stepInputs).toEqual(withoutTranscript);
-    expect(plain?.key).not.toBe(refused?.key);
-    expect(within(dialog).queryByText(refusalMessage(code)!)).toBeNull();
-  });
-
-  it("shows any other refusal and sends nothing more", async () => {
-    const { dialog, onStarted, socket } = await recordWhole();
-    answerRuns("flow_run_stale_version");
-    startThenFinalText(dialog, socket, "tr-1");
-    expect(
-      await within(dialog).findByText(messages.flow_error_flow_run_stale_version)
-    ).toBeTruthy();
-    expect(startRequests().map((request) => request.stepInputs)).toEqual([withTranscript]);
-    expect(onStarted).not.toHaveBeenCalled();
-  });
-
-  it("shows the refusal of the run sent again, and never offers the refused transcript again", async () => {
-    const { dialog, onStarted, socket } = await recordWhole();
-    answerRuns("flow_run_live_transcript_not_found", "flow_run_stale_version");
-    startThenFinalText(dialog, socket, "tr-1");
-    expect(
-      await within(dialog).findByText(messages.flow_error_flow_run_stale_version)
-    ).toBeTruthy();
-    expect(startRequests()).toHaveLength(2);
-
-    // Started again by hand: the files go without the transcript, and the run starts.
     fireEvent.click(button(dialog, messages.flow_runs_summary_next));
     fireEvent.click(button(dialog, messages.flow_runs_start_submit));
     await waitFor(() => expect(onStarted).toHaveBeenCalled());
-    expect(startRequests().map((request) => request.stepInputs)).toEqual([
-      withTranscript,
-      withoutTranscript,
-      withoutTranscript
-    ]);
+    expect(startBody()?.step_inputs).toEqual({
+      "step-1": { file_ids: ["file-1"], streamed: true }
+    });
+  });
+
+  it("starts without the live transcript once the core's time for the final text has passed", async () => {
+    const { dialog, onStarted, socket } = await recordLive({
+      keepsTranscript: true,
+      finishWithinSeconds: 0.05
+    });
+    fireEvent.click(button(dialog, messages.flow_transcript_rec_stop));
+    await within(dialog).findByText(/^Inspelning, del 1/);
+    await waitFor(() => expect(FakeUpload.sent).toHaveLength(1));
+    await waitFor(() => expect(socket.close).toHaveBeenCalled());
+
+    fireEvent.click(button(dialog, messages.flow_runs_summary_next));
+    fireEvent.click(button(dialog, messages.flow_runs_start_submit));
+    await waitFor(() => expect(onStarted).toHaveBeenCalled());
+    expect(startBody()?.step_inputs).toEqual({
+      "step-1": { file_ids: ["file-1"], streamed: true }
+    });
+  });
+
+  it("keeps the stored transcript with the recording, so it goes with the run after a reload", async () => {
+    const { dialog, onStarted, socket } = await recordLive({ keepsTranscript: true });
+    fireEvent.click(button(dialog, messages.flow_transcript_rec_stop));
+    await within(dialog).findByText(/^Inspelning, del 1/);
+    await waitFor(() => expect(socket.texts).toHaveLength(1));
+    act(() => {
+      socket.receive({ type: "transcript.done", text: "Hej.", transcript_id: "tr-1" });
+    });
+    await waitFor(() =>
+      expect([...device.db.parts.values()].map((part) => part.liveTranscript)).toEqual([
+        { id: "tr-1", parts: 1 }
+      ])
+    );
+
+    // Closed and opened again: the recorder that heard it is gone, the device keeps it.
+    fireEvent.click(
+      await within(dialog).findByRole("button", { name: messages.flow_transcript_save_later })
+    );
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Kör" }));
+    const again = await screen.findByRole("dialog", { name: "Kör Medborgarbrev" });
+    fireEvent.click(
+      await within(again).findByRole("button", { name: messages.flow_transcript_resume_continue })
+    );
+    await within(again).findByText(/^Inspelning, del 1/);
+    await waitFor(() => expect(FakeUpload.sent).toHaveLength(2));
+    fireEvent.click(button(again, messages.flow_runs_summary_next));
+    fireEvent.click(button(again, messages.flow_runs_start_submit));
+    await waitFor(() => expect(onStarted).toHaveBeenCalled());
+    expect(startBody()?.step_inputs).toEqual({
+      "step-1": { file_ids: ["file-2"], streamed: true, live_transcript_id: "tr-1" }
+    });
   });
 });
 
@@ -890,6 +877,25 @@ describe("The recording's health", () => {
 });
 
 describe("Keeping a recording on the device", () => {
+  it("sends a streamed recording kept from an earlier visit as streamed, with no transcript it did not keep", async () => {
+    installBrowser();
+    // The page went away before the live text came, or its id could not be kept.
+    await device.db.putPart(keptPart(0, { streamed: true }));
+    await device.db.putPart(keptPart(1, { streamed: true, interrupted: true }));
+    const { dialog, onStarted } = await openDialog(audioContract());
+    fireEvent.click(
+      await within(dialog).findByRole("button", { name: messages.flow_transcript_resume_continue })
+    );
+    await waitFor(() => expect(FakeUpload.sent).toHaveLength(2));
+
+    fireEvent.click(button(dialog, messages.flow_runs_summary_next));
+    fireEvent.click(button(dialog, messages.flow_runs_start_submit));
+    await waitFor(() => expect(onStarted).toHaveBeenCalled());
+    expect(startBody()?.step_inputs).toEqual({
+      "step-1": { file_ids: ["file-1", "file-2"], single_recording: true, streamed: true }
+    });
+  });
+
   it("offers a recording kept from an earlier visit, and goes on with it", async () => {
     installBrowser();
     grantMicrophone();

@@ -19,6 +19,8 @@ from eneo.files.audio import (
 )
 from eneo.files.transcriber import TranscribedAudio
 from eneo.files.transcript import TranscriptSegment
+from eneo.flows.domain.flow_run_exceptions import FlowStepAttemptClosed
+from eneo.flows.domain.live_fallback import LiveFallbackReason
 from eneo.flows.domain.speaker_labels import (
     build_label_renumbering,
     build_speaker_inventory,
@@ -306,8 +308,6 @@ MAX_DETAIL_BYTES = MAX_SEGMENTS_BYTES
 # anchor to the stored segments by index, so they exist only when the
 # segments do. An hour of speech is a few megabytes of words.
 MAX_WORDS_BYTES = 8 * 1024 * 1024
-
-LiveFallbackReason = Literal["duration_mismatch", "no_timing", "unavailable"]
 
 
 def serialize_segments(
@@ -738,8 +738,10 @@ def _transcription_failures(step_order: int, subject: str) -> Generator[None]:
         TypedIOValidationException,
         ProviderCallObserverError,
         FlowStepCancelledError,
+        FlowStepAttemptClosed,
     ):
-        # A cancelled run is the executor's outcome, not a step failure.
+        # A cancelled run, or an attempt closed under the step, is the
+        # executor's outcome, not a step failure.
         # A failure to record what a request did is not a transcription
         # fault, and the executor already reports it as the evidence gap it
         # is. Flattening it here would hide which request went unrecorded.
@@ -831,6 +833,22 @@ async def _transcribe_recording(
             await spool.aclose()
 
 
+# Stores why the transcription model writes a streamed step's text, and which
+# model, before that model is called.
+RecordLiveFallback = Callable[
+    [LiveFallbackReason, "TranscriptionModel"], Awaitable[None]
+]
+
+
+@dataclass(frozen=True, slots=True)
+class StreamedAudio:
+    """A step whose audio was streamed while it was recorded: the live transcript
+    the run bound to its files, or why the run has none."""
+
+    transcript: FlowLiveTranscripts | LiveFallbackReason
+    record_fallback: RecordLiveFallback
+
+
 @dataclass(frozen=True, slots=True)
 class _LiveText:
     """A live session's text, ready to stand in for transcribing its recording."""
@@ -842,17 +860,17 @@ class _LiveText:
 
 
 def _live_text(
-    live_transcript: FlowLiveTranscripts | None,
+    live_transcript: FlowLiveTranscripts | LiveFallbackReason,
     live_model: "TranscriptionModel | None",
     files: Sequence["FileInfo"],
 ) -> _LiveText | LiveFallbackReason:
     """The live text a run may use for these files, or why it may not."""
-    if (
-        live_transcript is None
-        or live_model is None
-        or list(live_transcript.bound_file_ids) != [file.id for file in files]
-    ):
+    if isinstance(live_transcript, str):
+        return live_transcript
+    if live_model is None:
         return "unavailable"
+    if list(live_transcript.bound_file_ids) != [file.id for file in files]:
+        return "files_mismatch"
     if live_transcript.segments is None:
         return "no_timing"
     return _LiveText(
@@ -877,6 +895,7 @@ async def _transcribe_streamed(
     files: list["FileInfo"],
     *,
     live: _LiveText,
+    record_fallback: RecordLiveFallback,
     transcriber: FlowStepTranscriber,
     transcription_model: "TranscriptionModel",
     labels_joined: bool,
@@ -934,6 +953,7 @@ async def _transcribe_streamed(
                 return split_recording(enriched, bounds), None
             except RecordingSplitError as exc:
                 raise SpeakerServiceFailed() from exc
+        await record_fallback("duration_mismatch", transcription_model)
         if labels_joined:
             assert isinstance(transcriber, RecordingTranscriber)
             recording = RecordingAudio(
@@ -986,16 +1006,16 @@ async def transcribe_audio_input(
     diarize: bool = True,
     max_speakers: int | None = None,
     source_preparation: TranscriptSourcePreparation | None = None,
-    live_transcript: FlowLiveTranscripts | None = None,
+    streamed: StreamedAudio | None = None,
     live_model: "TranscriptionModel | None" = None,
-    live_transcript_requested: bool = False,
     single_recording: bool = False,
     decode_limits: AudioDecodeLimits | None = None,
 ) -> FlowTranscriptionResult:
     """Transcribe files in request order, closing each spool on every exit.
 
-    A usable ``live_transcript`` is the text instead, and ``live_model``, the
-    model that streamed it, is its producer.
+    For ``streamed`` audio a usable live transcript is the text instead, and
+    ``live_model``, the model that streamed it, is its producer. Otherwise the
+    transcription model transcribes the files, and why is recorded first.
 
     Files marked as one recording have their speakers labelled once across
     all parts when the engine labels speakers, and take the longest recording
@@ -1059,16 +1079,19 @@ async def transcribe_audio_input(
         and isinstance(transcriber, RecordingTranscriber)
     )
     live = None
-    if live_transcript_requested:
-        live = _live_text(live_transcript, live_model, files)
+    if streamed is not None:
+        live = _live_text(streamed.transcript, live_model, files)
         if isinstance(live, str):
             # Known before any decode: the transcription model writes it.
             live_fallback_reason, live = live, None
+            await streamed.record_fallback(live_fallback_reason, transcription_model)
     if live is not None:
+        assert streamed is not None
         with _transcription_failures(step_order, "the recording"):
             recording_parts, live_fallback_reason = await _transcribe_streamed(
                 files,
                 live=live,
+                record_fallback=streamed.record_fallback,
                 transcriber=transcriber,
                 transcription_model=transcription_model,
                 labels_joined=labels_joined,
@@ -1355,8 +1378,7 @@ async def resolve_and_transcribe_audio_for_step(
     max_speakers: int | None = None,
     speaker_labels: bool | None = None,
     source_preparation: TranscriptSourcePreparation | None = None,
-    live_transcript: FlowLiveTranscripts | None = None,
-    live_transcript_requested: bool = False,
+    streamed: StreamedAudio | None = None,
     single_recording: bool = False,
     decode_limits: AudioDecodeLimits | None = None,
 ) -> FlowTranscriptionResult:
@@ -1428,15 +1450,16 @@ async def resolve_and_transcribe_audio_for_step(
         diarize=diarize,
         max_speakers=max_speakers,
         source_preparation=source_preparation,
-        live_transcript=live_transcript,
-        # The run's scope matched the transcript to this model.
+        streamed=streamed,
+        # The run's scope matched the transcript to this model; None once the
+        # space can no longer use it.
         live_model=(
             usable_transcription_model(space, transcription_config.streaming_model_id)
-            if live_transcript is not None
+            if streamed is not None
+            and not isinstance(streamed.transcript, str)
             and transcription_config.streaming_model_id is not None
             else None
         ),
-        live_transcript_requested=live_transcript_requested,
         single_recording=single_recording,
         decode_limits=decode_limits,
     )

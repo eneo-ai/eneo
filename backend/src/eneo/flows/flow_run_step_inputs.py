@@ -80,6 +80,9 @@ class FlowRunStepInputFiles:
     file_ids: tuple[UUID, ...] = ()
     live_transcript_id: UUID | None = None
     single_recording: bool = False
+    # The audio was streamed while it was recorded: its live text is the
+    # requested transcript, whether or not a transcript id came with it.
+    streamed: bool = False
 
 
 class FlowRunStepInputFileProjection(TypedDict):
@@ -185,33 +188,42 @@ def normalize_step_inputs_payload(
     return normalized
 
 
-def validate_live_transcript_inputs(
+def validate_streamed_inputs(
     *,
     step_inputs: FlowRunStepInputs,
     normalized_step_inputs: dict[UUID, list[UUID]],
     specs: dict[UUID, RuntimeStepInputSpec],
-    single_recording_steps: frozenset[UUID],
-) -> dict[UUID, UUID]:
-    """A live transcript goes with one audio file, or with the parts of one
-    recording; binding checks that they are every part, in order."""
+) -> tuple[frozenset[UUID], dict[UUID, UUID]]:
+    """The steps whose audio was streamed, and the live transcript each named.
+
+    Only the request's shape is checked here: whether the transcript can be
+    bound to the files is admission's outcome, which the run records."""
+    streamed: set[UUID] = set()
     live_ids: dict[UUID, UUID] = {}
     for step_id, submitted in step_inputs.items():
-        if submitted.live_transcript_id is None:
+        if submitted.live_transcript_id is not None and not submitted.streamed:
+            raise FlowBadRequestException(
+                "A live transcript is sent only with streamed audio: set streamed.",
+                code=FlowApiErrorCode.RUN_LIVE_TRANSCRIPT_REQUIRES_STREAMED,
+                context={"step_id": str(step_id)},
+            )
+        if not submitted.streamed:
             continue
         spec = specs.get(step_id)
-        files = len(normalized_step_inputs.get(step_id, ()))
         if (
-            files == 0
-            or (files > 1 and step_id not in single_recording_steps)
+            not normalized_step_inputs.get(step_id)
             or spec is None
             or spec.runtime_input.input_format is not FlowRuntimeInputFormat.AUDIO
         ):
             raise FlowBadRequestException(
-                "A live transcript needs one audio file, or the parts of one recording.",
-                code=FlowApiErrorCode.RUN_LIVE_TRANSCRIPT_FILES_MISMATCH,
+                "Only the audio files of an audio step can have been streamed.",
+                code=FlowApiErrorCode.RUN_STREAMED_REQUIRES_AUDIO_FILES,
+                context={"step_id": str(step_id)},
             )
-        live_ids[step_id] = submitted.live_transcript_id
-    return live_ids
+        streamed.add(step_id)
+        if submitted.live_transcript_id is not None:
+            live_ids[step_id] = submitted.live_transcript_id
+    return frozenset(streamed), live_ids
 
 
 async def validate_audio_lengths(

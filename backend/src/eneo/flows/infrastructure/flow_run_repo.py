@@ -63,10 +63,11 @@ from eneo.flows.domain.flow_run_recovery_policy import (
     start_flow_dispatch_epoch,
 )
 from eneo.flows.domain.flow_step_attempt_input import (
+    FlowStepAttemptEvidenceWrite,
     FlowStepAttemptInput,
+    FlowStepAttemptLiveFallback,
     FlowStepAttemptToolCallResult,
     FlowStepAttemptToolCallStart,
-    FlowStepAttemptToolCallWrite,
     merge_flow_step_attempt_input,
     parse_flow_step_attempt_input,
 )
@@ -1966,6 +1967,36 @@ class FlowRunRepository:
             for run_id, step_id, raw_edges in rows
         ]
 
+    async def list_current_attempt_live_fallbacks(
+        self, *, run_id: UUID, tenant_id: UUID
+    ) -> dict[UUID, FlowStepAttemptLiveFallback]:
+        """By step, why each step's current attempt transcribes its streamed audio
+        with the transcription model, for the steps whose attempt decided so.
+        Reads that record only, never the attempt's whole input."""
+        live_fallback = FlowStepAttempts.input_payload_json["live_fallback"].astext
+        rows = (
+            await self.session.execute(
+                sa.select(FlowStepResults.step_id, live_fallback)
+                .select_from(FlowStepResults)
+                .join(
+                    FlowStepAttempts,
+                    sa.and_(
+                        FlowStepAttempts.flow_run_id == FlowStepResults.flow_run_id,
+                        FlowStepAttempts.step_id == FlowStepResults.step_id,
+                        FlowStepAttempts.attempt_no
+                        == FlowStepResults.current_attempt_no,
+                    ),
+                )
+                .where(FlowStepResults.tenant_id == tenant_id)
+                .where(FlowStepResults.flow_run_id == run_id)
+                .where(FlowStepAttempts.input_payload_json.has_key("live_fallback"))
+            )
+        ).all()
+        return {
+            step_id: FlowStepAttemptLiveFallback.model_validate_json(raw)
+            for step_id, raw in rows
+        }
+
     async def list_completed_tool_answers(
         self, *, run_id: UUID, tenant_id: UUID
     ) -> dict[int, FlowResolvedInputToolAnswerSource]:
@@ -3719,17 +3750,57 @@ class FlowRunRepository:
         tenant_id: UUID,
         start: FlowStepAttemptToolCallStart,
         result: FlowStepAttemptToolCallResult | None = None,
-    ) -> FlowStepAttemptToolCallWrite:
+    ) -> FlowStepAttemptEvidenceWrite:
         """Store the start, or the start and the result, of the attempt's tool
         call. Only those two fields change: never the resolved-input edges or
-        anything activation records.
+        anything activation records. An interrupted call keeps its stored start
+        as the evidence of it."""
+        return await self._write_open_attempt_evidence(
+            run_id=run_id,
+            step_id=step_id,
+            attempt_no=attempt_no,
+            tenant_id=tenant_id,
+            evidence=FlowStepAttemptInput(
+                tool_call_start=start, tool_call_result=result
+            ),
+        )
+
+    async def write_attempt_live_fallback(
+        self,
+        *,
+        run_id: UUID,
+        step_id: UUID,
+        attempt_no: int,
+        tenant_id: UUID,
+        fallback: FlowStepAttemptLiveFallback,
+    ) -> FlowStepAttemptEvidenceWrite:
+        """Store why the attempt's streamed audio is transcribed by the
+        transcription model, before that model is called, so a failed,
+        cancelled or interrupted attempt still says so."""
+        return await self._write_open_attempt_evidence(
+            run_id=run_id,
+            step_id=step_id,
+            attempt_no=attempt_no,
+            tenant_id=tenant_id,
+            evidence=FlowStepAttemptInput(live_fallback=fallback),
+        )
+
+    async def _write_open_attempt_evidence(
+        self,
+        *,
+        run_id: UUID,
+        step_id: UUID,
+        attempt_no: int,
+        tenant_id: UUID,
+        evidence: FlowStepAttemptInput,
+    ) -> FlowStepAttemptEvidenceWrite:
+        """Merge evidence of work the open attempt is about to do into its input.
 
         The run row and then the attempt row are locked, in the order run
         terminalization takes them. An attempt that is already closed is left
-        as it is, whoever holds the run now: its stored start stays the
-        evidence of a call that was interrupted. On an open attempt the
-        execution lease is then asserted (FlowExecutionOwnershipLost when it
-        is gone), so a worker that lost the run writes nothing.
+        as it is, whoever holds the run now. On an open attempt the execution
+        lease is then asserted (FlowExecutionOwnershipLost when it is gone), so
+        a worker that lost the run writes nothing.
         """
         locked_run_id = await self.session.scalar(
             sa.select(FlowRuns.id)
@@ -3747,7 +3818,7 @@ class FlowRunRepository:
         )
         if locked_run_id is None or row is None:
             raise FlowRunPersistenceInvariantError(
-                operation="write_attempt_tool_call_evidence",
+                operation="write_open_attempt_evidence",
                 run_id=run_id,
                 tenant_id=tenant_id,
             )
@@ -3756,7 +3827,7 @@ class FlowRunRepository:
         await self.lock_execution_ownership(run_id=run_id, tenant_id=tenant_id)
         merged = merge_flow_step_attempt_input(
             row.input_payload_json,
-            FlowStepAttemptInput(tool_call_start=start, tool_call_result=result),
+            evidence,
             run_id=run_id,
             step_id=step_id,
             attempt_no=attempt_no,

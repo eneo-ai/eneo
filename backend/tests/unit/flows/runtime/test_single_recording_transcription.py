@@ -16,7 +16,7 @@ from eneo.files.transcript import (
     TranscriptWord,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
-from eneo.flows.runtime.transcription import transcribe_audio_input
+from eneo.flows.runtime.transcription import StreamedAudio, transcribe_audio_input
 from eneo.main.config import get_settings
 from eneo.main.exceptions import TypedIOValidationException
 from tests.unit.files import test_audio
@@ -311,6 +311,7 @@ async def test_each_file_is_decoded_under_the_tenant_limit(spool_contract, ffmpe
 # A streamed recording in two parts: the second began 9.9 s into the session,
 # while the first part still ran to 10 s, as a recorder overlaps its parts.
 LIVE_MODEL = SimpleNamespace(id=uuid4(), name="pianissimo")
+BATCH_MODEL = SimpleNamespace(id=uuid4(), name="whisper-1")
 LIVE_PASSAGES = [
     {"text": "Hej.", "start": 1.0, "end": 2.0},
     # One delta the session heard across the seam.
@@ -328,11 +329,13 @@ def _streamed(files, *, heard: float = 19.9) -> SimpleNamespace:
     )
 
 
-async def _run_streamed(spool_contract, files, engine, *, diarize, heard=19.9):
+async def _run_streamed(
+    spool_contract, files, engine, *, diarize, heard=19.9, record_fallback=None
+):
     return await transcribe_audio_input(
         files=files,
         transcriber=engine,
-        transcription_model=SimpleNamespace(id=uuid4(), name="whisper-1"),
+        transcription_model=BATCH_MODEL,
         language="sv",
         step_order=1,
         max_files=5,
@@ -341,9 +344,11 @@ async def _run_streamed(spool_contract, files, engine, *, diarize, heard=19.9):
         diarize=diarize,
         max_speakers=3,
         single_recording=True,
-        live_transcript=_streamed(files, heard=heard),
+        streamed=StreamedAudio(
+            transcript=_streamed(files, heard=heard),
+            record_fallback=record_fallback or AsyncMock(),
+        ),
         live_model=LIVE_MODEL,
-        live_transcript_requested=True,
     )
 
 
@@ -466,9 +471,17 @@ async def test_parts_that_are_not_the_streamed_audio_are_transcribed_once(
     files = [_part("del-1.wav", 10), _part("del-2.wav", 10)]
     engine = _engine()
     engine.enrich = AsyncMock(side_effect=AssertionError("not the heard audio"))
+    # Known only once the parts are decoded, and stored before they are paid for.
+    record = AsyncMock(
+        side_effect=lambda reason,
+        model: engine.transcribe_recording.assert_not_awaited()
+    )
 
-    result = await _run_streamed(spool_contract, files, engine, diarize=True, heard=30)
+    result = await _run_streamed(
+        spool_contract, files, engine, diarize=True, heard=30, record_fallback=record
+    )
 
+    record.assert_awaited_once_with("duration_mismatch", BATCH_MODEL)
     engine.transcribe_recording.assert_awaited_once()
     assert engine.transcribe_recording.await_args.args[1].name == "whisper-1"
     assert result.transcript_origin == "batch"

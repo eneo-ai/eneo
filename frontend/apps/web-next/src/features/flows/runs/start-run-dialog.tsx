@@ -35,7 +35,6 @@ import {
   runRequest,
   speakersBlockRun,
   takesFreeText,
-  withoutRefusedLiveTranscripts,
   type FieldValue,
   type FormValues
 } from "./run-contract";
@@ -299,23 +298,7 @@ function StartRunForm({
   }
 
   const start = useMutation({
-    mutationFn: async (request: RunCreateRequest) => {
-      try {
-        return await send(request);
-      } catch (error) {
-        // The core will not use a live transcript: it is not offered again, and
-        // the run, sent once more without it (a new body, so a new key),
-        // transcribes the files. Nothing is said: the run starts as usual.
-        const plain = withoutRefusedLiveTranscripts(request, error);
-        if (!plain) throw error;
-        for (const [stepId, input] of Object.entries(request.step_inputs ?? {})) {
-          if (input.live_transcript_id) {
-            recorders.current.get(stepId)?.refuseLiveTranscript(input.live_transcript_id);
-          }
-        }
-        return send(plain);
-      }
-    },
+    mutationFn: send,
     onMutate: () => onPendingChange(true),
     onSettled: () => onPendingChange(false),
     onSuccess: (run) => {

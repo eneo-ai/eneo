@@ -80,8 +80,6 @@ export type RecorderHandle = {
    * whole, in recording order.
    */
   liveTranscriptFor: (entryKeys: readonly string[]) => string | undefined;
-  /** The core refused this live transcript for the run: it is not offered again. */
-  refuseLiveTranscript: (id: string) => void;
 };
 
 /** "2 h 30 min", "45 min": a recording length as the form says it. */
@@ -365,12 +363,22 @@ export function RunRecorder({
   /** The recording the step's recorded parts belong to. */
   const [session, setSession] = useState<string | null>(null);
 
+  /** Where each part handed to the form sits in its recording, by entry key. */
+  const [partsByKey] = useState(() => new Map<string, { sessionId: string; index: number }>());
+  /** The recording going on asked for live text when it began: its parts were streamed. */
+  const streamed = useRef(false);
   const [live] = useState(
     () =>
       new LiveTranscript({
         openSession: (recordingId) => openLiveTranscription(flowId, input.step_id, recordingId),
         socketUrl: (path) => liveSocketUrl(path),
-        refusalReason
+        refusalReason,
+        maxParts: input.max_files ?? Infinity,
+        onTranscript: (id, keys) => {
+          const parts = keys.flatMap((key) => partsByKey.get(key) ?? []);
+          if (parts.length !== keys.length) return;
+          void keeper.keepLiveTranscript(input.step_id, parts, id);
+        }
       })
   );
   const [recorder] = useState(() => new AudioRecorder(options));
@@ -411,14 +419,21 @@ export function RunRecorder({
           mimeType: part.file.type,
           durationMs: part.durationMs,
           capturedAt: part.capturedAt,
-          contract: snapshotOfContract()
+          contract: snapshotOfContract(),
+          streamed: streamed.current
         });
         const label = partLabel(part.index, part.durationMs);
         const key = onPart(
           part.file,
-          { sessionId: part.sessionId, index: part.index, durationMs: part.durationMs },
+          {
+            sessionId: part.sessionId,
+            index: part.index,
+            durationMs: part.durationMs,
+            streamed: streamed.current
+          },
           label
         );
+        if (key) partsByKey.set(key, { sessionId: part.sessionId, index: part.index });
         live.addPart(key);
         // The part can be heard here at once, before its upload is done.
         setLastPart((previous) => {
@@ -426,7 +441,7 @@ export function RunRecorder({
           return key ? { key, url: URL.createObjectURL(part.file) } : null;
         });
       },
-      journal: keeper.journalFor(stepId, snapshotOfContract),
+      journal: keeper.journalFor(stepId, snapshotOfContract, () => streamed.current),
       onAudioGraph: (graph, signal) => {
         if (!graph) {
           live.stop();
@@ -533,8 +548,7 @@ export function RunRecorder({
       busy: () => recorder.getSnapshot().phase !== "idle",
       finishing: () => live.getSnapshot().finishing,
       settled: () => live.settled(),
-      liveTranscriptFor: (keys) => live.transcriptFor(keys),
-      refuseLiveTranscript: (id) => live.refuse(id)
+      liveTranscriptFor: (keys) => live.transcriptFor(keys)
     }),
     [recorder, live]
   );
@@ -592,7 +606,13 @@ export function RunRecorder({
       for (const part of parts) {
         onPart(
           storedPartFile(part),
-          { sessionId: part.sessionId, index: part.index, durationMs: part.durationMs },
+          {
+            sessionId: part.sessionId,
+            index: part.index,
+            durationMs: part.durationMs,
+            streamed: part.streamed,
+            liveTranscript: part.liveTranscript
+          },
           partLabel(part.index, part.durationMs)
         );
       }
@@ -670,6 +690,8 @@ export function RunRecorder({
     }
     setSession(sessionId);
     automatic.current = byItself;
+    // What the person chose as the recording begins: a later toggle or outage does not change it.
+    streamed.current = liveWanted;
     return recorder.start({
       sessionId,
       firstIndex,

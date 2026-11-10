@@ -6405,8 +6405,11 @@ export interface paths {
      *     The optional body `recording_id` is an opaque client string matching
      *     `^[A-Za-z0-9_-]{8,64}$`. With it, Eneo stores the text of a session that heard
      *     the whole recording and sends its `transcript_id` in `transcript.done`; `ready`
-     *     says whether it will, as `keeps_transcript`. Without one the text is shown
-     *     only, and a client need not wait for `transcript.done` before creating the run.
+     *     says whether it will, as `keeps_transcript`. `ready.finish_within_seconds` is
+     *     how long, from sending `stop`, the session may take to store the transcript or
+     *     give up; wait that long for `transcript.done`, then create the run without the
+     *     id. Without a `recording_id` the text is shown only, and a client need not wait
+     *     for `transcript.done` before creating the run.
      *     To store a clean session, also send `produced_samples` in the stop message: a
      *     non-negative integer counting captured 16 kHz samples before client queueing or
      *     discarding. Missing or invalid counts disable storage without changing the
@@ -6419,12 +6422,13 @@ export interface paths {
      *     below `produced_samples`; the run then submits every part, in order, with
      *     `single_recording`.
      *
-     *     Upload the recording as a runtime file and create the run with the
-     *     `transcript_id` as the step's `live_transcript_id`: the run uses the stored
-     *     text instead of transcribing the recording again, and the flow's speaker
-     *     service only times its words and labels the speakers. A run without the id, or
-     *     whose recording does not match the stored text, is transcribed by the flow's
-     *     transcription model. Live text is only available while both of the flow's
+     *     Upload the recording as a runtime file and create the run with `streamed` set
+     *     on the step, and the `transcript_id` as its `live_transcript_id` when one came:
+     *     the run uses the stored text instead of transcribing the recording again, and
+     *     the flow's speaker service only times its words and labels the speakers. When
+     *     the text cannot be used (no id, a recording that does not match it, or a live
+     *     model the flow no longer has), the flow's transcription model transcribes the
+     *     recording and the step's `live_fallback_reason` says why. Live text is only available while both of the flow's
      *     models are available in its space and the model it streams through supports
      *     realtime; otherwise this route answers 409
      *     `flow_live_transcription_unavailable` with a `reason`.
@@ -19044,10 +19048,9 @@ export interface components {
       | "flow_runtime_file_empty"
       | "flow_runtime_file_attached"
       | "flow_live_transcription_unavailable"
-      | "flow_run_live_transcript_files_mismatch"
-      | "flow_run_live_transcript_not_found"
       | "flow_run_single_recording_requires_audio_step"
-      | "flow_run_live_transcript_already_bound"
+      | "flow_run_streamed_requires_audio_files"
+      | "flow_run_live_transcript_requires_streamed"
       | "flow_evidence_audit_logging_failed"
       | "flow_evidence_export_reason_required"
       | "flow_evidence_export_too_large"
@@ -26453,6 +26456,21 @@ export interface components {
         | components["schemas"]["FileBackedStepText"]
         | components["schemas"]["InlineStepTextReference"]
       )[];
+      /**
+       * Live Fallback Reason
+       * @description Why the transcription model transcribes audio that was streamed (`streamed`) instead of using its live text. Set as soon as the step decides, so a running, failed or cancelled step has it too. `not_received`: the run named no live transcript. `not_found`, `already_bound`, `files_mismatch`: the run could not bind it to the files, as it was missing or expired, bound to other files, or not one file or every part in order. `unavailable`: the model that streamed it is no longer available to the flow. `no_timing`: the live text has no timing. `duration_mismatch`: the files are not the length of the audio the session heard. Null when the audio was not streamed or its live text was used.
+       */
+      live_fallback_reason?:
+        | (
+            | "not_received"
+            | "not_found"
+            | "already_bound"
+            | "files_mismatch"
+            | "unavailable"
+            | "no_timing"
+            | "duration_mismatch"
+          )
+        | null;
       /** @description Set when the step read input larger than its model's capacity in parts (`input_config.long_material`): what the digest covered, why anything was left out and which sources. Partial coverage either failed the step or, on a step with a review, is the reviewer's to judge. Token counts of the step include every digest call. */
       long_material?: components["schemas"]["LongMaterialCoverage"] | null;
       /** Model Parameters Json */
@@ -26500,6 +26518,16 @@ export interface components {
        * Format: uuid
        */
       tenant_id: string;
+      /**
+       * Transcript Model Name
+       * @description Name of the model that wrote the step's transcript, or that the step chose to write it when `live_fallback_reason` is set.
+       */
+      transcript_model_name?: string | null;
+      /**
+       * Transcript Origin
+       * @description Who wrote the step's transcript, once it is written: `live` for the text streamed while the audio was recorded, `batch` for the transcription model. Null for a step that transcribed nothing or has not finished transcribing.
+       */
+      transcript_origin?: ("live" | "batch") | null;
       /**
        * Updated At
        * Format: date-time
@@ -27779,6 +27807,7 @@ export interface components {
         components["schemas"]["FlowStepAttemptCompletionConfiguration"] | null;
       /** Execution Inputs */
       execution_inputs?: components["schemas"]["FlowStepAttemptExecutionInput"][] | null;
+      live_fallback?: components["schemas"]["FlowStepAttemptLiveFallback"] | null;
       /** Resolved Input */
       resolved_input?: {
         [key: string]: components["schemas"]["JsonValue"];
@@ -27792,6 +27821,38 @@ export interface components {
       start?: components["schemas"]["FlowStepAttemptStart"] | null;
       tool_call_result?: components["schemas"]["FlowStepAttemptToolCallResult"] | null;
       tool_call_start?: components["schemas"]["FlowStepAttemptToolCallStart"] | null;
+    };
+    /**
+     * FlowStepAttemptLiveFallback
+     * @description Why the attempt's streamed audio is transcribed by the transcription model
+     *     instead of written by its live text, stored and committed before that model
+     *     is called. It proves the decision, not that the transcription succeeded.
+     */
+    FlowStepAttemptLiveFallback: {
+      /**
+       * Model Id
+       * Format: uuid
+       * @description The transcription model that transcribes the audio instead.
+       */
+      model_id: string;
+      /**
+       * Model Name
+       * @description That model's name when the attempt chose it.
+       */
+      model_name: string;
+      /**
+       * Reason
+       * @description Why the live text could not be used.
+       * @enum {string}
+       */
+      reason:
+        | "not_received"
+        | "not_found"
+        | "already_bound"
+        | "files_mismatch"
+        | "unavailable"
+        | "no_timing"
+        | "duration_mismatch";
     };
     /** FlowStepAttemptMappedAdmission */
     FlowStepAttemptMappedAdmission: {
@@ -39542,7 +39603,7 @@ export interface components {
       file_ids?: string[];
       /**
        * Live Transcript Id
-       * @description Clean live-session transcript for this step's single audio file. It must match the run's user, flow, published version, step, and model. Admission binds it to that file; execution uses it when timing and decoded duration permit, otherwise it transcribes the file.
+       * @description The `transcript_id` of the live session that heard this step's audio; only with `streamed`. It goes with the step's one file, or with every part in recording order and `single_recording`. Admission binds it to the files. A transcript that cannot be bound does not refuse the run: the step records why in `live_fallback_reason`.
        */
       live_transcript_id?: string | null;
       /**
@@ -39551,6 +39612,12 @@ export interface components {
        * @default false
        */
       single_recording?: boolean;
+      /**
+       * Streamed
+       * @description The step's audio was streamed to a live transcription session while it was recorded, so its live text is the requested transcript. Send it for that recording whether or not a `live_transcript_id` came back, and only for audio steps with files. When the live text cannot be used, the transcription model transcribes the files and the step's result gives `live_fallback_reason`.
+       * @default false
+       */
+      streamed?: boolean;
     };
     /** StorageInfoModel */
     StorageInfoModel: {
@@ -64614,22 +64681,6 @@ export interface operations {
            *       "code": "not_found",
            *       "eneo_error_code": 9000,
            *       "message": "Flow not found."
-           *     }
-           */
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description The live transcript is already bound to another file. */
-      409: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          /**
-           * @example {
-           *       "code": "flow_run_live_transcript_already_bound",
-           *       "eneo_error_code": 9073,
-           *       "message": "Live transcript is already bound to another file."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];

@@ -53,8 +53,11 @@ chose none; uploaded and recorded files are written by the transcription model.
 The optional body `recording_id` is an opaque client string matching
 `^[A-Za-z0-9_-]{8,64}$`. With it, Eneo stores the text of a session that heard
 the whole recording and sends its `transcript_id` in `transcript.done`; `ready`
-says whether it will, as `keeps_transcript`. Without one the text is shown
-only, and a client need not wait for `transcript.done` before creating the run.
+says whether it will, as `keeps_transcript`. `ready.finish_within_seconds` is
+how long, from sending `stop`, the session may take to store the transcript or
+give up; wait that long for `transcript.done`, then create the run without the
+id. Without a `recording_id` the text is shown only, and a client need not wait
+for `transcript.done` before creating the run.
 To store a clean session, also send `produced_samples` in the stop message: a
 non-negative integer counting captured 16 kHz samples before client queueing or
 discarding. Missing or invalid counts disable storage without changing the
@@ -67,12 +70,13 @@ the sample count at which each part after the first began, increasing and
 below `produced_samples`; the run then submits every part, in order, with
 `single_recording`.
 
-Upload the recording as a runtime file and create the run with the
-`transcript_id` as the step's `live_transcript_id`: the run uses the stored
-text instead of transcribing the recording again, and the flow's speaker
-service only times its words and labels the speakers. A run without the id, or
-whose recording does not match the stored text, is transcribed by the flow's
-transcription model. Live text is only available while both of the flow's
+Upload the recording as a runtime file and create the run with `streamed` set
+on the step, and the `transcript_id` as its `live_transcript_id` when one came:
+the run uses the stored text instead of transcribing the recording again, and
+the flow's speaker service only times its words and labels the speakers. When
+the text cannot be used (no id, a recording that does not match it, or a live
+model the flow no longer has), the flow's transcription model transcribes the
+recording and the step's `live_fallback_reason` says why. Live text is only available while both of the flow's
 models are available in its space and the model it streams through supports
 realtime; otherwise this route answers 409
 `flow_live_transcription_unavailable` with a `reason`.

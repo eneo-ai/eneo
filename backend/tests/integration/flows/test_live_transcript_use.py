@@ -13,6 +13,7 @@ from dependency_injector import providers
 from eneo.database.database import sessionmanager
 from eneo.files.transcriber import TranscribedAudio
 from eneo.flows.api import flow_run_lifecycle_router
+from eneo.flows.application.flow_run_service import FlowRunService
 from eneo.flows.flow_input_limits import resolve_flow_input_limits
 from eneo.flows.flow_run_step_inputs import FlowRunStepInputFiles
 from eneo.flows.infrastructure.flow_transcript_source_repo import (
@@ -26,7 +27,6 @@ from eneo.flows.runtime.service_transcription import RegistryFlowTranscriber
 from eneo.flows.runtime.tasks import enable_autobegin_for_flow_task_session
 from eneo.flows.runtime.transcription import FlowTranscribers
 from eneo.main.container.container import Container
-from eneo.main.exceptions import NotFoundException
 from eneo.server.dependencies.container import load_container_upload_admission
 from tests.integration.flows.test_flow_live_transcription_session import (
     UNREACHABLE_ENDPOINT,
@@ -160,6 +160,7 @@ async def _admit(container, case):
             UUID(case.flow.step_id): FlowRunStepInputFiles(
                 file_ids=(case.file.id,),
                 live_transcript_id=case.transcript_id,
+                streamed=True,
             )
         },
     )
@@ -196,15 +197,36 @@ async def test_cleanup_skips_binding_in_flight_and_never_deletes_the_bound_row(
         assert row.bound_file_id == case.file.id
 
 
-async def test_cleanup_winning_before_binding_refuses_admission(
+async def test_cleanup_winning_before_binding_is_recorded_as_not_found(
     live_recording, db_container
 ):
     case = live_recording
     assert (await _cleanup(case)).purged_count == 1
-    with pytest.raises(NotFoundException) as error:
+    async with db_container() as container:
+        created = await _admit(container, case)
+    facts = created.run.input_payload_json["step_inputs"][case.flow.step_id]
+    assert facts["live_transcript_refusal"] == "not_found"
+
+
+async def test_a_refused_run_leaves_the_transcript_unbound(
+    live_recording, db_container, monkeypatch
+):
+    # Binding and the run are one transaction: a run that is not created binds nothing.
+    case = live_recording
+    monkeypatch.setattr(
+        FlowRunService,
+        "_create_persisted_run",
+        AsyncMock(side_effect=RuntimeError("refused")),
+    )
+    with pytest.raises(RuntimeError, match="refused"):
         async with db_container() as container:
             await _admit(container, case)
-    assert error.value.code == "flow_run_live_transcript_not_found"
+    async with db_container() as container:
+        row = await LiveTranscriptRepository(container.session()).get(
+            case.transcript_id, tenant_id=case.user.tenant_id
+        )
+        assert row.bound_file_id is None
+        assert list(row.bound_file_ids) == []
 
 
 async def test_full_run_uses_live_segments_and_persists_evidence(
@@ -218,6 +240,7 @@ async def test_full_run_uses_live_segments_and_persists_evidence(
             "step_inputs": {
                 case.flow.step_id: {
                     "file_ids": [str(case.file.id)],
+                    "streamed": True,
                     "live_transcript_id": str(case.transcript_id),
                 }
             }
@@ -259,11 +282,14 @@ async def test_full_run_uses_live_segments_and_persists_evidence(
         ]
 
 
+@pytest.mark.parametrize("removed_before_the_run", [False, True])
 async def test_a_live_models_text_is_the_runs_transcript(
-    client, flow_process_auth_headers, db_container, monkeypatch
+    removed_before_the_run, client, flow_process_auth_headers, db_container, monkeypatch
 ):
     """The source picks the model: audio streamed through the flow's live model
-    is not transcribed again by its transcription model."""
+    is not transcribed again by its transcription model. A live model removed
+    between the recording and the run leaves the transcription model to write
+    it, and the step says why."""
     headers = dict(flow_process_auth_headers)
     space_id = await _create_space(client, headers)
     live = await _create_transcription_model(
@@ -304,6 +330,8 @@ async def test_a_live_models_text_is_the_runs_transcript(
             segments=[{"text": "Live text.", "start": 0.0, "end": 1.0}],
             received_audio_seconds=1.0,
         )
+    if removed_before_the_run:
+        await _remove_from_space(db_container, space_id, live["id"])
     response = await client.post(
         f"/api/v1/flows/{flow.flow_id}/runs/",
         headers={**headers, "Idempotency-Key": "separate-live-model"},
@@ -311,6 +339,7 @@ async def test_a_live_models_text_is_the_runs_transcript(
             "step_inputs": {
                 flow.step_id: {
                     "file_ids": [str(file_id)],
+                    "streamed": True,
                     "live_transcript_id": str(transcript_id),
                 }
             }
@@ -320,22 +349,45 @@ async def test_a_live_models_text_is_the_runs_transcript(
     run_id = UUID(response.json()["id"])
     case = SimpleNamespace(flow=flow, user=user, tenant=tenant)
     registry = SimpleNamespace(
-        transcribe_from_filepath=AsyncMock(side_effect=AssertionError("Unexpected ASR"))
+        transcribe_from_filepath=(
+            AsyncMock(return_value=TranscribedAudio("Batch text.", 1.0))
+            if removed_before_the_run
+            else AsyncMock(side_effect=AssertionError("Unexpected ASR"))
+        )
     )
 
     async with _executed(db_container, case, run_id, registry) as (_, worker, outcome):
-        registry.transcribe_from_filepath.assert_not_awaited()
         assert outcome["status"] == "completed", outcome
         run = await worker.flow_run_repo().get(run_id=run_id, tenant_id=user.tenant_id)
-        assert run.output_payload_json["text"] == "Live text."
         results = await worker.flow_run_repo().list_step_results(
             run_id=run_id, tenant_id=user.tenant_id
         )
         metadata = results[0].input_payload_json["transcription"]
-        assert metadata["transcript_origin"] == "live"
+    steps = await client.get(
+        f"/api/v1/flows/{flow.flow_id}/runs/{run_id}/steps/", headers=headers
+    )
+    assert steps.status_code == 200, steps.text
+    step = steps.json()[0]
+    if removed_before_the_run:
+        registry.transcribe_from_filepath.assert_awaited_once()
+        assert run.output_payload_json["text"] == "Batch text."
+        assert metadata["model_id"] == flow.model_id
+        assert (
+            step["transcript_origin"],
+            step["live_fallback_reason"],
+            step["transcript_model_name"],
+        ) == ("batch", "unavailable", metadata["model"])
+    else:
+        registry.transcribe_from_filepath.assert_not_awaited()
+        assert run.output_payload_json["text"] == "Live text."
         # The live model wrote the text, so it is the transcript's model.
         assert metadata["model_id"] == live["id"] != flow.model_id
         assert metadata["model"] == live["model_name"]
+        assert (
+            step["transcript_origin"],
+            step["live_fallback_reason"],
+            step["transcript_model_name"],
+        ) == ("live", None, live["model_name"])
 
 
 @pytest.mark.parametrize("live_model_in_space", [True, False])
@@ -446,20 +498,31 @@ async def test_a_streamed_recording_in_parts_keeps_its_live_text_in_each_part(
                     case.flow.step_id: {
                         "file_ids": [str(file_id) for file_id in file_ids],
                         "single_recording": True,
+                        "streamed": True,
                         "live_transcript_id": str(transcript_id),
                     }
                 }
             },
         )
 
-    partial = await submit(parts[:1], "parts-one")
-    assert partial.status_code == 400, partial.text
-    assert partial.json()["code"] == "flow_run_live_transcript_files_mismatch"
+    async def refusal(response):
+        assert response.status_code == 201, response.text
+        async with db_container() as container:
+            run = await container.flow_run_repo().get(
+                run_id=UUID(response.json()["id"]), tenant_id=case.user.tenant_id
+            )
+        return run.input_payload_json["step_inputs"][case.flow.step_id].get(
+            "live_transcript_refusal"
+        )
+
+    # Admission records why it could not bind; the run is still created.
+    assert await refusal(await submit(parts[:1], "parts-one")) == "files_mismatch"
     response = await submit(parts, "parts-all")
-    assert response.status_code == 201, response.text
+    assert await refusal(response) is None
     # Bound to these parts in this order; no other order may claim the text.
-    reordered = await submit(parts[::-1], "parts-reordered")
-    assert reordered.status_code == 409, reordered.text
+    assert await refusal(await submit(parts[::-1], "parts-reordered")) == (
+        "already_bound"
+    )
     async with db_container() as container:
         row = await LiveTranscriptRepository(container.session()).get(
             transcript_id, tenant_id=case.user.tenant_id
@@ -487,3 +550,39 @@ async def test_a_streamed_recording_in_parts_keeps_its_live_text_in_each_part(
         assert [
             (s["file_index"], s["text"], round(s["start"], 3)) for s in source.segments
         ] == [(0, "Första.", 0.1), (1, "Andra.", 0.1)]
+
+
+async def test_a_failed_attempt_keeps_why_the_live_text_was_not_used(
+    live_recording, client, db_container
+):
+    """The decision is stored before the transcription model is called, so a step
+    that then fails still says why and which model was to write the text."""
+    case = live_recording
+    response = await client.post(
+        f"/api/v1/flows/{case.flow.flow_id}/runs/",
+        headers={**case.headers, "Idempotency-Key": "streamed-no-id"},
+        json={
+            "step_inputs": {
+                case.flow.step_id: {"file_ids": [str(case.file.id)], "streamed": True}
+            }
+        },
+    )
+    assert response.status_code == 201, response.text
+    run_id = UUID(response.json()["id"])
+    registry = SimpleNamespace(
+        transcribe_from_filepath=AsyncMock(side_effect=RuntimeError("model down"))
+    )
+    async with _executed(db_container, case, run_id, registry) as (_, _, outcome):
+        registry.transcribe_from_filepath.assert_awaited_once()
+        assert outcome["status"] == "failed", outcome
+    steps = await client.get(
+        f"/api/v1/flows/{case.flow.flow_id}/runs/{run_id}/steps/",
+        headers=case.headers,
+    )
+    assert steps.status_code == 200, steps.text
+    step = steps.json()[0]
+    assert step["status"] == "failed"
+    assert step["transcript_origin"] is None
+    assert step["live_fallback_reason"] == "not_received"
+    model = registry.transcribe_from_filepath.await_args.kwargs["transcription_model"]
+    assert step["transcript_model_name"] == model.name
