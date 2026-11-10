@@ -670,6 +670,44 @@ async def test_a_failing_probe_reads_unknown(
     assert (await _health()).status is RetentionHealthStatus.UNKNOWN
 
 
+async def test_a_failing_probe_leaves_the_other_tasks_health_readable(
+    test_tenant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A probe's error is its own task's: that task reads unknown and the next
+    task's overdue work still degrades the block.
+
+    Mutants: the error escapes, so the whole block reads unknown and hides the
+    other task's degraded; the error aborts the shared transaction, so the
+    next task's reads fail; the failing task reads healthy."""
+
+    class _Broken(_DueItems):
+        async def has_due(self) -> bool:
+            await self.session.execute(sa.text("SELECT 1 / 0"))
+            return False
+
+    now = await _database_now()
+    await _items("tests.late", 1, finished=now - _AFTER - timedelta(minutes=70))
+
+    def registrations(
+        settings: Settings, *, now: datetime | None = None
+    ) -> tuple[RetentionTaskRegistration, ...]:
+        assert now is not None
+        return (
+            _frequent("tests.broken", lambda s: _Broken(s, "tests.broken", now=now)),
+            _frequent("tests.late", lambda s: _DueItems(s, "tests.late", now=now)),
+        )
+
+    monkeypatch.setattr(retention_tasks, "retention_task_registrations", registrations)
+
+    health = await _health()
+
+    assert [(task.name, task.status) for task in health.tasks] == [
+        ("tests.broken", RetentionHealthStatus.UNKNOWN),
+        ("tests.late", RetentionHealthStatus.DEGRADED),
+    ]
+    assert health.status is RetentionHealthStatus.DEGRADED
+
+
 async def test_a_frequent_task_without_a_probe_reads_unknown(
     test_tenant, monkeypatch: pytest.MonkeyPatch
 ) -> None:

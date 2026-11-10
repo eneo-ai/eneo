@@ -1,15 +1,18 @@
 """Read-only retention health for the composition root's explicit task list."""
 
+import logging
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import datetime, timedelta
 from enum import StrEnum
 
 from pydantic import BaseModel
+from sqlalchemy.exc import SQLAlchemyError
 
 from eneo.data_retention.application.retention_registration import (
     RetentionTaskRegistration,
 )
 from eneo.data_retention.application.retention_runner import (
+    RetentionDueProbe,
     due_probe,
     overdue_reporter,
 )
@@ -22,6 +25,9 @@ from eneo.data_retention.infrastructure.retention_job_run_repo import (
     RetentionJobRunRecord,
     RetentionJobRunRepository,
 )
+from eneo.observability.error_log import log_error
+
+logger = logging.getLogger(__name__)
 
 
 class RetentionHealthStatus(StrEnum):
@@ -115,7 +121,9 @@ async def load_retention_health(
     A frequent task has no overdue snapshot: its due probe, on tasks the
     caller built an hour back, says whether anything is overdue, and with
     nothing overdue it reads healthy also before its first job row. Without a
-    probe it reads unknown. A probe's error is the caller's, like any read.
+    probe, or when its probe fails or hits the statement timeout, it reads
+    unknown; the probe runs in a savepoint, so the other tasks still read.
+    Any other failed read is the caller's.
     """
     names = [registered.name for registered in tasks]
     # Read once, and only when a task has no row.
@@ -200,9 +208,8 @@ async def _task_health(
     overdue_snapshot_stale = (
         snapshot is not None and snapshot.observed_at < stale_before
     )
-    overdue = (snapshot is not None and snapshot.overdue.count > 0) or (
-        probe is not None and await probe.has_due()
-    )
+    probe_due, probe_failed = await _ask(probe, repository, task.name)
+    overdue = (snapshot is not None and snapshot.overdue.count > 0) or probe_due
     failed = completed is not None and completed.outcome is RetentionJobOutcome.FAILED
     overdue_not_measured = (
         reports_overdue
@@ -217,7 +224,7 @@ async def _task_health(
     )
     if stale or overdue or failed:
         status = RetentionHealthStatus.DEGRADED
-    elif unprobed:
+    elif unprobed or probe_failed:
         status = RetentionHealthStatus.UNKNOWN
     elif latest is None and probe is not None:
         status = RetentionHealthStatus.HEALTHY
@@ -266,3 +273,29 @@ async def _task_health(
         limiting_settings=limiting_settings,
         overdue_complete=snapshot.overdue.complete if snapshot is not None else None,
     )
+
+
+async def _ask(
+    probe: RetentionDueProbe | None,
+    repository: RetentionJobRunRepository,
+    name: str,
+) -> tuple[bool, bool]:
+    """Whether the probe finds overdue work, and whether asking it failed.
+
+    A savepoint keeps a failed probe from aborting the health transaction
+    the other tasks still read from.
+    """
+    if probe is None:
+        return False, False
+    try:
+        async with repository.session.begin_nested():
+            return await probe.has_due(), False
+    except SQLAlchemyError as exc:
+        log_error(
+            logger,
+            logging.ERROR,
+            "Retention health could not ask task %s whether work is overdue",
+            name,
+            error=exc,
+        )
+        return False, True
