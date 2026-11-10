@@ -436,8 +436,9 @@ policy, so they do not expire. This is unchanged from earlier releases.
 #### Read back after a restore
 
 A restored database can hold rows that became due after its recovery point. Before
-traffic opens again, with the API closed and every worker stopped, run retention
-until nothing due is left:
+traffic opens again, with the API closed, every worker stopped and every retention
+task turned on (each `RETENTION_*_ENABLED` setting `true`, the default), run
+retention until nothing due is left:
 
 ```bash
 docker compose run --rm backend run-cron --until-complete run_retention
