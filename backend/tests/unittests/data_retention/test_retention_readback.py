@@ -267,3 +267,27 @@ def test_every_failure_of_a_round_is_named() -> None:
         HISTORY,
         SESSIONS,
     ]
+
+
+def test_each_task_keeps_its_own_not_due_reasons() -> None:
+    """Which blocked reasons of each registered task the readback accepts as
+    work that is not due. Pinned per task, so moving the declaration does not
+    change the readback's verdict.
+
+    Mutant: a task accepts a reason it never reports as not due, or loses one."""
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from eneo.data_retention.application.retention_readback import NOT_DUE
+    from eneo.main.config import get_settings
+    from eneo.main.retention_tasks import retention_task_registrations
+
+    assert {
+        registration.name: registration.build(AsyncSession()).blocked_keys & NOT_DUE
+        for registration in retention_task_registrations(get_settings())
+    } == {
+        "conversations.history": {"no_longer_due"},
+        "conversations.derived_copies": {"no_longer_due"},
+        "sessions.empty": {"no_longer_due"},
+        "files.unused": {"files_not_old_enough"},
+        "retention.jobs": set(),
+    }
