@@ -190,6 +190,8 @@ test(
       "flow_run_evidence_export_disabled"
     );
     await page.goto(`${url}/runs/${older.detail.id}`);
+    // The evidence and its export sit in a fold under the result.
+    await page.getByRole("button", { name: "Bevisunderlag", exact: true }).click();
     await expect(
       page.getByText(/^Nedladdning av bevisunderlag är avstängd för flödet\./)
     ).toBeVisible();
@@ -262,25 +264,24 @@ test(
     await expect(
       page.getByText(`Version ${older.detail.flow_version}`, { exact: true })
     ).toBeVisible();
-    await expect(
-      page
-        .getByRole("region", { name: "Användning", exact: true })
-        .getByText(usageText, { exact: true })
-    ).toBeVisible();
+    const usageFold = page.getByRole("region", { name: "Användning", exact: true });
+    await usageFold.getByRole("button", { name: "Användning", exact: true }).click();
+    await expect(usageFold.getByText(usageText, { exact: true })).toBeVisible();
 
     const article = page.getByRole("article", { name: `Steg 1: ${stepName}`, exact: true });
     await test.step("opens the older run's file and recorded knowledge passage after republishing", async () => {
       const inputs = article.getByRole("list", { name: "Filer som steget fick", exact: true });
       await expect(inputs.getByText(file.name, { exact: true })).toBeVisible();
       const downloaded = page.waitForEvent("download");
-      await inputs.getByRole("button", { name: `Ladda ned ${file.name}`, exact: true }).click();
+      await inputs.getByRole("button", { name: `Ladda ner ${file.name}`, exact: true }).click();
       const download = await downloaded;
       expect(download.suggestedFilename()).toBe(file.name);
       const path = await download.path();
       expect(path).not.toBeNull();
       expect(await readFile(path!, "utf8")).toBe(file.text);
 
-      const knowledge = page.getByRole("region", { name: "Kunskapsunderlag", exact: true });
+      const knowledge = page.getByRole("region", { name: "Kunskapskällor", exact: true });
+      await knowledge.getByRole("button", { name: "Kunskapskällor", exact: true }).click();
       await knowledge.getByRole("button", { name: "Visa kunskapsunderlag", exact: true }).click();
       const openSource = knowledge.getByRole("button", {
         name: `Visa källan ${source.title}`,
@@ -366,16 +367,19 @@ test(
     await expect
       .poll(() => page.evaluate(() => navigator.clipboard.readText()))
       .toBe(older.step.effective_prompt);
-    await article.getByRole("button", { name: "Försök", exact: true }).click();
+    // The attempts are part of the evidence, folded under the result and loaded on request.
+    await page.getByRole("button", { name: "Bevisunderlag", exact: true }).click();
+    await page.getByRole("button", { name: "Visa bevisunderlag", exact: true }).click();
+    const attempts = page.getByRole("region", { name: "Försök per steg", exact: true });
     const attempt = older.evidence.step_attempts[0]!;
     expect(attempt.response_model || attempt.requested_model).toBeTruthy();
     await expect(
-      article.getByText(`Modell ${attempt.response_model || attempt.requested_model}`, {
+      attempts.getByText(`Modell ${attempt.response_model || attempt.requested_model}`, {
         exact: false
       })
     ).toBeVisible();
-    await article.getByRole("button", { name: "Detaljer för försök 1", exact: true }).click();
-    await article.getByRole("button", { name: "Kopiera försök 1", exact: true }).click();
+    await attempts.getByRole("button", { name: "Detaljer för försök 1", exact: true }).click();
+    await attempts.getByRole("button", { name: "Kopiera försök 1", exact: true }).click();
     await expect
       .poll(() => page.evaluate(() => navigator.clipboard.readText()))
       .toBe(JSON.stringify(attempt, null, 2));
@@ -457,12 +461,15 @@ test(
       });
     });
     await page.goto(`${url}/runs/${run.detail.id}`);
-    const article = page.getByRole("article", { name: `Steg 1: ${stepName}`, exact: true });
-    await article.getByRole("button", { name: "Försök", exact: true }).click();
-    const first = article
+    await page.getByRole("button", { name: "Bevisunderlag", exact: true }).click();
+    await page.getByRole("button", { name: "Visa bevisunderlag", exact: true }).click();
+    const attemptList = page
+      .getByRole("region", { name: "Försök per steg", exact: true })
+      .getByRole("list", { name: `Steg 1: ${stepName}`, exact: true });
+    const first = attemptList
       .getByRole("listitem")
       .filter({ has: page.getByText("Försök 1", { exact: true }) });
-    const second = article
+    const second = attemptList
       .getByRole("listitem")
       .filter({ has: page.getByText("Försök 2", { exact: true }) });
     await expect(first).toContainText("Modell fixture-requested");

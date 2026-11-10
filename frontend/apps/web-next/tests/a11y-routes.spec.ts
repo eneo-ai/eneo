@@ -96,7 +96,13 @@ const CHECKS: Record<string, (screen: Screen) => Promise<void>> = {
   "/spaces/$/assistants": (screen) => heading(screen, 2, /^(Assistenter|Assistants)$/),
   "/spaces/$/assistants/$/edit": (screen) => heading(screen, 1, /^Bygglov /),
   "/spaces/$/flows": (screen) => heading(screen, 2, /^(Flöden|Flows)$/),
-  "/spaces/$/flows/$": (screen) => heading(screen, 2, /^(Inställningar|Settings)$/),
+  // Below 768 px the phone layout folds the settings under a disclosure of the same name.
+  "/spaces/$/flows/$": (screen) =>
+    screen.width < 768
+      ? expect(
+          screen.page.getByRole("button", { name: /^(Inställningar|Settings)$/ })
+        ).toBeVisible()
+      : heading(screen, 2, /^(Inställningar|Settings)$/),
   "/spaces/$/flows/$/runs/$": (screen) => heading(screen, 1, /^(Körning|Run) /),
   "/spaces/$/group-chats/$/edit": (screen) => heading(screen, 1, screen.fixtures.groupChatName),
   "/spaces/$/members": (screen) => heading(screen, 2, /^(Medlemmar|Members)$/),

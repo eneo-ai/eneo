@@ -58,6 +58,12 @@ test(
     await expect(page).toHaveURL(/\/runs\/[^/?]+$/);
     await expect.poll(() => statuses.includes("completed"), { timeout: 90_000 }).toBe(true);
     expect(statuses.length).toBeGreaterThan(1);
+    // A run that had ended when its step was shown keeps the transcript folded under the result.
+    const transcriptFold = page.getByRole("button", { name: "Transkription", exact: true });
+    await expect(transcriptFold).toBeVisible();
+    if ((await transcriptFold.getAttribute("aria-expanded")) === "false")
+      await transcriptFold.click();
+    await expect(transcriptFold).toHaveAttribute("aria-expanded", "true");
     const play = page.getByRole("button", { name: "Spela upp ljudet", exact: true }).first();
     await expect(play).toBeVisible();
     await play.click();

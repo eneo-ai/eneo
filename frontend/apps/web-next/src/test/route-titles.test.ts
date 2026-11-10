@@ -17,8 +17,6 @@ const TITLE_EXCEPTIONS: Record<string, string> = {
   "/admin/flow-knowledge-evidence": "Redirects to the knowledge evidence section of Flow settings.",
   "/admin/": "Inherits Administration from the admin layout.",
   "/spaces/$spaceId/flows/$flowId/": "Inherits the flow and space names from the flow layout.",
-  "/spaces/$spaceId/flows/$flowId/runs/$runId":
-    "Inherits the flow and space names from the flow layout.",
   "/spaces/$spaceId/overview": "Inherits the space name from the space layout.",
   "/spaces/$spaceId/chat": "Inherits the space name from the space layout.",
   "/dashboard/$assistantId/{-$sessionId}":

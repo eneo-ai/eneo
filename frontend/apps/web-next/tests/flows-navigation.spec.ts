@@ -80,8 +80,11 @@ test(
         .click();
     }
     await openUsers();
-    const confirmation = page.getByRole("alertdialog", { name: "Lämna sidan?", exact: true });
-    await confirmation.getByRole("button", { name: "Avbryt", exact: true }).click();
+    const confirmation = page.getByRole("alertdialog", {
+      name: "Lämna steget utan att spara?",
+      exact: true
+    });
+    await confirmation.getByRole("button", { name: "Fortsätt redigera", exact: true }).click();
     // A retained frame is insufficient: Stay must leave the editor usable after pending work settles.
     await page.waitForTimeout(1_000);
     await expect(page).toHaveURL(originalUrl);

@@ -65,7 +65,10 @@ test(
     await form.getByRole("switch", { name: "Livetranskribering", exact: true }).check();
     await save(form);
     // The backend accepted it for a vLLM provider and returns it.
-    await expect(provider.getByText("Livetranskribering", { exact: true })).toBeVisible();
+    // The row lists its capabilities twice (column and under the name); the width shows one.
+    await expect(
+      provider.getByText("Livetranskribering", { exact: true }).filter({ visible: true })
+    ).toBeVisible();
     details = await open();
     await expect(detailValue(details, "Livetranskribering")).toHaveText("Ja");
     await page.keyboard.press("Escape");

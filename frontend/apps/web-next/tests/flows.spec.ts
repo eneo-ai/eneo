@@ -53,7 +53,7 @@ test(
     await page.evaluate(() => history.back());
     const leave = page.getByRole("alertdialog");
     await expect(leave).toBeVisible();
-    await leave.getByRole("button", { name: "Avbryt", exact: true }).click();
+    await leave.getByRole("button", { name: "Fortsätt redigera", exact: true }).click();
     await expect(page.getByRole("textbox", { name: /^Egen text till steget/ })).toHaveValue(
       "Det manuella flödet fungerar."
     );
@@ -180,14 +180,15 @@ test(
     expect(historyAxe.violations).toEqual([]);
     await historyLink.click();
     await expect(page).toHaveURL(runUrl);
-    // A phone shows the result first and folds the steps under it (run-page.tsx FoldSection):
-    // the attempts are one tap into them.
+    // A phone shows the result first and folds the steps under it (run-page.tsx FoldSection);
+    // the attempts sit in the folded evidence, loaded on request.
     const steps = page.getByRole("region", { name: "Steg", exact: true });
     const stepsFold = steps.getByRole("button", { name: "Steg", exact: true });
     await expect(stepsFold).toHaveAttribute("aria-expanded", "false");
     await stepsFold.click();
     await expect(stepsFold).toHaveAttribute("aria-expanded", "true");
-    await steps.getByRole("button", { name: "Försök", exact: true }).click();
+    await page.getByRole("button", { name: "Bevisunderlag", exact: true }).click();
+    await page.getByRole("button", { name: "Visa bevisunderlag", exact: true }).click();
     const attemptDetails = page.getByRole("button", { name: "Detaljer för försök 1", exact: true });
     await attemptDetails.focus();
     await page.keyboard.press("Enter");

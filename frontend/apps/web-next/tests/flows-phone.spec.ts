@@ -134,10 +134,12 @@ test(
     await expect(page).toHaveURL(/\/runs\/[^/?]+$/);
     await expect(page.getByRole("heading", { level: 2, name: "Resultat" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Flöden", exact: true })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Underlag", exact: true })).toHaveAttribute(
-      "aria-expanded",
-      "false"
-    );
+    for (const fold of ["Det du fyllde i", "Bevisunderlag"]) {
+      await expect(page.getByRole("button", { name: fold, exact: true })).toHaveAttribute(
+        "aria-expanded",
+        "false"
+      );
+    }
     await fitsTheWidth(page);
     await axeFindsNothing(page);
 

@@ -17,7 +17,8 @@ test.describe("speaker identification services", { tag: "@vite" }, () => {
     await page.goto("/admin/models");
     await page.getByRole("tab", { name: "Ordtider och talaridentifiering" }).click();
     const panel = page.getByRole("tabpanel");
-    await panel.getByRole("button", { name: "Anslut tjänst" }).first().click();
+    // The connect action sits in the page header, beside the tabs.
+    await page.getByRole("button", { name: "Anslut tjänst" }).first().click();
     const dialog = page.getByRole("dialog");
     await dialog.getByLabel(/^Namn/).fill(name);
     await dialog.getByLabel(/^Adress/).fill(ENDPOINT);
