@@ -9,7 +9,7 @@ apps show as untitled; the feedback vote stays.
 
 from collections.abc import Sequence
 from datetime import datetime
-from typing import cast
+from typing import Any, TypeVar, cast
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -31,6 +31,8 @@ from eneo.database.tables.group_chats_table import (
 )
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces
+
+_Row = TypeVar("_Row", bound=tuple[Any, ...])
 
 
 class ConversationNameRepository:
@@ -59,10 +61,11 @@ class ConversationNameRepository:
         self.cutoff = now - sa.func.make_interval(0, 0, 0, days)
         self.days = days
 
-    def _due(self, ids: Sequence[UUID]) -> sa.Select[tuple[UUID, UUID, datetime]]:
+    def _under_a_period(self, statement: sa.Select[_Row]) -> sa.Select[_Row]:
+        """The conversations outside widgets that have a period, with their
+        space and organisation's policy joined."""
         return (
-            sa.select(Sessions.id, Spaces.tenant_id, self.cutoff.label("cutoff"))
-            .select_from(Sessions)
+            statement.select_from(Sessions)
             .outerjoin(Assistants, Assistants.id == Sessions.assistant_id)
             .outerjoin(GroupChatsTable, GroupChatsTable.id == Sessions.group_chat_id)
             .join(
@@ -72,12 +75,15 @@ class ConversationNameRepository:
             .outerjoin(
                 AuditRetentionPolicy, AuditRetentionPolicy.tenant_id == Spaces.tenant_id
             )
-            .where(
-                uuid_in(Sessions.id, ids),
-                outside_widgets(),
-                self.days.is_not(None),
-                sa.or_(_name_due(self.cutoff), _feedback_due(self.cutoff)),
-            )
+            .where(outside_widgets(), self.days.is_not(None))
+        )
+
+    def _due(self, ids: Sequence[UUID]) -> sa.Select[tuple[UUID, UUID, datetime]]:
+        return self._under_a_period(
+            sa.select(Sessions.id, Spaces.tenant_id, self.cutoff.label("cutoff"))
+        ).where(
+            uuid_in(Sessions.id, ids),
+            sa.or_(_name_due(self.cutoff), _feedback_due(self.cutoff)),
         )
 
     async def window(
