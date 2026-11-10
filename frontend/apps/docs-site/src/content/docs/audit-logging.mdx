@@ -443,7 +443,7 @@ task turned on (each `RETENTION_*_ENABLED` setting `true`, the default), run
 retention until nothing due is left:
 
 ```bash
-docker compose run --rm backend run-cron --until-complete run_retention
+docker compose --env-file .env --env-file release.env run --rm backend run-cron --until-complete run_retention
 ```
 
 The command runs the registered tasks in its own process, round after round, and
@@ -481,9 +481,8 @@ storage line other than `confirmed` or `pending`. A task turned off by its setti
 also fails the readback, since nothing shows that its work is done. Resolve the
 cause and run the command again.
 
-The readback covers what the retention engine removes. It does not replay manual
-deletions made after the recovery point and does not remove backup copies; see the
-[storage and restore procedures](/guides/object-content-storage#back-up-and-restore).
+What the readback promises, what can still come back after a restore and what
+it leaves to you are in [After a restore](/guides/data-retention#after-a-restore).
 
 ## Export formats
 
