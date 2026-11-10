@@ -1396,7 +1396,9 @@ async def test_list_flow_run_steps_handles_non_list_diagnostics(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_list_flow_run_steps_says_which_steps_hold_one_recording(monkeypatch):
+async def test_list_flow_run_steps_says_how_each_steps_files_were_submitted(
+    monkeypatch,
+):
     container = MagicMock()
     flow_id = uuid4()
     run_service = AsyncMock()
@@ -1404,10 +1406,17 @@ async def test_list_flow_run_steps_says_which_steps_hold_one_recording(monkeypat
     recorded_step_id, separate_step_id = uuid4(), uuid4()
     parts = (uuid4(), uuid4())
     separate = (uuid4(), uuid4())
+    transcript_id = uuid4()
     run = _run(flow_id=flow_id, tenant_id=uuid4()).model_copy(
         update={
             "input_payload_json": {
-                "step_inputs": {str(recorded_step_id): {"single_recording": True}}
+                "step_inputs": {
+                    str(recorded_step_id): {
+                        "single_recording": True,
+                        "streamed": True,
+                        "live_transcript_id": str(transcript_id),
+                    }
+                }
             }
         }
     )
@@ -1494,9 +1503,17 @@ async def test_list_flow_run_steps_says_which_steps_hold_one_recording(monkeypat
     )
 
     assert [
-        (step.runtime_input_file_ids, step.runtime_input_single_recording)
+        (
+            step.runtime_input_file_ids,
+            step.runtime_input_single_recording,
+            step.runtime_input_streamed,
+            step.runtime_input_live_transcript_id,
+        )
         for step in response
-    ] == [(list(parts), True), (list(separate), False)]
+    ] == [
+        (list(parts), True, True, transcript_id),
+        (list(separate), False, False, None),
+    ]
 
 
 @pytest.mark.asyncio

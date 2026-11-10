@@ -2337,6 +2337,25 @@ class FlowRunStepPublic(BaseModel):
             "run with the same files, where the run contract offers it."
         ),
     )
+    runtime_input_streamed: bool = Field(
+        default=False,
+        description=(
+            "Whether the run submitted this step's audio as streamed while it was "
+            "recorded (`streamed`). Send it again when starting a new run with "
+            "the same files. Read by the step outputs endpoint; false in evidence "
+            "reads, whose run input payload holds it."
+        ),
+    )
+    runtime_input_live_transcript_id: UUID | None = Field(
+        default=None,
+        description=(
+            "The live transcript the run submitted for this step "
+            "(`live_transcript_id`), whether or not it could be used. Send it "
+            "again beside `streamed` when starting a new run with the same files "
+            "in the same order. Read by the step outputs endpoint; null in "
+            "evidence reads."
+        ),
+    )
     transcript_origin: Literal["live", "batch"] | None = Field(
         default=None,
         validation_alias=AliasChoices(

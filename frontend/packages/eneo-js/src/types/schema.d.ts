@@ -26498,11 +26498,22 @@ export interface components {
        */
       runtime_input_files?: components["schemas"]["FlowRunStepInputFilePublic"][] | null;
       /**
+       * Runtime Input Live Transcript Id
+       * @description The live transcript the run submitted for this step (`live_transcript_id`), whether or not it could be used. Send it again beside `streamed` when starting a new run with the same files in the same order. Read by the step outputs endpoint; null in evidence reads.
+       */
+      runtime_input_live_transcript_id?: string | null;
+      /**
        * Runtime Input Single Recording
        * @description Whether the run submitted this step's files as the parts of one recording (`single_recording`). Send it again when starting a new run with the same files, where the run contract offers it.
        * @default false
        */
       runtime_input_single_recording?: boolean;
+      /**
+       * Runtime Input Streamed
+       * @description Whether the run submitted this step's audio as streamed while it was recorded (`streamed`). Send it again when starting a new run with the same files. Read by the step outputs endpoint; false in evidence reads, whose run input payload holds it.
+       * @default false
+       */
+      runtime_input_streamed?: boolean;
       /** Started At */
       started_at?: string | null;
       status: components["schemas"]["FlowStepResultStatus"];

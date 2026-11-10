@@ -279,6 +279,8 @@ class FlowAssembler:
         runtime_input_file_ids: Sequence[UUID] = (),
         runtime_input_files: Sequence[FlowRunStepInputFileRef] | None = None,
         runtime_input_single_recording: bool = False,
+        runtime_input_streamed: bool = False,
+        runtime_input_live_transcript_id: UUID | None = None,
         result_files: Sequence[FlowRunStepResultFile] = (),
         transcript_source: "TranscriptSourceReference | None" = None,
         live_fallback: FlowStepAttemptLiveFallback | None = None,
@@ -324,6 +326,8 @@ class FlowAssembler:
                     else None
                 ),
                 "runtime_input_single_recording": runtime_input_single_recording,
+                "runtime_input_streamed": runtime_input_streamed,
+                "runtime_input_live_transcript_id": runtime_input_live_transcript_id,
                 "result_files": list(result_files),
             }
         )

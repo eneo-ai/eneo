@@ -48,7 +48,11 @@ from eneo.flows.domain.flow import FlowRun
 from eneo.flows.flow_access_policy import FlowApiAction, flow_action_access_reason
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_contract_service import speakers_identifiable
-from eneo.flows.flow_run_input_envelope import read_single_recording_steps
+from eneo.flows.flow_run_input_envelope import (
+    read_live_transcript_ids,
+    read_single_recording_steps,
+    read_streamed_steps,
+)
 from eneo.flows.published_runtime import load_published_definition
 from eneo.main.container.container import Container
 from eneo.main.exceptions import AuditLoggingUnavailableException, ErrorCodes
@@ -225,6 +229,8 @@ async def list_flow_run_steps(
                 history=True,
             )
             single_recording_steps = read_single_recording_steps(run.input_payload_json)
+            streamed_steps = read_streamed_steps(run.input_payload_json)
+            live_transcript_ids = read_live_transcript_ids(run.input_payload_json)
             response = [
                 assembler.to_step_public(
                     view.step_result,
@@ -232,6 +238,10 @@ async def list_flow_run_steps(
                     runtime_input_files=view.runtime_input_files,
                     runtime_input_single_recording=view.step_result.step_id
                     in single_recording_steps,
+                    runtime_input_streamed=view.step_result.step_id in streamed_steps,
+                    runtime_input_live_transcript_id=live_transcript_ids.get(
+                        view.step_result.step_id
+                    ),
                     result_files=view.result_files,
                     transcript_source=transcript_sources.get(view.step_result.step_id),
                     live_fallback=view.live_fallback,

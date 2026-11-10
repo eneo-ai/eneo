@@ -316,6 +316,8 @@ def test_step_public_defaults_runtime_input_file_ids_to_empty_list():
 
     assert public_step.runtime_input_file_ids == []
     assert public_step.runtime_input_single_recording is False
+    assert public_step.runtime_input_streamed is False
+    assert public_step.runtime_input_live_transcript_id is None
 
 
 def test_step_public_says_its_files_are_one_recording():
@@ -328,6 +330,21 @@ def test_step_public_says_its_files_are_one_recording():
     )
 
     assert public_step.runtime_input_single_recording is True
+
+
+def test_step_public_says_its_audio_was_streamed_and_with_which_live_text():
+    built = _step_result(1, status=FlowStepResultStatus.COMPLETED, text="answer")
+    transcript_id = uuid4()
+
+    public_step = FlowAssembler().to_step_public(
+        built,
+        runtime_input_file_ids=(uuid4(),),
+        runtime_input_streamed=True,
+        runtime_input_live_transcript_id=transcript_id,
+    )
+
+    assert public_step.runtime_input_streamed is True
+    assert public_step.runtime_input_live_transcript_id == transcript_id
 
 
 def test_build_transcribe_only_rag_metadata_rounds_timeout_to_int():

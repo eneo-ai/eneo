@@ -3769,6 +3769,12 @@ def test_openapi_flow_run_step_public_exposes_runtime_input_file_ids(
     single_recording = step_result["properties"]["runtime_input_single_recording"]
     assert single_recording["type"] == "boolean"
     assert "one recording" in single_recording["description"]
+    streamed = step_result["properties"]["runtime_input_streamed"]
+    assert streamed["type"] == "boolean"
+    assert "`streamed`" in streamed["description"]
+    live_transcript_id = step_result["properties"]["runtime_input_live_transcript_id"]
+    assert {"type": "string", "format": "uuid"} in live_transcript_id["anyOf"]
+    assert "`live_transcript_id`" in live_transcript_id["description"]
     runtime_input_files = step_result["properties"]["runtime_input_files"]
     assert "runtime_input_files" not in step_result.get("required", [])
     assert "same order" in runtime_input_files["description"]

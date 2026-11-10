@@ -368,6 +368,11 @@ async def test_a_live_models_text_is_the_runs_transcript(
     )
     assert steps.status_code == 200, steps.text
     step = steps.json()[0]
+    # What the run was sent, for a new run started with the same files.
+    assert (
+        step["runtime_input_streamed"],
+        step["runtime_input_live_transcript_id"],
+    ) == (True, str(transcript_id))
     if removed_before_the_run:
         registry.transcribe_from_filepath.assert_awaited_once()
         assert run.output_payload_json["text"] == "Batch text."
