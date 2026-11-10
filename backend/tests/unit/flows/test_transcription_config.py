@@ -88,7 +88,7 @@ def test_a_speaker_bound_must_be_a_whole_number_of_at_least_one(raw: object) -> 
 
 
 def test_a_live_model_is_in_use_only_while_the_flow_transcribes() -> None:
-    # It only streams the live preview; the transcription model writes the text.
+    # It writes streamed audio; the transcription model writes files.
     live_id, model_id = uuid4(), uuid4()
     wizard = {
         "transcription_enabled": True,
@@ -99,6 +99,7 @@ def test_a_live_model_is_in_use_only_while_the_flow_transcribes() -> None:
     config = parse_transcription_config({"wizard": wizard})
     assert (config.model_id, config.live_model_id) == (model_id, live_id)
     assert config.live_model_in_use == live_id
+    assert config.streaming_model_id == live_id
 
     config = parse_transcription_config(
         {"wizard": {**wizard, "transcription_enabled": False}}
@@ -108,14 +109,22 @@ def test_a_live_model_is_in_use_only_while_the_flow_transcribes() -> None:
 
 
 @pytest.mark.parametrize("raw", [None, {"id": None}, {"id": " "}])
-def test_no_live_model_leaves_the_preview_to_the_transcription_model(
+def test_no_live_model_leaves_streaming_to_the_transcription_model(
     raw: object,
 ) -> None:
+    model_id = uuid4()
     config = parse_transcription_config(
-        {"wizard": {"transcription_enabled": True, "transcription_live_model": raw}}
+        {
+            "wizard": {
+                "transcription_enabled": True,
+                "transcription_model": {"id": str(model_id)},
+                "transcription_live_model": raw,
+            }
+        }
     )
 
     assert (config.live_model_id, config.live_model_in_use) == (None, None)
+    assert config.streaming_model_id == model_id
 
 
 @pytest.mark.parametrize("raw", ["model", {"id": "not-a-uuid"}])

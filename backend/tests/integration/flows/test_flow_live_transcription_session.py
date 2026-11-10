@@ -1,4 +1,4 @@
-"""Live transcription preview: admission over HTTP, then the WebSocket relay.
+"""Live transcription: admission over HTTP, then the WebSocket relay.
 
 The WebSocket half runs against the application served by uvicorn on a local
 port and a local server speaking vLLM's realtime schema, so ticket redemption,
@@ -366,7 +366,7 @@ async def test_a_session_takes_the_longest_recording_the_tenant_admin_set(
     assert session["max_seconds"] == 3600
 
 
-async def test_an_admitted_session_streams_the_preview_through_the_flows_model(
+async def test_an_admitted_session_streams_live_text_through_the_flows_model(
     live_stack: LiveStack, db_container
 ):
     session = await live_stack.open_session()
@@ -391,7 +391,7 @@ async def test_an_admitted_session_streams_the_preview_through_the_flows_model(
         "type": "ready",
         "sample_rate": 16000,
         "max_seconds": max_seconds,
-        # A session that names no recording only previews.
+        # A session that names no recording keeps no transcript.
         "keeps_transcript": False,
     }
     assert events == [
@@ -891,9 +891,11 @@ async def _flow_with_a_live_model(
     return flow, live
 
 
-async def test_a_live_model_previews_and_the_transcription_model_keeps_the_transcript(
+async def test_a_live_model_writes_the_transcript_of_streamed_audio(
     client, app, flow_process_auth_headers, db_container
 ):
+    """The source picks the model: a stream through the flow's live model keeps
+    its text for the run, though the flow transcribes files with another."""
     headers = dict(flow_process_auth_headers)
     async with (
         fake_realtime_server() as model_server,
@@ -918,28 +920,30 @@ async def test_a_live_model_previews_and_the_transcription_model_keeps_the_trans
             events = [json.loads(message) async for message in socket]
 
     assert session["model"]["id"] == live["id"]
-    assert ready["keeps_transcript"] is False
+    assert ready["keeps_transcript"] is True
     assert model_server.received[0] == {
         "type": "session.update",
         "model": live["model_name"],
     }
-    # The whole recording was heard, yet the text stays a preview: the run
-    # transcribes the recording with the flow's transcription model.
-    assert events[-1] == {"type": "transcript.done", "text": "Hej världen"}
+    done = events[-1]
+    assert (done["type"], done["text"]) == ("transcript.done", "Hej världen")
     from eneo.database.tables.flow_tables import FlowLiveTranscripts
 
     async with db_container() as container:
-        stored = await container.session().scalar(
-            sa.select(sa.func.count())
-            .select_from(FlowLiveTranscripts)
-            .where(FlowLiveTranscripts.flow_id == UUID(flow.flow_id))
+        [row] = list(
+            await container.session().scalars(
+                sa.select(FlowLiveTranscripts).where(
+                    FlowLiveTranscripts.flow_id == UUID(flow.flow_id)
+                )
+            )
         )
-    assert stored == 0
+        assert str(row.id) == done["transcript_id"]
+        assert row.model_id == UUID(live["id"]) != UUID(flow.model_id)
     [extra] = await _started_audit_extras(db_container, flow.flow_id)
     assert extra["model_id"] == live["id"]
 
 
-async def test_the_preview_needs_both_models_usable_in_the_space(
+async def test_live_text_needs_both_models_usable_in_the_space(
     client, flow_process_auth_headers, db_container
 ):
     headers = dict(flow_process_auth_headers)
@@ -953,8 +957,8 @@ async def test_the_preview_needs_both_models_usable_in_the_space(
     await _remove_from_space(db_container, flow.space_id, live["id"])
     assert await reason() == "live_model_unavailable"
 
-    # The run's transcript needs the transcription model; a preview of a
-    # recording the run cannot transcribe is not offered.
+    # The transcription model transcribes the recording when its live text
+    # cannot be used, so live text is not offered without it.
     await _add_to_space(db_container, flow.space_id, live["id"])
     await _remove_from_space(db_container, flow.space_id, flow.model_id)
     assert await reason() == "model_unavailable"
@@ -985,7 +989,7 @@ async def test_a_flow_picks_only_a_live_model_its_space_may_use_and_that_can_str
     )
     refused(await _with_live_model(client, headers, flow, live["id"]))
     # The flow's own model is no separate choice, even one that cannot stream:
-    # it reads as none, which leaves the preview to the transcription model.
+    # it reads as none, which leaves streaming to the transcription model.
     own = await _with_live_model(client, headers, flow, flow.model_id)
     assert own.status_code == 200, own.text
 
@@ -1009,7 +1013,7 @@ async def test_a_flow_picks_only_a_live_model_its_space_may_use_and_that_can_str
         await client.post(f"/api/v1/flows/{flow.flow_id}/publish/", headers=headers)
     )
 
-    # Choosing no live model leaves the preview to the transcription model.
+    # Choosing no live model leaves streaming to the transcription model.
     none = await _with_live_model(client, headers, flow, None)
     assert none.status_code == 200, none.text
     published = await client.post(

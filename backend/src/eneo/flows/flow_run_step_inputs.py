@@ -190,20 +190,25 @@ def validate_live_transcript_inputs(
     step_inputs: FlowRunStepInputs,
     normalized_step_inputs: dict[UUID, list[UUID]],
     specs: dict[UUID, RuntimeStepInputSpec],
+    single_recording_steps: frozenset[UUID],
 ) -> dict[UUID, UUID]:
+    """A live transcript goes with one audio file, or with the parts of one
+    recording; binding checks that they are every part, in order."""
     live_ids: dict[UUID, UUID] = {}
     for step_id, submitted in step_inputs.items():
         if submitted.live_transcript_id is None:
             continue
         spec = specs.get(step_id)
+        files = len(normalized_step_inputs.get(step_id, ()))
         if (
-            len(normalized_step_inputs[step_id]) != 1
+            files == 0
+            or (files > 1 and step_id not in single_recording_steps)
             or spec is None
             or spec.runtime_input.input_format is not FlowRuntimeInputFormat.AUDIO
         ):
             raise FlowBadRequestException(
-                "A live transcript requires exactly one audio file for the step.",
-                code=FlowApiErrorCode.RUN_LIVE_TRANSCRIPT_REQUIRES_ONE_AUDIO_FILE,
+                "A live transcript needs one audio file, or the parts of one recording.",
+                code=FlowApiErrorCode.RUN_LIVE_TRANSCRIPT_FILES_MISMATCH,
             )
         live_ids[step_id] = submitted.live_transcript_id
     return live_ids

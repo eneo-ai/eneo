@@ -257,7 +257,9 @@ async def resolve_transcribe_and_attach_audio_input(
             flow_id=request.run.flow_id,
             flow_version=request.run.flow_version,
             step_id=request.step.step_id,
-            model_id=parse_transcription_config(request.version_metadata).model_id,
+            model_id=parse_transcription_config(
+                request.version_metadata
+            ).streaming_model_id,
         )
         if live_transcript is not None and not scope.matches(live_transcript):
             live_transcript = None

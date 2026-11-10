@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import wave
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -305,3 +306,171 @@ async def test_each_file_is_decoded_under_the_tenant_limit(spool_contract, ffmpe
         TENANT_LIMITS,
         TENANT_LIMITS,
     ]
+
+
+# A streamed recording in two parts: the second began 9.9 s into the session,
+# while the first part still ran to 10 s, as a recorder overlaps its parts.
+LIVE_MODEL = SimpleNamespace(id=uuid4(), name="pianissimo")
+LIVE_PASSAGES = [
+    {"text": "Hej.", "start": 1.0, "end": 2.0},
+    # One delta the session heard across the seam.
+    {"text": " Över skarven.", "start": 9.7, "end": 10.4},
+    {"text": " Punkt två.", "start": 12.0, "end": 13.0},
+]
+
+
+def _streamed(files, *, heard: float = 19.9) -> SimpleNamespace:
+    return SimpleNamespace(
+        bound_file_ids=[file.id for file in files],
+        segments=LIVE_PASSAGES,
+        part_start_samples=[158_400],
+        received_audio_seconds=heard,
+    )
+
+
+async def _run_streamed(spool_contract, files, engine, *, diarize, heard=19.9):
+    return await transcribe_audio_input(
+        files=files,
+        transcriber=engine,
+        transcription_model=SimpleNamespace(id=uuid4(), name="whisper-1"),
+        language="sv",
+        step_order=1,
+        max_files=5,
+        max_inline_text_bytes=100_000,
+        open_audio_download=spool_contract.downloads(files),
+        diarize=diarize,
+        max_speakers=3,
+        single_recording=True,
+        live_transcript=_streamed(files, heard=heard),
+        live_model=LIVE_MODEL,
+        live_transcript_requested=True,
+    )
+
+
+def _word(text: str, start: float, end: float) -> TranscriptWord:
+    return TranscriptWord(text, start, end)
+
+
+async def test_a_passage_across_a_seam_is_enriched_in_the_audio_that_holds_it(
+    spool_contract, ffmpeg
+):
+    files = [_part("del-1.wav", 10), _part("del-2.wav", 10)]
+    engine = _engine()
+    engine.enrich = AsyncMock(
+        return_value=TranscribedAudio(
+            text="",
+            duration_seconds=20.0,
+            transcript_segments=(
+                _said("Hej.", 1.0, 2.0, "SPEAKER_04"),
+                TranscriptSegment(
+                    "Över skarven.",
+                    9.75,
+                    10.45,
+                    "SPEAKER_04",
+                    (_word("Över", 9.75, 9.95), _word("skarven.", 10.1, 10.45)),
+                ),
+                _said("Punkt två.", 12.1, 13.1, "SPEAKER_02"),
+            ),
+            diarization="external",
+        )
+    )
+
+    result = await _run_streamed(spool_contract, files, engine, diarize=True)
+
+    # The live text is the recording's text: nothing is transcribed again.
+    engine.transcribe.assert_not_awaited()
+    engine.transcribe_recording.assert_not_awaited()
+    engine.enrich.assert_awaited_once()
+    joined, model = engine.enrich.await_args.args
+    assert joined.filename == "recording.wav"
+    assert model is LIVE_MODEL
+    windows = engine.enrich.await_args.kwargs["transcribed"].segments
+    # On the joined audio, the seam passage keeps its whole span: it ends 0.5 s
+    # into the second part, which starts at 10 s there.
+    assert [(w.text, w.start, round(w.end, 6)) for w in windows] == [
+        ("Hej.", 1.0, 2.0),
+        ("Över skarven.", 9.7, 10.5),
+        ("Punkt två.", 12.1, 13.1),
+    ]
+    assert [
+        (s["file_index"], round(s["start"], 6), s["text"], s["speaker"])
+        for s in result.source.segments
+    ] == [
+        (0, 1.0, "Hej.", "SPEAKER_00"),
+        (0, 9.75, "Över", "SPEAKER_00"),
+        (1, 0.1, "skarven.", "SPEAKER_00"),
+        (1, 2.1, "Punkt två.", "SPEAKER_01"),
+    ]
+    assert result.transcript_origin == "live"
+    assert result.live_fallback_reason is None
+    assert (result.model_id, result.model_name) == (LIVE_MODEL.id, "pianissimo")
+    spool_contract.assert_finished()
+
+
+@pytest.mark.parametrize("timed", [True, False])
+async def test_an_unlabelled_streamed_recording_is_timed_once_and_split_by_words(
+    spool_contract, ffmpeg, timed
+):
+    files = [_part("del-1.wav", 10), _part("del-2.wav", 10)]
+    engine = _engine()
+
+    async def enrich(joined, model, *, transcribed, **_):
+        if not timed:
+            return replace(transcribed, word_timing="failed")
+        return replace(
+            transcribed,
+            transcript_segments=(
+                TranscriptSegment("Hej.", 1.0, 2.0, None, (_word("Hej.", 1.0, 2.0),)),
+                TranscriptSegment(
+                    "Över skarven.",
+                    9.75,
+                    10.45,
+                    None,
+                    (_word("Över", 9.75, 9.95), _word("skarven.", 10.1, 10.45)),
+                ),
+                TranscriptSegment(
+                    "Punkt två.",
+                    12.1,
+                    13.1,
+                    None,
+                    (_word("Punkt", 12.1, 12.5), _word("två.", 12.6, 13.1)),
+                ),
+            ),
+            word_timing="done",
+        )
+
+    engine.enrich = AsyncMock(side_effect=enrich)
+
+    result = await _run_streamed(spool_contract, files, engine, diarize=False)
+
+    engine.transcribe.assert_not_awaited()
+    engine.enrich.assert_awaited_once()
+    assert engine.enrich.await_args.kwargs["diarize"] is False
+    placed = [(s["file_index"], s["text"]) for s in result.source.segments]
+    if timed:
+        assert placed == [(0, "Hej."), (0, "Över"), (1, "skarven."), (1, "Punkt två.")]
+        assert result.word_timing.value == "done"
+    else:
+        # Without word times the seam passage stays whole, in the part it began in.
+        assert placed == [(0, "Hej."), (0, "Över skarven."), (1, "Punkt två.")]
+        assert result.word_timing.value == "failed"
+    # No one asked for speakers: the text stays prose, without line stamps.
+    assert "[00:" not in result.text
+    assert result.transcript_origin == "live"
+    spool_contract.assert_finished()
+
+
+async def test_parts_that_are_not_the_streamed_audio_are_transcribed_once(
+    spool_contract, ffmpeg
+):
+    files = [_part("del-1.wav", 10), _part("del-2.wav", 10)]
+    engine = _engine()
+    engine.enrich = AsyncMock(side_effect=AssertionError("not the heard audio"))
+
+    result = await _run_streamed(spool_contract, files, engine, diarize=True, heard=30)
+
+    engine.transcribe_recording.assert_awaited_once()
+    assert engine.transcribe_recording.await_args.args[1].name == "whisper-1"
+    assert result.transcript_origin == "batch"
+    assert result.live_fallback_reason == "duration_mismatch"
+    spool_contract.assert_finished()

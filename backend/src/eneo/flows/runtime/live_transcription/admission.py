@@ -1,12 +1,13 @@
-"""Whether a published flow can show a live transcript preview, and with which model.
+"""Whether a published flow can stream live text, and through which model.
 
 One owner for two readers: the run contract advertises availability and the
 live-session route admits a session, so both ask this module and cannot
-disagree. The flow's transcription model writes every run's transcript,
-however the recording arrived. The preview streams through the flow's live
-model, or through the transcription model when the flow chose none. Its text
-can stand in for the run's transcription only when the transcription model
-itself streamed it; a speaker service only adds labels.
+disagree. The source of the audio picks the model: streamed audio is written
+by the flow's live model, or by the transcription model when the flow chose
+none, and the text of a session that heard the whole recording is the run's
+transcript. Uploaded and recorded files are written by the transcription
+model, which also transcribes a streamed recording whose live text cannot be
+used. A speaker service only times the words and labels the speakers.
 """
 
 from __future__ import annotations
@@ -41,12 +42,9 @@ LiveTranscriptionUnavailableReason = Literal[
 
 @dataclass(frozen=True)
 class LiveTranscriptionAvailability:
-    # The model the preview streams through.
+    # The model the live text streams through.
     model: TranscriptionModel | None
     reason: LiveTranscriptionUnavailableReason | None
-    # Whether a session's text may become the run's transcript: only when the
-    # preview streams through the flow's transcription model.
-    keeps_transcript: bool = False
 
     @property
     def available(self) -> bool:
@@ -70,7 +68,8 @@ def resolve_live_transcription(
     ``space`` is the flow's space the caller was authorized in, which is also
     the step's space; models are picked from it exactly as the run's
     transcription picks them, without loading the space's applications again.
-    A preview is offered only while the run could transcribe the recording.
+    Live text is offered only while the run could also transcribe the
+    recording, which it does when the live text cannot be used.
     """
     try:
         config = parse_transcription_config({"wizard": wizard_metadata})
@@ -92,8 +91,4 @@ def resolve_live_transcription(
         model = live_model
     if not streams_live(model):
         return _unavailable("model_not_realtime")
-    return LiveTranscriptionAvailability(
-        model=model,
-        reason=None,
-        keeps_transcript=model.id == transcription_model.id,
-    )
+    return LiveTranscriptionAvailability(model=model, reason=None)

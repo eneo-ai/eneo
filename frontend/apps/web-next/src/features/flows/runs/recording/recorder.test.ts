@@ -89,15 +89,16 @@ function setup(
   {
     meter = false,
     journal,
-    wakeLock
-  }: { meter?: boolean; journal?: JournalSpy; wakeLock?: WakeLockHost } = {}
+    wakeLock,
+    onRotate
+  }: { meter?: boolean; journal?: JournalSpy; wakeLock?: WakeLockHost; onRotate?: () => void } = {}
 ) {
   let now = 0;
   let hidden = false;
   const parts: RecordedPart[] = [];
   const recorder = new AudioRecorder(
     { mimeType: "audio/ogg;codecs=opus", audioBitsPerSecond: 24_000 },
-    { onPart: (part) => parts.push(part), ...(journal ? { journal } : {}) },
+    { onPart: (part) => parts.push(part), onRotate, ...(journal ? { journal } : {}) },
     {
       mediaDevices: { getUserMedia },
       MediaRecorder: FakeMediaRecorder as unknown as typeof MediaRecorder,
@@ -226,9 +227,16 @@ describe("AudioRecorder", () => {
 
   it("goes on in a new part at the part length, overlapping the last, in order", async () => {
     const { stream } = fakeStream();
-    const { recorder, parts, advance } = setup(() => Promise.resolve(stream));
+    // The live text marks the new part as its recorder starts, while the last one still records.
+    const states: string[][] = [];
+    const onRotate = vi.fn(() =>
+      states.push(FakeMediaRecorder.instances.map((instance) => instance.state))
+    );
+    const { recorder, parts, advance } = setup(() => Promise.resolve(stream), { onRotate });
     await recorder.start({ sessionId: "abc", firstIndex: 0, limits: limits({ partMs: 60_000 }) });
+    expect(onRotate).not.toHaveBeenCalled();
     await advance(60_000, 500);
+    expect(states).toEqual([["recording", "recording"]]);
     expect(FakeMediaRecorder.instances).toHaveLength(2);
     expect(FakeMediaRecorder.instances[0]!.state).toBe("recording");
     await advance(ROTATION_OVERLAP_MS);

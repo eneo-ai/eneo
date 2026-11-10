@@ -168,12 +168,12 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Send a level the model's supported_model_kwargs offer for reasoning_effort, or null for the model's default.",
         user_action="Choose a level the model offers.",
     ),
-    FlowApiErrorCode.RUN_LIVE_TRANSCRIPT_REQUIRES_ONE_AUDIO_FILE: _entry(
+    FlowApiErrorCode.RUN_LIVE_TRANSCRIPT_FILES_MISMATCH: _entry(
         category="Run input",
         surfaced_through="API error response",
-        cause="A live transcript was submitted without exactly one audio file for its step.",
-        consumer_action="Submit one audio file for the step or omit live_transcript_id.",
-        user_action="Use one recording or transcribe the uploaded files again.",
+        cause="A live transcript was submitted beside files that are not every part of its recording.",
+        consumer_action="Submit the recording's parts in order, with single_recording for several, or omit live_transcript_id.",
+        user_action="Start the run again so the uploaded files are transcribed.",
     ),
     FlowApiErrorCode.RUN_SINGLE_RECORDING_REQUIRES_AUDIO_STEP: _entry(
         category="Run input",
@@ -994,11 +994,11 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         category="Run input",
         surfaced_through="API error response",
         cause=(
-            "Live preview needs the flow's own transcription model to transcribe, with "
-            "realtime support, and the error context names the missing condition."
+            "Live text needs the flow's models in its space and a realtime model "
+            "to stream through, and the error context names the missing condition."
         ),
         consumer_action=(
-            "Record without live preview and upload the file; the run transcribes it."
+            "Record without live text and upload the file; the run transcribes it."
         ),
         user_action="Record as usual; the text is created when the recording is done.",
     ),

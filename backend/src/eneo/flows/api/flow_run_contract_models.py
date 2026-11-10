@@ -587,7 +587,10 @@ class FlowTranscriptionContractPublic(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     live: FlowLiveTranscriptionAvailabilityPublic = Field(
-        description="Whether the audio step can show a live transcript preview while recording."
+        description=(
+            "Whether the audio step can stream: show the text while someone "
+            "records and use it as the run's transcript."
+        )
     )
     speaker_labels: FlowSpeakerLabelsOptionPublic
     max_speakers: FlowMaxSpeakersOptionPublic | None = Field(
@@ -690,7 +693,7 @@ class FlowRunContractPublic(BaseModel):
         default=None,
         description=(
             "Options for a flow that transcribes recorded audio: whether the audio "
-            "step can show a live transcript preview, and whether a run may choose "
+            "step can stream live text, and whether a run may choose "
             "speaker labels with `speaker_labels` on run creation. Null when the "
             "flow transcribes no audio."
         ),

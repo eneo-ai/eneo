@@ -4,7 +4,9 @@ A recorder that cuts a meeting into parts marks them as one recording. Their
 speakers are labelled once on the joined audio, so one voice keeps one label,
 and the result is split back into per-part transcripts whose times are
 relative to each part, which is what the stored transcript contract and the
-player expect.
+player expect. A recording streamed while it was made brings its live text
+instead: ``live_recording`` places that text on the joined timeline, where it
+is labelled and split the same way.
 """
 
 from __future__ import annotations
@@ -43,6 +45,10 @@ if TYPE_CHECKING:
 # Chunk windows are sums of measured cuts of the same decoded audio (no drift
 # on a 21 min recording), so only float noise separates them from the part.
 WINDOW_TOLERANCE_SECONDS = 0.05
+# A recorder starts a new part shortly before it ends the one before, so a part
+# runs on past the next one's start: about 0.15 s, about a second in a hidden
+# browser tab.
+PART_OVERLAP_ALLOWANCE_SECONDS = 2.0
 
 
 class RecordingSplitError(ValueError):
@@ -93,6 +99,60 @@ def part_bounds(durations: Sequence[float]) -> tuple[PartBounds, ...]:
     return tuple(
         PartBounds(start=start, duration=duration)
         for start, duration in zip(accumulate(durations, initial=0.0), durations)
+    )
+
+
+def live_recording(
+    passages: Sequence[TranscriptSegment],
+    *,
+    part_starts: Sequence[float],
+    heard_seconds: float,
+    bounds: Sequence[PartBounds],
+) -> TranscribedAudio | None:
+    """A live session's passages on the recording's timeline, ready for one
+    enrichment call, or None when the parts are not the audio it heard.
+
+    ``part_starts`` are where each part began in the session's audio (the
+    first at 0). A part must last as long as the session heard until the next
+    part began, within the tolerance one decoded recording gets, plus the
+    overlap a part records past the next one's start. A passage keeps its
+    whole span, even across a seam, so its words are placed in the audio that
+    holds them; ``split_recording`` then returns them to their parts.
+    """
+    if len(part_starts) != len(bounds):
+        return None
+    ends = [*part_starts[1:], heard_seconds]
+    last = len(bounds) - 1
+    for index, (start, end, bound) in enumerate(
+        zip(part_starts, ends, bounds, strict=True)
+    ):
+        tolerance = max(1.0, bound.duration * 0.005)
+        overlap = PART_OVERLAP_ALLOWANCE_SECONDS if index < last else 0.0
+        if not -tolerance <= bound.duration - (end - start) <= tolerance + overlap:
+            return None
+
+    def placed(time: float) -> float:
+        index = max(0, bisect_right(part_starts, time) - 1)
+        bound = bounds[index]
+        return min(max(bound.start + time - part_starts[index], 0.0), bound.end)
+
+    spoken: list[TranscriptSegment] = []
+    for passage in passages:
+        # Passages keep the space that joined them; the aligner refuses it.
+        text = passage.text.strip()
+        if not text:
+            continue
+        start = placed(passage.start)
+        spoken.append(
+            replace(
+                passage, text=text, start=start, end=max(placed(passage.end), start)
+            )
+        )
+    return TranscribedAudio(
+        text="".join(passage.text for passage in passages).strip(),
+        duration_seconds=bounds[-1].end,
+        segments=tuple(spoken),
+        transcript_segments=tuple(spoken),
     )
 
 
@@ -190,7 +250,10 @@ def split_recording(
 
     return [
         TranscribedAudio(
-            text=render_segments(segments[index]),
+            # Lines carry speakers; a transcript nobody asked to label stays prose.
+            text=render_segments(segments[index])
+            if labelled.diarization is not None
+            else " ".join(segment.text.strip() for segment in segments[index]),
             duration_seconds=bound.duration,
             transcript_segments=tuple(segments[index]),
             diarization=labelled.diarization,
@@ -199,6 +262,7 @@ def split_recording(
             if index == 0
             else None,
             alignment=labelled.alignment,
+            word_timing=labelled.word_timing,
             speaker_review=_review_in(labelled.speaker_review, bound),
             empty_intervals=tuple(
                 replace(interval, start=span[0], end=span[1])

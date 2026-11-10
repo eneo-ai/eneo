@@ -35,6 +35,7 @@ import {
   runRequest,
   speakersBlockRun,
   takesFreeText,
+  withoutRefusedLiveTranscripts,
   type FieldValue,
   type FormValues
 } from "./run-contract";
@@ -286,16 +287,34 @@ function StartRunForm({
     setServer((current) => ({ ...current, inputs: { ...current.inputs, [stepId]: message } }))
   );
 
+  function send(request: RunCreateRequest) {
+    const body = withRunLabel(request, runLabel);
+    // A retried request with the same body keeps its key, so a lost
+    // response cannot start the run twice; a changed body is a new run.
+    const serialized = JSON.stringify(body);
+    const key =
+      lastRequest.current?.body === serialized ? lastRequest.current.key : newIdempotencyKey();
+    lastRequest.current = { body: serialized, key };
+    return startRun(flow.id, body, key);
+  }
+
   const start = useMutation({
-    mutationFn: (request: RunCreateRequest) => {
-      const body = withRunLabel(request, runLabel);
-      // A retried request with the same body keeps its key, so a lost
-      // response cannot start the run twice; a changed body is a new run.
-      const serialized = JSON.stringify(body);
-      const key =
-        lastRequest.current?.body === serialized ? lastRequest.current.key : newIdempotencyKey();
-      lastRequest.current = { body: serialized, key };
-      return startRun(flow.id, body, key);
+    mutationFn: async (request: RunCreateRequest) => {
+      try {
+        return await send(request);
+      } catch (error) {
+        // The core will not use a live transcript: it is not offered again, and
+        // the run, sent once more without it (a new body, so a new key),
+        // transcribes the files. Nothing is said: the run starts as usual.
+        const plain = withoutRefusedLiveTranscripts(request, error);
+        if (!plain) throw error;
+        for (const [stepId, input] of Object.entries(request.step_inputs ?? {})) {
+          if (input.live_transcript_id) {
+            recorders.current.get(stepId)?.refuseLiveTranscript(input.live_transcript_id);
+          }
+        }
+        return send(plain);
+      }
     },
     onMutate: () => onPendingChange(true),
     onSettled: () => onPendingChange(false),

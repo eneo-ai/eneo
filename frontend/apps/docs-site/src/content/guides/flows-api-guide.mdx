@@ -822,7 +822,7 @@ For an audio workflow that generates structured output or a DOCX artifact, the r
 
 Important non-goals for this pattern:
 
-- no streaming audio into the run: live text while the browser records is a separate preview (see [Show live text while recording](/guides/flows/integrating-flows#show-live-text-while-recording)), and the run transcribes the uploaded file
+- no streaming audio into the run itself: a live session streams while the browser records (see [Show live text while recording](/guides/flows/integrating-flows#show-live-text-while-recording)), and the run uses its stored text or transcribes the uploaded file
 - no frontend chunk orchestration for oversized files
 - no separate browser-only retry protocol outside the shared `Idempotency-Key` contract
 

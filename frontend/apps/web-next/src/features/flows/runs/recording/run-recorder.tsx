@@ -76,10 +76,12 @@ export type RecorderHandle = {
   settled: () => Promise<void>;
   /**
    * The core's stored live transcript, when the step's stored files (by
-   * entry key) are exactly the one file of a recording the live text heard
-   * whole.
+   * entry key) are exactly the parts of a recording the live text heard
+   * whole, in recording order.
    */
   liveTranscriptFor: (entryKeys: readonly string[]) => string | undefined;
+  /** The core refused this live transcript for the run: it is not offered again. */
+  refuseLiveTranscript: (id: string) => void;
 };
 
 /** "2 h 30 min", "45 min": a recording length as the form says it. */
@@ -311,8 +313,8 @@ export function LiveText({ snapshot }: { snapshot: LiveSnapshot }) {
  * continues the same recording. Each part is added to the step's files when
  * it is done and uploads like a picked file.
  *
- * Where the flow's transcription model writes text in real time, the person
- * may follow a live draft of the text while recording. What keeps the
+ * Where the flow has a model that writes text in real time, the person
+ * follows the text while recording. What keeps the
  * browser from recording (an insecure page, no recorder, a refused or busy
  * microphone) is said in plain words, with the upload as the way on.
  */
@@ -362,8 +364,6 @@ export function RunRecorder({
   const latestEntries = useRef(entries);
   /** The recording the step's recorded parts belong to. */
   const [session, setSession] = useState<string | null>(null);
-  /** The entry of the last part the live text heard. */
-  const liveEntry = useRef<string | null>(null);
 
   const [live] = useState(
     () =>
@@ -419,7 +419,7 @@ export function RunRecorder({
           { sessionId: part.sessionId, index: part.index, durationMs: part.durationMs },
           label
         );
-        liveEntry.current = key ?? null;
+        live.addPart(key);
         // The part can be heard here at once, before its upload is done.
         setLastPart((previous) => {
           if (previous) URL.revokeObjectURL(previous.url);
@@ -440,7 +440,7 @@ export function RunRecorder({
         return live.start(graph, signal);
       },
       onPause: (paused) => live.pause(paused),
-      onRotate: () => live.lose()
+      onRotate: () => live.markPart()
     });
   });
 
@@ -533,10 +533,8 @@ export function RunRecorder({
       busy: () => recorder.getSnapshot().phase !== "idle",
       finishing: () => live.getSnapshot().finishing,
       settled: () => live.settled(),
-      liveTranscriptFor: (keys) => {
-        const id = live.transcriptId;
-        return id && keys.length === 1 && keys[0] === liveEntry.current ? id : undefined;
-      }
+      liveTranscriptFor: (keys) => live.transcriptFor(keys),
+      refuseLiveTranscript: (id) => live.refuse(id)
     }),
     [recorder, live]
   );
@@ -700,7 +698,6 @@ export function RunRecorder({
     restart.cancel();
     live.discard();
     recorder.dismiss();
-    liveEntry.current = null;
     flushSync(() => {
       onDiscard?.(parts.map((entry) => entry.key));
       setSession(null);

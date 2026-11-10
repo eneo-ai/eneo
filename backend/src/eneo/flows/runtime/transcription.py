@@ -48,10 +48,12 @@ from eneo.flows.runtime.audio_spool import (
     spool_audio,
     spool_recording,
 )
+from eneo.flows.runtime.live_transcription.upstream import SAMPLE_RATE
 from eneo.flows.runtime.recording_parts import (
     RecordingAudio,
     RecordingSplitError,
     RecordingTranscriber,
+    live_recording,
     part_bounds,
     split_recording,
 )
@@ -829,6 +831,146 @@ async def _transcribe_recording(
             await spool.aclose()
 
 
+@dataclass(frozen=True, slots=True)
+class _LiveText:
+    """A live session's text, ready to stand in for transcribing its recording."""
+
+    model: "TranscriptionModel"
+    passages: tuple[TranscriptSegment, ...]
+    part_starts: tuple[float, ...]
+    heard_seconds: float
+
+
+def _live_text(
+    live_transcript: FlowLiveTranscripts | None,
+    live_model: "TranscriptionModel | None",
+    files: Sequence["FileInfo"],
+) -> _LiveText | LiveFallbackReason:
+    """The live text a run may use for these files, or why it may not."""
+    if (
+        live_transcript is None
+        or live_model is None
+        or list(live_transcript.bound_file_ids) != [file.id for file in files]
+    ):
+        return "unavailable"
+    if live_transcript.segments is None:
+        return "no_timing"
+    return _LiveText(
+        model=live_model,
+        passages=tuple(
+            TranscriptSegment(
+                text=str(passage["text"]),
+                start=float(passage["start"]),
+                end=float(passage["end"]),
+            )
+            for passage in live_transcript.segments
+        ),
+        part_starts=(
+            0.0,
+            *(samples / SAMPLE_RATE for samples in live_transcript.part_start_samples),
+        ),
+        heard_seconds=live_transcript.received_audio_seconds,
+    )
+
+
+async def _transcribe_streamed(
+    files: list["FileInfo"],
+    *,
+    live: _LiveText,
+    transcriber: FlowStepTranscriber,
+    transcription_model: "TranscriptionModel",
+    labels_joined: bool,
+    diarize: bool,
+    language: str | None,
+    open_audio_download: OpenAudioDownload,
+    observer: "ProviderCallObserver | None",
+    max_speakers: int | None,
+    limits: AudioDecodeLimits,
+) -> tuple[list[TranscribedAudio], LiveFallbackReason | None]:
+    """A streamed recording written by its live text, or by the transcription
+    model when the files are not the audio the session heard.
+
+    Each file is fetched and decoded once. Parts are decoded onto the joined
+    audio, where the live text is enriched in one call, so a passage spoken
+    across a seam is placed in the audio that holds it; the result is then
+    split back into the parts."""
+    if len(files) == 1:
+        audio_file = await _spool_file(files[0], open_audio_download, limits)
+        try:
+            durations: tuple[float, ...] = (await audio_file.measure_duration(),)
+        except BaseException:
+            await audio_file.aclose()
+            raise
+        parts, joined, spools = (audio_file,), audio_file, (audio_file,)
+    else:
+        parts, joined, durations = await spool_recording(
+            files,
+            lambda file: _spool_file(file, open_audio_download, limits),
+            limits=limits,
+        )
+        spools = (*parts, joined)
+    try:
+        bounds = part_bounds(durations)
+        written = live_recording(
+            live.passages,
+            part_starts=live.part_starts,
+            heard_seconds=live.heard_seconds,
+            bounds=bounds,
+        )
+        if written is not None:
+            enriched = await transcriber.enrich(
+                joined,
+                live.model,
+                transcribed=written,
+                file_id=files[0].id,
+                diarize=diarize,
+                language=language,
+                observer=observer,
+                max_speakers=max_speakers if diarize else None,
+            )
+            if len(files) == 1:
+                return [enriched], None
+            try:
+                return split_recording(enriched, bounds), None
+            except RecordingSplitError as exc:
+                raise SpeakerServiceFailed() from exc
+        if labels_joined:
+            assert isinstance(transcriber, RecordingTranscriber)
+            recording = RecordingAudio(
+                parts=parts,
+                file_ids=tuple(file.id for file in files),
+                joined=joined,
+                bounds=bounds,
+            )
+            labelled = await transcriber.transcribe_recording(
+                recording,
+                transcription_model,
+                language=language,
+                observer=observer,
+                max_speakers=max_speakers,
+            )
+            try:
+                return split_recording(labelled, bounds), "duration_mismatch"
+            except RecordingSplitError as exc:
+                raise SpeakerServiceFailed() from exc
+        return [
+            await transcriber.transcribe(
+                part,
+                transcription_model,
+                file_id=file.id,
+                language=language,
+                diarize=diarize,
+                persist_cache_to_file=False,
+                observer=observer,
+                max_speakers=max_speakers if diarize else None,
+            )
+            for part, file in zip(parts, files, strict=True)
+        ], "duration_mismatch"
+    finally:
+        for spool in spools:
+            await spool.aclose()
+
+
 async def transcribe_audio_input(
     *,
     files: list["FileInfo"],
@@ -845,11 +987,15 @@ async def transcribe_audio_input(
     max_speakers: int | None = None,
     source_preparation: TranscriptSourcePreparation | None = None,
     live_transcript: FlowLiveTranscripts | None = None,
+    live_model: "TranscriptionModel | None" = None,
     live_transcript_requested: bool = False,
     single_recording: bool = False,
     decode_limits: AudioDecodeLimits | None = None,
 ) -> FlowTranscriptionResult:
     """Transcribe files in request order, closing each spool on every exit.
+
+    A usable ``live_transcript`` is the text instead, and ``live_model``, the
+    model that streamed it, is its producer.
 
     Files marked as one recording have their speakers labelled once across
     all parts when the engine labels speakers, and take the longest recording
@@ -902,15 +1048,41 @@ async def transcribe_audio_input(
     empty_intervals: list[EmptyTranscriptionInterval] = []
     transcript_origin: Literal["live", "batch"] = "batch"
     live_fallback_reason: LiveFallbackReason | None = None
+    producer = transcription_model
     recording_parts: list[TranscribedAudio] | None = None
     recording_labels: dict[str, str] | None = None
     recorded: list[float] = []
-    if (
+    labels_joined = (
         single_recording
         and diarize
         and len(files) > 1
         and isinstance(transcriber, RecordingTranscriber)
-    ):
+    )
+    live = None
+    if live_transcript_requested:
+        live = _live_text(live_transcript, live_model, files)
+        if isinstance(live, str):
+            # Known before any decode: the transcription model writes it.
+            live_fallback_reason, live = live, None
+    if live is not None:
+        with _transcription_failures(step_order, "the recording"):
+            recording_parts, live_fallback_reason = await _transcribe_streamed(
+                files,
+                live=live,
+                transcriber=transcriber,
+                transcription_model=transcription_model,
+                labels_joined=labels_joined,
+                diarize=diarize,
+                language=provider_language,
+                open_audio_download=open_audio_download,
+                observer=transcription_call_observer,
+                max_speakers=max_speakers,
+                limits=limits,
+            )
+        if live_fallback_reason is None:
+            transcript_origin, producer = "live", live.model
+    elif labels_joined:
+        assert isinstance(transcriber, RecordingTranscriber)
         with _transcription_failures(step_order, "the recording"):
             recording_parts = await _transcribe_recording(
                 files,
@@ -922,6 +1094,7 @@ async def transcribe_audio_input(
                 max_speakers=max_speakers,
                 limits=limits,
             )
+    if recording_parts is not None and labels_joined:
         # One recording, one speaker namespace across its parts.
         recording_labels = build_label_renumbering(
             "",
@@ -957,63 +1130,16 @@ async def transcribe_audio_input(
                                 measured=sum(recorded),
                                 ceiling=limits.longest_audio_seconds,
                             )
-                    transcribed = None
-                    if live_transcript_requested:
-                        if (
-                            live_transcript is None
-                            or len(files) != 1
-                            or live_transcript.bound_file_id != file.id
-                        ):
-                            live_fallback_reason = "unavailable"
-                        elif live_transcript.segments is None:
-                            # Known before any decode: batch it is.
-                            live_fallback_reason = "no_timing"
-                        else:
-                            duration = await audio_file.measure_duration()
-                            if abs(
-                                duration - live_transcript.received_audio_seconds
-                            ) > max(1.0, duration * 0.005):
-                                live_fallback_reason = "duration_mismatch"
-                            else:
-                                # Streamed deltas carry the space that joined them; the
-                                # speaker service's aligner refuses leading whitespace.
-                                live_segments = tuple(
-                                    TranscriptSegment(
-                                        text=str(segment["text"]).strip(),
-                                        start=float(segment["start"]),
-                                        end=float(segment["end"]),
-                                    )
-                                    for segment in live_transcript.segments
-                                    if str(segment["text"]).strip()
-                                )
-                                transcribed = TranscribedAudio(
-                                    text=live_transcript.text,
-                                    duration_seconds=duration,
-                                    segments=live_segments,
-                                    transcript_segments=live_segments,
-                                )
-                                transcribed = await transcriber.enrich(
-                                    audio_file,
-                                    transcription_model,
-                                    transcribed=transcribed,
-                                    file_id=file.id,
-                                    diarize=diarize,
-                                    language=provider_language,
-                                    observer=transcription_call_observer,
-                                    max_speakers=max_speakers if diarize else None,
-                                )
-                                transcript_origin = "live"
-                    if transcribed is None:
-                        transcribed = await transcriber.transcribe(
-                            audio_file,
-                            transcription_model,
-                            file_id=file.id,
-                            language=provider_language,
-                            diarize=diarize,
-                            persist_cache_to_file=False,
-                            observer=transcription_call_observer,
-                            max_speakers=max_speakers if diarize else None,
-                        )
+                    transcribed = await transcriber.transcribe(
+                        audio_file,
+                        transcription_model,
+                        file_id=file.id,
+                        language=provider_language,
+                        diarize=diarize,
+                        persist_cache_to_file=False,
+                        observer=transcription_call_observer,
+                        max_speakers=max_speakers if diarize else None,
+                    )
                 finally:
                     await audio_file.aclose()
 
@@ -1131,8 +1257,8 @@ async def transcribe_audio_input(
     return FlowTranscriptionResult(
         text=combined,
         file_ids=[file.id for file in files],
-        model_id=getattr(transcription_model, "id", None),
-        model_name=str(getattr(transcription_model, "name", "unknown")),
+        model_id=getattr(producer, "id", None),
+        model_name=str(getattr(producer, "name", "unknown")),
         language=language,
         transcript_bytes=transcript_bytes,
         estimated_tokens=estimated_tokens,
@@ -1303,6 +1429,13 @@ async def resolve_and_transcribe_audio_for_step(
         max_speakers=max_speakers,
         source_preparation=source_preparation,
         live_transcript=live_transcript,
+        # The run's scope matched the transcript to this model.
+        live_model=(
+            usable_transcription_model(space, transcription_config.streaming_model_id)
+            if live_transcript is not None
+            and transcription_config.streaming_model_id is not None
+            else None
+        ),
         live_transcript_requested=live_transcript_requested,
         single_recording=single_recording,
         decode_limits=decode_limits,

@@ -295,9 +295,9 @@ export type RunChoices = {
   /** The person's speaker bound, or null to leave it to the form or the flow. */
   maxSpeakers: number | null;
   /**
-   * The stored live transcript of a step whose one file is a recording the
-   * live text heard whole, by step id: the run uses it instead of
-   * transcribing the file again.
+   * The stored live transcript of a step whose files are the parts of a
+   * recording the live text heard whole, by step id: the run uses it instead
+   * of transcribing the files again.
    */
   liveTranscripts?: Readonly<Record<string, string>>;
 };
@@ -315,7 +315,9 @@ export function runRequest(contract: RunContract, choices: RunChoices): RunCreat
         (contract.transcription?.single_recording === true &&
           input.input_format === "audio" &&
           recordedAsOne(uploads));
-      const liveTranscript = fileIds.length === 1 ? choices.liveTranscripts?.[input.step_id] : null;
+      // Several parts go with the transcript only as one recording.
+      const liveTranscript =
+        fileIds.length === 1 || single ? choices.liveTranscripts?.[input.step_id] : null;
       return [
         [
           input.step_id,
@@ -339,6 +341,39 @@ export function runRequest(contract: RunContract, choices: RunChoices): RunCreat
     ...(choices.maxSpeakers !== null && offersMaxSpeakers(contract, choices.speakerLabels)
       ? { max_speakers: choices.maxSpeakers }
       : {})
+  };
+}
+
+/** The core's refusals of a live transcript for a run (gone, bound to other files, not every part). */
+const LIVE_TRANSCRIPT_REFUSALS: ReadonlySet<string> = new Set([
+  "flow_run_live_transcript_not_found",
+  "flow_run_live_transcript_already_bound",
+  "flow_run_live_transcript_files_mismatch"
+]);
+
+/**
+ * The same request without its live transcripts, when the core refused one:
+ * the run then transcribes the files. Null for any other refusal, or for a
+ * request that names none.
+ */
+export function withoutRefusedLiveTranscripts(
+  request: RunCreateRequest,
+  error: unknown
+): RunCreateRequest | null {
+  const inputs = request.step_inputs;
+  const refused = error instanceof EneoApiError && LIVE_TRANSCRIPT_REFUSALS.has(error.reason ?? "");
+  if (!refused || !inputs || !Object.values(inputs).some((input) => input.live_transcript_id)) {
+    return null;
+  }
+  return {
+    ...request,
+    step_inputs: Object.fromEntries(
+      Object.entries(inputs).map(([stepId, input]) => {
+        const plain = { ...input };
+        delete plain.live_transcript_id;
+        return [stepId, plain];
+      })
+    )
   };
 }
 

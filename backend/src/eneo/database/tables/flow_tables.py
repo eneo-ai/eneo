@@ -655,9 +655,18 @@ class FlowLiveTranscripts(BasePublic):
         JSONB(none_as_null=True)
     )
     received_audio_seconds: Mapped[float] = mapped_column(sa.Double)
+    # The sample at which each part after the first began, for a recording the
+    # session heard in parts; empty for one part.
+    part_start_samples: Mapped[list[int]] = mapped_column(
+        ARRAY(sa.Integer), server_default=sa.text("'{}'::integer[]")
+    )
     expires_at: Mapped[datetime | None] = mapped_column(sa.TIMESTAMP(timezone=True))
+    # The recording's first file, and every file of it in recording order.
     bound_file_id: Mapped[UUID | None] = mapped_column(
         info=file_usage(FileUsageKind.FLOW_RUNTIME), index=True
+    )
+    bound_file_ids: Mapped[list[UUID]] = mapped_column(
+        ARRAY(sa.UUID(as_uuid=True)), server_default=sa.text("'{}'::uuid[]")
     )
 
     __table_args__ = (
@@ -676,6 +685,17 @@ class FlowLiveTranscripts(BasePublic):
         CheckConstraint(
             "received_audio_seconds >= 0 AND flow_version >= 1",
             name="ck_flow_live_transcripts_bounds",
+        ),
+        CheckConstraint(
+            "(bound_file_id IS NULL) = (cardinality(bound_file_ids) = 0) "
+            "AND (bound_file_id IS NULL OR bound_file_ids[1] = bound_file_id)",
+            name="ck_flow_live_transcripts_bound_files",
+        ),
+        # Retention finds a recording's text by any one of its parts.
+        Index(
+            "ix_flow_live_transcripts_bound_file_ids",
+            "bound_file_ids",
+            postgresql_using="gin",
         ),
         Index(
             "ix_flow_live_transcripts_unbound_expiry",

@@ -672,24 +672,41 @@ class FlowRunHistoryPurgeRepository:
         return set(result.all())
 
     async def _delete_released_live_transcripts(self, file_ids: set[UUID]) -> None:
+        """Delete the live text of a recording once a run no longer uses any
+        one of its parts: the text holds every part's words, so it goes with
+        the first part whose audio may go, whichever part that is."""
         if not file_ids:
             return
-        retained_run_reference = (
+        part = (
+            sa.func.unnest(FlowLiveTranscripts.bound_file_ids)
+            .table_valued("file_id")
+            .render_derived(name="bound_part")
+        )
+        released_part = (
             sa.select(sa.literal(1))
-            .select_from(FlowRunStepInputFiles)
-            .where(FlowRunStepInputFiles.file_id == FlowLiveTranscripts.bound_file_id)
+            .select_from(part)
+            .where(
+                sa.not_(
+                    sa.select(sa.literal(1))
+                    .select_from(FlowRunStepInputFiles)
+                    .where(FlowRunStepInputFiles.file_id == part.c.file_id)
+                    .exists()
+                )
+            )
             .exists()
         )
         await self.session.execute(
             sa.delete(FlowLiveTranscripts)
             .where(
-                _uuid_is_in_batch(
-                    FlowLiveTranscripts.bound_file_id,
-                    file_ids,
-                    parameter_name="released_live_transcript_file_ids",
+                FlowLiveTranscripts.bound_file_ids.overlap(
+                    sa.bindparam(
+                        "released_live_transcript_file_ids",
+                        value=list(file_ids),
+                        type_=postgresql.ARRAY(postgresql.UUID(as_uuid=True)),
+                    )
                 )
             )
-            .where(sa.not_(retained_run_reference))
+            .where(released_part)
         )
 
     async def _delete_webhook_deliveries(self, run_ids: set[UUID]) -> int:

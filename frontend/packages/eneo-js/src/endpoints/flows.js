@@ -557,11 +557,11 @@ export function initFlows(client) {
 
     liveTranscription: {
       /**
-       * Admit a live transcript preview for an audio step of the published flow and
-       * get a single-use ticket for the WebSocket at `websocket_path`. The preview
-       * is not the run's transcript: upload the recording and create the run as usual.
-       * `recordingId` names the recording, so Eneo keeps the text of a session that
-       * heard all of it as `transcript_id`; without it the session is a preview only.
+       * Start a live transcription session for an audio step of the published flow and
+       * get a single-use ticket for the WebSocket at `websocket_path`. Upload the
+       * recording and create the run as usual. `recordingId` names the recording, so
+       * Eneo keeps the text of a session that heard all of it as `transcript_id`, which
+       * a run uses instead of transcribing the recording; without it Eneo keeps no text.
        * @param {{id: string, stepId: string, recordingId?: string}} params
        * @throws {EneoError} 409 `flow_live_transcription_unavailable` with `context.reason`
        */

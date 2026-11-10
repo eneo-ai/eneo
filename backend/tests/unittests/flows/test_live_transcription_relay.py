@@ -458,7 +458,8 @@ async def test_only_reconciled_sessions_are_stored(
     writes = []
     transcript_id = uuid4()
 
-    async def persist(grant, *, text, segments, received_audio_seconds):
+    async def persist(grant, *, text, segments, received_audio_seconds, **parts):
+        assert parts == {"part_start_samples": []}
         writes.append((grant, text, segments, received_audio_seconds))
         return transcript_id
 
@@ -516,10 +517,10 @@ def recording_grant() -> LiveTranscriptionGrant:
     )
 
 
-def counted_stop(samples: int) -> dict[str, object]:
+def counted_stop(samples: int, **parts: object) -> dict[str, object]:
     return {
         "type": "websocket.receive",
-        "text": json.dumps({"type": "stop", "produced_samples": samples}),
+        "text": json.dumps({"type": "stop", "produced_samples": samples, **parts}),
     }
 
 
@@ -559,6 +560,68 @@ async def test_stored_passages_require_complete_matching_timed_deltas(
         else [
             {"start": 0.0, "end": 20.0, "text": "Hej världen."},
             {"start": 20.0, "end": 45.0, "text": " Nästa mening"},
+        ]
+    )
+
+
+@pytest.mark.parametrize(
+    ("markers", "kept"),
+    [
+        ([3200], [3200]),
+        ([3200, 4800], [3200, 4800]),
+        # A part starts after the first sample, after the part before it, and
+        # inside the audio the stop counted.
+        ([0], None),
+        ([3200, 3200], None),
+        (["3200"], None),
+        ([6400], None),
+        ("3200", None),
+        (list(range(1, 101)), None),
+    ],
+)
+async def test_a_recording_in_parts_keeps_where_each_part_began(
+    monkeypatch, markers, kept
+):
+    writes = []
+
+    async def persist(grant, **values):
+        writes.append(values)
+        return uuid4()
+
+    monkeypatch.setattr(relay, "persist_live_transcript", persist)
+    browser = FakeBrowser(
+        audio(TENTH_OF_A_SECOND),
+        audio(TENTH_OF_A_SECOND),
+        audio(TENTH_OF_A_SECOND),
+        audio(TENTH_OF_A_SECOND),
+        counted_stop(6400, part_start_samples=markers),
+    )
+    async with fake_realtime_server(
+        deltas=["Ett", " två", " tre", " fyra"],
+        spans=[(0.0, 0.1), (0.1, 0.2), (0.2, 0.3), (0.3, 0.4)],
+    ) as server:
+        outcome, _ = await run_relay(browser, server.url, grant=recording_grant())
+
+    # A part start that cannot be one keeps no transcript but ends nothing.
+    assert outcome == "completed"
+    assert browser.events[-1]["text"] == "Ett två tre fyra"
+    if kept is None:
+        assert writes == []
+        assert "transcript_id" not in browser.events[-1]
+        return
+    [stored] = writes
+    assert stored["part_start_samples"] == kept
+    # No passage spans two parts.
+    assert stored["segments"] == (
+        [
+            {"start": 0.0, "end": 0.2, "text": "Ett två"},
+            {"start": 0.2, "end": 0.4, "text": " tre fyra"},
+        ]
+        if kept == [3200]
+        else [
+            {"start": 0.0, "end": 0.2, "text": "Ett två"},
+            {"start": 0.2, "end": 0.3, "text": " tre"},
+            {"start": 0.3, "end": 0.4, "text": " fyra"},
         ]
     )
 

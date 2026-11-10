@@ -1,4 +1,4 @@
-import { MetadataListItem } from "@astryxdesign/core/MetadataList";
+import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { NumberInput } from "@astryxdesign/core/NumberInput";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Heading, Text } from "@astryxdesign/core/Text";
@@ -61,34 +61,33 @@ function liveModelNote(state: LiveModelState, t: Translate): string | null {
         ? t("flow_editor_tools_live_model_same_note")
         : t("flow_editor_tools_live_model_off_note");
     case "picked":
-      return t("flow_editor_tools_live_model_separate_note", {
-        name: modelDisplayName(state.model)
-      });
+      return t("flow_editor_tools_live_model_separate_note");
     case "lost":
       return null;
   }
 }
 
-/** The live model setting in a word: the transcription model, none, or the chosen model's name. */
-function liveModelValue(state: LiveModelState, t: Translate): string {
-  if (state.kind !== "transcription_model") {
-    return state.model
-      ? modelDisplayName(state.model)
-      : t("flow_editor_tools_transcription_model_gone");
+/** The model that writes a streamed recording, by name, or that none does. */
+function liveModelValue(
+  state: LiveModelState,
+  model: TranscriptionModelLink | undefined,
+  t: Translate
+): string {
+  if (state.kind === "picked") return modelDisplayName(state.model);
+  if (state.kind === "transcription_model" && state.streams && model) {
+    return modelDisplayName(model);
   }
-  return state.streams
-    ? t("flow_editor_tools_live_model_same")
-    : t("flow_editor_tools_live_model_off");
+  return t("flow_editor_tools_live_model_off");
 }
 
 /**
  * A model option's second line: its provider, which tells apart models of the
- * same name, and, among transcription models, whether it can show live text.
+ * same name, and, among transcription models, that it is made for streaming.
  */
-function modelOption(model: TranscriptionModelLink, t: Translate, showsLive: boolean) {
+function modelOption(model: TranscriptionModelLink, t: Translate, showsRole: boolean) {
   const facts = [
     model.provider_name?.trim(),
-    showsLive && model.supports_realtime ? t("flow_editor_tools_model_shows_live_text") : null
+    showsRole && model.supports_realtime ? t("flow_editor_tools_model_shows_live_text") : null
   ].filter(Boolean);
   return {
     value: model.id,
@@ -97,10 +96,85 @@ function modelOption(model: TranscriptionModelLink, t: Translate, showsLive: boo
   };
 }
 
+/**
+ * A streaming model chosen to write files, while the space has a model made
+ * for files: the one to suggest instead.
+ */
+function fileModelInstead(
+  model: TranscriptionModelLink | undefined,
+  models: readonly TranscriptionModelLink[]
+): TranscriptionModelLink | undefined {
+  if (!model?.supports_realtime) return undefined;
+  return models.find((candidate) => !candidate.supports_realtime && candidate.can_access !== false);
+}
+
 function serviceName(service: SpeakerServiceLink, t: Translate): string {
   return service.is_default
     ? t("flow_editor_tools_speaker_service_default", { name: service.name })
     : service.name;
+}
+
+/** Who writes which audio: the routing the settings add up to. */
+function TranscriptionRouting({
+  settings,
+  resources,
+  required,
+  modelMissing,
+  inForm
+}: {
+  settings: TranscriptionSettings;
+  resources: TranscriptionResources;
+  required: boolean;
+  modelMissing: boolean;
+  /** The form shows each problem at its field, so the routing only names the outcome. */
+  inForm: boolean;
+}) {
+  const t = useTranslations();
+  const model = resources.models.find((candidate) => candidate.id === settings.modelId);
+  const state = speakerServiceState(settings, resources.services, required);
+  const live = liveModelState(settings, resources.models);
+  const choice = settings.speakerService;
+  return (
+    <>
+      <MetadataListItem label={t("flow_editor_tools_route_live")}>
+        {live.kind === "lost" && !inForm ? (
+          <span className="text-ax-warning">{t("flow_editor_tools_live_model_lost")}</span>
+        ) : (
+          liveModelValue(live, model, t)
+        )}
+      </MetadataListItem>
+      <MetadataListItem label={t("flow_editor_tools_route_files")}>
+        {model ? (
+          modelDisplayName(model)
+        ) : (
+          <span className={modelMissing ? "text-ax-warning" : "text-ax-text-secondary"}>
+            {settings.modelId
+              ? t("flow_editor_tools_transcription_model_unavailable")
+              : modelMissing
+                ? t("flow_editor_tools_transcription_model_missing")
+                : t("flow_editor_tools_transcription_model_none")}
+          </span>
+        )}
+      </MetadataListItem>
+      <MetadataListItem label={t("flow_editor_tools_speaker_service")}>
+        {state.picked ? (
+          state.picked.name
+        ) : state.lost ? (
+          <span className="text-ax-warning">
+            {inForm
+              ? (state.lost.name ?? t("flow_editor_tools_speaker_service_gone"))
+              : lostSentence(state, required, usableSpeakerServices(resources.services).length, t)}
+          </span>
+        ) : choice.kind === "none" ? (
+          t("flow_editor_tools_speaker_service_none")
+        ) : (
+          <span className="text-ax-text-secondary">
+            {t("flow_editor_tools_speaker_service_unset")}
+          </span>
+        )}
+      </MetadataListItem>
+    </>
+  );
 }
 
 /** The settings as facts, for the settings' read view. */
@@ -116,49 +190,18 @@ export function TranscriptionSummary({
   modelMissing: boolean;
 }) {
   const t = useTranslations();
-  const model = resources.models.find((candidate) => candidate.id === settings.modelId);
   const state = speakerServiceState(settings, resources.services, required);
-  const live = liveModelState(settings, resources.models);
-  const choice = settings.speakerService;
   return (
     <>
-      <MetadataListItem label={t("flow_editor_tools_transcription_model")}>
-        {model ? (
-          modelDisplayName(model)
-        ) : (
-          <span className={modelMissing ? "text-ax-warning" : "text-ax-text-secondary"}>
-            {settings.modelId
-              ? t("flow_editor_tools_transcription_model_unavailable")
-              : modelMissing
-                ? t("flow_editor_tools_transcription_model_missing")
-                : t("flow_editor_tools_transcription_model_none")}
-          </span>
-        )}
-      </MetadataListItem>
-      <MetadataListItem label={t("flow_editor_tools_live_model")}>
-        {live.kind === "lost" ? (
-          <span className="text-ax-warning">{t("flow_editor_tools_live_model_lost")}</span>
-        ) : (
-          liveModelValue(live, t)
-        )}
-      </MetadataListItem>
+      <TranscriptionRouting
+        settings={settings}
+        resources={resources}
+        required={required}
+        modelMissing={modelMissing}
+        inForm={false}
+      />
       <MetadataListItem label={t("flow_editor_tools_transcription_language")}>
         {t(LANGUAGE_KEYS[settings.language])}
-      </MetadataListItem>
-      <MetadataListItem label={t("flow_editor_tools_speaker_service")}>
-        {state.picked ? (
-          state.picked.name
-        ) : state.lost ? (
-          <span className="text-ax-warning">
-            {lostSentence(state, required, usableSpeakerServices(resources.services).length, t)}
-          </span>
-        ) : choice.kind === "none" ? (
-          t("flow_editor_tools_speaker_service_none")
-        ) : (
-          <span className="text-ax-text-secondary">
-            {t("flow_editor_tools_speaker_service_unset")}
-          </span>
-        )}
       </MetadataListItem>
       <MetadataListItem label={t("flow_editor_tools_speaker_labels")}>
         {state.labelled
@@ -200,7 +243,8 @@ export function TranscriptionFields({
   const usable = usableSpeakerServices(resources.services);
   const state = speakerServiceState(settings, resources.services, required);
   const choice = settings.speakerService;
-  const modelKnown = resources.models.some((model) => model.id === settings.modelId);
+  const model = resources.models.find((candidate) => candidate.id === settings.modelId);
+  const instead = fileModelInstead(model, resources.models);
   const lost = lostSentence(state, required, usable.length, t);
   const on = takesAudio || settings.enabled;
   const live = liveModelState(settings, resources.models);
@@ -208,6 +252,8 @@ export function TranscriptionFields({
   const liveOptions = liveModels(resources.models).filter((model) => model.id !== settings.modelId);
   const modelStreams = liveModels(resources.models).some((model) => model.id === settings.modelId);
   const liveValue = live.kind === "transcription_model" ? UNSET : (settings.liveModelId ?? UNSET);
+  // With no other streaming model, the transcription model's own role is a sentence, not a choice.
+  const hasLiveSelector = liveOptions.length > 0 || live.kind !== "transcription_model";
 
   const serviceValue = state.picked
     ? state.picked.id
@@ -266,6 +312,15 @@ export function TranscriptionFields({
       )}
       {on ? (
         <>
+          <MetadataList orientation="horizontal">
+            <TranscriptionRouting
+              settings={settings}
+              resources={resources}
+              required={required}
+              modelMissing={modelMissing}
+              inForm
+            />
+          </MetadataList>
           <div className="grid gap-4 sm:grid-cols-2">
             <div data-settings-field="transcription_model">
               <Selector
@@ -273,12 +328,12 @@ export function TranscriptionFields({
                 description={
                   resources.models.length === 0
                     ? t("flow_editor_tools_transcription_no_models")
-                    : undefined
+                    : t("flow_editor_tools_transcription_model_description")
                 }
                 options={[
                   { value: NONE, label: t("flow_editor_tools_transcription_model_none") },
                   ...resources.models.map((model) => modelOption(model, t, true)),
-                  ...(settings.modelId && !modelKnown
+                  ...(settings.modelId && !model
                     ? [
                         {
                           value: settings.modelId,
@@ -288,11 +343,21 @@ export function TranscriptionFields({
                     : [])
                 ]}
                 value={settings.modelId ?? NONE}
-                onChange={(value) =>
-                  onChange({ ...settings, modelId: value === NONE ? null : value })
-                }
+                onChange={(value) => {
+                  const modelId = value === NONE ? null : value;
+                  // Streaming stays with the model that did it when files move to another one.
+                  const liveModelId =
+                    live.kind === "transcription_model" && live.streams
+                      ? settings.modelId
+                      : settings.liveModelId;
+                  onChange({
+                    ...settings,
+                    modelId,
+                    liveModelId: liveModelId === modelId ? null : liveModelId
+                  });
+                }}
                 status={
-                  settings.modelId && !modelKnown
+                  settings.modelId && !model
                     ? {
                         type: "warning",
                         message: t("flow_editor_tools_transcription_model_unavailable")
@@ -302,11 +367,62 @@ export function TranscriptionFields({
                           type: "warning",
                           message: t("flow_editor_tools_transcription_model_missing")
                         }
-                      : undefined
+                      : model && instead
+                        ? {
+                            type: "warning",
+                            // Only a model that streams now keeps streaming after the switch.
+                            message: t(
+                              live.kind === "transcription_model" && live.streams
+                                ? "flow_editor_tools_transcription_model_streaming"
+                                : "flow_editor_tools_transcription_model_streaming_files",
+                              {
+                                name: modelDisplayName(model),
+                                suggestion: modelDisplayName(instead)
+                              }
+                            )
+                          }
+                        : undefined
                 }
                 width="100%"
               />
             </div>
+            {hasLiveSelector ? (
+              <div data-settings-field="live_model">
+                <Selector
+                  label={t("flow_editor_tools_live_model")}
+                  description={liveModelNote(live, t) ?? undefined}
+                  options={[
+                    {
+                      value: UNSET,
+                      label: modelStreams
+                        ? t("flow_editor_tools_live_model_same")
+                        : t("flow_editor_tools_live_model_off")
+                    },
+                    ...liveOptions.map((model) => modelOption(model, t, false)),
+                    ...(live.kind === "lost"
+                      ? [
+                          {
+                            value: liveValue,
+                            label: live.model
+                              ? modelDisplayName(live.model)
+                              : t("flow_editor_tools_transcription_model_gone")
+                          }
+                        ]
+                      : [])
+                  ]}
+                  value={liveValue}
+                  onChange={(value) =>
+                    onChange({ ...settings, liveModelId: value === UNSET ? null : value })
+                  }
+                  status={
+                    live.kind === "lost"
+                      ? { type: "warning", message: t("flow_editor_tools_live_model_lost") }
+                      : undefined
+                  }
+                  width="100%"
+                />
+              </div>
+            ) : null}
             <Selector
               label={t("flow_editor_tools_transcription_language")}
               options={TRANSCRIPTION_LANGUAGES.map((language) => ({
@@ -320,41 +436,12 @@ export function TranscriptionFields({
               width="100%"
             />
           </div>
-          {liveOptions.length === 0 && live.kind === "transcription_model" ? (
+          {hasLiveSelector ? null : (
             <Text type="supporting" size="sm" as="p" display="block" className="m-0">
               {live.streams
                 ? t("flow_editor_tools_live_model_same_note")
                 : t("flow_editor_tools_live_model_none_in_space")}
             </Text>
-          ) : (
-            <div data-settings-field="live_model">
-              <Selector
-                label={t("flow_editor_tools_live_model")}
-                description={liveModelNote(live, t) ?? undefined}
-                options={[
-                  {
-                    value: UNSET,
-                    label: modelStreams
-                      ? t("flow_editor_tools_live_model_same")
-                      : t("flow_editor_tools_live_model_off")
-                  },
-                  ...liveOptions.map((model) => modelOption(model, t, false)),
-                  ...(live.kind === "lost"
-                    ? [{ value: liveValue, label: liveModelValue(live, t) }]
-                    : [])
-                ]}
-                value={liveValue}
-                onChange={(value) =>
-                  onChange({ ...settings, liveModelId: value === UNSET ? null : value })
-                }
-                status={
-                  live.kind === "lost"
-                    ? { type: "warning", message: t("flow_editor_tools_live_model_lost") }
-                    : undefined
-                }
-                width="100%"
-              />
-            </div>
           )}
           {usable.length === 0 && !required && !state.lost ? (
             <Text type="supporting" size="sm" as="p" display="block" className="m-0">

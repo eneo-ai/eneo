@@ -81,8 +81,9 @@ class FlowLiveTranscriptionSessionPublic(BaseModel):
     )
     model: FlowLiveTranscriptionModelPublic = Field(
         description=(
-            "The model the preview streams through: the flow's live transcription "
-            "model, or its transcription model when the flow chose none."
+            "The model the live text streams through, which writes the text of "
+            "streamed audio: the flow's live transcription model, or its "
+            "transcription model when the flow chose none."
         )
     )
 
@@ -94,7 +95,7 @@ class FlowLiveTranscriptionAvailabilityPublic(BaseModel):
     reason: LiveTranscriptionUnavailableReason | None = Field(
         default=None,
         description=(
-            "Why live preview is unavailable: `transcription_disabled`, "
+            "Why live text is unavailable: `transcription_disabled`, "
             "`model_unavailable`, `live_model_unavailable`, or "
             "`model_not_realtime`."
         ),
@@ -108,14 +109,14 @@ class FlowLiveTranscriptionUnavailableContext(BaseModel):
             "`model_unavailable`: the flow's transcription model is not available "
             "in its space. `live_model_unavailable`: the flow's live transcription "
             "model is not available in its space. `model_not_realtime`: the model "
-            "the preview would stream through, the live transcription model or "
+            "the live text would stream through, the live transcription model or "
             "else the transcription model, does not support realtime."
         )
     )
 
 
 class FlowLiveTranscriptionUnavailableError(BaseModel):
-    """409 body when live preview cannot start for the flow."""
+    """409 body when live text cannot start for the flow."""
 
     message: str
     eneo_error_code: ErrorCodes
