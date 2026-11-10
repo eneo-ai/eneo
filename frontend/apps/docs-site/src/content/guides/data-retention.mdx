@@ -5,12 +5,14 @@ flowchart TB
   accTitle: How retention works
   accDescr: A retention time on an assistant or app, else on its space, decides. With no time set, nothing is removed. With a time set, the nightly run at 03:30 worker time removes chats and app runs older than their time, and the copies Eneo keeps of them follow. Cleanup of leftovers runs whatever the rules. Backups, downloads, AI model providers and knowledge bases are outside Eneo's reach.
   subgraph eneo["Eneo"]
+    direction TB
     time["Retention time\nassistant or app, else its space"] -->|"no time set"| keep["Kept: nothing is removed"]
     time -->|"time set"| run["Nightly run, 03:30 worker time\nremoves chats and app runs older than their time"]
     run --> copies["Copies follow their source\nnames and feedback · copied conversations · temporary files"]
     cleanup["Cleanup of leftovers, whatever the rules\nunused uploads · conversations without a question · run records"]
   end
   outside["Outside Eneo's reach\nbackups · downloads · AI model providers · knowledge bases"]
+  eneo ~~~ outside
   style eneo stroke-dasharray: 6 4
 ```
 
@@ -233,7 +235,7 @@ stops.
 ### Retention catches up before traffic opens [#retention-catches-up]
 
 ```mermaid
-flowchart LR
+flowchart TB
   accTitle: Retention after a restore
   accDescr: With the API closed and workers stopped, run the readback command. Exit code 1: fix the named cause and run it again. Exit code 0: read the storage line; if the store was not listed in full, run it again. When storage is confirmed or pending, start the worker alone with the API closed and run the widget and audit purges until the log lines are clean, or leave them to the nightly jobs. Then open traffic.
   closed["API closed\nworkers stopped"] --> readback["Readback command"]

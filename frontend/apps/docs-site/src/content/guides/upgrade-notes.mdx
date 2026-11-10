@@ -32,7 +32,7 @@ Each item can stop the backend from starting, stop sign-in or lose data:
 The diagram shows one sign-in and, on dotted lines, where an existing setup can get stuck. *A new client ID needs a window only with per-client `sub`.
 
 ```mermaid
-flowchart LR
+flowchart TB
   accTitle: OIDC sign-in after the upgrade
   accDescr: The browser starts sign-in at the backend, which keeps the transaction in Redis; the provider gives discovery and keys; the backend callback checks the ID token and the binding and writes a session row. Sign-in stops when Redis is not 6.2 or newer or does not answer within 2 seconds, when discovery, keys or the token endpoint are not reachable within 5 seconds, when iss, nonce, an asymmetric key or kid fail, when binding_verifier does not match, or when a new issuer, client ID or subject claim arrives without a window.
   browser["Browser"] --> start["Backend start\ntransaction in Redis"]

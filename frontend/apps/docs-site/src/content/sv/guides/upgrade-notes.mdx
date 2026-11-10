@@ -1,6 +1,6 @@
 ---
 title: Uppgraderingsanteckningar
-translationSource: guides/upgrade-notes.mdx@3d14dbcfe1ef
+translationSource: guides/upgrade-notes.mdx@e23829ee6e13
 ---
 
 import { Callout } from "nextra/components";
@@ -37,7 +37,7 @@ Varje punkt kan hindra backend från att starta, stoppa inloggningen eller förl
 Diagrammet visar en inloggning och, på prickade linjer, var en befintlig installation kan fastna. *Ett nytt klient-id kräver ett fönster bara med `sub` per klient.
 
 ```mermaid
-flowchart LR
+flowchart TB
   accTitle: OIDC-inloggning efter uppgraderingen
   accDescr: Webbläsaren startar inloggningen i backend, som håller transaktionen i Redis; leverantören ger discovery och nycklar; backends callback kontrollerar ID-token och bindningen och skriver en sessionsrad. Inloggningen stannar när Redis inte är 6.2 eller nyare eller inte svarar inom 2 sekunder, när discovery, nycklar eller token-endpoint inte nås inom 5 sekunder, när iss, nonce, en asymmetrisk nyckel eller kid inte stämmer, när binding_verifier inte stämmer, eller när en ny issuer, klient-id eller subject-claim kommer utan fönster.
   browser["Webbläsare"] --> start["Backend, start\ntransaktion i Redis"]

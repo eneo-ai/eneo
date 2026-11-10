@@ -1,6 +1,6 @@
 ---
 title: Gallring
-translationSource: guides/data-retention.mdx@2a128f7e9b07
+translationSource: guides/data-retention.mdx@54a0aab4082f
 ---
 
 # Gallring
@@ -10,12 +10,14 @@ flowchart TB
   accTitle: Så fungerar gallring
   accDescr: En gallringstid på en assistent eller app, annars på dess yta, avgör. Utan tid tas inget bort. Med en tid tar nattkörningen klockan 03:30 i workerns tid bort chattar och appkörningar som är äldre än sin tid, och de kopior Eneo har av dem följer med. Städning av rester körs oavsett regler. Säkerhetskopior, nedladdningar, AI-leverantörer och kunskapsbaser ligger utanför Eneos räckvidd.
   subgraph eneo["Eneo"]
+    direction TB
     time["Gallringstid\nassistent eller app, annars dess yta"] -->|"ingen tid satt"| keep["Sparas: inget tas bort"]
     time -->|"tid satt"| run["Nattkörning, 03:30 i workerns tid\ntar bort chattar och appkörningar äldre än sin tid"]
     run --> copies["Kopior följer sin källa\nnamn och feedback · kopierade konversationer · temporära filer"]
     cleanup["Städning av rester, oavsett regler\noanvända uppladdningar · konversationer utan fråga · körningsregister"]
   end
   outside["Utanför Eneos räckvidd\nsäkerhetskopior · nedladdningar · AI-leverantörer · kunskapsbaser"]
+  eneo ~~~ outside
   style eneo stroke-dasharray: 6 4
 ```
 
@@ -246,7 +248,7 @@ efter att backupen togs. Så här gör Eneo, och här slutar det.
 ### Gallringen körs ikapp innan trafiken öppnas [#retention-catches-up]
 
 ```mermaid
-flowchart LR
+flowchart TB
   accTitle: Gallring efter en återställning
   accDescr: Med API:et stängt och workers stoppade kör du återläsningskommandot. Slutkod 1: åtgärda den angivna orsaken och kör igen. Slutkod 0: läs lagringsraden; listades lagret inte helt, kör igen. När lagringen är bekräftad eller väntande startar du bara workern med API:et stängt och kör rensningen av widgetar och granskningslogg tills loggraderna är rena, eller lämnar dem åt nattjobben. Öppna sedan trafiken.
   closed["API stängt\nworkers stoppade"] --> readback["Återläsningskommandot"]
