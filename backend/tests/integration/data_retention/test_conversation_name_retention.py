@@ -18,6 +18,9 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.data_retention.domain.retention import RetentionOverdue
+from eneo.data_retention.infrastructure.conversation_name_repo import (
+    ConversationNameRepository,
+)
 from eneo.data_retention.infrastructure.retention_job_run_repo import (
     RetentionJobRunRepository,
 )
@@ -570,7 +573,9 @@ async def test_a_held_name_or_feedback_text_past_its_time_is_reported_overdue(
 
     Mutants: the overdue snapshot reads only questions and App runs; it counts
     each text instead of each conversation; its oldest deadline reads a field's
-    time when that field has nothing to remove (a cleared name keeps its time).
+    time when that field has nothing to remove (a cleared name keeps its time);
+    a read capped below what is overdue reads only the cap, or calls itself
+    complete.
     """
     model_id = (await completion_model_factory(retention_session, "gpt-4")).id
     space = await _space(retention_session, tenant_id=test_tenant.id)
@@ -637,6 +642,12 @@ async def test_a_held_name_or_feedback_text_past_its_time_is_reported_overdue(
     assert snapshot.overdue == RetentionOverdue(
         count=2, complete=True, oldest_due_at=name_set_at + timedelta(days=30)
     )
+    # A cap below what is overdue counts up to it and says it is incomplete.
+    capped = await ConversationNameRepository(
+        retention_session, now=datetime.now(timezone.utc)
+    ).overdue(window=timedelta(days=1), limit=1)
+    assert (capped.count, capped.complete) == (1, False)
+    assert capped.oldest_due_at is not None
 
 
 async def test_names_and_feedback_are_cleared_under_a_standing_backlog(
