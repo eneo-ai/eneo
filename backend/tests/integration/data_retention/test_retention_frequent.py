@@ -19,6 +19,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.audit.application.audit_service import AuditService
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+from eneo.data_retention.application.retention_health import (
+    RetentionHealth,
+    RetentionHealthStatus,
+)
 from eneo.data_retention.application.retention_registration import (
     RetentionTaskRegistration,
 )
@@ -47,7 +51,7 @@ from eneo.database.database import sessionmanager
 from eneo.database.tables.audit_log_table import AuditLog
 from eneo.database.tables.retention_tables import RetentionJobRuns
 from eneo.main import retention_tasks
-from eneo.main.config import Settings
+from eneo.main.config import Settings, get_settings
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.integration]
 
@@ -569,3 +573,135 @@ async def test_the_nightly_run_runs_a_frequent_task_without_its_probe(
         ("tests.nightly_off", RetentionJobOutcome.SKIPPED),
     ]
     assert await _left("tests.nightly") == 0
+
+
+def _health_of(
+    monkeypatch: pytest.MonkeyPatch,
+    build: Callable[[AsyncSession, datetime], _DueItems],
+    *,
+    enabled: bool = True,
+) -> None:
+    """Health reads one frequent task, built with the time health passes."""
+
+    def registrations(
+        settings: Settings, *, now: datetime | None = None
+    ) -> tuple[RetentionTaskRegistration, ...]:
+        assert now is not None, "health builds its tasks with the database clock"
+        return (_frequent("tests.health", lambda s: build(s, now), enabled=enabled),)
+
+    monkeypatch.setattr(retention_tasks, "retention_task_registrations", registrations)
+
+
+async def _health() -> RetentionHealth:
+    return await retention_tasks._read_retention_health(get_settings())
+
+
+@pytest.mark.parametrize(
+    "late,expected",
+    [
+        (None, RetentionHealthStatus.HEALTHY),
+        (timedelta(minutes=30), RetentionHealthStatus.HEALTHY),
+        (timedelta(minutes=70), RetentionHealthStatus.DEGRADED),
+    ],
+    ids=["nothing-due", "due-within-the-hour", "overdue"],
+)
+async def test_a_frequent_task_reads_overdue_an_hour_past_its_time(
+    test_tenant,
+    monkeypatch: pytest.MonkeyPatch,
+    late: timedelta | None,
+    expected: RetentionHealthStatus,
+) -> None:
+    """A frequent task has no overdue snapshot; health asks its probe an hour
+    back on the database clock. With nothing overdue and no job row yet it
+    reads healthy (a task that never had anything due is not initializing).
+
+    Mutants: health asks the probe at the present time, so an item a minute
+    past its time degrades health; no job row reads initializing or unknown;
+    an item more than an hour past its time reads healthy."""
+    if late is not None:
+        now = await _database_now()
+        await _items("tests.health", 1, finished=now - _AFTER - late)
+    _health_of(monkeypatch, lambda s, at: _DueItems(s, "tests.health", now=at))
+
+    health = await _health()
+
+    [task] = health.tasks
+    assert (health.status, task.status) == (expected, expected)
+    assert task.overdue is (expected is RetentionHealthStatus.DEGRADED)
+    assert task.no_execution
+
+
+async def test_a_failed_frequent_run_degrades_health(
+    test_tenant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Mutant: a frequent task's health asks only its probe and misses that
+    its latest run failed."""
+    now = await _database_now()
+    async with _committed() as session:
+        session.add(
+            RetentionJobRuns(
+                task="tests.health",
+                outcome=RetentionJobOutcome.FAILED.value,
+                started_at=now,
+                heartbeat_at=now,
+                finished_at=now,
+                error_code="chunk_failed",
+            )
+        )
+    _health_of(monkeypatch, lambda s, at: _DueItems(s, "tests.health", now=at))
+
+    [task] = (await _health()).tasks
+
+    assert (task.status, task.failed) == (RetentionHealthStatus.DEGRADED, True)
+
+
+async def test_a_failing_probe_reads_unknown(
+    test_tenant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Mutant: a probe that fails or times out reads healthy."""
+
+    class _Broken(_DueItems):
+        async def has_due(self) -> bool:
+            await self.session.execute(sa.text("SELECT 1 / 0"))
+            return False
+
+    _health_of(monkeypatch, lambda s, at: _Broken(s, "tests.health", now=at))
+
+    assert (await _health()).status is RetentionHealthStatus.UNKNOWN
+
+
+async def test_a_frequent_task_without_a_probe_reads_unknown(
+    test_tenant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The public health read never raises for a misregistered task.
+
+    Mutants: it raises; it reads healthy without anything to ask."""
+
+    class _Unprobed(_DueItems):
+        has_due = None  # type: ignore[assignment]
+
+    _health_of(monkeypatch, lambda s, at: _Unprobed(s, "tests.health", now=at))
+
+    health = await _health()
+
+    assert health.status is RetentionHealthStatus.UNKNOWN
+    assert [task.status for task in health.tasks] == [RetentionHealthStatus.UNKNOWN]
+
+
+async def test_a_disabled_frequent_task_is_not_probed(
+    test_tenant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Mutant: health asks the probe of a task the operator turned off."""
+
+    def unasked() -> None:
+        raise AssertionError("Health asked a disabled task's probe.")
+
+    _health_of(
+        monkeypatch,
+        lambda s, at: _DueItems(s, "tests.health", now=at, probe=unasked),
+        enabled=False,
+    )
+
+    [task] = (await _health()).tasks
+
+    assert (task.status, task.disabled) == (RetentionHealthStatus.DISABLED, True)

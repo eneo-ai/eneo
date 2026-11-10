@@ -9,7 +9,10 @@ from pydantic import BaseModel
 from eneo.data_retention.application.retention_registration import (
     RetentionTaskRegistration,
 )
-from eneo.data_retention.application.retention_runner import overdue_reporter
+from eneo.data_retention.application.retention_runner import (
+    due_probe,
+    overdue_reporter,
+)
 from eneo.data_retention.domain.retention import (
     RETENTION_STALE_AFTER,
     RetentionErrorCode,
@@ -45,7 +48,8 @@ class RetentionTaskHealth(BaseModel):
     """No execution completed (succeeded or partial) for two days."""
     overdue: bool = False
     """The latest overdue snapshot counts due data still stored past its
-    deadline and the overdue window."""
+    deadline and the overdue window; for a frequent task, its due probe finds
+    data more than an hour past its time."""
     no_execution: bool = False
     """The task has no execution row at all."""
     no_overdue_snapshot: bool = False
@@ -107,6 +111,11 @@ async def load_retention_health(
     not claim its task proves nothing about the due work, so it is unknown.
     A task turned off is disabled and does not count towards the overall
     status; with every task turned off it reads healthy.
+
+    A frequent task has no overdue snapshot: its due probe, on tasks the
+    caller built an hour back, says whether anything is overdue, and with
+    nothing overdue it reads healthy also before its first job row. Without a
+    probe it reads unknown. A probe's error is the caller's, like any read.
     """
     names = [registered.name for registered in tasks]
     # Read once, and only when a task has no row.
@@ -181,14 +190,19 @@ async def _task_health(
             limiting_settings=limiting_settings,
         )
     stale_before = now - RETENTION_STALE_AFTER
-    reports_overdue = overdue_reporter(task.build(repository.session)) is not None
+    built = task.build(repository.session)
+    reports_overdue = overdue_reporter(built) is not None
+    probe = due_probe(built) if task.every == "frequent" else None
+    unprobed = task.every == "frequent" and probe is None
     stale = await repository.is_stale(task.name, stale_before=stale_before)
     snapshot = await repository.latest_overdue(task.name) if reports_overdue else None
     no_overdue_snapshot = latest is not None and reports_overdue and snapshot is None
     overdue_snapshot_stale = (
         snapshot is not None and snapshot.observed_at < stale_before
     )
-    overdue = snapshot is not None and snapshot.overdue.count > 0
+    overdue = (snapshot is not None and snapshot.overdue.count > 0) or (
+        probe is not None and await probe.has_due()
+    )
     failed = completed is not None and completed.outcome is RetentionJobOutcome.FAILED
     overdue_not_measured = (
         reports_overdue
@@ -203,6 +217,10 @@ async def _task_health(
     )
     if stale or overdue or failed:
         status = RetentionHealthStatus.DEGRADED
+    elif unprobed:
+        status = RetentionHealthStatus.UNKNOWN
+    elif latest is None and probe is not None:
+        status = RetentionHealthStatus.HEALTHY
     elif latest is None:
         status = (
             RetentionHealthStatus.UNKNOWN

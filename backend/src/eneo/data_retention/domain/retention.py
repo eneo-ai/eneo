@@ -19,6 +19,9 @@ from uuid import UUID, uuid5
 RETENTION_CADENCE = timedelta(days=1)
 # A task without a completed execution for this long is stale.
 RETENTION_STALE_AFTER = 2 * RETENTION_CADENCE
+# A frequent task's item still stored this long after its time is overdue: a
+# crashed pass is taken over an hour after its last heartbeat.
+FREQUENT_OVERDUE_AFTER = timedelta(hours=1)
 
 # Namespace for deterministic audit ids (uuid5 over the batch or execution).
 _RETENTION_AUDIT_NAMESPACE = UUID("6f1d3a0e-7c55-4a8e-9a43-0b7f3a6c2d11")

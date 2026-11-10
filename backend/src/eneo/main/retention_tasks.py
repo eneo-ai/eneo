@@ -8,6 +8,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from types import MappingProxyType
 
+import sqlalchemy as sa
 from sqlalchemy.exc import SQLAlchemyError
 
 from eneo.data_retention.application.conversation_history_retention_task import (
@@ -35,7 +36,10 @@ from eneo.data_retention.application.retention_health import RetentionHealth
 from eneo.data_retention.application.retention_registration import (
     RetentionTaskRegistration,
 )
-from eneo.data_retention.domain.retention import RetentionBudget
+from eneo.data_retention.domain.retention import (
+    FREQUENT_OVERDUE_AFTER,
+    RetentionBudget,
+)
 from eneo.files.unused_file_retention_task import (
     UNUSED_FILES_TASK,
     UnusedFileRetentionTask,
@@ -238,10 +242,16 @@ async def _read_retention_health(settings: Settings) -> RetentionHealth:
                 await set_retention_timeouts(
                     session, statement_timeout_ms=timeout_ms, lock_timeout_ms=timeout_ms
                 )
+                # The database's clock, which also wrote every job row's times.
+                now = (await session.execute(sa.select(sa.func.now()))).scalar_one()
                 return await load_retention_health(
                     RetentionJobRunRepository(session),
-                    retention_task_registrations(settings),
-                    now=datetime.now(timezone.utc),
+                    # Built an hour back: a frequent task's due probe then
+                    # finds only what is more than an hour past its time.
+                    retention_task_registrations(
+                        settings, now=now - FREQUENT_OVERDUE_AFTER
+                    ),
+                    now=now,
                     lease_stale_after=timedelta(
                         seconds=settings.retention_lease_stale_seconds
                     ),
