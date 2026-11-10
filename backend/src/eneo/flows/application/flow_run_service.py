@@ -1108,6 +1108,7 @@ class FlowRunService:
         step_results = await self.flow_run_repo.list_step_result_annotations(
             run_id=run.id,
             tenant_id=self.user.tenant_id,
+            with_live_fallback_reasons=True,
         )
         return FlowRunVersionedView(
             published_definition=published_definition,

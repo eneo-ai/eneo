@@ -3294,6 +3294,7 @@ async def test_get_run_versioned_view_loads_run_definition_and_results(
     flow_run_repo.list_step_result_annotations.assert_awaited_once_with(
         run_id=run.id,
         tenant_id=user.tenant_id,
+        with_live_fallback_reasons=True,
     )
 
 

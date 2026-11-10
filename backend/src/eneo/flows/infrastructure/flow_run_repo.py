@@ -101,6 +101,7 @@ from eneo.flows.flow_run_error import (
 from eneo.flows.flow_run_input_envelope import (
     FLOW_INPUT_TRANSCRIPTION_KEY,
     SPEAKER_LABELS_KEY,
+    STEP_INPUTS_KEY,
     FlowRunInputEnvelopePatch,
     speaker_labels_choice,
 )
@@ -333,25 +334,20 @@ def _step_result_evidence_logical_bytes() -> Any:
     )
 
 
-def step_result_annotation_select(*, run_id: UUID, tenant_id: UUID) -> sa.Select[Any]:
-    """The columns a run-pinned graph annotates nodes with: status facts only.
+def step_result_annotation_select(
+    *, run_id: UUID, tenant_id: UUID, with_live_fallback_reasons: bool = False
+) -> sa.Select[Any]:
+    """The status facts of a run's steps, never the content columns (prompts,
+    input and output payloads, model parameters).
 
-    Polled while a run is active, so it must never select the content columns
-    (prompts, input and output payloads, model parameters). The one fact read
-    from a payload is why a streamed step's audio goes to the transcription
-    model, by its path: the step's transcription once it is written, else the
-    decision its current attempt committed before calling that model.
+    The run's graph, polled while the run is active, also reads why a streamed
+    step's audio goes to the transcription model: one path in the step's
+    transcription once it is written, else in the decision its current attempt
+    committed before calling that model. Only a step the run's input says was
+    streamed reads it; another step, and every step of a run without streamed
+    audio, reads no payload.
     """
-    # ponytail: Postgres reads each step's payloads whole to take one path, on
-    # every poll; skip the steps the run did not stream (read from its envelope)
-    # if graph polls of long transcripts show up in database time.
-    live_fallback_reason = sa.func.coalesce(
-        FlowStepResults.input_payload_json[
-            ("transcription", "live_fallback_reason")
-        ].astext,
-        FlowStepAttempts.input_payload_json[("live_fallback", "reason")].astext,
-    ).label("live_fallback_reason")
-    return (
+    stmt = (
         sa.select(
             FlowStepResults.step_id,
             FlowStepResults.step_order,
@@ -359,20 +355,44 @@ def step_result_annotation_select(*, run_id: UUID, tenant_id: UUID) -> sa.Select
             FlowStepResults.num_tokens_input,
             FlowStepResults.num_tokens_output,
             FlowStepResults.error_message,
-            live_fallback_reason,
-        )
-        .select_from(FlowStepResults)
-        .outerjoin(
-            FlowStepAttempts,
-            sa.and_(
-                FlowStepAttempts.flow_run_id == FlowStepResults.flow_run_id,
-                FlowStepAttempts.step_id == FlowStepResults.step_id,
-                FlowStepAttempts.attempt_no == FlowStepResults.current_attempt_no,
-            ),
         )
         .where(FlowStepResults.flow_run_id == run_id)
         .where(FlowStepResults.tenant_id == tenant_id)
         .order_by(FlowStepResults.step_order.asc())
+    )
+    if not with_live_fallback_reasons:
+        return stmt
+    # Uncorrelated, so Postgres reads the run's step facts once per statement.
+    step_inputs = (
+        sa.select(FlowRuns.input_payload_json[STEP_INPUTS_KEY])
+        .where(FlowRuns.id == run_id)
+        .where(FlowRuns.tenant_id == tenant_id)
+        .scalar_subquery()
+    )
+    streamed = (
+        sa.func.jsonb_extract_path_text(
+            step_inputs, sa.cast(FlowStepResults.step_id, sa.Text), "streamed"
+        )
+        == "true"
+    )
+    live_fallback_reason = sa.case(
+        (
+            streamed,
+            sa.func.coalesce(
+                FlowStepResults.input_payload_json[
+                    ("transcription", "live_fallback_reason")
+                ].astext,
+                FlowStepAttempts.input_payload_json[("live_fallback", "reason")].astext,
+            ),
+        )
+    ).label("live_fallback_reason")
+    return stmt.add_columns(live_fallback_reason).outerjoin(
+        FlowStepAttempts,
+        sa.and_(
+            FlowStepAttempts.flow_run_id == FlowStepResults.flow_run_id,
+            FlowStepAttempts.step_id == FlowStepResults.step_id,
+            FlowStepAttempts.attempt_no == FlowStepResults.current_attempt_no,
+        ),
     )
 
 
@@ -2192,11 +2212,17 @@ class FlowRunRepository:
         *,
         run_id: UUID,
         tenant_id: UUID,
+        with_live_fallback_reasons: bool = False,
     ) -> list[FlowStepResultAnnotation]:
-        """Status, token counts and error per step, never the content columns."""
+        """Status, token counts and error per step, never the content columns;
+        with each streamed step's live fallback reason when asked."""
         rows = (
             await self.session.execute(
-                step_result_annotation_select(run_id=run_id, tenant_id=tenant_id)
+                step_result_annotation_select(
+                    run_id=run_id,
+                    tenant_id=tenant_id,
+                    with_live_fallback_reasons=with_live_fallback_reasons,
+                )
             )
         ).all()
         return [FlowStepResultAnnotation.model_validate(row) for row in rows]

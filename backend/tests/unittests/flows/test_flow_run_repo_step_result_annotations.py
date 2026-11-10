@@ -21,7 +21,13 @@ _CONTENT_COLUMNS = {
 }
 
 
+def _sql(stmt) -> str:
+    return " ".join(str(stmt.compile(dialect=postgresql.dialect())).split())
+
+
 def test_step_result_annotation_select_projects_status_facts_only() -> None:
+    """Finalization and the executor read statuses alone: no payload, no other
+    table."""
     stmt = step_result_annotation_select(run_id=uuid4(), tenant_id=uuid4())
 
     selected = {column.name for column in stmt.selected_columns}
@@ -33,35 +39,62 @@ def test_step_result_annotation_select_projects_status_facts_only() -> None:
         "num_tokens_input",
         "num_tokens_output",
         "error_message",
-        "live_fallback_reason",
     }
-    assert selected.isdisjoint(_CONTENT_COLUMNS)
     assert _CONTENT_COLUMNS <= set(FlowStepResults.__table__.columns.keys())
+    sql = _sql(stmt)
+    assert "input_payload_json" not in sql
+    assert "JOIN" not in sql
+    assert "flow_runs" not in sql
 
 
-def test_step_result_annotations_read_why_the_live_text_was_not_used_alone() -> None:
+def test_the_graphs_annotations_read_why_the_live_text_was_not_used_alone() -> None:
     """The graph poll shows why a streamed step's audio goes to the transcription
     model as soon as the step's attempt decides it, before the step's status
-    changes: the same statement reads that reason, and nothing else of the
-    step's or the attempt's input."""
-    stmt = step_result_annotation_select(run_id=uuid4(), tenant_id=uuid4())
+    changes. Only a step the run's input says was streamed reads it, through
+    one path in its result's and its current attempt's input: another step,
+    and every step of a run without streamed audio, reads no payload."""
+    run_id, tenant_id = uuid4(), uuid4()
+    stmt = step_result_annotation_select(
+        run_id=run_id, tenant_id=tenant_id, with_live_fallback_reasons=True
+    )
     compiled = stmt.compile(dialect=postgresql.dialect())
     sql = " ".join(str(compiled).split())
 
+    assert {column.name for column in stmt.selected_columns} >= {
+        "step_id",
+        "live_fallback_reason",
+    }
     assert (
         "LEFT OUTER JOIN flow_step_attempts"
         " ON flow_step_attempts.flow_run_id = flow_step_results.flow_run_id"
         " AND flow_step_attempts.step_id = flow_step_results.step_id"
         " AND flow_step_attempts.attempt_no = flow_step_results.current_attempt_no"
     ) in sql
-    # Each payload is read through one path, never whole.
-    assert sql.count(".input_payload_json") == 2
+    # The run's step facts come from this run alone, read once for the
+    # statement rather than once per step.
+    run_facts = sql[
+        sql.index("(SELECT flow_runs.input_payload_json") : sql.index(
+            ", CAST(flow_step_results.step_id AS TEXT)"
+        )
+    ]
+    assert "FROM flow_runs WHERE flow_runs.id = " in run_facts
+    assert "AND flow_runs.tenant_id = " in run_facts
+    assert "flow_step_results" not in run_facts
+    # A step's payloads appear only behind the streamed check, each through
+    # one path; the payload columns themselves are never selected.
+    guarded = sql[sql.index("CASE WHEN (jsonb_extract_path_text(") :]
     assert sql.count(".input_payload_json #>> ") == 2
+    assert guarded.count(".input_payload_json #>> ") == 2
+    assert "flow_step_results.input_payload_json," not in sql
+    assert "flow_step_attempts.input_payload_json," not in sql
+    assert {"step_inputs", "streamed"} <= set(compiled.params.values())
     paths = [value for value in compiled.params.values() if isinstance(value, tuple)]
     assert sorted(paths) == [
         ("live_fallback", "reason"),
         ("transcription", "live_fallback_reason"),
     ]
+    assert run_id in compiled.params.values()
+    assert tenant_id in compiled.params.values()
 
 
 @pytest.mark.asyncio
