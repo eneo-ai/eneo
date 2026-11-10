@@ -14,6 +14,7 @@ import { sanitizeImageSrc, sanitizeWebHref } from "@/lib/safe-url";
 import { cn } from "@/lib/utils";
 import { FileTypeTile, useSignedUrl } from "./attachments";
 import {
+  namesAction,
   pendingTools,
   ToolArguments,
   toolDecision,
@@ -321,7 +322,9 @@ export function ToolApprovalCard({ data }: { data: ToolApprovalData }) {
       <ul className="flex flex-col gap-1.5">
         {data.tools.map((tool, index) => {
           const decision = toolDecision(tool, data, decisions);
-          const name = toolLabel(tool);
+          const name = toolLabel(tool, t);
+          // Named by what it will do ("Publicera flödet"): a name, without its server and id.
+          const action = namesAction(tool, t);
           const titled = Boolean(tool.title?.trim());
           return (
             <li
@@ -333,12 +336,12 @@ export function ToolApprovalCard({ data }: { data: ToolApprovalData }) {
                   <span
                     className={cn(
                       "min-w-0 break-all",
-                      titled ? "text-[13.5px] font-medium" : "font-mono text-xs"
+                      titled || action ? "text-[13.5px] font-medium" : "font-mono text-xs"
                     )}
                   >
                     {name}
                   </span>
-                  {titled && (
+                  {titled && !action && (
                     <span className="text-ax-text-secondary font-mono text-xs break-all">
                       {tool.server_name}/{tool.tool_name}
                     </span>
@@ -368,7 +371,9 @@ export function ToolApprovalCard({ data }: { data: ToolApprovalData }) {
                   // the children: each button names its tool, the text stays short.
                   <span className="flex gap-1.5">
                     <AxButton
-                      label={t("chat_tool_accept_named", { tool: name })}
+                      label={t(action ? "chat_tool_accept_action" : "chat_tool_accept_named", {
+                        tool: name
+                      })}
                       variant="primary"
                       size="sm"
                       isLoading={running === `accept:${tool.tool_call_id}`}
@@ -382,7 +387,9 @@ export function ToolApprovalCard({ data }: { data: ToolApprovalData }) {
                       {t("tool_accept")}
                     </AxButton>
                     <AxButton
-                      label={t("chat_tool_deny_named", { tool: name })}
+                      label={t(action ? "chat_tool_deny_action" : "chat_tool_deny_named", {
+                        tool: name
+                      })}
                       variant="secondary"
                       size="sm"
                       isLoading={running === `deny:${tool.tool_call_id}`}

@@ -6,7 +6,7 @@ import {
 } from "@astryxdesign/core/DropdownMenu";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { Heading, Text } from "@astryxdesign/core/Text";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { hashKey, useQuery, useQueryClient } from "@tanstack/react-query";
 import { MessageSquare, Pencil } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -96,6 +96,9 @@ function ModePicker({
           queryClient.getQueryData<FlowPublic>(flowKeys.flow(chat.flow_id))?.draft_revision ?? 0
       });
       restarted.current = updated.session_id !== current.session_id;
+      // A read of the chat still on its way (after an answer, on the window's
+      // focus) began before this change: it must not land after it.
+      await queryClient.cancelQueries({ queryKey: chatKey });
       queryClient.setQueryData(chatKey, updated);
       return updated;
     },
@@ -181,6 +184,7 @@ function AuthoringConversation({
   onRefused: ChatPanelProps["onRefused"];
 }) {
   const t = useTranslations();
+  const queryClient = useQueryClient();
   const published = flow.published_version != null;
   const { references, composer } = useFlowChatReferences(flow);
   // The page's references (pills, the card, "Fråga assistenten") reach the composer through it.
@@ -290,9 +294,43 @@ function AuthoringConversation({
       onToolCallFinished={(call) => {
         if (isFlowsToolCall(call)) onFlowMayHaveChanged();
       }}
-      onAnswerFinished={onFlowMayHaveChanged}
+      onAnswerFinished={() => {
+        onFlowMayHaveChanged();
+        // The turn's start may have left edit mode after a pause: show the mode the server holds.
+        void queryClient.invalidateQueries({ queryKey: flowKeys.authoringChat(flow.id) });
+      }}
     />
   );
+}
+
+/**
+ * Says so when a read of the chat (after an answer, on the window's focus)
+ * finds that the server left edit mode after a pause, politely and without
+ * moving focus. The person's own changes are written into the cache, not
+ * read, and announce themselves; a published flow shows Fråga either way.
+ */
+function useAnnounceModeFallback(flowId: string, published: boolean) {
+  const t = useTranslations();
+  const announce = useAnnounce();
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    if (published) return;
+    const key = flowKeys.authoringChat(flowId);
+    const hash = hashKey(key);
+    let shown = queryClient.getQueryData<FlowAuthoringChat>(key);
+    return queryClient.getQueryCache().subscribe((event) => {
+      if (event.type !== "updated" || event.query.queryHash !== hash) return;
+      if (event.action.type !== "success") return;
+      const read = event.action.data as FlowAuthoringChat | undefined;
+      const fellBack =
+        !event.action.manual &&
+        shown?.editing === true &&
+        read?.editing === false &&
+        read.session_id === shown.session_id;
+      shown = read;
+      if (fellBack) announce(t("flows_chat_mode_ask_after_pause"));
+    });
+  }, [announce, flowId, published, queryClient, t]);
 }
 
 type Unavailable = { status: "info" | "warning"; text: string };
@@ -340,6 +378,7 @@ export function FlowChatPanel({
   // still says so, should the flag be out of date).
   const mayEdit = flow.permissions.can_edit;
   const chat = useQuery({ ...authoringChatQueryOptions(flow.id), enabled: mayEdit });
+  useAnnounceModeFallback(flow.id, flow.published_version != null);
   const unavailable: Unavailable | null = !mayEdit
     ? { status: "info", text: t("flows_chat_no_access") }
     : chat.isError

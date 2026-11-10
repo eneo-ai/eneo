@@ -21,7 +21,7 @@ from sqlalchemy.engine import Engine
 from eneo.actors.actors.space_actor import SpaceAccessFacts, SpaceActor, SpaceRole
 from eneo.authentication.auth_models import ApiKeyScopeType
 from eneo.database.tables.assistant_table import Assistants
-from eneo.main.exceptions import BadRequestException
+from eneo.main.exceptions import NotFoundException
 from eneo.main.models import ModelId
 from eneo.roles.permissions import Permission
 from eneo.roles.role import RoleCreate
@@ -164,27 +164,45 @@ async def test_assistant_scoped_key_roles_are_those_of_a_load_of_every_hidden_as
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_loading_by_the_default_assistant_keeps_every_assistant_as_its_tool(
+async def test_loading_by_the_default_assistant_offers_only_visible_assistants_as_tools(
     client, db_container, admin_user, patch_auth_service_jwt
 ):
+    """A hidden assistant answers only where it was made for, never as the
+    default assistant's tool, although the load builds it."""
     _ = patch_auth_service_jwt
-    _, hidden_ids, visible, default_id = await _hidden_and_visible(
+    space_id, hidden_ids, visible, default_id = await _hidden_and_visible(
         client, db_container, admin_user, hidden=2
     )
+    plain = await _ordinary_hidden(db_container, space_id=space_id, count=1)
 
     async with db_container() as container:
         space = await container.space_repo().get_space_by_assistant(default_id)
 
     assert space.default_assistant is not None
-    assert {a.id for a in space.default_assistant.tool_assistants} == {
-        *hidden_ids,
-        visible,
-    }
+    assert {a.id for a in space.default_assistant.tool_assistants} == {visible}
+    assert {a.id for a in space.assistants} == {*hidden_ids, *plain, visible}
+
+
+async def test_asking_the_default_assistant_through_a_hidden_tool_assistant_is_not_found(
+    client, db_container, admin_user, patch_auth_service_jwt
+):
+    _ = patch_auth_service_jwt
+    space_id, (flow_managed, _), _, default_id = await _hidden_and_visible(
+        client, db_container, admin_user, hidden=2
+    )
+    (plain,) = await _ordinary_hidden(db_container, space_id=space_id, count=1)
+
+    for hidden in (flow_managed, plain):
+        async with db_container() as container:
+            with pytest.raises(NotFoundException):
+                await container.assistant_service().ask(
+                    question="Hej", assistant_id=default_id, tool_assistant_id=hidden
+                )
 
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_asking_through_a_hidden_tool_assistant_it_does_not_offer_is_refused_as_before(
+async def test_asking_another_assistant_through_a_hidden_tool_assistant_is_not_found(
     client, db_container, admin_user, patch_auth_service_jwt
 ):
     _ = patch_auth_service_jwt
@@ -193,7 +211,7 @@ async def test_asking_through_a_hidden_tool_assistant_it_does_not_offer_is_refus
     )
 
     async with db_container() as container:
-        with pytest.raises(BadRequestException):
+        with pytest.raises(NotFoundException):
             await container.assistant_service().ask(
                 question="Hej", assistant_id=visible, tool_assistant_id=hidden
             )
@@ -221,8 +239,7 @@ async def test_loading_by_the_default_assistant_selects_hidden_ones_without_list
     finally:
         sa.event.remove(Engine, "before_cursor_execute", record)
 
-    assert space.default_assistant is not None
-    assert {a.id for a in space.default_assistant.tool_assistants} >= set(hidden_ids)
+    assert {a.id for a in space.assistants} >= set(hidden_ids)
     assert not {str(id) for id in hidden_ids} & set(hidden_filter_params)
 
 

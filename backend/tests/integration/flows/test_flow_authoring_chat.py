@@ -19,6 +19,7 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.database.tables.ai_models_table import CompletionModels
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.flow_authoring_chats_table import FlowAuthoringChats
+from eneo.database.tables.flow_tables import Flows
 from eneo.database.tables.prompts_table import Prompts, PromptsAssistants
 from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.security_classifications_table import (
@@ -1357,6 +1358,71 @@ async def test_an_empty_conversation_is_kept_however_long_the_pause(
     assert editing["session_id"] == chat["session_id"]
 
 
+async def _left_in_edit_mode(client, setup: ModelChoices, db_container, tenant_id):
+    """The chat in edit mode, its last question and mode change long past."""
+    editing = await _set_editing(client, setup, setup.chat, True)
+    await _add_question(db_container, editing, tenant_id, age=timedelta(hours=2))
+    await _set_mode_changed(db_container, editing, age=timedelta(hours=2))
+    return editing
+
+
+async def test_a_chat_left_in_edit_mode_opens_in_view_mode_after_a_pause(
+    client,
+    model_choices: ModelChoices,
+    db_container,
+    admin_user,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    setup = model_choices
+    editing = await _left_in_edit_mode(
+        client, setup, db_container, admin_user.tenant_id
+    )
+    audited = _record_audit(monkeypatch)
+
+    opened = await client.post(setup.url, headers=setup.headers)
+
+    assert opened.status_code == 200, opened.text
+    assert opened.json()["editing"] is False
+    assert opened.json()["session_id"] == editing["session_id"]
+    assert audited.count(ActionType.FLOW_AUTHORING_MODE_CHANGED) == 1
+    # The pause still counts: turning edit mode on starts a new conversation.
+    again = await _set_editing(client, setup, opened.json(), True)
+    assert again["editing"] is True
+    assert again["session_id"] != editing["session_id"]
+
+
+async def test_a_turn_after_a_pause_on_a_tab_left_open_is_in_view_mode(
+    client,
+    model_choices: ModelChoices,
+    db_container,
+    admin_user,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    setup = model_choices
+    editing = await _left_in_edit_mode(
+        client, setup, db_container, admin_user.tenant_id
+    )
+    _capture_model_history(monkeypatch)
+    audited = _record_audit(monkeypatch)
+
+    asked = await client.post(
+        f"/api/v1/assistants/{editing['assistant_id']}/sessions/"
+        f"{editing['session_id']}/",
+        headers=setup.headers,
+        json={"question": "Lägg till ett steg.", "stream": False},
+    )
+
+    assert asked.status_code == 200, asked.text
+    assert audited.count(ActionType.FLOW_AUTHORING_MODE_CHANGED) == 1
+    async with db_container() as container:
+        mode = await container.session().scalar(
+            sa.select(FlowAuthoringChats.editing).where(
+                FlowAuthoringChats.session_id == UUID(editing["session_id"])
+            )
+        )
+    assert mode is False
+
+
 async def test_a_new_conversation_on_request_leaves_other_peoples_chats_alone(
     client,
     model_choices: ModelChoices,
@@ -1395,3 +1461,114 @@ async def test_a_new_conversation_on_request_leaves_other_peoples_chats_alone(
             await load_authoring_chat(
                 container, session_id=UUID(setup.chat["session_id"])
             )
+
+
+def _not_found(response) -> tuple[int, dict]:
+    """The status and body, without the request's own id."""
+    body = response.json() if response.content else {}
+    body.pop("request_id", None)
+    return response.status_code, body
+
+
+async def test_the_assistant_endpoints_reach_a_chats_assistant_for_its_persons_read_only(
+    client, enabled_flow, db_container, admin_user
+):
+    """The chat's own person reads its assistant, as the chat panel does.
+    Otherwise the assistant endpoints answer as for an assistant that does not
+    exist: nobody changes, moves, publishes or deletes it there, and another
+    person of the space does not learn that it exists."""
+    flow, headers = enabled_flow
+    url = f"/api/v1/flows/{flow['id']}/authoring-chat/"
+    opened = await client.post(url, headers=headers)
+    assert opened.status_code == 200, opened.text
+    chat = opened.json()
+    other = await _member_headers(db_container, admin_user, flow["space_id"])
+    base = f"/api/v1/assistants/{chat['assistant_id']}/"
+    server = f"mcp-servers/{uuid4()}/"
+    unknown = await client.get(f"/api/v1/assistants/{uuid4()}/", headers=other)
+    assert unknown.status_code == 404, unknown.text
+
+    read = await client.get(base, headers=headers)
+    assert read.status_code == 200, read.text
+    outcomes = {}
+    for path in ["", "prompts/", "mcp-servers/", "widget-status/"]:
+        theirs = await client.get(base + path, headers=other)
+        outcomes[("other", f"GET {path}")] = _not_found(theirs)
+    for who, person in [("other", other), ("own", headers)]:
+        for call, response in [
+            ("update", client.post(base, headers=person, json={"name": "Ändrad"})),
+            (
+                "transfer",
+                client.post(
+                    base + "transfer/",
+                    headers=person,
+                    json={"target_space_id": flow["space_id"]},
+                ),
+            ),
+            (
+                "publish",
+                client.post(
+                    base + "publish/", headers=person, params={"published": True}
+                ),
+            ),
+            ("add server", client.post(base + server, headers=person)),
+            ("remove server", client.delete(base + server, headers=person)),
+            ("delete", client.delete(base, headers=person)),
+        ]:
+            outcomes[(who, call)] = _not_found(await response)
+
+    assert {key: status for key, (status, _) in outcomes.items()} == dict.fromkeys(
+        outcomes, 404
+    )
+    assert outcomes == dict.fromkeys(outcomes, _not_found(unknown))
+
+    reopened = await client.post(url, headers=headers)
+    assert reopened.status_code == 200, reopened.text
+    assert reopened.json()["assistant_id"] == chat["assistant_id"]
+    assert reopened.json()["session_id"] == chat["session_id"]
+    async with db_container() as container:
+        name, published = (
+            await container.session().execute(
+                sa.select(Assistants.name, Assistants.published).where(
+                    Assistants.id == UUID(chat["assistant_id"])
+                )
+            )
+        ).one()
+    assert (name, published) == (flow["name"], False)
+
+
+async def test_a_flow_deleted_while_its_chat_waits_for_the_flow_gets_no_chat(
+    client, enabled_flow, db_container, monkeypatch: pytest.MonkeyPatch
+):
+    """The access check passed before the delete committed; the flow lock that
+    follows sees the flow deleted and refuses, so no chat is made for it."""
+    flow, headers = enabled_flow
+    from eneo.flows.application import flow_authoring_chat
+
+    passed_before_the_delete = flow_authoring_chat.require_flow_edit_access
+
+    async def checked_then_deleted(request, container, *, flow_id):
+        access = await passed_before_the_delete(request, container, flow_id=flow_id)
+        await container.session().execute(
+            sa.update(Flows)
+            .where(Flows.id == flow_id)
+            .values(deleted_at=datetime.now(timezone.utc))
+        )
+        return access
+
+    monkeypatch.setattr(
+        flow_authoring_chat, "require_flow_edit_access", checked_then_deleted
+    )
+
+    refused = await client.post(
+        f"/api/v1/flows/{flow['id']}/authoring-chat/", headers=headers
+    )
+
+    assert refused.status_code == 404, refused.text
+    async with db_container() as container:
+        chats = await container.session().scalar(
+            sa.select(sa.func.count())
+            .select_from(FlowAuthoringChats)
+            .where(FlowAuthoringChats.flow_id == UUID(flow["id"]))
+        )
+    assert chats == 0

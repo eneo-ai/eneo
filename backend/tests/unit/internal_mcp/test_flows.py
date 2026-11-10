@@ -9,7 +9,11 @@ import pytest
 from eneo.flows.application import flow_authoring_chat, flow_authoring_operations
 from eneo.internal_mcp import flows
 from eneo.internal_mcp.foundation import ToolContext
-from eneo.main.exceptions import BadRequestException, ConflictException
+from eneo.main.exceptions import (
+    BadRequestException,
+    ConflictException,
+    NotFoundException,
+)
 
 
 def test_large_read_has_explicit_continuation_and_no_false_complete_claim(monkeypatch):
@@ -160,13 +164,116 @@ async def test_failed_mutation_rolls_back_before_its_error_is_converted(monkeypa
     async def operation(*_):
         order.append("write")
         flow_authoring_operations._change_audit(container)[0].add(action="never")  # pyright: ignore[reportPrivateUsage]
-        raise BadRequestException("stale", code="stale_revision")
+        raise BadRequestException("still read", code="flow_form_field_still_read")
 
     result = await flows._call(MagicMock(), operation, editing=True)
     assert order == ["write", "rollback"]
     assert result.isError is True
-    assert json.loads(result.content[0].text)["code"] == "stale_revision"
+    assert json.loads(result.content[0].text)["code"] == "flow_form_field_still_read"
     assert load.await_args.kwargs["lock"] is True
+
+
+def _stale_chat(monkeypatch, order: list[str], current_revision):
+    """A chat in edit mode whose change is refused because the draft moved
+    on; ``current_revision`` is what the draft is at now, or an exception
+    its read raises."""
+    from eneo.flows.flow_api_error_code import FlowApiErrorCode
+    from eneo.flows.flow_api_exceptions import FlowBadRequestException
+
+    container = _transaction_container(order)
+    chat = SimpleNamespace(flow_id=uuid4(), space_id=uuid4(), editing=True)
+    monkeypatch.setattr(flows, "internal_tool_context", _tool_context(container))
+    load = AsyncMock(return_value=chat)
+    monkeypatch.setattr(flow_authoring_chat, "load_authoring_chat", load)
+    monkeypatch.setattr(flow_authoring_chat, "require_authoring_edit", AsyncMock())
+    read = AsyncMock(
+        side_effect=current_revision
+        if isinstance(current_revision, Exception)
+        else lambda *_: SimpleNamespace(draft_revision=current_revision)
+    )
+    monkeypatch.setattr(flow_authoring_operations, "get_flow", read)
+
+    async def operation(*_):
+        order.append("write")
+        raise FlowBadRequestException(
+            "Flödet har ändrats sedan det lästes in. Ladda om sidan.",
+            code=FlowApiErrorCode.STALE_REVISION,
+        )
+
+    return operation, load, read, chat
+
+
+async def test_a_stale_change_tells_the_model_the_revision_to_read_again_at(
+    monkeypatch,
+):
+    order: list[str] = []
+    operation, load, read, chat = _stale_chat(monkeypatch, order, 9)
+
+    result = await flows._call(MagicMock(), operation, editing=True)
+
+    assert result.isError is True
+    refusal = json.loads(result.content[0].text)
+    assert refusal["code"] == "stale_revision"
+    assert refusal["current_revision"] == 9
+    assert "read_flow" in refusal["message"]
+    assert "reapply only your own change" in refusal["message"]
+    assert "Ladda om" not in refusal["message"]
+    # The revision is read after the refused change rolled back, in a
+    # transaction of its own, for the chat's own flow.
+    assert order == ["write", "rollback", "commit"]
+    assert load.await_args.kwargs.get("lock", False) is False
+    assert read.await_args.args[0] == chat.flow_id
+
+
+async def test_a_stale_change_whose_revision_cannot_be_read_is_still_reported(
+    monkeypatch, caplog
+):
+    order: list[str] = []
+    operation, *_ = _stale_chat(
+        monkeypatch, order, NotFoundException("Flow not found.")
+    )
+
+    result = await flows._call(MagicMock(), operation, editing=True)
+
+    refusal = json.loads(result.content[0].text)
+    assert refusal["code"] == "stale_revision"
+    assert refusal["current_revision"] is None
+    (record,) = [r for r in caplog.records if "stale change" in r.getMessage()]
+    assert record.error_type == "NotFoundException"
+
+
+async def test_runtime_and_draft_tools_refuse_an_invalid_configuration_alike(
+    monkeypatch,
+):
+    from eneo.flows.api.flow_models import FlowEditorUpdateRequest
+
+    _runtime_chat(monkeypatch)
+
+    async def operation(*_):
+        FlowEditorUpdateRequest.model_validate(
+            {
+                "expected_revision": 1,
+                "definition": {},
+                "new_steps": [
+                    {
+                        "name": "Steg",
+                        "configuration": {},
+                        "assistant": {"instructions": "Sammanfatta."},
+                    }
+                ],
+            }
+        )
+        raise AssertionError("the configuration is refused")
+
+    result = await flows._call_runtime(MagicMock(), operation)
+
+    assert result.isError is True
+    refusal = json.loads(result.content[0].text)
+    # The same refusal _call gives: the shape an assistant takes, and the
+    # fields the core's model rejects.
+    assert set(refusal) == {"message", "code", "errors"}
+    assert '{"prompt": {"text": "..."}}' in refusal["message"]
+    assert refusal["errors"]
 
 
 async def test_a_saved_change_is_audited_after_its_commit(monkeypatch):
@@ -1222,3 +1329,122 @@ def test_an_assistant_given_a_field_it_lacks_is_told_its_shape():
     # The tools that take an assistant say its shape up front.
     for tool in (flows.add_step, flows.update_step):
         assert '{"prompt": {"text": ' in (tool.__doc__ or "")
+
+
+# --- What each tool declares ---------------------------------------------------
+
+
+_ACTING_TOOLS = {"run_flow", "retry_run", "cancel_run", "review_run", "publish_flow"}
+_READING_TOOLS = {
+    "read_flow",
+    "read_step_assistant",
+    "read_tool_options",
+    "read_flow_suggestions",
+    "read_run",
+    "read_review",
+}
+
+
+async def test_the_tools_that_act_beyond_the_draft_declare_destructive_hint():
+    """The chat asks the person before each call of a tool that declares
+    destructiveHint; every tool states both hints so the protocol's
+    defaults never decide."""
+    tools = {tool.name: tool.annotations for tool in await flows.mcp.list_tools()}
+
+    assert all(annotations is not None for annotations in tools.values())
+    acting = {name for name, hints in tools.items() if hints.destructiveHint is True}
+    reading = {name for name, hints in tools.items() if hints.readOnlyHint is True}
+    assert acting == _ACTING_TOOLS
+    assert reading == _READING_TOOLS
+    for name in set(tools) - _ACTING_TOOLS - _READING_TOOLS:
+        assert (tools[name].readOnlyHint, tools[name].destructiveHint) == (
+            False,
+            False,
+        ), name
+    assert flows.EDIT_MODE_TOOLS <= set(tools) - _READING_TOOLS
+
+
+# --- Settings keep what the change leaves out ---------------------------------
+
+
+_SAVED_METADATA = {
+    "form_schema": {"fields": [{"name": "kommun", "type": "text"}]},
+    "wizard": {"transcription_enabled": True},
+    "evidence_export": {"enabled": True},
+}
+
+
+def _settings_chat(monkeypatch):
+    """A chat in edit mode over a flow saved with ``_SAVED_METADATA``."""
+    container = _transaction_container([])
+    chat = SimpleNamespace(flow_id=uuid4(), space_id=uuid4(), editing=True)
+    monkeypatch.setattr(flows, "internal_tool_context", _tool_context(container))
+    monkeypatch.setattr(
+        flow_authoring_chat, "load_authoring_chat", AsyncMock(return_value=chat)
+    )
+    monkeypatch.setattr(flow_authoring_chat, "require_authoring_edit", AsyncMock())
+    monkeypatch.setattr(
+        flow_authoring_operations,
+        "get_flow",
+        AsyncMock(
+            return_value=SimpleNamespace(steps=[], metadata_json=_SAVED_METADATA)
+        ),
+    )
+    save = AsyncMock(return_value=SimpleNamespace(steps=[], draft_revision=5))
+    monkeypatch.setattr(flow_authoring_operations, "apply_editor_update", save)
+    return save
+
+
+async def test_update_flow_settings_merges_metadata_over_the_saved_one(monkeypatch):
+    save = _settings_chat(monkeypatch)
+    form = {"fields": [{"name": "ort", "type": "text"}]}
+
+    result = await flows.update_flow_settings(
+        MagicMock(),
+        expected_revision=4,
+        changes={
+            "metadata_json": {"form_schema": form, "evidence_export": None},
+            "form_field_renames": {"kommun": "ort"},
+        },
+    )
+
+    assert result.isError is not True, result.content[0].text
+    definition = save.await_args.args[2].definition
+    # The key sent replaces its saved value, the one sent as null is
+    # removed, and the one left out is kept.
+    assert definition.metadata_json == {
+        "form_schema": form,
+        "wizard": {"transcription_enabled": True},
+    }
+    assert definition.form_field_renames == {"kommun": "ort"}
+    assert save.await_args.kwargs["audit_context"] == {"origin": "authoring_chat"}
+
+
+async def test_update_flow_settings_without_metadata_leaves_it_unsent(monkeypatch):
+    save = _settings_chat(monkeypatch)
+
+    await flows.update_flow_settings(
+        MagicMock(), expected_revision=4, changes={"description": "Ny"}
+    )
+
+    definition = save.await_args.args[2].definition
+    assert "metadata_json" not in definition.model_fields_set
+    assert definition.description == "Ny"
+
+
+async def test_update_steps_merges_its_settings_metadata_the_same_way(monkeypatch):
+    save = _settings_chat(monkeypatch)
+
+    result = await flows.update_steps(
+        MagicMock(),
+        expected_revision=4,
+        edits=[],
+        settings={"metadata_json": {"wizard": {"transcription_enabled": False}}},
+    )
+
+    assert result.isError is not True, result.content[0].text
+    assert save.await_args.args[2].definition.metadata_json == {
+        **_SAVED_METADATA,
+        "wizard": {"transcription_enabled": False},
+    }
+    assert save.await_args.kwargs["audit_context"] == {"origin": "authoring_chat"}

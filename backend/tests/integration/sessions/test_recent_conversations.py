@@ -1,6 +1,6 @@
 """GET /conversations/recent/: the caller's latest conversations everywhere.
 
-Pins the three rules of the recent list against a real database:
+Pins the four rules of the recent list against a real database:
 
 * ownership: only the caller's own conversations, never another user's in
   the same assistant;
@@ -9,7 +9,9 @@ Pins the three rules of the recent list against a real database:
 * access: a conversation is listed exactly when its own history
   (``GET /conversations/?assistant_id=`` / ``?group_chat_id=``) opens for the
   caller, so leaving a space, the organisation space's admin-only rule and
-  unpublished group chats for viewers hide it.
+  unpublished group chats for viewers hide it;
+* hidden assistants: a conversation with a hidden assistant, such as a flow
+  authoring chat's, is never listed; it is reached where that assistant is.
 """
 
 from __future__ import annotations
@@ -109,6 +111,7 @@ async def _assistant(
     owner_id: UUID,
     name: str,
     is_default: bool = False,
+    hidden: bool = False,
 ) -> UUID:
     assistant_id = uuid4()
     await db.execute(
@@ -120,6 +123,7 @@ async def _assistant(
             logging_enabled=False,
             is_default=is_default,
             published=True,
+            hidden=hidden,
         )
     )
     return assistant_id
@@ -449,6 +453,37 @@ async def test_lists_exactly_the_partners_whose_history_opens(
             f"listed={str(partner_id) in listed_partners}"
         )
     assert len(listed_partners) == 4
+
+
+async def test_leaves_out_conversations_with_hidden_assistants(
+    client, db_container, admin_user, member, patch_auth_service_jwt
+):
+    scenario = await _scenario(db_container, admin_user, member)
+    async with db_container() as container:
+        db = container.session()
+        flow_chat = await _assistant(
+            db,
+            space_id=scenario.group_space,
+            owner_id=member.id,
+            name="Flödet",
+            hidden=True,
+        )
+        await _conversation(
+            db,
+            user=member,
+            name="Flödets chatt",
+            created=timedelta(seconds=30),
+            asked=[timedelta(seconds=10)],
+            assistant_id=flow_chat,
+        )
+    headers = {"Authorization": f"Bearer {await _token(db_container, member)}"}
+
+    response = await client.get("/api/v1/conversations/recent/", headers=headers)
+
+    assert response.status_code == 200, response.text
+    assert [UUID(item["id"]) for item in response.json()["items"]] == list(
+        scenario.listed
+    )
 
 
 async def test_limit_applies_after_ordering_and_is_bounded(

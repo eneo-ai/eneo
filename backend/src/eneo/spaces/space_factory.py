@@ -551,9 +551,13 @@ class SpaceFactory:
             for assistant in all_assistants
             if (not default_assistant or assistant.id != default_assistant.id)
         ]
-        # Set the tools of the default assistant
+        # Set the tools of the default assistant. A hidden assistant answers
+        # only where it was made for (a flow's steps, a flow authoring chat),
+        # never as another assistant's tool.
         if default_assistant is not None:
-            default_assistant.tool_assistants = space_assistants
+            default_assistant.tool_assistants = [
+                assistant for assistant in space_assistants if not assistant.hidden
+            ]
 
         space_apps = _build_or_skip(
             apps_in_db,

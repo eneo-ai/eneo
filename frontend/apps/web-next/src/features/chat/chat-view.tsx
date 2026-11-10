@@ -76,9 +76,11 @@ import type { ChatReferences } from "./chat-references";
 import { Composer, type ComposerHandle } from "./composer";
 import { ComposerDock, ConversationLayout } from "./conversation-layout";
 import {
+  namesAction,
   pendingTools,
   ToolApprovalsContext,
   ToolDecisionBar,
+  toolLabel,
   useToolApprovalState
 } from "./tool-approvals";
 import { ContextUsageBar } from "./context-usage-bar";
@@ -477,8 +479,13 @@ function ConversationView({
           part.data.status === "pending" &&
           mounted.current
         ) {
-          const names = part.data.tools.map((tool) => tool.title || tool.tool_name).join(", ");
-          announce(t("chat_announce_tool_approval", { tools: names }));
+          const names = part.data.tools.map((tool) => toolLabel(tool, t)).join(", ");
+          const actions = part.data.tools.every((tool) => namesAction(tool, t));
+          announce(
+            t(actions ? "chat_announce_tool_approval_action" : "chat_announce_tool_approval", {
+              tools: names
+            })
+          );
         }
         if (part.type === "data-token-usage") {
           setLockedTokens({

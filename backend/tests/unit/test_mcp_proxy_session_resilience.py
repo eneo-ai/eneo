@@ -414,6 +414,79 @@ def test_bundled_tools_are_identified_by_the_server_flag_not_its_name():
     assert proxy.is_bundled_tool("built_into_eneo__search") is False
 
 
+def _annotated_tool(server_id: UUID, name: str, annotations: object) -> MCPServerTool:
+    tool = MCPServerTool(
+        mcp_server_id=server_id,
+        name=name,
+        input_schema={"type": "object", "properties": {}},
+        is_enabled_by_default=True,
+    )
+    # The tool's MCP annotations, as its server declared them.
+    tool.annotations = annotations  # pyright: ignore[reportAttributeAccessIssue]
+    return tool
+
+
+def _annotated_servers() -> tuple[MCPServer, MCPServer]:
+    from mcp.types import ToolAnnotations
+
+    flows_id, external_id = uuid4(), uuid4()
+    flows = MCPServer(
+        id=flows_id,
+        tenant_id=uuid4(),
+        name="flows",
+        http_url="http://localhost/internal-mcp/flows/mcp",
+        http_auth_type="bearer",
+        is_internal=True,
+        tools=[
+            _annotated_tool(flows_id, "run_flow", {"destructiveHint": True}),
+            _annotated_tool(
+                flows_id, "publish_flow", ToolAnnotations(destructiveHint=True)
+            ),
+            _annotated_tool(flows_id, "read_flow", {"readOnlyHint": True}),
+            _annotated_tool(
+                flows_id,
+                "update_step",
+                {"readOnlyHint": False, "destructiveHint": False},
+            ),
+            _annotated_tool(flows_id, "unannotated", None),
+        ],
+    )
+    external = MCPServer(
+        id=external_id,
+        tenant_id=flows.tenant_id,
+        name="external",
+        http_url="https://external.example/mcp",
+        tools=[_annotated_tool(external_id, "delete", {"destructiveHint": True})],
+    )
+    return flows, external
+
+
+def test_only_an_internal_tool_that_declares_destructive_hint_requires_confirmation():
+    """An absent hint is not taken as destructive, whatever the protocol's
+    default, and an external server's hint decides nothing: its tools are
+    asked about when the request requires approval."""
+    proxy = MCPProxySession(list(_annotated_servers()))
+
+    assert proxy.requires_confirmation("flows__run_flow") is True
+    assert proxy.requires_confirmation("flows__publish_flow") is True
+    assert proxy.requires_confirmation("flows__read_flow") is False
+    assert proxy.requires_confirmation("flows__update_step") is False
+    assert proxy.requires_confirmation("flows__unannotated") is False
+    assert proxy.requires_confirmation("external__delete") is False
+    assert proxy.requires_confirmation("unknown__tool") is False
+
+
+def test_a_refreshed_tool_list_keeps_the_hint_of_the_tools_still_offered():
+    flows, _external = _annotated_servers()
+    proxy = MCPProxySession([flows])
+
+    proxy._rebuild_server_tools(flows, [{"name": "read_flow"}])  # pyright: ignore[reportPrivateUsage]
+    assert proxy.requires_confirmation("flows__run_flow") is False
+
+    proxy._rebuild_server_tools(flows, [{"name": "run_flow"}])  # pyright: ignore[reportPrivateUsage]
+    assert proxy.requires_confirmation("flows__run_flow") is True
+
+
 def test_tool_purpose_names_the_capability_whichever_server_backs_it():
     """A capability provider's calls carry the purpose so clients render
     them as one function ("web search") rather than by the provider's name;

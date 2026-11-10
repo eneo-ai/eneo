@@ -63,6 +63,8 @@ async def _insert_assistant(
     owner_user_id: UUID,
     space_id: UUID,
     name: str | None = None,
+    hidden: bool = False,
+    tracked: bool = False,
 ) -> UUID:
     assistant_id = uuid4()
     await session.execute(
@@ -74,7 +76,9 @@ async def _insert_assistant(
             completion_model_id=None,
             logging_enabled=False,
             is_default=False,
-            published=False,
+            published=tracked,
+            insight_enabled=tracked,
+            hidden=hidden,
         )
     )
     return assistant_id
@@ -905,3 +909,58 @@ async def test_omitted_analytics_zone_retains_the_database_session_zone(
                 row.created_at.astimezone(ZoneInfo("Asia/Kathmandu")).minute == 0
                 for row in rows
             )
+
+
+async def test_hidden_assistants_count_in_no_assistant_figure_but_their_use_does(
+    db_container, admin_user
+):
+    """A hidden assistant, such as a flow authoring chat's, is left out of every
+    assistant figure, while its conversation and question stay in the session
+    and question figures, which measure model use."""
+    tenant_id = admin_user.tenant_id
+    async with db_container() as container:
+        session = container.session()
+        repo = container.analysis_repo()
+        org_space_id = await _get_org_space(session, tenant_id=tenant_id)
+        tracked_id = await _insert_assistant(
+            session, owner_user_id=admin_user.id, space_id=org_space_id, tracked=True
+        )
+        hidden_id = await _insert_assistant(
+            session,
+            owner_user_id=admin_user.id,
+            space_id=org_space_id,
+            hidden=True,
+            tracked=True,
+        )
+        for assistant_id in (tracked_id, hidden_id):
+            session_id = await _insert_session(
+                session, name="chat", user_id=admin_user.id, assistant_id=assistant_id
+            )
+            await _insert_question(
+                session,
+                tenant_id=tenant_id,
+                session_id=session_id,
+                assistant_id=assistant_id,
+                text="question",
+            )
+        await session.flush()
+
+        assistants, sessions, questions = await repo.get_tenant_counts(
+            tenant_id=tenant_id
+        )
+        metadata_ids = {
+            row.id for row in await repo.get_assistant_metadata_for_tenant(tenant_id)
+        }
+        hourly = await repo.get_assistant_counts_by_hour_for_tenant(tenant_id)
+        session_assistant_ids = {
+            row.assistant_id
+            for row in await repo.get_session_metadata_for_tenant(tenant_id)
+        }
+
+        assert tracked_id in metadata_ids
+        assert hidden_id not in metadata_ids
+        assert assistants == sum(row.total for row in hourly) == len(metadata_ids)
+        assert (sessions, questions) == (2, 2)
+        assert {tracked_id, hidden_id} <= session_assistant_ids
+        assert await repo.get_trackable_assistant_count_for_tenant(tenant_id) == 1
+        assert await repo.get_active_assistant_count_for_tenant(tenant_id) == 1

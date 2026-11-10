@@ -23,8 +23,11 @@ from eneo.assistants.assistant_service import AssistantService
 from eneo.assistants.assistant_update import AssistantUpdateCommand
 from eneo.database.tables.ai_models_table import TranscriptionModels
 from eneo.database.tables.assistant_table import Assistants
+from eneo.database.tables.flow_authoring_chats_table import FlowAuthoringChats
 from eneo.database.tables.flow_tables import FlowRuns, Flows, FlowSteps
 from eneo.database.tables.model_providers_table import ModelProviders
+from eneo.database.tables.questions_table import Questions
+from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import SpacesTranscriptionModels
 from eneo.flows.domain.flow import Flow, FlowRunStatus, FlowStep
 from eneo.flows.enums import (
@@ -327,6 +330,114 @@ async def test_deleting_a_published_flow_without_runs_deletes_its_step_assistant
         await container.flow_service().delete_flow(flow.id)
 
     assert await _existing(db_container, [first, second]) == set()
+
+
+async def _authoring_chat(
+    db_container, *, flow_id: UUID, space_id: UUID, admin_user
+) -> tuple[UUID, UUID]:
+    """A flow authoring chat as the chat makes it: a hidden assistant, its
+    conversation with a question in it, and the binding row. Returns the
+    assistant's and the conversation's ids."""
+    async with db_container() as container:
+        session = container.session()
+        assistant_id = await session.scalar(
+            sa.insert(Assistants)
+            .values(
+                name="Flödeschatt",
+                user_id=admin_user.id,
+                space_id=space_id,
+                logging_enabled=False,
+                is_default=False,
+                published=False,
+                hidden=True,
+            )
+            .returning(Assistants.id)
+        )
+        assert assistant_id is not None
+        conversation = Sessions(
+            name="Flödeschatt", user_id=admin_user.id, assistant_id=assistant_id
+        )
+        session.add(conversation)
+        await session.flush()
+        session.add(
+            Questions(
+                question="Bygg ett flöde",
+                answer="Klart",
+                num_tokens_question=1,
+                num_tokens_answer=1,
+                tenant_id=admin_user.tenant_id,
+                assistant_id=assistant_id,
+                session_id=conversation.id,
+            )
+        )
+        session.add(
+            FlowAuthoringChats(
+                session_id=conversation.id,
+                assistant_id=assistant_id,
+                tenant_id=admin_user.tenant_id,
+                space_id=space_id,
+                user_id=admin_user.id,
+                flow_id=flow_id,
+            )
+        )
+        await session.flush()
+        return assistant_id, conversation.id
+
+
+async def test_deleting_a_flow_deletes_its_authoring_chats_and_their_conversations(
+    client, db_container, admin_user, patch_auth_service_jwt
+):
+    """Also a flow whose runs keep its steps: the chats are no run history."""
+    _ = patch_auth_service_jwt
+    _, space_id = await _admin_token_and_space(client, db_container, admin_user)
+    flow, (step_assistant, _) = await _flow_with_steps(
+        db_container, space_id, steps=1, name="Raderas"
+    )
+    other, _ = await _flow_with_steps(db_container, space_id, steps=1, name="Stannar")
+    await _publish(db_container, flow.id)
+    await _add_run(
+        db_container,
+        flow_id=flow.id,
+        version=1,
+        status="completed",
+        tenant_id=admin_user.tenant_id,
+        user_id=admin_user.id,
+    )
+    chat_assistant, chat_session = await _authoring_chat(
+        db_container, flow_id=flow.id, space_id=space_id, admin_user=admin_user
+    )
+    kept_assistant, kept_session = await _authoring_chat(
+        db_container, flow_id=other.id, space_id=space_id, admin_user=admin_user
+    )
+
+    async with db_container() as container:
+        await container.flow_service().delete_flow(flow.id)
+
+    assert await _existing(
+        db_container, [step_assistant, chat_assistant, kept_assistant]
+    ) == {step_assistant, kept_assistant}
+    async with db_container() as container:
+        session = container.session()
+        sessions = [chat_session, kept_session]
+        assert set(
+            await session.scalars(
+                sa.select(Sessions.id).where(Sessions.id.in_(sessions))
+            )
+        ) == {kept_session}
+        assert set(
+            await session.scalars(
+                sa.select(Questions.session_id).where(
+                    Questions.session_id.in_(sessions)
+                )
+            )
+        ) == {kept_session}
+        assert set(
+            await session.scalars(
+                sa.select(FlowAuthoringChats.flow_id).where(
+                    FlowAuthoringChats.flow_id.in_([flow.id, other.id])
+                )
+            )
+        ) == {other.id}
 
 
 _X = "assistant"  # stands for the assistant under test in the cases below

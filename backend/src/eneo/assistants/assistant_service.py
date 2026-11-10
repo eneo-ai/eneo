@@ -2760,6 +2760,23 @@ class AssistantService:
             personal_layer=skill_plan.personal_layer,
         )
 
+    async def flow_authoring_chat_owner_id(self, assistant_id: UUID) -> UUID | None:
+        """The person whose flow authoring chat ``assistant_id`` answers in, or
+        None when it is no flow authoring chat's assistant in the caller's
+        tenant."""
+        import sqlalchemy as sa
+
+        from eneo.database.tables.flow_authoring_chats_table import (
+            FlowAuthoringChats,
+        )
+
+        return await self.repo.session.scalar(
+            sa.select(FlowAuthoringChats.user_id).where(
+                FlowAuthoringChats.assistant_id == assistant_id,
+                FlowAuthoringChats.tenant_id == self.user.tenant_id,
+            )
+        )
+
     async def is_help_assistant(self, assistant_id: UUID) -> bool:
         """Whether ``assistant_id`` currently fills a Help Assistant role.
 
@@ -3776,6 +3793,12 @@ class AssistantService:
             authoring_flow_id, authoring_editing = await self._authoring_chat_binding(
                 session_id=session_id, assistant_id=assistant_id
             )
+        if tool_assistant_id is not None and any(
+            assistant.id == tool_assistant_id and assistant.hidden
+            for assistant in space.assistants
+        ):
+            # Nor does a hidden assistant answer as another assistant's tool.
+            raise NotFoundException("Assistant not found.")
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
         # The personal chat is the personal space's default assistant — gated by

@@ -42,6 +42,7 @@ from eneo.authentication.endpoint_access import (
 )
 from eneo.database.database import AsyncSession
 from eneo.main.container.container import Container
+from eneo.main.exceptions import NotFoundException
 from eneo.main.models import (
     CursorPaginatedResponse,
     PaginatedResponse,
@@ -101,6 +102,21 @@ def _raise_if_flow_managed(assistant: "Assistant", assistant_id: UUID) -> None:
                 },
             },
         )
+
+
+async def _raise_if_flow_authoring_chat(
+    container: Container, assistant_id: UUID, *, owner_may_read: bool = False
+) -> None:
+    """A flow authoring chat's assistant is configured only through its chat.
+    Here it answers as an assistant that does not exist, so another person
+    does not learn of it either. With ``owner_may_read`` the chat's own person
+    reads it, as the chat panel does."""
+    owner_id = await container.assistant_service().flow_authoring_chat_owner_id(
+        assistant_id
+    )
+    if owner_id is None or (owner_may_read and owner_id == container.user().id):
+        return
+    raise NotFoundException()
 
 
 @router.post(
@@ -297,6 +313,7 @@ async def get_assistant(
     id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
+    await _raise_if_flow_authoring_chat(container, id, owner_may_read=True)
     return await _assistant_response(container, id)
 
 
@@ -322,6 +339,7 @@ async def get_assistant_widget_status(
     id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
+    await _raise_if_flow_authoring_chat(container, id, owner_may_read=True)
     assistant, _ = await container.assistant_service().get_assistant(id)
     return AssistantWidgetStatus(
         serves_active_widget=await container.widget_repo().serves_target(
@@ -699,6 +717,7 @@ async def update_assistant(
             detail="Skill binding changes require a session token.",
         )
 
+    await _raise_if_flow_authoring_chat(container, id)
     service = container.assistant_service()
     current_user = container.user()
 
@@ -805,6 +824,7 @@ async def delete_assistant(
     id: UUID,
     container: ApiKeyRevokingContainer,
 ):
+    await _raise_if_flow_authoring_chat(container, id)
     service = container.assistant_service()
     current_user = container.user()
 
@@ -1184,6 +1204,7 @@ async def transfer_assistant_to_space(
     transfer_req: TransferRequest,
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
+    await _raise_if_flow_authoring_chat(container, id)
     # Get assistant info BEFORE transfer to capture source space
     user = container.user()
     assistant_service = container.assistant_service()
@@ -1257,6 +1278,7 @@ async def transfer_assistant_to_space(
 async def get_prompts(
     id: UUID, container: Annotated[Container, Depends(get_container(with_user=True))]
 ):
+    await _raise_if_flow_authoring_chat(container, id, owner_may_read=True)
     service = container.assistant_service()
     assembler = container.prompt_assembler()
 
@@ -1282,6 +1304,7 @@ async def publish_assistant(
     published: bool,
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
+    await _raise_if_flow_authoring_chat(container, id)
     service = container.assistant_service()
     assembler = container.assistant_assembler()
     user = container.user()
@@ -1358,6 +1381,7 @@ async def get_assistant_mcp_servers(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """Get all MCP servers associated with an assistant."""
+    await _raise_if_flow_authoring_chat(container, id, owner_may_read=True)
     service = container.assistant_service()
     mcp_servers = await service.get_assistant_mcp_servers(id)
 
@@ -1393,6 +1417,7 @@ async def add_mcp_to_assistant(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """Add an MCP server to an assistant."""
+    await _raise_if_flow_authoring_chat(container, id)
     service = container.assistant_service()
     existing_assistant, _ = await service.get_assistant(assistant_id=id)
     _raise_if_flow_managed(existing_assistant, id)
@@ -1445,6 +1470,7 @@ async def remove_mcp_from_assistant(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     """Remove an MCP server from an assistant."""
+    await _raise_if_flow_authoring_chat(container, id)
     service = container.assistant_service()
 
     # Get context before removal for audit log

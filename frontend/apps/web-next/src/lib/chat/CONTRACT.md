@@ -401,7 +401,13 @@ machinery is not involved. `useChat` sees only `data-tool-approval` parts
 and ordinary tool parts.
 
 1. The request carries `require_tool_approval: true` (and `stream: true`;
-   group chats are rejected with `400`).
+   group chats are rejected with `400`). A tool of Eneo's own servers that
+   declares the MCP annotation `destructiveHint: true` (the flow chat's run,
+   review and publish tools) is asked about in the person's own streamed
+   conversation even without the flag. Where nobody can be asked (no stream,
+   a group chat, a visitor) such a call is not run: its tool part ends in
+   `tool-output-error "denied"` and the model is told why
+   (`reason: "confirmation_unavailable"`).
 2. When the model calls MCP tools that need approval the backend registers
    an `approval_id` (uuid, Redis, TTL `mcp_tool_approval_ttl_seconds`, 305 s
    by default) and emits `data-tool-approval` with `status: "pending"`,

@@ -1,3 +1,5 @@
+import type { ToolCallInfo } from "@/lib/chat/types";
+
 /**
  * Turn a raw tool identifier into a readable label: drop a server/ prefix,
  * swap separators for spaces, and capitalize. `search_knowledge_base` →
@@ -126,6 +128,36 @@ const FLOW_TOOLS = new Set([
   "read_review",
   "review_run"
 ]);
+
+/**
+ * The flows server's calls that wait for the person's approval, named by what
+ * they will do (`tool_flows_<tool>_approval`). A review is named by its
+ * action (the `action` values `review_run` takes); one it does not know reads
+ * neutrally.
+ */
+const FLOW_APPROVALS = new Set([
+  "run_flow",
+  "retry_run",
+  "cancel_run",
+  "review_run",
+  "publish_flow"
+]);
+const REVIEW_ACTIONS = new Set(["approve", "reject", "edit", "resume", "approve_and_continue"]);
+
+/**
+ * What a call waiting for approval will do, when it is one of Eneo's own
+ * flows calls ("Publicera flödet"); null for every other tool, an external
+ * server named "flows" included.
+ */
+export function approvalLabel(tool: ToolCallInfo, t: Translate): string | null {
+  if (tool.server_name !== "flows" || !isOwnServer(tool.is_internal)) return null;
+  if (!FLOW_APPROVALS.has(tool.tool_name)) return null;
+  const action = tool.arguments?.action;
+  if (tool.tool_name === "review_run" && typeof action === "string" && REVIEW_ACTIONS.has(action)) {
+    return t(`tool_flows_review_run_approval_${action}`);
+  }
+  return t(`tool_flows_${tool.tool_name}_approval`);
+}
 
 function argumentsOf(part: ToolLike): Record<string, unknown> {
   return part.input && typeof part.input === "object" && !Array.isArray(part.input)

@@ -11,6 +11,9 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
+from eneo.ai_models.completion_models.completion_models_repo import (
+    flow_authoring_chat_assistant,
+)
 from eneo.completion_models.presentation.completion_model_models import (
     ModelUsageDetail,
     ModelUsageStatistics,
@@ -288,7 +291,14 @@ class CompletionModelUsageService:
         if entity_type in {"app", "question"}:
             # Direct tenant_id field
             return table.tenant_id == tenant_id
-        elif entity_type in {"assistant", "service"}:
+        elif entity_type == "assistant":
+            # Via the owner, like services. A flow authoring chat's assistant
+            # is left out, as in the stored count: it does not keep its model.
+            return and_(
+                table.user_id.in_(select(Users.id).where(Users.tenant_id == tenant_id)),
+                ~flow_authoring_chat_assistant(),
+            )
+        elif entity_type == "service":
             # Via user relationship - need to join with Users table
             return table.user_id.in_(
                 select(Users.id).where(Users.tenant_id == tenant_id)
@@ -897,6 +907,7 @@ class CompletionModelUsageService:
                 and_(
                     Assistants.completion_model_id == model_id,
                     Spaces.tenant_id == tenant_id,
+                    ~flow_authoring_chat_assistant(),
                 )
             )
         )

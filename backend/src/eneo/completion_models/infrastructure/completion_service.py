@@ -1141,9 +1141,18 @@ class CompletionService:
                 approval_manager: Any | None = None
                 pending_approval_ids: set[str] = set()
                 approval_context = None
+                # A person can be asked in this turn: it streams in their own
+                # conversation, not in a group chat or a visitor's. A tool that
+                # requires confirmation is asked about here even when the
+                # request did not require approval, and refused elsewhere.
+                can_ask = (
+                    session is not None
+                    and self.tenant is not None
+                    and session.user_id is not None
+                    and session.group_chat_id is None
+                )
                 try:
-                    # Get approval manager if tool approval is required
-                    if require_tool_approval:
+                    if require_tool_approval or can_ask:
                         approval_manager = get_approval_manager(
                             redis_client=self.redis_client
                         )
@@ -1154,6 +1163,11 @@ class CompletionService:
                             )
                         if self.tenant is None:
                             raise ValueError("Tool approval requires tenant context")
+                    if (
+                        session is not None
+                        and self.tenant is not None
+                        and (require_tool_approval or can_ask)
+                    ):
                         approval_context = {
                             "tenant_id": self.tenant.id,
                             "user_id": session.user_id,

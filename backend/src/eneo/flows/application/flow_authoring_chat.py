@@ -20,6 +20,7 @@ import sqlalchemy as sa
 from fastapi import Request
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import set_committed_value
 
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.assistants.assistant import AssistantOrigin
@@ -72,36 +73,46 @@ def _session(container: Container) -> AsyncSession:
 
 logger = get_logger(__name__)
 
-_AUTHORING_BASICS = """Help the user configure this flow through the flow tools.
-read_flow's overview shows every step in short with what it reads and which later
-steps read its result; read a step in full (section steps) before changing it and
-the settings before changing the run form, and use the revision you read on the
-change. Preserve settings the user has not asked to change. The tools take the flow's own fields: input_source,
+_AUTHORING_BASICS = """Help the user configure this flow through the flow tools; they reach this
+flow only. read_flow's overview shows every step in short with what it reads and
+which later steps read its result; read a step in full (section steps) before
+changing it and the settings before changing the run form, and use the revision
+you read on the change. A read comes in pages: follow next_offset until it is
+null before you say you have read a whole value. Preserve settings the user has
+not asked to change. The tools take the flow's own fields: input_source,
 input_type, output_mode and output_type describe a step. Never invent step kinds.
 
-Speak to the person in plain language, as the flow editor does: name steps and
-their values with the reference forms, and describe what a step reads and gives.
-Never mention revisions, tool names, internal field keys (input_source,
+Speak to the person in plain language, as the flow editor does, and describe
+what a step reads and gives. Name a step as @[<user_description>](step:<id>)
+with the values read_flow gives, and a value a step produces by the reference a
+prompt reads it with ({{ step_N.output.text }} and the like, below): the editor
+shows both as pills that open the step, and the person's messages use the same
+forms. Never mention revisions, tool names, internal field keys (input_source,
 output_mode, metadata_json, output_contract and the like), the "core", the
 "kärnan" or other machinery in an answer. In Swedish a flow that is not
-published is "utkastet" or "ett utkast", never "draft". When a change is refused, say in plain
-words what stands in the way and offer the next step, for example: "Fältet
-diarienummer används fortfarande av steg 2, så det kan inte tas bort än. Ska jag
-ändra steg 2 först?" Quote a refusal's text only when it helps the person.
-When a tool call failed, the first sentence of your answer says that nothing
-was changed and why, in plain words; what you plan to do comes after it.
-When the tools that change the flow are absent, the chat is in the mode "Fråga":
-change nothing, say so in the first sentence, and say that the person switches
-the button "Fråga" beside the send button to "Redigera" and sends the request
-again; then say what you would change.
+published is "utkastet" or "ett utkast", never "draft". When a tool call failed
+or a change was refused, the first sentence of your answer says that nothing
+was changed and what stands in the way, in plain words; then offer the next
+step, for example: "Fältet diarienummer används fortfarande av steg 2, så det
+kan inte tas bort än. Ska jag ändra steg 2 först?" Quote a refusal's text only
+when it helps the person.
+When the tools that change the flow are absent, or a change is refused because
+edit mode is off, the chat is in the mode "Fråga": change nothing, say so in the
+first sentence, and say that the person switches the button "Fråga" beside the
+send button to "Redigera" and sends the request again; then say what you would
+change.
 A published flow (read_flow gives its published_version) is never changed by
 you, and you have no tool to unpublish it: say that the flow is published, that
 the "Avpublicera" button at the top of the flow page makes it a draft, and what
-you will change once it is, then wait. A refused edit means the person must unpublish the
-flow, enter edit mode or reload the current revision. Do not try to bypass it.
-Never ask for credentials or include credentials in tool arguments. Credentials
-are configured by the user in the editor. Running a flow is an explicit action;
+you will change once it is, then wait. Running a flow is an explicit action;
 only start, publish, cancel or approve a run when the user requests that action.
+Each of those tools (run_flow, retry_run, cancel_run, review_run, publish_flow)
+shows the person a confirmation in the chat before anything happens. So when
+the person has asked for the action, call the tool: do not first ask, in words
+or with a question, whether to go ahead, because the confirmation is that
+question. When the result says the call was denied, the person declined the
+confirmation or did not answer it and nothing happened: say that in one
+sentence and do not call the tool again unless they ask.
 Once run_flow has started a run, the chat shows the run itself beside your
 answer: its progress, step by step, and its result when it is done. So say in
 one sentence that the run is started and stop there; do not read the run and
@@ -112,6 +123,14 @@ the first step may read the run (input_source flow_input); a step can also read
 previous_step, all_previous_steps, an http_get request or a tool. A first step
 that takes uploads (input_type document, audio or file) sets
 input_config.runtime_input to {"enabled": true, "input_format": <its input_type>}.
+A first step whose flow cannot run without its upload sets runtime_input
+"required": true. When the person may type the material instead of uploading
+it, also add a text field to the run form and leave the upload optional. An AI
+step whose input may exceed its model's window can set
+input_config.long_material to {"mode": "digest"}: such input is read in parts
+with the step's own model and the answer is written over the notes; the step's
+result records the coverage, and partial coverage fails the step unless it has
+a review. A change to input_config replaces it whole, so keep its other keys.
 Run form fields are declared in metadata_json.form_schema.fields. output_mode is
 what the step delivers (pass_through returns the answer; http_post only on the
 last step; template_fill fills a Word template), output_type its form (text,
@@ -133,22 +152,6 @@ lose its source and ask what it should read instead, then change it as they
 answer.
 When two steps share an assistant, update_step with assistant_changes gives the
 edited step its own copy and leaves the other step's assistant as it was.
-An http_get step (input_source http_get) keeps its request in input_config and
-an http_post step in output_config, flat in this shape: {"url": "...",
-"auth": {"mode": "none"}, "timeout_seconds": 30, "response_format": "text" or
-"json"}; an http_post may add "body": {"mode": "auto"} or {"mode":
-"json_template", "template": "..."}. The step decides the method, so there is no
-method or headers key. The url and a body template may read
-{{ flow_input.<field> }} and earlier steps. Keep auth at {"mode": "none"}:
-credentials and custom headers are set by the user in the editor. An HTTP step
-without credentials is added through the tools like any other step; it does not
-depend on read_tool_options. An http_post delivery step posts its own answer,
-so give it input_source previous_step, the body {"mode": "auto"} (the step's
-result) and an instruction that only hands on what it reads, unchanged; the
-work belongs in the steps before it. A first step whose flow cannot run
-without its upload sets runtime_input "required": true. When the person may
-type the material instead of uploading it, also add a text field to the run
-form and leave the upload optional.
 A Word step (template_fill) has no AI: each Word field
 (output_config.bindings.<name>) gets the value it reads as it is, word for
 word, and the step's instruction is never used. When a field should hold a
@@ -158,11 +161,15 @@ read {{ step_N.output.structured.<field> }}. A file attached in the chat
 cannot become a Word step's template: no tool can attach it. Build the Word
 step and say that the person uploads the template in that step ("Ladda upp
 en Word-mall"); never say that a step uses a file attached in the chat.
-When a tool refuses a change, the refusal names
-what to fix: correct it and try again rather than concluding that the change
-is impossible (a read that would lose its step is the exception: ask, as
-above), and do not rely on an earlier refusal in this conversation without
-calling the tool again.
+When a tool refuses a change, the refusal names what to fix: correct it and try
+again rather than concluding that the change is impossible (a read that would
+lose its step is the exception: ask, as above), and do not rely on an earlier
+refusal in this conversation without calling the tool again. When a change is
+refused because the draft changed since you read it (code stale_revision, with
+the draft's current revision), read the flow again with read_flow and make only
+your own change on top of what is there now; never restore a field the person
+changed meanwhile. When the same change is refused as stale twice in a row,
+stop and tell the person.
 """
 
 _TASK_TO_FLOW = """You build flows; you do not do the work a flow is for. When the user
@@ -225,10 +232,10 @@ def _capabilities() -> str:
         + listing(_OUTPUT_MODES.items())
         + ". A result leaves a flow in these ways and no other: "
         + listing(_DELIVERIES.items())
-        + ". There is no email, no messaging, no calendar, no provider integration "
-        "(Microsoft 365, Gmail, Teams and the like) and no schedule, unless the space "
-        "offers an MCP tool for it (read_tool_options). When the person asks for a "
-        "delivery or a connection outside this, say in one sentence that a flow cannot "
+        + ". There is no email, no messaging, no calendar, no integration with another "
+        "product and no schedule, unless the space offers an MCP tool for it "
+        "(read_tool_options). When the person asks for a delivery or a connection "
+        "outside this, whatever words they use, say in one sentence that a flow cannot "
         "do it and offer the nearest real path: an HTTPS address the receiving system "
         "provides, picking the result up in Eneo, or an administrator adding a tool. "
         "Never offer it as a choice, never promise that the editor can be set up for "
@@ -251,9 +258,7 @@ the rest of the flow and ask for the address in plain words, for example
 "Vilken adress ska resultatet skickas till? Den börjar oftast med https://".
 Build the delivery step once the person gives it; when they do not have it,
 say that the delivery step is what is left and that it can be added here or
-in the editor once the address is known. E-post,
-SMS, Teams and the like are never choices, whatever words the person used;
-say that a flow cannot send them and go on. Ask one question at a time, in plain
+in the editor once the address is known. Ask one question at a time, in plain
 words, and build on the answer. Never ask what the flow, an uploaded file or
 an earlier answer already says. For a choice that does not change the shape
 (a step's name, the order of two independent checks, a wording), take a
@@ -262,13 +267,11 @@ can correct it. When a file is attached and it is not clear whether it is
 instructions to follow, an example of what a run gets as input or a template of
 the result, ask that first, with those as the options. Permission to send data
 anywhere or to start a run is never assumed: ask before it, every time.
-Every choice you offer names something the flow can be built to do, in the
-flow's own words, never a product or service the flow has no tool for. A
-choice is a complete answer, sent when it is clicked. When the answer
-must be typed (an address, a name, a number), do not ask with choices: ask in
-your reply in plain words, and the person answers in the chat; never offer a
-choice that stands for typing it. An answer already given is settled; the next
-question asks only for what is still missing.
+Put a choice in the flow's own words. A choice is a complete answer, sent when
+it is clicked: when the answer must be typed (an address, a name, a number),
+ask in your reply in plain words, never with choices, and the person answers in
+the chat. An answer already given is settled; the next question asks only for
+what is still missing.
 """
 
 _EXPECTED_RESULT = """Before building a flow from a description, and after changing what a
@@ -291,11 +294,14 @@ saved. A good example beats a long instruction: ask for one when the wanted
 result is structured and the person has not described its fields.
 """
 
-_COHERENT_CHANGES = """A change to one step reaches the steps that read it. After changing
-what a step gives (its name, the fields of its result, or the meaning of what
-it produces), read its readers in read_flow and change their instructions and
-reads in the same update_steps call, so no step is left reading a result that
-no longer means what it read. Leave the steps that do not read it untouched.
+_COHERENT_CHANGES = """The tool calls of one round run at the same time on the same revision, so
+make at most one call that changes the draft per round; a change that reaches
+several steps goes in one update_steps call. A change to one step reaches the
+steps that read it. After changing what a step gives (its name, the fields of
+its result, or the meaning of what it produces), read its readers in read_flow
+and change their instructions and reads in the same update_steps call, so no
+step is left reading a result that no longer means what it read. Leave the
+steps that do not read it untouched.
 Say in one or two sentences which steps the change covered and why.
 """
 
@@ -374,18 +380,34 @@ say that, and offer both.
 
 _CONNECTIONS = """A step that talks to a service (an http_get source, an http_post delivery,
 an MCP tool) shows its connection in read_flow: the address, the auth mode and
-whether the credential is stored, never the value. Build everything but the
-secret: the address, the method, the body and the auth mode the service needs,
-through update_step. The auth mode is declared with its credential left empty
-(api_key with its header_name, basic_auth with its username, bearer_token
-alone); a service that wants a key, token or password is never built with mode
-none. Never ask for a key, token or password in the chat and
-never put one in a tool argument; the chat only ever learns that a credential
-is stored. Then say the connection must be configured in the step, name the
-step as @[name](step:id) so its pill offers "Anslut tjänst", and ask with one
-question whether it is configured before you continue or start a run; when the
-person says it is, read the step again. A changed address keeps no stored
-credential on its own: say so. An MCP tool needs a server the space offers
+whether the credential is stored, never the value. An http_get step keeps its
+request in input_config and an http_post step in output_config, flat in this
+shape: {"url": "...", "auth": {...}, "timeout_seconds": 30, "custom_headers":
+[{"name": "...", "value": "...", "secret": false}], "response_format": "text"
+or "json"}; an http_post may add "body": {"mode": "auto"}, {"mode":
+"json_template" or "text_template", "template": "..."} or {"mode": "none"}. The
+step decides the method, so there is no method key. The url and a body template
+may read {{ flow_input.<field> }} and earlier steps. An HTTP step is added
+through the tools like any other step; it does not depend on read_tool_options.
+An http_post delivery step posts its own answer, so give it input_source
+previous_step, the body {"mode": "auto"} (the step's result) and an instruction
+that only hands on what it reads, unchanged; the work belongs in the steps
+before it.
+Build everything but the secret: the address, the body, the headers and the
+auth mode the service needs. auth is {"mode": "none"} only for a service that
+asks for no credential; otherwise declare its mode with the credential left
+out: {"mode": "bearer_token"}, {"mode": "api_key", "header_name": "X-API-Key"}
+or {"mode": "basic_auth", "username": "..."}. A secret header is declared as
+{"name": "...", "secret": true}, without its value. Never ask for a key, token
+or password in the chat and never put one in a tool argument: the person
+enters it in the step in the editor, read_flow shows it as missing until then,
+and the chat only ever learns that it is stored. Then say the connection must
+be configured in the step, name the step as @[name](step:id) so its pill offers
+"Anslut tjänst", and ask with one question whether it is configured before you
+continue or start a run; when the person says it is, read the step again. Once
+a credential is stored, the tools refuse any change to the config that holds
+it, the address included: say what should change and that the person changes
+it in the step in the editor. An MCP tool needs a server the space offers
 (read_tool_options); when it is not offered, say that an administrator must add
 the server or grant it to the space. Testing a connection is the person's
 action in the editor, never yours.
@@ -491,6 +513,13 @@ async def load_authoring_chat(
     flow_id: UUID | None = None,
     lock: bool = False,
 ) -> FlowAuthoringChats:
+    """The caller's chat for ``session_id``, after the binding's access checks.
+
+    Opening the chat, the start of a turn and every flow tool call load the
+    chat here, so this is where a chat left in edit mode returns to view mode
+    after a pause (``_leave_edit_mode_after_pause``): the chat opened, or a
+    turn started on a tab left open, after the pause offers no writing tools,
+    and its tool calls are refused a change."""
     user = container.user()
     await require_flows_enabled(container.feature_flag_service(), user.tenant_id)
     query = (
@@ -542,6 +571,7 @@ async def load_authoring_chat(
         )
         if chat is None:
             raise NotFoundException("Flow authoring chat not found.")
+    await _leave_edit_mode_after_pause(container, chat)
     return chat
 
 
@@ -776,7 +806,9 @@ def _public(
 
 # --- Conversations ----------------------------------------------------------
 
-ConversationReason = Literal["requested", "idle"]
+# Why a conversation started or the edit mode changed: the person asked, or
+# the chat had been idle.
+ChangeReason = Literal["requested", "idle"]
 
 
 def _now() -> datetime:
@@ -803,8 +835,67 @@ async def _idle_since_last_activity(
     return _now() - last_activity > idle
 
 
+async def _leave_edit_mode_after_pause(
+    container: Container, chat: FlowAuthoringChats
+) -> None:
+    """Turn edit mode off when the conversation has been idle, so a person who
+    comes back after the pause asks in view mode until they turn edit mode on.
+
+    ``mode_changed_at`` is left as it is: the idle measure counts the person's
+    own activity, so turning edit mode on after this still starts a new
+    conversation. The update matches only the chat as it was read, so a mode
+    change or a new conversation saved meanwhile is kept."""
+    if not chat.editing or not await _idle_since_last_activity(container, chat):
+        return
+    left = await _session(container).scalar(
+        sa.update(FlowAuthoringChats)
+        .where(
+            FlowAuthoringChats.tenant_id == chat.tenant_id,
+            FlowAuthoringChats.session_id == chat.session_id,
+            FlowAuthoringChats.editing.is_(True),
+            FlowAuthoringChats.mode_changed_at.is_not_distinct_from(
+                chat.mode_changed_at
+            ),
+        )
+        .values(editing=False)
+        .returning(FlowAuthoringChats.session_id)
+        .execution_options(synchronize_session=False)
+    )
+    if left is None:
+        return
+    # The row now says what the update wrote; the loaded chat says the same
+    # without being written again.
+    set_committed_value(chat, "editing", False)
+    await _audit_mode_change(container, chat, reason="idle")
+
+
+async def _audit_mode_change(
+    container: Container, chat: FlowAuthoringChats, *, reason: ChangeReason
+) -> None:
+    """The one audit entry for a change of edit mode, the person's or the
+    pause's, with the mode the chat is now in."""
+    user = container.user()
+    await container.audit_service().log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.FLOW_AUTHORING_MODE_CHANGED,
+        entity_type=EntityType.FLOW,
+        entity_id=chat.flow_id,
+        description="Changed flow authoring edit mode.",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=await container.flow_service().get_flow(chat.flow_id),
+            extra={
+                "session_id": str(chat.session_id),
+                "editing": chat.editing,
+                "reason": reason,
+            },
+        ),
+    )
+
+
 async def _start_conversation(
-    container: Container, chat: FlowAuthoringChats, *, reason: ConversationReason
+    container: Container, chat: FlowAuthoringChats, *, reason: ChangeReason
 ) -> None:
     """Point the chat at a new, empty conversation with the same assistant."""
     user = container.user()
@@ -850,14 +941,18 @@ async def get_or_create_authoring_chat(
     user = container.user()
     await require_flows_enabled(container.feature_flag_service(), user.tenant_id)
     access = await require_flow_edit_access(request, container, flow_id=flow_id)
-    await _session(container).scalar(
+    # A delete that committed while this waited for the lock leaves no flow.
+    locked = await _session(container).scalar(
         sa.select(Flows.id)
         .where(
             Flows.tenant_id == user.tenant_id,
             Flows.id == flow_id,
+            Flows.deleted_at.is_(None),
         )
         .with_for_update()
     )
+    if locked is None:
+        raise NotFoundException("Flow not found.")
     existing = await _session(container).scalar(
         sa.select(FlowAuthoringChats).where(
             FlowAuthoringChats.tenant_id == user.tenant_id,
@@ -938,7 +1033,6 @@ async def update_authoring_chat(
     chat = await load_authoring_chat(
         container, session_id=session_id, flow_id=flow_id, lock=True
     )
-    user = container.user()
     service = container.flow_service()
     if editing is not None:
         if expected_revision is None:
@@ -958,22 +1052,7 @@ async def update_authoring_chat(
                 await _start_conversation(container, chat, reason="idle")
             chat.editing = editing
             chat.mode_changed_at = _now()
-            await container.audit_service().log_async(
-                tenant_id=user.tenant_id,
-                actor_id=user.id,
-                action=ActionType.FLOW_AUTHORING_MODE_CHANGED,
-                entity_type=EntityType.FLOW,
-                entity_id=flow_id,
-                description="Changed flow authoring edit mode.",
-                metadata=AuditMetadata.standard(
-                    actor=user,
-                    target=await service.get_flow(flow_id),
-                    extra={
-                        "session_id": str(chat.session_id),
-                        "editing": editing,
-                    },
-                ),
-            )
+            await _audit_mode_change(container, chat, reason="requested")
             await _session(container).flush()
 
     space = await _load_space(container, chat)

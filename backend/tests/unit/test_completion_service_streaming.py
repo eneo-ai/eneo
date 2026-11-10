@@ -512,6 +512,7 @@ async def test_streaming_wrapper_cancels_pending_approval_ids():
     conversation_session = SimpleNamespace(
         id=uuid4(),
         user_id=uuid4(),
+        group_chat_id=None,
         assistant=SimpleNamespace(id=uuid4()),
         questions=[],
     )
@@ -623,6 +624,7 @@ async def test_generated_image_chunks_pass_through_tool_call_handling():
         session=SimpleNamespace(
             id=uuid4(),
             user_id=uuid4(),
+            group_chat_id=None,
             assistant=SimpleNamespace(id=uuid4()),
             questions=[],
         ),
@@ -681,6 +683,7 @@ async def test_adapter_events_without_text_reach_the_caller():
         session=SimpleNamespace(
             id=uuid4(),
             user_id=uuid4(),
+            group_chat_id=None,
             assistant=SimpleNamespace(id=uuid4()),
             questions=[],
         ),
@@ -766,6 +769,7 @@ def _conversation_session() -> SimpleNamespace:
     return SimpleNamespace(
         id=uuid4(),
         user_id=uuid4(),
+        group_chat_id=None,
         assistant=SimpleNamespace(id=uuid4()),
         questions=[],
     )
@@ -970,3 +974,74 @@ async def test_a_shielded_prepared_stream_cannot_delay_the_proxy_cleanup(
 
     assert cancelled
     assert proxy.closed
+
+
+class _ApprovalRecordingAdapter(_DummyAdapter):
+    """Records what the stream is given to ask the person with."""
+
+    def __init__(self, model: CompletionModel):
+        super().__init__(model)
+        self.stream_kwargs: dict[str, object] = {}
+
+    async def iterate_stream(self, **kwargs):
+        self.stream_kwargs = kwargs
+        yield Completion(response_type=ResponseType.TEXT, text="hello")
+
+
+async def _stream_kwargs(session: object | None) -> dict[str, object]:
+    completion_model = _make_completion_model()
+    adapter = _ApprovalRecordingAdapter(model=completion_model)
+    with patch(
+        "eneo.completion_models.infrastructure.completion_service.get_approval_manager",
+        return_value=AsyncMock(),
+    ):
+        response = await _service(adapter).get_response(
+            model=completion_model, text_input="hi", session=session, stream=True
+        )
+        async for _chunk in response.completion:
+            pass
+    return adapter.stream_kwargs
+
+
+async def test_a_streamed_turn_in_the_persons_conversation_can_ask_without_the_flag():
+    """A tool that requires confirmation is asked about in the person's own
+    conversation even when the request did not require approval."""
+    session = _conversation_session()
+
+    kwargs = await _stream_kwargs(session)
+
+    assert kwargs["require_tool_approval"] is False
+    assert kwargs["approval_manager"] is not None
+    context = kwargs["approval_context"]
+    assert isinstance(context, dict)
+    assert context["user_id"] == session.user_id
+    assert context["session_id"] == session.id
+
+
+@pytest.mark.parametrize(
+    "session",
+    [
+        None,
+        SimpleNamespace(
+            id=uuid4(),
+            user_id=uuid4(),
+            group_chat_id=uuid4(),
+            assistant=None,
+            questions=[],
+        ),
+        # A widget visitor's or a service key's conversation has no person.
+        SimpleNamespace(
+            id=uuid4(),
+            user_id=None,
+            group_chat_id=None,
+            assistant=None,
+            questions=[],
+        ),
+    ],
+    ids=["no conversation", "group chat", "no person"],
+)
+async def test_a_turn_without_a_person_to_ask_gets_nothing_to_ask_with(session):
+    kwargs = await _stream_kwargs(session)
+
+    assert kwargs["approval_manager"] is None
+    assert kwargs["approval_context"] is None

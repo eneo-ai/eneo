@@ -13,6 +13,7 @@ from eneo.assistants.assistant_update import (
     AssistantUpdateCaller,
     AssistantUpdateCommand,
 )
+from eneo.authentication.auth_models import ApiKeyScopeType, ApiKeyStateReasonCode
 from eneo.files.file_models import File
 from eneo.flows.application.flow_tool_options import (
     FlowToolOptions,
@@ -519,6 +520,25 @@ class FlowService:
                 flow_id=flow_id, tenant_id=self.user.tenant_id
             ),
         )
+        await self._delete_authoring_chats(flow_id)
+
+    async def _delete_authoring_chats(self, flow_id: UUID) -> None:
+        """Delete the authoring chats of a deleted flow with their hidden
+        assistants and conversations. A deleted flow is never restored and
+        its chats can no longer be opened. API keys bound to such an assistant
+        are revoked, as for every deleted assistant."""
+        assistant_ids = (
+            await self.assistant_service.repo.delete_flow_authoring_chat_assistants(
+                flow_id=flow_id, tenant_id=self.user.tenant_id
+            )
+        )
+        for assistant_id in assistant_ids:
+            await self.assistant_service.api_key_scope_revoker.revoke_scope(
+                scope_type=ApiKeyScopeType.ASSISTANT,
+                scope_id=assistant_id,
+                reason_code=ApiKeyStateReasonCode.SCOPE_REMOVED,
+                reason_text="Assistant deleted",
+            )
 
     async def create_flow_assistant(
         self,

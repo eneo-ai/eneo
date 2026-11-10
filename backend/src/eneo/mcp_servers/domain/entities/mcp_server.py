@@ -272,6 +272,7 @@ class MCPServerTool(Entity):
         created_at: Optional[datetime] = None,
         updated_at: Optional[datetime] = None,
         enabled_override: bool | None = None,
+        annotations: Optional[dict[str, Any]] = None,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
         self.mcp_server_id = mcp_server_id
@@ -281,6 +282,9 @@ class MCPServerTool(Entity):
         self.description = description
         self.input_schema = input_schema
         self.meta = meta
+        # The MCP tool annotations the tool's server declared when it was
+        # listed for this turn, explicit values only. Never persisted.
+        self.annotations = annotations
         # SHA-256 of the MCP App view HTML approved with this definition.
         self.ui_resource_sha256 = ui_resource_sha256
         self.is_enabled_by_default = is_enabled_by_default

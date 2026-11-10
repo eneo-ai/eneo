@@ -146,6 +146,23 @@ def _tool_call_timeout_for(server: MCPServer) -> int | None:
     return None
 
 
+def declares_destructive(tool: MCPServerTool) -> bool:
+    """Whether a tool definition sets the MCP annotation ``destructiveHint``
+    to true.
+
+    The tool's ``annotations`` are the protocol's ToolAnnotations, as a
+    mapping or as the protocol model, when the definition carries them. Only
+    an explicit true counts: the protocol reads an absent hint as destructive,
+    and most servers declare no annotations at all.
+    """
+    annotations = getattr(tool, "annotations", None)
+    if isinstance(annotations, Mapping):
+        hint = cast(Mapping[str, Any], annotations).get("destructiveHint")
+    else:
+        hint = getattr(annotations, "destructiveHint", None)
+    return hint is True
+
+
 class MCPProxySession:
     """
     Session-scoped proxy for aggregating multiple MCP servers.
@@ -221,6 +238,9 @@ class MCPProxySession:
 
         # Build tool registry from DB (no connections needed)
         self._tool_registry: dict[str, tuple[MCPServer, str, str | None]] = {}
+        # The registered tools whose definitions set the MCP annotation
+        # ``destructiveHint`` to true (see requires_confirmation).
+        self._destructive_tools: set[str] = set()
         # A model key keeps its protocol identity for the whole session, even
         # after discovery removes it. Replay and call evidence rely on this.
         self._tool_key_owners: dict[str, tuple[UUID, str]] = {}
@@ -273,6 +293,7 @@ class MCPProxySession:
         title: str | None,
         description: str | None,
         input_schema: dict[str, Any] | None,
+        destructive: bool = False,
     ) -> str | None:
         """Register one tool into the registry + LLM list.
 
@@ -280,6 +301,7 @@ class MCPProxySession:
         because its prefixed name collides with a tool from another server.
         Shared by the DB-backed initial build and the live refresh so prefixing,
         collision handling, and OpenAI-format conversion stay identical.
+        ``destructive`` records that the definition declares ``destructiveHint``.
         """
         tool_name_sanitized = self._sanitize_name(name)
         prefixed_name = f"{server_prefix}__{tool_name_sanitized}"
@@ -308,6 +330,8 @@ class MCPProxySession:
 
         self._tool_key_owners[prefixed_name] = owner
         self._tool_registry[prefixed_name] = (server, name, title)
+        if destructive:
+            self._destructive_tools.add(prefixed_name)
         self._tools_for_llm.append(
             {
                 "type": "function",
@@ -378,6 +402,7 @@ class MCPProxySession:
                     title=tool.display_name or tool.title,
                     description=tool.description,
                     input_schema=tool.input_schema,
+                    destructive=declares_destructive(tool),
                 )
 
         logger.debug(
@@ -410,6 +435,7 @@ class MCPProxySession:
         # server no longer exposes disappear).
         for prefixed in before:
             self._tool_registry.pop(prefixed, None)
+            self._destructive_tools.discard(prefixed)
         self._tools_for_llm = [
             t for t in self._tools_for_llm if t["function"]["name"] not in before
         ]
@@ -437,6 +463,7 @@ class MCPProxySession:
                 title=db_tool.display_name or db_tool.title,
                 description=db_tool.description,
                 input_schema=db_tool.input_schema,
+                destructive=declares_destructive(db_tool),
             )
             if prefixed is not None:
                 after.add(prefixed)
@@ -1010,6 +1037,21 @@ class MCPProxySession:
         if entry is None:
             return False
         return bool(entry[0].is_internal)
+
+    def requires_confirmation(self, prefixed_tool_name: str) -> bool:
+        """Whether every call of a tool waits for the person's decision.
+
+        True for a tool of one of Eneo's own servers whose definition sets
+        ``destructiveHint``: it acts beyond the conversation (starts a run,
+        publishes), so a call the model was steered into by text it read must
+        not run unasked. An external server's hint is that server's own claim
+        and decides nothing here: its tools are asked about when the request
+        requires approval. Unknown tools need no confirmation (they are never
+        run).
+        """
+        return prefixed_tool_name in self._destructive_tools and self.is_internal_tool(
+            prefixed_tool_name
+        )
 
     def is_bundled_tool(self, prefixed_tool_name: str) -> bool:
         """Whether a prefixed tool belongs to a server built into Eneo.

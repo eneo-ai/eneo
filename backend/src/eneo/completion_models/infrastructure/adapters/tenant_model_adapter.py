@@ -615,6 +615,148 @@ def _tool_metadata_arguments(tool: ToolCallMetadata) -> dict[str, Any] | None:
     return cast(dict[str, Any] | None, cast(Any, tool).arguments)
 
 
+# The tool result of a call that needs the person's confirmation in a turn
+# that cannot ask for it: a request without a stream, a group chat, a widget
+# visitor or a service key. The call is not run.
+CONFIRMATION_UNAVAILABLE_RESULT: dict[str, Any] = {
+    "denied": True,
+    "reason": "confirmation_unavailable",
+    "message": (
+        "This action needs the person's confirmation, and this request cannot "
+        "ask for it, so it was not done. Tell the person to do it themselves "
+        "from the page where it is managed."
+    ),
+}
+
+
+# What the model is told when the person was asked to confirm a call and it
+# did not run: they declined it, or the confirmation timed out unanswered.
+CONFIRMATION_DECLINED_MESSAGE = (
+    "The person declined this action in the chat, so it was not done. Do not "
+    "repeat it unless they ask for it again."
+)
+CONFIRMATION_TIMEOUT_MESSAGE = (
+    "The person did not answer the confirmation in time, so this action was "
+    "not done. Do not repeat it unless they ask for it again."
+)
+
+
+def _denial_payload(
+    *, unasked: bool, confirmation: bool, timed_out: bool
+) -> dict[str, Any]:
+    """The tool result of a call that did not run. A call that needed the
+    person's confirmation says who said no, so the model does not report the
+    refusal as the tool's own: nobody could be asked (``unasked``), or the
+    person declined or did not answer in time."""
+    if unasked:
+        return dict(CONFIRMATION_UNAVAILABLE_RESULT)
+    if confirmation:
+        return {
+            "denied": True,
+            "message": (
+                CONFIRMATION_TIMEOUT_MESSAGE
+                if timed_out
+                else CONFIRMATION_DECLINED_MESSAGE
+            ),
+        }
+    return {"denied": True}
+
+
+def _approval_round(
+    mcp_proxy: "MCPProxySession",
+    tool_metadata: list[ToolCallMetadata],
+    *,
+    require_tool_approval: bool,
+) -> tuple[set[str], set[str], list[ToolCallMetadata]]:
+    """Who decides each call of one tool round: the ids of the calls that run
+    without asking, the ids of the calls that need the person's
+    confirmation, and the calls to ask the person about.
+
+    Tools of Eneo's own loopback servers (knowledge, files, built-in
+    providers) are core capabilities and run unasked, unless the tool
+    requires confirmation: such a call always waits for the person's
+    decision. External MCP servers are asked about only when the request
+    requires approval, even when both kinds are called in one round.
+    Internal is a property of the server entity, not of its name, so an
+    external server named like an internal one still goes through approval.
+    """
+    internal: set[str] = set()
+    confirmation: set[str] = set()
+    for tm in tool_metadata:
+        if tm.tool_call_id is None or tm.mcp_tool_name is None:
+            continue
+        if mcp_proxy.requires_confirmation(tm.mcp_tool_name):
+            confirmation.add(tm.tool_call_id)
+        elif mcp_proxy.is_internal_tool(tm.mcp_tool_name):
+            internal.add(tm.tool_call_id)
+    to_ask = [
+        tm
+        for tm in tool_metadata
+        if tm.tool_call_id in confirmation
+        or (require_tool_approval and tm.tool_call_id not in internal)
+    ]
+    asked = {tm.tool_call_id for tm in to_ask}
+    unasked = {
+        tm.tool_call_id
+        for tm in tool_metadata
+        if tm.tool_call_id is not None and tm.tool_call_id not in asked
+    }
+    return unasked, confirmation, to_ask
+
+
+def _unasked_round(
+    tool_metadata: list[ToolCallMetadata], refused: set[str]
+) -> list[ToolCallMetadata]:
+    """The snapshot of a round nobody was asked about: every call approved
+    to run, except the ``refused`` ones, whose confirmation nobody can give."""
+    return [
+        ToolCallMetadata(
+            server_name=tm.server_name,
+            tool_name=tm.tool_name,
+            title=tm.title,
+            arguments=_tool_metadata_arguments(tm),
+            tool_call_id=tm.tool_call_id,
+            approved=False if tm.tool_call_id in refused else tm.approved,
+            result_status="denied" if tm.tool_call_id in refused else "approved",
+            mcp_tool_name=tm.mcp_tool_name,
+            purpose=tm.purpose,
+            is_internal=tm.is_internal,
+            is_bundled=tm.is_bundled,
+        )
+        for tm in tool_metadata
+    ]
+
+
+def _unasked_call_metadata(
+    mcp_proxy: "MCPProxySession",
+    call: ProviderToolCall,
+    arguments: dict[str, Any] | None,
+) -> ToolCallMetadata:
+    """The record of a call refused with CONFIRMATION_UNAVAILABLE_RESULT."""
+    info = mcp_proxy.get_tool_info(call.name)
+    if info:
+        server_name, tool_name, title = info
+    elif "__" in call.name:
+        server_name, tool_name = call.name.split("__", 1)
+        title = None
+    else:
+        server_name, tool_name, title = "", call.name, None
+    return ToolCallMetadata(
+        server_name=server_name,
+        tool_name=tool_name,
+        title=title,
+        arguments=arguments,
+        tool_call_id=call.call_id,
+        approved=False,
+        result_status="denied",
+        result=json.dumps(CONFIRMATION_UNAVAILABLE_RESULT),
+        mcp_tool_name=call.name,
+        purpose=mcp_proxy.get_tool_purpose(call.name),
+        is_internal=mcp_proxy.is_internal_tool(call.name),
+        is_bundled=mcp_proxy.is_bundled_tool(call.name),
+    )
+
+
 TOOL_RESULT_BUDGET_NOTICE = (
     "Tool-result budget for this turn is exhausted; this result was withheld. "
     "Stop calling tools and answer now using the information already gathered."
@@ -2071,6 +2213,10 @@ class TenantModelAdapter(CompletionModelAdapter):
 
                     results: list[dict[str, Any]] = []
                     proxy_calls: list[tuple[str, dict[str, Any]]] = []
+                    # A request without a stream cannot ask the person, so a
+                    # call that needs their confirmation is refused, never run.
+                    run_calls: list[ProviderToolCall] = []
+                    unasked_calls: list[ProviderToolCall] = []
                     if external_calls:
                         assert mcp_proxy is not None
                         allowed_tools = mcp_proxy.get_allowed_tool_names()
@@ -2080,14 +2226,19 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     "The model requested an unauthorized tool.",
                                     code="unauthorized_tool",
                                 )
+                            if mcp_proxy.requires_confirmation(call.name):
+                                unasked_calls.append(call)
+                            else:
+                                run_calls.append(call)
                         proxy_calls = [
                             (
                                 call.name,
                                 self._parse_tool_arguments(call.arguments),
                             )
-                            for call in external_calls
+                            for call in run_calls
                         ]
-                        results = await mcp_proxy.call_tools_parallel(proxy_calls)
+                        if proxy_calls:
+                            results = await mcp_proxy.call_tools_parallel(proxy_calls)
 
                     # Add tool results to messages. Resource content blocks are
                     # captured as McpToolReferences (buffered on completion for
@@ -2098,7 +2249,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                     # completion) so the caller can persist arguments + result
                     # for replay on later turns, matching the streaming path.
                     for call, (_, call_args), result in zip(
-                        external_calls, proxy_calls, results
+                        run_calls, proxy_calls, results
                     ):
                         content_list = cast(
                             list[dict[str, Any]], result.get("content") or []
@@ -2167,6 +2318,22 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     else None
                                 ),
                             )
+                        )
+                    for call in unasked_calls:
+                        assert mcp_proxy is not None
+                        try:
+                            unasked_args = self._parse_tool_arguments(call.arguments)
+                        except OpenAIException:
+                            unasked_args = None
+                        messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": call.call_id,
+                                "content": json.dumps(CONFIRMATION_UNAVAILABLE_RESULT),
+                            }
+                        )
+                        collected_tool_metadata.append(
+                            _unasked_call_metadata(mcp_proxy, call, unasked_args)
                         )
                     if external_calls:
                         assert mcp_proxy is not None
@@ -2533,9 +2700,11 @@ class TenantModelAdapter(CompletionModelAdapter):
             stream: Stream from prepare_streaming()
             context: Optional conversation context (for logging)
             model_kwargs: Optional model parameters (for logging)
-            require_tool_approval: Whether MCP tool calls need user approval
+            require_tool_approval: Whether external MCP tool calls need user approval
             approval_manager: Manager for tool approval flow
-            approval_context: Context map with tenant_id, user_id, session_id, assistant_id
+            approval_context: Context map with tenant_id, user_id, session_id, assistant_id.
+                With a manager, it means the person can be asked: a tool that
+                requires confirmation is asked about, and refused without them.
             pending_approval_ids: Mutable set to track approvals for disconnect cleanup
 
         Yields:
@@ -3049,30 +3218,25 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 _tool_metadata_arguments(tm)
                             )
 
-                    # Approval flow. Tools of Eneo's own loopback servers
-                    # (knowledge, files, built-in providers) are core
-                    # capabilities: approval controls apply only to external
-                    # MCP servers, even when both kinds are called in one
-                    # round. Internal is a property of the server entity, not
-                    # of its name, so an external server named like an
-                    # internal one still goes through approval.
-                    internal_call_ids = {
-                        tm.tool_call_id
-                        for tm in tool_metadata
-                        if tm.tool_call_id is not None
-                        and tm.mcp_tool_name is not None
-                        and mcp_proxy.is_internal_tool(tm.mcp_tool_name)
-                    }
-                    approval_metadata = [
-                        tm
-                        for tm in tool_metadata
-                        if tm.tool_call_id not in internal_call_ids
-                    ]
+                    # Approval flow: who decides each call (_approval_round).
+                    auto_approved_ids, confirmation_call_ids, approval_metadata = (
+                        _approval_round(
+                            mcp_proxy,
+                            tool_metadata,
+                            require_tool_approval=require_tool_approval,
+                        )
+                    )
                     decision_map: dict[str, tuple[bool, str | None]] = {
-                        call_id: (True, None) for call_id in internal_call_ids
+                        call_id: (True, None) for call_id in auto_approved_ids
                     }
                     timed_out = False
-                    if require_tool_approval and approval_manager and approval_metadata:
+                    # Calls refused because nobody can be asked in this turn.
+                    unasked_call_ids: set[str] = set()
+                    if (
+                        approval_manager
+                        and approval_metadata
+                        and (require_tool_approval or approval_context is not None)
+                    ):
                         if approval_context is None:
                             raise OpenAIException(
                                 "Missing approval context for tool approval flow"
@@ -3178,27 +3342,21 @@ class TenantModelAdapter(CompletionModelAdapter):
                             if not decision_map.get(tc["id"] or "", (False, None))[0]
                         ]
                     else:
+                        # Nobody can be asked in this turn: a call that needs
+                        # the person's decision is refused and never runs.
+                        unasked_call_ids = confirmation_call_ids
                         yield Completion(
                             response_type=ResponseType.TOOL_CALL,
-                            tool_calls_metadata=[
-                                ToolCallMetadata(
-                                    server_name=tm.server_name,
-                                    tool_name=tm.tool_name,
-                                    title=tm.title,
-                                    arguments=_tool_metadata_arguments(tm),
-                                    tool_call_id=tm.tool_call_id,
-                                    approved=tm.approved,
-                                    result_status="approved",
-                                    mcp_tool_name=tm.mcp_tool_name,
-                                    purpose=tm.purpose,
-                                    is_internal=tm.is_internal,
-                                    is_bundled=tm.is_bundled,
-                                )
-                                for tm in tool_metadata
-                            ],
+                            tool_calls_metadata=_unasked_round(
+                                tool_metadata, unasked_call_ids
+                            ),
                         )
-                        approved_tcs = tool_calls
-                        denied_tcs: list[_AccumulatedToolCall] = []
+                        approved_tcs = [
+                            tc for tc in tool_calls if tc["id"] not in unasked_call_ids
+                        ]
+                        denied_tcs: list[_AccumulatedToolCall] = [
+                            tc for tc in tool_calls if tc["id"] in unasked_call_ids
+                        ]
 
                     # Add assistant message with tool calls to conversation
                     if not activation or not activation.assistant_message_appended:
@@ -3341,7 +3499,11 @@ class TenantModelAdapter(CompletionModelAdapter):
                         denial_reason = decision_map.get(tc["id"] or "", (False, None))[
                             1
                         ]
-                        denial_payload: dict[str, Any] = {"denied": True}
+                        denial_payload = _denial_payload(
+                            unasked=tc["id"] in unasked_call_ids,
+                            confirmation=tc["id"] in confirmation_call_ids,
+                            timed_out=timed_out,
+                        )
                         if denial_reason:
                             denial_payload["user_reason"] = denial_reason
                         messages.append(

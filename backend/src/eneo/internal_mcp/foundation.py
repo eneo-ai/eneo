@@ -255,6 +255,11 @@ async def build_ephemeral_server(
             ),
             input_schema=tool.inputSchema,
             is_enabled_by_default=True,
+            annotations=(
+                tool.annotations.model_dump(exclude_none=True)
+                if tool.annotations is not None
+                else None
+            ),
         )
         for tool in await mcp.list_tools()
         if tool.name not in exclude_tools

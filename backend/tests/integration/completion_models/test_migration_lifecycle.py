@@ -9,24 +9,34 @@ These tests verify end-to-end that:
 5. Already-migrated models are rejected for re-migration
 6. Lifecycle cleanup removes migrated or soft-deleted models only when safe
 7. Migration history remains readable after cleanup via tenant/migration history
+8. A flow authoring chat's assistant is no use of its model, while the chat's
+   questions stay in the model's usage
 """
 
 from datetime import datetime
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import delete, select
 
+from eneo.ai_models.completion_models.completion_models_repo import (
+    CompletionModelsRepository,
+)
 from eneo.completion_models.infrastructure.model_cleanup_worker import (
     cleanup_orphaned_models,
 )
 from eneo.database.tables.ai_models_table import CompletionModels
 from eneo.database.tables.app_template_table import AppTemplates
+from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.assistant_template_table import AssistantTemplates
 from eneo.database.tables.completion_model_migration_history_table import (
     CompletionModelMigrationHistory,
 )
+from eneo.database.tables.flow_authoring_chats_table import FlowAuthoringChats
+from eneo.database.tables.flow_tables import Flows
 from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
+from eneo.database.tables.spaces_table import Spaces
 from eneo.main.exceptions import ValidationException
 
 
@@ -582,3 +592,168 @@ class TestLifecycleCleanup:
             record = (await session.execute(stmt)).scalar_one()
             assert record.from_model_name == old_model_name
             assert record.from_provider_type == "openai"
+
+
+async def _org_space_id(session, admin_user) -> UUID:
+    space_id = await session.scalar(
+        select(Spaces.id).where(
+            Spaces.tenant_id == admin_user.tenant_id,
+            Spaces.user_id.is_(None),
+            Spaces.tenant_space_id.is_(None),
+        )
+    )
+    assert space_id is not None
+    return space_id
+
+
+async def _flow_authoring_chat(
+    session, *, admin_user, completion_model_id: UUID
+) -> tuple[UUID, UUID]:
+    """A flow authoring chat on a new flow whose hidden assistant answers with
+    ``completion_model_id``. Returns the assistant's and the conversation's
+    ids."""
+    space_id = await _org_space_id(session, admin_user)
+    flow = Flows(
+        name=f"Flöde {uuid4().hex[:8]}",
+        tenant_id=admin_user.tenant_id,
+        space_id=space_id,
+    )
+    assistant = Assistants(
+        name="Flöde",
+        user_id=admin_user.id,
+        space_id=space_id,
+        completion_model_id=completion_model_id,
+        logging_enabled=False,
+        is_default=False,
+        published=False,
+        hidden=True,
+    )
+    session.add_all([flow, assistant])
+    await session.flush()
+    conversation = Sessions(
+        name="Flöde", user_id=admin_user.id, assistant_id=assistant.id
+    )
+    session.add(conversation)
+    await session.flush()
+    session.add(
+        FlowAuthoringChats(
+            session_id=conversation.id,
+            assistant_id=assistant.id,
+            tenant_id=admin_user.tenant_id,
+            space_id=space_id,
+            user_id=admin_user.id,
+            flow_id=flow.id,
+        )
+    )
+    await session.flush()
+    return assistant.id, conversation.id
+
+
+class TestFlowAuthoringChatModel:
+    """A flow authoring chat's assistant takes a usable model of its space each
+    time the chat is opened. Its model is therefore no use of the model, while
+    what the chat asked the model stays in the model's usage."""
+
+    async def test_the_chat_neither_blocks_nor_keeps_a_deleted_model(
+        self,
+        db_container,
+        completion_model_factory,
+        assistant_factory,
+        admin_user,
+    ):
+        model_id = None
+
+        async with db_container() as container:
+            session = container.session()
+            model = await completion_model_factory(
+                session, "gpt-flow-chat-only", provider="openai"
+            )
+            used = await completion_model_factory(
+                session, "gpt-flow-chat-and-assistant", provider="openai"
+            )
+            chat_assistant_id, _ = await _flow_authoring_chat(
+                session, admin_user=admin_user, completion_model_id=model.id
+            )
+            await _flow_authoring_chat(
+                session, admin_user=admin_user, completion_model_id=used.id
+            )
+            await assistant_factory(session, "Ordinary", used.id)
+            repo = CompletionModelsRepository(session=session)
+
+            for tenant_id in (admin_user.tenant_id, None):
+                assert not await repo.has_active_references(model.id, tenant_id)
+                assert await repo.has_active_references(used.id, tenant_id)
+
+            await repo.delete_model(model.id)
+
+            assert (
+                await session.scalar(
+                    select(Assistants.completion_model_id).where(
+                        Assistants.id == chat_assistant_id
+                    )
+                )
+                is None
+            )
+            model_id = model.id
+
+        async with db_container() as container:
+            cleanup_result = await cleanup_orphaned_models(container)
+
+            assert any(
+                removed["id"] == str(model_id)
+                for removed in cleanup_result["removed_models"]
+            )
+
+    async def test_usage_counts_the_chats_questions_but_not_its_assistant(
+        self,
+        db_container,
+        completion_model_factory,
+        assistant_factory,
+        admin_user,
+    ):
+        async with db_container() as container:
+            session = container.session()
+            model = await completion_model_factory(
+                session, "gpt-flow-chat-usage", provider="openai"
+            )
+            ordinary = await assistant_factory(
+                session,
+                "Ordinary",
+                model.id,
+                space_id=await _org_space_id(session, admin_user),
+            )
+            chat_assistant_id, chat_session_id = await _flow_authoring_chat(
+                session, admin_user=admin_user, completion_model_id=model.id
+            )
+            session.add(
+                Questions(
+                    question="Bygg ett flöde",
+                    answer="Klart",
+                    num_tokens_question=10,
+                    num_tokens_answer=5,
+                    tenant_id=admin_user.tenant_id,
+                    assistant_id=chat_assistant_id,
+                    session_id=chat_session_id,
+                    completion_model_id=model.id,
+                )
+            )
+            await session.flush()
+
+            usage_service = container.completion_model_usage_service()
+            await usage_service.recalculate_all_usage_stats_in_transaction(
+                admin_user.tenant_id
+            )
+            stats = await usage_service.get_model_usage_statistics(
+                model.id, admin_user.tenant_id
+            )
+            details = await usage_service.get_model_usage_details(
+                model_id=model.id,
+                tenant_id=admin_user.tenant_id,
+                entity_type="assistant",
+                limit=100,
+            )
+
+            assert (stats.assistants_count, stats.questions_count) == (1, 1)
+            assert details is not None
+            assert details.total == 1
+            assert [item.entity_id for item in details.items] == [ordinary.id]

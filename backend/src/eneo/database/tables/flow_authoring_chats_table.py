@@ -37,7 +37,8 @@ class FlowAuthoringChats(BaseCrossReference):
         ForeignKey(CompletionModels.id, ondelete="SET NULL"), nullable=True
     )
     reasoning_effort: Mapped[Optional[str]] = mapped_column(nullable=True)
-    # When edit mode was last turned on or off.
+    # When the person last turned edit mode on or off. The return to view
+    # mode after a pause leaves it, so the pause still counts.
     mode_changed_at: Mapped[Optional[datetime]] = mapped_column(
         TIMESTAMP(timezone=True), nullable=True
     )

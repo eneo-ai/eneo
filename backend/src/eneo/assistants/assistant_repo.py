@@ -32,6 +32,7 @@ from eneo.database.tables.assistant_template_table import AssistantTemplates
 from eneo.database.tables.capabilities_table import AssistantCapabilities
 from eneo.database.tables.collections_table import CollectionsTable
 from eneo.database.tables.document_templates_table import AssistantDocumentTemplates
+from eneo.database.tables.flow_authoring_chats_table import FlowAuthoringChats
 from eneo.database.tables.flow_tables import FlowSteps
 from eneo.database.tables.group_chats_table import (
     GroupChatsAssistantsMapping,
@@ -599,6 +600,30 @@ class AssistantRepository:
         )
         return {row.id: row.icon_id for row in rows}
 
+    async def delete_flow_authoring_chat_assistants(
+        self, *, flow_id: UUID, tenant_id: UUID
+    ) -> list[UUID]:
+        """Delete the hidden assistants of ``flow_id``'s authoring chats.
+
+        The database removes what hangs on them: their conversations with
+        the questions in them, and the chat bindings. Returns the deleted
+        assistants' ids.
+        """
+        rows = await self.session.scalars(
+            sa.delete(Assistants)
+            .where(
+                sa.exists().where(
+                    FlowAuthoringChats.assistant_id == Assistants.id,
+                    FlowAuthoringChats.flow_id == flow_id,
+                    FlowAuthoringChats.tenant_id == tenant_id,
+                )
+            )
+            .where(Assistants.hidden.is_(True))
+            .where(Assistants.origin == AssistantOrigin.USER.value)
+            .returning(Assistants.id)
+        )
+        return sorted(rows.all())
+
     async def add(self, assistant: Assistant):
         completion_model_id = (
             assistant.completion_model.id
@@ -675,9 +700,13 @@ class AssistantRepository:
         )
 
         if assistant_id is not None:
+            # A named assistant is listed hidden or not, as a space load
+            # builds the hidden assistant it is asked for.
             query = query.where(Assistants.id == assistant_id)
-        elif space_id is not None:
-            query = query.where(Assistants.space_id == space_id)
+        else:
+            query = query.where(Assistants.hidden.is_(False))
+            if space_id is not None:
+                query = query.where(Assistants.space_id == space_id)
 
         if search_query is not None:
             query = query.filter(Assistants.name.like(f"%{search_query}%"))
@@ -709,6 +738,7 @@ class AssistantRepository:
             sa.select(Assistants)
             .join(Users)
             .where(Users.tenant_id == tenant_id)
+            .where(Assistants.hidden.is_(False))
             .order_by(Assistants.created_at)
         )
 

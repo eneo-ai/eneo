@@ -116,6 +116,7 @@ def _session() -> SimpleNamespace:
     return SimpleNamespace(
         id=uuid4(),
         user_id=uuid4(),
+        group_chat_id=None,
         assistant=SimpleNamespace(id=uuid4()),
         questions=[],
     )

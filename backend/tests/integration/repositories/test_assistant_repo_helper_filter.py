@@ -54,6 +54,7 @@ async def _insert_assistant(
     space_id: UUID,
     published: bool = False,
     name: str | None = None,
+    hidden: bool = False,
 ) -> UUID:
     assistant_id = uuid4()
     await session.execute(
@@ -66,6 +67,7 @@ async def _insert_assistant(
             logging_enabled=False,
             is_default=False,
             published=published,
+            hidden=hidden,
         )
     )
     return assistant_id
@@ -306,3 +308,33 @@ async def test_published_does_not_override_helper_exclusion(db_container, admin_
 
         assert published_helper_id not in for_user_ids
         assert published_helper_id not in for_tenant_ids
+
+
+async def test_hidden_assistant_is_listed_only_when_named(db_container, admin_user):
+    """A hidden assistant answers only where it was made for, such as a flow
+    authoring chat, so the user and tenant lists leave it out. A caller that
+    names it, as an assistant-scoped key does, still reads it."""
+    async with db_container() as container:
+        session = container.session()
+
+        org_space_id = await _get_org_space(session, tenant_id=admin_user.tenant_id)
+        hidden_id = await _insert_assistant(
+            session, owner_user_id=admin_user.id, space_id=org_space_id, hidden=True
+        )
+        visible_id = await _insert_assistant(
+            session, owner_user_id=admin_user.id, space_id=org_space_id
+        )
+
+        await session.flush()
+
+        repo = container.assistant_repo()
+        for_user_ids = {a.id for a in await repo.get_for_user(admin_user.id)}
+        in_space_ids = {
+            a.id for a in await repo.get_for_user(admin_user.id, space_id=org_space_id)
+        }
+        for_tenant_ids = {a.id for a in await repo.get_for_tenant(admin_user.tenant_id)}
+        named = await repo.get_for_user(admin_user.id, assistant_id=hidden_id)
+
+        assert hidden_id not in for_user_ids | in_space_ids | for_tenant_ids
+        assert visible_id in for_user_ids & in_space_ids & for_tenant_ids
+        assert [a.id for a in named] == [hidden_id]

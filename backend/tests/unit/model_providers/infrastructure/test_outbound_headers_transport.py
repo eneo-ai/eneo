@@ -337,6 +337,9 @@ class _FakeMCPProxy:
     def is_internal_tool(self, prefixed_tool_name: str) -> bool:
         return False
 
+    def requires_confirmation(self, prefixed_tool_name: str) -> bool:
+        return False
+
     def is_bundled_tool(self, prefixed_tool_name: str) -> bool:
         return False
 

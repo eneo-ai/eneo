@@ -17,6 +17,7 @@ async def test_update_assistant_rejects_flow_managed_mutation():
     assistant_id = uuid4()
     flow_id = uuid4()
     service = AsyncMock()
+    service.flow_authoring_chat_owner_id.return_value = None
     service.get_assistant.return_value = (
         SimpleNamespace(origin=AssistantOrigin.FLOW_MANAGED, managing_flow_id=flow_id),
         [],
@@ -44,6 +45,7 @@ async def test_delete_assistant_rejects_flow_managed_mutation():
     assistant_id = uuid4()
     flow_id = uuid4()
     service = AsyncMock()
+    service.flow_authoring_chat_owner_id.return_value = None
     service.get_assistant.return_value = (
         SimpleNamespace(origin=AssistantOrigin.FLOW_MANAGED, managing_flow_id=flow_id),
         [],

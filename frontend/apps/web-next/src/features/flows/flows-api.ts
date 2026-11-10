@@ -123,8 +123,10 @@ export function unpublishFlow(
 
 /**
  * The caller's chat for the flow, created on first use (one per user and
- * flow). It is a POST, so it is read once per visit and not refetched in the
- * background.
+ * flow). Reading it again returns the same chat, but the server turns edit
+ * mode off when the chat has been idle: it is read again when the window
+ * regains focus (and by the panel after each answer), so a tab left open
+ * shows Fråga before the next message is typed.
  */
 export function authoringChatQueryOptions(flowId: string) {
   return queryOptions({
@@ -134,7 +136,7 @@ export function authoringChatQueryOptions(flowId: string) {
         browserApi.POST("/api/v1/flows/{id}/authoring-chat/", { params: { path: { id: flowId } } })
       ),
     staleTime: Infinity,
-    refetchOnWindowFocus: false,
+    refetchOnWindowFocus: "always",
     retry: false
   });
 }

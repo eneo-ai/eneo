@@ -301,7 +301,8 @@ class SessionRepository:
         tenant_id: UUID,
         user_group_ids: Collection[UUID],
     ) -> list[ChatPartnerAccess]:
-        """Every assistant and group chat the user has conversations with.
+        """Every assistant and group chat the user has conversations with,
+        hidden assistants left out.
 
         Each comes with the facts of its space that decide whether the user
         can still open it: the space's kind and default assistant, the user's
@@ -369,6 +370,14 @@ class SessionRepository:
                 ),
             )
             .where(Spaces.tenant_id == tenant_id)
+            # A hidden assistant, such as a flow authoring chat's, is reached
+            # where it was made for, so its conversations are no partner here.
+            .where(
+                sa.or_(
+                    partners.c.group_chat_id.is_not(None),
+                    Assistants.hidden.is_(False),
+                )
+            )
         )
         rows = (await self.session.execute(query)).all()
 

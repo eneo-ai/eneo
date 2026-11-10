@@ -22,6 +22,7 @@ from eneo.database.tables.app_table import Apps
 from eneo.database.tables.app_template_table import AppTemplates
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.assistant_template_table import AssistantTemplates
+from eneo.database.tables.flow_authoring_chats_table import FlowAuthoringChats
 from eneo.database.tables.model_providers_table import ModelProviders
 from eneo.database.tables.service_table import Services
 from eneo.database.tables.spaces_table import SpacesCompletionModels
@@ -30,6 +31,16 @@ from eneo.main.exceptions import UniqueException
 from eneo.main.models import IdAndName
 
 COMPLETION_MODEL_DB_WRITE_EXCLUDE = {"token_limit", "supported_model_kwargs"}
+
+
+def flow_authoring_chat_assistant() -> sa.ColumnElement[bool]:
+    """Whether the assistant of the enclosing query is a flow authoring chat's.
+
+    Such an assistant does not keep a model of its own: each time its chat is
+    opened, the chat gives it a usable model of its space, so a model that
+    goes away never strands it. Its model is therefore not a use of the model.
+    """
+    return sa.exists().where(FlowAuthoringChats.assistant_id == Assistants.id)
 
 
 class CompletionModelsRepository:
@@ -223,6 +234,15 @@ class CompletionModelsRepository:
                 SpacesCompletionModels.completion_model_id == id
             )
         )
+        # A flow authoring chat's assistant lets go of the model, so that it
+        # does not hold the soft-deleted row once the cleanup can remove it.
+        # The chat gives it another model when it is opened next.
+        await self.session.execute(
+            sa.update(Assistants)
+            .where(Assistants.completion_model_id == id)
+            .where(flow_authoring_chat_assistant())
+            .values(completion_model_id=None)
+        )
 
         stmt = (
             sa.update(CompletionModels)
@@ -286,11 +306,14 @@ class CompletionModelsRepository:
         # containers for resources (assistants, apps, services); a model
         # "enabled" on a space without any resource using it is just
         # configuration. The cross-reference rows are cleaned up in
-        # `delete_model`.
+        # `delete_model`. A flow authoring chat's assistant is not counted
+        # either: it takes another model when its chat is opened, and
+        # `delete_model` releases its reference.
         assistant_stmt = (
             sa.select(sa.func.count())
             .select_from(Assistants)
             .where(Assistants.completion_model_id == model_id)
+            .where(~flow_authoring_chat_assistant())
         )
         service_stmt = (
             sa.select(sa.func.count())

@@ -383,10 +383,23 @@ FLOW_ROUTE_AUDIT_CONTRACTS: dict[str, FlowAuditContract] = {
         ),
     ),
     "get_or_create_flow_authoring_chat": _configurable(
-        ActionType.FLOW_AUTHORING_CHAT_CREATED,
+        (
+            ActionType.FLOW_AUTHORING_CHAT_CREATED,
+            ActionType.FLOW_AUTHORING_MODE_CHANGED,
+        ),
         owner="flow_authoring_chat.get_or_create_authoring_chat",
-        metadata_keys=(*_FLOW_METADATA, "assistant_id", "session_id"),
-        idempotency="one event when the chat is created; reopening it emits none",
+        metadata_keys=(
+            *_FLOW_METADATA,
+            "assistant_id",
+            "session_id",
+            "editing",
+            "reason",
+        ),
+        idempotency=(
+            "one event when the chat is created; reopening it emits none, except "
+            "one mode change when a chat left in edit mode returns to view mode "
+            "after a pause"
+        ),
         actor="signed-in user; API keys are refused",
     ),
     "update_flow_authoring_chat": _configurable(
@@ -407,15 +420,30 @@ FLOW_ROUTE_AUDIT_CONTRACTS: dict[str, FlowAuditContract] = {
         ),
         idempotency=(
             "one event per mode or model change, and one when entering edit "
-            "mode after a pause starts a conversation; an unchanged value emits none"
+            "mode after a pause starts a conversation; an unchanged value emits "
+            "none; a chat left in edit mode returns to view mode after a pause "
+            "with one mode change first"
         ),
         actor="signed-in user; API keys are refused",
     ),
     "start_flow_authoring_conversation": _configurable(
-        ActionType.FLOW_AUTHORING_CONVERSATION_STARTED,
+        (
+            ActionType.FLOW_AUTHORING_CONVERSATION_STARTED,
+            ActionType.FLOW_AUTHORING_MODE_CHANGED,
+        ),
         owner="flow_authoring_chat.start_authoring_conversation",
-        metadata_keys=(*_FLOW_METADATA, "session_id", "previous_session_id", "reason"),
-        idempotency="one event per request; each request starts a new conversation",
+        metadata_keys=(
+            *_FLOW_METADATA,
+            "session_id",
+            "previous_session_id",
+            "editing",
+            "reason",
+        ),
+        idempotency=(
+            "one event per request; each request starts a new conversation, after "
+            "one mode change when a chat left in edit mode returns to view mode "
+            "after a pause"
+        ),
         actor="signed-in user; API keys are refused",
     ),
     "delete_flow": _required_transaction(

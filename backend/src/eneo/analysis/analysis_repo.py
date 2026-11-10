@@ -64,6 +64,14 @@ def _exclude_helper_run_sessions(
     )
 
 
+def _exclude_hidden_assistants(query: sa.Select[Any]) -> sa.Select[Any]:
+    """Leave out hidden assistants, which answer only where they were made
+    for (a flow's steps, a flow authoring chat): an assistant count shown to
+    admins counts the assistants people see. Their sessions and questions
+    stay in the session and question figures, which measure model use."""
+    return query.where(Assistants.hidden.is_(False))
+
+
 class AssistantMetadataRow(NamedTuple):
     """Lightweight row for assistant metadata (id and created_at only)."""
 
@@ -158,6 +166,8 @@ class AnalysisRepository:
             stmt = _exclude_helper_run_sessions(stmt, Sessions.id)
         elif table == Questions:
             stmt = _exclude_helper_run_sessions(stmt, Questions.session_id)
+        elif table == Assistants:
+            stmt = _exclude_hidden_assistants(stmt)
 
         count = await self.session.scalar(stmt)
 
@@ -176,13 +186,12 @@ class AnalysisRepository:
         return await self._get_count(Questions, tenant_id=tenant_id)
 
     async def get_tenant_counts(self, tenant_id: UUID) -> tuple[int, int, int]:
-        assistant_count = (
+        assistant_count = _exclude_hidden_assistants(
             sa.select(sa.func.count())
             .select_from(Assistants)
             .join(Users, Assistants.user_id == Users.id)
             .where(Users.tenant_id == tenant_id)
-            .scalar_subquery()
-        )
+        ).scalar_subquery()
         session_count = _exclude_helper_run_sessions(
             sa.select(sa.func.count())
             .select_from(Sessions)
@@ -706,7 +715,7 @@ class AnalysisRepository:
         This is optimized for the metadata-statistics endpoint - only fetches
         the columns that are actually needed instead of full assistant objects.
         """
-        stmt = (
+        stmt = _exclude_hidden_assistants(
             sa.select(Assistants.id, Assistants.created_at)
             .join(Users, Assistants.user_id == Users.id)
             .where(Users.tenant_id == tenant_id)
@@ -813,7 +822,7 @@ class AnalysisRepository:
         time_zone: str | None = None,
     ) -> list[CountBucketRow]:
         bucket = _hour_bucket(Assistants.created_at, time_zone)
-        stmt = (
+        stmt = _exclude_hidden_assistants(
             sa.select(bucket, sa.func.count().label("total"))
             .join(Users, Assistants.user_id == Users.id)
             .where(Users.tenant_id == tenant_id)
@@ -983,7 +992,7 @@ class AnalysisRepository:
 
         This ensures active_count <= trackable_count, avoiding >100% percentages.
         """
-        stmt = (
+        stmt = _exclude_hidden_assistants(
             sa.select(sa.func.count(sa.distinct(Sessions.assistant_id)))
             .join(Assistants, Sessions.assistant_id == Assistants.id)
             .join(Users, Assistants.user_id == Users.id)
@@ -1010,7 +1019,7 @@ class AnalysisRepository:
 
         These are the assistants that can be tracked for analytics.
         """
-        stmt = (
+        stmt = _exclude_hidden_assistants(
             sa.select(sa.func.count())
             .select_from(Assistants)
             .join(Users, Assistants.user_id == Users.id)

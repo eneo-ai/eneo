@@ -45,6 +45,10 @@ class _FakeMCPProxy:
         del prefixed_tool_name
         return False
 
+    def requires_confirmation(self, prefixed_tool_name: str) -> bool:
+        del prefixed_tool_name
+        return False
+
     def is_bundled_tool(self, prefixed_tool_name: str) -> bool:
         del prefixed_tool_name
         return False
@@ -189,6 +193,58 @@ async def test_get_response_executes_non_streaming_tool_round():
     assert completion.provider_response_id == "resp-final"
     assert mocked_acompletion.await_count == 2
     assert mcp_proxy.call_count == 1
+
+
+class _ConfirmingMCPProxy(_FakeMCPProxy):
+    """One of Eneo's own servers whose only tool requires confirmation."""
+
+    def is_internal_tool(self, prefixed_tool_name: str) -> bool:
+        del prefixed_tool_name
+        return True
+
+    def requires_confirmation(self, prefixed_tool_name: str) -> bool:
+        del prefixed_tool_name
+        return True
+
+
+async def test_a_request_without_a_stream_refuses_a_call_that_requires_confirmation():
+    from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
+        CONFIRMATION_UNAVAILABLE_RESULT,
+    )
+
+    mcp_proxy = _ConfirmingMCPProxy()
+    mocked_acompletion = AsyncMock(
+        side_effect=[
+            _response(
+                response_id="resp-initial",
+                tool_calls=[_tool_call()],
+                finish_reason="tool_calls",
+            ),
+            _response(response_id="resp-final", content="final answer"),
+        ]
+    )
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        mocked_acompletion,
+    ):
+        completion = await _make_adapter().get_response(
+            context=SimpleNamespace(), model_kwargs={}, mcp_proxy=mcp_proxy
+        )
+
+    assert mcp_proxy.call_count == 0
+    follow_up_messages = mocked_acompletion.await_args_list[1].kwargs["messages"]
+    (tool_message,) = [m for m in follow_up_messages if m.get("role") == "tool"]
+    assert tool_message["tool_call_id"] == "call_1"
+    assert json.loads(tool_message["content"]) == CONFIRMATION_UNAVAILABLE_RESULT
+    (call,) = completion.tool_calls_metadata or []
+    assert (call.approved, call.result_status, call.is_internal) == (
+        False,
+        "denied",
+        True,
+    )
+    assert call.arguments == {"q": "hello"}
+    assert completion.text == "final answer"
 
 
 @pytest.mark.asyncio

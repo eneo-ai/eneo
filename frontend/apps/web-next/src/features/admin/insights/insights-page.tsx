@@ -251,7 +251,8 @@ function AssistantActivityRows({
           >
             <div className="min-w-0">
               <p className="truncate font-medium">
-                {assistantNames.get(row.assistantId) ?? row.assistantId}
+                {/* The list leaves out hidden assistants (a flow's chat) and deleted ones. */}
+                {assistantNames.get(row.assistantId) ?? t("unknown_assistant")}
               </p>
               <p className="text-muted-foreground text-sm">
                 {t("insights_assistant_row_counts", {

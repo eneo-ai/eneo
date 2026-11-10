@@ -987,6 +987,19 @@ describe("FlowPage", () => {
     expect(await screen.findByRole("button", { name: "Ny konversation" })).toBeTruthy();
   });
 
+  it("shows Fråga after an answer when the server left edit mode after a pause, and says so", async () => {
+    const chat = { flow_id: "flow-1", assistant_id: "assistant-chat", session_id: "session-1" };
+    state.chat = ok({ ...chat, editing: true });
+    renderPage();
+    expect(await screen.findByRole("button", { name: "Läge: Redigera" })).toBeTruthy();
+
+    state.chat = ok({ ...chat, editing: false });
+    fireEvent.click(screen.getByRole("button", { name: "Svar klart" }));
+
+    expect(await screen.findByRole("button", { name: "Läge: Fråga" })).toBeTruthy();
+    expect(state.announce).toHaveBeenCalledWith(messages.flows_chat_mode_ask_after_pause);
+  });
+
   it("holds the definition, the runs and the chat in one row of tabs below lg", async () => {
     setViewport(NARROW_WINDOW);
     renderPage();

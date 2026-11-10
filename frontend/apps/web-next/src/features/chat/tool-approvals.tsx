@@ -11,9 +11,10 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import type { ToolApprovalData, ToolCallInfo } from "@/lib/chat/types";
-import { humanizeToolName, readableArguments } from "./tool-presentation";
+import { approvalLabel, humanizeToolName, readableArguments } from "./tool-presentation";
 
 export type ToolDecision = "approved" | "denied";
+type Translate = ReturnType<typeof useTranslations>;
 type DecisionItem = { tool_call_id: string; approved: boolean };
 
 /** A decision's key: a provider may reuse a call id in a later turn, an approval id is new each time. */
@@ -110,9 +111,22 @@ export function pendingTools(
   return data.tools.filter((tool) => tool.tool_call_id && !toolDecision(tool, data, decisions));
 }
 
-/** What a tool is called for people: its title, else its server and id. */
-export function toolLabel(tool: ToolCallInfo): string {
-  return tool.title?.trim() || `${tool.server_name}/${tool.tool_name}`;
+/**
+ * What a tool is called for people: what one of Eneo's own calls will do,
+ * else its title, else its server and id.
+ */
+export function toolLabel(tool: ToolCallInfo, t: Translate): string {
+  return approvalLabel(tool, t) ?? (tool.title?.trim() || `${tool.server_name}/${tool.tool_name}`);
+}
+
+/**
+ * Whether a call is named by what it will do ("Publicera flödet"). Such a
+ * name reads as itself, so the sentences around it take their action form
+ * ("Godkänn: Publicera flödet"), and its arguments (ids, revisions) say
+ * nothing a person decides by: they stay behind "Visa alla argument".
+ */
+export function namesAction(tool: ToolCallInfo, t: Translate): boolean {
+  return approvalLabel(tool, t) !== null;
 }
 
 /**
@@ -125,7 +139,7 @@ export function ToolArguments({ tool }: { tool: ToolCallInfo }) {
   const args = tool.arguments ?? {};
   const entries = Object.entries(args);
   if (entries.length === 0) return null;
-  const summary = readableArguments(args);
+  const summary = namesAction(tool, t) ? null : readableArguments(args);
   return (
     <div className="flex min-w-0 flex-col gap-1">
       {summary && (
@@ -180,7 +194,13 @@ function DecisionPair({
     <div className="grid grid-cols-2 gap-2">
       <Button
         variant="secondary"
-        label={many ? t("tool_deny_all") : t("chat_tool_deny_named", { tool: toolLabel(one) })}
+        label={
+          many
+            ? t("tool_deny_all")
+            : t(namesAction(one, t) ? "chat_tool_deny_action" : "chat_tool_deny_named", {
+                tool: toolLabel(one, t)
+              })
+        }
         width="100%"
         isLoading={running === `${control}:deny`}
         isInterruptible
@@ -193,7 +213,9 @@ function DecisionPair({
         label={
           many
             ? t("tool_accept_all", { count: tools.length })
-            : t("chat_tool_accept_named", { tool: toolLabel(one) })
+            : t(namesAction(one, t) ? "chat_tool_accept_action" : "chat_tool_accept_named", {
+                tool: toolLabel(one, t)
+              })
         }
         width="100%"
         isLoading={running === `${control}:accept`}
@@ -238,8 +260,9 @@ export function ToolDecisionBar({
   const one = pending[0];
   if (!one) return null;
   const many = pending.length > 1;
-  const summary = !many && one.arguments ? readableArguments(one.arguments) : null;
-  const subject = many ? t("chat_tool_count", { count: pending.length }) : toolLabel(one);
+  const action = !many && namesAction(one, t);
+  const summary = !many && !action && one.arguments ? readableArguments(one.arguments) : null;
+  const subject = many ? t("chat_tool_count", { count: pending.length }) : toolLabel(one, t);
   return (
     <>
       <section
@@ -255,7 +278,10 @@ export function ToolDecisionBar({
             <h2 id={headingId} className="text-[15px] leading-5 font-semibold text-pretty">
               {many
                 ? t("chat_tool_wants_many", { assistant: assistantName, count: pending.length })
-                : t("chat_tool_wants", { assistant: assistantName, tool: toolLabel(one) })}
+                : t(action ? "chat_tool_wants_action" : "chat_tool_wants", {
+                    assistant: assistantName,
+                    tool: subject
+                  })}
             </h2>
             {summary && (
               // Two lines at most, so the pair stays in reach; Granska has it all.
@@ -267,7 +293,9 @@ export function ToolDecisionBar({
               <Button
                 ref={reviewButton}
                 variant="ghost"
-                label={t("chat_tool_review_named", { tool: subject })}
+                label={t(action ? "chat_tool_review_action" : "chat_tool_review_named", {
+                  tool: subject
+                })}
                 aria-haspopup="dialog"
                 endContent={<ChevronRight aria-hidden="true" className="size-4" />}
                 onClick={() => setReviewing(true)}
@@ -303,10 +331,12 @@ export function ToolDecisionBar({
           </div>
           {pending.map((tool) => (
             <section key={tool.tool_call_id} className="flex flex-col gap-2">
-              {many && <h3 className="text-[15px] font-semibold">{toolLabel(tool)}</h3>}
-              <span className="text-ax-text-secondary font-mono text-[13px] wrap-anywhere">
-                {tool.server_name}/{tool.tool_name}
-              </span>
+              {many && <h3 className="text-[15px] font-semibold">{toolLabel(tool, t)}</h3>}
+              {!namesAction(tool, t) && (
+                <span className="text-ax-text-secondary font-mono text-[13px] wrap-anywhere">
+                  {tool.server_name}/{tool.tool_name}
+                </span>
+              )}
               <ToolArguments tool={tool} />
             </section>
           ))}

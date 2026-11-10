@@ -56,7 +56,10 @@ function useSaveChat(chat: FlowAuthoringChat) {
   const queryClient = useQueryClient();
   return async (save: () => Promise<FlowAuthoringChat>) => {
     const updated = await save();
-    queryClient.setQueryData(flowKeys.authoringChat(chat.flow_id), updated);
+    const key = flowKeys.authoringChat(chat.flow_id);
+    // A read of the chat still on its way began before this change: it must not land after it.
+    await queryClient.cancelQueries({ queryKey: key });
+    queryClient.setQueryData(key, updated);
     void queryClient.invalidateQueries({ queryKey: ["assistants", chat.assistant_id] });
     return updated;
   };

@@ -5,12 +5,12 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Literal, cast
 from uuid import UUID
 
 from mcp.server.fastmcp import Context, FastMCP
-from mcp.types import CallToolResult, TextContent
+from mcp.types import CallToolResult, TextContent, ToolAnnotations
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,47 +32,24 @@ logger = logging.getLogger(__name__)
 mcp = FastMCP(
     name="Eneo Flows",
     stateless_http=True,
-    instructions="""Configure the flow bound to this chat. Tools cannot be pointed at another flow.
-Read the current saved revision and configuration before editing; use that revision
-on every change. Keep unchanged fields. Every change goes through the flow's own
-validation, permissions, classification and audit. The tools that change the flow
-are offered only while the chat is in the mode "Redigera"; when they are absent,
-change nothing, say so first, and say that the person switches the button "Fråga"
-beside the send button to "Redigera" and sends the request again.
-read_flow's overview (the default) lists every step in short with what it reads and
-which later steps read it; section "steps" with steps=[...] gives those steps in
-full with their prompts, section "settings" the flow without its steps. Each step
-lists its connections (an HTTP source or delivery, an MCP tool) with the address,
-the auth mode and whether the credential is stored, never the value. Read a step
-in full before changing it. A change that reaches several steps goes in one
-update_steps call. When the person shows an example of what a step should give as
-JSON, contract_from_example gives the step the contract the example implies; the
-example itself is not kept.
-Read pages until next_offset is null before claiming you reviewed the whole value.
-A flow delivers its result in Eneo, as a file, or by posting it to an HTTPS
-address (http_post on the last step); it cannot send e-mail, messages or anything
-else, and a question never offers those as choices.
-Credentials belong in the editor and must never be requested or placed in tools.
-An HTTP step's config (input_config for http_get, output_config for http_post)
-holds url, auth, timeout_seconds, body ({"mode": "auto"|"json_template"|
-"text_template"|"none", "template"}), custom_headers ([{"name", "value", "secret"}])
-and response_format ("text"|"json"). auth is {"mode": "none"},
-{"mode": "bearer_token"}, {"mode": "api_key", "header_name": "X-API-Key"} or
-{"mode": "basic_auth", "username": "..."}: declare the mode the service needs and
-leave token, key and password out; the person enters them in the editor, and until
-then read_flow shows the connection's credential as missing. A secret custom header
-is declared as {"name": "...", "secret": true} without its value.
-A completion step whose input may exceed its model's window can set
-input_config.long_material = {"mode": "digest"}: such input is read in parts with
-the step's own model and the answer is written over the notes. The step result
-records the coverage; partial coverage fails the step unless it has a review.
-Changing input_config replaces it whole, so keep its other keys.
-Name a step in an answer as @[<user_description>](step:<id>) with the values
-read_flow gives, and a value a step produces as the reference the flow resolves,
-{{step_<step_order>.output.text}} or {{step_<step_order>.output.structured.<field>}};
-the editor shows both as pills that open the step. The person's messages use the
-same forms.
-""",
+    instructions="Configure the flow bound to this chat.",
+)
+
+# The MCP annotations of the tools. Reading tools change nothing. Draft edits
+# change only the draft, gated by edit mode. A tool that acts beyond the
+# draft (starts, retries or cancels a run, decides a review, publishes)
+# declares destructiveHint, and the chat asks the person before each call.
+_READS = ToolAnnotations(readOnlyHint=True)
+_EDITS_DRAFT = ToolAnnotations(readOnlyHint=False, destructiveHint=False)
+_ACTS = ToolAnnotations(readOnlyHint=False, destructiveHint=True)
+
+# How the audit entries of a change made through the chat name their origin.
+AUTHORING_CHAT_ORIGIN = "authoring_chat"
+_CHAT_AUDIT = {"origin": AUTHORING_CHAT_ORIGIN}
+
+_STALE_REVISION_MESSAGE = (
+    "The draft changed since you read it. Read the flow again with read_flow "
+    "and reapply only your own change on top of what is there."
 )
 
 
@@ -127,31 +104,43 @@ async def _call(
     from eneo.flows.application.flow_authoring_operations import (
         authoring_transaction,
     )
+    from eneo.flows.flow_api_error_code import FlowApiErrorCode
 
     try:
-        # Refusals are caught outside this block so failed writes roll back;
-        # the change's audit entries are logged once it has committed.
+        # Refusals are caught outside the transaction so failed writes roll
+        # back; the change's audit entries are logged once it has committed.
         async with internal_tool_context(ctx, transactional=False) as scope:
             if scope.session_id is None:
                 raise NotFoundException("Flow authoring chat not found.")
-            async with authoring_transaction(scope.container):
-                chat = await load_authoring_chat(
-                    scope.container,
-                    session_id=scope.session_id,
-                    assistant_id=scope.assistant_id,
-                    lock=editing or changes_draft,
-                )
-                if editing or changes_draft:
-                    await require_authoring_edit(
-                        scope.container, chat, draft=changes_draft
+            try:
+                async with authoring_transaction(scope.container):
+                    chat = await load_authoring_chat(
+                        scope.container,
+                        session_id=scope.session_id,
+                        assistant_id=scope.assistant_id,
+                        lock=editing or changes_draft,
                     )
-                request = scoped_request(chat.space_id)
-                if not changes_draft:
-                    return await operation(scope.container, chat, request)
-                before = await _draft_suggestions(scope.container, chat.flow_id)
-                result = await operation(scope.container, chat, request)
-                return await _with_introduced(
-                    result, scope.container, chat.flow_id, before
+                    if editing or changes_draft:
+                        await require_authoring_edit(
+                            scope.container, chat, draft=changes_draft
+                        )
+                    request = scoped_request(chat.space_id)
+                    if not changes_draft:
+                        return await operation(scope.container, chat, request)
+                    before = await _draft_suggestions(scope.container, chat.flow_id)
+                    result = await operation(scope.container, chat, request)
+                    return await _with_introduced(
+                        result, scope.container, chat.flow_id, before
+                    )
+            except BadRequestException as exc:
+                if exc.code != FlowApiErrorCode.STALE_REVISION:
+                    raise
+                # The editor's refusal tells a person to reload the page; the
+                # model gets the revision to read the draft again at.
+                return _refusal(
+                    _STALE_REVISION_MESSAGE,
+                    code=FlowApiErrorCode.STALE_REVISION.value,
+                    current_revision=await _current_revision(scope),
                 )
     except (
         BadRequestException,
@@ -160,28 +149,69 @@ async def _call(
         UnauthorizedException,
         ValidationError,
     ) as exc:
-        details = (
-            exc.errors(include_input=False, include_context=False)
-            if isinstance(exc, ValidationError)
-            else None
+        return _error_result(exc)
+
+
+def _refusal(
+    message: str, *, code: str | None, errors: Any = None, **fields: Any
+) -> CallToolResult:
+    """A refusal the model reads: its message, its code, the fields the core's
+    models reject (``errors``) and any further ``fields``."""
+    return CallToolResult(
+        isError=True,
+        content=[
+            TextContent(
+                type="text",
+                text=json.dumps(
+                    {"message": message, "code": code, "errors": errors, **fields},
+                    default=str,
+                ),
+            )
+        ],
+    )
+
+
+def _error_result(
+    exc: BadRequestException
+    | ConflictException
+    | NotFoundException
+    | UnauthorizedException
+    | ValidationError,
+) -> CallToolResult:
+    """The refusal of a tool call that raised ``exc``."""
+    if isinstance(exc, ValidationError):
+        errors = exc.errors(include_input=False, include_context=False)
+        return _refusal(invalid_message(errors), code=None, errors=errors)
+    return _refusal(str(exc), code=getattr(exc, "code", None))
+
+
+async def _current_revision(scope: Any) -> int | None:
+    """The draft revision of the chat's flow now, read in a transaction of
+    its own after a refused change has rolled back; None when it cannot be
+    read, which is logged by its kind only."""
+    from eneo.flows.application.flow_authoring_chat import (
+        load_authoring_chat,
+        scoped_request,
+    )
+    from eneo.flows.application.flow_authoring_operations import get_flow
+
+    try:
+        async with cast(AsyncSession, scope.container.session()).begin():
+            chat = await load_authoring_chat(
+                scope.container,
+                session_id=scope.session_id,
+                assistant_id=scope.assistant_id,
+            )
+            flow = await get_flow(
+                chat.flow_id, scoped_request(chat.space_id), scope.container
+            )
+            return flow.draft_revision
+    except Exception as exc:  # noqa: BLE001 - the refusal is reported either way
+        logger.warning(
+            "The draft revision could not be read after a stale change",
+            extra={"error_type": type(exc).__name__},
         )
-        message = invalid_message(details) if details is not None else str(exc)
-        return CallToolResult(
-            isError=True,
-            content=[
-                TextContent(
-                    type="text",
-                    text=json.dumps(
-                        {
-                            "message": message,
-                            "code": getattr(exc, "code", None),
-                            "errors": details,
-                        },
-                        default=str,
-                    ),
-                )
-            ],
-        )
+        return None
 
 
 def invalid_message(errors: Any) -> str:
@@ -298,29 +328,7 @@ async def _call_runtime(
         UnauthorizedException,
         ValidationError,
     ) as exc:
-        errors = (
-            exc.errors(include_input=False, include_context=False)
-            if isinstance(exc, ValidationError)
-            else None
-        )
-        return CallToolResult(
-            isError=True,
-            content=[
-                TextContent(
-                    type="text",
-                    text=json.dumps(
-                        {
-                            "message": "The submitted configuration is invalid."
-                            if errors is not None
-                            else str(exc),
-                            "code": getattr(exc, "code", None),
-                            "errors": errors,
-                        },
-                        default=str,
-                    ),
-                )
-            ],
-        )
+        return _error_result(exc)
 
 
 def _runtime_result(value: Any, *, flow_id: UUID, offset: int = 0) -> CallToolResult:
@@ -355,7 +363,7 @@ _OVERVIEW_STEP_FIELDS = frozenset(
 )
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READS)
 async def read_flow(
     ctx: Context,
     section: FlowSection = "overview",
@@ -437,36 +445,43 @@ async def read_flow(
     return await _call(ctx, operation)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_EDITS_DRAFT)
 async def update_flow_settings(
     ctx: Context, expected_revision: int, changes: dict[str, Any]
 ) -> CallToolResult:
-    """Change flow name, description or metadata_json, preserving all other fields.
-    To rename a run form field, send the new metadata_json with
-    form_field_renames ({"old name": "new name"}): the steps' reads of the field
-    follow it. A field a step reads cannot be removed."""
+    """Change the flow's name, description or metadata_json; what changes
+    leaves out keeps its saved value. metadata_json is merged into the saved
+    one key by key: a top-level key you send replaces that key whole (send
+    its full value, for example the whole form_schema), a key sent as null is
+    removed, and keys you leave out are kept. To rename a run form field,
+    send the new form_schema in metadata_json with form_field_renames
+    ({"old name": "new name"}): the steps' reads of the field follow it. A
+    field a step reads cannot be removed."""
 
     async def operation(container, chat, request):
         from eneo.flows.api.flow_models import FlowEditorUpdateRequest
-        from eneo.flows.application.flow_authoring_operations import apply_editor_update
+        from eneo.flows.application.flow_authoring_operations import (
+            apply_editor_update,
+            get_flow,
+        )
 
-        if set(changes) - {
-            "name",
-            "description",
-            "metadata_json",
-            "form_field_renames",
-        }:
+        if set(changes) - _SETTINGS_FIELDS:
             raise BadRequestException(
                 "Only name, description, metadata_json and form_field_renames "
                 "can be changed here."
             )
+        definition = changes
+        if isinstance(changes.get("metadata_json"), dict):
+            saved = await get_flow(chat.flow_id, request, container)
+            definition = _merged_settings(changes, saved.metadata_json)
         flow = await apply_editor_update(
             chat.flow_id,
             request,
             FlowEditorUpdateRequest.model_validate(
-                {"expected_revision": expected_revision, "definition": changes}
+                {"expected_revision": expected_revision, "definition": definition}
             ),
             container,
+            audit_context=_CHAT_AUDIT,
         )
         return page_result(
             {"saved": True}, flow_id=chat.flow_id, revision=flow.draft_revision
@@ -475,7 +490,7 @@ async def update_flow_settings(
     return await _call(ctx, operation, changes_draft=True)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READS)
 async def read_step_assistant(
     ctx: Context, step_id: UUID, offset: int = 0
 ) -> CallToolResult:
@@ -618,7 +633,7 @@ def require_safe_model_configuration(
             )
 
 
-@mcp.tool()
+@mcp.tool(annotations=_EDITS_DRAFT)
 async def update_step(
     ctx: Context,
     expected_revision: int,
@@ -661,6 +676,7 @@ async def update_step(
                 }
             ),
             container,
+            audit_context=_CHAT_AUDIT,
         )
         saved_step = next(item for item in updated.steps if item.id == step_id)
         return _change_result(
@@ -799,7 +815,24 @@ _SETTINGS_FIELDS = frozenset(
 )
 
 
-@mcp.tool()
+def _merged_settings(
+    settings: dict[str, Any], saved_metadata: Mapping[str, Any] | None
+) -> dict[str, Any]:
+    """``settings`` with its metadata_json laid over the saved metadata key by
+    key: a top-level key sent replaces the saved key, a key sent as null
+    removes it, and saved keys it leaves out are kept. The core replaces the
+    saved metadata with the one an update sends, so a model that sends only
+    the key it changes would otherwise drop the rest."""
+    merged = dict(saved_metadata or {})
+    for key, value in settings["metadata_json"].items():
+        if value is None:
+            merged.pop(key, None)
+        else:
+            merged[key] = value
+    return {**settings, "metadata_json": merged}
+
+
+@mcp.tool(annotations=_EDITS_DRAFT)
 async def update_steps(
     ctx: Context,
     expected_revision: int,
@@ -810,7 +843,8 @@ async def update_steps(
     revision: everything is saved or nothing. Each edit is {"step_id": ...,
     "changes": {...}, "assistant_changes": {...}} with the fields update_step
     takes (either part may be left out); a step appears once. settings takes
-    what update_flow_settings takes. Use it when one change reaches several
+    what update_flow_settings takes, its metadata_json merged into the saved
+    one key by key the same way. Use it when one change reaches several
     steps: when a step's result changes, the steps that read it (readers in
     read_flow) get their new instructions in the same call, so the flow is
     never saved half-changed. A refusal names what to fix and saves nothing.
@@ -863,18 +897,22 @@ async def update_steps(
             edited.append(step_id)
             fields[step_id] = part.fields
             card_fields[step_id] = part.card_fields
+        definition = settings or {}
+        if isinstance(definition.get("metadata_json"), dict):
+            definition = _merged_settings(definition, flow.metadata_json)
         updated = await apply_editor_update(
             chat.flow_id,
             request,
             FlowEditorUpdateRequest.model_validate(
                 {
                     "expected_revision": expected_revision,
-                    "definition": settings or {},
+                    "definition": definition,
                     "step_edits": step_edits,
                     "assistants": assistants,
                 }
             ),
             container,
+            audit_context=_CHAT_AUDIT,
         )
         by_id = {step.id: step for step in updated.steps}
         return _change_result(
@@ -910,7 +948,7 @@ _EXAMPLE_PROBLEMS = {
 }
 
 
-@mcp.tool()
+@mcp.tool(annotations=_EDITS_DRAFT)
 async def contract_from_example(
     ctx: Context, expected_revision: int, step_id: UUID, example: str
 ) -> CallToolResult:
@@ -957,6 +995,7 @@ async def contract_from_example(
                 }
             ),
             container,
+            audit_context=_CHAT_AUDIT,
         )
         return page_result(
             {
@@ -979,7 +1018,7 @@ async def contract_from_example(
     return await _call(ctx, operation, changes_draft=True)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_EDITS_DRAFT)
 async def add_step(
     ctx: Context,
     expected_revision: int,
@@ -1030,6 +1069,7 @@ async def add_step(
                 }
             ),
             container,
+            audit_context=_CHAT_AUDIT,
         )
         added = updated.steps[-1 if position is None else position - 1]
         return page_result(
@@ -1041,7 +1081,7 @@ async def add_step(
     return await _call(ctx, operation, changes_draft=True)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_EDITS_DRAFT)
 async def move_step(
     ctx: Context, expected_revision: int, step_id: UUID, position: int
 ) -> CallToolResult:
@@ -1062,7 +1102,7 @@ async def move_step(
     return await _call(ctx, operation, changes_draft=True)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_EDITS_DRAFT)
 async def remove_step(
     ctx: Context, expected_revision: int, step_id: UUID
 ) -> CallToolResult:
@@ -1104,6 +1144,7 @@ async def _save_order(container, chat, request, expected_revision, ids):
             }
         ),
         container,
+        audit_context=_CHAT_AUDIT,
     )
     return page_result(
         {
@@ -1118,9 +1159,11 @@ async def _save_order(container, chat, request, expected_revision, ids):
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ACTS)
 async def publish_flow(ctx: Context, expected_revision: int) -> CallToolResult:
-    """Publish the current revision after the user explicitly requests publication."""
+    """Publish the current revision after the user explicitly requests
+    publication. The person confirms it in the chat before it happens; a
+    denied call published nothing, so do not repeat it unless asked again."""
 
     async def operation(container, chat, request):
         from eneo.flows.application.flow_authoring_operations import (
@@ -1139,7 +1182,7 @@ async def publish_flow(ctx: Context, expected_revision: int) -> CallToolResult:
     return await _call(ctx, operation, editing=True)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READS)
 async def read_tool_options(ctx: Context, offset: int = 0) -> CallToolResult:
     """Read the MCP tools a tool step may call unattended, and why others are
     refused, with pagination. It says nothing about HTTP steps: http_get and
@@ -1159,7 +1202,7 @@ async def read_tool_options(ctx: Context, offset: int = 0) -> CallToolResult:
     return await _call(ctx, operation)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READS)
 async def read_flow_suggestions(
     ctx: Context, include_runs: bool = False, offset: int = 0
 ) -> CallToolResult:
@@ -1233,7 +1276,7 @@ _NO_TRACE_NOTE = (
 )
 
 
-@mcp.tool()
+@mcp.tool(annotations=_EDITS_DRAFT)
 async def apply_flow_suggestions(
     ctx: Context, fingerprints: list[str], expected_revision: int
 ) -> CallToolResult:
@@ -1278,7 +1321,7 @@ async def apply_flow_suggestions(
     return await _call(ctx, operation, changes_draft=True)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_EDITS_DRAFT)
 async def dismiss_flow_suggestion(
     ctx: Context, fingerprint: str, code: str
 ) -> CallToolResult:
@@ -1322,7 +1365,7 @@ async def dismiss_flow_suggestion(
     return await _call(ctx, operation, editing=True)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ACTS)
 async def run_flow(
     ctx: Context,
     expected_flow_version: int,
@@ -1330,7 +1373,10 @@ async def run_flow(
     inputs: dict[str, Any],
     step_inputs: dict[str, Any] | None = None,
 ) -> CallToolResult:
-    """Start a published flow only when asked. Reuse idempotency_key after an uncertain response."""
+    """Start a published flow only when asked. Reuse idempotency_key after an
+    uncertain response. The person confirms the run in the chat before it
+    starts; a denied call started nothing, so do not repeat it unless asked
+    again."""
 
     async def operation(container, chat, request):
         from fastapi import BackgroundTasks
@@ -1362,7 +1408,7 @@ async def run_flow(
     return await _call_runtime(ctx, operation)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ACTS)
 async def retry_run(ctx: Context, run_id: UUID, idempotency_key: str) -> CallToolResult:
     """Start a failed run again from its failed step, on the same flow version
     with the same inputs, keeping the steps that completed before it. Only
@@ -1371,7 +1417,8 @@ async def retry_run(ctx: Context, run_id: UUID, idempotency_key: str) -> CallToo
     Refused when the run did not fail, when its version is no longer
     published, or when no step completed before the failure. Reuse
     idempotency_key after an uncertain response: the same key returns the
-    run it already started."""
+    run it already started. The person confirms the retry in the chat first;
+    a denied call started nothing."""
 
     async def operation(container, chat, request):
         from fastapi import BackgroundTasks
@@ -1411,7 +1458,7 @@ async def retry_run(ctx: Context, run_id: UUID, idempotency_key: str) -> CallToo
 RunSection = Literal["summary", "all"]
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READS)
 async def read_run(
     ctx: Context, run_id: UUID, section: RunSection = "summary", offset: int = 0
 ) -> CallToolResult:
@@ -1468,9 +1515,10 @@ async def read_run(
     return await _call_runtime(ctx, operation)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ACTS)
 async def cancel_run(ctx: Context, run_id: UUID) -> CallToolResult:
-    """Cancel a run of this flow only when the user asks to cancel it."""
+    """Cancel a run of this flow only when the user asks to cancel it. The
+    person confirms it in the chat first; a denied call cancelled nothing."""
 
     async def operation(container, chat, request):
         from eneo.flows.api.flow_run_lifecycle_router import cancel_flow_run
@@ -1485,7 +1533,7 @@ async def cancel_run(ctx: Context, run_id: UUID) -> CallToolResult:
     return await _call_runtime(ctx, operation)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READS)
 async def read_review(ctx: Context, run_id: UUID, offset: int = 0) -> CallToolResult:
     """Read the active review and its revision before proposing a review decision."""
 
@@ -1502,7 +1550,7 @@ async def read_review(ctx: Context, run_id: UUID, offset: int = 0) -> CallToolRe
     return await _call_runtime(ctx, operation)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ACTS)
 async def review_run(
     ctx: Context,
     run_id: UUID,
@@ -1512,7 +1560,10 @@ async def review_run(
     changes: dict[str, Any] | None = None,
     idempotency_key: str | None = None,
 ) -> CallToolResult:
-    """Apply an explicitly requested review action using the current checkpoint revision. changes holds edited_value or rejection reason."""
+    """Apply an explicitly requested review action using the current
+    checkpoint revision. changes holds edited_value or rejection reason. The
+    person confirms the decision in the chat first; a denied call decided
+    nothing."""
 
     async def operation(container, chat, request):
         from fastapi import BackgroundTasks

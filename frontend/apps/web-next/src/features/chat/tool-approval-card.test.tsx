@@ -19,6 +19,17 @@ afterEach(() => {
 const lookup = { server_name: "lou", tool_name: "troskelvarden", tool_call_id: "call-1" };
 const register = { server_name: "diarium", tool_name: "sok_arende", tool_call_id: "call-2" };
 
+/** A call on Eneo's own flows server (the flow chat's), waiting for approval. */
+function flowsCall(id: string, tool: string, args: Record<string, unknown>) {
+  return {
+    server_name: "flows",
+    tool_name: tool,
+    tool_call_id: id,
+    is_internal: true,
+    arguments: args
+  };
+}
+
 function renderCard(data: ToolApprovalData) {
   return renderInApp(<ToolApprovalCard data={data} />);
 }
@@ -141,6 +152,70 @@ describe("ToolApprovalCard", () => {
     fireEvent.click(within(card).getByRole("button", { name: "Visa alla argument" }));
     await waitFor(() => expect(within(card).getByText(/"handlingar"/)).toBeTruthy());
     expect(within(card).getByRole("button", { name: "Godkänn Sök ärende i diariet" })).toBeTruthy();
+  });
+
+  it("names a call of Eneo's own flows server by what it will do, without its ids", () => {
+    renderCard({
+      approval_id: "a-run",
+      status: "pending",
+      tools: [
+        flowsCall("call-1", "run_flow", {
+          expected_flow_version: 3,
+          idempotency_key: "run-key-1",
+          inputs: { text: "Hej" }
+        })
+      ]
+    });
+    const card = screen.getByRole("region", { name: "Väntar på godkännande" });
+    expect(within(card).getByText("Starta en körning av flödet").className).not.toContain(
+      "font-mono"
+    );
+    expect(
+      within(card).getByRole("button", { name: "Godkänn: Starta en körning av flödet" })
+    ).toBeTruthy();
+    expect(
+      within(card).getByRole("button", { name: "Avvisa: Starta en körning av flödet" })
+    ).toBeTruthy();
+    // Neither the server and id nor the run's version and key; all of it is one press away.
+    expect(within(card).queryByText(/run_flow|idempotency_key/)).toBeNull();
+    expect(within(card).getByRole("button", { name: "Visa alla argument" })).toBeTruthy();
+  });
+
+  it("names a review call by its action, and one it does not know neutrally", () => {
+    const review = {
+      run_id: "run-1",
+      checkpoint_id: "checkpoint-1",
+      expected_checkpoint_revision: 2
+    };
+    renderCard({
+      approval_id: "a-review",
+      status: "pending",
+      tools: [
+        flowsCall("call-1", "review_run", { ...review, action: "reject" }),
+        flowsCall("call-2", "review_run", { ...review, action: "approve_and_continue" }),
+        flowsCall("call-3", "review_run", { ...review, action: "something_new" })
+      ]
+    });
+    expect(
+      screen.getByRole("button", { name: "Avvisa: Underkänn steget och avbryt körningen" })
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Godkänn: Fortsätt körningen med steget godkänt" })
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Godkänn: Svara på granskningen" })).toBeTruthy();
+  });
+
+  it("keeps naming a call to an external server named flows by its server and id", () => {
+    renderCard({
+      approval_id: "a-external",
+      status: "pending",
+      tools: [
+        { ...flowsCall("call-1", "publish_flow", { expected_revision: 4 }), is_internal: false }
+      ]
+    });
+    expect(screen.getByRole("button", { name: "Godkänn flows/publish_flow" })).toBeTruthy();
+    expect(screen.getByText("expected_revision: 4")).toBeTruthy();
+    expect(screen.queryByText("Publicera flödet")).toBeNull();
   });
 
   it("has no axe violations", async () => {

@@ -18,6 +18,8 @@ from eneo.ai_models.completion_models.completion_model import (
 )
 from eneo.completion_models.infrastructure.adapters import tenant_model_adapter
 from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
+    CONFIRMATION_DECLINED_MESSAGE,
+    CONFIRMATION_TIMEOUT_MESSAGE,
     MCP_IMAGE_PLACEHOLDER_TEMPLATE,
     TOOL_RESULT_BUDGET_NOTICE,
     PreparedModelStream,
@@ -171,6 +173,10 @@ class _FakeMCPProxy:
         del prefixed_tool_name
         return False
 
+    def requires_confirmation(self, prefixed_tool_name: str) -> bool:
+        del prefixed_tool_name
+        return False
+
     def is_bundled_tool(self, prefixed_tool_name: str) -> bool:
         del prefixed_tool_name
         return False
@@ -287,6 +293,24 @@ class _MixedMCPProxy(_FakeMCPProxy):
     def is_bundled_tool(self, prefixed_tool_name: str) -> bool:
         del prefixed_tool_name
         return False
+
+
+class _ConfirmingMCPProxy(_FakeMCPProxy):
+    """One of Eneo's own servers whose run_flow requires confirmation, beside
+    its read_flow, which does not, and an external server's tool."""
+
+    def get_allowed_tool_names(self):
+        return {"flows__run_flow", "flows__read_flow", "server__tool"}
+
+    def get_tool_info(self, prefixed_tool_name: str):
+        server, tool = prefixed_tool_name.split("__", 1)
+        return (server, tool, None)
+
+    def is_internal_tool(self, prefixed_tool_name: str) -> bool:
+        return prefixed_tool_name.startswith("flows__")
+
+    def requires_confirmation(self, prefixed_tool_name: str) -> bool:
+        return prefixed_tool_name == "flows__run_flow"
 
 
 def _make_adapter() -> TenantModelAdapter:
@@ -2963,3 +2987,254 @@ async def test_closing_after_a_tool_round_closes_the_follow_up_stream():
 
     assert follow_up.closed
     assert not first.closed, "the exhausted first-round stream needs no close"
+
+
+# --- Tools that require confirmation -----------------------------------------
+
+
+def _approval_context() -> dict[str, object]:
+    return {
+        "tenant_id": uuid4(),
+        "user_id": uuid4(),
+        "session_id": uuid4(),
+        "assistant_id": uuid4(),
+    }
+
+
+def _decided(*decisions: ToolApprovalDecision, timed_out: bool = False):
+    manager = AsyncMock()
+    manager.wait_for_approval.return_value = ToolApprovalWaitResult(
+        decisions=list(decisions), timed_out=timed_out
+    )
+    return manager
+
+
+async def _confirming_round(chunks, messages, **approval):
+    """One tool round over ``_ConfirmingMCPProxy``, then a final answer."""
+    proxy = _ConfirmingMCPProxy()
+    stream = _AsyncChunkStream(
+        chunks,
+        eneo_context={
+            "mcp_proxy": proxy,
+            "messages": messages,
+            "kwargs": {},
+            "has_tools": True,
+        },
+    )
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(
+            return_value=_AsyncChunkStream([_text_chunk("done", finish_reason="stop")])
+        ),
+    ):
+        completions = await _collect(
+            _make_adapter(), stream, pending_approval_ids=set(), **approval
+        )
+    return proxy, completions
+
+
+def _events(completions, response_type):
+    return [c for c in completions if c.response_type == response_type]
+
+
+def _tool_result(messages, call_id: str) -> dict:
+    (content,) = [
+        message["content"]
+        for message in messages
+        if message.get("role") == "tool" and message["tool_call_id"] == call_id
+    ]
+    return json.loads(content)
+
+
+def _decided_statuses(completions) -> set[tuple[object, ...]]:
+    """Each call's approval, status and internal flag once it was decided
+    (its announcement while the model writes it is pending)."""
+    return {
+        (metadata.approved, metadata.result_status, metadata.is_internal)
+        for completion in _events(completions, ResponseType.TOOL_CALL)
+        for metadata in completion.tool_calls_metadata or []
+        if metadata.result_status != "pending"
+    }
+
+
+async def test_a_tool_that_requires_confirmation_asks_without_required_approval():
+    manager = _decided(ToolApprovalDecision(tool_call_id="call_1", approved=True))
+
+    proxy, completions = await _confirming_round(
+        [_tool_call_chunk(tool_name="flows__run_flow")],
+        [],
+        require_tool_approval=False,
+        approval_manager=manager,
+        approval_context=_approval_context(),
+    )
+
+    (asked,) = _events(completions, ResponseType.TOOL_APPROVAL_REQUIRED)
+    (call,) = asked.tool_calls_metadata or []
+    assert (call.tool_name, call.is_internal) == ("run_flow", True)
+    assert manager.request_approval.await_args.kwargs["tool_call_ids"] == ["call_1"]
+    assert proxy.calls == [[("flows__run_flow", {"q": "x"})]]
+
+
+async def test_a_declined_confirmation_runs_nothing_and_tells_the_model_why():
+    messages: list[dict] = []
+    manager = _decided(
+        ToolApprovalDecision(tool_call_id="call_1", approved=False, reason="Inte nu")
+    )
+
+    proxy, completions = await _confirming_round(
+        [_tool_call_chunk(tool_name="flows__run_flow")],
+        messages,
+        require_tool_approval=False,
+        approval_manager=manager,
+        approval_context=_approval_context(),
+    )
+
+    assert proxy.calls == []
+    assert _tool_result(messages, "call_1") == {
+        "denied": True,
+        "message": CONFIRMATION_DECLINED_MESSAGE,
+        "user_reason": "Inte nu",
+    }
+    assert _decided_statuses(completions) == {(False, "denied", True)}
+
+
+async def test_an_unanswered_confirmation_times_out_as_denied():
+    messages: list[dict] = []
+    manager = _decided(
+        ToolApprovalDecision(tool_call_id="call_1", approved=False), timed_out=True
+    )
+
+    proxy, completions = await _confirming_round(
+        [_tool_call_chunk(tool_name="flows__run_flow")],
+        messages,
+        require_tool_approval=False,
+        approval_manager=manager,
+        approval_context=_approval_context(),
+    )
+
+    assert proxy.calls == []
+    (timeout,) = _events(completions, ResponseType.TOOL_APPROVAL_TIMEOUT)
+    (call,) = timeout.tool_calls_metadata or []
+    assert (call.result_status, call.is_internal) == ("timeout_denied", True)
+    result = _tool_result(messages, "call_1")
+    assert result["denied"] is True
+    assert result["message"] == CONFIRMATION_TIMEOUT_MESSAGE
+
+
+@pytest.mark.parametrize(
+    "approval",
+    [
+        # A turn outside the person's own streamed conversation.
+        {"approval_manager": None, "approval_context": None},
+        {"approval_manager": AsyncMock(), "approval_context": None},
+        # Required approval without a manager to ask through.
+        {
+            "require_tool_approval": True,
+            "approval_manager": None,
+            "approval_context": None,
+        },
+    ],
+)
+async def test_a_turn_that_cannot_ask_refuses_a_call_that_requires_confirmation(
+    approval,
+):
+    messages: list[dict] = []
+
+    proxy, completions = await _confirming_round(
+        [_tool_call_chunk(tool_name="flows__run_flow")],
+        messages,
+        **{"require_tool_approval": False, **approval},
+    )
+
+    assert proxy.calls == []
+    assert not _events(completions, ResponseType.TOOL_APPROVAL_REQUIRED)
+    refusal = _tool_result(messages, "call_1")
+    assert refusal == tenant_model_adapter.CONFIRMATION_UNAVAILABLE_RESULT
+    assert "cannot ask" in refusal["message"]
+    assert _decided_statuses(completions) == {(False, "denied", True)}
+
+
+async def test_only_the_call_that_requires_confirmation_waits_for_the_person():
+    """An internal tool without the hint and an external tool, in a request
+    that does not require approval, run as before, whatever the person
+    decides about the one that needs confirmation."""
+    messages: list[dict] = []
+    manager = _decided(ToolApprovalDecision(tool_call_id="call_run", approved=False))
+
+    proxy, completions = await _confirming_round(
+        [
+            _tool_call_delta_chunk(
+                index=0, tool_call_id="call_read", tool_name="flows__read_flow"
+            ),
+            _tool_call_delta_chunk(index=0, arguments="{}"),
+            _tool_call_delta_chunk(
+                index=1, tool_call_id="call_ext", tool_name="server__tool"
+            ),
+            _tool_call_delta_chunk(index=1, arguments="{}"),
+            _tool_call_delta_chunk(
+                index=2, tool_call_id="call_run", tool_name="flows__run_flow"
+            ),
+            _tool_call_delta_chunk(index=2, arguments="{}", finish_reason="tool_calls"),
+        ],
+        messages,
+        require_tool_approval=False,
+        approval_manager=manager,
+        approval_context=_approval_context(),
+    )
+
+    assert manager.request_approval.await_args.kwargs["tool_call_ids"] == ["call_run"]
+    assert proxy.calls == [[("flows__read_flow", {}), ("server__tool", {})]]
+    assert _tool_result(messages, "call_run") == {
+        "denied": True,
+        "message": CONFIRMATION_DECLINED_MESSAGE,
+    }
+
+
+async def test_without_required_approval_an_external_tool_runs_unasked():
+    """A person who could be asked is asked only about tools that require
+    confirmation; an external tool waits only when the request requires
+    approval."""
+    manager = AsyncMock()
+
+    proxy, completions = await _confirming_round(
+        [_tool_call_chunk(tool_name="server__tool")],
+        [],
+        require_tool_approval=False,
+        approval_manager=manager,
+        approval_context=_approval_context(),
+    )
+
+    assert not _events(completions, ResponseType.TOOL_APPROVAL_REQUIRED)
+    manager.request_approval.assert_not_awaited()
+    assert proxy.calls == [[("server__tool", {"q": "x"})]]
+
+
+async def test_required_approval_asks_about_external_and_confirmation_calls_at_once():
+    manager = _decided(
+        ToolApprovalDecision(tool_call_id="call_ext", approved=True),
+        ToolApprovalDecision(tool_call_id="call_run", approved=True),
+    )
+
+    proxy, _completions = await _confirming_round(
+        [
+            _tool_call_delta_chunk(
+                index=0, tool_call_id="call_ext", tool_name="server__tool"
+            ),
+            _tool_call_delta_chunk(index=0, arguments="{}"),
+            _tool_call_delta_chunk(
+                index=1, tool_call_id="call_run", tool_name="flows__run_flow"
+            ),
+            _tool_call_delta_chunk(index=1, arguments="{}", finish_reason="tool_calls"),
+        ],
+        [],
+        require_tool_approval=True,
+        approval_manager=manager,
+        approval_context=_approval_context(),
+    )
+
+    manager.request_approval.assert_awaited_once()
+    assert manager.request_approval.await_args.kwargs["tool_call_ids"] == [
+        "call_ext",
+        "call_run",
+    ]
+    assert proxy.calls == [[("server__tool", {}), ("flows__run_flow", {})]]
