@@ -1,0 +1,479 @@
+import { Callout } from "nextra/components";
+
+# Data retention
+
+Retention ("gallring" in Swedish) removes stored content once the time chosen
+for it has passed. This guide explains what removal means in Eneo, where each
+time is set, how the levels combine, when removal runs, and what a restore
+from backup brings back. Limits, counts and health fields are on the technical
+page, [Retention](/docs/audit-logging#retention).
+
+<Callout type="info">
+  No rule, no removal: Eneo removes chats and app runs only where someone has
+  chosen a time for them. A new installation keeps them until a space, an
+  assistant or an app gets a time. The exception is web widgets: a new widget
+  starts with 30 days.
+</Callout>
+
+## No rule, no removal [#no-rule-no-removal]
+
+Eneo keeps two kinds of removal apart:
+
+- **Retention** removes chats and app runs because someone chose a time for
+  them, on a space, an assistant or an app. Where nobody has chosen a time,
+  retention removes nothing.
+- **Cleanup of leftovers** runs whatever rules are set. It removes what nothing
+  uses any more, such as an upload that was never attached to a chat, and
+  records that have a period of their own, such as the audit log.
+
+With no time set anywhere, retention removes nothing:
+
+```text
+Organization: nothing set
+└ Space: nothing set
+  ├ Assistant A, nothing set → chats kept
+  ├ Group chat → each turn follows the assistant that answered it: kept
+  └ App B, nothing set → runs kept
+```
+
+Cleanup of leftovers still runs in that installation; the
+[second table below](#cleanup-of-leftovers) lists what it removes and when.
+
+## What removal means [#what-removal-means]
+
+When retention **removes** something, Eneo deletes it from its database
+together with the copies Eneo keeps of it, and object content storage deletes
+its file bytes. After that, Eneo cannot show it or bring it back. Removal of one
+conversation turn covers:
+
+- the question and its answer;
+- the files that only this turn used, such as uploaded documents, audio
+  recordings and their transcriptions, including the files derived from them;
+- with extended logging, the stored log of the turn, and the content of every
+  later log in the same conversation, because each log repeats the earlier
+  turns;
+- the conversation itself, once its last question is gone.
+
+### Copies that follow their source [#copies-that-follow-their-source]
+
+| Copy | How it follows |
+| --- | --- |
+| A conversation's name (its first question, a generated title or a name someone chose) and its feedback text | Each records when it was written. Once that time is older than the conversation's period, the name is emptied (both apps show Untitled) and the feedback text removed, even while questions remain. The thumbs up or down stays. A group chat follows the shortest period among its assistants |
+| A conversation copied from another one | Unreadable as soon as a question it was copied from is removed, and then removed itself. See [Copies of removed conversations](/docs/audit-logging#copies-of-removed-conversations) |
+| Temporary files of an upload, a transcription, a crawl or a SharePoint import | Kept in a directory of the process that works on them and removed when it stops. After a crash, the next process that starts on the same volume removes them. See [Temporary files](/guides/deployment#temporary-files) |
+| The record of a failed job | Keeps a failure code, never the error text, which could quote the content |
+
+Two moments matter, and Eneo keeps them apart:
+
+| Moment | What it means |
+| --- | --- |
+| **No longer shown** | Eneo stops showing or returning the content. For a turn removed by retention this happens when its removal commits. |
+| **Removal confirmed** | The database rows are deleted and committed, and object content storage has deleted the file bytes and checked that the store no longer has them. |
+
+A retention run that reports success has finished its database work. The bytes
+of a file are deleted by object content storage afterwards, in its own
+background batches, and an unavailable store is retried. So a removed file can
+already be unreachable while its bytes still wait for deletion. See
+[What happens when a File is deleted?](/guides/object-content-storage#what-happens-when-a-file-is-deleted)
+
+### Copies outside Eneo's reach
+
+Retention never removes these:
+
+- backups of the database and the object store, and their snapshots; see
+  [After a restore](#after-a-restore);
+- a document or export that someone downloaded;
+- content sent to an AI model provider or another external service;
+- text added to a knowledge base, which stays until it is removed there;
+- the audit log, which records who did what and when, but no removed content;
+  it follows its own period ([Audit log](#audit-log)).
+
+One copy inside Eneo can outlive a removal: an Insights answer built from
+conversations is stored for 24 hours after it was last updated, and people with
+Insights access to the assistant or group chat can open it in that time, also
+when the conversations behind it have been removed.
+
+PostgreSQL does not overwrite deleted rows at once. A deleted row stays in the
+database files until PostgreSQL reuses its space or the table is rewritten, so
+a copy of the database volume can still contain it. A `pg_dump` backup contains
+only the rows that exist when it runs.
+
+## At a glance [#at-a-glance]
+
+### Retention: removed because someone chose a time [#retention-by-a-rule]
+
+| What | Where its time is set | Without a choice | Removed by |
+| --- | --- | --- | --- |
+| Chats with assistants, group chats and help assistants | The assistant, otherwise its space | Kept | The nightly run |
+| App runs | The app, otherwise its space | Kept | The nightly run |
+| Files attached to a chat turn or an app run | They follow the turn or run; a file still used elsewhere stays | Kept | The nightly run, with the turn or run |
+| Conversation names and feedback text | They follow the conversation's period, from when they were written | Kept | The nightly run |
+| Web widget conversations | The widget, within the organization's widget policy | 30 days, shown on a new widget | The widget job, nightly |
+
+"Kept" means that nothing removes it until someone chooses a time or deletes it.
+
+### Cleanup of leftovers: runs regardless of the rules [#cleanup-of-leftovers]
+
+Cleanup is on by default. An operator can switch off the cleanup of unused
+uploads, conversations without a question and retention run records; see
+[Settings](#settings).
+
+| What | Removed | Set by | Removed by |
+| --- | --- | --- | --- |
+| Uploads that nothing uses | 24 hours after the upload | Operator setting | The nightly run |
+| Conversations without a question | 24 hours after they started | Operator setting | The nightly run |
+| Temporary files of a process | When the process stops; after a crash, when the next process starts on the same volume | Fixed | The process |
+| Staged files of a knowledge import | After the import has finished; files of an import that no longer exists after 1 hour | Fixed | A cleanup job of the worker |
+| Audit log | After 365 days, unless the organization chooses another period | The organization | The daily audit purge |
+| Audit log exports | Download for 24 hours; the file at the next daily cleanup after that | Operator setting (`export_max_age_hours`) | The daily export cleanup |
+| Retention run records | After the audit log's period | The audit log's period | The nightly run |
+
+Backups are neither: your backup system keeps them, never Eneo. See
+[After a restore](#after-a-restore).
+
+## How the levels combine [#how-the-levels-combine]
+
+### Chats and app runs
+
+A question in a chat, with its answer, follows the time of the assistant that
+answered it. An app run follows its app. The time is chosen on these levels,
+from the nearest outwards:
+
+1. the assistant or app;
+2. its space;
+3. the organization: a legacy period that counts only while its switch is on.
+   The switch is `conversation_retention_enabled`, next to
+   `conversation_retention_days` on the organization's row in
+   `audit_retention_policies`. No screen or API in this version sets, clears
+   or shows either column, so they count only where someone set them directly
+   in the database.
+
+**The nearest level that has a time decides, even when that time is longer
+than the time of a level outside it.** The space's time is a default for the
+assistants and apps that have none of their own, not a maximum. When no level
+has a time, nothing is removed.
+
+```text
+Space: 30 days
+├ Assistant A, nothing set → 30 days (follows the space)
+├ Assistant B, 7 days → 7 days
+├ Assistant C, 60 days → 60 days (the nearest level decides, also when it is longer)
+├ App D, nothing set → 30 days (follows the space)
+└ New assistant or app, nothing set → 30 days, until someone chooses a time
+```
+
+In a group chat, each turn follows the time of the assistant that answered it,
+so an earlier turn can stay while a later one is removed:
+
+```text
+Group chat in a space with 30 days
+├ Turn 1, answered by Assistant B (nothing set) → removed after 30 days
+└ Turn 2, answered by Assistant A (7 days) → removed after 7 days, before turn 1
+```
+
+Deleting an assistant deletes its chats. A group chat turn whose answering
+assistant was deleted keeps no assistant, so it follows no time and retention
+does not remove it. A question that was not asked to an assistant, such as a
+service run, is not removed by retention either; it is kept until its service
+or the organization is deleted.
+
+Help assistants, such as the Prompt Guide, are assistants in the organization
+space. A new help assistant has no time of its own, and no screen sets a time
+for the organization space, so give the help assistant its own time if its
+chats should be removed.
+
+### When a time changes
+
+| Change | Effect at the next run |
+| --- | --- |
+| A shorter time | Older conversations become due and are removed |
+| A longer time | Conversations that are no longer due are kept |
+| A time removed | The level follows the next level outwards, which can be shorter, longer or none |
+| A first time | Conversations older than it are removed |
+
+A removed conversation never comes back. A name taken from a question that was
+removed earlier stays until the new time has passed, or for good when no time
+applies any more.
+
+### Web widgets
+
+Conversations in a web widget follow only the widget's own time, held to the
+range in the organization's widget policy. The times of the assistant, its
+space and the organization never reach them.
+
+```text
+Widget policy: minimum 7, maximum 90 days
+├ Widget A, 30 days → 30 days
+├ Widget B, 0 days saved before the minimum was raised → nothing is kept after the answer
+├ Widget C, 365 days saved before the maximum was lowered → 90 days
+└ Widget D, 3 days saved before the minimum was raised → 7 days
+```
+
+The range applies as it stands on the night of each run, also to widgets saved
+before it changed. A widget conversation's age counts from when it started, and
+the whole conversation goes at once, including its later turns.
+
+### Audit log [#audit-log]
+
+The audit log has one period for the whole organization, 365 days unless an
+administrator chooses another one between 1 and 2555 days. It is independent
+of every conversation time.
+
+## When removal happens [#when-removal-happens]
+
+Retention runs on a schedule; nothing is removed at the moment a time passes.
+Content becomes **due** when it is older than its time, measured from when it
+was created; for chats and app runs the database clock decides. The next run
+removes it.
+
+| What | Runs |
+| --- | --- |
+| Chats and app runs, names and feedback text, conversations without a question, files that nothing uses, retention run records | Once a night, 03:30 by default (`RETENTION_CRON_HOUR`, `RETENTION_CRON_MINUTE`) |
+| Web widget conversations | Once a night, 03:30 |
+| Audit log | Once a day, 02:00 |
+| Audit log exports | Once a day, 03:00: files older than 24 hours |
+| File bytes in object content storage | In the background, every minute, after the file is deleted |
+
+The times are in the worker's time zone. The container image sets none, so
+they are UTC unless you set `TZ` for the worker.
+
+```text
+Assistant with 30 days, worker in UTC
+├ 1 March 14:00   question asked
+├ 31 March 03:30  nightly run: 29 days and 13½ hours old → kept
+├ 31 March 14:00  30 days old → due
+└ 1 April 03:30   nightly run → removed
+```
+
+So a turn normally goes within a day after its time. It stays longer when:
+
+- the run has more due work than it may do in one night; the next night
+  continues where it stopped;
+- something holds a row the run needs, or one conversation is larger than the
+  run's limits; the turn is kept and reported, see [For operators](#for-operators);
+- the worker is stopped; nothing runs when it starts again, so the next
+  scheduled run after the restart catches up. To run it at once, use
+  `docker compose --env-file .env --env-file release.env exec worker run-cron run_retention`.
+
+## Change the rules [#change-the-rules]
+
+Every time is a whole number of days. The click paths below use the English
+labels; switch the page to Swedish in the header for the Swedish labels.
+
+### A space
+
+Who: someone who may edit the space. The organization space has no retention
+setting in either app.
+
+**Svelte app:**
+
+1. Open **Spaces**, choose the space, then **Settings**.
+2. Under **Security & Privacy**, find **Conversation History Retention**.
+3. Switch on **Override policy** and enter the number of days (1 to 2555).
+   Switched off, the space has no time of its own.
+4. Click **Save changes**.
+
+**React app (beta):**
+
+1. Open **Spaces**, choose the space, then **Settings**.
+2. Under **Security and privacy**, enter the days in **Conversation History
+   Retention**, or leave the field empty for **No limit**.
+3. The value is saved when you leave the field.
+
+**API:** `PATCH /api/v1/spaces/{space_id}/` with
+`{"data_retention_days": 30}`; `null` removes the space's time, and leaving the
+field out keeps it.
+
+### An assistant or an app
+
+Who: in a shared or organization space, someone who may edit the space. In a
+personal space, its owner. Permission to edit an assistant or an app does not
+by itself include its retention time.
+
+**Svelte app:**
+
+1. Open the space, then **Assistants** (or **Apps**). Open the row's
+   **Actions** menu and choose **Edit**.
+2. Under **Security & Privacy**, find **Conversation History Retention**. The
+   number in brackets is the space's time.
+3. Switch on **Override policy** and enter the days. Switched off, the
+   assistant or app follows its space.
+4. Click **Save changes**.
+
+**React app (beta):**
+
+1. Open the space, then **Assistants** (or **Apps**), and choose **Edit** in
+   the row's menu.
+2. Under **Security and privacy**, enter the days in **Conversation History
+   Retention**. The placeholder shows the space's time, or `∞` when the space
+   has none. Leave the field empty to follow the space.
+3. The value is saved when you leave the field.
+
+**API:** `POST /api/v1/assistants/{assistant_id}/` or
+`PATCH /api/v1/apps/{app_id}/` with `data_retention_days`: a number of days,
+`null` to follow the space, or left out to keep the current value.
+
+The help assistants, such as the Prompt Guide, are set the same way under
+**Admin → Help assistants → Open settings**.
+
+### Web widgets
+
+An administrator sets the range that widgets may use under **Admin → Web
+widgets → Policy**, in **Minimum days** and **Maximum days** (each 0 to 3650).
+Until an administrator saves a policy, the range is 0 to 365 days. A widget's
+own time is under the assistant's **Web widget → Open widget settings → Rules →
+Privacy → Retention in days**. `0` keeps no conversation after the answer. See
+[Embed an Assistant](/guides/embed-widget#conversation-retention).
+
+### Audit log
+
+An administrator sets the audit log's period in days (1 to 2555):
+
+- **Svelte app:** **Admin → Audit Logs**, give the reason for access, then on the
+  **Logs** tab open **Retention Policy** and click **Edit**.
+- **React app (beta):** **Admin → Settings → Retention Policy → Change**, or the
+  same section at the bottom of the **Audit Logs** tab.
+- **API:** `PUT /api/v1/audit/retention-policy` with `{"retention_days": 365}`;
+  `GET` on the same path reads it.
+
+### Check the result
+
+- Open the assistant or app again and check which value it shows, or read
+  `data_retention_days` on the space, assistant and app. A `null` on the
+  assistant or app means that it follows the space.
+- Saving writes an audit event, `space_updated`, `assistant_updated` or
+  `app_updated`, whose changes list the old and the new time under
+  `data_retention_days`.
+- The next run removes what the new time makes due. A removal cannot be undone,
+  so check a shorter time before you save it.
+
+## For operators [#for-operators]
+
+### Health
+
+`GET /api/healthz` reports each retention task with a status: `healthy`,
+`degraded`, `unknown`, `initializing` or `disabled`. A task is `degraded` when
+its latest run failed, when no run has completed for two days, or when the
+latest run found content that has been due for more than a day
+(`RETENTION_OVERDUE_WINDOW_DAYS`), names and feedback texts included.
+`limiting_settings` names the setting whose limit kept due content. Retention
+problems never make an otherwise ready API unavailable. The statuses and flags
+are listed in [Health](/docs/audit-logging#health).
+
+### Audit events and records
+
+Each run writes a `data_retention_run` audit event with its outcome and counts,
+and each chunk that removed or kept something writes a `data_retention_batch`
+event per organization. A task switched off writes `data_retention_skipped`.
+The audit log purge writes `retention_policy_applied` with the number of
+deleted events, but only for an organization where it deleted at least one
+event: a night with nothing to delete writes no event, so a missing event does
+not mean the purge failed. None of these events holds removed content: they
+carry identities and numbers only.
+
+The table `retention_job_runs` keeps each run's outcome, counts, blocked
+reasons and position; [Operator view](/docs/audit-logging#operator-view) has a
+query.
+
+### Settings [#settings]
+
+The schedule, the per-task switches and the limits are environment settings
+on the worker; they are listed in [Settings](/docs/audit-logging#settings).
+Switching a task off keeps the content it would have removed. The switches are
+an emergency brake for a fault, not a way to keep content: a task turned off
+also fails the readback after a restore.
+
+### Object storage
+
+Use a bucket that has never had versioning or Object Lock. With either, a
+deleted file stays readable as an old version, so Eneo does not start with
+such a bucket and reports no deletion as done while an old version remains. See
+[Choose Content Storage](/guides/object-content-storage).
+
+## After a restore [#after-a-restore]
+
+Retention does not reach backups. A backup taken before a removal still holds
+what was removed, and restoring it brings that content back into the database
+and the store. This is what Eneo does about it, and where it stops.
+
+### Retention catches up before traffic opens [#retention-catches-up]
+
+Before traffic opens, with the API closed and every worker stopped, and with
+every retention task turned on, run:
+
+```bash
+docker compose --env-file .env --env-file release.env run --rm backend run-cron --until-complete run_retention
+```
+
+The command runs every retention task in its own process, round after round,
+until nothing that the rules in the restored database make due is left. Every
+round counts against the time the command started, so what falls due while it
+runs is left to the nightly run. Content that those rules select is removed
+again before anyone can reach it.
+
+Every retention task must be on while it runs: keep each `RETENTION_*_ENABLED`
+setting at `true`, the default. A task turned off fails the command, for
+example `conversations.history: skipped (disabled_by_deployment_setting)`,
+because it may hold overdue content and nothing shows that its work is done.
+
+The command ends by reporting storage on its own line, because rows gone from
+the database do not mean that the store has deleted the bytes:
+
+| Last line | What to do |
+| --- | --- |
+| `storage: confirmed` | Nothing. A full listing of the store that began after the command started found nothing left to remove |
+| `storage: pending N (held H, retrying R, waiting W)` | Retention is complete and traffic may open, but the store has not confirmed every removal. Run the command again after the grace period (`OBJECT_CONTENT_ORPHAN_GRACE_SECONDS`, one hour by default) until it reads `confirmed` |
+| `storage: pending N (...), store not listed in full` | The store is larger than one run lists. Run the command again; it continues the listing |
+
+Exit code 0 means retention is complete and storage is confirmed or pending.
+Exit code 1 means it is not: the output names each task and the reason, such
+as a task turned off, an execution held by another process (a worker is still
+running), blocked work, a round without progress, `still removing after 10000
+rounds` (run it again; it continues), or a store that could not be reached or
+failed. Resolve the cause and run the command again. Each line is explained in
+[Read back after a restore](/docs/audit-logging#read-back-after-a-restore).
+
+The command does not cover web widget conversations or the audit log, which
+have jobs of their own on the worker. To remove what those make due before
+traffic opens, start the worker with the API still closed, run
+
+```bash
+docker compose --env-file .env --env-file release.env exec worker run-cron purge_widget_sessions
+docker compose --env-file .env --env-file release.env exec worker run-cron purge_old_audit_logs
+```
+
+and wait for `Widget retention purge completed` and `Audit log retention purge
+completed successfully` in the worker log. Otherwise their nightly jobs remove
+it.
+
+### What can come back [#what-can-come-back]
+
+The command removes what the rules in the restored database select. It does not
+know what happened after the backup was taken, so these can come back until
+the people responsible have put their rules back:
+
+- content that a person removed by hand after the backup, such as a deleted
+  conversation, file, assistant or app;
+- content that retention removed under a rule that was set or shortened after
+  the backup: the restored database has the old rule, or none.
+
+Keep a record of such changes outside the backup, and repeat them once the
+system is restored and before traffic opens.
+
+### Backups are yours [#backups-are-yours]
+
+Eneo never removes backup copies, and a successful retention run, or a
+`storage: confirmed` line, is not proof that every copy is gone: backups and
+snapshots of the database and the store keep what they hold for as long as you
+keep them. Set how long backups live, and who may read them, so that they
+match your retention decisions. The restore procedure for the store is in
+[Back up and restore](/guides/object-content-storage#back-up-and-restore).
+
+### Known limit [#restore-known-limit]
+
+The command expects Eneo's part of the bucket (the prefix
+`v1/<deployment id>/`) to hold only what Eneo wrote. An object or an unfinished
+multipart upload there that Eneo did not write stops it with an error, exit
+code 1, before the storage line, and scheduled reconciliation fails the same
+way. Remove that object or abort that upload at the store, then run the command
+again.
