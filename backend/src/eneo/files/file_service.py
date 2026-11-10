@@ -3,6 +3,7 @@ from collections import defaultdict
 from collections.abc import AsyncGenerator, Awaitable, Callable, Iterable, Sequence
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from fastapi import UploadFile
@@ -68,6 +69,9 @@ from eneo.object_content.content_service import (
 )
 from eneo.object_content.deployment_policy import UploadAdmissionSnapshot
 from eneo.users.user import UserInDB
+
+if TYPE_CHECKING:
+    from eneo.audit.application.audit_service import AuditService
 
 
 def require_requested_files(file_ids: Iterable[UUID], files: Sequence[File]) -> None:
@@ -144,7 +148,9 @@ class FileService:
         protocol: FileProtocol,
         object_content: ObjectContentService,
         upload_admission: UploadAdmissionSnapshot | None = None,
+        audit_service: "AuditService | None" = None,
     ):
+        self._audit_service = audit_service
         self.user = user
         self.repo = repo
         self.protocol = protocol
@@ -569,6 +575,12 @@ class FileService:
                 )
         return persisted.metadata.id
 
+    # The ``files`` grant is checked in get_files_by_ids and get_file_infos,
+    # the lookups a request's own file ids go through. The single-file and
+    # derived-image lookups also serve files no request named as an upload (a
+    # tool's fresh output, the export of a generated document, images derived
+    # from an assistant's attachments), so they must stay open to a key
+    # without ``files: read``. Never hand them an id taken from a request.
     async def get_file_by_id(self, file_id: UUID) -> FileInfo:
         metadata = await self.repo.get_by_id(file_id=file_id)
         self._require_owner(metadata, action="read")
@@ -585,7 +597,9 @@ class FileService:
         include_transcription: bool = True,
     ) -> list[File]:
         if file_ids:
-            require_file_read_permission(self._authenticated_user())
+            await require_file_read_permission(
+                self._authenticated_user(), self._audit_service
+            )
         metadata = await self.repo.get_list_by_id_and_user(
             ids=file_ids,
             user_id=self._authenticated_user().id,
@@ -621,7 +635,9 @@ class FileService:
         # A queued App run resolves its inputs here and later executes as the
         # plain owner, so the caller's grant is checked where the ids are named.
         if file_ids:
-            require_file_read_permission(self._authenticated_user())
+            await require_file_read_permission(
+                self._authenticated_user(), self._audit_service
+            )
         metadata = await self.repo.get_by_ids(file_ids)
         for file in metadata:
             self._require_owner(file, action="read")

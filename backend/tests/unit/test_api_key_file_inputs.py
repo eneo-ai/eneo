@@ -19,6 +19,8 @@ from httpx import ASGITransport, AsyncClient
 
 from eneo.apps.app_runs.app_run_service import AppRunService
 from eneo.apps.apps.app_service import AppService
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.outcome import Outcome
 from eneo.authentication import api_key_resolver
 from eneo.authentication.auth_models import (
     ApiKeyHashVersion,
@@ -35,6 +37,7 @@ from eneo.files.file_content_loader import FileAttachmentGroup
 from eneo.files.file_models import File, FileMetadata, FileType
 from eneo.files.file_service import FileService, require_requested_files
 from eneo.files.upload_access import may_read_user_uploads
+from eneo.main.container.container import Container
 from eneo.main.container.request_container import request_container
 from eneo.main.exceptions import (
     BadRequestException,
@@ -42,8 +45,7 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from eneo.main.models import ModelId
-from eneo.questions.question import Question, QuestionsFiles
-from eneo.questions.question_file_projection import attach_question_files
+from eneo.questions.question import Question, QuestionsFiles, ToolCallInfo
 from eneo.server.exception_handlers import add_exception_handlers
 from eneo.services.service_runner import ServiceRunner
 from eneo.sessions.session import SessionFeedback, SessionInDB, SessionUpdate
@@ -141,7 +143,13 @@ def _files(user: UserInDB, file: File) -> FileService:
     repo = AsyncMock()
     repo.session = Mock()
     repo.get_list_by_id_and_user.return_value = [_metadata(file)]
-    service = FileService(user=user, repo=repo, protocol=Mock(), object_content=Mock())
+    service = FileService(
+        user=user,
+        repo=repo,
+        protocol=Mock(),
+        object_content=Mock(),
+        audit_service=AsyncMock(),
+    )
     service._content_loader.load = AsyncMock(return_value={file.id: file})
     return service
 
@@ -160,9 +168,21 @@ async def test_files_none_rejects_known_owner_id_before_content_read(key_type):
         await service.get_files_by_ids([file.id])
 
     assert denied.value.code == "insufficient_resource_permission"
-    assert denied.value.context["resource_type"] == "files"
+    # What a route-level denial of the same code shows: never the held level.
+    assert denied.value.context == {
+        "resource_type": "files",
+        "required_level": "read",
+        "auth_layer": "api_key_resource",
+        "action": "resource_permission_check",
+    }
     service.repo.get_list_by_id_and_user.assert_not_awaited()
     service._content_loader.load.assert_not_awaited()
+    service._audit_service.log_async.assert_awaited_once()
+    logged = service._audit_service.log_async.await_args.kwargs
+    assert logged["action"] is ActionType.API_KEY_AUTH_FAILED
+    assert logged["outcome"] is Outcome.FAILURE
+    assert logged["entity_id"] == user.active_api_key.id
+    assert logged["metadata"]["extra"]["granted_level"] == "none"
 
 
 @pytest.mark.parametrize(
@@ -184,6 +204,7 @@ async def test_file_read_grants_preserve_owner_file_content(level):
     service.repo.get_list_by_id_and_user.assert_awaited_once_with(
         ids=[file.id], user_id=user.id
     )
+    service._audit_service.log_async.assert_not_awaited()
 
 
 @pytest.mark.parametrize("session_login", [False, True])
@@ -249,30 +270,29 @@ def test_request_container_hydrates_conversations_by_the_principals_grant(grante
     user.active_api_key = _key(
         user, ResourcePermissionLevel.READ if granted else ResourcePermissionLevel.NONE
     )
-    container = request_container(
-        session=providers.Object(Mock()),
-        user=providers.Object(user),
-        tenant=providers.Object(user.tenant),
-    )
-    container.file_content_loader.override(providers.Object(Mock()))
+    container = _request_container(user, Mock())
 
     assert container.session_repo().include_user_uploads is granted
     assert container.question_repo().include_user_uploads is granted
     assert container.analysis_repo().include_user_uploads is granted
+    assert container.app_run_repo().include_user_uploads is granted
+    # The one derivation also reaches the repositories SessionService builds
+    # for its own transactions.
+    assert (
+        container.session_service.kwargs["include_user_uploads"]
+        is container.user_uploads_readable
+    )
 
 
 @pytest.mark.parametrize("granted", [False, True])
 def test_session_service_write_repositories_follow_the_grant(granted):
-    user = TEST_USER.model_copy()
-    user.active_api_key = _key(
-        user, ResourcePermissionLevel.READ if granted else ResourcePermissionLevel.NONE
-    )
     loader = Mock()
     service = SessionService(
         session_repo=AsyncMock(),
         question_repo=AsyncMock(),
-        user=user,
+        user=TEST_USER.model_copy(),
         file_content_loader_factory=lambda session: loader,
+        include_user_uploads=granted,
     )
 
     for repo in (
@@ -298,32 +318,68 @@ class _Loader:
         }
 
 
-async def _hydrated_question(
-    session: SessionInDB, user: UserInDB
-) -> tuple[Question, File, File]:
-    """An earlier turn with one upload and one generated file, hydrated the
-    way the repositories do it for ``user``."""
-    upload = _file(user)
-    generated = _file(user, name="summary.txt", text="GENERATED-SUMMARY")
-    question = Question(
-        id=uuid4(),
-        tenant_id=user.tenant_id,
-        session_id=session.id,
-        question="Read the attached document.",
-        answer="Earlier answer.",
-        num_tokens_question=5,
-        num_tokens_answer=2,
-        questions_files=[
-            QuestionsFiles(type="user", file=_metadata(upload)),
-            QuestionsFiles(type="assistant", file=_metadata(generated)),
-        ],
+TOOL_READ = "TOOL-READ-PAYROLL-7"
+
+
+def _request_container(user: UserInDB, loader: object) -> Container:
+    container = request_container(
+        session=providers.Object(AsyncMock()),
+        user=providers.Object(user),
+        tenant=providers.Object(user.tenant),
     )
-    await attach_question_files(
-        [question],
-        loader=_Loader([upload, generated]),  # type: ignore[arg-type]
-        include_user_uploads=may_read_user_uploads(user),
+    container.file_content_loader.override(providers.Object(loader))
+    return container
+
+
+@pytest.fixture
+def hydrated(monkeypatch: pytest.MonkeyPatch):
+    """Gives ``session`` an earlier turn, hydrated as a request by ``user``
+    hydrates it: through the request container's own SessionRepository, with
+    only the database lookups stubbed. The turn has one upload, one generated
+    file, and a tool call that read the upload."""
+    monkeypatch.setattr(
+        "eneo.sessions.sessions_repo.InfoBlobRepository.hydrate_original_availability",
+        AsyncMock(),
     )
-    return question, upload, generated
+    monkeypatch.setattr("eneo.sessions.sessions_repo.show_current_views", AsyncMock())
+
+    async def hydrate(
+        session: SessionInDB, user: UserInDB
+    ) -> tuple[Question, File, File]:
+        upload = _file(user)
+        generated = _file(user, name="summary.txt", text="GENERATED-SUMMARY")
+        question = Question(
+            id=uuid4(),
+            tenant_id=user.tenant_id,
+            session_id=session.id,
+            question="Read the attached document.",
+            answer="Earlier answer.",
+            num_tokens_question=5,
+            num_tokens_answer=2,
+            questions_files=[
+                QuestionsFiles(type="user", file=_metadata(upload)),
+                QuestionsFiles(type="assistant", file=_metadata(generated)),
+            ],
+            tool_calls=[
+                ToolCallInfo(
+                    server_name="files",
+                    tool_name="read_file",
+                    mcp_tool_name="files__read_file",
+                    tool_call_id="read-upload",
+                    arguments={
+                        "url": f"https://eneo.test/api/v1/files/{upload.id}"
+                        "/original/download?token=REDACTED"
+                    },
+                    result=f"File: {upload.name} (text/plain)\n\n{TOOL_READ}",
+                )
+            ],
+        )
+        session.questions = [question]
+        repo = _request_container(user, _Loader([upload, generated])).session_repo()
+        await repo._attach_turn_details([session])
+        return question, upload, generated
+
+    return hydrate
 
 
 def _ownership(session: SessionInDB) -> SessionOwnership:
@@ -341,15 +397,19 @@ def _history(user: UserInDB, session: SessionInDB) -> SessionService:
     repo = AsyncMock()
     repo.get.return_value = session
     repo.get_ownership.return_value = _ownership(session)
-    return SessionService(session_repo=repo, question_repo=AsyncMock(), user=user)
+    return SessionService(
+        session_repo=repo,
+        question_repo=AsyncMock(),
+        user=user,
+        include_user_uploads=may_read_user_uploads(user),
+    )
 
 
-async def test_history_without_the_grant_is_read_once_with_uploads_left_out():
+async def test_history_without_the_grant_is_read_once_with_uploads_left_out(hydrated):
     user = TEST_USER.model_copy()
     user.active_api_key = _key(user)
     session = SessionInDB(id=uuid4(), user_id=user.id, name="Private chat")
-    question, upload, generated = await _hydrated_question(session, user)
-    session.questions = [question]
+    _, upload, generated = await hydrated(session, user)
     history = _history(user, session)
 
     read = await history.get_session_by_uuid(session.id)
@@ -357,17 +417,23 @@ async def test_history_without_the_grant_is_read_once_with_uploads_left_out():
     assert read.questions[0].files == []
     assert read.questions[0].generated_files == [generated]
     assert upload.name not in read.model_dump_json()
+    assert TOOL_READ not in read.model_dump_json()
+    # The tool-result endpoint reads the same record.
+    call = await history.get_tool_call_result(session=read, tool_call_id="read-upload")
+    assert call is not None
+    assert (call.arguments, call.result) == (None, None)
     history.session_repo.get.assert_awaited_once()
     history.session_repo.get_ownership.assert_not_awaited()
 
 
 @pytest.mark.parametrize("operation", ["feedback", "rename"])
-async def test_rename_and_feedback_stay_available_without_the_grant(operation: str):
+async def test_rename_and_feedback_stay_available_without_the_grant(
+    hydrated, operation: str
+):
     user = TEST_USER.model_copy()
     user.active_api_key = _key(user)
     session = SessionInDB(id=uuid4(), user_id=user.id, name="Private chat")
-    question, _, _ = await _hydrated_question(session, user)
-    session.questions = [question]
+    await hydrated(session, user)
     service = _history(user, session)
     service.session_repo.add_feedback.return_value = session
     service.session_repo.update.return_value = session
@@ -411,15 +477,14 @@ async def test_unreadable_copy_keeps_its_existing_missing_history_error():
 
 @pytest.mark.parametrize("granted", [False, True])
 async def test_history_reaches_the_model_only_with_the_files_grant(
-    turn: TurnFixture, granted: bool
+    turn: TurnFixture, hydrated, granted: bool
 ):
     turn.user.active_api_key = _key(
         turn.user,
         ResourcePermissionLevel.READ if granted else ResourcePermissionLevel.NONE,
         scope_id=turn.assistant.id,
     )
-    question, upload, _ = await _hydrated_question(turn.session, turn.user)
-    turn.session.questions = [question]
+    _, upload, _ = await hydrated(turn.session, turn.user)
     history = _history(turn.user, turn.session)
     turn.history.get_session_by_uuid.side_effect = history.get_session_by_uuid
 
@@ -432,6 +497,8 @@ async def test_history_reaches_the_model_only_with_the_files_grant(
     messages = str(turn.requests[0]["messages"])
     assert "Earlier answer." in messages
     assert (upload.text in messages) is granted
+    # What an earlier turn's tool read out of the upload is replayed the same way.
+    assert (TOOL_READ in messages) is granted
 
 
 # --- Uploads named in the current request ----------------------------------------
@@ -604,5 +671,10 @@ async def test_denial_has_a_stable_403_api_response():
 
     assert response.status_code == 403
     assert response.json()["code"] == "insufficient_resource_permission"
-    assert response.json()["context"]["auth_layer"] == "api_key_resource"
+    assert response.json()["context"] == {
+        "resource_type": "files",
+        "required_level": "read",
+        "auth_layer": "api_key_resource",
+        "action": "resource_permission_check",
+    }
     assert "CONFIDENTIAL-PAYROLL-42" not in response.text

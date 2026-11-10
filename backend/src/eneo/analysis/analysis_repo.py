@@ -128,7 +128,7 @@ class AnalysisRepository:
         session: AsyncSession,
         file_content_loader: FileContentLoader,
         *,
-        include_user_uploads: bool = True,
+        include_user_uploads: bool,
     ) -> None:
         super().__init__()
         self.session = session

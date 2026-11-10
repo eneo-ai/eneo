@@ -61,7 +61,7 @@ class QuestionRepository:
         session: AsyncSession,
         file_content_loader: FileContentLoader | None = None,
         *,
-        include_user_uploads: bool = True,
+        include_user_uploads: bool,
     ) -> None:
         super().__init__()
         self.delegate: BaseRepositoryDelegate[Question] = BaseRepositoryDelegate(
@@ -83,10 +83,6 @@ class QuestionRepository:
             info_blob for question in questions for info_blob in question.info_blobs
         ]
         await InfoBlobRepository(self.session).hydrate_original_availability(info_blobs)
-        if self.file_content_loader is None:
-            if any(question.questions_files for question in questions):
-                raise RuntimeError("Question files require FileContentLoader")
-            return questions
         await attach_question_files(
             questions,
             loader=self.file_content_loader,

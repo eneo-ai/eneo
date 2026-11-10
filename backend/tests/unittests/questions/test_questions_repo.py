@@ -26,7 +26,7 @@ async def test_hydrates_all_info_blobs_without_file_loader(monkeypatch):
         "eneo.questions.questions_repo.InfoBlobRepository.hydrate_original_availability",
         hydrate,
     )
-    repo = QuestionRepository(AsyncMock())
+    repo = QuestionRepository(AsyncMock(), include_user_uploads=True)
 
     await repo._hydrate_questions(
         [SimpleNamespace(info_blobs=blobs, questions_files=[])]
@@ -54,7 +54,7 @@ async def test_hydration_follows_the_principals_file_grant(monkeypatch):
 
 
 async def test_get_by_tenant_filters_out_questions_without_session_id():
-    repo = QuestionRepository(AsyncMock())
+    repo = QuestionRepository(AsyncMock(), include_user_uploads=True)
     repo.delegate.get_models_from_query = AsyncMock(return_value=[])
 
     await repo.get_by_tenant(
@@ -77,7 +77,7 @@ async def test_get_session_partner_uses_tenant_scoped_scalar_join():
     result.one_or_none.return_value = (assistant_id, None)
     session = AsyncMock()
     session.execute.return_value = result
-    repo = QuestionRepository(session)
+    repo = QuestionRepository(session, include_user_uploads=True)
 
     partner = await repo.get_session_partner(
         id=question_id,
@@ -103,7 +103,7 @@ async def test_get_session_partner_uses_tenant_scoped_scalar_join():
 async def test_get_for_tenant_is_scoped_before_hydration():
     question_id = uuid4()
     tenant_id = uuid4()
-    repo = QuestionRepository(AsyncMock())
+    repo = QuestionRepository(AsyncMock(), include_user_uploads=True)
     repo.delegate.get_model_from_query = AsyncMock(return_value=None)
 
     question = await repo.get_for_tenant(id=question_id, tenant_id=tenant_id)
@@ -129,7 +129,7 @@ async def test_add_serializes_skill_provenance_as_json_safe_revision_references(
     session = AsyncMock()
     record = MagicMock(id=uuid4())
     session.scalar.return_value = record
-    repo = QuestionRepository(session)
+    repo = QuestionRepository(session, include_user_uploads=True)
     repo._add_references = AsyncMock(return_value=[])  # type: ignore[method-assign]
     repo.get = AsyncMock(return_value=MagicMock())  # type: ignore[method-assign]
 
@@ -172,7 +172,7 @@ async def test_add_serializes_strict_skill_activation_evidence():
     )
     session = AsyncMock()
     session.scalar.return_value = MagicMock(id=uuid4())
-    repo = QuestionRepository(session)
+    repo = QuestionRepository(session, include_user_uploads=True)
     repo._add_references = AsyncMock(return_value=[])  # type: ignore[method-assign]
     repo.get = AsyncMock(return_value=MagicMock())  # type: ignore[method-assign]
 
@@ -195,7 +195,7 @@ async def test_add_serializes_strict_skill_activation_evidence():
 
 async def test_answer_finalization_does_not_rewrite_frozen_skill_activation():
     session = AsyncMock()
-    repo = QuestionRepository(session)
+    repo = QuestionRepository(session, include_user_uploads=True)
 
     await repo.update_with_answer(
         question_id=uuid4(),
@@ -219,7 +219,7 @@ async def test_answer_finalization_does_not_rewrite_frozen_skill_activation():
 
 async def test_answer_finalization_replaces_initial_skill_runtime_state():
     session = AsyncMock()
-    repo = QuestionRepository(session)
+    repo = QuestionRepository(session, include_user_uploads=True)
     reference = SkillExecutionReference(
         skill_id=uuid4(),
         skill_revision_id=uuid4(),
@@ -275,7 +275,7 @@ async def test_answer_finalization_replaces_initial_skill_runtime_state():
 
 async def test_skill_runtime_state_update_is_tenant_scoped():
     session = AsyncMock()
-    repo = QuestionRepository(session)
+    repo = QuestionRepository(session, include_user_uploads=True)
     question_id = uuid4()
     tenant_id = uuid4()
     evidence = SkillActivationEvidenceV1(
@@ -329,7 +329,9 @@ async def test_skill_activation_evidence_read_is_bounded_to_one_turn():
     )
     session.execute.return_value = result
     file_loader = MagicMock()
-    repo = QuestionRepository(session, file_content_loader=file_loader)
+    repo = QuestionRepository(
+        session, file_content_loader=file_loader, include_user_uploads=True
+    )
 
     stored = await repo.get_skill_activation_evidence(
         id=question_id,
@@ -369,7 +371,9 @@ async def test_skill_activation_evidence_read_rejects_untyped_body_fields():
     result = MagicMock()
     result.one_or_none.return_value = SimpleNamespace(skill_activation_data=evidence)
     session.execute.return_value = result
-    repo = QuestionRepository(session, file_content_loader=MagicMock())
+    repo = QuestionRepository(
+        session, file_content_loader=MagicMock(), include_user_uploads=True
+    )
 
     with pytest.raises(ValidationError):
         await repo.get_skill_activation_evidence(
@@ -384,7 +388,7 @@ async def test_turn_without_activation_evidence_is_distinct_from_missing_message
     result = MagicMock()
     result.one_or_none.return_value = SimpleNamespace(skill_activation_data=None)
     session.execute.return_value = result
-    repo = QuestionRepository(session)
+    repo = QuestionRepository(session, include_user_uploads=True)
 
     stored = await repo.get_skill_activation_evidence(
         id=uuid4(),
@@ -398,7 +402,7 @@ async def test_turn_without_activation_evidence_is_distinct_from_missing_message
 
 async def test_answer_finalization_stores_tool_calls_as_json_values():
     session = AsyncMock()
-    repo = QuestionRepository(session)
+    repo = QuestionRepository(session, include_user_uploads=True)
     generated = uuid4()
 
     await repo.update_with_answer(

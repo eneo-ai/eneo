@@ -9,7 +9,10 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import Request
 
-from eneo.authentication.api_key_resolver import ApiKeyValidationError
+from eneo.authentication.api_key_resolver import (
+    PUBLIC_DENIAL_CONTEXT_KEYS,
+    ApiKeyValidationError,
+)
 from eneo.authentication.auth_models import (
     ApiKeyListCursor,
     ApiKeyUsageEvent,
@@ -24,16 +27,7 @@ from eneo.server.exception_handlers import extract_request_id
 logger = get_logger(__name__)
 
 
-_SAFE_CONTEXT_KEYS: frozenset[str] = frozenset(
-    {
-        "resource_type",
-        "required_level",
-        "scope_type",
-        "action",
-        "auth_layer",
-        "required_capability",
-    }
-)
+_SAFE_CONTEXT_KEYS = PUBLIC_DENIAL_CONTEXT_KEYS
 _GUARDRAIL_CODES: frozenset[str] = frozenset(
     {
         "origin_not_allowed",

@@ -123,7 +123,7 @@ class SessionRepository:
         session: AsyncSession,
         file_content_loader: FileContentLoader | None = None,
         *,
-        include_user_uploads: bool = True,
+        include_user_uploads: bool,
     ):
         super().__init__()
         self.delegate: BaseRepositoryDelegate[SessionInDB] = BaseRepositoryDelegate(
@@ -164,14 +164,6 @@ class SessionRepository:
             ),
             McpAppViewRepo(self.session),
         )
-        if self.file_content_loader is None:
-            if any(
-                question.questions_files
-                for session in sessions
-                for question in session.questions
-            ):
-                raise RuntimeError("Session files require FileContentLoader")
-            return
         await attach_question_files(
             [question for session in sessions for question in session.questions],
             loader=self.file_content_loader,

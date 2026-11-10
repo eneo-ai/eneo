@@ -6,6 +6,7 @@ file map can resolve them. MCP providers continue to receive their original URLs
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Mapping
 from typing import Any, cast
@@ -14,11 +15,13 @@ from uuid import UUID
 from eneo.authentication.signed_urls import (
     redact_reference_tokens,
     redact_reference_tokens_in_json,
+    reference_file_ids,
 )
 
 HANDLE_PREFIX = "eneo-file:"
 HANDLE_PATTERN = r"eneo-file:[0-9a-f]{32}"
 _HANDLE = re.compile(HANDLE_PATTERN + r"$")
+_HANDLE_ANYWHERE = re.compile(HANDLE_PATTERN)
 # Historical arguments/results can contain URLs inside JSON text or prose.
 _LEGACY_LINK = re.compile(
     r"https?://[^\s\"'<>]+?/api/v1/files/(?P<id>[0-9a-fA-F-]{36})"
@@ -74,6 +77,19 @@ def handle_file_ids(value: Any) -> set[UUID]:
             *(handle_file_ids(item) for item in cast(list[Any], value))
         )
     return set()
+
+
+def referenced_file_ids(value: Any) -> set[UUID]:
+    """Every file ``value`` points at, as a handle or a link, anywhere in it.
+
+    Stored tool arguments keep the link with its token redacted, and a handle
+    can sit inside longer text, so both shapes are read without verification.
+    """
+    file_ids = reference_file_ids(value, include_redacted=True)
+    text = value if isinstance(value, str) else json.dumps(value, default=str)
+    for handle in _HANDLE_ANYWHERE.findall(text):
+        file_ids.add(UUID(hex=handle[len(HANDLE_PREFIX) :]))
+    return file_ids
 
 
 def model_file_references(value: Any, current_urls: Mapping[UUID, str]) -> Any:

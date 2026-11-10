@@ -19,7 +19,7 @@ async def test_hydrates_all_info_blobs_before_file_projection(monkeypatch):
     monkeypatch.setattr(
         "eneo.analysis.analysis_repo.attach_question_files", attach_files
     )
-    repo = AnalysisRepository(AsyncMock(), MagicMock())
+    repo = AnalysisRepository(AsyncMock(), MagicMock(), include_user_uploads=True)
     questions = [SimpleNamespace(info_blobs=blobs, questions_files=[])]
 
     await repo._hydrate_sessions([SimpleNamespace(id=uuid4(), questions=questions)])

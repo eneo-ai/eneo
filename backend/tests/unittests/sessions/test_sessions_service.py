@@ -41,6 +41,7 @@ async def service():
         session_repo=session_repo,
         question_repo=question_repo,
         user=TEST_USER,
+        include_user_uploads=True,
     )
 
     return service

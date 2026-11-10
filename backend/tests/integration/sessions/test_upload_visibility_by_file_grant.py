@@ -18,7 +18,8 @@ from eneo.authentication.auth_models import (
     ResourcePermissionLevel,
     ResourcePermissions,
 )
-from eneo.questions.question import QuestionAdd
+from eneo.files.model_file_references import file_handle
+from eneo.questions.question import QuestionAdd, ToolCallInfo
 from eneo.sessions.session import SessionFeedback, SessionUpdate
 from eneo.users.user import UserInDB
 
@@ -68,6 +69,22 @@ async def test_uploads_follow_the_files_grant_through_every_history_read(
                 num_tokens_answer=0,
                 tenant_id=admin_user.tenant_id,
                 session_id=session.id,
+                tool_calls=[
+                    ToolCallInfo(
+                        server_name="files",
+                        tool_name="read_file",
+                        tool_call_id="read-upload",
+                        arguments={"url": file_handle(upload.id)},
+                        result="File: payroll-scan.png (image/png)\n\nPAYROLL-TEXT",
+                    ),
+                    ToolCallInfo(
+                        server_name="images",
+                        tool_name="describe",
+                        tool_call_id="describe-generated",
+                        arguments={"image": file_handle(generated.id)},
+                        result="A bar chart.",
+                    ),
+                ],
             ),
             files=[upload],
             generated_files=[generated],
@@ -81,6 +98,18 @@ async def test_uploads_follow_the_files_grant_through_every_history_read(
         assert [file.id for file in read.questions[0].files] == []
         assert [file.id for file in read.questions[0].generated_files] == [generated.id]
         assert "payroll-scan" not in str(read.model_dump())
+        # What a tool read out of the upload is left out with it; the call on
+        # the generated file is not an upload read and stays.
+        assert "PAYROLL-TEXT" not in str(read.model_dump())
+        masked = await sessions.get_tool_call_result(
+            session=read, tool_call_id="read-upload"
+        )
+        assert masked is not None
+        assert (masked.arguments, masked.result) == (None, None)
+        kept = await sessions.get_tool_call_result(
+            session=read, tool_call_id="describe-generated"
+        )
+        assert kept is not None and kept.result == "A bar chart."
 
         renamed = await sessions.update_session(
             SessionUpdate(id=session.id, name="Renamed")
@@ -98,6 +127,10 @@ async def test_uploads_follow_the_files_grant_through_every_history_read(
         assert stored is not None
         assert stored.files == []
         assert [file.id for file in stored.generated_files] == [generated.id]
+        assert [call.result for call in stored.tool_calls or []] == [
+            None,
+            "A bar chart.",
+        ]
 
         # Tenant-wide reads (exports) hydrate through the same path.
         exported_sessions = await container.session_repo().get_by_tenant(
@@ -122,10 +155,17 @@ async def test_uploads_follow_the_files_grant_through_every_history_read(
         read = await container.session_service().get_session_by_uuid(session.id)
         assert [file.id for file in read.questions[0].files] == [upload.id]
         assert [file.id for file in read.questions[0].generated_files] == [generated.id]
+        assert "PAYROLL-TEXT" in str(read.model_dump())
 
+    # The key's rename and rating above wrote the conversation back: what it
+    # could not see is still stored.
     async with db_container() as container:
         owner_view = await container.session_service().get_session_by_uuid(session.id)
         assert [file.id for file in owner_view.questions[0].files] == [upload.id]
+        assert [call.result for call in owner_view.questions[0].tool_calls or []] == [
+            "File: payroll-scan.png (image/png)\n\nPAYROLL-TEXT",
+            "A bar chart.",
+        ]
 
     # Deleting needs ownership only; the turns cascade away with the row.
     async with db_container(user=denied) as container:

@@ -831,7 +831,8 @@ class Container(containers.DeclarativeContainer):
     user_groups_repo = providers.Factory(UserGroupsRepository, session=session)
     # Whether the principal may read the files users uploaded to conversations:
     # an API key needs its ``files`` read grant. The repositories that hydrate
-    # a conversation's turns leave those uploads out otherwise.
+    # a conversation's turns or an App run's inputs leave those uploads out
+    # otherwise.
     user_uploads_readable = providers.Callable(may_read_user_uploads, user=user)
     analysis_repo = providers.Factory(
         AnalysisRepository,
@@ -870,6 +871,7 @@ class Container(containers.DeclarativeContainer):
         session=session,
         factory=app_run_factory,
         file_repo=file_repo,
+        include_user_uploads=user_uploads_readable,
     )
     service_repo = providers.Factory(
         ServiceRepository,
@@ -1294,6 +1296,7 @@ class Container(containers.DeclarativeContainer):
         protocol=file_protocol,
         object_content=object_content_service,
         upload_admission=upload_admission,
+        audit_service=audit_service,
     )
     widget_service = providers.Factory(
         WidgetService,
@@ -1333,6 +1336,7 @@ class Container(containers.DeclarativeContainer):
         session_repo=session_repo,
         file_service=file_service,
         file_content_loader_factory=providers.Object(_file_content_loader_for_session),
+        include_user_uploads=user_uploads_readable,
     )
     resource_mover_service = providers.Factory(
         ResourceMoverService,

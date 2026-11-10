@@ -48,6 +48,7 @@ async def test_session_service_create_session_commits_independently(
         session_repo=request_repo,
         question_repo=AsyncMock(),
         user=SimpleNamespace(id=uuid4(), tenant_id=uuid4()),
+        include_user_uploads=True,
     )
 
     await service.create_session(name="new-session", assistant_id=uuid4())
@@ -100,6 +101,7 @@ async def test_question_placeholder_commits_independently(
         session_repo=request_session_repo,
         question_repo=request_question_repo,
         user=SimpleNamespace(id=uuid4(), tenant_id=uuid4()),
+        include_user_uploads=True,
     )
 
     await service.create_question_placeholder(
@@ -152,6 +154,7 @@ async def test_new_session_and_first_question_share_one_short_transaction(
         session_repo=SimpleNamespace(session=MagicMock()),
         question_repo=AsyncMock(),
         user=SimpleNamespace(id=uuid4(), tenant_id=uuid4()),
+        include_user_uploads=True,
     )
 
     (

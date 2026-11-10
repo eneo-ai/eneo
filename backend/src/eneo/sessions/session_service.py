@@ -14,7 +14,6 @@ from eneo.database.database import AsyncSession, sessionmanager
 from eneo.files.file_content_loader import FileContentLoader
 from eneo.files.file_models import File
 from eneo.files.file_service import FileService
-from eneo.files.upload_access import may_read_user_uploads
 from eneo.group_chat.application.group_chat_service import GroupChatService
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from eneo.logging.logging import LoggingDetails
@@ -136,7 +135,8 @@ async def persist_partial_question_answer(
     """
     try:
         async with sessionmanager.session() as session, session.begin():
-            repo = QuestionRepository(session)
+            # Write-only: nothing is read back, so no upload needs to be visible.
+            repo = QuestionRepository(session, include_user_uploads=False)
             await repo.update_with_answer(
                 question_id=question_id,
                 tenant_id=tenant_id,
@@ -173,7 +173,7 @@ async def persist_final_skill_runtime_state(
     """Commit final Skill evidence independently of a failing request transaction."""
 
     async with sessionmanager.session() as session, session.begin():
-        repo = QuestionRepository(session)
+        repo = QuestionRepository(session, include_user_uploads=False)
         await repo.update_skill_runtime_state(
             question_id=question_id,
             tenant_id=tenant_id,
@@ -198,8 +198,13 @@ class SessionService:
         file_content_loader_factory: (
             Callable[[AsyncSession], FileContentLoader] | None
         ) = None,
+        *,
+        include_user_uploads: bool,
     ):
         super().__init__()
+        # The principal's ``files`` read grant, as the injected repositories
+        # got it; the repositories built here per transaction follow it.
+        self._include_user_uploads = include_user_uploads
         self.session_repo = session_repo
         self.question_repo = question_repo
         self.user = user
@@ -217,14 +222,14 @@ class SessionService:
         return QuestionRepository(
             session,
             self._file_content_loader(session),
-            include_user_uploads=may_read_user_uploads(self.user),
+            include_user_uploads=self._include_user_uploads,
         )
 
     def _session_repository(self, session: AsyncSession) -> SessionRepository:
         return SessionRepository(
             session,
             self._file_content_loader(session),
-            include_user_uploads=may_read_user_uploads(self.user),
+            include_user_uploads=self._include_user_uploads,
         )
 
     @asynccontextmanager

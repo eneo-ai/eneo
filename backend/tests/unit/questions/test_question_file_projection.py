@@ -4,9 +4,17 @@ from collections.abc import Sequence
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
+import pytest
+
 from eneo.files.file_content_loader import FileAttachmentGroup
 from eneo.files.file_models import File, FileMetadata, FileType
-from eneo.questions.question import Question, QuestionsFiles
+from eneo.files.model_file_references import file_handle
+from eneo.questions.question import (
+    McpToolReferencePublic,
+    Question,
+    QuestionsFiles,
+    ToolCallInfo,
+)
 from eneo.questions.question_file_projection import attach_question_files
 from eneo.questions.question_protocol import to_question_public
 
@@ -101,9 +109,134 @@ async def test_with_the_grant_uploads_and_outputs_are_attached():
     question = _question(upload, generated)
     loader = _Loader([upload, generated])
 
-    await attach_question_files([question], loader=loader)  # type: ignore[arg-type]
+    await attach_question_files(
+        [question],
+        loader=loader,  # type: ignore[arg-type]
+        include_user_uploads=True,
+    )
 
     assert question.files == [upload]
     assert question.generated_files == [generated]
     assert loader.requested == [upload.id, generated.id]
     assert [link.type for link in question.questions_files] == ["user", "assistant"]
+
+
+def _reference(tool_call_id: str, content: str) -> McpToolReferencePublic:
+    now = datetime.now(timezone.utc)
+    return McpToolReferencePublic(
+        id=uuid4(),
+        created_at=now,
+        updated_at=now,
+        uri="resource://captured",
+        content=content,
+        tool_call_id=tool_call_id,
+    )
+
+
+def _with_tool_calls(question: Question, upload: File, generated: File) -> Question:
+    """The turn read its upload with a tool, edited its own output and searched."""
+    question.tool_calls = [
+        ToolCallInfo(
+            server_name="files",
+            tool_name="read_file",
+            tool_call_id="read-upload",
+            arguments={
+                "url": f"https://eneo.test/api/v1/files/{upload.id}"
+                "/original/download?token=REDACTED"
+            },
+            result=f"File: {upload.name} (text/plain)\n\n{upload.text}",
+            structured_content={"text": upload.text},
+        ),
+        ToolCallInfo(
+            server_name="images",
+            tool_name="edit",
+            tool_call_id="edit-generated",
+            arguments={"image": file_handle(generated.id), "prompt": "Crop it"},
+            result="[Image 1]",
+        ),
+        ToolCallInfo(
+            server_name="web",
+            tool_name="search",
+            tool_call_id="search",
+            arguments={"query": "payroll law"},
+            result="Three results.",
+        ),
+    ]
+    question.mcp_tool_references = [
+        _reference("read-upload", upload.text or ""),
+        _reference("search", "A public page."),
+    ]
+    return question
+
+
+async def test_without_the_grant_what_a_tool_read_out_of_an_upload_is_left_out():
+    upload = _file("private-payroll.txt", "CONFIDENTIAL-PAYROLL-42")
+    generated = _file("summary.txt", "GENERATED-SUMMARY")
+    question = _with_tool_calls(_question(upload, generated), upload, generated)
+
+    await attach_question_files(
+        [question],
+        loader=_Loader([upload, generated]),  # type: ignore[arg-type]
+        include_user_uploads=False,
+    )
+
+    assert question.tool_calls is not None
+    read, edit, search = question.tool_calls
+    assert (read.arguments, read.result, read.structured_content) == (None, None, None)
+    assert read.tool_call_id == "read-upload"
+    assert edit.result == "[Image 1]"
+    assert search.result == "Three results."
+    assert [ref.tool_call_id for ref in question.mcp_tool_references] == ["search"]
+    stored = question.model_dump_json()
+    assert "PAYROLL-42" not in stored
+    assert "private-payroll" not in stored
+    assert str(upload.id) not in stored
+
+
+async def test_with_the_grant_tool_calls_are_untouched():
+    upload = _file("private-payroll.txt", "CONFIDENTIAL-PAYROLL-42")
+    generated = _file("summary.txt", "GENERATED-SUMMARY")
+    question = _with_tool_calls(_question(upload, generated), upload, generated)
+    before = question.model_dump(include={"tool_calls", "mcp_tool_references"})
+
+    await attach_question_files(
+        [question],
+        loader=_Loader([upload, generated]),  # type: ignore[arg-type]
+        include_user_uploads=True,
+    )
+
+    assert question.model_dump(include={"tool_calls", "mcp_tool_references"}) == before
+
+
+async def test_a_file_from_another_turn_counts_as_an_upload():
+    """Only the turns in hand say what was generated, so a reference to any
+    other file is masked rather than trusted."""
+    upload = _file("private-payroll.txt", "CONFIDENTIAL-PAYROLL-42")
+    generated = _file("summary.txt", "GENERATED-SUMMARY")
+    question = _with_tool_calls(_question(upload, generated), upload, generated)
+    question.questions_files = []
+
+    await attach_question_files([question], loader=None, include_user_uploads=False)
+
+    assert question.tool_calls is not None
+    assert [call.result for call in question.tool_calls] == [
+        None,
+        None,
+        "Three results.",
+    ]
+
+
+async def test_without_a_loader_only_the_files_left_to_read_need_one():
+    upload = _file("private-payroll.txt", "CONFIDENTIAL-PAYROLL-42")
+    generated = _file("summary.txt", "GENERATED-SUMMARY")
+    only_upload = _question(upload, generated)
+    only_upload.questions_files = only_upload.questions_files[:1]
+
+    await attach_question_files([only_upload], loader=None, include_user_uploads=False)
+    assert only_upload.files == []
+    assert only_upload.questions_files == []
+
+    with pytest.raises(RuntimeError, match="require FileContentLoader"):
+        await attach_question_files(
+            [_question(upload, generated)], loader=None, include_user_uploads=False
+        )

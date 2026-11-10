@@ -36,11 +36,21 @@ class AppRunRepository:
         session: AsyncSession,
         factory: AppRunFactory,
         file_repo: FileRepository,
+        *,
+        include_user_uploads: bool,
     ):
         super().__init__()
         self.session = session
         self.factory = factory
         self.file_repo = file_repo
+        # The principal's ``files`` read grant: a run's input files are uploads.
+        self.include_user_uploads = include_user_uploads
+
+    async def _input_file_infos(self, file_ids: list[UUID]) -> dict[UUID, FileInfo]:
+        if not self.include_user_uploads:
+            return {}
+        infos = await self.file_repo.get_infos_by_ids(file_ids)
+        return {file.id: file for file in infos}
 
     def _options(self) -> list[ExecutableOption]:
         return [
@@ -51,8 +61,7 @@ class AppRunRepository:
 
     async def _to_domain(self, app_run: AppRuns) -> AppRun:
         file_ids = [association.file_id for association in app_run.input_files]
-        infos = await self.file_repo.get_infos_by_ids(file_ids)
-        by_id = {file.id: file for file in infos}
+        by_id = await self._input_file_infos(file_ids)
         return self.factory.create_app_run_from_db(
             app_run,
             input_files=[by_id[file_id] for file_id in file_ids if file_id in by_id],
@@ -66,8 +75,7 @@ class AppRunRepository:
                 for association in app_run.input_files
             )
         )
-        infos = await self.file_repo.get_infos_by_ids(file_ids)
-        by_id = {file.id: file for file in infos}
+        by_id = await self._input_file_infos(file_ids)
         return [
             self.factory.create_app_run_from_db(
                 app_run,
