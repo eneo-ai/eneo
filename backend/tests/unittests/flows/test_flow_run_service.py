@@ -5127,6 +5127,10 @@ async def test_list_step_results_with_files_composes_per_step_views(user):
         tenant_id=user.tenant_id,
         step_results=[step_result_1, step_result_2, step_result_3],
     )
+    # A run without streamed audio has no live-text decision to read.
+    flow_run_repo.list_current_attempt_live_fallbacks.assert_awaited_once_with(
+        run_id=run.id, tenant_id=user.tenant_id, step_ids=frozenset()
+    )
 
 
 # ---------------------------------------------------------------------------

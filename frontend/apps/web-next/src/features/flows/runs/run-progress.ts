@@ -58,9 +58,11 @@ export function runStepViews(
 }
 
 /**
- * What the content-free reads say about a run: its revision and each step's
- * status. When it changes, the run moved on and its audited detail and step
- * results are read again; while it stays the same they are not.
+ * What the content-free reads say about a run: its revision, each step's
+ * status and why a step's live text was not used. When it changes, the run
+ * moved on and its audited detail and step results are read again; while it
+ * stays the same they are not. A step decides on its live text while it runs,
+ * so that reason moves without its status.
  */
 export function progressSignature(
   status: { revision: number; status: string } | null | undefined,
@@ -68,7 +70,7 @@ export function progressSignature(
 ): string {
   const steps = (graph?.nodes ?? [])
     .filter((node) => typeof node.step_order === "number")
-    .map((node) => `${node.step_order}=${node.run_status ?? ""}`)
+    .map((node) => `${node.step_order}=${node.run_status ?? ""}/${node.live_fallback_reason ?? ""}`)
     .join(",");
   return `${status?.revision ?? ""}:${status?.status ?? ""}:${steps}`;
 }

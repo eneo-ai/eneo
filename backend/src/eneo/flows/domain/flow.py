@@ -22,6 +22,7 @@ from eneo.authentication.auth_models import ApiKeyPermission
 from eneo.authentication.principal_types import PrincipalType
 from eneo.flows.domain.flow_invariant_exceptions import FlowPersistedIdMissingError
 from eneo.flows.domain.flow_run_retention_policy import FlowRunRetentionProjection
+from eneo.flows.domain.live_fallback import LiveFallbackReason
 from eneo.flows.enums import (
     FlowInputSource,
     FlowInputType,
@@ -495,6 +496,9 @@ class FlowStepResultAnnotation(BaseModel):
     num_tokens_input: Optional[int] = None
     num_tokens_output: Optional[int] = None
     error_message: Optional[str] = None
+    # Why the step's streamed audio goes to the transcription model, from the
+    # moment its attempt decides it: a poll sees it before the status changes.
+    live_fallback_reason: Optional[LiveFallbackReason] = None
 
 
 class FlowStepAttempt(BaseModel):

@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict
 from pydantic.config import JsonDict
 
 from eneo.flows.domain.flow import FlowPersistedJsonObject, FlowStepResultAnnotation
+from eneo.flows.domain.live_fallback import LiveFallbackReason
 from eneo.flows.enums import (
     FLOW_PRIMARY_OUTPUT_EXECUTION_KIND_BY_MODE,
     FlowInputSource,
@@ -57,6 +58,9 @@ class GraphNode(BaseModel):
     # Audio steps only: whether this run labels speakers as part of transcription
     # (speaker identification on, and an external service configured for it).
     speaker_identification: bool | None = None
+    # Audio steps only: why the run's streamed audio is transcribed by the
+    # transcription model instead of written by its live text.
+    live_fallback_reason: LiveFallbackReason | None = None
 
 
 class GraphEdge(BaseModel):
@@ -379,6 +383,7 @@ def enrich_nodes_with_run_results(
                     "num_tokens_input": result.num_tokens_input,
                     "num_tokens_output": result.num_tokens_output,
                     "error_message": result.error_message,
+                    "live_fallback_reason": result.live_fallback_reason,
                 }
             )
         )

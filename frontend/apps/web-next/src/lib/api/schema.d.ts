@@ -30447,6 +30447,18 @@ export interface components {
       input_type?: string | null;
       /** Label */
       label: string;
+      /** Live Fallback Reason */
+      live_fallback_reason?:
+        | (
+            | "not_received"
+            | "not_found"
+            | "already_bound"
+            | "files_mismatch"
+            | "unavailable"
+            | "no_timing"
+            | "duration_mismatch"
+          )
+        | null;
       /** Num Tokens Input */
       num_tokens_input?: number | null;
       /** Num Tokens Output */

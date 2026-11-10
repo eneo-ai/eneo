@@ -39,7 +39,7 @@ describe("runStepViews", () => {
 });
 
 describe("progressSignature", () => {
-  it("changes when the run's revision or a step's status moves, and only then", () => {
+  it("changes when the run's revision, a step's status or why its live text was not used moves, and only then", () => {
     const graph = makeRunGraph([{ order: 1, label: "A", status: "running" }]);
     const run = makeRunSummary({ status: "running", revision: 2 });
     const same = progressSignature(run, graph);
@@ -51,6 +51,9 @@ describe("progressSignature", () => {
     expect(
       progressSignature(run, makeRunGraph([{ order: 1, label: "A", status: "completed" }]))
     ).not.toBe(same);
+    const fellBack = makeRunGraph([{ order: 1, label: "A", status: "running" }]);
+    fellBack.nodes[0]!.live_fallback_reason = "duration_mismatch";
+    expect(progressSignature(run, fellBack)).not.toBe(same);
   });
 });
 

@@ -142,17 +142,15 @@ async def test_step_listing_batches_reference_only_attempt_reads(
     assert response.status_code == 200, response.text
     assert len(response.json()) == step_count + 2
     attempts = [query.sql for query in queries if "flow_step_attempts" in query.sql]
-    # The transcript references and the live-text fallbacks, whatever the step count.
-    assert len(attempts) == 2
-    for attempt in attempts:
-        assert "output_payload_json" not in attempt
-        assert "provenance_json" not in attempt
-        assert not re.search(
-            r"flow_step_attempts\.input_payload_json(?:\s+AS\s+\w+)?(?:,|\s+FROM)",
-            attempt,
-        )
-        assert "segments_json" not in attempt
-        assert "detail_json" not in attempt
+    assert len(attempts) == 1
+    assert "output_payload_json" not in attempts[0]
+    assert "provenance_json" not in attempts[0]
+    assert not re.search(
+        r"flow_step_attempts\.input_payload_json(?:\s+AS\s+\w+)?(?:,|\s+FROM)",
+        attempts[0],
+    )
+    assert "segments_json" not in attempts[0]
+    assert "detail_json" not in attempts[0]
 
 
 @pytest.mark.parametrize("envelope", [False, True])

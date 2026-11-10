@@ -337,8 +337,20 @@ def step_result_annotation_select(*, run_id: UUID, tenant_id: UUID) -> sa.Select
     """The columns a run-pinned graph annotates nodes with: status facts only.
 
     Polled while a run is active, so it must never select the content columns
-    (prompts, input and output payloads, model parameters).
+    (prompts, input and output payloads, model parameters). The one fact read
+    from a payload is why a streamed step's audio goes to the transcription
+    model, by its path: the step's transcription once it is written, else the
+    decision its current attempt committed before calling that model.
     """
+    # ponytail: Postgres reads each step's payloads whole to take one path, on
+    # every poll; skip the steps the run did not stream (read from its envelope)
+    # if graph polls of long transcripts show up in database time.
+    live_fallback_reason = sa.func.coalesce(
+        FlowStepResults.input_payload_json[
+            ("transcription", "live_fallback_reason")
+        ].astext,
+        FlowStepAttempts.input_payload_json[("live_fallback", "reason")].astext,
+    ).label("live_fallback_reason")
     return (
         sa.select(
             FlowStepResults.step_id,
@@ -347,6 +359,16 @@ def step_result_annotation_select(*, run_id: UUID, tenant_id: UUID) -> sa.Select
             FlowStepResults.num_tokens_input,
             FlowStepResults.num_tokens_output,
             FlowStepResults.error_message,
+            live_fallback_reason,
+        )
+        .select_from(FlowStepResults)
+        .outerjoin(
+            FlowStepAttempts,
+            sa.and_(
+                FlowStepAttempts.flow_run_id == FlowStepResults.flow_run_id,
+                FlowStepAttempts.step_id == FlowStepResults.step_id,
+                FlowStepAttempts.attempt_no == FlowStepResults.current_attempt_no,
+            ),
         )
         .where(FlowStepResults.flow_run_id == run_id)
         .where(FlowStepResults.tenant_id == tenant_id)
@@ -1968,11 +1990,14 @@ class FlowRunRepository:
         ]
 
     async def list_current_attempt_live_fallbacks(
-        self, *, run_id: UUID, tenant_id: UUID
+        self, *, run_id: UUID, tenant_id: UUID, step_ids: Collection[UUID]
     ) -> dict[UUID, FlowStepAttemptLiveFallback]:
-        """By step, why each step's current attempt transcribes its streamed audio
-        with the transcription model, for the steps whose attempt decided so.
-        Reads that record only, never the attempt's whole input."""
+        """By step, why each of the run's streamed steps' current attempt
+        transcribes its audio with the transcription model, for the steps whose
+        attempt decided so. Reads that record only, never the attempt's whole
+        input, and nothing for a run without streamed steps."""
+        if not step_ids:
+            return {}
         live_fallback = FlowStepAttempts.input_payload_json["live_fallback"].astext
         rows = (
             await self.session.execute(
@@ -1989,6 +2014,7 @@ class FlowRunRepository:
                 )
                 .where(FlowStepResults.tenant_id == tenant_id)
                 .where(FlowStepResults.flow_run_id == run_id)
+                .where(FlowStepResults.step_id.in_(tuple(step_ids)))
                 .where(FlowStepAttempts.input_payload_json.has_key("live_fallback"))
             )
         ).all()

@@ -50,6 +50,7 @@ _GOLDEN_GRAPH_RESPONSE = {
             "num_tokens_output": None,
             "error_message": None,
             "speaker_identification": None,
+            "live_fallback_reason": None,
         },
         {
             "id": str(_GOLDEN_STEP_1_ID),
@@ -66,6 +67,7 @@ _GOLDEN_GRAPH_RESPONSE = {
             "num_tokens_output": None,
             "error_message": None,
             "speaker_identification": None,
+            "live_fallback_reason": None,
         },
         {
             "id": str(_GOLDEN_STEP_2_ID),
@@ -82,6 +84,7 @@ _GOLDEN_GRAPH_RESPONSE = {
             "num_tokens_output": None,
             "error_message": None,
             "speaker_identification": None,
+            "live_fallback_reason": None,
         },
         {
             "id": str(_GOLDEN_STEP_3_ID),
@@ -98,6 +101,7 @@ _GOLDEN_GRAPH_RESPONSE = {
             "num_tokens_output": None,
             "error_message": None,
             "speaker_identification": None,
+            "live_fallback_reason": None,
         },
         {
             "id": str(_GOLDEN_STEP_4_ID),
@@ -114,6 +118,7 @@ _GOLDEN_GRAPH_RESPONSE = {
             "num_tokens_output": 17,
             "error_message": None,
             "speaker_identification": None,
+            "live_fallback_reason": None,
         },
         {
             "id": "output",
@@ -130,6 +135,7 @@ _GOLDEN_GRAPH_RESPONSE = {
             "num_tokens_output": None,
             "error_message": None,
             "speaker_identification": None,
+            "live_fallback_reason": None,
         },
     ],
     "edges": [
@@ -371,6 +377,31 @@ def test_enrich_nodes_with_run_results_uses_typed_step_result_fields() -> None:
     assert llm_node.num_tokens_input == 11
     assert llm_node.num_tokens_output == 17
     assert llm_node.error_message is None
+    assert llm_node.live_fallback_reason is None
+
+
+def test_a_run_node_says_why_its_streamed_audio_is_not_written_by_the_live_text() -> (
+    None
+):
+    step_id = uuid4()
+    nodes = [GraphNode(id=str(step_id), label="Step", type="llm", step_order=1)]
+
+    enriched = enrich_nodes_with_run_results(
+        nodes,
+        [
+            FlowStepResultAnnotation(
+                step_id=step_id,
+                step_order=1,
+                status=FlowStepResultStatus.RUNNING,
+                live_fallback_reason="duration_mismatch",
+            )
+        ],
+    )
+
+    assert (enriched[0].run_status, enriched[0].live_fallback_reason) == (
+        "running",
+        "duration_mismatch",
+    )
 
 
 def test_build_graph_includes_explicit_underlag_dependencies() -> None:

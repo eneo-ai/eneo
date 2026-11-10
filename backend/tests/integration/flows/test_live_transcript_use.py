@@ -552,6 +552,54 @@ async def test_a_streamed_recording_in_parts_keeps_its_live_text_in_each_part(
         ] == [(0, "Första.", 0.1), (1, "Andra.", 0.1)]
 
 
+async def test_the_run_graph_says_why_while_the_transcription_model_works(
+    live_recording, client, db_container
+):
+    """The graph a run page polls carries why the live text is not used as soon
+    as the step's attempt decides it, while the step still runs and the run's
+    revision stays the same, and keeps saying it once the step is done."""
+    case = live_recording
+    response = await client.post(
+        f"/api/v1/flows/{case.flow.flow_id}/runs/",
+        headers={**case.headers, "Idempotency-Key": "streamed-graph"},
+        json={
+            "step_inputs": {
+                case.flow.step_id: {"file_ids": [str(case.file.id)], "streamed": True}
+            }
+        },
+    )
+    assert response.status_code == 201, response.text
+    run_id = UUID(response.json()["id"])
+    graph_url = f"/api/v1/flows/{case.flow.flow_id}/graph/?run_id={run_id}"
+    status_url = f"/api/v1/flows/{case.flow.flow_id}/runs/{run_id}/status/"
+    seen: dict[str, object] = {}
+
+    async def transcribe(*_args: object, **_kwargs: object) -> TranscribedAudio:
+        graph = await client.get(graph_url, headers=case.headers)
+        status = await client.get(status_url, headers=case.headers)
+        seen["graph"], seen["status"] = graph.json(), status.json()
+        return TranscribedAudio("Batch text.", 1.0)
+
+    registry = SimpleNamespace(
+        transcribe_from_filepath=AsyncMock(side_effect=transcribe)
+    )
+    async with _executed(db_container, case, run_id, registry) as (_, _, outcome):
+        assert outcome["status"] == "completed", outcome
+
+    (node,) = [n for n in seen["graph"]["nodes"] if n["id"] == case.flow.step_id]
+    assert (node["run_status"], node["live_fallback_reason"]) == (
+        "running",
+        "not_received",
+    )
+    assert seen["status"]["status"] == "running"
+    after = await client.get(graph_url, headers=case.headers)
+    (node,) = [n for n in after.json()["nodes"] if n["id"] == case.flow.step_id]
+    assert (node["run_status"], node["live_fallback_reason"]) == (
+        "completed",
+        "not_received",
+    )
+
+
 async def test_a_failed_attempt_keeps_why_the_live_text_was_not_used(
     live_recording, client, db_container
 ):

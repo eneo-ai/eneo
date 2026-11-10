@@ -846,6 +846,57 @@ describe("FlowRunPage", () => {
     expect(calls(STATUS)).toHaveLength(3);
   });
 
+  it("shows why a running step's live text was not used as soon as the graph says so", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const running = makeRunSummary({ status: "running", finished_at: null, revision: 2 });
+    answerRun(running, makeRunDetail({ ...running, result: null }));
+    const transcribing = () =>
+      makeRunGraph([
+        { order: 1, label: "Transkribera", status: "running" },
+        { order: 2, label: "Skriv svar", status: null }
+      ]);
+    const step = makeRunStep(1, {
+      status: "running",
+      finished_at: null,
+      output_payload_json: null
+    });
+    state.routes[GRAPH] = () => ({ body: transcribing() });
+    state.routes[STEPS] = () => ({ body: [step] });
+    renderRun();
+    await screen.findByText(messages.flow_runs_result_pending);
+    expect(calls(STEPS)).toHaveLength(1);
+    expect(screen.queryByText(messages.flow_run_live_fallback_title)).toBeNull();
+
+    // The step's attempt decides while the batch work runs: the statuses and
+    // the revision stay the same, only the content-free graph says why.
+    const fellBack = transcribing();
+    fellBack.nodes[0]!.live_fallback_reason = "duration_mismatch";
+    state.routes[GRAPH] = () => ({ body: fellBack });
+    state.routes[STEPS] = () => ({
+      body: [
+        {
+          ...step,
+          live_fallback_reason: "duration_mismatch",
+          transcript_model_name: "KB-Whisper"
+        }
+      ]
+    });
+    await act(() => vi.advanceTimersByTimeAsync(2_100));
+
+    expect(await screen.findByText(messages.flow_run_live_fallback_title)).toBeTruthy();
+    expect(
+      screen.getByText(
+        `${messages.flow_run_live_fallback_duration_mismatch} Ljudfilerna transkriberas med KB-Whisper i stället.`
+      )
+    ).toBeTruthy();
+    expect(calls(STEPS)).toHaveLength(2);
+
+    // The steps are read once for it, not on every poll.
+    await act(() => vi.advanceTimersByTimeAsync(2_100));
+    expect(calls(STATUS).length).toBeGreaterThan(2);
+    expect(calls(STEPS)).toHaveLength(2);
+  });
+
   it("stops following a moving run once it is gone", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const running = makeRunSummary({ status: "running", finished_at: null, revision: 2 });

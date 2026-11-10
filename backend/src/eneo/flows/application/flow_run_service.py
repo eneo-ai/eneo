@@ -1253,7 +1253,9 @@ class FlowRunService:
         )
         result_files_by_step_result_id = _result_files_by_step_result_id(result_files)
         live_fallbacks = await self.flow_run_repo.list_current_attempt_live_fallbacks(
-            run_id=run.id, tenant_id=self.user.tenant_id
+            run_id=run.id,
+            tenant_id=self.user.tenant_id,
+            step_ids=read_streamed_steps(run.input_payload_json),
         )
         views: list[FlowRunStepResultWithFiles] = []
         for result in step_results:
