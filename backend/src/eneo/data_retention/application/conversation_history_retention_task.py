@@ -18,6 +18,7 @@ from eneo.data_retention.application.retention_runner import (
     RetentionBatch,
     RetentionStep,
     RetentionStepResult,
+    is_statement_timeout,
 )
 from eneo.data_retention.application.retention_step_order import rotate_retention_steps
 from eneo.data_retention.application.retention_units import RetentionEffects
@@ -195,7 +196,7 @@ class ConversationHistoryRetentionTask:
         ]
         # A name or feedback text goes on its own time, not its questions', so
         # the conversations still holding one past it are a third stream.
-        for read in (*walks, partial(self.names.overdue, window=self.overdue_window)):
+        for read in (*walks, self._names_overdue):
             if remaining == 0:
                 # Rows past the cap are not counted, so the next stream is not
                 # read at all: the snapshot is incomplete whatever it holds.
@@ -216,3 +217,16 @@ class ConversationHistoryRetentionTask:
             complete=all(snapshot.complete for snapshot in snapshots),
             oldest_due_at=min(deadlines) if deadlines else None,
         )
+
+    async def _names_overdue(self, *, limit: int) -> RetentionOverdue:
+        """The names read has no page bound, so the statement timeout can stop
+        it. In its own savepoint, that leaves the transaction usable: the
+        snapshot keeps what the walks before it counted and says it is
+        incomplete. Any other error still fails the snapshot."""
+        try:
+            async with self.names.session.begin_nested():
+                return await self.names.overdue(window=self.overdue_window, limit=limit)
+        except Exception as exc:
+            if not is_statement_timeout(exc):
+                raise
+            return RetentionOverdue(count=0, complete=False, oldest_due_at=None)

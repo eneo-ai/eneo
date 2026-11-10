@@ -335,6 +335,11 @@ def is_retention_timeout(exc: BaseException) -> bool:
     return _transient_state(exc) in _TIMEOUT_STATES
 
 
+def is_statement_timeout(exc: BaseException) -> bool:
+    """A statement ran past the statement timeout (57014), and no other state."""
+    return _transient_state(exc) is _TransientSQLState.STATEMENT_CANCELLED
+
+
 def is_lock_wait_timeout(exc: BaseException) -> bool:
     """A lock wait reached the lock timeout (55P03), and no other state: a
     statement timeout or a deadlock still ends the chunk."""

@@ -17,6 +17,13 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from eneo.data_retention.application.conversation_history_retention_task import (
+    CONVERSATION_HISTORY_TASK,
+)
+from eneo.data_retention.application.retention_health import (
+    RetentionHealthStatus,
+    load_retention_health,
+)
 from eneo.data_retention.domain.retention import RetentionOverdue
 from eneo.data_retention.infrastructure.conversation_name_repo import (
     ConversationNameRepository,
@@ -37,6 +44,7 @@ from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.widgets_table import Widgets
 from eneo.main.config import get_settings
+from eneo.main.retention_tasks import retention_task_registrations
 from eneo.sessions.session import SessionFeedback, SessionUpdate
 from eneo.sessions.sessions_repo import SessionRepository
 from eneo.widgets.domain.widget import generate_public_id
@@ -648,6 +656,53 @@ async def test_a_held_name_or_feedback_text_past_its_time_is_reported_overdue(
     ).overdue(window=timedelta(days=1), limit=1)
     assert (capped.count, capped.complete) == (1, False)
     assert capped.oldest_due_at is not None
+
+
+async def test_a_names_read_stopped_by_the_statement_timeout_is_not_healthy(
+    retention_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+):
+    """The names read has no page bound; the statement timeout stops it.
+    The questions and App runs it follows are kept, the snapshot says it is
+    incomplete, and health does not read healthy.
+
+    Mutant: the timeout loses the whole snapshot, so health keeps reading the
+    older complete one as healthy.
+    """
+    jobs = RetentionJobRunRepository(retention_session)
+    await run_registered_retention(retention_session)
+    before = await jobs.latest_overdue(CONVERSATION_HISTORY_TASK)
+    assert before is not None
+    assert before.overdue == RetentionOverdue(count=0, complete=True)
+
+    async def past_the_statement_timeout(
+        self: ConversationNameRepository, *, window: timedelta, limit: int
+    ) -> RetentionOverdue:
+        await self.session.execute(
+            sa.text("SELECT set_config('statement_timeout', '10ms', true)")
+        )
+        await self.session.execute(sa.text("SELECT pg_sleep(1)"))
+        raise AssertionError("The statement timeout did not stop the read.")
+
+    monkeypatch.setattr(
+        ConversationNameRepository, "overdue", past_the_statement_timeout
+    )
+    await run_registered_retention(retention_session)
+
+    after = await jobs.latest_overdue(CONVERSATION_HISTORY_TASK)
+    assert after is not None
+    assert after.observed_at > before.observed_at
+    assert after.overdue.complete is False
+    health = await load_retention_health(
+        jobs,
+        [
+            task
+            for task in retention_task_registrations(get_settings())
+            if task.name == CONVERSATION_HISTORY_TASK
+        ],
+        now=datetime.now(timezone.utc),
+        lease_stale_after=timedelta(hours=1),
+    )
+    assert health.status is not RetentionHealthStatus.HEALTHY
 
 
 async def test_names_and_feedback_are_cleared_under_a_standing_backlog(

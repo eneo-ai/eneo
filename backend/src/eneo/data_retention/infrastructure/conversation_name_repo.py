@@ -153,8 +153,9 @@ class ConversationNameRepository:
         another transaction holds is still overdue. No index serves a cutoff
         that depends on each conversation's period, so the statement reads
         conversations until it has `limit + 1` (all of them when fewer are
-        overdue), bounded by the transaction's statement timeout like the
-        step that clears them.
+        overdue). Unlike the step that clears them, it reads no pages: only
+        the transaction's statement timeout bounds it, and the task then
+        reports its snapshot incomplete.
         """
         cutoff = self.cutoff - window
         name_overdue = _name_due(cutoff)
