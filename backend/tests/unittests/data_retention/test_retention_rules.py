@@ -4,8 +4,8 @@ import pytest
 import sqlalchemy as sa
 
 from eneo.data_retention.domain.rules import RetentionRule, RuleTask, rule_task
-from eneo.data_retention.infrastructure.conversation_retention_policy import (
-    nearest_period,
+from eneo.data_retention.infrastructure.retention_rule_sql import (
+    rule_period,
 )
 from eneo.policy_levels import PolicyLevel
 
@@ -20,11 +20,11 @@ def test_the_sql_refuses_a_rule_it_cannot_resolve_like_the_kernel():
     columns = {SPACE: sa.literal(60), OWN: sa.literal(30)}
 
     with pytest.raises(ValueError):
-        nearest_period(RuleTask("bounded", (SPACE, OWN), frozenset({SPACE})), columns)
+        rule_period(RuleTask("bounded", (SPACE, OWN), frozenset({SPACE})), columns)
     with pytest.raises(ValueError):
-        nearest_period(RuleTask("partial", (SPACE, OWN)), {OWN: sa.literal(30)})
+        rule_period(RuleTask("partial", (SPACE, OWN)), {OWN: sa.literal(30)})
     with pytest.raises(ValueError):
-        nearest_period(RuleTask("extra", (OWN,)), columns)
+        rule_period(RuleTask("extra", (OWN,)), columns)
 
 
 def test_an_exempt_rule_has_no_period_to_resolve():

@@ -63,7 +63,7 @@ removal. Every `RetentionRule` has exactly one disposition:
 | `widget_conversations` | exemption: each widget's own nightly job removes its conversations, held to the organisation's widget policy |
 
 The SQL that selects due conversations is built from the rule's levels
-(`nearest_period`): a `COALESCE` and a level `CASE` in the rule's order, from
+(`rule_period`): a `COALESCE` and a level `CASE` in the rule's order, from
 the innermost level out. It refuses a rule with a bound, which needs its bound
 in SQL first. A parity test runs every combination of the three levels and
 the organisation switch through the database and through `resolve_period`,
