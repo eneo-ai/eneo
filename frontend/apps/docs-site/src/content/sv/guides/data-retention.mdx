@@ -1,6 +1,6 @@
 ---
 title: Gallring
-translationSource: guides/data-retention.mdx@f784c1b9f724
+translationSource: guides/data-retention.mdx@4f2ba09b971a
 ---
 
 import { Callout } from "nextra/components";
@@ -66,7 +66,7 @@ konversation tas bort omfattar det:
 | En konversations namn (första frågan, en genererad rubrik eller ett namn någon valt) och dess feedbacktext | Var och en registrerar när den skrevs. När den tiden är äldre än konversationens period töms namnet (båda apparna visar Namnlös) och feedbacktexten tas bort, även medan frågor finns kvar. Tummen upp eller ned finns kvar. En gruppchatt följer den kortaste perioden bland sina assistenter |
 | En konversation som kopierats från en annan | Går inte att läsa så snart en fråga den kopierades från tas bort, och tas sedan bort själv. Se [Copies of removed conversations](/docs/audit-logging#copies-of-removed-conversations) (på engelska) |
 | Temporära filer för en uppladdning, en transkribering, en webbläsning eller en SharePoint-import | Ligger i en katalog som tillhör processen som arbetar med dem och tas bort när den stannar. Efter en krasch tar nästa process som startar på samma volym bort dem. `UPLOAD_TMP_DIR` måste därför ligga på ett lokalt filsystem |
-| Registret för ett misslyckat jobb | Behåller en felkod, aldrig feltexten, som kunde citera innehållet |
+| Registret för ett misslyckat jobb | Behåller en felkod, aldrig feltexten, som kunde citera innehållet. Jobb som registrerades före uppgraderingen behåller sin text |
 
 Två ögonblick spelar roll, och Eneo håller isär dem:
 
@@ -420,6 +420,8 @@ gallringsuppgifter påslagna, kör:
 docker compose --env-file .env --env-file release.env run --rm backend run-cron --until-complete run_retention
 ```
 
+Lägg till installationens Compose-filer och profiler även i det här kommandot; med det medföljande lagret är det `--profile object-content -f docker-compose.yml -f docker-compose.object-content.yml` (se [Välj innehållslagring](/guides/object-content-storage)).
+
 Kommandot kör varje gallringsuppgift i en egen process, omgång efter omgång,
 tills inget som reglerna i den återställda databasen gör aktuellt finns kvar.
 Varje omgång räknar mot den tid då kommandot startade, så det som blir aktuellt
@@ -438,7 +440,7 @@ som är borta ur databasen inte betyder att lagret har raderat filernas bytes:
 | Sista raden | Vad du gör |
 | --- | --- |
 | `storage: confirmed` | Inget. En fullständig listning av lagret som började efter att kommandot startade hittade inget kvar att ta bort |
-| `storage: pending N (held H, retrying R, waiting W)` | Gallringen är klar och trafiken får öppnas, men lagret har inte bekräftat varje borttagning. Kör kommandot igen efter karenstiden (`OBJECT_CONTENT_ORPHAN_GRACE_SECONDS`, en timme som standard) tills det visar `confirmed` |
+| `storage: pending N (held H, retrying R, waiting W)` | Gallringen är klar och trafiken får öppnas, men lagret har inte bekräftat varje borttagning. Workern fortsätter borttagningarna när den körs; `held` ligger kvar tills spärren eller minimiretentionen löper ut. Vill du se `confirmed`: kör kommandot igen med trafiken stängd och workers stoppade, efter karenstiden (`OBJECT_CONTENT_ORPHAN_GRACE_SECONDS`, en timme som standard) |
 | `storage: pending N (...), store not listed in full` | Lagret är större än en körning hinner lista. Kör kommandot igen; det fortsätter listningen |
 
 Slutkod 0 betyder att gallringen är klar och att lagringen är bekräftad eller
@@ -453,15 +455,22 @@ kommandot igen. Varje rad förklaras i
 
 Kommandot omfattar inte konversationer i webbwidgetar eller granskningsloggen,
 som har egna jobb i workern. För att ta bort det som de gör aktuellt innan
-trafiken öppnas: starta workern med API:et fortfarande stängt, kör
+trafiken öppnas: starta bara workern, med API:et fortfarande stängt:
+`docker compose --env-file .env --env-file release.env up -d --no-deps worker`,
+med samma Compose-filer och profiler. Utan `--no-deps` startar Compose också
+backend, som öppnar API:et. Kör sedan
 
 ```bash
 docker compose --env-file .env --env-file release.env exec worker run-cron purge_widget_sessions
 docker compose --env-file .env --env-file release.env exec worker run-cron purge_old_audit_logs
 ```
 
-och vänta på `Widget retention purge completed` och `Audit log retention purge
-completed successfully` i workerns logg. Annars tar deras nattliga jobb bort det.
+och vänta i workerns logg på `Widget retention purge completed` med `errors` 0
+och utan någon rad `Widget retention purge failed`, och på `Audit log retention
+purge completed successfully`. Felräkningen syns bara i JSON-loggar
+(`JSON_LOGS=true`, standard); utan dem är frånvaron av rader om fel kontrollen.
+Rapporterar ett jobb fel: åtgärda dem och kör jobbet igen. Annars tar deras
+nattliga jobb bort det.
 
 ### Det här kan komma tillbaka [#what-can-come-back]
 

@@ -61,7 +61,7 @@ conversation turn covers:
 | A conversation's name (its first question, a generated title or a name someone chose) and its feedback text | Each records when it was written. Once that time is older than the conversation's period, the name is emptied (both apps show Untitled) and the feedback text removed, even while questions remain. The thumbs up or down stays. A group chat follows the shortest period among its assistants |
 | A conversation copied from another one | Unreadable as soon as a question it was copied from is removed, and then removed itself. See [Copies of removed conversations](/docs/audit-logging#copies-of-removed-conversations) |
 | Temporary files of an upload, a transcription, a crawl or a SharePoint import | Kept in a directory of the process that works on them and removed when it stops. After a crash, the next process that starts on the same volume removes them. See [Temporary files](/guides/deployment#temporary-files) |
-| The record of a failed job | Keeps a failure code, never the error text, which could quote the content |
+| The record of a failed job | Keeps a failure code, never the error text, which could quote the content. Jobs recorded before the upgrade keep their text |
 
 Two moments matter, and Eneo keeps them apart:
 
@@ -405,6 +405,8 @@ every retention task turned on, run:
 docker compose --env-file .env --env-file release.env run --rm backend run-cron --until-complete run_retention
 ```
 
+Add your installation's Compose files and profiles to this command too; with the bundled store that is `--profile object-content -f docker-compose.yml -f docker-compose.object-content.yml` (see [Review network changes](/guides/deployment#review-network-changes)).
+
 The command runs every retention task in its own process, round after round,
 until nothing that the rules in the restored database make due is left. Every
 round counts against the time the command started, so what falls due while it
@@ -422,7 +424,7 @@ the database do not mean that the store has deleted the bytes:
 | Last line | What to do |
 | --- | --- |
 | `storage: confirmed` | Nothing. A full listing of the store that began after the command started found nothing left to remove |
-| `storage: pending N (held H, retrying R, waiting W)` | Retention is complete and traffic may open, but the store has not confirmed every removal. Run the command again after the grace period (`OBJECT_CONTENT_ORPHAN_GRACE_SECONDS`, one hour by default) until it reads `confirmed` |
+| `storage: pending N (held H, retrying R, waiting W)` | Retention is complete and traffic may open, but the store has not confirmed every removal. The worker continues the removals once it runs; `held` stays until its hold or minimum retention ends. To see `confirmed`, run the command again with traffic closed and the workers stopped, after the grace period (`OBJECT_CONTENT_ORPHAN_GRACE_SECONDS`, one hour by default) |
 | `storage: pending N (...), store not listed in full` | The store is larger than one run lists. Run the command again; it continues the listing |
 
 Exit code 0 means retention is complete and storage is confirmed or pending.
@@ -435,16 +437,22 @@ failed. Resolve the cause and run the command again. Each line is explained in
 
 The command does not cover web widget conversations or the audit log, which
 have jobs of their own on the worker. To remove what those make due before
-traffic opens, start the worker with the API still closed, run
+traffic opens, start only the worker, with the API still closed:
+`docker compose --env-file .env --env-file release.env up -d --no-deps worker`,
+with the same Compose files and profiles. Without `--no-deps`, Compose also
+starts the backend, which opens the API. Then run
 
 ```bash
 docker compose --env-file .env --env-file release.env exec worker run-cron purge_widget_sessions
 docker compose --env-file .env --env-file release.env exec worker run-cron purge_old_audit_logs
 ```
 
-and wait for `Widget retention purge completed` and `Audit log retention purge
-completed successfully` in the worker log. Otherwise their nightly jobs remove
-it.
+and wait in the worker log for `Widget retention purge completed` with `errors`
+at 0 and no `Widget retention purge failed` line, and for `Audit log retention
+purge completed successfully`. The error count shows only in JSON logs
+(`JSON_LOGS=true`, the default); without them, the absence of failed lines is
+the check. If either job reports errors, resolve them and run it again.
+Otherwise their nightly jobs remove it.
 
 ### What can come back [#what-can-come-back]
 
