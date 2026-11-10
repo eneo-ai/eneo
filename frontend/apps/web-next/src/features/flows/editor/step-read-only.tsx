@@ -1,11 +1,19 @@
+import { Button } from "@astryxdesign/core/Button";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { Text } from "@astryxdesign/core/Text";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
+import { useId, useRef, useState } from "react";
 import { useSpace } from "@/features/spaces/use-space";
+import { cn } from "@/lib/utils";
+import { useFlowReadLabel } from "../flow-read-layout";
 import { knownClassifications, levelName } from "./classification-names";
-import { securityClassificationsQueryOptions, toolOptionsQueryOptions } from "./editor-api";
-import { previewParts } from "./request-preview";
+import {
+  securityClassificationsQueryOptions,
+  templateInspectionQueryOptions,
+  toolOptionsQueryOptions
+} from "./editor-api";
+import { answerShape, previewParts } from "./request-preview";
 import {
   hasHttpConfig,
   readCitationsOn,
@@ -16,8 +24,9 @@ import {
   readTemplateFill,
   readToolConfig,
   reviewChoiceOf,
-  sourceRefStepOrder
+  sourceRefKey
 } from "./step-configs";
+import { sourceRefName } from "./step-input-section";
 import {
   httpAuthSummary,
   httpBodyModeLabel,
@@ -26,17 +35,49 @@ import {
   meaningLabel,
   outputModeLabel,
   outputTypeLabel,
-  reviewChoiceLabel,
-  stepLabel
+  reviewChoiceLabel
 } from "./step-labels";
 import { stepUsesModel } from "./step-rules";
 import type { AssistantConfig, FlowPublic, StepConfig } from "./step-types";
 
-function Paragraph({ children }: { children: React.ReactNode }) {
+// ponytail: a length guess, not a measured overflow; a text under it is never clamped, so nothing hides.
+const LONG_TEXT = 480;
+const LONG_LINES = 6;
+
+/**
+ * A text as written, at a reading width. A long one (an instruction of a
+ * few thousand characters) shows its first lines with "Visa hela", so the
+ * rest of the step stays in view.
+ */
+function Paragraph({ children }: { children: string }) {
+  const t = useTranslations();
+  const id = useId();
+  const [open, setOpen] = useState(false);
+  const long = children.length > LONG_TEXT || children.split("\n").length > LONG_LINES;
   return (
-    <Text as="p" display="block" className="m-0 whitespace-pre-wrap">
-      {children}
-    </Text>
+    <div className="flex max-w-prose flex-col items-start gap-1">
+      <Text
+        as="p"
+        display="block"
+        id={id}
+        className={cn(
+          "m-0 [overflow-wrap:anywhere] whitespace-pre-wrap",
+          long && !open && "line-clamp-6"
+        )}
+      >
+        {children}
+      </Text>
+      {long ? (
+        <Button
+          size="sm"
+          variant="ghost"
+          label={open ? t("flows_change_card_show_less") : t("flows_change_card_show_all")}
+          aria-expanded={open}
+          aria-controls={id}
+          onClick={() => setOpen((value) => !value)}
+        />
+      ) : null}
+    </div>
   );
 }
 
@@ -77,12 +118,30 @@ export function StepReadOnly({
 }) {
   const t = useTranslations();
   const { space } = useSpace();
+  const rootRef = useRef<HTMLDivElement>(null);
+  const label = useFlowReadLabel(rootRef);
   const listing = useQuery(securityClassificationsQueryOptions());
   const classifications = knownClassifications(listing.data?.items, space);
   const runtime = readRuntimeInput(step.input_config);
   const bindings = readInputBindings(step.input_bindings);
   const tool = readToolConfig(step.input_config);
   const template = readTemplateFill(step.output_config);
+  // The Word fields by the titles the editor shows; their tags while the template is read.
+  // Only an editor may inspect (a published flow keeps `can_edit`); a reader sees the tags.
+  const inspection = useQuery({
+    ...templateInspectionQueryOptions(flow.id, template.templateAssetId ?? ""),
+    enabled:
+      flow.permissions.can_edit &&
+      step.output_mode === "template_fill" &&
+      template.templateAssetId !== null
+  });
+  const fieldTitle = (name: string) =>
+    inspection.data?.placeholders.find((item) => item.name === name)?.label?.trim() || name;
+  const answer = answerShape(step);
+  // Results or a text chosen under "Välj själv vad steget läser" replace the source.
+  const chosenMaterial =
+    bindings.status === "valid" &&
+    (bindings.sourceRefs.length > 0 || bindings.question.trim() !== "");
   const review = reviewChoiceOf(step.review_policy);
   const httpIn =
     step.input_source === "http_get" && hasHttpConfig(step.input_config)
@@ -117,10 +176,12 @@ export function StepReadOnly({
   const no = t("flow_step_editor_no");
 
   return (
-    <div className="flex flex-col gap-6">
-      <MetadataList title={t("flow_step_editor_input_title")}>
+    <div ref={rootRef} className="flex flex-col gap-6">
+      <MetadataList title={t("flow_step_editor_input_title")} label={label}>
         <MetadataListItem label={t("flow_step_editor_input_source")}>
-          {inputSourceLabel(step.input_source, t)}
+          {chosenMaterial
+            ? t("flow_step_editor_source_chosen")
+            : inputSourceLabel(step.input_source, t)}
         </MetadataListItem>
         <MetadataListItem label={t("flow_step_input_type")}>
           {inputTypeLabel(step.input_type, t)}
@@ -149,7 +210,7 @@ export function StepReadOnly({
         {httpIn && (
           <>
             <MetadataListItem label={t("flow_step_editor_http_url_get")}>
-              <span className="break-all">{httpIn.url}</span>
+              <span className="[overflow-wrap:anywhere]">{httpIn.url}</span>
             </MetadataListItem>
             <MetadataListItem label={t("flow_step_editor_http_auth")}>
               {httpAuthSummary(httpIn.auth, t)}
@@ -172,19 +233,12 @@ export function StepReadOnly({
         )}
         {bindings.status === "valid" && bindings.sourceRefs.length > 0 && (
           <MetadataListItem label={t("flow_step_editor_underlag_results")}>
-            {bindings.sourceRefs
-              .map((ref) => {
-                const order = sourceRefStepOrder(ref);
-                const source = order
-                  ? stepLabel(
-                      order,
-                      flow.steps.find((item) => item.step_order === order)?.user_description,
-                      t
-                    )
-                  : ref.stepRef;
-                return ref.fieldPath ? `${source} (${ref.fieldPath})` : source;
-              })
-              .join(", ")}
+            {/* One per line: a name can hold a comma ("Steg 2: Sammanfatta, fältet beslut"). */}
+            <ul className="m-0 flex list-none flex-col gap-1 p-0">
+              {bindings.sourceRefs.map((ref) => (
+                <li key={sourceRefKey(ref)}>{sourceRefName(ref, flow, t)}</li>
+              ))}
+            </ul>
           </MetadataListItem>
         )}
         {bindings.status === "valid" && bindings.question.trim() && (
@@ -195,7 +249,7 @@ export function StepReadOnly({
       </MetadataList>
 
       {stepUsesModel(step) && assistant && (
-        <MetadataList title={t("flow_step_editor_ai_title")}>
+        <MetadataList title={t("flow_step_editor_ai_title")} label={label}>
           <MetadataListItem label={t("flow_step_editor_instruction")}>
             <Paragraph>
               {assistant.prompt.trim() || t("flow_step_editor_instruction_none")}
@@ -215,7 +269,7 @@ export function StepReadOnly({
         </MetadataList>
       )}
 
-      <MetadataList title={t("flow_step_editor_output_title")}>
+      <MetadataList title={t("flow_step_editor_output_title")} label={label}>
         <MetadataListItem label={t("flow_step_output_mode")}>
           {outputModeLabel(step.output_mode, t)}
         </MetadataListItem>
@@ -225,7 +279,7 @@ export function StepReadOnly({
         {httpOut && (
           <>
             <MetadataListItem label={t("flow_step_editor_http_url_post")}>
-              <span className="break-all">{httpOut.url}</span>
+              <span className="[overflow-wrap:anywhere]">{httpOut.url}</span>
             </MetadataListItem>
             <MetadataListItem label={t("flow_step_editor_http_auth")}>
               {httpAuthSummary(httpOut.auth, t)}
@@ -246,9 +300,21 @@ export function StepReadOnly({
               {template.placeholders.map((name) => (
                 <li key={name}>
                   {t("flow_step_editor_template_field_reads", {
-                    field: name,
+                    field: fieldTitle(name),
                     source: templateSource(template.bindings[name])
                   })}
+                </li>
+              ))}
+            </ul>
+          </MetadataListItem>
+        )}
+        {answer.kind === "fields" && answer.fields.length > 0 && (
+          <MetadataListItem label={t("flow_step_editor_answer_fields")}>
+            <ul className="m-0 flex list-none flex-col gap-1 p-0">
+              {answer.fields.map((field) => (
+                <li key={field.name} className="[overflow-wrap:anywhere]">
+                  <code className="font-mono text-xs">{field.name}</code>
+                  {field.description ? ` · ${field.description}` : ""}
                 </li>
               ))}
             </ul>
@@ -261,7 +327,7 @@ export function StepReadOnly({
         )}
       </MetadataList>
 
-      <MetadataList title={t("flow_step_editor_control_title")}>
+      <MetadataList title={t("flow_step_editor_control_title")} label={label}>
         <MetadataListItem label={t("flow_step_review_policy")}>
           {reviewChoiceLabel(review, t)}
         </MetadataListItem>

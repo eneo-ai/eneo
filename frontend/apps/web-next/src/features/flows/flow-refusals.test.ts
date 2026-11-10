@@ -235,7 +235,7 @@ describe("flowRefusalMessage", () => {
   it("gives the Word field a refusal names to the sentence it picks", () => {
     const sentence = translator("sv", {
       ...sv,
-      flow_error_template_binding_not_scalar: "Fältet {placeholder} tar ett värde."
+      flow_validation_msg_template_binding_not_scalar: "Fältet {placeholder} tar ett värde."
     });
     expect(
       flowRefusalMessage(
@@ -248,6 +248,17 @@ describe("flowRefusalMessage", () => {
         sentence
       )
     ).toBe("Steg 2: Skriv svar: Fältet Deltagare tar ett värde.");
+    // The core's refusal of a list in a Word field, as the catalogs say it.
+    const listInField = refusal("template_binding_not_scalar", {
+      issue_code: "template_binding_not_scalar",
+      step_order: 2,
+      field: "output_config.bindings",
+      placeholder: "Deltagare"
+    });
+    expect(flowRefusalMessage(listInField, steps, t)).toMatch(
+      /^Steg 2: Skriv svar: Fältet ”Deltagare” i Word-mallen tar ett värde/
+    );
+    expect(flowRefusalMessage(listInField, steps, tEn)).toContain("“Deltagare”");
   });
 
   it("points at nothing the publish notice does not show", () => {

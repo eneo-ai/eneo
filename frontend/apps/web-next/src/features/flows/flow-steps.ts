@@ -42,6 +42,30 @@ export function tokensOf(template: string): string[] {
 }
 
 /**
+ * The first `{{` of a template that no `}}` closes, from the braces to the end
+ * of its word (`{{transkribering}`), or null. The core sends it as plain text.
+ * With `caret`, the one being typed there is left out: it is not a mistake
+ * until the text moves past it.
+ */
+export function unclosedReference(template: string, caret?: number): string | null {
+  let at = 0;
+  for (const part of templateParts(template)) {
+    if (part.kind === "read") {
+      at += part.raw.length;
+      continue;
+    }
+    for (const open of part.text.matchAll(/\{\{\s*[^\s{]*/g)) {
+      const start = at + open.index;
+      if (caret !== undefined && caret > start && caret <= start + open[0].length) continue;
+      if (part.text.slice(open.index).includes("}}")) break;
+      return open[0];
+    }
+    at += part.text.length;
+  }
+  return null;
+}
+
+/**
  * A template as its text and the references in it, in order. A reference
  * keeps the text it was written as (`raw`, `{{ step_2.output.text }}`), so
  * the parts join back into the template.
@@ -136,6 +160,27 @@ function templateFieldTokens(step: FlowStep): string[] {
   );
 }
 
+/**
+ * What an HTTP call and a webhook read: the texts publish checks in them (its
+ * address, its body and the values of its headers that are not secret).
+ */
+function httpTokens(step: FlowStep): string[] {
+  const calls = [
+    step.input_source === "http_get" ? step.input_config : null,
+    step.output_mode === "http_post" ? step.output_config : null
+  ];
+  return calls.flatMap((call) => {
+    if (!isRecord(call)) return [];
+    const body = isRecord(call.body) ? call.body : {};
+    const headers = Array.isArray(call.custom_headers) ? call.custom_headers : [];
+    return [
+      call.url,
+      body.template,
+      ...headers.map((header) => (isRecord(header) && header.secret !== true ? header.value : null))
+    ].flatMap((text) => (typeof text === "string" ? tokensOf(text) : []));
+  });
+}
+
 type ReadFacts = {
   /** Earlier steps named in the step's bindings or tool arguments (alias or name). */
   named: Set<number>;
@@ -185,9 +230,10 @@ function readFacts(step: FlowStep, steps: readonly FlowStep[], prompt = ""): Rea
     }
   };
 
-  // The prompt and a Word step's fields are read whatever the step's material is.
+  // The prompt, a Word step's fields and an HTTP call's texts are read whatever the step's material is.
   tokensOf(prompt).forEach(readToken);
   templateFieldTokens(step).forEach(readToken);
+  httpTokens(step).forEach(readToken);
   const { question, refs } = bindingsOf(step);
   if (question.trim() || refs.length > 0) {
     tokensOf(question).forEach(readToken);
@@ -245,8 +291,8 @@ export function stepReads(
 }
 
 /**
- * The later steps that name a step in their bindings, tool arguments or
- * prompt, in run order: removing the step leaves them without it. A step that reads
+ * The later steps that name a step in their bindings, tool arguments,
+ * prompt, Word fields or HTTP call, in run order: removing the step leaves them without it. A step that reads
  * "the previous step" reads whichever step comes before it after a change.
  */
 export function stepReaders(

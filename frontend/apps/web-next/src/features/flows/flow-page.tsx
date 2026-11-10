@@ -4,6 +4,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import { useAnnounce, useMediaQuery } from "@astryxdesign/core/hooks";
 import { ResizeHandle, useResizable } from "@astryxdesign/core/Resizable";
+import { Spinner } from "@astryxdesign/core/Spinner";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import {
   queryOptions,
@@ -834,8 +835,12 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
           label={t("publish")}
           variant={publishReady ? "primary" : "secondary"}
           onClick={requestPublish}
-          isLoading={publish.isPending}
-          isInterruptible
+          // The label stays while it publishes (isLoading would leave an
+          // empty button); requestPublish ignores a press meanwhile.
+          icon={
+            publish.isPending ? <Spinner size="sm" shade="inherit" aria-hidden="true" /> : undefined
+          }
+          aria-busy={publish.isPending || undefined}
         />
       ) : null}
       {settingsElsewhere ? (
@@ -845,9 +850,8 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
         <Button
           ref={unpublishButtonRef}
           label={t("unpublish")}
+          // The confirmation's own button shows the work.
           onClick={() => setConfirmUnpublish(true)}
-          isLoading={unpublish.isPending}
-          isInterruptible
         />
       ) : null}
       {mayEdit ? (

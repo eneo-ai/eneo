@@ -8,7 +8,8 @@ import {
   stepReaders,
   stepReads,
   stepsInOrder,
-  templateParts
+  templateParts,
+  unclosedReference
 } from "./flow-steps";
 
 const ids = (slots: { step_id?: string | null }[] | null) => slots?.map((slot) => slot.step_id);
@@ -97,6 +98,60 @@ describe("stepReaders", () => {
       1, 2
     ]);
   });
+
+  it("counts an HTTP call or webhook whose address, body or header value reads the step", () => {
+    const http = (order: number, overrides: Parameters<typeof makeStep>[1]) => [
+      makeStep(1),
+      makeStep(2),
+      makeStep(order, overrides)
+    ];
+    const readers = (steps: ReturnType<typeof http>) =>
+      stepReaders(steps[0]!, steps).map((step) => step.step_order);
+
+    expect(
+      readers(
+        http(3, {
+          input_source: "http_get",
+          input_config: {
+            url: "https://api.example.se/{{step_1.output.text}}",
+            auth: { mode: "none" }
+          }
+        })
+      )
+    ).toEqual([3]);
+    expect(
+      readers(
+        http(3, {
+          output_mode: "http_post",
+          output_config: {
+            url: "https://hooks.example.se",
+            auth: { mode: "none" },
+            body: { mode: "json_template", template: '{"svar": "{{step_1.output.text}}"}' }
+          }
+        })
+      )
+    ).toEqual([3]);
+    expect(
+      readers(
+        http(3, {
+          output_mode: "http_post",
+          output_config: {
+            url: "https://hooks.example.se",
+            auth: { mode: "none" },
+            custom_headers: [{ name: "X-Fall", value: "{{step_1.output.text}}" }]
+          }
+        })
+      )
+    ).toEqual([3]);
+    // A webhook config on a step that sends none reads nothing.
+    expect(
+      readers(
+        http(3, {
+          output_config: { url: "https://hooks.example.se/{{step_1.output.text}}" }
+        })
+      )
+    ).toEqual([]);
+  });
 });
 
 describe("step orders", () => {
@@ -173,5 +228,23 @@ describe("the reference grammar", () => {
     });
     expect(readTarget("step_2", steps[1]!, steps)).toEqual({ kind: "not_earlier", order: 2 });
     expect(readTarget("föregående_steg", steps[0]!, steps)).toEqual({ kind: "flow_input" });
+  });
+
+  it("finds a reference that is opened and never closed", () => {
+    expect(unclosedReference("Läs {{transkribering} och svara")).toBe("{{transkribering}");
+    expect(unclosedReference("Läs {{ klammer.")).toBe("{{ klammer.");
+    expect(unclosedReference("Läs {{step_1.output.text}} och {{datum}}")).toBeNull();
+    expect(unclosedReference("{{step_1.output.text}} men {{")).toBe("{{");
+    expect(unclosedReference("Inga hänvisningar alls")).toBeNull();
+  });
+
+  it("leaves out the reference being typed at the caret, not one before it", () => {
+    expect(unclosedReference("Läs {{dat", 9)).toBeNull();
+    expect(unclosedReference("Läs {{dat", 7)).toBeNull();
+    expect(unclosedReference("Läs {{dat", 4)).toBe("{{dat");
+    expect(unclosedReference("Läs {{dat och", 13)).toBe("{{dat");
+    expect(unclosedReference("Läs {{a} och {{b", 16)).toBe("{{a}");
+    expect(unclosedReference("Läs {{a} och {{b", 8)).toBe("{{b");
+    expect(unclosedReference("{{step_1.output.text}} {{d", 26)).toBeNull();
   });
 });

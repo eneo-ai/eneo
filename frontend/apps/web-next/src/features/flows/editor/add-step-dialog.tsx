@@ -15,6 +15,7 @@ import { flushSync } from "react-dom";
 import { Collapsible } from "@/components/astryx/collapsible";
 import { TextInput } from "@/components/astryx/text-input";
 import { QueryStateBoundary, type QueryLike } from "@/components/composites/query-state";
+import { useSpace } from "@/features/spaces/use-space";
 import {
   getFlow,
   insertionKindsQueryOptions,
@@ -130,6 +131,7 @@ function AddStepPicker({
   flow,
   position,
   kinds,
+  personal,
   pending,
   onCancel,
   onClose,
@@ -141,6 +143,8 @@ function AddStepPicker({
   flow: FlowPublic;
   position: number;
   kinds: QueryLike<StepKindPlace>;
+  /** A personal space has no tools for a flow: the tool step folds with that reason. */
+  personal: boolean;
   pending: boolean;
   onCancel: () => void;
   onClose: () => void;
@@ -183,7 +187,11 @@ function AddStepPicker({
   const before = position > 1 ? (ordered[position - 2] ?? null) : null;
   const rows: Row[] = STEP_TASKS.flatMap((task) => {
     const option = kindOption(kinds.data, task.kind);
-    return option && taskFits(task, option) ? [{ task, option }] : [];
+    if (!option || !taskFits(task, option)) return [];
+    // The core allows it here and refuses it at publish (`space_is_personal`): say so now.
+    return [
+      { task, option: personal && option.kind === "tool" ? { ...option, allowed: false } : option }
+    ];
   });
   const found = rows.filter((row) => taskMatches(row.task, query, text));
   const allowed = found.filter((row) => row.option.allowed);
@@ -541,9 +549,11 @@ function AddStepPicker({
                               label={rowName(task)}
                               description={
                                 <Text type="supporting" size="sm">
-                                  {option.refusals[0]
-                                    ? kindRefusalText(option.refusals[0], position, flow, t)
-                                    : t("flow_step_editor_kind_block_refused")}
+                                  {personal && option.kind === "tool"
+                                    ? t("flow_step_editor_tools_personal")
+                                    : option.refusals[0]
+                                      ? kindRefusalText(option.refusals[0], position, flow, t)
+                                      : t("flow_step_editor_kind_block_refused")}
                                 </Text>
                               }
                               align="first-line"
@@ -661,6 +671,7 @@ export function AddStepDialog({
   onSaved: (flow: FlowPublic) => void;
 }): React.JSX.Element {
   const [pending, setPending] = useState(false);
+  const { space } = useSpace();
   // A draft read again after a stale save, while the dialog stays open.
   const [reloaded, setReloaded] = useState<FlowPublic | null>(null);
   const flow = reloaded && reloaded.draft_revision >= propFlow.draft_revision ? reloaded : propFlow;
@@ -694,6 +705,7 @@ export function AddStepDialog({
         flow={flow}
         position={position}
         kinds={kinds}
+        personal={space.personal}
         pending={pending}
         onCancel={() => requestOpenChange(false)}
         onClose={close}

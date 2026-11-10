@@ -259,12 +259,91 @@ async def test_full_run_uses_live_segments_and_persists_evidence(
         ]
 
 
+async def test_a_live_models_text_is_the_runs_transcript(
+    client, flow_process_auth_headers, db_container, monkeypatch
+):
+    """The source picks the model: audio streamed through the flow's live model
+    is not transcribed again by its transcription model."""
+    headers = dict(flow_process_auth_headers)
+    space_id = await _create_space(client, headers)
+    live = await _create_transcription_model(
+        client, headers, endpoint=UNREACHABLE_ENDPOINT, supports_realtime=True
+    )
+    await _add_to_space(db_container, space_id, live["id"])
+    flow = await _published_flow(
+        client,
+        headers,
+        db_container,
+        supports_realtime=False,
+        space_id=space_id,
+        wizard={
+            "transcription_live_model": {"id": live["id"]},
+            "transcription_diarization": False,
+        },
+    )
+    monkeypatch.setattr(
+        flow_run_lifecycle_router,
+        "dispatch_flow_run_recoverably_after_commit",
+        AsyncMock(),
+    )
+    file_id = await _upload_second_of_silence(client, headers, flow)
+    async with db_container() as container:
+        user, tenant = container.user(), container.tenant()
+        transcript_id = await LiveTranscriptRepository(container.session()).create(
+            LiveTranscriptionGrant(
+                tenant_id=user.tenant_id,
+                user_id=user.id,
+                flow_id=UUID(flow.flow_id),
+                flow_version=1,
+                step_id=UUID(flow.step_id),
+                model_id=UUID(live["id"]),
+                recording_id="recording_456",
+                max_seconds=60,
+            ),
+            text="Live text.",
+            segments=[{"text": "Live text.", "start": 0.0, "end": 1.0}],
+            received_audio_seconds=1.0,
+        )
+    response = await client.post(
+        f"/api/v1/flows/{flow.flow_id}/runs/",
+        headers={**headers, "Idempotency-Key": "separate-live-model"},
+        json={
+            "step_inputs": {
+                flow.step_id: {
+                    "file_ids": [str(file_id)],
+                    "live_transcript_id": str(transcript_id),
+                }
+            }
+        },
+    )
+    assert response.status_code == 201, response.text
+    run_id = UUID(response.json()["id"])
+    case = SimpleNamespace(flow=flow, user=user, tenant=tenant)
+    registry = SimpleNamespace(
+        transcribe_from_filepath=AsyncMock(side_effect=AssertionError("Unexpected ASR"))
+    )
+
+    async with _executed(db_container, case, run_id, registry) as (_, worker, outcome):
+        registry.transcribe_from_filepath.assert_not_awaited()
+        assert outcome["status"] == "completed", outcome
+        run = await worker.flow_run_repo().get(run_id=run_id, tenant_id=user.tenant_id)
+        assert run.output_payload_json["text"] == "Live text."
+        results = await worker.flow_run_repo().list_step_results(
+            run_id=run_id, tenant_id=user.tenant_id
+        )
+        metadata = results[0].input_payload_json["transcription"]
+        assert metadata["transcript_origin"] == "live"
+        # The live model wrote the text, so it is the transcript's model.
+        assert metadata["model_id"] == live["id"] != flow.model_id
+        assert metadata["model"] == live["model_name"]
+
+
 @pytest.mark.parametrize("live_model_in_space", [True, False])
-async def test_a_live_model_never_transcribes_the_run(
+async def test_an_uploaded_recording_is_transcribed_by_the_transcription_model(
     live_model_in_space, client, flow_process_auth_headers, db_container, monkeypatch
 ):
-    """The run is transcribed by the flow's transcription model, whether or
-    not its live model is there to stream a preview."""
+    """The source picks the model: an uploaded recording is transcribed by the
+    flow's transcription model, whether or not its live model is there."""
     headers = dict(flow_process_auth_headers)
     space_id = await _create_space(client, headers)
     live = await _create_transcription_model(
@@ -323,3 +402,88 @@ async def test_a_live_model_never_transcribes_the_run(
         )
         metadata = results[0].input_payload_json["transcription"]
         assert metadata["transcript_origin"] == "batch"
+
+
+async def test_a_streamed_recording_in_parts_keeps_its_live_text_in_each_part(
+    live_recording, client, db_container
+):
+    """A recording streamed in two parts is written by the live text alone,
+    each passage in the part that holds it, and binds every part in order."""
+    case = live_recording
+    second = await _upload_second_of_silence(client, case.headers, case.flow)
+    parts = [case.file.id, second]
+    async with db_container() as container:
+        transcript_id = await LiveTranscriptRepository(container.session()).create(
+            LiveTranscriptionGrant(
+                tenant_id=case.user.tenant_id,
+                user_id=case.user.id,
+                flow_id=UUID(case.flow.flow_id),
+                flow_version=1,
+                step_id=UUID(case.flow.step_id),
+                model_id=UUID(case.flow.model_id),
+                recording_id="recording_parts",
+                max_seconds=60,
+            ),
+            text="Första. Andra.",
+            segments=[
+                {"text": "Första.", "start": 0.1, "end": 0.9},
+                {"text": " Andra.", "start": 1.1, "end": 1.9},
+            ],
+            received_audio_seconds=2.0,
+            part_start_samples=[16000],
+        )
+        row = await LiveTranscriptRepository(container.session()).get(
+            transcript_id, tenant_id=case.user.tenant_id
+        )
+        row.expires_at = datetime.now(timezone.utc) + timedelta(days=1)
+
+    def submit(file_ids, key):
+        return client.post(
+            f"/api/v1/flows/{case.flow.flow_id}/runs/",
+            headers={**case.headers, "Idempotency-Key": key},
+            json={
+                "step_inputs": {
+                    case.flow.step_id: {
+                        "file_ids": [str(file_id) for file_id in file_ids],
+                        "single_recording": True,
+                        "live_transcript_id": str(transcript_id),
+                    }
+                }
+            },
+        )
+
+    partial = await submit(parts[:1], "parts-one")
+    assert partial.status_code == 400, partial.text
+    assert partial.json()["code"] == "flow_run_live_transcript_files_mismatch"
+    response = await submit(parts, "parts-all")
+    assert response.status_code == 201, response.text
+    # Bound to these parts in this order; no other order may claim the text.
+    reordered = await submit(parts[::-1], "parts-reordered")
+    assert reordered.status_code == 409, reordered.text
+    async with db_container() as container:
+        row = await LiveTranscriptRepository(container.session()).get(
+            transcript_id, tenant_id=case.user.tenant_id
+        )
+        assert (row.bound_file_id, list(row.bound_file_ids)) == (parts[0], parts)
+        assert list(row.part_start_samples) == [16000]
+
+    run_id = UUID(response.json()["id"])
+    registry = SimpleNamespace(
+        transcribe_from_filepath=AsyncMock(side_effect=AssertionError("Unexpected ASR"))
+    )
+    async with _executed(db_container, case, run_id, registry) as (
+        session,
+        _,
+        outcome,
+    ):
+        registry.transcribe_from_filepath.assert_not_awaited()
+        assert outcome["status"] == "completed", outcome
+        source = await FlowTranscriptSourceRepository(session=session).get_for_attempt(
+            tenant_id=case.user.tenant_id,
+            run_id=run_id,
+            step_id=UUID(case.flow.step_id),
+            attempt_no=1,
+        )
+        assert [
+            (s["file_index"], s["text"], round(s["start"], 3)) for s in source.segments
+        ] == [(0, "Första.", 0.1), (1, "Andra.", 0.1)]

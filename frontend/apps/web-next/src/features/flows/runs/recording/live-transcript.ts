@@ -1,8 +1,9 @@
 /**
- * The live transcript of a recording in the run form: a draft the flow's live
+ * The live transcript of a recording in the run form: the text the flow's live
  * model (or its transcription model, when it chose none) writes while the
- * person records. The recording is uploaded and transcribed as usual, so
- * nothing here ever stops or changes the recording.
+ * person records. The recording is uploaded as usual, and the run uses this
+ * text instead of transcribing it when the core kept it; nothing here ever
+ * stops or changes the recording.
  *
  * One owner per audio step for the ticket, the socket, the worklet on the
  * recorder's audio graph and the text so far. The protocol is the core's
@@ -14,11 +15,14 @@
  * A session that heard the whole recording, from its first sample with
  * nothing lost, counts the samples in its stop, and its final text may name a
  * stored transcript the run can use instead of transcribing the recording's
- * one file again. Only the transcription model's text is kept: `ready` says
- * whether this session's is (`keeps_transcript`), and a preview from a
- * separate live model holds nothing up. A session that drops while the
- * recording goes on is connected again, up to three times: the text then goes
- * on as a draft only.
+ * files again. Pauses keep it whole: the worklet sends what it heard up to a
+ * pause and nothing after it. A recording that went on in a new part says in
+ * its stop at which sample each part after the first began, as the worklet
+ * counted it when the part's recorder started; the transcript then stands for
+ * exactly those parts, in that order. `ready` says whether the core keeps this
+ * session's text (`keeps_transcript`); text it does not keep holds nothing up.
+ * A session that drops while the recording goes on is connected again, up to
+ * three times: the text then goes on as a draft only.
  *
  * Read it from React with `useSyncExternalStore(subscribe, getSnapshot)`.
  */
@@ -29,7 +33,8 @@ const PCM16_FLUSH = "flush";
 const PCM16_FLUSHED = "flushed";
 const PCM16_PAUSE = "pause";
 const PCM16_RESUME = "resume";
-const PCM16_RESUMED = "resumed";
+/** Answered with the worklet's sample count (a number) at the moment it heard it. */
+const PCM16_MARK = "mark";
 export const PCM16_WORKLET_URL = "/flows/pcm16-worklet.js";
 
 const LIVE_PROTOCOL = "eneo-live.v1";
@@ -45,6 +50,8 @@ export const FINAL_TEXT_WAIT_MS = 20_000;
 const FINAL_TEXT_TIMEOUT_MS = 65_000;
 /** The waits before each new connection after a drop; then the live text stays interrupted. */
 export const RECONNECT_DELAYS_MS = [1_000, 2_000, 4_000] as const;
+/** The most part starts a stop may name (the core's bound). */
+const MAX_PART_STARTS = 99;
 
 /**
  * `unavailable`: the first session never started listening. `reconnecting`:
@@ -131,7 +138,12 @@ export class LiveTranscript {
   #nextPieceId = 0;
   #recordingId: string | null = null;
   #produced = 0;
-  #resumesUnanswered = 0;
+  /** The worklet's count at each part start after the first, as it answered. */
+  #partStarts: number[] = [];
+  /** The parts the stop described, once it was sent. */
+  #partCount = 0;
+  /** The entry key of each part handed over while this text listened, in order; null when it has none. */
+  #partKeys: (string | null)[] = [];
   #whole = false;
   #transcriptId: string | null = null;
 
@@ -162,6 +174,21 @@ export class LiveTranscript {
     return this.#transcriptId;
   }
 
+  /**
+   * The stored transcript, for the step's stored files (by entry key) when
+   * they are exactly the parts this text heard whole, in recording order.
+   */
+  transcriptFor(keys: readonly string[]): string | undefined {
+    const id = this.#transcriptId;
+    if (!id || keys.length !== this.#partCount || keys.length !== this.#partKeys.length) return;
+    return keys.every((key, index) => key === this.#partKeys[index]) ? id : undefined;
+  }
+
+  /** The core refused this transcript for the run: it is not offered again. */
+  refuse(id: string): void {
+    if (this.#transcriptId === id) this.#transcriptId = null;
+  }
+
   /** Settles once no final text is awaited (it came, or the wait ran out). */
   settled(): Promise<void> {
     if (!this.#snapshot.finishing) return Promise.resolve();
@@ -181,7 +208,9 @@ export class LiveTranscript {
     this.#sessionText = "";
     this.#recordingId = this.#deps.newRecordingId();
     this.#produced = 0;
-    this.#resumesUnanswered = 0;
+    this.#partStarts = [];
+    this.#partCount = 0;
+    this.#partKeys = [];
     this.#reconnects = 0;
     this.#whole = true;
     this.#transcriptId = null;
@@ -207,27 +236,37 @@ export class LiveTranscript {
 
   /**
    * The recording paused (true) or went on: what the microphone hears
-   * meanwhile is not recorded, so it is not sent. The text then no longer
-   * matches the recording exactly: it stays a draft.
+   * meanwhile is not recorded, so the worklet does not send it. It holds the
+   * pause where it hears of it, as the recorder did a moment before: the text
+   * stays whole.
    */
   pause(paused: boolean): void {
     this.#set({ ...this.#snapshot, paused });
-    const node = this.#node;
-    if (paused) {
-      node?.port.postMessage(PCM16_PAUSE);
-      this.lose();
-    } else if (node) {
-      // Frames stay closed out until the worklet answers: until then they may
-      // hold what it heard before it handled the pause.
-      this.#resumesUnanswered += 1;
-      node.port.postMessage(PCM16_RESUME);
-    }
+    this.#node?.port.postMessage(paused ? PCM16_PAUSE : PCM16_RESUME);
   }
 
   /**
-   * Some of the recording never reaches this text (it went on in a second
-   * part, or a session dropped): the text stays a draft, for good, and
-   * nothing waits for it.
+   * The recording went on in a new part, whose recorder started just now:
+   * the worklet answers with its count, where the part starts.
+   */
+  markPart(): void {
+    const node = this.#node;
+    if (!this.#whole) return;
+    if (!node) {
+      this.lose();
+      return;
+    }
+    node.port.postMessage(PCM16_MARK);
+  }
+
+  /** A part of the recording was handed over to the form, as the entry `key`. */
+  addPart(key: string | undefined): void {
+    this.#partKeys.push(key ?? null);
+  }
+
+  /**
+   * Some of the recording never reaches this text (a session dropped, or the
+   * audio stopped): the text stays a draft, for good, and nothing waits for it.
    */
   lose(): void {
     this.#whole = false;
@@ -325,9 +364,9 @@ export class LiveTranscript {
       channelCountMode: "explicit",
       channelInterpretation: "speakers"
     });
-    node.port.onmessage = (event: MessageEvent<ArrayBuffer | string>) => {
-      if (event.data === PCM16_RESUMED) {
-        this.#resumesUnanswered -= 1;
+    node.port.onmessage = (event: MessageEvent<ArrayBuffer | string | number>) => {
+      if (typeof event.data === "number") {
+        this.#partStarts.push(event.data);
       } else if (event.data === PCM16_FLUSHED) {
         if (this.#socket) this.#sendStop(this.#socket);
       } else if (event.data instanceof ArrayBuffer) {
@@ -342,7 +381,6 @@ export class LiveTranscript {
   }
 
   #takeFrame(frame: ArrayBuffer) {
-    if (this.#snapshot.paused || this.#resumesUnanswered > 0) return;
     this.#produced += frame.byteLength / 2;
     const socket = this.#socket;
     if (socket?.readyState === WebSocket.OPEN && this.#snapshot.status !== "reconnecting") {
@@ -379,12 +417,34 @@ export class LiveTranscript {
     clearTimeout(this.#stopTimer);
     this.#detachAudio();
     if (socket !== this.#socket || socket.readyState !== WebSocket.OPEN) return;
+    const starts = this.#validPartStarts();
+    if (starts.length > MAX_PART_STARTS) this.lose();
+    this.#partCount = starts.length + 1;
     // A recording not heard whole names no count, and the core keeps no text.
     const stop = this.#whole
-      ? { type: "stop", produced_samples: this.#produced }
+      ? {
+          type: "stop",
+          produced_samples: this.#produced,
+          ...(starts.length > 0 ? { part_start_samples: starts } : {})
+        }
       : { type: "stop" };
     socket.send(JSON.stringify(stop));
     this.#stopTimer = setTimeout(() => this.#teardown(), FINAL_TEXT_TIMEOUT_MS);
+  }
+
+  /**
+   * The part starts the core takes: each after the one before and before the
+   * end. One that is not (no audio came after it) is left out: the transcript
+   * then names one part fewer, which the form's parts match only when that
+   * part held nothing.
+   */
+  #validPartStarts(): number[] {
+    const starts: number[] = [];
+    for (const start of this.#partStarts) {
+      const previous = starts.at(-1) ?? 0;
+      if (Number.isInteger(start) && start > previous && start < this.#produced) starts.push(start);
+    }
+    return starts;
   }
 
   #receive(message: ServerMessage) {

@@ -156,9 +156,12 @@ def test_a_new_chat_builds_an_empty_draft_and_only_reads_any_other_flow() -> Non
 def test_the_instructions_explain_transcription_but_leave_its_choices() -> None:
     instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
 
-    assert "transcription_model writes the text of every run" in instructions
-    assert "transcription_live_model, when set, only shows the text" in instructions
-    assert "its text never becomes the run's text" in instructions
+    assert "The source of the audio picks the model" in instructions
+    assert (
+        "transcription_model writes the text of uploaded and recorded" in instructions
+    )
+    assert "that text is the run's text, so the recording is not" in instructions
+    assert "it writes no text of its own" in instructions
     assert "never write their ids" in instructions
     assert '"Ändra inställningar", in the Transkribering part' in instructions
 

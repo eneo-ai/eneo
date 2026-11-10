@@ -162,10 +162,20 @@ export function meaningLabel(
       });
     case "step_field":
       return t("flows_chat_reference_value", { step: step(meaning.order), what: meaning.field });
-    case "missing":
-      return t("flow_editor_tools_preview_read_missing", { order: meaning.order });
-    case "other":
+    case "later":
+      return meaning.self
+        ? t("flow_editor_tools_preview_read_self")
+        : t("flow_editor_tools_preview_read_later", { order: meaning.order });
+    case "no_step":
+      return meaning.order < 1
+        ? t("flow_editor_tools_preview_read_no_previous")
+        : t("flow_editor_tools_preview_read_missing", { order: meaning.order });
+    case "removed":
+      return t("flow_editor_tools_preview_read_removed");
+    case "run_value":
       return token;
+    case "other":
+      return t("flow_editor_tools_preview_read_unknown", { token });
   }
 }
 
@@ -186,6 +196,10 @@ export function readWarning(
       });
     case "section_index_unavailable":
       return t("flow_step_editor_reference_warning_section_index");
+    case "other":
+      return t("flow_step_editor_reference_warning_unknown", { name: meaning.token });
+    case "later":
+      return t("flow_step_editor_reference_warning_later");
     default:
       return null;
   }

@@ -225,6 +225,11 @@ describe("checkDraft", () => {
 
   it("opens each problem at the field that fixes it", () => {
     expect(problemAnchor({ code: "template_missing" })).toBe("output_config.template");
+    // At the Word field that needs a value, not at the template picker.
+    expect(problemAnchor({ code: "template_unbound", names: ["Deltagare"] })).toBe(
+      "output_config.template.fields"
+    );
+    expect(problemAnchor({ code: "template_structured" })).toBe("output_config.template.fields");
     expect(problemAnchor({ code: "model_missing" })).toBe("completion_model");
     expect(problemAnchor({ code: "tool_missing" })).toBe("input_config.tool");
     expect(problemAnchor({ code: "name_missing" })).toBe("user_description");
@@ -311,11 +316,11 @@ describe("checkDraft", () => {
         code: "reference",
         anchor: "prompt",
         reads: [
-          { token: "datun", meaning: { kind: "other" } },
-          { token: "steg_9.output.text", meaning: { kind: "other" } },
-          { token: "step_4.output.text", meaning: { kind: "missing", order: 4 } },
-          { token: "step_9.output.text", meaning: { kind: "missing", order: 9 } },
-          { token: "step_1_deleted.output.text", meaning: { kind: "missing", order: 1 } }
+          { token: "datun", meaning: { kind: "other", token: "datun" } },
+          { token: "steg_9.output.text", meaning: { kind: "other", token: "steg_9.output.text" } },
+          { token: "step_4.output.text", meaning: { kind: "later", order: 4 } },
+          { token: "step_9.output.text", meaning: { kind: "no_step", order: 9 } },
+          { token: "step_1_deleted.output.text", meaning: { kind: "removed" } }
         ]
       }
     ]);
@@ -351,7 +356,7 @@ describe("checkDraft", () => {
       {
         code: "reference",
         anchor: "prompt",
-        reads: [{ token: "datun", meaning: { kind: "other" } }]
+        reads: [{ token: "datun", meaning: { kind: "other", token: "datun" } }]
       }
     ]);
   });
@@ -453,6 +458,58 @@ describe("checkDraft", () => {
     expect(problemAnchor({ code: "tool_arguments_invalid", names: ["limit"] })).toBe(
       "input_config.tool"
     );
+  });
+
+  it("refuses a form field whose value the tool argument cannot take", () => {
+    const invalid = (args: Record<string, unknown>) =>
+      checkDraft(
+        makeFlow({
+          metadata_json: {
+            form_schema: {
+              fields: [
+                { name: "deltagare", label: "Deltagare", type: "list" },
+                { name: "antal", label: "Antal", type: "number" }
+              ]
+            }
+          },
+          steps: [
+            makeStep(1, {
+              input_source: "tool",
+              input_config: { tool: { mcp_server_id: "s-1", tool_id: "sum", arguments: args } }
+            })
+          ]
+        }),
+        {
+          ...none,
+          toolOptions: [
+            {
+              mcp_server_id: "s-1",
+              mcp_server_name: "Räknare",
+              mcp_server_security_level: null,
+              tool_id: "sum",
+              tool_name: "Summera",
+              tool_description: null,
+              refusal: null,
+              input_schema: {
+                properties: {
+                  values: { type: "array", items: { type: "number" } },
+                  count: { type: "integer" }
+                }
+              }
+            }
+          ]
+        }
+      ).steps.flatMap(({ problems }) =>
+        problems.flatMap((problem) =>
+          problem.code === "tool_arguments_invalid" ? [problem.names] : []
+        )
+      );
+
+    // A list holds text: it cannot be a list of numbers.
+    expect(invalid({ values: "{{flow_input.deltagare}}", count: "{{flow_input.antal}}" })).toEqual([
+      ["values"]
+    ]);
+    expect(invalid({ count: "{{ flow_input.antal }}" })).toEqual([]);
   });
 
   it("asks an audio flow for its transcription model and the service its speakers need", () => {

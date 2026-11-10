@@ -5,6 +5,7 @@ import { Text } from "@astryxdesign/core/Text";
 import { Token } from "@astryxdesign/core/Token";
 import { VStack } from "@astryxdesign/core/VStack";
 import { useLocale, useTranslations } from "use-intl";
+import { TriangleAlert } from "lucide-react";
 import { useState } from "react";
 import { Banner } from "@astryxdesign/core/Banner";
 import { StatusLabel } from "@/components/composites/status-label";
@@ -344,12 +345,15 @@ function StepCard({
   notRun,
   runSettled,
   sameAs,
-  transcript
+  transcript,
+  failureShown
 }: {
   flowId: string;
   runId: string;
   step: RunStepView;
   isNext: boolean;
+  /** The run's failure notice already says why this step failed. */
+  failureShown: boolean;
   /** The run ended without the step starting. */
   notRun: boolean;
   /** The run has ended (`isTerminal`). */
@@ -365,12 +369,14 @@ function StepCard({
   const result = step.result;
   const duration = result ? stepDurationMs(result) : null;
   const tokens = result ? tokenTotal(result.num_tokens_input, result.num_tokens_output) : null;
-  // A step that ran and ended without counts: its usage was not recorded, not zero.
+  // A model step that ran and ended without counts: its usage was not recorded, not zero. A step
+  // with no prompt (an HTTP call, a file) uses no tokens to record.
   const usageNotRecorded =
     !notRun &&
     tokens === null &&
     (result?.status === "completed" || result?.status === "failed") &&
-    Boolean(result.started_at);
+    Boolean(result.started_at) &&
+    Boolean(result.effective_prompt);
   // A step that used no tokens (a transcription, a document) has nothing to count.
   const shownTokens = tokens !== null && tokens > 0 ? tokens : null;
   const title = stepTitle(step, t);
@@ -424,7 +430,7 @@ function StepCard({
             .join(" · ")}
         </p>
       ) : null}
-      {result?.status === "failed" && !notRun ? (
+      {result?.status === "failed" && !notRun && !failureShown ? (
         <Banner
           status="error"
           title={t("flow_runs_step_failed_title")}
@@ -440,11 +446,17 @@ function StepCard({
         <StepRejectedOutput payload={result.output_payload_json} />
       ) : null}
       {warnings.length > 0 ? (
-        <ul className="text-ax-text flex list-disc flex-col gap-0.5 pl-5 text-sm">
+        <ul className="text-ax-text m-0 flex max-w-prose flex-col gap-1 p-0 text-sm">
           {/* A code's text says nothing of the case, so two of one code read as one line. */}
           {[...new Set(warnings.map((item) => stepWarningText(item.code, t) ?? item.message))].map(
             (text) => (
-              <li key={text}>{text}</li>
+              <li key={text} className="flex list-none items-start gap-2">
+                <TriangleAlert
+                  aria-hidden="true"
+                  className="text-ax-warning mt-0.5 size-4 shrink-0"
+                />
+                <span>{text}</span>
+              </li>
             )
           )}
         </ul>
@@ -509,14 +521,16 @@ function StepCard({
  * reads "did not run". A running step says what it is doing and the step
  * next in turn says so. A step that transcribed audio shows its transcript
  * (`transcripts`, rendered by the page). Each card can be gone to
- * (`showRunStep`), as the failure notice does.
+ * (`showRunStep`), as the failure notice does; the step that notice is
+ * about (`failureShownFor`) does not say its failure a second time.
  */
 export function RunSteps({
   flowId,
   runId,
   steps,
   runStatus = null,
-  transcripts
+  transcripts,
+  failureShownFor = null
 }: {
   flowId: string;
   runId: string;
@@ -525,6 +539,8 @@ export function RunSteps({
   runStatus?: string | null;
   /** By step id, the element each step's transcript renders into (`useTranscriptHosts`). */
   transcripts?: ReadonlyMap<string, HTMLElement>;
+  /** The order of the failed step the run's failure notice describes. */
+  failureShownFor?: number | null;
 }) {
   const t = useTranslations();
   if (steps.length === 0) {
@@ -545,6 +561,7 @@ export function RunSteps({
             runSettled={runSettled}
             sameAs={sameTextAs(steps, index)}
             transcript={(step.result && transcripts?.get(step.result.step_id)) ?? null}
+            failureShown={step.order === failureShownFor}
           />
         </li>
       ))}

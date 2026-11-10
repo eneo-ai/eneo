@@ -1,4 +1,3 @@
-import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { List } from "@astryxdesign/core/List";
 import { Heading, Text } from "@astryxdesign/core/Text";
@@ -310,21 +309,22 @@ export function SuggestionsSummary({
         tabIndex={-1}
         className="focus-visible:outline-ring rounded-ax-container focus-visible:outline-2 focus-visible:outline-offset-2"
       >
-        <Banner
-          status="info"
-          title={
-            count > 0
-              ? t("flow_suggestions_summary", { count })
-              : t("flow_suggestions_summary_all_dismissed", { count: listedDismissed.length })
-          }
-          description={
-            count > 0
-              ? t("flow_suggestions_summary_description")
-              : t("flow_suggestions_summary_all_dismissed_description")
-          }
-          collapsible={false}
-          endContent={
-            runFix && patchable.length > 0 ? (
+        {/* A quiet line, not a box: the cards hold the suggestions and "Före publicering" counts them. */}
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+            <div className="flex min-w-0 flex-[1_1_20rem] flex-col gap-0.5">
+              <Text type="label" as="p" display="block" className="m-0">
+                {count > 0
+                  ? t("flow_suggestions_summary", { count })
+                  : t("flow_suggestions_summary_all_dismissed", { count: listedDismissed.length })}
+              </Text>
+              <Text type="supporting" size="sm" as="p" display="block" className="m-0">
+                {count > 0
+                  ? t("flow_suggestions_summary_description")
+                  : t("flow_suggestions_summary_all_dismissed_description")}
+              </Text>
+            </div>
+            {runFix && patchable.length > 0 ? (
               <Button
                 label={t("flow_suggestions_fix_all", { count: patchable.length })}
                 size="sm"
@@ -335,9 +335,8 @@ export function SuggestionsSummary({
                   if (!fix?.pending) setConfirming(true);
                 }}
               />
-            ) : undefined
-          }
-        >
+            ) : null}
+          </div>
           {formItems.length > 0 || listedDismissed.length > 0 ? (
             <div className="flex flex-col gap-2">
               <SuggestionSection
@@ -378,7 +377,7 @@ export function SuggestionsSummary({
               />
             </div>
           ) : null}
-        </Banner>
+        </div>
       </div>
       {runFix ? (
         <ConfirmDialogControlled

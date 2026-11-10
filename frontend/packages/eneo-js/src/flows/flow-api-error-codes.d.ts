@@ -110,7 +110,7 @@ export declare const FLOW_API_ERROR_CODE: Readonly<{
   RUNTIME_FILE_EMPTY: "flow_runtime_file_empty";
   RUNTIME_FILE_ATTACHED: "flow_runtime_file_attached";
   LIVE_TRANSCRIPTION_UNAVAILABLE: "flow_live_transcription_unavailable";
-  RUN_LIVE_TRANSCRIPT_REQUIRES_ONE_AUDIO_FILE: "flow_run_live_transcript_requires_one_audio_file";
+  RUN_LIVE_TRANSCRIPT_FILES_MISMATCH: "flow_run_live_transcript_files_mismatch";
   RUN_LIVE_TRANSCRIPT_NOT_FOUND: "flow_run_live_transcript_not_found";
   RUN_SINGLE_RECORDING_REQUIRES_AUDIO_STEP: "flow_run_single_recording_requires_audio_step";
   RUN_LIVE_TRANSCRIPT_ALREADY_BOUND: "flow_run_live_transcript_already_bound";
@@ -362,7 +362,7 @@ export type FlowApiErrorCode =
   | "flow_runtime_file_empty"
   | "flow_runtime_file_attached"
   | "flow_live_transcription_unavailable"
-  | "flow_run_live_transcript_requires_one_audio_file"
+  | "flow_run_live_transcript_files_mismatch"
   | "flow_run_live_transcript_not_found"
   | "flow_run_single_recording_requires_audio_step"
   | "flow_run_live_transcript_already_bound"

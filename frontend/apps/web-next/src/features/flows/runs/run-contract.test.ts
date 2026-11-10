@@ -15,6 +15,7 @@ import {
   runRequest,
   speakersBlockRun,
   takesFreeText,
+  withoutRefusedLiveTranscripts,
   type UploadEntry
 } from "./run-contract";
 import { makeContract, makeInput } from "./run-fixtures";
@@ -96,6 +97,12 @@ describe("inputProblem", () => {
   it("waits for uploads and names a failed one", () => {
     expect(inputProblem(input, [{ ...done("a"), state: "uploading" }])).toBe("uploading");
     expect(inputProblem(input, [done("a"), { ...done("b"), state: "failed" }])).toBe("failed");
+  });
+
+  it("does not hold the run back for a file the form refused before sending it", () => {
+    // The row says why (the wrong type, too large, one too many); the good file goes.
+    const refused = { ...done("b"), state: "failed" as const, refused: true };
+    expect(inputProblem(input, [done("a"), refused])).toBeNull();
   });
 
   it("asks for a required file and keeps to the step's count", () => {
@@ -218,7 +225,7 @@ describe("runRequest", () => {
     expect(body.step_inputs).toEqual({ s1: { file_ids: ["f1", "f2"], single_recording: true } });
   });
 
-  it("sends a live transcript only with the step's one file", () => {
+  it("sends a live transcript with the step's one file, or with every part of one recording", () => {
     const choices = {
       values: { ärende: "Bygglov" },
       freeText: "",
@@ -227,12 +234,74 @@ describe("runRequest", () => {
       maxSpeakers: null,
       liveTranscripts: { s1: "transcript-1" }
     };
+    const part = (fileId: string, index: number): UploadEntry => ({
+      ...done(fileId),
+      recording: { sessionId: "rec-1", index, durationMs: 60_000 }
+    });
+    const parts = [part("f1", 0), part("f2", 1), part("f3", 2)];
     expect(runRequest(contract, { ...choices, uploads: { s1: [done("f1")] } }).step_inputs).toEqual(
       { s1: { file_ids: ["f1"], live_transcript_id: "transcript-1" } }
     );
+    expect(runRequest(contract, { ...choices, uploads: { s1: parts } }).step_inputs).toEqual({
+      s1: {
+        file_ids: ["f1", "f2", "f3"],
+        single_recording: true,
+        live_transcript_id: "transcript-1"
+      }
+    });
+    // Separate files, or parts the flow cannot take as one recording, go without it.
     expect(
       runRequest(contract, { ...choices, uploads: { s1: [done("f1"), done("f2")] } }).step_inputs
     ).toEqual({ s1: { file_ids: ["f1", "f2"] } });
+    const apart = makeContract({
+      ...contract,
+      transcription: { ...contract.transcription!, single_recording: false }
+    });
+    expect(runRequest(apart, { ...choices, uploads: { s1: parts } }).step_inputs).toEqual({
+      s1: { file_ids: ["f1", "f2", "f3"] }
+    });
+  });
+});
+
+describe("withoutRefusedLiveTranscripts", () => {
+  const request = {
+    expected_flow_version: 7,
+    input_payload_json: {},
+    step_inputs: {
+      s1: { file_ids: ["f1", "f2"], single_recording: true, live_transcript_id: "tr-1" },
+      s2: { file_ids: ["f3"] }
+    }
+  };
+  const refusal = (reason: string) => new EneoApiError("Refused", { status: 409, reason });
+
+  it.each([
+    "flow_run_live_transcript_not_found",
+    "flow_run_live_transcript_already_bound",
+    "flow_run_live_transcript_files_mismatch"
+  ])("sends the same files and choices without the live transcript after %s", (reason) => {
+    expect(withoutRefusedLiveTranscripts(request, refusal(reason))).toEqual({
+      expected_flow_version: 7,
+      input_payload_json: {},
+      step_inputs: {
+        s1: { file_ids: ["f1", "f2"], single_recording: true },
+        s2: { file_ids: ["f3"] }
+      }
+    });
+    // The request asked is left as it was.
+    expect(request.step_inputs.s1.live_transcript_id).toBe("tr-1");
+  });
+
+  it("leaves any other refusal, and a request without a live transcript, as they are", () => {
+    expect(withoutRefusedLiveTranscripts(request, refusal("flow_run_stale_version"))).toBeNull();
+    expect(withoutRefusedLiveTranscripts(request, new Error("offline"))).toBeNull();
+    const plain = withoutRefusedLiveTranscripts(
+      request,
+      refusal("flow_run_live_transcript_not_found")
+    )!;
+    // Sent again without it, a second live refusal is not answered by a third request.
+    expect(
+      withoutRefusedLiveTranscripts(plain, refusal("flow_run_live_transcript_not_found"))
+    ).toBeNull();
   });
 });
 

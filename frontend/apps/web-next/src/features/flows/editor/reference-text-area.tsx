@@ -3,17 +3,9 @@ import { Text } from "@astryxdesign/core/Text";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { Token } from "@astryxdesign/core/Token";
 import { useTranslations } from "use-intl";
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useId,
-  useLayoutEffect,
-  useRef,
-  useState
-} from "react";
+import { useContext, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
-import { VariablePicker } from "./editor-fields";
+import { TemplateScope, VariablePicker } from "./editor-fields";
 import {
   completeReference,
   referenceSuggestions,
@@ -23,18 +15,8 @@ import {
 } from "./reference-autocomplete";
 import { previewParts, readTone, type PreviewPart, type ReadMeaning } from "./request-preview";
 import { meaningLabel, readWarning, variableEntryLabel, variableGroupTitle } from "./step-labels";
-import type { FlowPublic } from "./step-types";
-import { insertToken, type VariableGroup } from "./step-variables";
-
-/**
- * The flow and the place of the step whose texts are edited, so a reference
- * can be named for what it reads. The step editor provides it; without it a
- * text still completes references but shows no chips.
- */
-export const TemplateScope = createContext<{
-  flow: Pick<FlowPublic, "steps" | "metadata_json">;
-  stepOrder: number;
-} | null>(null);
+import { unclosedReference } from "../flow-steps";
+import type { VariableGroup } from "./step-variables";
 
 /** The computed text metrics the chip layer copies from the text area, so both wrap alike. */
 const MIRRORED = [
@@ -167,9 +149,13 @@ export function TemplateTextArea({
   const mirrorRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const caretAfter = useRef<number | null>(null);
+  // Where the caret was when the text lost focus: the menu inserts there.
+  const lastSelection = useRef<{ start: number; end: number } | null>(null);
   const [trigger, setTrigger] = useState<ReferenceTrigger | null>(null);
   const [dismissed, setDismissed] = useState<number | null>(null);
   const [active, setActive] = useState(0);
+  // The caret while the text has focus: the reference being typed there is not yet unclosed.
+  const [caret, setCaret] = useState<number | null>(null);
 
   // The text's menus offer what it can read: the section's number only in
   // an instruction run once per section.
@@ -184,9 +170,15 @@ export function TemplateTextArea({
       parts.flatMap((part) => (part.kind === "read" ? [[part.token, part] as const] : []))
     ).values()
   ];
-  const warnings = scope
-    ? [...new Set(reads.flatMap((read) => readWarning(read.meaning, scope.flow, t) ?? []))]
-    : [];
+  const unclosed = unclosedReference(value, caret ?? undefined);
+  const warnings = [
+    ...(scope
+      ? new Set(reads.flatMap((read) => readWarning(read.meaning, scope.flow, t) ?? []))
+      : []),
+    ...(unclosed
+      ? [t("flow_step_editor_reference_warning_unclosed", { text: unclosed, close: "}}" })]
+      : [])
+  ];
   const suggestions = trigger
     ? referenceSuggestions(groups, trigger.query, (entry, group) =>
         group.type === "run"
@@ -258,6 +250,7 @@ export function TemplateTextArea({
   /** Opens, follows or closes the list for where the caret is now. */
   function follow(typed: boolean) {
     const area = areaRef.current;
+    setCaret(area ? area.selectionEnd : null);
     if (!area || area.selectionStart !== area.selectionEnd) {
       setTrigger(null);
       return;
@@ -301,10 +294,19 @@ export function TemplateTextArea({
     }
   }
 
+  /**
+   * Inserts `{{token}}` where the caret was, or at the end of a text never
+   * focused, with a space where it would touch a word.
+   */
   function insert(token: string) {
-    const area = areaRef.current;
-    const selection = area ? { start: area.selectionStart, end: area.selectionEnd } : null;
-    const next = insertToken(value, token, selection);
+    const start = Math.min(lastSelection.current?.start ?? value.length, value.length);
+    const end = Math.min(Math.max(lastSelection.current?.end ?? start, start), value.length);
+    const word = /[\p{L}\p{N}_]/u;
+    const reference = `${word.test(value[start - 1] ?? "") ? " " : ""}{{${token}}}`;
+    const next = {
+      text: `${value.slice(0, start)}${reference}${word.test(value[end] ?? "") ? " " : ""}${value.slice(end)}`,
+      caret: start + reference.length
+    };
     // The menu hands focus back to its trigger as it closes; then the text
     // takes it, with the caret after the inserted reference.
     requestAnimationFrame(() => {
@@ -336,15 +338,24 @@ export function TemplateTextArea({
           onChange={(next, event) => {
             onChange(next);
             const inputType = (event.nativeEvent as InputEvent).inputType ?? "";
-            if (inputType.startsWith("delete")) setTrigger(null);
-            else follow(inputType === "insertText");
+            if (inputType.startsWith("delete")) {
+              setTrigger(null);
+              setCaret(event.currentTarget.selectionEnd);
+            } else follow(inputType === "insertText");
           }}
           onKeyDown={onKeyDown}
           onKeyUp={(event) => {
             if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) follow(false);
           }}
           onClick={() => follow(false)}
-          onBlur={() => setTrigger(null)}
+          onBlur={(event) => {
+            setTrigger(null);
+            setCaret(null);
+            lastSelection.current = {
+              start: event.currentTarget.selectionStart,
+              end: event.currentTarget.selectionEnd
+            };
+          }}
           onScroll={() => {
             if (mirrorRef.current && areaRef.current) {
               mirrorRef.current.scrollTop = areaRef.current.scrollTop;

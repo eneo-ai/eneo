@@ -154,6 +154,9 @@ describe("ConfirmDialogControlled", () => {
     expect(remove.getAttribute("aria-busy")).toBe("true");
     expect(document.activeElement).toBe(remove);
     expect(onConfirm).not.toHaveBeenCalled();
+    // The label stays while the action runs: a slow one never leaves an empty button.
+    expect(within(remove).getByText("Ta bort").closest('[aria-hidden="true"]')).toBeNull();
+    expect(remove.querySelector(".astryx-spinner")).not.toBeNull();
   });
 
   it("does not ask its owner to close while pending", async () => {

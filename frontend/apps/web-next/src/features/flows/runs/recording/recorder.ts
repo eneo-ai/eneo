@@ -110,7 +110,10 @@ export type RecorderCallbacks = {
    */
   onAudioGraph?: (graph: RecorderAudioGraph | null, signal?: AbortSignal) => void | Promise<void>;
   onPause?: (paused: boolean) => void;
-  /** The recording is about to go on in a new part: the live text no longer covers one file. */
+  /**
+   * The recording went on in a new part, whose recorder started in this same
+   * task: the live text marks where the part starts.
+   */
   onRotate?: () => void;
   /**
    * Where each part's chunks are written as they come, so a closed tab or a

@@ -19,7 +19,8 @@ import {
   templateInspectionQueryOptions,
   uploadTemplate
 } from "./editor-api";
-import { problemStatus } from "./editor-fields";
+import { EneoApiError } from "@/lib/api/errors";
+import { Anchor, problemStatus } from "./editor-fields";
 import { useRecordUpload } from "./editor-uploads";
 import { describeSaveError } from "./field-problems";
 import {
@@ -96,9 +97,8 @@ function bindingSources(groups: VariableGroup[], t: Translate) {
   const sections = groups.flatMap((group) => {
     const options = group.entries.filter(fillsTemplateField).map((entry) => {
       const value = `{{${entry.token}}}`;
-      const label = variableEntryLabel(entry, t);
-      chosen.set(
-        value,
+      // Several steps answer in text: each answer is named by its step, in the list too.
+      const label =
         group.type === "step"
           ? t("flows_chat_reference_value", {
               step: stepLabel(group.stepOrder, group.stepName, t),
@@ -107,8 +107,8 @@ function bindingSources(groups: VariableGroup[], t: Translate) {
                   ? entry.kind.field
                   : t("flows_chat_reference_value_text")
             })
-          : label
-      );
+          : variableEntryLabel(entry, t);
+      chosen.set(value, label);
       return { value, label };
     });
     if (options.length === 0) return [];
@@ -141,6 +141,7 @@ function fieldsCountText(bound: number, total: number, t: Translate): string {
  * the step is part of the draft. The chosen template can be downloaded.
  */
 export function TemplateFillFields({
+  formId,
   flow,
   stepOrder,
   draft,
@@ -148,6 +149,8 @@ export function TemplateFillFields({
   groups,
   problem
 }: {
+  /** The step form's id, for the anchor of the field that needs a value. */
+  formId: string;
   flow: Pick<FlowPublic, "id" | "steps" | "metadata_json">;
   stepOrder: number;
   draft: StepConfig;
@@ -226,6 +229,10 @@ export function TemplateFillFields({
       setUploadFailure(t("flow_error_flow_template_unsupported_extension"));
       return;
     }
+    if (file.size === 0) {
+      setUploadFailure(t("flow_error_flow_runtime_file_empty"));
+      return;
+    }
     setBusy("upload");
     try {
       const asset = await uploadTemplate(flowId, file);
@@ -251,7 +258,10 @@ export function TemplateFillFields({
 
   const assets = files.data;
   const chosen = assets.find((asset) => asset.id === config.templateAssetId);
-  const missing = config.templateAssetId !== null && !chosen;
+  // Gone from the flow, or gone before the list knew (a 404 when it is read).
+  const missing =
+    config.templateAssetId !== null &&
+    (!chosen || (inspection.error instanceof EneoApiError && inspection.error.status === 404));
   const placeholders =
     inspection.data?.placeholders ??
     config.placeholders.map((name) => ({
@@ -270,6 +280,11 @@ export function TemplateFillFields({
     config.bindings,
     binds
   );
+  // The first field that needs a value, for "Öppna steget" from the check to focus.
+  const firstToFix = placeholders.find(({ name }) => {
+    const binding = config.bindings[name];
+    return binding === undefined || (binding !== "" && !binds(binding));
+  })?.name;
   // A flow without templates starts at the upload; the picker comes with the first one.
   const hasPicker = assets.length > 0 || config.templateAssetId !== null;
 
@@ -295,7 +310,7 @@ export function TemplateFillFields({
                 : undefined,
               disabled: asset.can_select === false && asset.id !== config.templateAssetId
             })),
-            ...(missing && config.templateAssetId
+            ...(missing && !chosen && config.templateAssetId
               ? [
                   {
                     value: config.templateAssetId,
@@ -316,7 +331,7 @@ export function TemplateFillFields({
           width="100%"
         />
       ) : null}
-      {chosen?.can_download ? (
+      {chosen?.can_download && !missing ? (
         <div>
           <DownloadButton
             label={t("flow_runs_file_download", { name: chosen.name })}
@@ -326,7 +341,7 @@ export function TemplateFillFields({
           />
         </div>
       ) : null}
-      {inspection.isError && config.templateAssetId && (
+      {inspection.isError && config.templateAssetId && !missing && (
         <ListError error={inspection.error} onRetry={() => void inspection.refetch()} />
       )}
 
@@ -360,7 +375,7 @@ export function TemplateFillFields({
                     label: meaningLabel(readMeaning(token, stepOrder, flow), token, flow, t)
                   }
                 : null;
-            return (
+            const field = (
               <Selector
                 key={placeholder.name}
                 label={placeholder.label || placeholder.name}
@@ -404,6 +419,18 @@ export function TemplateFillFields({
                 }
                 width="100%"
               />
+            );
+            return placeholder.name === firstToFix ? (
+              <Anchor
+                key={placeholder.name}
+                formId={formId}
+                anchor="output_config.template.fields"
+                className="flex min-w-0 flex-col"
+              >
+                {field}
+              </Anchor>
+            ) : (
+              field
             );
           })}
         </fieldset>

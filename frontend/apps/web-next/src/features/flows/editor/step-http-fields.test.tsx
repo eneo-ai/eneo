@@ -98,6 +98,59 @@ describe("HttpFields", () => {
     expect(screen.getByText("Väntetiden är för lång")).toBeTruthy();
   });
 
+  it("says at the field that a header name the request cannot send must change", () => {
+    renderFields({
+      url: "https://api.example.org/a",
+      auth: { mode: "api_key", header_name: "API nyckel", key: "" },
+      custom_headers: [
+        { name: "X-Kommun", value: "Sundsvall", secret: false },
+        { name: "X Ärende Nyckel", value: "1", secret: false }
+      ]
+    });
+    const invalid = (name: string) =>
+      screen.getByRole("textbox", { name: new RegExp(name) }).getAttribute("aria-invalid");
+    expect(invalid(messages.flow_step_editor_http_api_key_header)).toBe("true");
+    expect(invalid("Namn på header 1")).not.toBe("true");
+    expect(invalid("Namn på header 2")).toBe("true");
+    expect(screen.getAllByText(messages.flow_step_editor_http_header_name_invalid)).toHaveLength(2);
+    cleanup();
+
+    // A run fills the API key's header name, so it is known only then.
+    renderFields({
+      url: "https://api.example.org/a",
+      auth: { mode: "api_key", header_name: "{{namn}}", key: "" }
+    });
+    expect(screen.queryByText(messages.flow_step_editor_http_header_name_invalid)).toBeNull();
+  });
+
+  it("does not claim a wrong scheme when the only fault is a sign-in in the address", () => {
+    renderFields({ url: "https://anna:hemligt@api.example.org/a" });
+    const address = screen.getByRole("textbox", {
+      name: new RegExp(messages.flow_step_editor_http_url_get)
+    });
+    fireEvent.blur(address);
+    expect(address.getAttribute("aria-invalid")).toBe("true");
+    const shown = screen.getByText(messages.flow_step_editor_http_url_invalid).textContent ?? "";
+    // The address does start with https://; the message asks to check it, then states both rules.
+    expect(shown).toMatch(/^Kontrollera adressen\./);
+    expect(shown).toMatch(/användarnamn eller lösenord/);
+  });
+
+  it("says a refused header name once, at the row, after a refused save", () => {
+    const headers = [{ name: "X Ärende", value: "1", secret: false }];
+    const refused = {
+      "output_config.http.more": messages.flow_step_editor_http_header_name_invalid
+    };
+    renderFields({ url: "https://api.example.org/a", custom_headers: headers }, "output", refused);
+    expect(moreSettings().getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getAllByText(messages.flow_step_editor_http_header_name_invalid)).toHaveLength(1);
+    cleanup();
+
+    // No row shows it (the name has changed since): the fold says it.
+    renderFields({ url: "https://api.example.org/a" }, "output", refused);
+    expect(screen.getAllByText(messages.flow_step_editor_http_header_name_invalid)).toHaveLength(1);
+  });
+
   it("fills the test values with one empty value per reference the call reads", () => {
     expect(
       JSON.parse(

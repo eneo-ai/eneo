@@ -98,6 +98,8 @@ def admission(user):
         received_audio_seconds=42,
         expires_at=datetime.now(timezone.utc) + timedelta(days=1),
         bound_file_id=None,
+        bound_file_ids=[],
+        part_start_samples=[],
     )
     run_repo.session.scalar.return_value = row
     return SimpleNamespace(
@@ -111,7 +113,9 @@ def admission(user):
     )
 
 
-async def _submit(case, *, file_ids=None, transcript_id=None, key=None):
+async def _submit(
+    case, *, file_ids=None, transcript_id=None, key=None, single_recording=False
+):
     return await case.service.create_run(
         flow_id=case.flow.id,
         input_payload_json=None,
@@ -122,6 +126,7 @@ async def _submit(case, *, file_ids=None, transcript_id=None, key=None):
                     file_ids if file_ids is not None else [case.files[0].id]
                 ),
                 live_transcript_id=transcript_id or case.row.id,
+                single_recording=single_recording,
             )
         },
     )
@@ -170,11 +175,41 @@ async def test_foreign_or_expired_live_transcript_refuses_without_binding(
 
 
 @pytest.mark.parametrize("count", [0, 2])
-async def test_live_transcript_requires_exactly_one_audio_file(admission, count):
+async def test_a_live_transcript_needs_one_file_or_one_recording(admission, count):
     case = admission
     with pytest.raises(BadRequestException) as error:
         await _submit(case, file_ids=[file.id for file in case.files[:count]])
-    assert error.value.code == "flow_run_live_transcript_requires_one_audio_file"
+    assert error.value.code == "flow_run_live_transcript_files_mismatch"
+    assert case.row.bound_file_id is None
+    case.repo.create.assert_not_awaited()
+
+
+async def test_the_parts_of_a_streamed_recording_bind_in_recording_order(admission):
+    case = admission
+    case.row.part_start_samples = [16000 * 30]
+    parts = [file.id for file in case.files]
+    await _submit(case, file_ids=parts, single_recording=True)
+    await _submit(case, file_ids=parts, single_recording=True)
+    assert (case.row.bound_file_id, case.row.bound_file_ids) == (parts[0], parts)
+    assert case.repo.create.await_count == 2
+    # The same files in another order are other audio.
+    with pytest.raises(ConflictException) as error:
+        await _submit(case, file_ids=parts[::-1], single_recording=True)
+    assert error.value.code == "flow_run_live_transcript_already_bound"
+
+
+@pytest.mark.parametrize("part_start_samples", [[], [16000, 32000]])
+async def test_a_live_transcript_binds_only_every_part_of_its_recording(
+    admission, part_start_samples
+):
+    case = admission
+    case.row.part_start_samples = part_start_samples
+    with pytest.raises(BadRequestException) as error:
+        await _submit(
+            case, file_ids=[file.id for file in case.files], single_recording=True
+        )
+    assert error.value.code == "flow_run_live_transcript_files_mismatch"
+    assert error.value.context == {"parts": len(part_start_samples) + 1, "files": 2}
     assert case.row.bound_file_id is None
     case.repo.create.assert_not_awaited()
 
@@ -182,10 +217,11 @@ async def test_live_transcript_requires_exactly_one_audio_file(admission, count)
 async def test_live_transcript_cannot_be_rebound(admission):
     case = admission
     case.row.bound_file_id = case.files[1].id
+    case.row.bound_file_ids = [case.files[1].id]
     with pytest.raises(ConflictException) as error:
         await _submit(case)
     assert error.value.code == "flow_run_live_transcript_already_bound"
-    assert case.row.bound_file_id == case.files[1].id
+    assert case.row.bound_file_ids == [case.files[1].id]
     case.repo.create.assert_not_awaited()
 
 
@@ -194,6 +230,7 @@ async def test_live_transcript_binds_and_same_file_retry_is_accepted(admission):
     await _submit(case)
     await _submit(case)
     assert case.row.bound_file_id == case.files[0].id
+    assert case.row.bound_file_ids == [case.files[0].id]
     assert case.repo.create.await_count == 2
     step_facts = case.repo.create.await_args.kwargs["input_payload_json"]["step_inputs"]
     assert step_facts[str(case.step.id)]["live_transcript_id"] == str(case.row.id)
@@ -203,6 +240,7 @@ async def test_an_expired_transcript_already_bound_to_this_file_is_accepted(admi
     # A retry re-admits the run's own binding; expiry refuses only a first binding.
     case = admission
     case.row.bound_file_id = case.files[0].id
+    case.row.bound_file_ids = [case.files[0].id]
     case.row.expires_at = datetime.now(timezone.utc) - timedelta(days=1)
     await _submit(case)
     assert case.row.bound_file_id == case.files[0].id

@@ -18,6 +18,7 @@ from websockets.asyncio.client import connect as websocket_connect
 from websockets.exceptions import ConnectionClosed, InvalidHandshake
 from websockets.uri import parse_uri
 
+from eneo.flows.flow_input_limits import FLOW_INPUT_MAX_AUDIO_FILES_COUNT
 from eneo.flows.runtime.egress.policy import (
     Deadline,
     DestinationRefused,
@@ -43,7 +44,10 @@ from eneo.main.logging import get_logger
 # Wire and health bounds; the session's own limits (duration, idle, final text)
 # are deployment settings and arrive as arguments.
 MAX_FRAME_BYTES: Final = 64 * 1024
-MAX_CONTROL_BYTES: Final = 1024
+# Room for a stop that lists where every part of the longest run began.
+MAX_CONTROL_BYTES: Final = 2048
+# A recording has at most as many parts as a run takes audio files.
+MAX_PART_MARKERS: Final = FLOW_INPUT_MAX_AUDIO_FILES_COUNT - 1
 UPSTREAM_OPEN_TIMEOUT_SECONDS: Final = 10
 # A model server that stops reading must not hold the session past its deadlines;
 # a slow one still reads, since it buffers audio it has not decoded yet.
@@ -110,6 +114,9 @@ class LiveSessionStats:
 @dataclass
 class _Capture:
     produced_samples: int | None = None
+    # The produced sample at which each part after the first began, as the
+    # stop reported them; None when they cannot be the parts of that audio.
+    part_starts: list[int] | None = None
     final_commit_sent: asyncio.Event = field(default_factory=asyncio.Event)
 
 
@@ -165,8 +172,8 @@ async def relay_live_session(
                     "type": "ready",
                     "sample_rate": SAMPLE_RATE,
                     "max_seconds": max_seconds,
-                    # Without it the text is only a preview: the client need
-                    # not wait for it once the recording ends.
+                    # Without a recording id the text is shown only: the
+                    # client need not wait for it once the recording ends.
                     "keeps_transcript": grant is not None and grant.keeps_transcript,
                 },
             )
@@ -290,11 +297,13 @@ async def _run(
                 )
         completed = to_client.result()
         event: dict[str, object] = {"type": "transcript.done", "text": completed.text}
+        part_starts = capture.part_starts
         if (
             grant is not None
             and grant.keeps_transcript
             and capture.final_commit_sent.is_set()
             and capture.produced_samples == stats.received_samples
+            and part_starts is not None
             and completed.audio_seconds is not None
             and math.isfinite(completed.audio_seconds * SAMPLE_RATE)
             and round(completed.audio_seconds * SAMPLE_RATE) == stats.received_samples
@@ -303,8 +312,12 @@ async def _run(
                 persist_live_transcript(
                     grant,
                     text=completed.text,
-                    segments=pieces.passages(completed.text),
+                    segments=pieces.passages(
+                        completed.text,
+                        breaks=[start / SAMPLE_RATE for start in part_starts],
+                    ),
                     received_audio_seconds=stats.audio_seconds,
+                    part_start_samples=part_starts,
                 )
             )
             try:
@@ -368,16 +381,20 @@ async def _pump_client(
                 )
             await _send_upstream(upstream, append(frame))
             continue
-        # Anything but audio and the stop message ends the session, so only audio
+        control = _control(message.get("text"))
+        # Anything but audio and the stop ends the session, so only audio
         # keeps a session, and its slot on the model server, open.
-        if not _is_stop(message.get("text")):
+        if control is None or control.get("type") != "stop":
             raise LiveSessionEnded(
                 "invalid_message",
                 'Send audio as binary frames and end with {"type": "stop"}.',
             )
-        evidence = json.loads(message["text"]).get("produced_samples")
+        evidence = control.get("produced_samples")
         if type(evidence) is int and evidence >= 0:
             capture.produced_samples = evidence
+            capture.part_starts = _part_starts(
+                control.get("part_start_samples", []), produced=evidence
+            )
         await _send_upstream(
             upstream, commit(final=True), final_commit_sent=capture.final_commit_sent
         )
@@ -419,16 +436,31 @@ async def _pump_upstream(
     )
 
 
-def _is_stop(text: str | None) -> bool:
+def _part_starts(value: object, *, produced: int) -> list[int] | None:
+    """Where each part after the first began, when each one can: an int after
+    the part before it and inside the produced audio, at most one per part."""
+    if not isinstance(value, list):
+        return None
+    starts = cast(list[object], value)
+    if len(starts) > MAX_PART_MARKERS:
+        return None
+    previous = 0
+    for start in starts:
+        if type(start) is not int or not previous < start < produced:
+            return None
+        previous = start
+    return cast(list[int], starts)
+
+
+def _control(text: str | None) -> dict[str, object] | None:
+    """A small JSON object from the client, or None for anything else."""
     if text is None or len(text) > MAX_CONTROL_BYTES:
-        return False
+        return None
     try:
         event = json.loads(text)
     except ValueError:
-        return False
-    if not isinstance(event, dict):
-        return False
-    return cast(dict[str, object], event).get("type") == "stop"
+        return None
+    return cast(dict[str, object], event) if isinstance(event, dict) else None
 
 
 async def _send_upstream(

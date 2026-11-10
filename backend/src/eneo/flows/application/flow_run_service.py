@@ -538,19 +538,19 @@ class FlowRunService:
         live_transcript_ids = read_live_transcript_ids(prepared.input_payload_json)
         if live_transcript_ids:
             file_ids_by_step = {
-                projection["step_id"]: projection["file_ids"][0]
+                projection["step_id"]: projection["file_ids"]
                 for projection in prepared.step_input_files
             }
             model_id = parse_transcription_config(
                 {"wizard": published.definition.metadata().wizard}
-            ).model_id
+            ).streaming_model_id
             live_repo = LiveTranscriptRepository(self.flow_run_repo.session)
             for step_id, transcript_id in sorted(
                 live_transcript_ids.items(), key=lambda item: item[1]
             ):
                 await live_repo.bind(
                     transcript_id,
-                    file_id=file_ids_by_step[step_id],
+                    file_ids=file_ids_by_step[step_id],
                     scope=LiveTranscriptScope(
                         tenant_id=self.user.tenant_id,
                         user_id=principal.principal_user_id,
@@ -684,13 +684,14 @@ class FlowRunService:
                 limits=limits,
                 mapped_policy=mapped_policy,
             )
+            single_recording_steps = validate_single_recording_inputs(
+                step_inputs=step_inputs or {}, specs=runtime_specs
+            )
             live_transcript_ids = validate_live_transcript_inputs(
                 step_inputs=step_inputs or {},
                 normalized_step_inputs=normalized_step_inputs,
                 specs=runtime_specs,
-            )
-            single_recording_steps = validate_single_recording_inputs(
-                step_inputs=step_inputs or {}, specs=runtime_specs
+                single_recording_steps=single_recording_steps,
             )
             await validate_submitted_step_inputs(
                 flow_id=flow_id,

@@ -37,9 +37,11 @@ class FlowTranscriptionConfig:
     # The most speakers the service may label in a run that states no bound;
     # None lets the service count them.
     max_speakers: int | None = None
-    # The model that streams the live preview while someone records; None
-    # leaves the preview to the transcription model. It never writes a
-    # run's transcript: ``model_id`` does, however the audio arrived.
+    # The source of the audio picks the model. This one writes the text of
+    # audio streamed while someone records, and that text is the run's
+    # transcript; None leaves streaming to ``model_id`` when it can stream.
+    # ``model_id`` writes uploaded and recorded files, and a streamed
+    # recording whose live text cannot be used.
     live_model_id: UUID | None = None
 
     @property
@@ -52,6 +54,11 @@ class FlowTranscriptionConfig:
     def live_model_in_use(self) -> UUID | None:
         """The chosen live model, while the flow transcribes."""
         return self.live_model_id if self.enabled else None
+
+    @property
+    def streaming_model_id(self) -> UUID | None:
+        """The model whose live text a run uses instead of transcribing."""
+        return self.live_model_id or self.model_id
 
     def diarize(self, speaker_labels: bool | None) -> bool:
         """Whether speakers are labelled: the run's own choice, else the flow's."""

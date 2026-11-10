@@ -1,6 +1,7 @@
 """Bounded timed delta collection for a session's authoritative done text."""
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from eneo.flows.runtime.live_transcription.upstream import UpstreamEvent
@@ -35,7 +36,12 @@ class TimedPieces:
             return
         self._pieces.append((start, end, event.text))
 
-    def passages(self, done_text: str) -> list[dict[str, str | float]] | None:
+    def passages(
+        self, done_text: str, *, breaks: Sequence[float] = ()
+    ) -> list[dict[str, str | float]] | None:
+        """The done text in timed passages. A passage ends before a piece that
+        starts at or after one of ``breaks`` (where a new part of the recording
+        began), so no passage spans two parts."""
         if not self._complete or not self._pieces:
             return None
         if "".join(text for _, _, text in self._pieces) != done_text:
@@ -43,8 +49,13 @@ class TimedPieces:
         passages: list[dict[str, str | float]] = []
         texts: list[str] = []
         start = end = 0.0
+        upcoming = sorted(breaks)
         for piece_start, piece_end, text in self._pieces:
-            if texts and piece_end - start > 30:
+            crossed = False
+            while upcoming and piece_start >= upcoming[0]:
+                upcoming.pop(0)
+                crossed = True
+            if texts and (crossed or piece_end - start > 30):
                 passages.append({"start": start, "end": end, "text": "".join(texts)})
                 texts = []
             if not texts:

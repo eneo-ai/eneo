@@ -1,5 +1,6 @@
 """Durable live transcripts; each socket write owns one short transaction."""
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
@@ -12,7 +13,11 @@ from eneo.database.tables.flow_tables import FlowLiveTranscripts, Flows
 from eneo.database.tables.tenant_table import Tenants
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.runtime.live_transcription.tickets import LiveTranscriptionGrant
-from eneo.main.exceptions import ConflictException, NotFoundException
+from eneo.main.exceptions import (
+    BadRequestException,
+    ConflictException,
+    NotFoundException,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,8 +73,13 @@ class LiveTranscriptRepository:
         return await self.session.scalar(statement)
 
     async def bind(
-        self, transcript_id: UUID, *, file_id: UUID, scope: LiveTranscriptScope
+        self,
+        transcript_id: UUID,
+        *,
+        file_ids: Sequence[UUID],
+        scope: LiveTranscriptScope,
     ) -> None:
+        """Bind the transcript to the files of its recording, in recording order."""
         row = await self.get(
             transcript_id, tenant_id=scope.tenant_id, lock_for_binding=True
         )
@@ -79,17 +89,27 @@ class LiveTranscriptRepository:
         )
         if row is None or not scope.matches(row):
             raise not_found
-        if row.bound_file_id == file_id:
-            # A retry of a run over this file keeps its transcript, expired or not.
+        if list(row.bound_file_ids) == list(file_ids):
+            # A retry of a run over these files keeps its transcript, expired or not.
             return
         if row.bound_file_id is not None:
             raise ConflictException(
-                "Live transcript is already bound to another file.",
+                "Live transcript is already bound to other files.",
                 code=FlowApiErrorCode.RUN_LIVE_TRANSCRIPT_ALREADY_BOUND.value,
             )
         if row.expires_at is not None and row.expires_at <= datetime.now(timezone.utc):
             raise not_found
-        row.bound_file_id = file_id
+        if len(file_ids) != len(row.part_start_samples) + 1:
+            raise BadRequestException(
+                "A live transcript needs every part of its recording, in order.",
+                code=FlowApiErrorCode.RUN_LIVE_TRANSCRIPT_FILES_MISMATCH.value,
+                context={
+                    "parts": len(row.part_start_samples) + 1,
+                    "files": len(file_ids),
+                },
+            )
+        row.bound_file_id = file_ids[0]
+        row.bound_file_ids = list(file_ids)
         await self.session.flush()
 
     async def create(
@@ -99,6 +119,7 @@ class LiveTranscriptRepository:
         text: str,
         segments: list[dict[str, str | float]] | None,
         received_audio_seconds: float,
+        part_start_samples: list[int] | None = None,
     ) -> UUID:
         if grant.recording_id is None:
             raise ValueError("A live transcript requires a recording identity.")
@@ -123,6 +144,7 @@ class LiveTranscriptRepository:
                 text=text,
                 segments=segments,
                 received_audio_seconds=received_audio_seconds,
+                part_start_samples=part_start_samples or [],
                 created_at=now,
                 expires_at=now + timedelta(days=days) if days is not None else None,
             )
@@ -189,6 +211,7 @@ async def persist_live_transcript(
     text: str,
     segments: list[dict[str, str | float]] | None,
     received_audio_seconds: float,
+    part_start_samples: list[int],
 ) -> UUID:
     async with sessionmanager.session() as session, session.begin():
         transcript_id = await LiveTranscriptRepository(session).create(
@@ -196,5 +219,6 @@ async def persist_live_transcript(
             text=text,
             segments=segments,
             received_audio_seconds=received_audio_seconds,
+            part_start_samples=part_start_samples,
         )
     return transcript_id

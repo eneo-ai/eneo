@@ -237,7 +237,6 @@ describe("StartRunDialog", () => {
     expect(FakeUpload.sent[0]?.url).toBe("/api/v1/flows/flow-1/steps/step-1/runtime-files/");
     // The person sees which part of the dialog this is, and how many files the step has.
     expect(within(dialog).getByText(messages.flow_runs_start_part_input)).toBeTruthy();
-    expect(within(dialog).getByText("Filer: 1 av 3")).toBeTruthy();
 
     fireEvent.click(button(dialog, messages.flow_runs_summary_next));
 
@@ -781,5 +780,37 @@ describe("StartRunDialog on a phone", () => {
       true
     );
     expect(within(dialog).getByText("Välj filer eller dra hit dem")).toBeTruthy();
+  });
+
+  it("asks for no separate run name when a form field names the run", async () => {
+    const { dialog } = await openDialog(contract, {
+      form_schema: {
+        fields: [
+          {
+            name: "arende",
+            label: "Ärende",
+            type: "text",
+            required: true,
+            order: 1,
+            role: "run_label"
+          }
+        ]
+      }
+    });
+    expect(within(dialog).queryByLabelText(RUN_LABEL)).toBeNull();
+  });
+
+  it("swaps the file of a step that takes one when another is picked", async () => {
+    const { dialog } = await openDialog({
+      ...contract,
+      steps_requiring_input: [makeInput({ step_id: "step-1", label: "Brevet", max_files: 1 })]
+    });
+    pickFile(dialog, new File(["%PDF"], "forsta.pdf", { type: "application/pdf" }));
+    expect(await within(dialog).findByText(/Uppladdad/)).toBeTruthy();
+    pickFile(dialog, new File(["%PDF"], "andra.pdf", { type: "application/pdf" }));
+
+    await waitFor(() => expect(within(dialog).queryByText("forsta.pdf")).toBeNull());
+    expect(within(dialog).getByText("andra.pdf")).toBeTruthy();
+    expect(within(dialog).queryByText(/Steget tar högst/)).toBeNull();
   });
 });

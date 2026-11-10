@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from eneo.flows.http_transport.authored_config import (
     HttpAuth,
     HttpAuthApiKey,
@@ -17,6 +19,9 @@ from eneo.flows.http_transport.effective_url import (
 )
 from eneo.flows.http_transport.errors import HttpTransportError
 from eneo.flows.http_transport.json_template import is_json_template
+
+# RFC 9110 `token`: what a request may send as a header name.
+_HEADER_NAME = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+")
 
 
 def credential_missing(auth: HttpAuth) -> bool:
@@ -79,7 +84,29 @@ def validate_authored_config(
     if config.timeout_seconds < 1 or config.timeout_seconds > max_timeout:
         errors.append(HttpTransportError.TIMEOUT_OUT_OF_RANGE)
 
+    if invalid_header_name_field(config) is not None:
+        errors.append(HttpTransportError.INVALID_HEADER_NAME)
+
     return errors
+
+
+def invalid_header_name_field(config: HttpAuthoredConfig) -> str | None:
+    """The config path of the first header name the request could not send.
+
+    The request sends a header name as written, so one with a space or a
+    letter outside ASCII would fail only when a run sends it. An API key's
+    header name a run fills in is known only then."""
+    auth = config.auth
+    if (
+        isinstance(auth, HttpAuthApiKey)
+        and not _contains_template_marker(auth.header_name)
+        and not _HEADER_NAME.fullmatch(auth.header_name)
+    ):
+        return "auth.header_name"
+    for index, header in enumerate(config.custom_headers):
+        if header.sent and not _HEADER_NAME.fullmatch(header.name):
+            return f"custom_headers[{index}]"
+    return None
 
 
 def authored_url_error(url: str) -> HttpTransportError | None:

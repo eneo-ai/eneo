@@ -10,6 +10,7 @@ import { Trash2 } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { Switch } from "@astryxdesign/core/Switch";
 import { TextInput } from "@/components/astryx/text-input";
+import { useSpace } from "@/features/spaces/use-space";
 import { Anchor, EditorSection, FieldMessage, problemStatus } from "./editor-fields";
 import { TemplateTextArea } from "./reference-text-area";
 import type { FieldProblems } from "./field-problems";
@@ -35,6 +36,7 @@ import {
   writeInputBindings,
   type RuntimeInputChange,
   type RuntimeInputFormat,
+  type SourceRef,
   type TextProcessingMode
 } from "./step-configs";
 import { HttpFields } from "./step-http-fields";
@@ -57,6 +59,20 @@ import type { FlowPublic, InputSource, InputType, OutputType, StepConfig } from 
 import { materialOptions, stepsBefore, type VariableGroup } from "./step-variables";
 
 const WHOLE = "whole";
+
+/** A result a step reads, as the editor lists it: "Steg 2: Sammanfatta, fältet beslut". */
+export function sourceRefName(
+  ref: SourceRef,
+  flow: Pick<FlowPublic, "steps">,
+  t: ReturnType<typeof useTranslations>
+): string {
+  const order = sourceRefStepOrder(ref);
+  const step = order === null ? null : flow.steps.find((item) => item.step_order === order);
+  const source = order === null ? ref.stepRef : stepLabel(order, step?.user_description, t);
+  return ref.fieldPath
+    ? t("flow_step_editor_underlag_field", { step: source, field: ref.fieldPath })
+    : source;
+}
 
 const DOCUMENT_MIME_TYPES = [
   { value: "application/pdf", label: "PDF" },
@@ -412,15 +428,6 @@ function Underlag({
     });
   }
 
-  function refName(ref: (typeof unlisted)[number]): string {
-    const order = sourceRefStepOrder(ref);
-    const step = order === null ? null : flow.steps.find((item) => item.step_order === order);
-    const source = order === null ? ref.stepRef : stepLabel(order, step?.user_description, t);
-    return ref.fieldPath
-      ? t("flow_step_editor_underlag_field", { step: source, field: ref.fieldPath })
-      : source;
-  }
-
   function setRefs(keys: string[]) {
     if (state.status !== "valid") return;
     const kept = state.sourceRefs.filter(
@@ -482,10 +489,12 @@ function Underlag({
           {unlisted.map((ref) => (
             <li key={sourceRefKey(ref)} className="flex flex-wrap items-center gap-2">
               <Text type="body" size="sm">
-                {refName(ref)}
+                {sourceRefName(ref, flow, t)}
               </Text>
               <Button
-                label={t("flow_step_editor_underlag_remove_ref", { name: refName(ref) })}
+                label={t("flow_step_editor_underlag_remove_ref", {
+                  name: sourceRefName(ref, flow, t)
+                })}
                 variant="ghost"
                 size="sm"
                 icon={<Trash2 className="size-4" aria-hidden="true" />}
@@ -547,6 +556,7 @@ export function StepInputSection({
   showUnderlag: boolean;
 }) {
   const t = useTranslations();
+  const { space } = useSpace();
   const previous = stepsBefore(flow, stepOrder).at(-1) ?? null;
   const previousOutput: OutputType | null = previous?.output_type ?? null;
   const sourceOptions = inputSourceOptions(stepOrder, draft.input_source);
@@ -558,6 +568,25 @@ export function StepInputSection({
       : null;
   const typeIssue = issue && !sourceIssue ? chainIssueText(issue, t) : null;
   const audio = draft.input_type === "audio";
+  // What the step reads, in one line: what is chosen under "Välj själv vad
+  // steget läser" replaces the source, so the line names that instead.
+  const bindings = readInputBindings(draft.input_bindings);
+  const chosenRefs = bindings.status === "valid" ? bindings.sourceRefs : [];
+  const readsLine =
+    chosenRefs.length > 0
+      ? t("flow_step_editor_reads_chosen", {
+          // A semicolon, as a name can hold a comma ("Steg 2: Sammanfatta, fältet beslut").
+          steps: chosenRefs.map((ref) => sourceRefName(ref, flow, t)).join("; ")
+        })
+      : bindings.status === "valid" && bindings.question.trim()
+        ? t("flow_step_editor_reads_own_text")
+        : draft.input_source === "previous_step" && previous
+          ? t("flow_step_editor_reads_previous", {
+              step: stepLabel(previous.step_order, previous.user_description, t)
+            })
+          : draft.input_source === "all_previous_steps" && stepOrder > 1
+            ? t("flow_step_editor_reads_all_previous")
+            : null;
 
   return (
     <EditorSection
@@ -603,16 +632,9 @@ export function StepInputSection({
         </Anchor>
       </div>
 
-      {draft.input_source === "previous_step" && previous && (
+      {readsLine && (
         <Text type="supporting" size="sm" as="p" display="block" className="m-0">
-          {t("flow_step_editor_reads_previous", {
-            step: stepLabel(previous.step_order, previous.user_description, t)
-          })}
-        </Text>
-      )}
-      {draft.input_source === "all_previous_steps" && stepOrder > 1 && (
-        <Text type="supporting" size="sm" as="p" display="block" className="m-0">
-          {t("flow_step_editor_reads_all_previous")}
+          {readsLine}
         </Text>
       )}
 
@@ -660,6 +682,7 @@ export function StepInputSection({
             }
             groups={toolGroups}
             problem={problems["input_config.tool"]}
+            personal={space.personal}
           />
         </Anchor>
       )}

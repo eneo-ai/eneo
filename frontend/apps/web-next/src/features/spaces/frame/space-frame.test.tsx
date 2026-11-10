@@ -271,6 +271,16 @@ describe("SpaceFrame on a tablet: the space's header and tabs (#1328)", () => {
     expect(names).toEqual(["Ytans sökväg", "Ytans innehåll", "Sökväg"]);
   });
 
+  it("leaves the space's name out above a page whose own trail starts with it (a flow run)", () => {
+    show(sharedSpace(), ["flows", "f1", "runs", "r1"]);
+    // The run page's trail begins "Upphandling › Flöden": no small label repeats it.
+    expect(screen.queryByText("Upphandling", { selector: "p" })).toBeNull();
+    // Another page below a tab still names the space.
+    cleanup();
+    show(sharedSpace(), ["knowledge", "collections", "c1"]);
+    expect(screen.getByText("Upphandling", { selector: "p" })).toBeTruthy();
+  });
+
   it("shows the personal space without members or invites", () => {
     const space = makeSpace({
       permissions: ["read"],

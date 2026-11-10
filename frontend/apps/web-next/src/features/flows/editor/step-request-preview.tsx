@@ -7,9 +7,10 @@ import { Token } from "@astryxdesign/core/Token";
 import { useQuery } from "@tanstack/react-query";
 import { ScanEye } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { modelDisplayName } from "@/features/spaces/space-models";
 import { useSpace } from "@/features/spaces/use-space";
+import { useFlowReadLabel } from "../flow-read-layout";
 import { toolOptionsQueryOptions } from "./editor-api";
 import { tokenColor } from "./reference-text-area";
 import { answerShape, modelParameters, previewParts, type PreviewPart } from "./request-preview";
@@ -123,9 +124,11 @@ function RequestPreview({
   );
   const answer = answerShape(draft);
   const readingMode = readTextProcessingMode(draft.input_config);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const label = useFlowReadLabel(rootRef);
 
   return (
-    <div className="flex flex-col gap-5">
+    <div ref={rootRef} className="flex flex-col gap-5">
       {usesModel ? (
         <section className="flex flex-col gap-2">
           <Text type="label" as="h3" display="block" className="m-0">
@@ -188,7 +191,7 @@ function RequestPreview({
           <Template parts={previewParts(bindings.question, stepOrder, flow)} flow={flow} />
         ) : null}
         {tool ? (
-          <MetadataList label={{ position: "start", width: "8rem" }}>
+          <MetadataList label={label}>
             <MetadataListItem label={t("flow_step_editor_tool")}>
               <ToolName flowId={flow.id} serverId={tool.mcp_server_id} toolId={tool.tool_id} />
             </MetadataListItem>
@@ -204,15 +207,12 @@ function RequestPreview({
           </MetadataList>
         ) : null}
         {httpIn ? (
-          <HttpCall config={httpIn} method="GET" stepOrder={stepOrder} flow={flow} />
+          <HttpCall config={httpIn} method="GET" stepOrder={stepOrder} flow={flow} label={label} />
         ) : null}
       </section>
 
       {usesModel ? (
-        <MetadataList
-          title={t("flow_editor_tools_preview_model_title")}
-          label={{ position: "start", width: "8rem" }}
-        >
+        <MetadataList title={t("flow_editor_tools_preview_model_title")} label={label}>
           <MetadataListItem label={t("flow_step_editor_model")}>
             {model ? modelDisplayName(model) : t("flow_step_editor_model_unknown")}
           </MetadataListItem>
@@ -277,7 +277,14 @@ function RequestPreview({
           <Text type="label" as="h3" display="block" className="m-0">
             {t("flow_editor_tools_preview_http_destination")}
           </Text>
-          <HttpCall config={httpOut} method="POST" stepOrder={stepOrder} flow={flow} />
+          {/* Sent once the step has answered: it reads as the next step would. */}
+          <HttpCall
+            config={httpOut}
+            method="POST"
+            stepOrder={stepOrder + 1}
+            flow={flow}
+            label={label}
+          />
         </section>
       ) : null}
     </div>
@@ -289,12 +296,14 @@ function HttpCall({
   config,
   method,
   stepOrder,
-  flow
+  flow,
+  label
 }: {
   config: HttpConfig;
   method: "GET" | "POST";
   stepOrder: number;
   flow: FlowPublic;
+  label: ReturnType<typeof useFlowReadLabel>;
 }) {
   const t = useTranslations();
   const headers = config.custom_headers.filter(headerSent).map((header) => header.name);
@@ -303,7 +312,7 @@ function HttpCall({
       ? (config.body.template ?? "")
       : "";
   return (
-    <MetadataList label={{ position: "start", width: "8rem" }}>
+    <MetadataList label={label}>
       {/* No method: "Skickas till" and the material line already say which way it goes. */}
       <MetadataListItem label={t("flow_editor_tools_preview_http_address")}>
         <Template parts={previewParts(config.url, stepOrder, flow)} flow={flow} />

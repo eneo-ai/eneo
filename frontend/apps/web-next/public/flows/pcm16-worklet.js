@@ -6,9 +6,12 @@
 // takes no worklet from a data: URL, and so it imports nothing.
 //
 // Messages from the page: "flush" asks for the frame in progress, however
-// short, answered by "flushed"; "pause" drops the frame in progress and hears
-// nothing until "resume", which is answered by "resumed" (every frame posted
-// before that answer was heard before the resume).
+// short, answered by "flushed"; "pause" sends the frame in progress and hears
+// nothing until "resume", so what was heard before a pause is all sent and
+// nothing after it; "mark" is answered with the number of samples written so
+// far (a number), where a new part of the recording starts. The pause and the
+// mark take effect here, between two render quanta, not on the page, whose
+// count lags by the frames still on their way.
 
 const TARGET_RATE = 16000;
 const FRAME_SAMPLES = 1600;
@@ -25,6 +28,7 @@ function createPcm16FrameWriter(inputRate, onFrame) {
   let offset = 0;
   let filled = 0;
   let sum = 0;
+  let written = 0;
 
   const emit = (buffer) => {
     onFrame(buffer);
@@ -33,12 +37,8 @@ function createPcm16FrameWriter(inputRate, onFrame) {
   };
 
   return {
-    discard() {
-      frame = new DataView(new ArrayBuffer(FRAME_SAMPLES * 2));
-      offset = 0;
-      filled = 0;
-      sum = 0;
-    },
+    /** Samples written so far, the frame in progress included. */
+    written: () => written,
     write(samples) {
       for (const sample of samples) {
         let remaining = TARGET_RATE;
@@ -52,6 +52,7 @@ function createPcm16FrameWriter(inputRate, onFrame) {
           const value = Math.max(-1, Math.min(1, sum / inputRate));
           frame.setInt16(offset, Math.round(value < 0 ? value * 0x8000 : value * 0x7fff), true);
           offset += 2;
+          written += 1;
           filled = 0;
           sum = 0;
           if (offset === frame.byteLength) emit(frame.buffer);
@@ -77,10 +78,11 @@ registerProcessor(
       this.port.onmessage = (event) => {
         if (event.data === "pause") {
           this.paused = true;
-          this.writer.discard();
+          this.writer.flush();
         } else if (event.data === "resume") {
           this.paused = false;
-          this.port.postMessage("resumed");
+        } else if (event.data === "mark") {
+          this.port.postMessage(this.writer.written());
         } else if (event.data === "flush") {
           this.writer.flush();
           this.port.postMessage("flushed");

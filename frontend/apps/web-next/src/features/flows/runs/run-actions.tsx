@@ -37,32 +37,53 @@ export type RunActionNotice = {
   error?: unknown;
 };
 
-/** Why a failed run cannot be retried by this person now. */
-export type RetryHeldBack = "version_changed" | "starter_only";
+/** Why an ended run cannot be run again (retried, or started anew) by this person now. */
+export type RunHeldBack = "unpublished" | "version_changed" | "starter_only";
 
 /**
- * Which actions a run offers the person: retry needs the right to run
- * flows, a failed run of the version published now, and (when the core
- * names the starter) the person who started it; cancel follows the core's
- * status table.
+ * Which actions a run offers the person. Retry needs the right to run
+ * flows, a failed run of the version published now whose first step
+ * completed (the core reuses only a completed prefix; `facts` is null where
+ * the steps are not known, as in the runs list) and, when the core names
+ * the starter, the person who started it. A failed or cancelled run of a
+ * published flow can be started anew. `primary` is the one to lead with.
+ * The error's `retryable` does not demote it: the core sets it only for
+ * the few codes after which a new run repeats no provider work, so false
+ * says nothing about whether the same error comes back (a 503, a timeout).
+ * Cancel follows the core's status table.
  */
 export function runActions(
   run: Pick<RunSummary, "status" | "flow_version" | "started_by">,
-  person: { canRun: boolean; userId: string; publishedVersion: number | null | undefined }
-): { retry: boolean; retryHeldBack: RetryHeldBack | null; cancel: boolean } {
+  person: { canRun: boolean; userId: string; publishedVersion: number | null | undefined },
+  facts: { steps: readonly { order: number; status: string | null }[] } | null
+): {
+  retry: boolean;
+  newRun: boolean;
+  heldBack: RunHeldBack | null;
+  primary: "retry" | "new_run" | null;
+  cancel: boolean;
+} {
   const failed = person.canRun && run.status === "failed";
-  const currentVersion = run.flow_version === person.publishedVersion;
-  const otherStarter = startedByUser(run, person.userId) === false;
-  const retryHeldBack: RetryHeldBack | null = !failed
+  const ended = failed || (person.canRun && run.status === "cancelled");
+  const reusable = facts?.steps.find((step) => step.order === 1)?.status === "completed";
+  const heldBack: RunHeldBack | null = !ended
     ? null
-    : !currentVersion
-      ? "version_changed"
-      : otherStarter
-        ? "starter_only"
-        : null;
+    : person.publishedVersion == null
+      ? "unpublished"
+      : !failed
+        ? null
+        : run.flow_version !== person.publishedVersion
+          ? "version_changed"
+          : reusable && startedByUser(run, person.userId) === false
+            ? "starter_only"
+            : null;
+  const retry = failed && reusable && heldBack === null;
+  const newRun = ended && heldBack !== "unpublished";
   return {
-    retry: failed && retryHeldBack === null,
-    retryHeldBack,
+    retry,
+    newRun,
+    heldBack,
+    primary: retry ? "retry" : newRun ? "new_run" : null,
     cancel: isCancellable(run.status)
   };
 }
@@ -228,7 +249,8 @@ export function CancelRunButton({
         }}
         title={t("flow_runs_cancel_title")}
         description={t("flow_runs_cancel_description")}
-        confirmLabel={t("flow_runs_cancel")}
+        confirmLabel={t("flow_runs_cancel_confirm")}
+        cancelLabel={t("flow_runs_cancel_keep")}
         pending={cancel.isPending}
         onConfirm={() => cancel.mutate()}
       />

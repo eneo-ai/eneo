@@ -14,7 +14,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { FileArchive, PackageOpen, RefreshCw, Upload } from "lucide-react";
 import { useRouter } from "@/lib/navigation";
 import { useLocale, useTranslations } from "use-intl";
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { FieldMessage } from "./editor/editor-fields";
 import { formatBytes } from "@/lib/format";
@@ -195,6 +195,15 @@ function Requirement({
         : t("flow_editor_tools_package_optional");
 
   const unusable = unusableModels(resolution, t);
+  const controlRef = useRef<HTMLDivElement>(null);
+  // A refused Word file is said under its field, which may be below the fold: go there.
+  useEffect(() => {
+    if (!templateProblem) return;
+    controlRef.current?.scrollIntoView({ block: "nearest" });
+    controlRef.current
+      ?.querySelector<HTMLElement>('[aria-invalid="true"]')
+      ?.focus({ preventScroll: true });
+  }, [templateProblem]);
   let control: React.ReactNode;
   if (template && resolution.kind === "template_asset") {
     control = (
@@ -328,7 +337,9 @@ function Requirement({
               </Text>
             ) : null}
           </div>
-          <div className="w-full min-w-0 sm:w-72 sm:shrink-0">{control}</div>
+          <div ref={controlRef} className="w-full min-w-0 sm:w-72 sm:shrink-0">
+            {control}
+          </div>
         </div>
         {unusable.length > 0 ? (
           <ul className="m-0 flex list-none flex-col gap-1 p-0">
@@ -393,8 +404,9 @@ export function FlowPackageImportDialog({
   const resolutions = plan?.dependency_resolutions ?? [];
   const omittedMcp = plan?.omissions.find((item) => item.kind === "mcp_attachment")?.count ?? 0;
   const needsReview = readiness?.canImport === true && !readiness.canPublishAfterImport;
-  // Something to say when nothing blocks: a review ahead, or audio settings the package leaves behind.
-  const importNote = !refused && (needsReview || readiness?.takesAudio === true);
+  // Audio settings the package leaves behind. A review ahead is said beside the buttons instead,
+  // so the rows do not move when the last choice is made.
+  const audioNote = !refused && readiness?.takesAudio === true;
   // Choices the person made would be lost by closing: ask first.
   const initial = plan ? initialSelections(plan) : {};
   const hasChoices =
@@ -691,24 +703,14 @@ export function FlowPackageImportDialog({
                           }
                           collapsible={false}
                         />
-                      ) : importNote ? (
+                      ) : audioNote ? (
                         <Banner
                           status="info"
-                          title={
-                            needsReview
-                              ? t("flow_editor_tools_package_needs_review_after_import")
-                              : t("flow_package_import_audio_title")
-                          }
+                          title={t("flow_package_import_audio_title")}
                           description={
                             readiness?.transcriptionModelToChoose
                               ? t("flow_editor_tools_package_transcription_model_to_choose")
-                              : readiness?.takesAudio
-                                ? t(
-                                    needsReview
-                                      ? "flow_package_import_audio_note"
-                                      : "flow_package_import_audio_body"
-                                  )
-                                : undefined
+                              : t("flow_package_import_audio_body")
                           }
                           collapsible={false}
                         />
@@ -781,14 +783,21 @@ export function FlowPackageImportDialog({
                   <p role="status" className="text-ax-text-secondary m-0 mr-auto text-sm">
                     {refused
                       ? t("flow_package_import_footer_blocked")
-                      : readiness && readiness.totalRequired > 0
-                        ? t("flow_editor_tools_package_required_progress", {
-                            selected: readiness.selectedRequired,
-                            total: readiness.totalRequired
-                          })
-                        : readiness?.canImport
-                          ? t("flow_package_import_footer_ready")
-                          : null}
+                      : [
+                          readiness && readiness.totalRequired > 0
+                            ? t("flow_editor_tools_package_required_progress", {
+                                selected: readiness.selectedRequired,
+                                total: readiness.totalRequired
+                              })
+                            : readiness?.canImport
+                              ? t("flow_package_import_footer_ready")
+                              : null,
+                          needsReview
+                            ? t("flow_editor_tools_package_needs_review_after_import")
+                            : null
+                        ]
+                          .filter(Boolean)
+                          .join(" ")}
                   </p>
                   <div className="flex flex-wrap justify-end gap-2">
                     <Button

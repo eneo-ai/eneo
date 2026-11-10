@@ -18,7 +18,6 @@ import {
 } from "@tanstack/react-query";
 import { History, Search } from "lucide-react";
 import Link from "@/lib/link";
-import { useRouter } from "@/lib/navigation";
 import { useLocale, useTranslations } from "use-intl";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Collapsible } from "@/components/astryx/collapsible";
@@ -43,7 +42,7 @@ import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { toast } from "@/lib/toast";
 import { useDebouncedValue } from "../editor/use-debounced-value";
 import { formatCount, formatSeconds } from "./run-format";
-import { CancelRunButton, RetryRunButton, runActions, type RunActionNotice } from "./run-actions";
+import { CancelRunButton, runActions, type RunActionNotice } from "./run-actions";
 import { refusalText } from "./run-messages";
 import { runHref } from "./run-routes";
 import { starterName } from "./run-starter";
@@ -173,27 +172,15 @@ function RedispatchButton({ flowId, run }: { flowId: string; run: RunSummary }) 
 }
 
 /**
- * What came of a row's retry or cancel, as a toast (errors stay until
- * closed, with the failure's support references); a page the notice points
- * to is the toast's action.
+ * What came of a row's cancel, as a toast (errors stay until closed, with
+ * the failure's support references).
  */
-function toastNotice(
-  notice: RunActionNotice,
-  navigate: (href: string) => void,
-  t: (key: string) => string
-) {
+function toastNotice(notice: RunActionNotice, t: (key: string) => string) {
   if (notice.status === "error") {
     toastApiError(notice.error, t, { title: notice.title, message: notice.description });
     return;
   }
-  const { link } = notice;
-  const options =
-    notice.description || link
-      ? {
-          ...(notice.description ? { description: notice.description } : {}),
-          ...(link ? { action: { label: link.label, onClick: () => navigate(link.href) } } : {})
-        }
-      : undefined;
+  const options = notice.description ? { description: notice.description } : undefined;
   switch (notice.status) {
     case "warning":
       toast.warning(notice.title, options);
@@ -221,10 +208,10 @@ function isSortKey(value: string): value is RunsSort["key"] {
  * keeps itself current while a run in it is queued, running
  * or waiting for review, on the cadence the run API asks for, and stops once
  * all of them have ended. A run that moves on is announced. A queued run
- * whose start is due or gave up can be sent again from its row, a failed run
- * retried and a run under way cancelled, by the run page's rules
- * (`run-actions.tsx`), and a run this tab just started shows at once
- * (`runs-optimistic.ts`). A flow with no runs that is not published yet
+ * whose start is due or gave up can be sent again from its row and a run
+ * under way cancelled, by the run page's rules (`run-actions.tsx`); a failed
+ * run is run again from its page, which knows its steps. A run this tab
+ * just started shows at once (`runs-optimistic.ts`). A flow with no runs that is not published yet
  * says to publish it first.
  */
 export function FlowRunsList({
@@ -235,7 +222,7 @@ export function FlowRunsList({
 }: {
   flowId: string;
   spaceRouteId: string;
-  /** The flow's published version: only its failed runs can be retried. */
+  /** The flow's published version, for the empty list's words and the run page's rules. */
   publishedVersion: number | null;
   headingLevel?: 2 | 3;
 }) {
@@ -243,8 +230,7 @@ export function FlowRunsList({
   const locale = useLocale();
   const announce = useAnnounce();
   const { can, user } = useAppContext();
-  const router = useRouter();
-  const report = (notice: RunActionNotice) => toastNotice(notice, (href) => router.push(href), t);
+  const report = (notice: RunActionNotice) => toastNotice(notice, t);
   // A cancelled run's button goes: focus moves to the run's link in its row,
   // or to the heading when the run left the list (a status filter).
   const rescue = useFocusRescue();
@@ -328,17 +314,17 @@ export function FlowRunsList({
   const total = counts ? Object.values(counts).reduce((sum, count) => sum + count, 0) : undefined;
 
   /**
-   * A run's state, with the actions its state allows: review it (on its page), send it again, try
-   * it again, cancel it.
+   * A run's state, with the actions its state allows: review it (on its page), send it again,
+   * cancel it. Running a failed run again is offered on its page, which knows its steps.
    */
   const statusCell = (run: Row) => {
     const redispatch = canRedispatch(run, runs.dataUpdatedAt);
-    const offers = runActions(run, person);
+    const offers = runActions(run, person, null);
     const review = isAwaitingReview(run.status);
     return (
       <span className="flex flex-col items-start gap-1">
         <RunStatus status={run.status} purpose={run.purpose} />
-        {review || redispatch || offers.retry || offers.cancel ? (
+        {review || redispatch || offers.cancel ? (
           <span className="flex flex-wrap gap-1">
             {review ? (
               <Button
@@ -349,15 +335,6 @@ export function FlowRunsList({
               />
             ) : null}
             {redispatch ? <RedispatchButton flowId={flowId} run={run} /> : null}
-            {offers.retry ? (
-              <RetryRunButton
-                spaceRouteId={spaceRouteId}
-                flowId={flowId}
-                runId={run.id}
-                report={report}
-                size="sm"
-              />
-            ) : null}
             {offers.cancel ? (
               <CancelRunButton
                 flowId={flowId}

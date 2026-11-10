@@ -16,7 +16,7 @@ import { LoadingState } from "@/components/composites/loading-state";
 import { PHONE_QUERY, usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
-import { restrictedBeforeApproval } from "../flow-form-fields";
+import { formFieldsOf, restrictedBeforeApproval } from "../flow-form-fields";
 import type { FlowPublic } from "../flows-api";
 import { RecordingKeeper } from "./recording/recording-keeper";
 import { RunRecorder, type RecorderHandle } from "./recording/run-recorder";
@@ -35,6 +35,7 @@ import {
   runRequest,
   speakersBlockRun,
   takesFreeText,
+  withoutRefusedLiveTranscripts,
   type FieldValue,
   type FormValues
 } from "./run-contract";
@@ -286,16 +287,34 @@ function StartRunForm({
     setServer((current) => ({ ...current, inputs: { ...current.inputs, [stepId]: message } }))
   );
 
+  function send(request: RunCreateRequest) {
+    const body = withRunLabel(request, runLabel);
+    // A retried request with the same body keeps its key, so a lost
+    // response cannot start the run twice; a changed body is a new run.
+    const serialized = JSON.stringify(body);
+    const key =
+      lastRequest.current?.body === serialized ? lastRequest.current.key : newIdempotencyKey();
+    lastRequest.current = { body: serialized, key };
+    return startRun(flow.id, body, key);
+  }
+
   const start = useMutation({
-    mutationFn: (request: RunCreateRequest) => {
-      const body = withRunLabel(request, runLabel);
-      // A retried request with the same body keeps its key, so a lost
-      // response cannot start the run twice; a changed body is a new run.
-      const serialized = JSON.stringify(body);
-      const key =
-        lastRequest.current?.body === serialized ? lastRequest.current.key : newIdempotencyKey();
-      lastRequest.current = { body: serialized, key };
-      return startRun(flow.id, body, key);
+    mutationFn: async (request: RunCreateRequest) => {
+      try {
+        return await send(request);
+      } catch (error) {
+        // The core will not use a live transcript: it is not offered again, and
+        // the run, sent once more without it (a new body, so a new key),
+        // transcribes the files. Nothing is said: the run starts as usual.
+        const plain = withoutRefusedLiveTranscripts(request, error);
+        if (!plain) throw error;
+        for (const [stepId, input] of Object.entries(request.step_inputs ?? {})) {
+          if (input.live_transcript_id) {
+            recorders.current.get(stepId)?.refuseLiveTranscript(input.live_transcript_id);
+          }
+        }
+        return send(plain);
+      }
     },
     onMutate: () => onPendingChange(true),
     onSettled: () => onPendingChange(false),
@@ -589,8 +608,11 @@ function StartRunForm({
 
       {/* Keyed: a contract read again keeps each block, and a running recording, mounted. */}
       {inputsFirst ? [inputsBlock, fieldsBlock] : [fieldsBlock, inputsBlock]}
-      {/* What the run is called is optional: it comes last, so the form opens with the input. */}
-      <RunLabelField value={runLabel} onChange={setRunLabel} />
+      {/* What the run is called is optional: it comes last, so the form opens with the input. A
+          form field that names the run (its run_label role) already asks it. */}
+      {formFieldsOf(flow.metadata_json).some((field) => field.role === "run_label") ? null : (
+        <RunLabelField value={runLabel} onChange={setRunLabel} />
+      )}
     </form>
   );
 }

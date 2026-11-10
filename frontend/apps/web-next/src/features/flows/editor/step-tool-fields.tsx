@@ -17,6 +17,7 @@ import {
   type ToolArgumentSpec,
   type ToolConfig
 } from "./step-configs";
+import { formFieldFitsArgument, templateBindingToken } from "./step-rules";
 import type { ToolOption } from "./step-types";
 import type { VariableGroup } from "./step-variables";
 
@@ -34,12 +35,17 @@ export function toolRefusalText(
 }
 
 /** What the schema says about an argument beyond its description, in a few words. */
+/** An argument's type as the hint shows it: `array<number>` for a list of numbers. */
+function argumentTypeText({ type, items }: Pick<ToolArgumentSpec, "type" | "items">) {
+  return type && items ? `${type}<${items}>` : type;
+}
+
 function argumentHints(
   argument: ToolArgumentSpec,
   t: ReturnType<typeof useTranslations>
 ): string[] {
-  const { type, items, format, minimum, maximum } = argument;
-  const shown = type && items ? `${type}<${items}>` : type;
+  const { format, minimum, maximum } = argument;
+  const shown = argumentTypeText(argument);
   return [
     shown
       ? t("flow_step_editor_tool_argument_type", { type: format ? `${shown} (${format})` : shown })
@@ -60,6 +66,7 @@ function argumentHints(
 function ArgumentField({
   name,
   type,
+  items,
   description,
   hints,
   required,
@@ -69,6 +76,7 @@ function ArgumentField({
 }: {
   name: string;
   type: string | null;
+  items: string | null;
   description: string | null;
   hints: string[];
   required: boolean;
@@ -80,6 +88,15 @@ function ArgumentField({
   const text = argumentText(value);
   const parsed = argumentValue(text, type);
   const composed = /\{\{/.test(text) && !/^\s*\{\{[^{}]+\}\}\s*$/.test(text);
+  // A form field's value has its type before the run: say now when the tool cannot take it.
+  const token = templateBindingToken(text);
+  const field = groups
+    .flatMap((group) => group.entries)
+    .find((entry) => entry.token === token)?.kind;
+  const mismatch =
+    field?.type === "field" && !formFieldFitsArgument(field.fieldType, { type, items })
+      ? field.label
+      : null;
   return (
     <div className="flex flex-col gap-2">
       <TextInput
@@ -98,7 +115,12 @@ function ArgumentField({
             ? t("flow_step_editor_tool_argument_composed")
             : !parsed.ok
               ? t("flow_step_editor_tool_argument_not_json", { type: type ?? "" })
-              : null
+              : mismatch !== null
+                ? t("flow_step_editor_tool_argument_field_mismatch", {
+                    field: mismatch,
+                    type: argumentTypeText({ type, items }) ?? ""
+                  })
+                : null
         )}
       />
       <div>
@@ -122,13 +144,16 @@ export function ToolFields({
   tool,
   onChange,
   groups,
-  problem
+  problem,
+  personal = false
 }: {
   flowId: string;
   tool: ToolConfig | null;
   onChange: (tool: ToolConfig | null) => void;
   groups: VariableGroup[];
   problem?: string;
+  /** The flow is in a personal space, which has no tools a flow can use. */
+  personal?: boolean;
 }) {
   const t = useTranslations();
   const options = useQuery(toolOptionsQueryOptions(flowId));
@@ -176,7 +201,7 @@ export function ToolFields({
     <div className="flex flex-col gap-4">
       {items.length === 0 && !tool ? (
         <Text type="supporting" size="sm" as="p" display="block" className="m-0">
-          {t("flow_step_editor_tools_none")}
+          {personal ? t("flow_step_editor_tools_personal") : t("flow_step_editor_tools_none")}
         </Text>
       ) : (
         <Selector
@@ -215,6 +240,7 @@ export function ToolFields({
               key={argument.name}
               name={argument.name}
               type={argument.type}
+              items={argument.items}
               description={argument.description}
               hints={argumentHints(argument, t)}
               required={argument.required}

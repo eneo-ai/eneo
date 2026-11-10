@@ -292,8 +292,32 @@ export function useRuntimeUploads(flowId: string, policy: UploadPolicy | undefin
     }
   }
 
-  /** Takes picked files for a step: uploads those it can take, refuses the rest at once. */
+  /** Why the step cannot take a file, before sending it; null when it can (room aside). */
+  function refusalOf(input: RuntimeInput, file: File): string | null {
+    if (file.size === 0) return t("flow_error_flow_runtime_file_empty");
+    if (!acceptsType(input.accepted_mimetypes ?? [], file.type)) {
+      return t("flow_runs_upload_wrong_type");
+    }
+    if (input.max_file_size_bytes != null && file.size > input.max_file_size_bytes) {
+      return t("flow_runs_upload_too_large", {
+        max: formatBytes(input.max_file_size_bytes, locale)
+      });
+    }
+    return null;
+  }
+
+  /**
+   * Takes picked files for a step: uploads those it can take, refuses the rest at once. A step
+   * that takes one file swaps a picked file for a new one it can take: a second pick is a change
+   * of mind. A recorded part is never swapped out: it exists nowhere else.
+   */
   function add(input: RuntimeInput, picked: readonly File[], info: AddedFileInfo = {}) {
+    const [only] = picked;
+    if (input.max_files === 1 && !info.recording && only && refusalOf(input, only) === null) {
+      for (const entry of current.current[input.step_id] ?? []) {
+        if (!entry.recording) remove(input.step_id, entry.key);
+      }
+    }
     const existing = current.current[input.step_id] ?? [];
     let slots =
       input.max_files == null
@@ -310,16 +334,15 @@ export function useRuntimeUploads(flowId: string, policy: UploadPolicy | undefin
       };
       // A recording's part is kept even when it is refused: it exists nowhere else.
       if (info.recording) files.current.set(base.key, { input, file });
-      const refuse = (problem: string): UploadEntry => ({ ...base, state: "failed", problem });
-      if (file.size === 0) return refuse(t("flow_error_flow_runtime_file_empty"));
-      if (!acceptsType(input.accepted_mimetypes ?? [], file.type)) {
-        return refuse(t("flow_runs_upload_wrong_type"));
-      }
-      if (input.max_file_size_bytes != null && file.size > input.max_file_size_bytes) {
-        return refuse(
-          t("flow_runs_upload_too_large", { max: formatBytes(input.max_file_size_bytes, locale) })
-        );
-      }
+      // A refused recording's part still holds the run back: it is the person's audio.
+      const refuse = (problem: string): UploadEntry => ({
+        ...base,
+        state: "failed",
+        problem,
+        ...(info.recording ? {} : { refused: true })
+      });
+      const refusal = refusalOf(input, file);
+      if (refusal) return refuse(refusal);
       if (slots <= 0) {
         return refuse(t("flow_runs_upload_too_many", { count: input.max_files ?? 0 }));
       }
@@ -367,7 +390,8 @@ export function useRuntimeUploads(flowId: string, policy: UploadPolicy | undefin
       update(stepId, key, {
         problem: t("flow_runs_upload_too_many", { count: input.max_files }),
         retryable: false,
-        nextRetryAt: undefined
+        nextRetryAt: undefined,
+        refused: !entry.recording
       });
       return;
     }

@@ -727,6 +727,7 @@ async def test_live_transcript_admin_purge_obeys_scope_expiry_and_bound_rows(
         assert row is not None
         row.expires_at = expiry
         row.bound_file_id = fixture.file.id if bound else None
+        row.bound_file_ids = [fixture.file.id] if bound else []
         ids.append(row_id)
     await async_session.flush()
     scope_args = {}
@@ -1680,6 +1681,7 @@ async def test_flow_run_history_purge_reclaims_runtime_source_after_final_refere
         received_audio_seconds=1.0,
         expires_at=datetime.now(timezone.utc) - timedelta(days=1),
         bound_file_id=source_file_id,
+        bound_file_ids=[source_file_id],
     )
     async_session.add(live_transcript)
     await async_session.flush()
@@ -1740,6 +1742,231 @@ async def test_flow_run_history_purge_reclaims_runtime_source_after_final_refere
     )
     assert third_result.counts == FlowRunHistoryPurgeCounts()
     assert third_result.affected_flow_tenant_ids == frozenset()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("still_used_part", [0, 1])
+async def test_the_live_text_of_a_recording_goes_with_any_of_its_parts(
+    async_session: AsyncSession,
+    test_tenant,
+    admin_user,
+    flow_retention_space: Spaces,
+    flow_retention_assistant: Assistants,
+    flow_retention_service: FlowRetentionRepository,
+    still_used_part: int,
+):
+    fixture = await _create_flow_runtime_fixture(
+        async_session,
+        tenant=test_tenant,
+        user=admin_user,
+        space=flow_retention_space,
+        assistant=flow_retention_assistant,
+        days_old=3,
+        flow_retention_days=1,
+    )
+    created_at = fixture.run.created_at
+    second_part = await _create_durable_file(
+        async_session,
+        tenant_id=test_tenant.id,
+        user_id=admin_user.id,
+        name="del-2.txt",
+        mimetype="text/plain",
+        file_type=FileType.TEXT,
+        payload=b"s" * 128,
+        variant=FileContentVariant.EXTRACTED_TEXT,
+        created_at=created_at,
+    )
+    async_session.add(
+        FlowRuntimeUploadedFiles(
+            file_id=second_part.id,
+            flow_id=fixture.flow.id,
+            tenant_id=test_tenant.id,
+            uploaded_for_step_id=fixture.step_id,
+            owner_type="user",
+            owner_user_id=admin_user.id,
+            owner_service_id=None,
+            created_at=created_at,
+            updated_at=created_at,
+        )
+    )
+    await async_session.flush()
+    async_session.add(
+        FlowRunStepInputFiles(
+            flow_run_id=fixture.run.id,
+            flow_id=fixture.flow.id,
+            tenant_id=test_tenant.id,
+            step_id=fixture.step_id,
+            step_order=1,
+            attempt_no=1,
+            file_id=second_part.id,
+            ordinal=1,
+            created_at=created_at,
+            updated_at=created_at,
+        )
+    )
+    await async_session.flush()
+    parts = [fixture.runtime_input_file.id, second_part.id]
+    # A newer run still uses one part of the recording; the other part is released.
+    await _add_flow_runtime_input_reference(
+        async_session,
+        source_run=fixture.run,
+        step_id=fixture.step_id,
+        file_id=parts[still_used_part],
+        run_id=uuid4(),
+        created_at=datetime.now(timezone.utc),
+    )
+    live_transcript = FlowLiveTranscripts(
+        tenant_id=test_tenant.id,
+        user_id=admin_user.id,
+        flow_id=fixture.flow.id,
+        flow_version=1,
+        step_id=fixture.step_id,
+        model_id=uuid4(),
+        recording_id="recording-1",
+        text="Första delen. Andra delen.",
+        segments=None,
+        received_audio_seconds=2.0,
+        expires_at=datetime.now(timezone.utc) - timedelta(days=1),
+        bound_file_id=parts[0],
+        bound_file_ids=parts,
+        part_start_samples=[16000],
+    )
+    async_session.add(live_transcript)
+    await async_session.flush()
+    live_transcript_id = live_transcript.id
+
+    await flow_retention_service.purge_old_flow_run_history_batch(
+        now=datetime.now(timezone.utc), limit=10
+    )
+    await _flush_and_clear_identity_map(async_session)
+
+    assert await async_session.get(FlowRuns, fixture.run.id) is None
+    assert await async_session.get(Files, parts[still_used_part]) is not None
+    assert await async_session.get(Files, parts[1 - still_used_part]) is None
+    # The text holds what was said in the released part, so it is gone too.
+    assert await async_session.get(FlowLiveTranscripts, live_transcript_id) is None
+
+
+@pytest.mark.asyncio
+async def test_the_live_text_of_a_recording_goes_when_a_later_run_releases_a_part(
+    async_session: AsyncSession,
+    test_tenant,
+    admin_user,
+    flow_retention_space: Spaces,
+    flow_retention_assistant: Assistants,
+    flow_retention_service: FlowRetentionRepository,
+):
+    fixture = await _create_flow_runtime_fixture(
+        async_session,
+        tenant=test_tenant,
+        user=admin_user,
+        space=flow_retention_space,
+        assistant=flow_retention_assistant,
+        days_old=3,
+        flow_retention_days=1,
+    )
+    created_at = fixture.run.created_at
+    second_part = await _create_durable_file(
+        async_session,
+        tenant_id=test_tenant.id,
+        user_id=admin_user.id,
+        name="del-2.txt",
+        mimetype="text/plain",
+        file_type=FileType.TEXT,
+        payload=b"s" * 128,
+        variant=FileContentVariant.EXTRACTED_TEXT,
+        created_at=created_at,
+    )
+    async_session.add(
+        FlowRuntimeUploadedFiles(
+            file_id=second_part.id,
+            flow_id=fixture.flow.id,
+            tenant_id=test_tenant.id,
+            uploaded_for_step_id=fixture.step_id,
+            owner_type="user",
+            owner_user_id=admin_user.id,
+            owner_service_id=None,
+            created_at=created_at,
+            updated_at=created_at,
+        )
+    )
+    await async_session.flush()
+    async_session.add(
+        FlowRunStepInputFiles(
+            flow_run_id=fixture.run.id,
+            flow_id=fixture.flow.id,
+            tenant_id=test_tenant.id,
+            step_id=fixture.step_id,
+            step_order=1,
+            attempt_no=1,
+            file_id=second_part.id,
+            ordinal=1,
+            created_at=created_at,
+            updated_at=created_at,
+        )
+    )
+    await async_session.flush()
+    first_part = fixture.runtime_input_file.id
+    # Two newer runs each keep one part, so the first purge keeps the text.
+    now = datetime.now(timezone.utc)
+    await _add_flow_runtime_input_reference(
+        async_session,
+        source_run=fixture.run,
+        step_id=fixture.step_id,
+        file_id=first_part,
+        run_id=uuid4(),
+        created_at=now,
+    )
+    keeps_second = await _add_flow_runtime_input_reference(
+        async_session,
+        source_run=fixture.run,
+        step_id=fixture.step_id,
+        file_id=second_part.id,
+        run_id=uuid4(),
+        created_at=now,
+    )
+    live_transcript = FlowLiveTranscripts(
+        tenant_id=test_tenant.id,
+        user_id=admin_user.id,
+        flow_id=fixture.flow.id,
+        flow_version=1,
+        step_id=fixture.step_id,
+        model_id=uuid4(),
+        recording_id="recording-1",
+        text="Första delen. Andra delen.",
+        segments=None,
+        received_audio_seconds=2.0,
+        expires_at=now - timedelta(days=1),
+        bound_file_id=first_part,
+        bound_file_ids=[first_part, second_part.id],
+        part_start_samples=[16000],
+    )
+    async_session.add(live_transcript)
+    await async_session.flush()
+    live_transcript_id = live_transcript.id
+    keeps_second_id = keeps_second.id
+
+    await flow_retention_service.purge_old_flow_run_history_batch(now=now, limit=10)
+    await _flush_and_clear_identity_map(async_session)
+    assert await async_session.get(FlowRuns, fixture.run.id) is None
+    assert await async_session.get(FlowLiveTranscripts, live_transcript_id) is not None
+
+    # The run that kept the second part grows old; its purge batch holds only that part.
+    await async_session.execute(
+        update(FlowRuns)
+        .where(FlowRuns.id == keeps_second_id)
+        .values(created_at=created_at, started_at=created_at, finished_at=created_at)
+    )
+    await flow_retention_service.purge_old_flow_run_history_batch(
+        now=datetime.now(timezone.utc), limit=10
+    )
+    await _flush_and_clear_identity_map(async_session)
+
+    assert await async_session.get(FlowRuns, keeps_second_id) is None
+    assert await async_session.get(Files, first_part) is not None
+    assert await async_session.get(Files, second_part.id) is None
+    # The text holds what was said in the released part, so it is gone too.
+    assert await async_session.get(FlowLiveTranscripts, live_transcript_id) is None
 
 
 @pytest.mark.asyncio

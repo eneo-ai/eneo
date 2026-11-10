@@ -19,6 +19,7 @@ import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { toast } from "@/lib/toast";
 import { saveBlob } from "@/features/files/signed-file-url";
 import type { FlowPublic } from "./flows-api";
+import { stepLabel } from "./flow-labels";
 import {
   defaultPackageId,
   exportFlowPackage,
@@ -68,9 +69,14 @@ export function FlowPackageExportDialog({
   const ackRef = useRef<HTMLInputElement>(null);
 
   const templateSteps = flow.steps.filter((step) => step.output_mode === "template_fill").length;
+  // The core refuses an HTTP call's address and credentials in a package: say so before export.
+  const httpSteps = flow.steps.filter(
+    (step) => step.input_source === "http_get" || step.output_mode === "http_post"
+  );
   const locked = exporting || pending !== null;
   const nameMissing = !name.trim();
   const versionMissing = !version.trim();
+  const versionInvalid = !versionMissing && !/^\d+\.\d+\.\d+$/.test(version.trim());
 
   function reset() {
     setPackageId(defaultPackageId(flow.name));
@@ -101,7 +107,7 @@ export function FlowPackageExportDialog({
 
   async function submit(event: React.SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (exporting) return;
+    if (exporting || httpSteps.length > 0) return;
     if (pending) {
       if (acknowledged) {
         save(pending, packageId);
@@ -111,10 +117,10 @@ export function FlowPackageExportDialog({
       ackRef.current?.focus();
       return;
     }
-    if (nameMissing || versionMissing) {
+    if (nameMissing || versionMissing || versionInvalid) {
       flushSync(() => {
         setShowProblems(true);
-        if (versionMissing) setAdvancedOpen(true);
+        if (versionMissing || versionInvalid) setAdvancedOpen(true);
       });
       document.getElementById(formId)?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
       return;
@@ -174,6 +180,26 @@ export function FlowPackageExportDialog({
           open ? (
             <LayoutContent>
               <form id={formId} onSubmit={submit} noValidate className="flex flex-col gap-6">
+                {/* A state of the flow, shown on every visit: no live region. */}
+                {httpSteps.length > 0 ? (
+                  <Banner
+                    status="warning"
+                    title={t("flow_package_export_http_title")}
+                    description={
+                      <>
+                        <ul className="m-0 list-disc pl-5">
+                          {httpSteps.map((step) => (
+                            <li key={step.id}>{stepLabel(step, t)}</li>
+                          ))}
+                        </ul>
+                        <span className="mt-1 block">
+                          {t("flow_package_export_http_description", { count: httpSteps.length })}
+                        </span>
+                      </>
+                    }
+                    collapsible={false}
+                  />
+                ) : null}
                 {/* Required is the default and unmarked; only the optional fields say so. */}
                 <FormLayout defaultOptionality="required">
                   <TextInput
@@ -231,10 +257,14 @@ export function FlowPackageExportDialog({
                       isDisabled={locked}
                       autoComplete="off"
                       status={
-                        showProblems && versionMissing
+                        showProblems && (versionMissing || versionInvalid)
                           ? {
                               type: "error",
-                              message: t("flow_editor_tools_package_version_required")
+                              message: t(
+                                versionMissing
+                                  ? "flow_editor_tools_package_version_required"
+                                  : "flow_editor_tools_package_version_invalid"
+                              )
                             }
                           : undefined
                       }
@@ -338,6 +368,7 @@ export function FlowPackageExportDialog({
                       : t("flow_editor_tools_package_export")
                   }
                   icon={<Icon icon={Download} />}
+                  isDisabled={httpSteps.length > 0}
                   isLoading={exporting}
                   isInterruptible
                 />

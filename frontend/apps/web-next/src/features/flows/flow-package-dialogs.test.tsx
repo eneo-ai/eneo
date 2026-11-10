@@ -100,13 +100,15 @@ describe("FlowPackageExportDialog", () => {
     });
     renderInApp(
       <FlowPackageExportDialog
-        flow={makeFlow({ steps: [makeStep(1), makeStep(2, { output_mode: "http_post" })] })}
+        flow={makeFlow({ steps: [makeStep(1), makeStep(2)] })}
         open
         onOpenChange={vi.fn()}
       />
     );
     fireEvent.click(screen.getByRole("button", { name: "Exportera" }));
     expect(await screen.findByText(/Det gäller utdatainställningarna i steg 2\./)).toBeTruthy();
+    // The refusal also covers steps that are not HTTP calls: removing the step is not the fix there.
+    expect(screen.queryByText(/Ta bort steget/)).toBeNull();
   });
 });
 
@@ -339,6 +341,68 @@ describe("FlowPackageImportDialog", () => {
 
     expect(await screen.findByText(progress(0))).toBeTruthy();
     expect(screen.queryByText(BLOCKED)).toBeNull();
+  });
+
+  it("goes to the Word template field and its message when the template is refused", async () => {
+    const [model] = plan.dependency_resolutions;
+    const needsTemplate = {
+      ...plan,
+      dependency_resolutions: [
+        {
+          ...model,
+          kind: "template_asset",
+          slot_ref: { kind: "template_asset", slot: "brev", label: "Brevmall" },
+          suggestions: [],
+          template: { filename: "brev.docx", fields: [{ name: "namn" }], asset_path: null }
+        }
+      ]
+    };
+    api.POST.mockResolvedValueOnce({ data: needsTemplate, response: json(200, needsTemplate) });
+    api.POST.mockResolvedValueOnce({
+      error: {
+        message: "Mismatch",
+        code: "flow_package_template_fields_mismatch",
+        context: { missing_fields: ["namn"] }
+      },
+      response: json(400, {})
+    });
+    const scrolled = vi.spyOn(Element.prototype, "scrollIntoView");
+    const { container } = renderImport();
+    choose(container, new File(["zip"], "brev.eneopkg", { type: "application/zip" }));
+    await screen.findByText(progress(0));
+
+    const templateInput = container.ownerDocument.querySelector<HTMLInputElement>(
+      'input[type="file"][accept^=".docx"]'
+    );
+    fireEvent.change(templateInput!, {
+      target: { files: [new File(["docx"], "egen.docx")] }
+    });
+
+    const message = await screen.findByText(/Filen används inte\. Mallens fält matchar inte/);
+    const field = screen.getByRole("button", { name: /Word-fil till Brevmall/ });
+    await waitFor(() => expect(document.activeElement).toBe(field));
+    expect(field.getAttribute("aria-invalid")).toBe("true");
+    expect(scrolled.mock.contexts.some((element) => (element as Element).contains(message))).toBe(
+      true
+    );
+    scrolled.mockRestore();
+  });
+
+  it("asks for a review before publishing beside the buttons, without a banner", async () => {
+    const [model] = plan.dependency_resolutions;
+    planned({ ...plan, can_publish_after_import: false, dependency_resolutions: [model] });
+    const { container } = renderImport();
+    choose(container, new File(["zip"], "brev.eneopkg", { type: "application/zip" }));
+
+    fireEvent.click(await screen.findByRole("combobox", { name: /Lokal resurs för Skrivmodell/ }));
+    fireEvent.click(await screen.findByRole("option", { name: "Modell A" }));
+
+    expect(
+      await screen.findByText(`${progress(1)} Granska resursvalen innan du publicerar.`)
+    ).toBeTruthy();
+    // The draft is said once, by the dialog's subtitle.
+    expect(screen.queryByText(/Flödet importeras som utkast/)).toBeNull();
+    expect(container.ownerDocument.querySelector(".astryx-banner")).toBeNull();
   });
 
   it("says which steps use a resource by number, not by the package's keys", async () => {

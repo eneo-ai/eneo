@@ -137,6 +137,11 @@ function httpFlow(auth: Record<string, unknown> = { mode: "none" }) {
   });
 }
 
+/** The value beside a read-only row's label. */
+async function rowValue(label: string) {
+  return (await screen.findByText(label)).closest("dt")!.nextElementSibling!;
+}
+
 async function nameField() {
   return (await screen.findByLabelText(/^Stegnamn/)) as HTMLInputElement;
 }
@@ -767,6 +772,48 @@ describe("FlowStepEditor", () => {
     expect(dialog.textContent).not.toContain("$secret");
   });
 
+  it("reads the step's own answer in its webhook, in the field and in the preview", async () => {
+    renderEditor(
+      makeFlow({
+        steps: [
+          makeStep({
+            output_mode: "http_post",
+            output_config: {
+              url: "https://api.example.org/a",
+              auth: { mode: "none" },
+              timeout_seconds: 30,
+              body: { mode: "json_template", template: '{"svar": "{{step_1.output.text}}"}' },
+              custom_headers: []
+            }
+          })
+        ]
+      })
+    );
+    await screen.findByRole("textbox", {
+      name: new RegExp(`^${messages.flow_step_editor_http_body_template}`)
+    });
+    // A webhook is sent once the step has answered: the core reads it at step_order + 1.
+    const reads = screen.getByRole("list", { name: messages.flow_step_editor_reads_heading });
+    expect(reads.textContent).toContain("Steg 1: Sammanfatta › text");
+    expect(screen.queryByText(messages.flow_step_editor_reference_warning_later)).toBeNull();
+    // Its menus offer the step's own answer.
+    fireEvent.click(
+      screen.getAllByRole("button", { name: messages.flow_step_editor_insert_variable })[0]!
+    );
+    const offered = await screen.findAllByRole("menuitem");
+    expect(offered.map((item) => item.textContent).join(" ")).toContain("{{step_1.output.text}}");
+    fireEvent.keyDown(offered[0]!, { key: "Escape" });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: messages.flow_editor_tools_preview_button })
+    );
+    const dialog = await screen.findByRole("dialog", {
+      name: messages.flow_editor_tools_preview_title
+    });
+    expect(dialog.textContent).toContain("Steg 1: Sammanfatta › text");
+    expect(dialog.textContent).not.toContain(messages.flow_editor_tools_preview_read_self);
+  });
+
   it("proposes an output contract from an example answer, for the author to accept", async () => {
     api.routes[EDITOR] = () => ({ body: makeFlow({ draft_revision: 5 }) });
     const { onSaved, container } = renderEditor(
@@ -1004,7 +1051,9 @@ describe("FlowStepEditor", () => {
     await within(dialog).findByText("Sammanfatta kort.");
     fireEvent.click(within(dialog).getByRole("button", { name: messages.restore_this_version }));
 
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: messages.prompt_history })).toBeNull()
+    );
     expect((screen.getByLabelText(/^Instruktion/) as HTMLTextAreaElement).value).toBe(
       "Sammanfatta kort."
     );
@@ -1368,7 +1417,7 @@ describe("FlowStepEditor", () => {
       screen.getByText(`beslut: ${messages.flow_step_editor_template_field_none}`)
     ).toBeTruthy();
     // A later step's answer is not there when this step runs.
-    expect(screen.getByText("senare: Steg 2 finns inte")).toBeTruthy();
+    expect(screen.getByText("senare: Steg 2 kommer efter det här steget")).toBeTruthy();
   }, 20_000);
 
   it.each([
@@ -1504,7 +1553,406 @@ describe("FlowStepEditor", () => {
     expect(screen.queryByRole("button", { name: messages.flow_step_editor_save })).toBeNull();
     // The result's mode is told in the header and in the list of settings.
     expect(screen.getByText(messages.flow_step_output_mode)).toBeTruthy();
-    expect(screen.getAllByText(messages.flow_output_mode_pass_through)).toHaveLength(2);
+    expect(screen.getAllByText(messages.flow_output_mode_pass_through)).toHaveLength(1);
     await expectNoAxeViolations(container);
   }, 20_000);
+
+  it("folds a long instruction under Visa hela and wraps a long address anywhere", async () => {
+    const prompt = "Läs ärendet noga. ".repeat(170);
+    const url = `https://api.example.org/${"a".repeat(180)}`;
+    const assistant = makeAssistant();
+    api.routes[ASSISTANT] = () => ({
+      body: { ...assistant, prompt: { ...assistant.prompt!, text: prompt } }
+    });
+    renderEditor(
+      makeFlow({
+        steps: [
+          makeStep({
+            output_mode: "pass_through",
+            input_source: "http_get",
+            input_config: {
+              url,
+              auth: { mode: "none" },
+              timeout_seconds: 30,
+              body: { mode: "none" },
+              custom_headers: [],
+              response_format: "text"
+            }
+          })
+        ]
+      }),
+      { readOnly: true }
+    );
+    const show = await screen.findByRole("button", { name: messages.flows_change_card_show_all });
+    const text = document.getElementById(show.getAttribute("aria-controls")!)!;
+    expect(text.textContent).toBe(prompt.trim());
+    expect(text.className).toContain("line-clamp-6");
+    expect(show.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(show);
+    expect(text.className).not.toContain("line-clamp-6");
+    expect(
+      screen
+        .getByRole("button", { name: messages.flows_change_card_show_less })
+        .getAttribute("aria-expanded")
+    ).toBe("true");
+    expect(screen.getByText(url).className).toContain("[overflow-wrap:anywhere]");
+  });
+
+  it("does not inspect a Word template for a reader who may not edit the flow", async () => {
+    // The core lets only an editor inspect; a reader sees the field's tag.
+    api.routes["GET /api/v1/flows/{id}/template-inspect/"] = () => ({
+      status: 403,
+      body: { message: "Forbidden" }
+    });
+    renderEditor(
+      makeFlow({
+        permissions: {
+          can_edit: false,
+          can_publish: false,
+          can_delete: false,
+          can_run: true,
+          can_view_runs: true
+        },
+        steps: [
+          makeStep({
+            output_mode: "template_fill",
+            output_type: "docx",
+            output_config: {
+              template_asset_id: "asset-1",
+              template_name: "Protokoll.docx",
+              placeholders: ["beslut_och_atgarder"],
+              bindings: {}
+            }
+          })
+        ]
+      }),
+      { readOnly: true }
+    );
+    expect(
+      await screen.findByText(
+        `beslut_och_atgarder: ${messages.flow_step_editor_template_field_none}`
+      )
+    ).toBeTruthy();
+    expect(
+      api.stub.calls.some((call) => call.path === "/api/v1/flows/{id}/template-inspect/")
+    ).toBe(false);
+  });
+
+  it("names a Word step's fields by their titles, and lists a fixed-format answer's fields", async () => {
+    api.routes["GET /api/v1/flows/{id}/template-inspect/"] = () => ({
+      body: {
+        asset_id: "asset-1",
+        file_id: "file-1",
+        file_name: "Protokoll.docx",
+        placeholders: [
+          {
+            name: "beslut_och_atgarder",
+            label: "Beslut och åtgärder",
+            kind: "text",
+            location: "body"
+          }
+        ]
+      }
+    });
+    renderEditor(
+      makeFlow({
+        steps: [
+          makeStep({
+            output_mode: "template_fill",
+            output_type: "docx",
+            output_config: {
+              template_asset_id: "asset-1",
+              template_name: "Protokoll.docx",
+              placeholders: ["beslut_och_atgarder"],
+              bindings: {}
+            }
+          })
+        ]
+      }),
+      { readOnly: true }
+    );
+    expect(
+      await screen.findByText(
+        `Beslut och åtgärder: ${messages.flow_step_editor_template_field_none}`
+      )
+    ).toBeTruthy();
+    expect(screen.queryByText(/beslut_och_atgarder/)).toBeNull();
+    cleanup();
+
+    renderEditor(
+      makeFlow({
+        steps: [
+          makeStep({
+            output_mode: "pass_through",
+            output_type: "json",
+            output_contract: {
+              type: "object",
+              properties: {
+                diarienummer: { type: "string", description: "Ärendets nummer" },
+                beslut: { type: "string" }
+              }
+            }
+          })
+        ]
+      }),
+      { readOnly: true }
+    );
+    const fields = await rowValue(messages.flow_step_editor_answer_fields);
+    expect(fields.textContent).toContain("diarienummer · Ärendets nummer");
+    expect(fields.textContent).toContain("beslut");
+  });
+
+  it("says a step reads what was chosen for it, not its source, in both views", async () => {
+    const twoSteps = (readsChosen: boolean) =>
+      makeFlow({
+        steps: [
+          makeStep(),
+          makeStep({
+            id: "step-2",
+            assistant_id: "assistant-2",
+            step_order: 2,
+            user_description: "Skriv svar",
+            input_source: "previous_step",
+            input_bindings: readsChosen
+              ? { source_refs: [{ step_ref: "step_1", output: "text" }] }
+              : null
+          })
+        ]
+      });
+    const open = (flow: FlowPublic, readOnly: boolean) => {
+      const queryClient = testQueryClient();
+      queryClient.setQueryData(["spaces", "space-1"], makeSpace());
+      return renderInApp(
+        <FlowStepEditor
+          flow={flow}
+          stepId="step-2"
+          readOnly={readOnly}
+          onSaved={() => {}}
+          onCancel={() => {}}
+        />,
+        { queryClient }
+      );
+    };
+    api.routes[ASSISTANT] = () => ({ body: makeAssistant() });
+
+    open(twoSteps(false), false);
+    expect(await screen.findByText("Steget läser svaret från Steg 1: Sammanfatta.")).toBeTruthy();
+    cleanup();
+
+    open(twoSteps(true), false);
+    expect(
+      await screen.findByText("Steget läser Steg 1: Sammanfatta, som du valt nedan.")
+    ).toBeTruthy();
+    expect(screen.queryByText(/läser svaret från/)).toBeNull();
+    cleanup();
+
+    open(twoSteps(true), true);
+    const source = await rowValue(messages.flow_step_editor_input_source);
+    expect(source.textContent).toContain(messages.flow_step_editor_source_chosen);
+    expect(source.textContent).not.toContain(messages.flow_input_source_previous_step);
+  });
+
+  it("lists each chosen result on its own line, since a name can hold a comma", async () => {
+    const queryClient = testQueryClient();
+    queryClient.setQueryData(["spaces", "space-1"], makeSpace());
+    const flow = makeFlow({
+      steps: [
+        makeStep(),
+        makeStep({
+          id: "step-2",
+          assistant_id: "assistant-2",
+          step_order: 2,
+          user_description: "Granska",
+          input_bindings: {
+            source_refs: [{ step_ref: "step_1", output: "structured", field_path: "beslut" }]
+          }
+        }),
+        makeStep({
+          id: "step-3",
+          assistant_id: "assistant-3",
+          step_order: 3,
+          input_bindings: {
+            source_refs: [
+              { step_ref: "step_1", output: "structured", field_path: "beslut" },
+              { step_ref: "step_2", output: "text" }
+            ]
+          }
+        })
+      ]
+    });
+    const open = (readOnly: boolean) =>
+      renderInApp(
+        <FlowStepEditor
+          flow={flow}
+          stepId="step-3"
+          readOnly={readOnly}
+          onSaved={() => {}}
+          onCancel={() => {}}
+        />,
+        { queryClient }
+      );
+    open(true);
+    const results = await rowValue(messages.flow_step_editor_underlag_results);
+    expect(
+      within(results as HTMLElement)
+        .getAllByRole("listitem")
+        .map((item) => item.textContent)
+    ).toEqual(["Steg 1: Sammanfatta, fältet beslut", "Steg 2: Granska"]);
+    cleanup();
+
+    // In a sentence, a semicolon parts them.
+    open(false);
+    expect(
+      await screen.findByText(
+        "Steget läser Steg 1: Sammanfatta, fältet beslut; Steg 2: Granska, som du valt nedan."
+      )
+    ).toBeTruthy();
+  });
+
+  it("heads the step with its name alone: no step number above it, no chips repeating its rows", async () => {
+    renderEditor(makeFlow(), { readOnly: true });
+    const heading = await screen.findByRole("heading", { level: 2, name: "Sammanfatta" });
+    const header = heading.closest("header")!;
+    expect(within(header).queryByText("Steg 1")).toBeNull();
+    // "Källa" and "Vad steget gör" say these in the list below.
+    expect(within(header).queryByText(messages.flow_input_source_flow_input)).toBeNull();
+    expect(within(header).queryByText(messages.flow_output_mode_pass_through)).toBeNull();
+  });
+
+  it("forgets a save it reported once the step was published and unpublished", async () => {
+    const saved = makeFlow({
+      draft_revision: 5,
+      steps: [makeStep({ user_description: "Sammanfatta ärendet" })]
+    });
+    api.routes[EDITOR] = () => ({ body: saved });
+    const { rerender } = renderEditor(makeFlow());
+    fireEvent.change(await nameField(), { target: { value: "Sammanfatta ärendet" } });
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
+    await screen.findByText(messages.flow_step_editor_saved);
+
+    const editor = (flow: FlowPublic) => (
+      <FlowStepEditor
+        flow={flow}
+        stepId="step-1"
+        readOnly={false}
+        onSaved={() => {}}
+        onCancel={() => {}}
+      />
+    );
+    rerender(editor({ ...saved, draft_revision: 6, published_version: 1 }));
+    await screen.findByText(messages.flow_step_editor_published);
+    rerender(editor({ ...saved, draft_revision: 7, published_version: null }));
+    await nameField();
+    // The save bar, not the live region that once announced the save.
+    expect(
+      screen.queryByText(messages.flow_step_editor_saved, {
+        ignore: "script, style, [data-astryx-live-region]"
+      })
+    ).toBeNull();
+    expect(screen.getByText(messages.flow_step_editor_no_changes)).toBeTruthy();
+  });
+
+  it("says which of the edits a newer version changed too, and lets the person take that version", async () => {
+    const { rerender } = renderEditor(makeFlow());
+    const name = await nameField();
+    fireEvent.change(name, { target: { value: "Mitt namn" } });
+    // The assistant renames the step in the chat: a newer draft reaches the editor.
+    const newer = makeFlow({
+      draft_revision: 5,
+      steps: [makeStep({ user_description: "Chattens namn" })]
+    });
+    rerender(
+      <FlowStepEditor
+        flow={newer}
+        stepId="step-1"
+        readOnly={false}
+        onSaved={() => {}}
+        onCancel={() => {}}
+      />
+    );
+    const newerBanner = await screen.findByText(messages.flow_step_editor_newer_title);
+    fireEvent.click(
+      within(newerBanner.closest(".astryx-banner") ?? document.body).getByRole("button", {
+        name: messages.flow_step_editor_reload
+      })
+    );
+
+    // Not settled silently: the field keeps the person's value and the conflict is named.
+    const conflict = await screen.findByText(
+      messages.flow_step_editor_conflict_title.replace("{fields}", messages.flow_step_name)
+    );
+    expect((await nameField()).value).toBe("Mitt namn");
+    fireEvent.click(
+      within(conflict.closest(".astryx-banner") ?? document.body).getByRole("button", {
+        name: messages.flow_step_editor_conflict_take_theirs
+      })
+    );
+    await waitFor(async () => expect((await nameField()).value).toBe("Chattens namn"));
+    // The banner went with its buttons: focus stays in the editor, where it was.
+    expect(document.activeElement?.closest("form")).toBeTruthy();
+    expect(
+      screen.queryByText(
+        messages.flow_step_editor_conflict_title.replace("{fields}", messages.flow_step_name)
+      )
+    ).toBeNull();
+  });
+
+  it("shows the newer contract once the person takes that version over their typed one", async () => {
+    const { rerender } = renderEditor(makeFlow());
+    await nameField();
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: new RegExp(`^${messages.flow_step_editor_advanced_title}`)
+      })
+    );
+    const contract = () =>
+      screen.getByRole("textbox", {
+        name: new RegExp(`^${messages.flow_step_input_contract}`)
+      }) as HTMLTextAreaElement;
+    fireEvent.change(contract(), { target: { value: '{"type": "object"}' } });
+    rerender(
+      <FlowStepEditor
+        flow={makeFlow({
+          draft_revision: 5,
+          steps: [makeStep({ input_contract: { type: "string" } })]
+        })}
+        stepId="step-1"
+        readOnly={false}
+        onSaved={() => {}}
+        onCancel={() => {}}
+      />
+    );
+    fireEvent.click(await screen.findByRole("button", { name: messages.flow_step_editor_reload }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: messages.flow_step_editor_conflict_take_theirs })
+    );
+    // The field shows what will be saved, not the text the person typed before.
+    await waitFor(() => expect(JSON.parse(contract().value)).toEqual({ type: "string" }));
+    expect(screen.getByText(messages.flow_step_editor_no_changes)).toBeTruthy();
+  });
+
+  it("says nothing about a newer version that left the edited fields alone", async () => {
+    const { rerender } = renderEditor(makeFlow());
+    fireEvent.change(await nameField(), { target: { value: "Mitt namn" } });
+    rerender(
+      <FlowStepEditor
+        flow={makeFlow({
+          draft_revision: 5,
+          steps: [makeStep({ timeout_seconds: 120 })]
+        })}
+        stepId="step-1"
+        readOnly={false}
+        onSaved={() => {}}
+        onCancel={() => {}}
+      />
+    );
+    fireEvent.click(await screen.findByRole("button", { name: messages.flow_step_editor_reload }));
+    await waitFor(() =>
+      expect(screen.queryByText(messages.flow_step_editor_newer_title)).toBeNull()
+    );
+    expect(
+      screen.queryByRole("button", { name: messages.flow_step_editor_conflict_take_theirs })
+    ).toBeNull();
+    expect((await nameField()).value).toBe("Mitt namn");
+  });
 });

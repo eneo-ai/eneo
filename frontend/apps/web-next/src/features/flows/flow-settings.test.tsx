@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import messages from "@/lib/i18n/messages/sv.json";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
@@ -402,7 +403,7 @@ describe("FlowSettings", () => {
     );
   }, 20_000);
 
-  it("chooses a live text model apart from the transcription model, and says what each does", async () => {
+  it("chooses a live recording model apart from the transcription model, and says what each writes", async () => {
     const onSave = vi.fn(async () => true);
     const withLive: TranscriptionResources = {
       ...resources,
@@ -429,11 +430,12 @@ describe("FlowSettings", () => {
     const { container } = renderInApp(
       <FlowSettings flow={whisperFlow} canEdit transcription={withLive} onSave={onSave} />
     );
-    expect(rowValue("Modell för livetext")).toBe("Ingen livetext");
+    expect(rowValue("Direktinspelning")).toBe("Ingen direktinspelning");
+    expect(rowValue("Ljudfiler")).toBe("Tal till text");
     fireEvent.click(screen.getByRole("button", { name: "Ändra inställningar" }));
 
-    const live = screen.getByRole("combobox", { name: /Modell för livetext/ });
-    expect(live.textContent).toContain("Ingen livetext");
+    const live = screen.getByRole("combobox", { name: /Modell för direktinspelning/ });
+    expect(live.textContent).toContain("Ingen direktinspelning");
     fireEvent.click(live);
     // The transcription model's list offers the same model, so pick from this list.
     const liveList = await waitFor(() =>
@@ -442,9 +444,11 @@ describe("FlowSettings", () => {
     fireEvent.click(await within(liveList).findByRole("option", { name: "Pianissimo" }));
     expect(
       screen.getByText(
-        "Medan någon spelar in visar Pianissimo texten. Den slutliga texten skriver sedan transkriberingsmodellen."
+        "Skriver texten medan någon spelar in, och den texten blir transkriberingen."
       )
     ).toBeTruthy();
+    // The routing at the top of the form follows the choice.
+    expect(rowValue("Direktinspelning")).toBe("Pianissimo");
     await expectNoAxeViolations(container);
     fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
 
@@ -478,10 +482,115 @@ describe("FlowSettings", () => {
     renderInApp(
       <FlowSettings flow={lostLive} canEdit={false} transcription={resources} onSave={vi.fn()} />
     );
-    expect(rowValue("Modell för livetext")).toBe(
-      "Den valda modellen kan inte längre visa livetext i ytan, så ingen text visas medan någon spelar in. Välj en annan."
+    expect(rowValue("Direktinspelning")).toBe(
+      "Den valda modellen kan inte längre användas för direktinspelning i ytan, så filerna transkriberas efteråt. Välj en annan."
     );
   });
+
+  it("warns when a streaming model writes the files, and keeps it streaming when files move", async () => {
+    const onSave = vi.fn(async () => true);
+    const withLive: TranscriptionResources = {
+      ...resources,
+      models: [
+        ...resources.models,
+        {
+          id: "live-1",
+          name: "pianissimo-sv-live",
+          nickname: "Pianissimo",
+          supports_realtime: true
+        }
+      ]
+    };
+    const streamingFlow = makeFlow({
+      steps: audioFlow.steps,
+      metadata_json: {
+        wizard: {
+          transcription_enabled: true,
+          transcription_model: { id: "live-1" },
+          transcription_speaker_service: null
+        }
+      }
+    });
+    renderInApp(
+      <FlowSettings flow={streamingFlow} canEdit transcription={withLive} onSave={onSave} />
+    );
+    expect(rowValue("Direktinspelning")).toBe("Pianissimo");
+    expect(rowValue("Ljudfiler")).toBe("Pianissimo");
+    fireEvent.click(screen.getByRole("button", { name: "Ändra inställningar" }));
+    expect(
+      screen.getByText(
+        "Gjord för direktinspelning. Välj en modell för ljudfiler, till exempel Tal till text. Pianissimo skriver då fortfarande direktinspelningen."
+      )
+    ).toBeTruthy();
+
+    const model = screen.getByRole("combobox", { name: /Transkriberingsmodell/ });
+    fireEvent.click(model);
+    const list = await waitFor(() =>
+      document.getElementById(model.getAttribute("aria-controls") ?? "")!
+    );
+    fireEvent.click(await within(list).findByRole("option", { name: /Tal till text/ }));
+    expect(rowValue("Direktinspelning")).toBe("Pianissimo");
+    expect(rowValue("Ljudfiler")).toBe("Tal till text");
+    expect(screen.queryByText(/Gjord för direktinspelning/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata_json: {
+          wizard: expect.objectContaining({
+            transcription_model: { id: "tm-1" },
+            transcription_live_model: { id: "live-1" }
+          })
+        }
+      })
+    );
+  }, 20_000);
+
+  it("promises nothing about live recording when another model streams", async () => {
+    const twoStreaming: TranscriptionResources = {
+      ...resources,
+      models: [
+        ...resources.models,
+        {
+          id: "live-1",
+          name: "pianissimo-sv-live",
+          nickname: "Pianissimo",
+          supports_realtime: true
+        },
+        { id: "live-2", name: "forte-sv-live", nickname: "Forte", supports_realtime: true }
+      ]
+    };
+    const flowWithBoth = makeFlow({
+      steps: audioFlow.steps,
+      metadata_json: {
+        wizard: {
+          transcription_enabled: true,
+          transcription_model: { id: "live-1" },
+          transcription_live_model: { id: "live-2" },
+          transcription_speaker_service: null
+        }
+      }
+    });
+    renderInApp(
+      <FlowSettings flow={flowWithBoth} canEdit transcription={twoStreaming} onSave={vi.fn()} />
+    );
+    expect(rowValue("Direktinspelning")).toBe("Forte");
+    fireEvent.click(screen.getByRole("button", { name: "Ändra inställningar" }));
+    expect(
+      screen.getByText(
+        "Gjord för direktinspelning. Välj en modell för ljudfiler, till exempel Tal till text."
+      )
+    ).toBeTruthy();
+
+    const model = screen.getByRole("combobox", { name: /Transkriberingsmodell/ });
+    fireEvent.click(model);
+    const list = await waitFor(() =>
+      document.getElementById(model.getAttribute("aria-controls") ?? "")!
+    );
+    fireEvent.click(await within(list).findByRole("option", { name: /Tal till text/ }));
+    expect(rowValue("Direktinspelning")).toBe("Forte");
+  }, 20_000);
 
   it("saves a renamed field and a transcription change as one edit", async () => {
     const onSave = vi.fn(async () => true);
@@ -584,7 +693,7 @@ describe("FlowSettings", () => {
     // Under their own heading, which says it is on: no separate "På" row.
     expect(screen.getByRole("heading", { level: 3, name: "Transkribering" })).toBeTruthy();
     expect(screen.queryByText("Transkribering", { selector: "dt" })).toBeNull();
-    expect(rowValue("Transkriberingsmodell")).toBe("Tal till text");
+    expect(rowValue("Ljudfiler")).toBe("Tal till text");
     expect(rowValue("Språk")).toBe("English");
   });
 
@@ -614,7 +723,7 @@ describe("FlowSettings", () => {
         }
       });
     // A column beside the chat and the sidebar on a wide screen: too narrow for a label column.
-    resize(420);
+    resize(360);
     expect(placed()).toBe("DIV");
     resize(640);
     expect(placed()).toBe("DL");
@@ -778,6 +887,38 @@ describe("FlowSettings", () => {
     );
     await new Promise(requestAnimationFrame);
     expect(screen.queryByRole("textbox", { name: /^Namn/ })).toBeNull();
+  });
+
+  it("puts focus in a new field's label, and says nothing wrong before it is touched", async () => {
+    renderInApp(
+      <FlowSettings flow={flow} canEdit transcription={noTranscription} onSave={vi.fn()} />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Ändra inställningar" }));
+    fireEvent.click(screen.getByRole("button", { name: "Lägg till fält" }));
+    const field = screen.getByRole("group", { name: "Fält 2" });
+    await waitFor(() =>
+      expect(document.activeElement).toBe(within(field).getByRole("textbox", { name: /Etikett/ }))
+    );
+    expect(within(field).queryByText(messages.flows_field_problem_required)).toBeNull();
+  });
+
+  it("hints at a label another field of the form already has", () => {
+    renderInApp(
+      <FlowSettings flow={flow} canEdit transcription={noTranscription} onSave={vi.fn()} />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Ändra inställningar" }));
+    fireEvent.click(screen.getByRole("button", { name: "Lägg till fält" }));
+    const label = "Diarienummer";
+    const added = within(screen.getByRole("group", { name: "Fält 2" })).getByRole("textbox", {
+      name: /Etikett/
+    });
+    fireEvent.change(added, { target: { value: ` ${label.toLocaleUpperCase()} ` } });
+    const hint = messages.flows_field_label_taken.replace("{label}", label.toLocaleUpperCase());
+    expect(screen.getByText(hint)).toBeTruthy();
+    // A hint, not an error: the form still saves.
+    expect(added.getAttribute("aria-invalid")).not.toBe("true");
+    fireEvent.change(added, { target: { value: "Något annat" } });
+    expect(screen.queryByText(hint)).toBeNull();
   });
 
   it("explains an empty run form with an example, and adds the first field", async () => {

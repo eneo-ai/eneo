@@ -87,7 +87,7 @@ export function referenceNote(reference: Reference, flow: Flow, t: Translate): s
   if (reference.kind === "step") {
     return reference.step ? null : t("flows_chat_reference_step_missing");
   }
-  if (reference.meaning.kind === "missing") {
+  if (referenceTone(reference) === "missing") {
     return meaningLabel(reference.meaning, reference.token, flow, t);
   }
   // Nothing the flow resolves: shorthand such as {{step_1...}}, or a name it has no value for.

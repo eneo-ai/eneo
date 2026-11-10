@@ -2708,6 +2708,9 @@ def test_openapi_flow_run_public_exposes_structured_error(openapi_spec: dict) ->
         "contract_violation",
         # Which Word template field could not be filled, from which step, and why.
         "template_fill",
+        # The status and host an HTTP step's service answered with.
+        "http_status",
+        "http_host",
     }
     violation_ref = next(
         option

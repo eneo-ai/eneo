@@ -57,15 +57,22 @@ export function useEditorUploads(flow: FlowPublic, assistantId: string) {
   // The flow the edit last saved or read; set from events, read when releasing.
   const savedFlow = useRef(flow);
   const flowId = flow.id;
+  // Read when releasing. The step can get another assistant during the edit
+  // (the flow assistant gives it its own): that must not end the edit's
+  // uploads, so `release` does not change with it.
+  const currentAssistantId = useRef(assistantId);
+  useEffect(() => {
+    currentAssistantId.current = assistantId;
+  }, [assistantId]);
 
   const savedState = useCallback(
     () => ({
       flows: [savedFlow.current, queryClient.getQueryData<FlowPublic>(flowKeys.flow(flowId))],
       assistant: queryClient.getQueryData<FlowAssistant>(
-        flowEditorKeys.assistant(flowId, assistantId)
+        flowEditorKeys.assistant(flowId, currentAssistantId.current)
       )
     }),
-    [assistantId, flowId, queryClient]
+    [flowId, queryClient]
   );
 
   const record = useCallback((upload: EditorUpload) => {

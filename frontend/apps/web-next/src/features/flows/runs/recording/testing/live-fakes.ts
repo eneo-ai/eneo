@@ -59,14 +59,21 @@ export class FakeSocket {
   }
 }
 
-/** The worklet node: `frame(tag)` is the processor posting 100 ms of audio starting with `tag`. */
+/**
+ * The worklet node: `frame(tag)` is the processor posting 100 ms of audio
+ * starting with `tag`; it answers a mark with the samples it posted so far.
+ */
 export class FakeNode {
   static instances: FakeNode[] = [];
+  written = 0;
   port = {
     onmessage: null as ((event: { data: unknown }) => void) | null,
     postMessage: vi.fn((message: unknown) => {
       if (message === "flush") queueMicrotask(() => this.post("flushed"));
-      if (message === "resume") queueMicrotask(() => this.post("resumed"));
+      if (message === "mark") {
+        const written = this.written;
+        queueMicrotask(() => this.post(written));
+      }
     }),
     close: vi.fn()
   };
@@ -78,6 +85,7 @@ export class FakeNode {
   frame(tag = 0, bytes = 3200) {
     const frame = new ArrayBuffer(bytes);
     new Uint8Array(frame)[0] = tag;
+    this.written += bytes / 2;
     this.post(frame);
   }
 

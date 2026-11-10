@@ -3,7 +3,7 @@ import { Text } from "@astryxdesign/core/Text";
 import { useTranslations } from "use-intl";
 import { Switch } from "@astryxdesign/core/Switch";
 import { ContractFromExampleDialog } from "./contract-from-example-dialog";
-import { Anchor, EditorSection, problemStatus } from "./editor-fields";
+import { Anchor, EditorSection, problemStatus, TemplateScope } from "./editor-fields";
 import type { FieldProblems } from "./field-problems";
 import {
   readCitationsOn,
@@ -38,7 +38,7 @@ import {
   type OutputType,
   type StepConfig
 } from "./step-types";
-import { formFieldsOf, type VariableGroup } from "./step-variables";
+import { formFieldsOf, variableGroups, type VariableGroup } from "./step-variables";
 
 const NONE = "__none";
 
@@ -208,24 +208,32 @@ export function StepOutputSection({
 
       {draft.output_mode === "http_post" && (
         <Anchor formId={formId} anchor="output_config.http">
-          <HttpFields
-            formId={formId}
-            flowId={flow.id}
-            stepId={stepId}
-            direction="output"
-            config={readHttpConfig(draft.output_config, "output")}
-            onChange={(http) =>
-              onChange({ ...draft, output_config: withHttpConfig(draft.output_config, http) })
-            }
-            groups={groups}
-            problems={problems}
-          />
+          {/* Sent once the step has answered: it reads as the next step would, its own answer too. */}
+          <TemplateScope value={{ flow, stepOrder: stepOrder + 1 }}>
+            <HttpFields
+              formId={formId}
+              flowId={flow.id}
+              stepId={stepId}
+              direction="output"
+              config={readHttpConfig(draft.output_config, "output")}
+              onChange={(http) =>
+                onChange({ ...draft, output_config: withHttpConfig(draft.output_config, http) })
+              }
+              groups={variableGroups({
+                flow,
+                stepOrder: stepOrder + 1,
+                inputConfig: draft.input_config
+              })}
+              problems={problems}
+            />
+          </TemplateScope>
         </Anchor>
       )}
 
       {draft.output_mode === "template_fill" && (
         <Anchor formId={formId} anchor="output_config.template">
           <TemplateFillFields
+            formId={formId}
             flow={flow}
             stepOrder={stepOrder}
             draft={draft}

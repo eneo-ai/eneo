@@ -3,7 +3,6 @@ import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import messages from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
-import { router } from "@/test/navigation";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
 import { reportResize, setViewport } from "@/test/setup-dom";
 import { makeRunDetail, makeRunSummary } from "./run-fixtures";
@@ -33,7 +32,6 @@ import { rememberStartedRun } from "./runs-optimistic";
 
 const LIST = "GET /api/v1/flows/{id}/runs/";
 const REDISPATCH = "POST /api/v1/flows/{id}/runs/{run_id}/redispatch/";
-const RETRY = "POST /api/v1/flows/{id}/runs/{run_id}/retry/";
 const CANCEL = "POST /api/v1/flows/{id}/runs/{run_id}/cancel/";
 
 /** The list of a flow whose published version is 3, the fixtures' version. */
@@ -542,7 +540,9 @@ describe("FlowRunsList", () => {
     const dialog = await screen.findByRole("alertdialog", {
       name: messages.flow_runs_cancel_title
     });
-    fireEvent.click(within(dialog).getByRole("button", { name: messages.flow_runs_cancel }));
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: messages.flow_runs_cancel_confirm })
+    );
     await vi.waitFor(() =>
       expect(state.toast.error).toHaveBeenCalledWith(messages.flow_runs_cancel_failed, {
         description
@@ -550,84 +550,11 @@ describe("FlowRunsList", () => {
     );
   });
 
-  it("retries a failed run from its row and opens the new run", async () => {
+  it("offers no retry from a row: the run's page knows its steps and decides", async () => {
     answerList([makeRunSummary({ id: "run-f", status: "failed" }), makeRunSummary()]);
-    state.routes[RETRY] = () => ({
-      status: 201,
-      body: {
-        created: true,
-        first_executed_step_order: 2,
-        reused_step_orders: [1],
-        source_run_id: "run-f",
-        run: makeRunSummary({ id: "run-2", status: "queued" })
-      }
-    });
-    const { container } = renderInApp(<List />, {
-      appContext: testAppContext({ permissions: ["flows_view", "flows_run"] })
-    });
-    const table = await screen.findByRole("table");
-    const buttons = within(table).getAllByRole("button", { name: messages.flow_runs_retry });
-    expect(buttons).toHaveLength(1);
-    await expectNoAxeViolations(container);
-
-    fireEvent.click(buttons[0]!);
-
-    await vi.waitFor(() =>
-      expect(router.push).toHaveBeenCalledWith("/spaces/space-1/flows/flow-1/runs/run-2")
-    );
-    const call = state.stub.calls.find((entry) => `${entry.method} ${entry.path}` === RETRY);
-    expect(call?.init.params?.path).toEqual({ id: "flow-1", run_id: "run-f" });
-    expect(state.announce).toHaveBeenCalledWith(
-      messages.flow_runs_retry_started.replace("{order}", "2")
-    );
-  });
-
-  it("says in a toast that a retry was already started, with a way to it", async () => {
-    answerList([makeRunSummary({ id: "run-f", status: "failed" })]);
-    state.routes[RETRY] = () => ({
-      body: {
-        created: false,
-        first_executed_step_order: 2,
-        reused_step_orders: [1],
-        source_run_id: "run-f",
-        run: makeRunSummary({ id: "run-2" })
-      }
-    });
     renderInApp(<List />, {
       appContext: testAppContext({ permissions: ["flows_view", "flows_run"] })
     });
-    fireEvent.click(await screen.findByRole("button", { name: messages.flow_runs_retry }));
-    await vi.waitFor(() => expect(state.toast.info).toHaveBeenCalled());
-    const [title, options] = state.toast.info.mock.calls[0] as [
-      string,
-      { action: { label: string; onClick: () => void } }
-    ];
-    expect(title).toBe(messages.flow_runs_retry_replayed);
-    expect(options.action.label).toBe(messages.flow_runs_retry_replayed_open);
-    expect(router.push).not.toHaveBeenCalled();
-    options.action.onClick();
-    expect(router.push).toHaveBeenCalledWith("/spaces/space-1/flows/flow-1/runs/run-2");
-  });
-
-  it("offers a retry by the run page's rules only", async () => {
-    answerList([
-      makeRunSummary({ id: "run-old", status: "failed", flow_version: 2 }),
-      makeRunSummary({
-        id: "run-other",
-        status: "failed",
-        started_by: { principal_type: "user", id: "user-2", display_name: "Erik Berg" }
-      })
-    ]);
-    renderInApp(<List />, {
-      appContext: testAppContext({ permissions: ["flows_view", "flows_run"] })
-    });
-    await screen.findByRole("table");
-    // An older version cannot be retried, and only its starter retries a run.
-    expect(screen.queryByRole("button", { name: messages.flow_runs_retry })).toBeNull();
-    cleanup();
-
-    answerList([makeRunSummary({ id: "run-f", status: "failed" })]);
-    renderInApp(<List />, { appContext: testAppContext({ permissions: ["flows_view"] }) });
     await screen.findByRole("table");
     expect(screen.queryByRole("button", { name: messages.flow_runs_retry })).toBeNull();
   });
@@ -652,7 +579,9 @@ describe("FlowRunsList", () => {
     expect(within(dialog).getByText(messages.flow_runs_cancel_description)).toBeTruthy();
     answerList([{ ...running, status: "cancelled" }, makeRunSummary()]);
 
-    fireEvent.click(within(dialog).getByRole("button", { name: messages.flow_runs_cancel }));
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: messages.flow_runs_cancel_confirm })
+    );
 
     await vi.waitFor(() =>
       expect(state.announce).toHaveBeenCalledWith(messages.flow_runs_cancel_done)
@@ -676,7 +605,9 @@ describe("FlowRunsList", () => {
     const dialog = await screen.findByRole("alertdialog", {
       name: messages.flow_runs_cancel_title
     });
-    fireEvent.click(within(dialog).getByRole("button", { name: messages.flow_runs_cancel }));
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: messages.flow_runs_cancel_confirm })
+    );
     await vi.waitFor(() =>
       expect(state.toast.info).toHaveBeenCalledWith(
         messages.flow_runs_cancel_already_ended.replace(
@@ -763,8 +694,6 @@ describe("FlowRunsList on a phone", () => {
     expect(within(rows[0]!).getByRole("link", { name: /./ }).getAttribute("href")).toBe(
       "/spaces/space-1/flows/flow-1/runs/run-f"
     );
-    expect(within(rows[0]!).getByRole("button", { name: messages.flow_runs_retry })).toBeTruthy();
-    expect(within(rows[1]!).queryByRole("button", { name: messages.flow_runs_retry })).toBeNull();
     // What only a wide screen has room for.
     expect(screen.queryByText(messages.flow_runs_usage_tokens_explainer)).toBeNull();
     await expectNoAxeViolations(container);

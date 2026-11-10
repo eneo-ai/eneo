@@ -36,43 +36,48 @@ router = APIRouter()
 __all__ = ["router"]
 
 _DESCRIPTION = """
-Admit a live transcription preview for one audio step of a published flow and
+Admit a live transcription session for one audio step of a published flow and
 return a single-use ticket for the WebSocket at `websocket_path`.
 
 Connect within 30 seconds, offering the subprotocols `eneo-live.v1` and
 `ticket.<ticket>`. Send the recording as binary frames of mono 16-bit
 little-endian PCM at 16 kHz and a text frame `{"type": "stop"}` when it ends.
 The socket answers `ready`, `transcript.delta` (text to append),
-`transcript.done` (the full preview text) and `error` (`code`, `message`,
+`transcript.done` (the session's full text) and `error` (`code`, `message`,
 `retryable`) events.
 
-The preview streams through the flow's live transcription model, or through
-its transcription model when the flow chose none. The transcription model
-writes the run's transcript however the recording arrived, so only its own
-text can stand in for transcribing the recording.
+The source of the audio picks the model. Streamed audio is written by the
+flow's live transcription model, or by its transcription model when the flow
+chose none; uploaded and recorded files are written by the transcription model.
 
 The optional body `recording_id` is an opaque client string matching
-`^[A-Za-z0-9_-]{8,64}$`. Eneo keeps it only when the preview streams through
-the flow's transcription model; `ready` says whether it did, as
-`keeps_transcript`. When `keeps_transcript` is false the text is only a
-preview: no `transcript_id` follows, and a client need not wait for
-`transcript.done` before creating the run. To store a clean session, also send `produced_samples`
-in the stop message: a non-negative integer counting captured 16 kHz samples
-before client queueing or discarding. Missing or invalid counts disable storage
-without changing the preview. Storage also requires a successfully sent final
-commit and upstream `audio_seconds` whose rounded 16 kHz sample count matches
-Eneo's received count exactly. The `transcript_id` in `transcript.done` is sent
-only after the row commits. Storage failures or a five-second write timeout
-leave the preview usable without an id.
+`^[A-Za-z0-9_-]{8,64}$`. With it, Eneo stores the text of a session that heard
+the whole recording and sends its `transcript_id` in `transcript.done`; `ready`
+says whether it will, as `keeps_transcript`. Without one the text is shown
+only, and a client need not wait for `transcript.done` before creating the run.
+To store a clean session, also send `produced_samples` in the stop message: a
+non-negative integer counting captured 16 kHz samples before client queueing or
+discarding. Missing or invalid counts disable storage without changing the
+text. Storage also requires a successfully sent final commit and upstream
+`audio_seconds` whose rounded 16 kHz sample count matches Eneo's received count
+exactly. The `transcript_id` is sent only after the row commits. Storage
+failures or a five-second write timeout leave the text without an id. A
+recording cut into parts while it streamed also sends `part_start_samples`:
+the sample count at which each part after the first began, increasing and
+below `produced_samples`; the run then submits every part, in order, with
+`single_recording`.
 
-The preview is not the run's transcript. Upload the recording as a runtime file
-and create the run as usual; the flow's transcription model then produces the
-transcript the run uses. Live preview is only available while both of the
-flow's models are available in its space and the model it streams through
-supports realtime; otherwise this route answers 409
+Upload the recording as a runtime file and create the run with the
+`transcript_id` as the step's `live_transcript_id`: the run uses the stored
+text instead of transcribing the recording again, and the flow's speaker
+service only times its words and labels the speakers. A run without the id, or
+whose recording does not match the stored text, is transcribed by the flow's
+transcription model. Live text is only available while both of the flow's
+models are available in its space and the model it streams through supports
+realtime; otherwise this route answers 409
 `flow_live_transcription_unavailable` with a `reason`.
 The run contract's `transcription.live` reports the same availability and
-reason, so a client can decide before recording whether to offer the preview.
+reason, so a client can decide before recording whether to offer streaming.
 """
 
 
@@ -81,7 +86,7 @@ reason, so a client can decide before recording whether to offer the preview.
     response_model=FlowLiveTranscriptionSessionPublic,
     status_code=status.HTTP_201_CREATED,
     operation_id="create_flow_live_transcription_session",
-    summary="Start a live transcription preview",
+    summary="Start a live transcription session",
     description=_DESCRIPTION,
     responses={
         400: error_response(
@@ -155,7 +160,7 @@ async def create_flow_live_transcription_session(
             action=ActionType.FLOW_LIVE_TRANSCRIPTION_STARTED,
             entity_type=EntityType.FLOW,
             entity_id=id,
-            description=f"Started a live transcription preview for flow {id}",
+            description=f"Started a live transcription session for flow {id}",
             metadata=AuditMetadata.standard(
                 actor=user,
                 target=live.flow,

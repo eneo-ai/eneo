@@ -137,15 +137,17 @@ function ReviewPolicyStepList({
  * way to the step, what a timed-out step was doing, whether a provider or
  * a tool may already have acted, what a tool said, whether running again
  * unchanged can help). A refused review policy, which keeps the run from
- * starting, names the steps it concerns. The error's code, technical
- * message and the guidance for API clients are there for support, behind
- * a disclosure that renders them only when opened.
+ * starting, names the steps it concerns. Whether running again can help is
+ * said only where running again is offered (`rerunOffered`). The error's
+ * code, technical message and the guidance for API clients are there for
+ * support, behind a disclosure that renders them only when opened.
  */
 export function RunFailure({
   error,
   stepName,
   reviewSteps = [],
-  onShowStep = showRunStep
+  onShowStep = showRunStep,
+  rerunOffered = true
 }: {
   error: FailureError;
   /** The step's label in the run's version, for the facts that name a step. */
@@ -153,6 +155,8 @@ export function RunFailure({
   /** The flow's steps, for a refused review policy that names no step. */
   reviewSteps?: readonly ReviewPolicyStep[];
   onShowStep?: (order: number) => void;
+  /** The person can run the flow again from here (a retry or a new run). */
+  rerunOffered?: boolean;
 }) {
   const t = useTranslations();
   const [technicalOpen, setTechnicalOpen] = useState(false);
@@ -187,15 +191,17 @@ export function RunFailure({
           </>
         ) : (
           <ul className="text-ax-text m-0 flex list-disc flex-col gap-1 pl-5 text-sm">
-            {failureFacts(error).map((fact) => (
-              <FactLine
-                key={fact.kind}
-                fact={fact}
-                t={t}
-                stepName={stepName}
-                onShowStep={onShowStep}
-              />
-            ))}
+            {failureFacts(error)
+              .filter((fact) => rerunOffered || fact.kind !== "retry")
+              .map((fact) => (
+                <FactLine
+                  key={fact.kind}
+                  fact={fact}
+                  t={t}
+                  stepName={stepName}
+                  onShowStep={onShowStep}
+                />
+              ))}
           </ul>
         )}
         <LazyCollapsible

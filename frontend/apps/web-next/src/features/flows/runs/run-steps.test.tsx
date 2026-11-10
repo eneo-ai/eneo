@@ -35,12 +35,17 @@ describe("RunSteps", () => {
         { order: 2, label: "Skriv svar", status: "running" }
       ]),
       [
-        makeRunStep(1, { num_tokens_input: null, num_tokens_output: null }),
+        makeRunStep(1, {
+          num_tokens_input: null,
+          num_tokens_output: null,
+          effective_prompt: "Sammanfatta."
+        }),
         makeRunStep(2, {
           status: "running",
           finished_at: null,
           num_tokens_input: null,
-          num_tokens_output: null
+          num_tokens_output: null,
+          effective_prompt: "Skriv svar."
         })
       ]
     );
@@ -63,7 +68,11 @@ describe("RunSteps", () => {
       ]),
       [
         makeRunStep(1, { num_tokens_input: 0, num_tokens_output: 0 }),
-        makeRunStep(2, { num_tokens_input: null, num_tokens_output: null })
+        makeRunStep(2, {
+          num_tokens_input: null,
+          num_tokens_output: null,
+          effective_prompt: "Sammanfatta."
+        })
       ]
     );
     renderInApp(<RunSteps flowId="flow-1" runId="run-1" steps={steps} />);
@@ -293,6 +302,38 @@ describe("RunSteps warnings", () => {
     );
     renderInApp(<RunSteps flowId="flow-1" runId="run-1" steps={steps} />);
     expect(screen.getByText("Sökfrågan mot kunskapen blev för lång och kortades.")).toBeTruthy();
+  });
+
+  it("says in Swedish that an uploaded file had no readable text", () => {
+    const steps = runStepViews(
+      makeRunGraph([{ order: 1, label: "Sammanfatta", status: "completed" }]),
+      [
+        makeRunStep(1, {
+          diagnostics: [
+            {
+              code: "runtime_input_source_text_unavailable",
+              message: "[no readable text extracted]",
+              severity: "warning"
+            }
+          ]
+        })
+      ]
+    );
+    renderInApp(<RunSteps flowId="flow-1" runId="run-1" steps={steps} />);
+    expect(
+      screen.getByText(messages.flow_step_warning_runtime_input_source_text_unavailable)
+    ).toBeTruthy();
+    expect(screen.queryByText("[no readable text extracted]")).toBeNull();
+  });
+
+  it("says nothing of tokens for a step that used no model, such as an HTTP call", () => {
+    const steps = runStepViews(
+      makeRunGraph([{ order: 1, label: "Hämta ärendet", status: "completed" }]),
+      [makeRunStep(1, { num_tokens_input: null, num_tokens_output: null })]
+    );
+    renderInApp(<RunSteps flowId="flow-1" runId="run-1" steps={steps} />);
+    const card = screen.getByRole("article", { name: "Steg 1: Hämta ärendet" });
+    expect(card.textContent).not.toMatch(/[Tt]oken/);
   });
 });
 

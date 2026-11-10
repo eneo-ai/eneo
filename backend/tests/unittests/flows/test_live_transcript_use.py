@@ -68,6 +68,8 @@ def live_audio(user, monkeypatch, spool_contract):
         model_id=model.id,
         recording_id="recording_123",
         bound_file_id=file.id,
+        bound_file_ids=[file.id],
+        part_start_samples=[],
         text="Live text.",
         segments=[{"text": "Live text.", "start": 0.0, "end": 42.0}],
         received_audio_seconds=42.0,
@@ -314,7 +316,7 @@ async def test_unusable_live_transcript_calls_batch_once(
     elif condition == "missing":
         case.lookup.return_value = None
     else:
-        case.row.bound_file_id = uuid4()
+        case.row.bound_file_ids = [uuid4()]
     result = await resolve_transcribe_and_attach_audio_input(
         request=case.request, deps=case.deps
     )
