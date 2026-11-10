@@ -29,10 +29,13 @@ the worker process.
 - `PolicyLevel`: `installation`, `organization`, `space`, `assistant_or_app`,
   `flow`. The strings are released API and audit values.
 - `resolve(chain, *, stricter, bounding)` takes the levels from the outermost
-  to the innermost. The nearest chosen value is inherited. A value chosen on a
-  bounding level is a bound that no inner value loosens, so the result is the
-  stricter of the nearest value and the bound. The result carries the value,
-  the level it came from, the bound and the outermost level that set it.
+  to the innermost. The nearest chosen value is inherited. The value that
+  applies on a bounding level, chosen there or inherited from outside it, is a
+  bound that no inner value loosens, so the result is the stricter of the
+  nearest value and the bound. A space that inherits its organisation's 30
+  days caps an assistant's 90 at 30, from the organisation. The result
+  carries the value, the level it came from, the bound and the outermost
+  level that chose it.
 - `None` means nothing is chosen at that level. Any other value, `False`
   included, is a choice. On a tie the nearest level is the origin. An empty
   chain, or one without a choice, resolves to nothing chosen.
