@@ -10,6 +10,7 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication.auth_models import ApiKeyOwnership, audit_actor_for
+from eneo.widgets.domain.visitor import WidgetVisitorContext
 
 
 def test_a_signed_in_user_is_the_actor_of_its_entries():
@@ -29,8 +30,23 @@ def test_a_service_key_has_no_actor_row():
 def test_a_widget_visitor_is_its_own_kind_of_actor_without_a_row():
     # The synthetic visitor's id is a pseudonymous visitor id: never a users.id,
     # so it must not reach audit_log.actor_id (a foreign key to users).
-    visitor = SimpleNamespace(id=uuid4(), active_api_key=None, active_widget=object())
+    context = WidgetVisitorContext(
+        widget_id=uuid4(),
+        visitor_id=uuid4(),
+        tenant_id=uuid4(),
+        space_id=uuid4(),
+        target_id=uuid4(),
+        token_generation=0,
+    )
+    visitor = SimpleNamespace(id=uuid4(), active_api_key=None, active_widget=context)
     assert audit_actor_for(visitor) == (None, ActorType.WIDGET_VISITOR)  # type: ignore[arg-type]
+
+
+def test_a_user_double_with_a_truthy_attribute_is_still_a_user():
+    # Test doubles answer every attribute with something truthy; only the real
+    # visitor context makes an actorless entry.
+    double = SimpleNamespace(id=uuid4(), active_api_key=None, active_widget=object())
+    assert audit_actor_for(double) == (double.id, ActorType.USER)  # type: ignore[arg-type]
 
 
 def _params(**overrides) -> AuditLogTaskParams:

@@ -6,7 +6,8 @@ for the copies.
 """
 
 EXPECTED_CATEGORY_COUNTS: dict[str, int] = {
-    "admin_actions": 67,
+    # Includes WIDGET_PREVIEW_TOKEN_MINTED and WIDGET_EXTERNAL_TOOL_CALLED.
+    "admin_actions": 69,
     "user_actions": 52,
     "security_events": 17,
     "file_operations": 8,

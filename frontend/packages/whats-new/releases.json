@@ -23,10 +23,7 @@
         {
           "id": "web-widgets-external-tools",
           "permissions": {
-            "anyOf": [
-              "widgets",
-              "admin"
-            ]
+            "anyOf": ["widgets", "admin"]
           },
           "type": "improved",
           "area": "assistants",

@@ -159,9 +159,11 @@ def audit_actor_for(user: "UserInDB") -> tuple[UUID | None, ActorType]:
 
     A widget visitor is synthetic too (``build_visitor_user``): its id is a
     pseudonymous visitor id, not a users row, so it gets its own actor type
-    and no actor_id. The entry's metadata carries the visitor id.
+    and no actor_id. The entry's metadata carries the visitor id. Decided on
+    the context object itself, so a user double with a truthy attribute of
+    that name is still audited as a user.
     """
-    if is_widget_visitor(user):
+    if isinstance(getattr(user, "active_widget", None), WidgetVisitorContext):
         return None, ActorType.WIDGET_VISITOR
     if is_service_api_key(user):
         return None, ActorType.SYSTEM
