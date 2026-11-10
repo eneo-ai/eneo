@@ -1,5 +1,6 @@
 import { Button } from "@astryxdesign/core/Button";
 import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
+import { CheckboxList, CheckboxListItem } from "@astryxdesign/core/CheckboxList";
 import { FormLayout } from "@astryxdesign/core/FormLayout";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@/components/astryx/text-input";
@@ -31,7 +32,7 @@ import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
 /**
  * The roles as checkbox rows in named groups (Standardroller, Anpassade
- * roller), each row a whole 44 px target on touch.
+ * roller); each whole row is the target.
  */
 function RolePicker({
   selected,
@@ -41,7 +42,6 @@ function RolePicker({
   onToggle: (roleId: string, checked: boolean) => void;
 }) {
   const t = useTranslations();
-  const baseId = useId();
   const { data } = useQuery(rolesQueryOptions(browserApi));
   const groups: { key: string; label: string; roles: Role[] }[] = [
     { key: "default", label: t("default_roles"), roles: data?.predefined ?? [] },
@@ -56,33 +56,16 @@ function RolePicker({
       {groups.map(
         (group) =>
           group.roles.length > 0 && (
-            <div
-              key={group.key}
-              role="group"
-              aria-labelledby={`${baseId}-${group.key}`}
-              className="flex flex-col"
-            >
-              <span
-                id={`${baseId}-${group.key}`}
-                className="text-ax-text-secondary pb-1 text-xs font-medium"
-              >
-                {group.label}
-              </span>
+            <CheckboxList key={group.key} label={group.label}>
               {group.roles.map((role) => (
-                // The label's ::after covers the row: the tap target is the
-                // row, not the words (the theme makes it 44 px on touch).
-                <div
+                <CheckboxListItem
                   key={role.id}
-                  className="relative flex min-h-9 items-center [&_label]:after:absolute [&_label]:after:inset-0"
-                >
-                  <CheckboxInput
-                    label={role.name}
-                    value={selected.has(role.id)}
-                    onChange={(checked) => onToggle(role.id, checked)}
-                  />
-                </div>
+                  label={role.name}
+                  isChecked={selected.has(role.id)}
+                  onCheck={(checked) => onToggle(role.id, checked)}
+                />
               ))}
-            </div>
+            </CheckboxList>
           )
       )}
     </div>

@@ -50,8 +50,9 @@ test("saves a role change to an existing user and keeps it after a reload", asyn
     .first()
     .evaluate((input) => (input as HTMLInputElement).labels?.[0]?.textContent ?? "");
   expect(role).toBeTruthy();
-  // The label covers its row, the target a user taps.
-  await roles(dialog).getByText(role, { exact: true }).click();
+  const box = page.getByRole("checkbox", { name: role, exact: true });
+  // The whole row is the target a user taps.
+  await roles(dialog).getByRole("listitem").filter({ has: box }).click();
   await expect(roles(dialog).getByRole("checkbox", { name: role, exact: true })).toBeChecked();
 
   const saved = page.waitForResponse(

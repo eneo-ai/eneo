@@ -559,6 +559,13 @@
       min-inline-size: 44px;
       min-block-size: 44px;
     }
+    /* A list row's checkbox has the row's label, centred beside it: the box
+       is centred in the 44 px the theme gives the checkbox, not at its top. */
+    .astryx-item .astryx-checkbox-input {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
     .astryx-token[data-size="sm"]:not(a, :has(a, button)) {
       block-size: 1.5rem;
     }

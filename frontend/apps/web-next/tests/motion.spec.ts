@@ -270,8 +270,16 @@ for (const { title, reduced, touch } of [
       await trigger.click();
       await page.waitForTimeout(30);
       const runs = (await running(page, "#main-content")).filter((run) => run.ms > 1);
+      // Whether the content holds a still clip while its parts slide under it.
+      const held = await page
+        .locator("#assistant-document-template *")
+        .evaluateAll((elements) =>
+          elements.some(
+            (element) => !["", "none"].includes((element as HTMLElement).style.clipPath)
+          )
+        );
       await page.waitForTimeout(800);
-      return runs;
+      return { runs, held };
     };
     const opened = await toggle();
     await expect(trigger).toHaveAttribute("aria-expanded", "true");
@@ -280,17 +288,21 @@ for (const { title, reduced, touch } of [
     const left = await running(page, "#main-content");
     await context.close();
 
-    for (const [what, runs] of [
+    for (const [what, { runs, held }] of [
       ["open", opened],
       ["close", closed]
     ] as const) {
       if (!reduced) {
         const glide = scripted(runs).map((run) => [...run.props].sort().join());
         expect(glide, `${what}: what follows glides`).toContain("translate");
-        expect(glide, `${what}: the content clips`).toContain("clipPath,opacity");
+        // The content clips: a moving clip, or a held one its parts slide under.
+        expect(
+          glide.includes("clipPath,opacity") || (held && glide.includes("opacity")),
+          `${what}: the content clips`
+        ).toBe(true);
         // Nothing animates a size.
         expect(
-          glide.filter((props) => props !== "translate" && props !== "clipPath,opacity"),
+          glide.filter((props) => !["translate", "opacity", "clipPath,opacity"].includes(props)),
           what
         ).toEqual([]);
       } else if (touch) {

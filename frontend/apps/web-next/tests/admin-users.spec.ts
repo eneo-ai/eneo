@@ -82,7 +82,7 @@ test.describe("the user editor on a phone", () => {
     await page.getByRole("menuitem", { name: /redigera/i }).click();
     const dialog = page.getByRole("dialog", { name: "Redigera användare" });
     const group = dialog.getByRole("group", { name: /^(Standardroller|Anpassade roller)$/ }).last();
-    const row = group.locator(":scope > div").last();
+    const row = group.getByRole("listitem").last();
     const role = row.getByRole("checkbox");
     await expect(role).toBeVisible();
     const before = await role.isChecked();

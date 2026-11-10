@@ -60,7 +60,8 @@ beforeEach(async () => {
   }));
   // Loading the app's route modules is fixture setup, before the timed auth behavior.
   ({ createAppRouter } = await import("@/router"));
-});
+  // The first test of a file transforms the whole app graph, cold.
+}, 30_000);
 
 afterEach(() => {
   cleanup();

@@ -183,7 +183,8 @@ beforeEach(async () => {
   }));
   // Transform the app graph during fixture setup, outside each behavior assertion's timeout.
   await import("@/router");
-});
+  // The first test of a file transforms the whole app graph, cold.
+}, 30_000);
 
 it("opens the knowledge hub and passes the operator's runtime integration form URL", async () => {
   replies.set("/api/v1/spaces/space-1/", makeSpace());

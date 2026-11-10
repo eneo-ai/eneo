@@ -104,7 +104,8 @@ beforeEach(async () => {
     API_BASE: window.location.origin
   }));
   await import("@/router");
-});
+  // The first test of a file transforms the whole app graph, cold.
+}, 30_000);
 
 afterEach(() => {
   cleanup();
