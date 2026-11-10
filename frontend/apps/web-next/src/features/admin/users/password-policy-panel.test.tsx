@@ -37,12 +37,12 @@ it("saves the maximum age and reports the saved policy", async () => {
   api.PATCH.mockImplementation((_path: string, init: { body: unknown }) => ok(init.body));
   const panel = await show();
   const save = within(panel).getByRole("button", { name: "Spara" });
-  expect(save.hasAttribute("disabled")).toBe(true);
+  expect(save.getAttribute("aria-disabled")).toBe("true");
 
   fireEvent.change(within(panel).getByLabelText(/Längsta giltighetstid/), {
     target: { value: "90" }
   });
-  expect(save.hasAttribute("disabled")).toBe(false);
+  expect(save.getAttribute("aria-disabled")).toBeNull();
   fireEvent.click(save);
 
   await waitFor(() =>
@@ -53,7 +53,9 @@ it("saves the maximum age and reports the saved policy", async () => {
   await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Lösenordspolicyn är sparad."));
   // The form now shows the saved policy, with nothing left to save.
   await waitFor(() =>
-    expect(within(panel).getByRole("button", { name: "Spara" }).hasAttribute("disabled")).toBe(true)
+    expect(within(panel).getByRole("button", { name: "Spara" }).getAttribute("aria-disabled")).toBe(
+      "true"
+    )
   );
   await expectNoAxeViolations(panel);
 });

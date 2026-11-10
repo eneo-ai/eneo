@@ -13,6 +13,11 @@ export function focusAfterRemoval(anchor: HTMLElement | null): () => HTMLElement
     if (!anchor || anchor.isConnected || !list?.isConnected || index < 0) return null;
     const rows = Array.from(list.children);
     const neighbour = rows[index] ?? rows[index - 1];
-    return neighbour?.querySelector<HTMLElement>("a[href], button:not(:disabled)") ?? null;
+    // A disabled Astryx button is aria-disabled and still focusable: skip it too.
+    return (
+      neighbour?.querySelector<HTMLElement>(
+        'a[href], button:not(:disabled):not([aria-disabled="true"])'
+      ) ?? null
+    );
   };
 }

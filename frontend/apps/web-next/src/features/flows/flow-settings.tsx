@@ -598,7 +598,8 @@ export function FlowSettings({
     announce(t("flows_step_moved", { step: fieldTitle(field, moved), position: moved }));
     const same = document.getElementById(moveId(field.key, delta < 0 ? "up" : "down"));
     const other = document.getElementById(moveId(field.key, delta < 0 ? "down" : "up"));
-    (same instanceof HTMLButtonElement && !same.disabled ? same : other)?.focus();
+    // A disabled Astryx Button is aria-disabled and still focusable.
+    (same && same.getAttribute("aria-disabled") !== "true" ? same : other)?.focus();
   }
 
   async function submit(event: React.SubmitEvent<HTMLFormElement>) {

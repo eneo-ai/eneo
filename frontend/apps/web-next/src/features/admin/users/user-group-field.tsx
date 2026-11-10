@@ -105,12 +105,6 @@ export function UserGroupField({ user, isDisabled }: { user: AdminUser; isDisabl
               <Selector
                 label={label}
                 description={t("admin_user_groups_immediate_hint")}
-                // With a search field the trigger is named by its label alone.
-                aria-label={
-                  selected
-                    ? t("admin_user_groups_picker_trigger", { label, group: selected.name })
-                    : label
-                }
                 options={available.map((group) => ({ value: group.id, label: group.name }))}
                 value={selected?.id}
                 onChange={(next) => setSelectedId(next)}

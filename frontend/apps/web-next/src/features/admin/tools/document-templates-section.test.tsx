@@ -191,7 +191,7 @@ it("downloads stored bytes with the captured filename and limits the built-in do
   );
   const client = show();
   const builtin = await screen.findByRole("button", { name: "document_template_download_builtin" });
-  expect((builtin as HTMLButtonElement).disabled).toBe(true);
+  expect(builtin.getAttribute("aria-disabled")).toBe("true");
   expect(screen.getByText("document_template_builtin_unavailable")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "actions: Municipal report" }));
   fireEvent.click(screen.getByRole("menuitem", { name: "document_template_download" }));
@@ -204,7 +204,7 @@ it("downloads stored bytes with the captured filename and limits the built-in do
     client.setQueryData(DOCUMENT_TEMPLATES_KEY, { items: [template], runtime_configured: true })
   );
   get.mockImplementation(() => ok(bytes));
-  await waitFor(() => expect((builtin as HTMLButtonElement).disabled).toBe(false));
+  await waitFor(() => expect(builtin.getAttribute("aria-disabled")).toBeNull());
   fireEvent.click(builtin);
   await waitFor(() =>
     expect(get).toHaveBeenCalledWith("/api/v1/document-templates/builtin/", {
@@ -273,7 +273,7 @@ it("keeps the built-in download button focused and blocks a second request while
   button.focus();
   fireEvent.click(button);
   await waitFor(() => expect(button.getAttribute("aria-busy")).toBe("true"));
-  expect((button as HTMLButtonElement).disabled).toBe(false);
+  expect(button.getAttribute("aria-disabled")).toBeNull();
   expect(document.activeElement).toBe(button);
   fireEvent.click(button);
   expect(get.mock.calls.filter(([path]) => path.endsWith("/builtin/"))).toHaveLength(1);
@@ -390,9 +390,10 @@ it.each([
     }
   });
   expect(
-    (within(dialog).getByRole("button", { name: "document_template_save" }) as HTMLButtonElement)
-      .disabled
-  ).toBe(true);
+    within(dialog)
+      .getByRole("button", { name: "document_template_save" })
+      .getAttribute("aria-disabled")
+  ).toBe("true");
   expect(await within(dialog).findByText(message)).toBeTruthy();
   await waitFor(() => expect(dialog.querySelector('[aria-invalid="true"]')).not.toBeNull());
   expect(post).not.toHaveBeenCalled();
@@ -420,7 +421,7 @@ it("keeps a failed upload's file and fields, and ignores a second press while sa
   fireEvent.click(save);
   const pending = await within(dialog).findByRole("button", { name: "document_template_saving" });
   expect(pending).toBe(save);
-  expect(pending.hasAttribute("disabled")).toBe(false);
+  expect(pending.getAttribute("aria-disabled")).toBeNull();
   expect(document.activeElement).toBe(save);
   fireEvent.click(pending);
   expect(post).toHaveBeenCalledTimes(1);

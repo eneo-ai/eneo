@@ -197,7 +197,7 @@ test("model parity: sorts rows, edits token budgets and default, and names provi
   ).toHaveCount(0);
   await expect(provider.getByText("3 modeller · nyckel ...fixture", { exact: true })).toBeVisible();
   const table = provider.getByRole("table");
-  await table.getByRole("button", { name: /Sortera efter Modell/ }).click();
+  await table.getByRole("button", { name: "Modell", exact: true }).click();
   await expect(table.getByRole("row").nth(1)).toHaveAttribute("data-model-id", "model-compatible");
   await provider.getByRole("button", { name: "Zeta fixture", exact: true }).click();
   const detail = page.getByRole("dialog", { name: "Zeta fixture", exact: true });

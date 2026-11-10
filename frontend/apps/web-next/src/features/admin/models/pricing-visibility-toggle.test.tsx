@@ -113,7 +113,7 @@ it("updates prices in an existing model picker through the shared tenant query",
     { queryClient }
   );
   api.GET.mockClear();
-  fireEvent.click(screen.getByRole("button", { name: "Chattmodell: Example" }));
+  fireEvent.click(screen.getByRole("button", { name: "Chattmodell Example" }));
   expect((await screen.findByRole("option", { name: /^Example/ })).textContent).toContain(
     "$2.50 / $10.00"
   );
@@ -124,7 +124,7 @@ it("updates prices in an existing model picker through the shared tenant query",
       show_model_pricing: false
     })
   );
-  fireEvent.click(screen.getByRole("button", { name: "Chattmodell: Example" }));
+  fireEvent.click(screen.getByRole("button", { name: "Chattmodell Example" }));
   expect((await screen.findByRole("option", { name: /^Example/ })).textContent).not.toContain("$");
   expect(api.GET).toHaveBeenCalledExactlyOnceWith("/api/v1/users/tenant/");
 });

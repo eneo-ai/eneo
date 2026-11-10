@@ -89,7 +89,7 @@ describe("role administration", () => {
     expect(alert.textContent).toContain("query_error_title");
     expect(screen.queryByRole("list", { name: "roles" })).toBeNull();
 
-    fireEvent.click(within(alert).getByRole("button", { name: "retry" }));
+    fireEvent.click(screen.getByRole("button", { name: "retry" }));
     expect(await screen.findByRole("list", { name: "roles" })).toBeTruthy();
   });
   it("shows the default role and searches the permissions granted by a role", async () => {

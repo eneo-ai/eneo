@@ -154,7 +154,7 @@ describe("flow settings page", { timeout: 20_000 }, () => {
   it("saves the flow chat's default model from the models that can use tools", async () => {
     await show();
     const picker = await screen.findByRole("button", {
-      name: "Modell för flödesassistenten: Ytans standardmodell"
+      name: "Modell för flödesassistenten Ytans standardmodell"
     });
     fireEvent.click(picker);
     const options = await screen.findAllByRole("option");
@@ -177,7 +177,7 @@ describe("flow settings page", { timeout: 20_000 }, () => {
 
   it("shows a refused default model at its field and moves focus there", async () => {
     await show();
-    fireEvent.click(await screen.findByRole("button", { name: /^Modell för flödesassistenten: / }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Modell för flödesassistenten / }));
     // The open list moves focus to its search a frame later; choose after that,
     // as a person does, so only the refusal decides where focus goes next.
     const search = await screen.findByRole("combobox", { name: "Sökalternativ" });
@@ -193,7 +193,7 @@ describe("flow settings page", { timeout: 20_000 }, () => {
     fireEvent.click(screen.getByRole("button", { name: "Spara ändringar" }));
 
     const picker = await screen.findByRole("button", {
-      name: "Modell för flödesassistenten: Stark modell"
+      name: "Modell för flödesassistenten Stark modell"
     });
     await waitFor(() => expect(document.activeElement).toBe(picker));
     expect(screen.getAllByText(/Modellen kan inte använda verktyg/).length).toBeGreaterThan(0);

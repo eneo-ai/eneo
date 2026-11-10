@@ -125,7 +125,7 @@ describe("SpaceNav", () => {
 
   it("switches between shared spaces and creates one from the heading's menu", () => {
     const { shell } = renderNav("/spaces/s1/overview");
-    fireEvent.click(screen.getByRole("button", { name: "Öppna meny" }));
+    fireEvent.click(screen.getByRole("button", { name: "Upphandling, Öppna meny" }));
     const items = screen.getAllByRole("menuitem");
     expect(items.map((item) => item.textContent)).toEqual([
       "Dina ytor",
@@ -141,7 +141,7 @@ describe("SpaceNav", () => {
 
   it("moves one row per arrow key, however many handlers Astryx stacks", () => {
     renderNav("/spaces/s1/overview");
-    fireEvent.click(screen.getByRole("button", { name: "Öppna meny" }));
+    fireEvent.click(screen.getByRole("button", { name: "Upphandling, Öppna meny" }));
     const [yours, current, other] = screen.getAllByRole("menuitem");
     yours!.focus();
     fireEvent.keyDown(yours!, { key: "ArrowDown" });
@@ -152,7 +152,7 @@ describe("SpaceNav", () => {
 
   it("leaves every other key to the page: Tab to the focus trap, ⌘K to the palette", () => {
     renderNav("/spaces/s1/overview");
-    fireEvent.click(screen.getByRole("button", { name: "Öppna meny" }));
+    fireEvent.click(screen.getByRole("button", { name: "Upphandling, Öppna meny" }));
     const seen: string[] = [];
     const listen = (event: Event) => void seen.push((event as globalThis.KeyboardEvent).key);
     document.addEventListener("keydown", listen);
@@ -168,7 +168,7 @@ describe("SpaceNav", () => {
     const queryClient = client({ s1: SHARED });
     queryClient.setQueryData(spacesListQueryOptions(browserApi).queryKey, [PERSONAL, ORG]);
     renderNav("/spaces/s1/overview", { queryClient });
-    fireEvent.click(screen.getByRole("button", { name: "Öppna meny" }));
+    fireEvent.click(screen.getByRole("button", { name: "Upphandling, Öppna meny" }));
     expect(screen.queryByRole("group", { name: "Dina ytor" })).toBeNull();
   });
 
@@ -178,7 +178,7 @@ describe("SpaceNav", () => {
     queryClient.removeQueries({ queryKey, exact: true });
     const list = vi.spyOn(browserApi, "GET").mockRejectedValue(new Error("down"));
     renderNav("/spaces/s1/overview", { queryClient });
-    fireEvent.click(screen.getByRole("button", { name: "Öppna meny" }));
+    fireEvent.click(screen.getByRole("button", { name: "Upphandling, Öppna meny" }));
     const retry = await screen.findByRole("menuitem", { name: /^Försök ladda ytorna igen/ });
     expect(retry.textContent).toContain("Ytorna kunde inte laddas.");
     const calls = list.mock.calls.length;
@@ -188,7 +188,7 @@ describe("SpaceNav", () => {
 
   it("keeps Dina ytor and Skapa en ny yta outside the spaces' scroll area", () => {
     renderNav("/spaces/s1/overview");
-    fireEvent.click(screen.getByRole("button", { name: "Öppna meny" }));
+    fireEvent.click(screen.getByRole("button", { name: "Upphandling, Öppna meny" }));
     const scroll = screen.getByRole("menuitem", { name: "Socialtjänst" }).parentElement!;
     expect(scroll.className).toMatch(/(^| )max-h-\[50dvh\]( |$)/);
     expect(scroll.className).toMatch(/(^| )overflow-y-auto( |$)/);
@@ -202,7 +202,7 @@ describe("SpaceNav", () => {
     proto.hidePopover = hidePopover;
     try {
       renderNav("/spaces/s1/overview");
-      fireEvent.click(screen.getByRole("button", { name: "Öppna meny" }));
+      fireEvent.click(screen.getByRole("button", { name: "Upphandling, Öppna meny" }));
       fireEvent.click(screen.getByRole("menuitem", { name: "Socialtjänst" }));
       expect(hidePopover).toHaveBeenCalled();
     } finally {
@@ -220,7 +220,7 @@ describe("SpaceNav", () => {
     try {
       renderNav("/spaces/s1/overview");
       expect(screen.queryByText("Socialtjänst")).toBeNull();
-      fireEvent.click(screen.getByRole("button", { name: "Öppna meny" }));
+      fireEvent.click(screen.getByRole("button", { name: "Upphandling, Öppna meny" }));
       expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
         "Dina ytor",
         "Upphandling",
@@ -235,7 +235,7 @@ describe("SpaceNav", () => {
 
   it("offers Skapa en ny yta only with the shared_spaces permission", () => {
     renderNav("/spaces/s1/overview", { permissions: [] });
-    fireEvent.click(screen.getByRole("button", { name: "Öppna meny" }));
+    fireEvent.click(screen.getByRole("button", { name: "Upphandling, Öppna meny" }));
     expect(screen.queryByRole("menuitem", { name: "Skapa en ny yta" })).toBeNull();
   });
 

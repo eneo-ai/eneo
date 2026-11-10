@@ -136,8 +136,8 @@ it("reports a failed read once, in the user's language, with a retry", async () 
   );
   renderInApp(<ModulesPage title="Moduler" />);
 
-  const retry = await screen.findByRole("button", { name: "Försök igen" });
-  const alert = retry.closest<HTMLElement>('[role="alert"]')!;
+  await screen.findByRole("button", { name: "Försök igen" });
+  const alert = screen.getByText("Innehållet kunde inte hämtas").closest('[role="alert"]')!;
   expect(alert.textContent).not.toContain("Internal server error");
   expect(alert.textContent).toContain("Innehållet kunde inte hämtas");
   expect(screen.getAllByText("Innehållet kunde inte hämtas")).toHaveLength(1);

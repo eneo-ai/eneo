@@ -63,7 +63,7 @@ describe("ConfirmDialog", () => {
     expect(field.id).not.toBe("confirm-value");
     const remove = within(first).getByRole("button", { name: "Ta bort" });
     // Never disabled: confirming without the name says so at the field.
-    expect(remove).toHaveProperty("disabled", false);
+    expect(remove.getAttribute("aria-disabled")).toBeNull();
     fireEvent.click(remove);
     expect(field.getAttribute("aria-invalid")).toBe("true");
     expect(document.getElementById(field.getAttribute("aria-describedby")!)?.textContent).toBe(
@@ -116,10 +116,9 @@ describe("ConfirmDialog", () => {
     fireEvent.change(within(dialog).getByRole("textbox"), { target: { value: "Avtal" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Ta bort" }));
     await waitFor(() =>
-      expect(within(dialog).getByRole("button", { name: "Avbryt" })).toHaveProperty(
-        "disabled",
-        true
-      )
+      expect(
+        within(dialog).getByRole("button", { name: "Avbryt" }).getAttribute("aria-disabled")
+      ).toBe("true")
     );
 
     fireEvent.keyDown(dialog, { key: "Escape" });
@@ -150,7 +149,7 @@ describe("ConfirmDialogControlled", () => {
 
     fireEvent.click(remove);
 
-    expect(remove).toHaveProperty("disabled", false);
+    expect(remove.getAttribute("aria-disabled")).toBeNull();
     expect(remove.getAttribute("aria-busy")).toBe("true");
     expect(document.activeElement).toBe(remove);
     expect(onConfirm).not.toHaveBeenCalled();

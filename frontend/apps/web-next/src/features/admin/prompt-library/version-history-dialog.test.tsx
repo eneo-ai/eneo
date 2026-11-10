@@ -219,7 +219,7 @@ describe("VersionHistoryDialog", () => {
     const alert = await within(dialog).findByRole("alert");
     expect(alert.textContent).toContain("Refused");
 
-    fireEvent.click(within(alert).getByRole("button", { name: "Försök igen" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Försök igen" }));
     expect(await within(dialog).findByRole("button", { name: "Visa version 1" })).toBeTruthy();
   });
 });

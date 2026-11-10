@@ -94,10 +94,11 @@ export function DesktopSideNav({
   const variant: NavVariant = kind === "admin" ? "admin" : "main";
   const { collapsed, chosen } = rail;
 
-  // The width collapsing or expanding the nav removes whole sections. If the
-  // focused link was one of them, focus goes to the toggle, which stays; focus
-  // anywhere else is left alone. Read while the focused element is still in
-  // the page, before this render commits.
+  // The width collapsing or expanding the nav removes whole sections. On a
+  // collapse Astryx moves focus from a removed control to the nearest row the
+  // rail keeps; on an expand, focus on a removed control goes to the toggle,
+  // which stays. Focus anywhere else is left alone. Read while the focused
+  // element is still in the page, before this render commits.
   const rescueFocus = useFocusRescue();
   const [shown, setShown] = useState({ collapsed, focusInNav: false });
   if (shown.collapsed !== collapsed) {

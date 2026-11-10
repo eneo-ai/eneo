@@ -473,14 +473,6 @@ function AddGroupMemberDialog() {
           <div ref={groupRef}>
             <Selector
               label={t("user_groups")}
-              aria-label={
-                selectedId
-                  ? t("admin_user_groups_picker_trigger", {
-                      label: t("user_groups"),
-                      group: selectable.find((group) => group.id === selectedId)?.name ?? ""
-                    })
-                  : t("user_groups")
-              }
               value={selectedId ?? undefined}
               onChange={setSelectedId}
               options={selectable.map((group) => ({ value: group.id, label: group.name }))}

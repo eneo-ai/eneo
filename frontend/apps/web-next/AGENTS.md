@@ -48,7 +48,9 @@ manual test protocol and the exceptions process. Read it before building UI.
 
 - Use Astryx components and native elements; they carry roles, states and
   keyboard support. Never put `onClick` on a `div`/`span`; no `autoFocus`, no
-  positive `tabIndex`.
+  positive `tabIndex`. A disabled Astryx button (Button, IconButton, the
+  menu and pagination buttons) keeps focus and is `aria-disabled="true"`, not
+  `disabled`: code and tests read that attribute.
 - Everything works with the keyboard, in visual order, with a visible 3:1
   focus indicator that sticky headers and the docked chat composer never cover
   (`scroll-pt-*` / `scroll-pb-*` on the scroll container).
@@ -129,16 +131,17 @@ ships must be release-ready: correct, accessible, tested and without dead ends.
 - **Fix an Astryx gap in one place**, never at each call site: a wrapper in
   `src/components/astryx/` (lint sends imports there), or the bun patch for
   what a wrapper can't reach (How it is wired → Packages). Known gaps in
-  Astryx 0.7.5:
+  Astryx 0.7.12:
   - A `Banner` has no live region unless it is given one. A banner for
     something that just happened (a refusal, a list that failed to load) gets
     `role="alert"`; a page-level notice that may change gets `role="status"`;
     a notice about a state that lasts, shown on every visit to its page or
     tab, gets no role, and what is new is announced politely with
-    `useAnnounce`.
-  - `Typeahead` and `Tokenizer` set no `aria-invalid` for an error status and
-    leave the `KEYBOARD` attributes out of their types: use the wrappers in
-    `@/components/astryx/`.
+    `useAnnounce`. Astryx puts `role="alert"` on the title and description
+    only: what must be read out with it goes there, not in the children or
+    `endContent`.
+  - `Typeahead` and `Tokenizer` leave the `KEYBOARD` attributes out of their
+    types: use the wrappers in `@/components/astryx/`.
   - A `Collapsible` jumps open and shut unless it is given a
     `useAnimatedLayout` handle: the wrapper in `@/components/astryx/collapsible`
     takes the one the page panel provides (`AnimatedLayoutScope`). The chat
@@ -154,20 +157,14 @@ ships must be release-ready: correct, accessible, tested and without dead ends.
     says). DateInput's `nativePicker` is deprecated since 0.6.4: use
     `presentation` (`"adaptive-bottom-sheet"` keeps the CSP-blocked browser
     picker away, see `key-expiry-field.tsx`).
-  - BottomSheet skips `data-autofocus` when opening the dialog already focused
-    its panel: focus the target yourself once the sheet is open (as
-    `activity-sources.tsx` does).
   - MoreMenu and DropdownMenu put `className` on the menu, not on its button
     (lint refuses it; the theme already makes the button 44 px on touch), and
     end a menu row's label in an ellipsis: `globals.css` (section 12d) wraps
     it. A start-aligned menu gets only the room right of its button: align a
     button near the right edge `end`, and one whose place varies `center`.
-  - A searchable Selector names its trigger by its label alone: give it an
-    `aria-label` that includes the value (as `model-selector.tsx` does).
-  - Table names every scroll region "Tabell", and absolutely positioned
-    (screen-reader-only) cell content escaped its scroll box and widened the
-    page: `@/components/astryx/table` names the region, and `globals.css`
-    (section 9) makes the scroll box `relative`.
+  - Absolutely positioned (screen-reader-only) cell content escapes Table's
+    scroll box and widens the page: `globals.css` (section 9) makes the scroll
+    box `relative`.
   - ScrollableArea's `axis="inline"` adds an `inline` class that collides with
     Tailwind's display utility. `globals.css` restores block layout for its
     viewport so overflowing content stays contained and keyboard-scrollable.
@@ -180,7 +177,9 @@ ships must be release-ready: correct, accessible, tested and without dead ends.
     `MessageResponse`), `useClipboard` writes text/plain only (the chat's
     rich-text copy keeps `navigator.clipboard.write`, commented), and the
     dictation hooks (`useChatDictation`, `useSpeechRecognition`) send audio to
-    the browser vendor, so we don't use them.
+    the browser vendor, so we don't use them. `useChatStreamScroll` adds its
+    overflow-anchor `<style>` without the CSP nonce unless the page has one:
+    `index.html` carries it (`data-astryx-scroll-anchoring="rule"`).
 - **Quality bar for every change:** small focused modules, typed APIs, no dead
   or duplicated code, tests for behaviour (including keyboard and axe), and
   `bun run check && bun run lint && bun run test` green.
@@ -227,7 +226,7 @@ open), so the index has no bar of its own and names itself with a heading.
 - **Packages** (beta, pinned exactly; upgrade together, then run
   `bunx astryx upgrade` and `bun run theme:build`): `@astryxdesign/core`,
   `@astryxdesign/theme-neutral`, `@stylexjs/stylex` (runtime only), dev
-  `@astryxdesign/cli`. `frontend/patches/@astryxdesign%2Fcore@0.7.5.patch`
+  `@astryxdesign/cli`. `frontend/patches/@astryxdesign%2Fcore@0.7.12.patch`
   makes CommandPalette mark the highlighted option as selected, and gives
   the layers' slide-rule `<style>` the page's CSP nonce. After an upgrade bun silently skips
   the stale patch and the guard tests in `src/components/astryx/` fail:
@@ -758,7 +757,7 @@ and with the text size at 130 %.
 
 <!-- ASTRYX:START -->
 
-Astryx 0.7.5 quick reference for this app (edited for web-next; see above).
+Astryx 0.7.12 quick reference for this app (edited for web-next; see above).
 
 - Discover: `bunx astryx search "<q>"`, `bunx astryx component <Name> --dense`,
   `bunx astryx build "<idea>"`, `bunx astryx docs layout`.

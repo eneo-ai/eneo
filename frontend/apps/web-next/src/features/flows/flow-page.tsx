@@ -154,7 +154,8 @@ function focusMoveControl(stepId: string, delta: -1 | 1) {
   requestAnimationFrame(() => {
     const same = document.getElementById(stepControlId(stepId, delta < 0 ? "up" : "down"));
     const other = document.getElementById(stepControlId(stepId, delta < 0 ? "down" : "up"));
-    const target = same instanceof HTMLButtonElement && !same.disabled ? same : other;
+    // A disabled Astryx Button is aria-disabled and still focusable.
+    const target = same && same.getAttribute("aria-disabled") !== "true" ? same : other;
     target?.focus();
   });
 }

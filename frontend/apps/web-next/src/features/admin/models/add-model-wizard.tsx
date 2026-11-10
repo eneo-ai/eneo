@@ -52,7 +52,7 @@ import { ProviderPicker } from "./provider-picker";
  */
 const STEP_FOCUS = [
   'input:not([disabled]):not([type="hidden"]), [role="combobox"]:not([aria-disabled="true"]), textarea:not([disabled])',
-  'button:not([disabled]), a[href], [tabindex="0"]'
+  'button:not([disabled]):not([aria-disabled="true"]), a[href], [tabindex="0"]'
 ];
 
 type Step = "provider" | "credentials" | "models";

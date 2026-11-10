@@ -11,7 +11,7 @@ import { Token } from "@astryxdesign/core/Token";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, RefreshCw, Search } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { LoadingState } from "@/components/composites/loading-state";
 import {
@@ -150,6 +150,7 @@ export function ModelCatalogStep({
   const announce = useAnnounce();
   const focus = useFieldFocus();
   const acknowledgeRef = useRef<HTMLInputElement>(null);
+  const failuresId = useId();
 
   const capsQuery = useQuery(providerCapabilitiesQueryOptions(browserApi));
   const securityQuery = useQuery(securityClassificationsQueryOptions(browserApi));
@@ -699,14 +700,16 @@ export function ModelCatalogStep({
 
       {validationFailures.length > 0 && (
         <div className="flex flex-col gap-3">
-          {/* Mounted by the press on the create button: announced as an alert. */}
+          {/* Mounted by the press on the create button: its title is announced
+              as an alert, and the checkbox that takes focus is described by
+              the failures. */}
           <Banner
             role="alert"
             status="warning"
             title={t("model_validation_warning_title")}
             collapsible={false}
           >
-            <ul className="flex flex-col gap-1.5">
+            <ul id={failuresId} className="flex flex-col gap-1.5">
               {validationFailures.map((failure) => (
                 <li key={failure.model} className="flex flex-wrap items-center gap-2 text-sm">
                   <Token label={failure.model} size="sm" />
@@ -718,6 +721,7 @@ export function ModelCatalogStep({
           <CheckboxInput
             ref={acknowledgeRef}
             label={t("model_validation_create_anyway_ack")}
+            aria-describedby={failuresId}
             value={createAnyway}
             onChange={setCreateAnyway}
           />

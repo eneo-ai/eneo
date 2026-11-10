@@ -23,8 +23,9 @@
       type="font/woff2"
       crossorigin=""
     />
-    <style nonce="__ENEO_CSP_NONCE__" data-astryx-chat-following-style>
-      [data-astryx-chat-following] {
+    <!-- Astryx's chat scroll-follow rule, with the nonce its own <style> lacks under the CSP. -->
+    <style nonce="__ENEO_CSP_NONCE__" data-astryx-scroll-anchoring="rule">
+      [data-astryx-scroll-anchoring="off"] {
         overflow-anchor: none !important;
       }
     </style>

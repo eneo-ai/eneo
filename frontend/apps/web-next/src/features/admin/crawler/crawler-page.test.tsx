@@ -315,7 +315,7 @@ describe("CrawlerPage", () => {
     expect(within(row).getByText("Dags att köra")).toBeTruthy();
     expect(screen.getByText("1 schemalagda webbplatser", { exact: false })).toBeTruthy();
 
-    fireEvent.click(within(table).getByRole("button", { name: /Sortera efter Webbplats/ }));
+    fireEvent.click(within(table).getByRole("button", { name: "Webbplats" }));
     await waitFor(() =>
       expect(
         state.requests

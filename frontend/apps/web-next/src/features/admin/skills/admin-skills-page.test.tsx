@@ -57,7 +57,7 @@ describe("admin skill runtime policy", () => {
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("query_error_title");
 
-    fireEvent.click(within(alert).getByRole("button", { name: "retry" }));
+    fireEvent.click(screen.getByRole("button", { name: "retry" }));
     expect(
       await screen.findByRole("switch", { name: "skills_runtime_policy_selective_title" })
     ).toBeTruthy();
@@ -207,10 +207,10 @@ describe("admin skill runtime policy", () => {
     fireEvent.click(screen.getByRole("button", { name: "skills_runtime_policy_save" }));
 
     const title = await screen.findByText("skills_runtime_policy_save_error");
-    const alert = title.closest<HTMLElement>('[role="alert"]')!;
-    fireEvent.click(alert.querySelector<HTMLElement>("[aria-expanded]")!);
-    expect(within(alert).getByText("error_id: 8bc91e0a")).toBeTruthy();
-    expect(within(alert).getByText("trace_id: trace-1")).toBeTruthy();
+    expect(title.closest('[role="alert"]')).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { expanded: false }));
+    expect(screen.getByText("error_id: 8bc91e0a")).toBeTruthy();
+    expect(screen.getByText("trace_id: trace-1")).toBeTruthy();
   });
 
   it("requires confirmation to reset the policy", async () => {

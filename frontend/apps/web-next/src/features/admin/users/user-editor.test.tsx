@@ -542,7 +542,7 @@ describe("UserEditorDialog user groups", () => {
     expect(screen.queryByRole("option", { name: "Ekonomi" })).toBeNull();
     fireEvent.click(await screen.findByRole("option", { name: "Arkiv" }));
     // The trigger's name carries the pick (Astryx names it by its label alone).
-    expect(within(dialog).getByRole("button", { name: "Användargrupper: Arkiv" })).toBeTruthy();
+    expect(within(dialog).getByRole("button", { name: "Användargrupper Arkiv" })).toBeTruthy();
     fireEvent.click(within(dialog).getByRole("button", { name: "Tilldela" }));
 
     await waitFor(() =>

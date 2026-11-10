@@ -80,11 +80,19 @@ function modelFacts(model: CompletionModel, showPricing: boolean, t: Translate):
  */
 const COMPACT_NAME = "max-w-[min(12rem,30vw)] max-sm:hidden";
 
-function ModelValue({ model, compact }: { model: ModelRef; compact: boolean }) {
+function ModelValue({
+  model,
+  name = modelName(model),
+  compact
+}: {
+  model: ModelRef;
+  name?: string;
+  compact: boolean;
+}) {
   return (
     <span className="flex min-w-0 items-center gap-2">
       <ProviderLogo provider={model.org ?? model.provider_type} />
-      <span className={cn("truncate", compact && COMPACT_NAME)}>{modelName(model)}</span>
+      <span className={cn("truncate", compact && COMPACT_NAME)}>{name}</span>
     </span>
   );
 }
@@ -271,9 +279,6 @@ export function ModelSelector({
     <>
       <Selector
         {...shared}
-        // With a search field the trigger is a plain button that Astryx 0.6.3
-        // names by its label alone, so the chosen model would not be read out.
-        aria-label={t("legacy_model_selector_trigger", { label, model: valueText })}
         options={options}
         value={followsDefault ? DEFAULT_VALUE : selected?.id}
         onChange={(next) => {
@@ -294,8 +299,12 @@ export function ModelSelector({
         searchPlaceholder={t("search_models_and_providers")}
         emptyText={t("no_models_found")}
         emptySearchText={t("no_models_found")}
+        // The trigger is named by its label and this value (Astryx), so a
+        // followed default says so in both.
         renderValue={(option) => {
-          const model = option.value === DEFAULT_VALUE ? defaultModel : byId.get(option.value);
+          if (option.value === DEFAULT_VALUE && defaultModel)
+            return <ModelValue model={defaultModel} name={valueText} compact={compact} />;
+          const model = byId.get(option.value);
           if (model) return <ModelValue model={model} compact={compact} />;
           return option.value === DEFAULT_VALUE && defaultChoice ? (
             <span className={cn("block truncate", compact && COMPACT_NAME)}>

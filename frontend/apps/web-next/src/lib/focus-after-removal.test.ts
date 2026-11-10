@@ -44,3 +44,16 @@ it("names nothing when the list went with the row, or for a control outside any 
   button.remove();
   expect(loose()).toBeNull();
 });
+
+it("skips a disabled control, also an aria-disabled one that keeps focus", () => {
+  const ul = list(["a", "b"]);
+  const [link, button] = ul.children[1]!.children;
+  link!.removeAttribute("href");
+  button!.setAttribute("aria-disabled", "true");
+  ul.children[1]!.append(
+    Object.assign(document.createElement("button"), { textContent: "Öppna b" })
+  );
+  const next = focusAfterRemoval(menu("a"));
+  ul.children[0]!.remove();
+  expect(next()?.textContent).toBe("Öppna b");
+});

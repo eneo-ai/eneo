@@ -459,7 +459,7 @@ describe("DesktopSideNav on a tablet or a small laptop", () => {
     expect(expanded()).toBe(true);
   });
 
-  it("moves focus to the toggle when narrowing below 1280 px replaces the focused control", async () => {
+  it("keeps focus in the rail when narrowing below 1280 px removes the focused control", async () => {
     setViewport({ width: 1280, height: 800, pointer: "fine" });
     setRoute("/spaces/s1/overview");
     const queryClient = seededClient();
@@ -469,13 +469,16 @@ describe("DesktopSideNav on a tablet or a small laptop", () => {
     );
     renderInApp(<SpaceSideNav />, { queryClient, appContext: testAppContext() });
     // The space switcher's trigger is another element in the icon rail.
-    const trigger = screen.getByRole("button", { name: "Öppna meny" });
+    const trigger = screen.getByRole("button", { name: "Upphandling, Öppna meny" });
     trigger.focus();
 
     act(() => setViewport({ width: 1279, height: 800, pointer: "fine" }));
 
-    const toggle = screen.getByRole("button", { name: "Fäll ut sidomenyn" });
-    await waitFor(() => expect(document.activeElement).toBe(toggle));
+    // Astryx moves it to the nearest row the rail keeps: the current page.
+    await waitFor(() => expect(document.activeElement?.getAttribute("aria-current")).toBe("page"));
+    expect(
+      screen.getByRole("navigation", { name: "Ytans meny" }).contains(document.activeElement)
+    ).toBe(true);
   });
 
   it("leaves focus outside the nav where it was when the width collapses the nav", async () => {

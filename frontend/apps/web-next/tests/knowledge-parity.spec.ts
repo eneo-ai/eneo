@@ -144,7 +144,7 @@ test("restores server search and a URL folder after reloading indexed content", 
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 844 });
     await expect(search).toBeVisible();
-    const nameColumn = page.getByRole("columnheader", { name: "Sortera efter Namn" });
+    const nameColumn = page.getByRole("columnheader", { name: "Namn", exact: true });
     expect((await nameColumn.boundingBox())!.width).toBeGreaterThanOrEqual(176);
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)

@@ -38,7 +38,7 @@ function Probe() {
 
 it("renders in Swedish, Astryx's own strings too", () => {
   renderInApp(<Spinner />);
-  expect(screen.getByRole("status", { name: "Läser in" })).toBeTruthy();
+  expect(screen.getByRole("progressbar", { name: "Läser in" })).toBeTruthy();
 });
 
 it("provides the signed-in context, the app's query client, the shell and the route", () => {

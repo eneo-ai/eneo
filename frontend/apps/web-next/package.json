@@ -24,8 +24,8 @@
   },
   "dependencies": {
     "@ai-sdk/react": "3.0.294",
-    "@astryxdesign/core": "0.7.5",
-    "@astryxdesign/theme-neutral": "0.7.5",
+    "@astryxdesign/core": "0.7.12",
+    "@astryxdesign/theme-neutral": "0.7.12",
     "@eneo/markdown-math": "workspace:*",
     "@eneo/whats-new": "workspace:*",
     "@eneo/eneo-js": "workspace:*",
@@ -84,7 +84,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@astryxdesign/cli": "0.7.5",
+    "@astryxdesign/cli": "0.7.12",
     "@axe-core/playwright": "4.13.0",
     "@eneo/eslint-plugin": "workspace:*",
     "@playwright/test": "1.61.1",

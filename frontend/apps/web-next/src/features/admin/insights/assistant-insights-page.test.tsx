@@ -259,10 +259,10 @@ describe("AssistantInsightsPage", () => {
     fireEvent.keyDown(question, { key: "Enter" });
 
     const message = await screen.findByText("Model unavailable");
-    const alert = message.closest<HTMLElement>('[role="alert"]')!;
-    // No retry inside the error: it would unmount under focus while the
+    expect(message.closest('[role="alert"]')).not.toBeNull();
+    // No retry beside the error: it would unmount under focus while the
     // question runs. Asking again is the retry, and its control stays put.
-    expect(within(alert).queryByRole("button", { name: /Försök igen/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Försök igen/ })).toBeNull();
 
     fireEvent.keyDown(question, { key: "Enter" });
     expect(await screen.findByText("De flesta frågor gäller LOU.")).toBeTruthy();

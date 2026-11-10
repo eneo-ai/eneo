@@ -32,12 +32,12 @@ describe("overview chart", () => {
     renderInApp(<UsageAreaChart data={data} range={range} />);
     const previous = screen.getByRole("button", { name: "Tidigare dagar" });
     const next = screen.getByRole("button", { name: "Senare dagar" });
-    expect(previous.getAttribute("disabled")).toBeNull();
-    expect(next.getAttribute("disabled")).not.toBeNull();
+    expect(previous.getAttribute("aria-disabled")).toBeNull();
+    expect(next.getAttribute("aria-disabled")).toBe("true");
     expect(within(screen.getByRole("table")).getAllByRole("row").length).toBeLessThanOrEqual(46);
     fireEvent.click(previous);
     expect(within(screen.getByRole("table")).getByText("3")).toBeTruthy();
-    expect(next.getAttribute("disabled")).toBeNull();
+    expect(next.getAttribute("aria-disabled")).toBeNull();
     expect(screen.getByText(/Första registrerade aktivitet i vald period/)).toBeTruthy();
   });
 

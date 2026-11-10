@@ -141,7 +141,7 @@ describe("FlowChatSettings", () => {
     renderControls();
     await openSettings();
     const picker = screen.getByRole("button", {
-      name: "Chattmodell: Standardmodell (standard)"
+      name: "Chattmodell Standardmodell (standard)"
     });
 
     fireEvent.click(picker);
@@ -160,7 +160,7 @@ describe("FlowChatSettings", () => {
     state.reply = ok({ ...CHAT, completion_model_id: "model-strong" });
     const { queryClient } = renderControls();
     await openSettings();
-    fireEvent.click(screen.getByRole("button", { name: /^Chattmodell: / }));
+    fireEvent.click(screen.getByRole("button", { name: /^Chattmodell / }));
     fireEvent.click(await screen.findByRole("option", { name: /Stark modell/ }));
 
     await waitFor(() =>
@@ -182,7 +182,7 @@ describe("FlowChatSettings", () => {
     state.reply = ok(CHAT);
     renderControls({ ...CHAT, completion_model_id: "model-strong" });
     await openSettings();
-    fireEvent.click(screen.getByRole("button", { name: "Chattmodell: Stark modell" }));
+    fireEvent.click(screen.getByRole("button", { name: "Chattmodell Stark modell" }));
     fireEvent.click(await screen.findByRole("option", { name: /^Använd standard/ }));
 
     await waitFor(() =>
@@ -203,7 +203,7 @@ describe("FlowChatSettings", () => {
     });
     const { onRefused } = renderControls();
     await openSettings();
-    fireEvent.click(screen.getByRole("button", { name: /^Chattmodell: / }));
+    fireEvent.click(screen.getByRole("button", { name: /^Chattmodell / }));
     fireEvent.click(await screen.findByRole("option", { name: /Stark modell/ }));
 
     await waitFor(() => expect(onRefused).toHaveBeenCalledTimes(1));
@@ -212,7 +212,7 @@ describe("FlowChatSettings", () => {
     expect((error as { reason?: string }).reason).toBe("flow_authoring_model_below_classification");
     await waitFor(() =>
       expect(
-        screen.getByRole("button", { name: "Chattmodell: Standardmodell (standard)" })
+        screen.getByRole("button", { name: "Chattmodell Standardmodell (standard)" })
       ).toBeTruthy()
     );
     expect(state.announce).not.toHaveBeenCalled();
@@ -239,7 +239,7 @@ describe("FlowChatSettings", () => {
   it("offers no reasoning level for a model without them", async () => {
     renderControls();
     await openSettings();
-    expect(screen.getByRole("button", { name: /^Chattmodell: / })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Chattmodell / })).toBeTruthy();
     expect(screen.queryByRole("combobox", { name: /^Resonemangsnivå/ })).toBeNull();
   });
 });

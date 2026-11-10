@@ -23,7 +23,6 @@ import { LoadingState } from "@/components/composites/loading-state";
 import { browserApi } from "@/lib/api/browser";
 import { MEDIA } from "@/lib/breakpoints";
 import { formatBytes } from "@/lib/format";
-import { useFocusRescue } from "@/lib/focus-rescue";
 import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 import { useSpace } from "@/features/spaces/use-space";
 import type { IntegrationKnowledge } from "../../knowledge";
@@ -241,8 +240,6 @@ export function FolderDocuments({
   const announce = useAnnounce();
   const isNarrow = useMediaQuery(NARROW_QUERY);
   const { space } = useSpace();
-  const sectionRef = useRef<HTMLElement>(null);
-  const rescue = useFocusRescue();
   const [view, setView] = useState<DocumentsView>("searchable");
   const [searchInput, setSearchInput] = useState("");
   const [q, setQ] = useState("");
@@ -290,10 +287,9 @@ export function FolderDocuments({
     (documents.isPlaceholderData || page > lastPage);
 
   function changePage(next: number) {
+    // The pressed button keeps focus, also when it disables at the last or
+    // first page (Astryx's disabled buttons stay focusable).
     setPage(next);
-    // The pressed button stays focused, except "next"/"previous" at the last
-    // or first page, which becomes disabled: then focus moves to the folder.
-    rescue(sectionRef.current);
   }
 
   const emptyText =
@@ -401,10 +397,7 @@ export function FolderDocuments({
 
   return (
     <section
-      ref={sectionRef}
-      // Takes focus when the pressed page button disables at the first or last page.
-      tabIndex={-1}
-      className="focus-visible:outline-ring rounded-ax-element flex min-w-0 flex-col gap-3 focus-visible:outline-2 focus-visible:outline-offset-4"
+      className="flex min-w-0 flex-col gap-3"
       aria-labelledby={`folder-documents-${item.id}`}
     >
       {showHeader ? (

@@ -59,21 +59,21 @@ it("previews the current version and author, blocks current restore and non-auth
   show();
   await screen.findByText("Current text");
   expect(
-    (screen.getByRole("button", { name: "Återställ denna version" }) as HTMLButtonElement).disabled
-  ).toBe(true);
-  expect(
-    (screen.getByRole("button", { name: "Radera prompt" }) as HTMLButtonElement).disabled
-  ).toBe(true);
+    screen.getByRole("button", { name: "Återställ denna version" }).getAttribute("aria-disabled")
+  ).toBe("true");
+  expect(screen.getByRole("button", { name: "Radera prompt" }).getAttribute("aria-disabled")).toBe(
+    "true"
+  );
   expect(screen.getAllByText(/owner@example.se/).length).toBeGreaterThan(0);
   await expectNoAxeViolations(document.body);
   fireEvent.click(screen.getByRole("button", { name: /Other note/ }));
   await screen.findByText("Old text");
   expect(
-    (screen.getByRole("button", { name: "Redigera beskrivning" }) as HTMLButtonElement).disabled
-  ).toBe(true);
-  expect(
-    (screen.getByRole("button", { name: "Radera prompt" }) as HTMLButtonElement).disabled
-  ).toBe(true);
+    screen.getByRole("button", { name: "Redigera beskrivning" }).getAttribute("aria-disabled")
+  ).toBe("true");
+  expect(screen.getByRole("button", { name: "Radera prompt" }).getAttribute("aria-disabled")).toBe(
+    "true"
+  );
 });
 it("keeps a failed description draft for retry, updates preview and confirms historical deletion", async () => {
   api.PATCH.mockRejectedValueOnce(new Error("failed")).mockImplementation(async (_path, init) => {
@@ -148,8 +148,8 @@ it("clears a historical selection when the parent resource changes", async () =>
   expect(await screen.findByText("Second resource prompt")).toBeTruthy();
   expect(screen.queryByText("Old text")).toBeNull();
   expect(
-    (screen.getByRole("button", { name: "Återställ denna version" }) as HTMLButtonElement).disabled
-  ).toBe(true);
+    screen.getByRole("button", { name: "Återställ denna version" }).getAttribute("aria-disabled")
+  ).toBe("true");
 });
 
 it("names the dialog when opened after its parent was mounted closed", async () => {

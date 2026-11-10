@@ -218,7 +218,9 @@ it("searches the group picker and adds the chosen group with its role", async ()
     response: new Response("{}")
   });
   const { dialog, add } = await openDialog("Lägg till grupp");
-  fireEvent.click(within(dialog).getByRole("button", { name: "Användargrupper" }));
+  fireEvent.click(
+    within(dialog).getByRole("button", { name: "Användargrupper Välj en användargrupp..." })
+  );
   const search = await screen.findByPlaceholderText("Välj en användargrupp...");
   fireEvent.change(search, { target: { value: "miljö" } });
   expect(screen.queryByRole("option", { name: "HR" })).toBeNull();
@@ -240,7 +242,9 @@ it("says a group must be picked when adding a group, at its picker", async () =>
 
   fireEvent.click(add);
 
-  const group = within(dialog).getByRole("button", { name: "Användargrupper" });
+  const group = within(dialog).getByRole("button", {
+    name: "Användargrupper Välj en användargrupp..."
+  });
   expect(group.getAttribute("aria-invalid")).toBe("true");
   expect(document.activeElement).toBe(group);
   expect(api.POST).not.toHaveBeenCalled();

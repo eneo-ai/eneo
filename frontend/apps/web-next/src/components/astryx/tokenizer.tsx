@@ -3,9 +3,8 @@ import type { SearchableItem } from "@astryxdesign/core/Typeahead";
 import type { KeyboardAttributes } from "./typeahead";
 
 /**
- * Astryx Tokenizer whose error status is announced as one and whose input
- * takes a `KEYBOARD` preset, as Typeahead's does. Lint sends every Tokenizer
- * import here.
+ * Astryx Tokenizer whose input takes a `KEYBOARD` preset, as Typeahead's
+ * does. Lint sends every Tokenizer import here.
  */
 export function Tokenizer<T extends SearchableItem>({
   enterKeyHint,
@@ -16,11 +15,5 @@ export function Tokenizer<T extends SearchableItem>({
   ...props
 }: TokenizerProps<T> & KeyboardAttributes) {
   const keyboard: object = { enterKeyHint, inputMode, autoCapitalize, autoCorrect, spellCheck };
-  return (
-    <AstryxTokenizer
-      aria-invalid={props.status?.type === "error" || undefined}
-      {...keyboard}
-      {...props}
-    />
-  );
+  return <AstryxTokenizer {...keyboard} {...props} />;
 }

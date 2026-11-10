@@ -73,7 +73,7 @@ describe("states", () => {
     renderInApp(<FederationPage />);
 
     const retry = await screen.findByRole("button", { name: /Försök igen/ });
-    expect(retry.closest('[role="alert"]')?.textContent).toContain(
+    expect(screen.getByRole("alert").textContent).toContain(
       "Inloggningsinställningarna kunde inte hämtas"
     );
     fireEvent.click(retry);

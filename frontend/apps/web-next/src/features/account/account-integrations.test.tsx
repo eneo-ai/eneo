@@ -130,8 +130,8 @@ it("explains unavailable tenant configuration without offering an action", async
   items = [integration({ tenant_app_configured: false })];
   renderInApp(<AccountIntegrations />);
   expect(
-    (await screen.findByRole("button", { name: "Inte tillgänglig" })).hasAttribute("disabled")
-  ).toBe(true);
+    (await screen.findByRole("button", { name: "Inte tillgänglig" })).getAttribute("aria-disabled")
+  ).toBe("true");
   expect(
     screen.getByText("Kontakta din administratör för att aktivera denna integration")
   ).toBeTruthy();

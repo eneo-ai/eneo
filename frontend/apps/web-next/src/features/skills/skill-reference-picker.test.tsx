@@ -77,7 +77,7 @@ describe("instruction references", () => {
     fireEvent.click(option);
     const insert = screen.getByRole("button", { name: "Infoga referens" });
     await screen.findByRole("button", { name: "Försök igen" });
-    expect(insert.hasAttribute("disabled")).toBe(true);
+    expect(insert.getAttribute("aria-disabled")).toBe("true");
     fireEvent.click(screen.getByRole("button", { name: "Försök igen" }));
     await screen.findByText("Använd korta meningar.");
     expect(screen.queryByRole("textbox", { name: "Sök referens" })).toBeNull();
@@ -170,8 +170,8 @@ describe("instruction references", () => {
     expect(
       within(screen.getByRole("dialog"))
         .getByRole("button", { name: "Infoga referens" })
-        .hasAttribute("disabled")
-    ).toBe(false);
+        .getAttribute("aria-disabled")
+    ).toBeNull();
   });
 
   it("exposes a named, described editor with accessible reference tokens", async () => {

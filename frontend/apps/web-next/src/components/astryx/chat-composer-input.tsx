@@ -9,7 +9,7 @@ export type { ChatComposerInputProps };
 
 /**
  * Astryx ChatComposerInput whose `aria-invalid` reaches the element you type
- * in. Astryx 0.7.5 puts a caller's `aria-describedby` on the editable element
+ * in. Astryx 0.7.12 puts a caller's `aria-describedby` on the editable element
  * and its wrapper, but `aria-invalid` on the wrapper only, so the validation
  * state would otherwise never be read out with the field. Both are written on
  * the editable element alone after each render; Astryx sets neither of its

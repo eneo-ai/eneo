@@ -548,9 +548,9 @@ describe("FlowStepEditor", () => {
     const { container } = renderEditor(makeFlow(), { suggestionFix: fix });
 
     const button = await screen.findByRole("button", { name: "Åtgärda ”Förslag”" });
-    expect((button as HTMLButtonElement).disabled).toBe(false);
+    expect(button.getAttribute("aria-disabled")).toBeNull();
     fireEvent.change(await nameField(), { target: { value: "Sammanfatta ärendet" } });
-    await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(true));
+    await waitFor(() => expect(button.getAttribute("aria-disabled")).toBe("true"));
     const reason = screen.getByText(messages.flow_suggestions_fix_blocked_unsaved);
     expect(button.getAttribute("aria-describedby")).toBe(reason.id);
     fireEvent.click(button);
@@ -559,7 +559,7 @@ describe("FlowStepEditor", () => {
 
     // Undone, it is offered again and fixes the one suggestion.
     fireEvent.change(await nameField(), { target: { value: "Sammanfatta" } });
-    await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+    await waitFor(() => expect(button.getAttribute("aria-disabled")).toBeNull());
     fireEvent.click(button);
     await waitFor(() => expect(fix.onFix).toHaveBeenCalledWith(["b".repeat(64)]));
   });
@@ -656,8 +656,8 @@ describe("FlowStepEditor", () => {
     const bar = screen.getByRole("navigation", { name: "Stegen" });
     // Disabled at the first step, so the bar does not move.
     expect(
-      (within(bar).getByRole("button", { name: "Föregående steg" }) as HTMLButtonElement).disabled
-    ).toBe(true);
+      within(bar).getByRole("button", { name: "Föregående steg" }).getAttribute("aria-disabled")
+    ).toBe("true");
     fireEvent.click(within(bar).getByRole("button", { name: "Nästa steg: Skriv svar" }));
     expect(onGo).toHaveBeenCalledWith("step-2");
 

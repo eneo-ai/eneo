@@ -337,7 +337,7 @@ describe("UsagePage", () => {
     expect(window.location.search).toBe("?tab=users&page=2");
 
     // A new sort starts over on the first page; names sort A–Z first.
-    fireEvent.click(screen.getByRole("button", { name: /^Sortera efter Användare/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Användare" }));
     await waitFor(() =>
       expect(usersCalls().at(-1)?.query).toMatchObject({
         page: 1,
@@ -350,20 +350,20 @@ describe("UsagePage", () => {
 
     // A second click on the active column flips it, and a figure column can
     // reach ascending order.
-    fireEvent.click(screen.getByRole("button", { name: /^Sortera efter Användare/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Användare" }));
     await waitFor(() =>
       expect(usersCalls().at(-1)?.query).toMatchObject({ sort_by: "username", sort_order: "desc" })
     );
-    fireEvent.click(screen.getByRole("button", { name: /^Sortera efter Förfrågningar/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Förfrågningar" }));
     await waitFor(() =>
       expect(usersCalls().at(-1)?.query).toMatchObject({ sort_by: "requests", sort_order: "desc" })
     );
-    fireEvent.click(screen.getByRole("button", { name: /^Sortera efter Förfrågningar/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Förfrågningar" }));
     await waitFor(() =>
       expect(usersCalls().at(-1)?.query).toMatchObject({ sort_by: "requests", sort_order: "asc" })
     );
     // Back to names: served from the cache, so check the view, not a request.
-    fireEvent.click(screen.getByRole("button", { name: /^Sortera efter Användare/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Användare" }));
     await waitFor(() =>
       expect(
         screen.getByRole("columnheader", { name: /Användare/ }).getAttribute("aria-sort")
@@ -444,8 +444,8 @@ describe("UsagePage", () => {
     apiState.failingPaths.add("/api/v1/token-usage/");
     const { container } = renderInApp(<UsagePage />, { route: "/admin/usage" });
 
-    const alert = await findError();
-    fireEvent.click(within(alert).getByRole("button", { name: "Expandera" }));
+    expect(await findError()).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Expandera" }));
     expect(screen.getByText("Fel-ID: 8bc91e0a")).toBeTruthy();
     expect(screen.getByText("Spårnings-ID: trace-123")).toBeTruthy();
     await expectNoAxeViolations(container);

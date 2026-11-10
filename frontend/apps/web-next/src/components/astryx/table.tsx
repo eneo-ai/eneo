@@ -29,11 +29,9 @@ export type TableProps<T extends Record<string, unknown>> = AstryxTableProps<T> 
   };
 
 /**
- * Astryx Table that has to be named, and whose scroll region carries that
- * name. Astryx names every table's horizontal scroll region "Tabell", so a
- * keyboard user tabbing to a table that scrolls heard only that; the region
- * now takes the table's own name through Astryx's plugin API. Lint sends
- * every Table import here.
+ * Astryx Table that has to be named: Astryx gives its scroll region the
+ * table's name, or only "Tabell" when the table has none. Lint sends every
+ * Table import here.
  *
  * `pinnedColumn` and `pinnedEndColumn` hold a column in view at either end
  * (Astryx's sticky columns). They cover
@@ -45,24 +43,13 @@ export function Table<T extends Record<string, unknown>>({
   pinnedEndColumn,
   ...props
 }: TableProps<T>) {
-  const label = props["aria-label"];
-  const labelledBy = props["aria-labelledby"];
   const userPlugins = props.plugins;
   const sticky = useTableStickyColumns<T>({
     startKeys: pinnedColumn ? [pinnedColumn] : undefined,
     endKeys: pinnedEndColumn ? [pinnedEndColumn] : undefined
   });
   const plugins = useMemo(() => {
-    const scrollRegionName: TablePlugin<T> = {
-      transformScrollWrapper: (render) => ({
-        ...render,
-        htmlProps: {
-          ...render.htmlProps,
-          ...(labelledBy ? { "aria-labelledby": labelledBy } : { "aria-label": label })
-        }
-      })
-    };
-    if (!pinnedColumn && !pinnedEndColumn) return { ...userPlugins, scrollRegionName };
+    if (!pinnedColumn && !pinnedEndColumn) return userPlugins;
     // After the sticky plugin, whose ref on the region this one wraps. The
     // attribute is for globals.css section 9.
     const pinnedRegion: TablePlugin<T> = {
@@ -71,8 +58,8 @@ export function Table<T extends Record<string, unknown>>({
         htmlProps: { ...render.htmlProps, ref: keepFocusClear(render.htmlProps.ref), ...PINNED }
       })
     };
-    return { ...userPlugins, sticky, pinnedRegion, scrollRegionName };
-  }, [label, labelledBy, pinnedColumn, pinnedEndColumn, sticky, userPlugins]);
+    return { ...userPlugins, sticky, pinnedRegion };
+  }, [pinnedColumn, pinnedEndColumn, sticky, userPlugins]);
 
   return <AstryxTable<T> {...props} plugins={plugins} />;
 }

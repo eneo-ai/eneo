@@ -357,9 +357,9 @@ describe("FlowStepList", () => {
   it("moves a step with buttons, never past either end", () => {
     const { actions } = renderList();
     const up = screen.getByRole("button", { name: "Flytta upp Steg 1: Sammanfatta" });
-    expect((up as HTMLButtonElement).disabled).toBe(true);
+    expect(up.getAttribute("aria-disabled")).toBe("true");
     const down = screen.getByRole("button", { name: "Flytta ner Steg 3: Granska" });
-    expect((down as HTMLButtonElement).disabled).toBe(true);
+    expect(down.getAttribute("aria-disabled")).toBe("true");
 
     fireEvent.click(screen.getByRole("button", { name: "Flytta ner Steg 1: Sammanfatta" }));
     expect(actions.onMove).toHaveBeenCalledWith(steps[0], 1);

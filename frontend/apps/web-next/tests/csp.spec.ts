@@ -28,7 +28,7 @@ test("records what the Content-Security-Policy blocks", async ({ page, cspViolat
 test("Astryx layers get their slide rules past the CSP", async ({ page, cspViolations }) => {
   // The chat mounts Astryx layers (tooltips, popovers) on load; the first one
   // installs the `@position-try` rules that let a layer slide or flip at the
-  // viewport edge (frontend/patches/@astryxdesign%2Fcore@0.7.5.patch).
+  // viewport edge (frontend/patches/@astryxdesign%2Fcore@0.7.12.patch).
   await page.goto("/spaces/personal/chat");
   await expect
     .poll(() =>

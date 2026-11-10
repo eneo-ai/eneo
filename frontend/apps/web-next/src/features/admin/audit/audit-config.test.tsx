@@ -100,7 +100,7 @@ describe("AuditConfig", () => {
     button.focus();
     fireEvent.click(button);
     await waitFor(() => expect(api.PATCH).toHaveBeenCalledTimes(1));
-    expect(button).toHaveProperty("disabled", false);
+    expect(button.getAttribute("aria-disabled")).toBeNull();
     expect(button.getAttribute("aria-busy")).toBe("true");
     fireEvent.click(button);
     expect(api.PATCH).toHaveBeenCalledTimes(1);
@@ -227,14 +227,18 @@ describe("AuditConfig", () => {
     await screen.findByText("Serverläget kunde inte läsas om. Dina ändringar finns kvar.", {
       selector: "p"
     });
-    expect(screen.getByRole("button", { name: "Återställ" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: "Återställ" }).getAttribute("aria-disabled")).toBe(
+      "true"
+    );
     expect(enabled("Administratörsåtgärder")).toBe("false");
     failRefresh = false;
     fireEvent.click(
       screen.getByRole("button", { name: /Försök igen: Innehållet kunde inte uppdateras/ })
     );
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Återställ" })).toHaveProperty("disabled", false)
+      expect(
+        screen.getByRole("button", { name: "Återställ" }).getAttribute("aria-disabled")
+      ).toBeNull()
     );
     reset();
     fireEvent.click(screen.getByRole("button", { name: "Expandera alla" }));

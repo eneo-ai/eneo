@@ -633,7 +633,16 @@ describe("the add-model wizard's catalog", () => {
       name: "Jag förstår att valideringen misslyckades och vill skapa modellen ändå."
     });
     expect(document.activeElement).toBe(acknowledge);
-    expect(within(dialog).getByRole("alert").textContent).toContain("Model not found: gpt-5");
+    expect(within(dialog).getByRole("alert").textContent).toBe(
+      "Vissa modeller kunde inte verifieras"
+    );
+    // What failed is read with the checkbox that acknowledges it.
+    const description = acknowledge
+      .getAttribute("aria-describedby")!
+      .split(" ")
+      .map((id) => document.getElementById(id)?.textContent)
+      .join(" ");
+    expect(description).toContain("Model not found: gpt-5");
     await expectNoAxeViolations(document.body);
 
     // Not acknowledged: the press leads back to the question.

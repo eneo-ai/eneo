@@ -269,7 +269,7 @@ describe("SpaceChat", () => {
 
     const effort = await screen.findByRole("combobox", { name: "Resonemangsnivå: Medel" });
     // Beside the model picker, in the composer's send actions.
-    expect(screen.getByRole("button", { name: /^Chattmodell: GPT-5/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Chattmodell GPT-5/ })).toBeTruthy();
     fireEvent.click(effort);
     fireEvent.click(await screen.findByRole("option", { name: "Hög" }));
 
@@ -303,7 +303,7 @@ describe("SpaceChat", () => {
       }
     });
     renderRoute("/spaces/personal/chat");
-    await screen.findByRole("button", { name: /^Chattmodell: GPT-5/ });
+    await screen.findByRole("button", { name: /^Chattmodell GPT-5/ });
     expect(screen.queryByRole("combobox", { name: /^Resonemangsnivå/ })).toBeNull();
   });
 });

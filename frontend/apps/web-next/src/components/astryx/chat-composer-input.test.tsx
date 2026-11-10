@@ -10,7 +10,7 @@ import { ChatComposerInput } from "./chat-composer-input";
 
 afterEach(cleanup);
 
-// Guards the wrapper's reason: Astryx 0.7.5 puts a caller's aria-invalid on
+// Guards the wrapper's reason: Astryx 0.7.12 puts a caller's aria-invalid on
 // the input's wrapper only. When the editable element gets it itself, this
 // wrapper and this test can go.
 it("marks the element you type in as invalid, where Astryx marks its wrapper", () => {

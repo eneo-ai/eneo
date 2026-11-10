@@ -214,8 +214,8 @@ describe("FlowSettings", () => {
     const button = (name: string) => screen.getByRole("button", { name }) as HTMLButtonElement;
     expect(order()).toEqual(["Diarienummer", "Datum"]);
     // The first field cannot go up, the last cannot go down.
-    expect(button("Flytta upp Diarienummer").disabled).toBe(true);
-    expect(button("Flytta ner Datum").disabled).toBe(true);
+    expect(button("Flytta upp Diarienummer").getAttribute("aria-disabled")).toBe("true");
+    expect(button("Flytta ner Datum").getAttribute("aria-disabled")).toBe("true");
 
     fireEvent.click(screen.getByRole("button", { name: "Flytta ner Diarienummer" }));
     expect(order()).toEqual(["Datum", "Diarienummer"]);

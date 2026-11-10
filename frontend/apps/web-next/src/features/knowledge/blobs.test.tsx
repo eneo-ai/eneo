@@ -205,7 +205,7 @@ describe("BlobTable", () => {
     );
     expect(screen.getByRole("button", { name: "https://example.test/old" })).toBeTruthy();
     expect(screen.getByText("https://example.test/new")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Sortera efter Skapad" }));
+    fireEvent.click(screen.getByRole("button", { name: "Skapad" }));
     const rows = within(screen.getByRole("table")).getAllByRole("row");
     expect(rows[1]!.textContent).toContain("https://example.test/old");
     expect(rows[2]!.querySelector("time")?.dateTime).toBe("2026-10-30T10:00:00.000Z");
@@ -226,9 +226,9 @@ describe("BlobTable", () => {
     // Named by what the page shows it under (here the collection's title).
     expect(screen.getByRole("table", { name: "Upphandlingspolicy" })).toBeTruthy();
     expect(names()).toEqual(["b.pdf", "ö.pdf", "a.pdf"]);
-    fireEvent.click(screen.getByRole("button", { name: "Sortera efter Storlek" }));
+    fireEvent.click(screen.getByRole("button", { name: "Storlek" }));
     expect(names()).toEqual(["ö.pdf", "a.pdf", "b.pdf"]);
-    fireEvent.click(screen.getByRole("button", { name: "Sortera efter Namn" }));
+    fireEvent.click(screen.getByRole("button", { name: "Namn" }));
     expect(names()).toEqual(["a.pdf", "b.pdf", "ö.pdf"]);
     expect(screen.getAllByRole("button", { name: /Fler åtgärder för/ })).toHaveLength(3);
     await expectNoAxeViolations(container);

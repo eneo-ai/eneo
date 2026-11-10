@@ -1,8 +1,8 @@
 diff --git a/dist/CommandPalette/CommandPaletteItem.js b/dist/CommandPalette/CommandPaletteItem.js
-index 7a953f718ccf3c24611a459441e4f22ef495b115..18f733c2c1512bd649774f3fe83da9a7b907ebe5 100644
+index e365e44..b56cc87 100644
 --- a/dist/CommandPalette/CommandPaletteItem.js
 +++ b/dist/CommandPalette/CommandPaletteItem.js
-@@ -142,7 +142,10 @@ export function CommandPaletteItem({
+@@ -144,7 +144,10 @@ export function CommandPaletteItem({
      ...props,
      id: ctx && itemIndex >= 0 ? ctx.getItemId(itemIndex) : idProp,
      role: "option",
@@ -15,10 +15,10 @@ index 7a953f718ccf3c24611a459441e4f22ef495b115..18f733c2c1512bd649774f3fe83da9a7
      "data-value": value,
      ...pressable,
 diff --git a/dist/Layer/layerSlideRules.js b/dist/Layer/layerSlideRules.js
-index 110ea7ed876817c29125c30017f552ac185f2209..a12c0b5d7d6a5c4fd209219cf42e10facc5af77a 100644
+index 0724b74..d1bf2a5 100644
 --- a/dist/Layer/layerSlideRules.js
 +++ b/dist/Layer/layerSlideRules.js
-@@ -225,6 +225,15 @@ export function ensureSlideRules(doc) {
+@@ -213,6 +213,15 @@ export function ensureSlideRules(doc) {
    }
    const style = doc.createElement('style');
    style.id = SLIDE_RULES_ID;
@@ -36,10 +36,10 @@ index 110ea7ed876817c29125c30017f552ac185f2209..a12c0b5d7d6a5c4fd209219cf42e10fa
  }
 \ No newline at end of file
 diff --git a/src/CommandPalette/CommandPaletteItem.tsx b/src/CommandPalette/CommandPaletteItem.tsx
-index cac88d5d83a1e56e77899ca9cd49d11624a24b23..4adee6b0be5688f5f7f627c255b67d2f796a236d 100644
+index 1f8fb6e..ff6f0f1 100644
 --- a/src/CommandPalette/CommandPaletteItem.tsx
 +++ b/src/CommandPalette/CommandPaletteItem.tsx
-@@ -194,7 +194,10 @@ export function CommandPaletteItem({
+@@ -195,7 +195,10 @@ export function CommandPaletteItem({
        {...props}
        id={ctx && itemIndex >= 0 ? ctx.getItemId(itemIndex) : idProp}
        role="option"
@@ -52,10 +52,10 @@ index cac88d5d83a1e56e77899ca9cd49d11624a24b23..4adee6b0be5688f5f7f627c255b67d2f
        data-value={value}
        {...pressable}
 diff --git a/src/Layer/layerSlideRules.ts b/src/Layer/layerSlideRules.ts
-index 7b7d0c20989cd056c30757c6497d01d83201307d..bbbf186b36045c89d35954b79ecf9e1b470005fe 100644
+index 6e1ee52..cadfd84 100644
 --- a/src/Layer/layerSlideRules.ts
 +++ b/src/Layer/layerSlideRules.ts
-@@ -277,6 +277,17 @@ export function ensureSlideRules(doc: Document): void {
+@@ -266,6 +266,17 @@ export function ensureSlideRules(doc: Document): void {
    }
    const style = doc.createElement('style');
    style.id = SLIDE_RULES_ID;

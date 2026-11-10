@@ -146,9 +146,9 @@ describe("CrawlRunsTable", () => {
       within(table).getByRole("columnheader", { name: new RegExp(name) }).style.width;
     expect([width("Startad"), width("Varaktighet")]).toEqual(["184px", "224px"]);
     expect(Number.parseFloat(table.style.minWidth)).toBeLessThanOrEqual(682);
-    expect(
-      screen.getByRole("button", { name: "Sortera efter Startad, sorterat fallande" })
-    ).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Startad" }).getAttribute("aria-sort")).toBe(
+      "descending"
+    );
     const filter = screen.getByRole("textbox", { name: "Filtrera indexeringar" });
     // The placeholder says the same as the label.
     expect(filter.getAttribute("placeholder")).toBe("Filtrera indexeringar…");
@@ -216,7 +216,7 @@ describe("CrawlRunsTable", () => {
   it("sorts by its column headers and filters by the search box", () => {
     renderInApp(<CrawlRunsTable runs={RUNS} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Sortera efter Status" }));
+    fireEvent.click(screen.getByRole("button", { name: "Status" }));
     expect(statusColumn()[0]).toBe("Misslyckades");
 
     fireEvent.change(screen.getByRole("textbox", { name: "Filtrera indexeringar" }), {

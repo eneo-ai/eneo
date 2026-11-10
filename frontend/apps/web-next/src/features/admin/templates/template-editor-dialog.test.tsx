@@ -82,7 +82,7 @@ describe("TemplateEditorDialog", () => {
   it("starts a new app template with the first model, text input and the first category", async () => {
     renderEditor({ kind: "apps" });
     const dialog = screen.getByRole("dialog", { name: "Ny mall" });
-    await within(dialog).findByRole("button", { name: "Chattmodell: GPT-4o" });
+    await within(dialog).findByRole("button", { name: "Chattmodell GPT-4o" });
     expect(within(dialog).getByRole("combobox", { name: "Inmatningstyp" }).textContent).toBe(
       "Ange text direkt"
     );

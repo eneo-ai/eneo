@@ -160,10 +160,11 @@ describe("globals.css", () => {
       "--size-element-sm": "44px",
       "--size-element-md": "44px",
       "--size-element-lg": "44px",
-      // The touch type scale: body and labels 15 px, supporting text 13 px.
-      "--text-body-size": "0.9375rem",
-      "--text-label-size": "0.9375rem",
-      "--text-supporting-size": "0.8125rem"
+      // The touch type scale: body and labels 15 px, supporting text 13 px,
+      // grown by the phone's text size (Astryx sets the factors).
+      "--text-body-size": "calc(0.9375rem * var(--_dynamic-type-body, 1))",
+      "--text-label-size": "calc(0.9375rem * var(--_dynamic-type-body, 1))",
+      "--text-supporting-size": "calc(0.8125rem * var(--_dynamic-type-footnote, 1))"
     });
     // Hand-built text follows it: Tailwind's text-sm and text-xs.
     expect(coarse.get(":root")).toMatchObject({

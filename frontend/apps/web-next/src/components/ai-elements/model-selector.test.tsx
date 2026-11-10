@@ -58,13 +58,13 @@ function renderSelector(props: Partial<React.ComponentProps<typeof ModelSelector
 }
 
 function trigger() {
-  return screen.getByRole("button", { name: /^Chattmodell: / });
+  return screen.getByRole("button", { name: /^Chattmodell / });
 }
 
 describe("ModelSelector", () => {
   it("names the trigger by its label and the chosen model", async () => {
     const { container } = renderSelector();
-    const button = screen.getByRole("button", { name: "Chattmodell: GPT-4o" });
+    const button = screen.getByRole("button", { name: "Chattmodell GPT-4o" });
     expect(button.getAttribute("aria-haspopup")).toBe("listbox");
     expect(button.getAttribute("aria-expanded")).toBe("false");
     await expectNoAxeViolations(container);
@@ -155,7 +155,7 @@ describe("ModelSelector", () => {
     fireEvent.click(trigger());
     fireEvent.click(await screen.findByRole("option", { name: /Claude Sonnet 4/ }));
 
-    const button = screen.getByRole("button", { name: "Chattmodell: Claude Sonnet 4" });
+    const button = screen.getByRole("button", { name: "Chattmodell Claude Sonnet 4" });
     await waitFor(() => expect(document.activeElement).toBe(button));
     expect(button.getAttribute("aria-busy")).toBe("true");
     expect((button as HTMLButtonElement).disabled).toBe(false);
@@ -163,7 +163,7 @@ describe("ModelSelector", () => {
     rerender(<ModelSelector models={MODELS} selectedId="sonnet" onSelect={onSelect} size="sm" />);
     await act(async () => finishSave());
     expect(button.getAttribute("aria-busy")).toBeNull();
-    expect(button.getAttribute("aria-label")).toBe("Chattmodell: Claude Sonnet 4");
+    expect(screen.getByRole("button", { name: "Chattmodell Claude Sonnet 4" })).toBe(button);
   });
 
   it("goes back to the saved model when the save fails", async () => {
@@ -172,14 +172,14 @@ describe("ModelSelector", () => {
     fireEvent.click(trigger());
     fireEvent.click(await screen.findByRole("option", { name: /Claude Sonnet 4/ }));
 
-    await waitFor(() => expect(trigger().getAttribute("aria-label")).toBe("Chattmodell: GPT-4o"));
+    await screen.findByRole("button", { name: "Chattmodell GPT-4o" });
     expect(trigger().getAttribute("aria-busy")).toBeNull();
   });
 
   it("says when the saved model is no longer offered", () => {
     renderSelector({ selectedId: "retired-model" });
     expect(
-      screen.getByRole("button", { name: "Chattmodell: Stöds ej vald modell" }).textContent
+      screen.getByRole("button", { name: "Chattmodell Stöds ej vald modell" }).textContent
     ).toContain("Stöds ej vald modell");
   });
 
@@ -214,7 +214,7 @@ describe("ModelSelector", () => {
       }
     });
     const button = screen.getByRole("button", {
-      name: "Chattmodell: Claude Sonnet 4 (standard)"
+      name: "Chattmodell Claude Sonnet 4 (standard)"
     });
     await expectNoAxeViolations(container);
 
@@ -261,7 +261,7 @@ describe("ModelSelector", () => {
       status: { type: "error", message: "Modellen kan inte använda verktyg." }
     });
     const button = screen.getByRole("button", {
-      name: "Modell för flödesassistenten: Ytans standardmodell"
+      name: "Modell för flödesassistenten Ytans standardmodell"
     });
     expect(button.id).toBe("flow-model");
     expect(screen.getByText("Modell för flödesassistenten")).toBeTruthy();

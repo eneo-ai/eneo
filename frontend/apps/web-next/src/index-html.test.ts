@@ -49,9 +49,13 @@ it("preserves the responsive document metadata and fixed server placeholders", (
   expect(template.querySelector('link[rel="preload"][as="font"]')?.getAttribute("href")).toBe(
     "/src/assets/fonts/figtree-latin-wght-normal.woff2"
   );
+  // Astryx (useChatStreamScroll) adds this rule only when no element carries
+  // its attribute; its own <style> would have no nonce.
   expect(
-    template.querySelector("[data-astryx-chat-following-style]")?.textContent?.replace(/\s/g, "")
-  ).toBe("[data-astryx-chat-following]{overflow-anchor:none!important;}");
+    template
+      .querySelector('style[data-astryx-scroll-anchoring="rule"]')
+      ?.textContent?.replace(/\s/g, "")
+  ).toBe('[data-astryx-scroll-anchoring="off"]{overflow-anchor:none!important;}');
   const inline = template.querySelectorAll<HTMLScriptElement | HTMLStyleElement>(
     "script:not([src]), style"
   );

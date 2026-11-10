@@ -490,7 +490,7 @@ describe("ChatView docked composer", () => {
 
     const log = await screen.findByRole("log", { name: "Konversation" });
     // useChatStreamScroll marks the element it follows the answer in.
-    const scroller = document.querySelector("[data-astryx-chat-following]");
+    const scroller = document.querySelector('[data-astryx-scroll-anchoring="off"]');
     expect(scroller?.contains(log)).toBe(true);
     const textarea = screen.getByRole("textbox", { name: /^Fråga / });
     expect(scroller?.contains(textarea)).toBe(false);

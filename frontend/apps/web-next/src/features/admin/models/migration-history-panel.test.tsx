@@ -112,7 +112,7 @@ it("announces a failed read as an error with its retry, not as an empty status",
   expect(alert).not.toBeNull();
   expect(title.closest('[role="status"]')).toBeNull();
   expect(
-    within(alert!).getByRole("button", {
+    screen.getByRole("button", {
       name: "Försök igen: Det gick inte att ladda migrationshistoriken"
     })
   ).toBeTruthy();

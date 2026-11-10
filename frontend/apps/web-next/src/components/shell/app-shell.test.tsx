@@ -126,7 +126,7 @@ describe("AppShellFrame", () => {
     expect(screen.queryByLabelText(/Namn/)).toBeNull();
 
     // From the space switcher at the top of the sidebar, as in the Svelte app.
-    fireEvent.click(screen.getByRole("button", { name: "Öppna meny" }));
+    fireEvent.click(screen.getByRole("button", { name: "Välj en yta, Öppna meny" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Skapa en ny yta" }));
 
     const dialog = await screen.findByRole("dialog", { name: "Skapa en ny yta" });

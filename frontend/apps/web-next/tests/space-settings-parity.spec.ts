@@ -319,7 +319,9 @@ test("members keep the real existing user disabled and find a real group before 
     .getByRole("button", { name: "Lägg till grupp", exact: true })
     .click();
   const group = page.getByRole("dialog", { name: "Lägg till grupp", exact: true });
-  await group.getByRole("button", { name: "Användargrupper", exact: true }).click();
+  await group
+    .getByRole("button", { name: "Användargrupper Välj en användargrupp...", exact: true })
+    .click();
   await page.getByPlaceholder("Välj en användargrupp...", { exact: true }).fill(groupName);
   await page.getByRole("option", { name: groupName, exact: true }).click();
   await expect(group.getByRole("button", { name: new RegExp(groupName) })).toBeVisible();

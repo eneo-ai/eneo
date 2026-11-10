@@ -191,10 +191,9 @@ export function AdminUsersPage() {
   }
 
   function changePage(next: number) {
+    // The pressed button keeps focus, also when it disables at the last or
+    // first page (Astryx's disabled buttons stay focusable).
     changeFilters({ page: next });
-    // The pressed button stays focused, except "next"/"previous" at the last
-    // or first page, which becomes disabled: then focus moves to the panel.
-    rescue(panelRef.current);
   }
 
   let results: React.ReactNode;

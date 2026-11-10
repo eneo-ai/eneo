@@ -24,7 +24,7 @@ function renderLayer() {
   return document.getElementById("astryx-layer-slide-rules") as HTMLStyleElement | null;
 }
 
-// Guards frontend/patches/@astryxdesign%2Fcore@0.7.5.patch. Astryx installs
+// Guards frontend/patches/@astryxdesign%2Fcore@0.7.12.patch. Astryx installs
 // its layers' `@position-try` slide rules as a <style> in <head>; without the
 // request nonce the production CSP blocks it, and a menu or popover near the
 // viewport edge can no longer slide or flip. The patch reads the nonce the

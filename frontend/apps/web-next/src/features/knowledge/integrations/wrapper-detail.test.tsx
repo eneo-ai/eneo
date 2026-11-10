@@ -597,15 +597,6 @@ function recordAnnouncements() {
   return { said, stop: () => observer.disconnect() };
 }
 
-/** Browsers move focus to <body> when the focused element becomes disabled; jsdom keeps it. */
-function focusFixup() {
-  act(() => {
-    document.body.tabIndex = -1;
-    document.body.focus();
-    document.body.removeAttribute("tabindex");
-  });
-}
-
 describe("WrapperDetail in Swedish", () => {
   const folders = [
     { ...mall, id: "a1", name: "Äldreomsorg", folder_path: "/Äldreomsorg" },
@@ -984,7 +975,7 @@ describe("WrapperDetail navigation", () => {
 });
 
 describe("WrapperDetail documents", () => {
-  it("keeps focus in the folder when paging to the last page, which the pager announces", async () => {
+  it("keeps focus on the pager when paging to the last page, which the pager announces", async () => {
     state.documents.i1 = documentPages(() => 60);
     show([mall, protokoll], "/spaces/space-1/knowledge/integrations/wrapper/w1?folder=i1");
     await screen.findByRole("button", { name: /Dokument 1\.docx/ });
@@ -993,15 +984,12 @@ describe("WrapperDetail documents", () => {
     const next = screen.getByRole("button", { name: "Gå till nästa sida" });
     next.focus();
     fireEvent.click(next);
-    // The last page is known from the first one: the button turns disabled at once,
-    // and a browser drops its focus then (jsdom does not, so do it here).
-    expect(next.hasAttribute("disabled")).toBe(true);
-    focusFixup();
+    // The last page is known from the first one: the button turns disabled at
+    // once and keeps focus.
+    expect(next.getAttribute("aria-disabled")).toBe("true");
 
     expect(await screen.findByRole("button", { name: /Dokument 51\.docx/ })).toBeTruthy();
-    await waitFor(() =>
-      expect(document.activeElement).toBe(screen.getByRole("region", { name: "Mallar" }))
-    );
+    expect(document.activeElement).toBe(next);
     expect(screen.getByText(/^Visar 51–60 av 60/)).toBeTruthy();
     announcements.stop();
     // Astryx's Pagination says which page; the range is not read out after it.
@@ -1017,7 +1005,7 @@ describe("WrapperDetail documents", () => {
     await screen.findByRole("button", { name: /Dokument 1\.docx/ });
     const announcements = recordAnnouncements();
 
-    fireEvent.click(screen.getByRole("button", { name: "Sortera efter Storlek" }));
+    fireEvent.click(screen.getByRole("button", { name: "Storlek" }));
     await waitFor(() => expect(announcements.said).toEqual(["Visar 1–50 av 60"]));
 
     // A sync wrote a new revision: the rows are replaced without a word.

@@ -169,15 +169,13 @@ describe("KnowledgePage", () => {
 
     // Name, ascending, in Swedish order (Ä after Z).
     expect(names()).toEqual(["Avtal", "Budget", "Ärenden"]);
-    expect(
-      screen.getByRole("button", { name: "Sortera efter Namn, sorterat stigande" })
-    ).toBeTruthy();
-
-    fireEvent.click(screen.getByRole("button", { name: "Sortera efter Innehåll" }));
-    expect(names()).toEqual(["Avtal", "Budget", "Ärenden"]);
-    fireEvent.click(
-      screen.getByRole("button", { name: "Sortera efter Innehåll, sorterat stigande" })
+    expect(screen.getByRole("columnheader", { name: "Namn" }).getAttribute("aria-sort")).toBe(
+      "ascending"
     );
+
+    fireEvent.click(screen.getByRole("button", { name: "Innehåll" }));
+    expect(names()).toEqual(["Avtal", "Budget", "Ärenden"]);
+    fireEvent.click(screen.getByRole("button", { name: "Innehåll" }));
     expect(names()).toEqual(["Ärenden", "Budget", "Avtal"]);
   });
 
@@ -301,7 +299,7 @@ describe("KnowledgePage", () => {
     expect(sources()).toEqual(["Byggnad"]);
     fireEvent.click(screen.getByRole("radio", { name: "Alla 3" }));
 
-    fireEvent.click(screen.getByRole("button", { name: "Sortera efter Status" }));
+    fireEvent.click(screen.getByRole("button", { name: "Status" }));
     expect(sources()[0]).toBe("Byggnad");
   });
 
@@ -363,7 +361,7 @@ describe("KnowledgePage", () => {
       "integrations"
     );
     const table = screen.getByRole("table", { name: "Integrationer" });
-    fireEvent.click(within(table).getByRole("button", { name: "Sortera efter Uppdaterad" }));
+    fireEvent.click(within(table).getByRole("button", { name: "Uppdaterad" }));
     const sources = within(table)
       .getAllByRole("row")
       .slice(1)
@@ -572,7 +570,7 @@ describe("KnowledgePage", () => {
     const table = screen.getByRole("table", { name: "Integrationer" });
     await within(table).findByText("Uppdateras nu");
 
-    fireEvent.click(within(table).getByRole("button", { name: "Sortera efter Uppdaterad" }));
+    fireEvent.click(within(table).getByRole("button", { name: "Uppdaterad" }));
     const sources = within(table)
       .getAllByRole("row")
       .slice(1)

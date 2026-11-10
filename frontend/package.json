@@ -69,6 +69,6 @@
     "braces@3.0.3": "patches/braces@3.0.3.patch",
     "mermaid@11.16.1": "patches/mermaid@11.16.1.patch",
     "@tanstack/react-router@1.170.45": "patches/@tanstack%2Freact-router@1.170.45.patch",
-    "@astryxdesign/core@0.7.5": "patches/@astryxdesign%2Fcore@0.7.5.patch"
+    "@astryxdesign/core@0.7.12": "patches/@astryxdesign%2Fcore@0.7.12.patch"
   }
 }

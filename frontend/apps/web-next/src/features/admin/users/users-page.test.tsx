@@ -544,7 +544,7 @@ describe("AdminUsersPage paging", () => {
     expect(document.activeElement).toBe(page2);
   });
 
-  it("moves focus to the list when the next-page button disables at the last page", async () => {
+  it("keeps focus on the next-page button when it disables at the last page", async () => {
     serve((query) => ({ items: [user({ email: `sida${query.page}@kommun.se` })], totalPages: 2 }));
     renderUsers();
     await screen.findByText("sida1@kommun.se");
@@ -554,15 +554,8 @@ describe("AdminUsersPage paging", () => {
     fireEvent.click(next);
 
     expect(await screen.findByText("sida2@kommun.se")).toBeTruthy();
-    expect(next.hasAttribute("disabled")).toBe(true);
-    // Browsers move focus to <body> when the focused element becomes disabled
-    // ("focus fixup"); jsdom keeps it there, so do what the browser does.
-    act(() => {
-      document.body.tabIndex = -1;
-      document.body.focus();
-      document.body.removeAttribute("tabindex");
-    });
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("tabpanel")));
+    expect(next.getAttribute("aria-disabled")).toBe("true");
+    expect(document.activeElement).toBe(next);
   });
 
   it("shows the last page instead of an empty one when the page runs past the end", async () => {

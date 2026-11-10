@@ -230,7 +230,7 @@ it("locks the fields while a save is answering, so nothing typed meanwhile is lo
   await waitFor(() => expect(field(KEY).getAttribute("aria-disabled")).toBe("true"));
   expect(field(KEY).readOnly).toBe(true);
   expect(field(NAME).getAttribute("aria-disabled")).toBe("true");
-  expect((button("Avbryt") as HTMLButtonElement).disabled).toBe(true);
+  expect(button("Avbryt").getAttribute("aria-disabled")).toBe("true");
   await act(async () => answer(saved));
   await waitFor(() => expect(field(KEY).hasAttribute("aria-disabled")).toBe(false));
 });

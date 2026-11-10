@@ -650,7 +650,7 @@ describe("FlowPage", () => {
       params: { path: { id: "flow-1" }, query: { expected_revision: 4 } }
     });
     // The step it names is one press away.
-    fireEvent.click(within(alert).getByRole("button", { name: "Öppna Steg 2: Skriv svar" }));
+    fireEvent.click(screen.getByRole("button", { name: "Öppna Steg 2: Skriv svar" }));
     expect(await screen.findByText("Redigerar step-2")).toBeTruthy();
   });
 
@@ -678,14 +678,14 @@ describe("FlowPage", () => {
       within(draftCheck()).getByText("Publiceringen nekades. Se meddelandet ovan.")
     ).toBeTruthy();
     // One press opens the step at the instruction.
-    fireEvent.click(within(alert).getByRole("button", { name: "Öppna Steg 2: Skriv svar" }));
+    fireEvent.click(screen.getByRole("button", { name: "Öppna Steg 2: Skriv svar" }));
     expect(await screen.findByText("Redigerar step-2")).toBeTruthy();
     expect(screen.getByText("Vid fältet prompt")).toBeTruthy();
     const field = screen.getByRole("textbox", { name: "Fältet prompt" });
     await waitFor(() => expect(document.activeElement).toBe(field));
     // With the step open, the notice still takes focus back to the field.
     field.blur();
-    fireEvent.click(within(alert).getByRole("button", { name: messages.flows_notice_go_to_field }));
+    fireEvent.click(screen.getByRole("button", { name: messages.flows_notice_go_to_field }));
     await waitFor(() => expect(document.activeElement).toBe(field));
   });
 
