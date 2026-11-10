@@ -57,7 +57,11 @@ class RetentionTaskHealth(BaseModel):
     """The latest execution is still running but stopped renewing its lease
     (for example a crashed worker); status unknown until a later run takes over."""
     failed: bool = False
-    """The latest execution failed."""
+    """The latest execution that ended failed (a rerun in progress does not
+    clear it)."""
+    overdue_not_measured: bool = False
+    """The task reports overdue work, and the latest execution that ended
+    (succeeded or partial) did not read it, so no snapshot says what is due."""
     latest_outcome: RetentionJobOutcome | None = None
     error_code: RetentionErrorCode | None = None
     blocked_reasons: tuple[str, ...] = ()
@@ -148,6 +152,7 @@ async def _task_health(
     other_task_ran: Callable[[], Awaitable[bool]],
 ) -> RetentionTaskHealth:
     latest = await repository.latest(task.name)
+    completed = await repository.latest_completed(task.name)
     latest_outcome = latest.outcome if latest is not None else None
     error_code = latest.error_code if latest is not None else None
     blocked_reasons = (
@@ -184,7 +189,13 @@ async def _task_health(
         snapshot is not None and snapshot.observed_at < stale_before
     )
     overdue = snapshot is not None and snapshot.overdue.count > 0
-    failed = latest_outcome is RetentionJobOutcome.FAILED
+    failed = completed is not None and completed.outcome is RetentionJobOutcome.FAILED
+    overdue_not_measured = (
+        reports_overdue
+        and completed is not None
+        and not failed
+        and completed.overdue_observed_at is None
+    )
     abandoned = (
         latest is not None
         and latest.outcome is RetentionJobOutcome.RUNNING
@@ -216,6 +227,8 @@ async def _task_health(
         and not snapshot.overdue.complete
     ):
         status = RetentionHealthStatus.UNKNOWN
+    elif overdue_not_measured:
+        status = RetentionHealthStatus.UNKNOWN
     else:
         status = RetentionHealthStatus.HEALTHY
     return RetentionTaskHealth(
@@ -228,6 +241,7 @@ async def _task_health(
         overdue_snapshot_stale=overdue_snapshot_stale,
         abandoned=abandoned,
         failed=failed,
+        overdue_not_measured=overdue_not_measured,
         latest_outcome=latest_outcome,
         error_code=error_code,
         blocked_reasons=blocked_reasons,

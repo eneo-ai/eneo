@@ -4,6 +4,7 @@ run, with the composition root's registrations and each process's own settings."
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from uuid import UUID
 
 import pytest
 
@@ -17,9 +18,17 @@ from eneo.data_retention.application.retention_health import (
     RetentionHealth,
     RetentionHealthStatus,
 )
+from eneo.data_retention.application.retention_runner import (
+    RetentionOverdueReporter,
+    RetentionRunner,
+)
 from eneo.data_retention.domain.retention import (
     RetentionErrorCode,
     RetentionJobOutcome,
+)
+from eneo.data_retention.infrastructure.retention_worker import (
+    database_now,
+    run_retention_at,
 )
 from eneo.database.database import sessionmanager
 from eneo.database.tables.retention_tables import RetentionJobRuns
@@ -146,3 +155,31 @@ async def test_a_failed_task_degrades_health_beside_a_disabled_one(
     history = tasks[CONVERSATION_HISTORY_TASK]
     assert (history.status, history.failed) == (RetentionHealthStatus.DEGRADED, True)
     assert _tasks(health)[EMPTY_SESSIONS_TASK] == (RetentionHealthStatus.DISABLED, True)
+
+
+async def test_every_way_to_run_retention_measures_overdue_work(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """The scheduled run and the readback's rounds both end a task through the
+    runner, which reads its overdue work before it records the outcome, so a
+    completed run without a measurement means the read failed.
+
+    Mutant: a path finishes a run without trying to measure it."""
+    measured: list[str] = []
+    record_overdue = RetentionRunner._record_overdue
+
+    async def spy(
+        self: RetentionRunner,
+        name: str,
+        reporter: RetentionOverdueReporter,
+        job_run_id: UUID,
+    ) -> None:
+        measured.append(name)
+        await record_overdue(self, name, reporter, job_run_id)
+
+    monkeypatch.setattr(RetentionRunner, "_record_overdue", spy)
+
+    await run_nightly_retention(monkeypatch, get_settings())
+    await run_retention_at(await database_now())
+
+    assert measured == [CONVERSATION_HISTORY_TASK, CONVERSATION_HISTORY_TASK]
