@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -393,6 +394,10 @@ async def test_an_admitted_session_streams_live_text_through_the_flows_model(
         "max_seconds": max_seconds,
         # A session that names no recording keeps no transcript.
         "keeps_transcript": False,
+        # From stop: the final commit's send, the final text, its write.
+        "finish_within_seconds": math.ceil(
+            10 + get_settings().flow_live_transcription_final_text_timeout_seconds + 5
+        ),
     }
     assert events == [
         {"type": "transcript.delta", "text": "Hej"},
