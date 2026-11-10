@@ -3,7 +3,8 @@
 import asyncio
 import logging
 import time
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from types import MappingProxyType
 
@@ -100,6 +101,28 @@ OUTSIDE_THE_ENGINE: Mapping[str, str] = MappingProxyType(
 )
 
 
+# One frequent pass ends within this many seconds plus the chunk in progress,
+# before the next five-minute tick, also when the nightly run starts it.
+FREQUENT_RUN_SECONDS = 240
+
+
+def _paced(
+    registrations: Iterable[RetentionTaskRegistration],
+) -> tuple[RetentionTaskRegistration, ...]:
+    return tuple(
+        replace(
+            registration,
+            budget=replace(
+                registration.budget,
+                seconds=min(registration.budget.seconds, FREQUENT_RUN_SECONDS),
+            ),
+        )
+        if registration.every == "frequent"
+        else registration
+        for registration in registrations
+    )
+
+
 def retention_task_registrations(
     settings: Settings, *, now: datetime | None = None
 ) -> tuple[RetentionTaskRegistration, ...]:
@@ -127,7 +150,7 @@ def retention_task_registrations(
             family_rows=settings.retention_max_family_rows,
         )
 
-    return (
+    registrations = (
         RetentionTaskRegistration(
             name=CONVERSATION_HISTORY_TASK,
             enabled=settings.retention_conversations_history_enabled,
@@ -190,6 +213,7 @@ def retention_task_registrations(
             build=lambda session: JobHistoryRetentionTask(session, now=now),
         ),
     )
+    return _paced(registrations)
 
 
 async def _read_retention_health(settings: Settings) -> RetentionHealth:

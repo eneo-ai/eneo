@@ -219,6 +219,23 @@ def overdue_reporter(task: RetentionTask) -> RetentionOverdueReporter | None:
     return task if isinstance(task, RetentionOverdueReporter) else None
 
 
+@runtime_checkable
+class RetentionDueProbe(Protocol):
+    """A task that runs frequently: one bounded read, with the same selection
+    as its removal (held content and other lasting reasons left out), of
+    whether anything is due at the task's time.
+
+    The five-minute run asks it before claiming, so a task with nothing due
+    writes no job row; health asks it an hour back instead of reading an
+    overdue snapshot (due_probe)."""
+
+    async def has_due(self) -> bool: ...
+
+
+def due_probe(task: RetentionTask) -> RetentionDueProbe | None:
+    return task if isinstance(task, RetentionDueProbe) else None
+
+
 class RetentionJobRunStore(Protocol):
     async def claim(self, *, task: str, lease_stale_seconds: int) -> UUID | None: ...
 
