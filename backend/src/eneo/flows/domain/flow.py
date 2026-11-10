@@ -498,6 +498,7 @@ class FlowStepResultAnnotation(BaseModel):
     error_message: Optional[str] = None
     # Why the step's streamed audio goes to the transcription model, from the
     # moment its attempt decides it: a poll sees it before the status changes.
+    # Read for the run's graph only; None in every other read.
     live_fallback_reason: Optional[LiveFallbackReason] = None
 
 
