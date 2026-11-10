@@ -7,7 +7,7 @@ from cryptography.fernet import Fernet
 from fastapi import HTTPException
 
 from eneo.audit.domain.action_types import ActionType
-from eneo.settings.credential_resolver import CredentialResolver
+from eneo.authentication.oidc.sign_in_source import sign_in_config
 from eneo.settings.encryption_service import EncryptionService
 from eneo.tenants.federation_startup_migration import (
     FederationStartupMigrationService,
@@ -287,11 +287,7 @@ async def test_credential_resolver_can_decrypt_migrated_federation_config():
     await service.migrate_env_oidc_to_tenant_federation()
     tenant.federation_config = _stored(tenant_repo)
 
-    resolved = CredentialResolver(
-        tenant=tenant,
-        settings=settings,
-        encryption_service=EncryptionService(ENCRYPTION_KEY),
-    ).get_federation_config()
+    resolved = sign_in_config(settings, tenant, EncryptionService(ENCRYPTION_KEY))
 
     assert resolved["client_secret"] == "super-secret-value"
     assert resolved["client_id"] == "client-id"

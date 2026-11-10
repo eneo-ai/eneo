@@ -24,6 +24,7 @@ from fastapi import HTTPException
 from eneo.audit.domain.action_types import ActionType
 from eneo.authentication import auth_service as auth_service_module
 from eneo.authentication import oidc_resource_server
+from eneo.authentication.auth_models import CredentialFacts
 from eneo.authentication.auth_service import AuthService
 from eneo.main.exceptions import AuthenticationException, UniqueException
 from eneo.tenants.tenant import TenantInDB, TenantState
@@ -242,6 +243,8 @@ def _make_settings(**overrides) -> SimpleNamespace:
         oidc_accepted_audience=AUDIENCE,
         oidc_jwks_cache_ttl_seconds=3600,
         oidc_tenant_id=None,
+        # Stored mode: the tenant's config names the subject claim.
+        federation_enabled=True,
         # JIT admission requires allowed domains (resolve_federated_user).
         oidc_allowed_domains=["example.com"],
     )
@@ -333,7 +336,7 @@ async def test_valid_idp_token_resolves_correct_user(setup):
     assert user.id == setup.user.id
     assert user.email == "user@example.com"
     # A provider's token authenticates on its own; it starts no session.
-    assert user.browser_session is None
+    assert user.credential == CredentialFacts(kind="bearer")
 
 
 @pytest.mark.asyncio

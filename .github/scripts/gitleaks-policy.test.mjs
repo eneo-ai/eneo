@@ -34,6 +34,7 @@ const examples = [
   ["frontend/apps/web-next/src/lib/api/use-secret-mutation.test.tsx", ["sk-synthetic-", "other-5678"]],
   ["frontend/apps/web-next/src/lib/api/use-secret-mutation.test.tsx", ["sk-synthetic-", "second-2222"]],
   ["frontend/apps/web-next/src/features/admin/models/provider-edit-dialog.test.tsx", ["synthetic-header-", "secret-9012"]],
+  ["backend/tests/unit/authentication/test_browser_session_router.py", ["replacing=", "None"]],
 ].map(([path, parts]) => ({ path, value: parts.join("") }));
 
 function repository(t) {

@@ -1,6 +1,11 @@
 """Unit tests for shared Redis connection helpers."""
 
+import asyncio
+import time
+
 import pytest
+import redis.asyncio as aioredis
+import redis.exceptions
 
 from eneo.redis.connection import (
     build_arq_redis_settings,
@@ -8,6 +13,7 @@ from eneo.redis.connection import (
     build_redis_pool_kwargs,
     build_redis_url,
 )
+from tests.silent_server import silent_server
 
 
 def test_build_arq_redis_settings_uses_custom_values(test_settings):
@@ -50,6 +56,8 @@ def test_build_redis_pool_kwargs_includes_expected_options(test_settings):
 
     assert kwargs["decode_responses"] is False
     assert kwargs["socket_connect_timeout"] == 6
+    # One value bounds both the connect and every read.
+    assert kwargs["socket_timeout"] == 6
     assert kwargs["retry_on_timeout"] is True
     assert kwargs["socket_keepalive"] is True
     assert kwargs["health_check_interval"] == 15
@@ -101,3 +109,34 @@ def test_credentials_are_never_part_of_the_address(test_settings):
     assert build_redis_url(settings) == (
         f"redis://{settings.redis_host}:{settings.redis_port}"
     )
+
+
+@pytest.mark.asyncio
+async def test_a_client_built_from_the_pool_kwargs_gives_up_on_a_silent_redis(
+    test_settings,
+):
+    # The connect succeeds and nothing is ever answered: the setup, its health
+    # check and the command all end at the read bound, with one retry.
+    settings = test_settings.model_copy(
+        update={
+            "redis_conn_timeout": 1,
+            "redis_health_check_interval": 30,
+            "redis_retry_on_timeout": True,
+            "redis_db": 1,
+        }
+    )
+    async with silent_server() as port:
+        client = aioredis.Redis(
+            host="127.0.0.1",
+            port=port,
+            **build_redis_pool_kwargs(settings, decode_responses=False),
+        )
+        started = time.monotonic()
+        try:
+            async with asyncio.timeout(10):
+                with pytest.raises(redis.exceptions.TimeoutError):
+                    await client.ping()
+        finally:
+            await client.aclose()
+
+    assert time.monotonic() - started < 4

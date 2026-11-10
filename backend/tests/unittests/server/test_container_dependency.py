@@ -365,7 +365,7 @@ async def test_websocket_user_authenticates_on_its_own_session_in_a_transaction(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session = _Session()
-    user = SimpleNamespace(browser_session=None)
+    user = SimpleNamespace(credential=None)
     seen: list[tuple[bool, bool, str]] = []
 
     @asynccontextmanager

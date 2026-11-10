@@ -323,6 +323,43 @@ async def test_an_edit_keeps_every_other_stored_setting(
     assert response.json()["revision"] != view["revision"]
 
 
+async def test_an_edit_to_a_moved_config_fetches_nothing(
+    client: AsyncClient,
+    admin_token: str,
+    configured: dict[str, str],
+    test_tenant,
+    oidc_mock,
+):
+    # A config moved from the OIDC_* settings stores no issuer or endpoints:
+    # sign-in reads them from discovery. Editing it needs no provider.
+    moved = {
+        key: value
+        for key, value in (await _stored(test_tenant.id)).items()
+        if key
+        not in (
+            "issuer",
+            "authorization_endpoint",
+            "token_endpoint",
+            "userinfo_endpoint",
+            "jwks_uri",
+            "token_endpoint_auth_method",
+            "token_endpoint_auth_methods_supported",
+        )
+    }
+    await _store(test_tenant.id, moved)
+    oidc_mock(discovery={configured["discovery_endpoint"]: ({}, 503)})
+    view = await _view(client, admin_token)
+
+    response = await client.patch(
+        URL,
+        json={"revision": view["revision"], "provider": "Org Entra"},
+        headers=_bearer(admin_token),
+    )
+
+    assert response.status_code == 200, response.text
+    assert await _stored(test_tenant.id) == {**moved, "provider": "Org Entra"}
+
+
 async def test_a_legacy_row_saves_with_the_revision_its_view_shows(
     client: AsyncClient, admin_token: str, configured: dict[str, str], test_tenant
 ):

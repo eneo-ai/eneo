@@ -28,12 +28,15 @@ from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.oidc import sign_in_source
 from eneo.authentication.oidc.profile import (
     DEFAULT_SCOPES,
     SIGNING_ALGORITHM_ALLOWLIST,
-    TEMPLATED_ISSUER_GUIDANCE,
     OidcProviderError,
-    is_templated_issuer,
+    OidcProviderUnavailable,
+    build_profile,
+    check_config,
+    download_discovery,
     subject_claim,
 )
 from eneo.main.config import (
@@ -44,7 +47,6 @@ from eneo.main.config import (
     validate_redirect_uri,
 )
 from eneo.main.logging import get_logger
-from eneo.settings.credential_resolver import CredentialResolver
 from eneo.settings.encryption_service import EncryptionService
 from eneo.tenants.masking import looks_masked
 from eneo.tenants.tenant import TenantInDB
@@ -541,10 +543,8 @@ def build_admin_view(
     secret_updated_at = _timestamp(config.get("encrypted_at"))
     redirect_problem: Literal["unresolvable"] | None = None
     try:
-        # No encryption service: listing the URIs never decrypts the secret.
-        redirect_uris = CredentialResolver(
-            tenant=tenant, settings=settings
-        ).get_valid_redirect_uris()
+        _, accepted = sign_in_source.redirect_uris(config, settings)
+        redirect_uris = list(accepted)
     except ValueError:
         redirect_uris, redirect_problem = [], "unresolvable"
 
@@ -570,163 +570,71 @@ def build_admin_view(
     )
 
 
-def _select_token_auth_method(methods: list[str]) -> str:
-    normalized = [str(m).lower() for m in methods if m]
-    if "client_secret_post" in normalized:
-        return "client_secret_post"
-    if "client_secret_basic" in normalized:
-        return "client_secret_basic"
-    return normalized[0] if normalized else "client_secret_post"
+# What discovery decides, stored with the config by every save that reads it.
+_DISCOVERY_KEYS = (
+    "issuer",
+    "authorization_endpoint",
+    "token_endpoint",
+    "userinfo_endpoint",
+    "jwks_uri",
+    "token_endpoint_auth_method",
+    "token_endpoint_auth_methods_supported",
+)
 
 
-async def _fetch_discovery_metadata(
-    *,
-    tenant: TenantInDB,
-    discovery_endpoint: str,
-    provider: str,
-) -> dict[str, Any]:
-    """Fetch and validate discovery metadata for a federation configuration."""
-    import aiohttp
-
-    from eneo.main.aiohttp_client import aiohttp_client
-
-    logger.info(
-        "Validating OIDC discovery endpoint",
-        extra={
-            "tenant_id": str(tenant.id),
-            "tenant_name": tenant.name,
-            "discovery_endpoint": discovery_endpoint,
-            "provider": provider,
-        },
-    )
-
+async def _discovery(endpoint: str) -> dict[str, object]:
+    """The provider's discovery document: 502 when it cannot be read."""
     try:
-        async with aiohttp_client().get(discovery_endpoint) as resp:
-            if resp.status != 200:
-                try:
-                    error_body = await resp.json()
-                except Exception:
-                    error_body = await resp.text()
+        return await download_discovery(endpoint)
+    except OidcProviderUnavailable as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+    except OidcProviderError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
-                logger.error(
-                    f"Discovery endpoint validation failed: HTTP {resp.status}",
-                    extra={
-                        "tenant_id": str(tenant.id),
-                        "tenant_name": tenant.name,
-                        "discovery_endpoint": discovery_endpoint,
-                        "http_status": resp.status,
-                        "error_response": error_body,
-                    },
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Failed to fetch discovery endpoint: HTTP {resp.status}",
-                )
-            discovery = await resp.json()
-    except aiohttp.ClientError as e:
-        logger.error(
-            "Failed to connect to discovery endpoint",
-            extra={
-                "tenant_id": str(tenant.id),
-                "tenant_name": tenant.name,
-                "discovery_endpoint": discovery_endpoint,
-                "error": str(e),
-                "error_type": type(e).__name__,
-            },
-        )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to fetch discovery endpoint: {str(e)}",
-        )
 
-    # resp.json() returns Any; cast to typed dict at the HTTP boundary.
-    discovery_doc: dict[str, object] = (
-        cast(dict[str, object], discovery) if isinstance(discovery, dict) else {}
-    )
+def _usable(config: Mapping[str, Any]) -> None:
+    """Refuse a config that no discovery document can make usable (400).
 
-    def _str_field(key: str) -> str | None:
-        v = discovery_doc.get(key)
-        return v if isinstance(v, str) else None
+    The sign-in's own rules, applied without fetching anything.
+    """
+    try:
+        check_config(config)
+    except OidcProviderError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
-    issuer = _str_field("issuer")
-    authorization_endpoint = _str_field("authorization_endpoint")
-    token_endpoint = _str_field("token_endpoint")
-    userinfo_endpoint = _str_field("userinfo_endpoint")
-    jwks_uri = _str_field("jwks_uri")
-    methods_raw: object = (
-        discovery_doc.get("token_endpoint_auth_methods_supported") or []
-    )
-    if isinstance(methods_raw, list):
-        methods_list: list[object] = cast(list[object], methods_raw)
-        token_auth_methods_supported: list[str] = [str(m) for m in methods_list if m]
-    elif methods_raw:
-        token_auth_methods_supported = [str(methods_raw)]
+
+def _checked(
+    config: Mapping[str, Any], discovery: Mapping[str, object]
+) -> dict[str, Any]:
+    """The discovery keys to store, from the profile sign-in would build.
+
+    A provider that sign-in cannot use is refused (400). Stored issuer and
+    endpoints win over discovery, so a caller storing a new discovery
+    endpoint removes the old discovery keys from ``config`` first.
+    """
+    try:
+        profile = build_profile(config, discovery)
+    except OidcProviderError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    userinfo = discovery.get("userinfo_endpoint")
+    methods: object = discovery.get("token_endpoint_auth_methods_supported") or []
+    if isinstance(methods, list):
+        supported = [str(method) for method in cast(list[object], methods) if method]
     else:
-        token_auth_methods_supported = []
-
-    if not all([issuer, authorization_endpoint, token_endpoint, jwks_uri]):
-        logger.error(
-            "Discovery endpoint missing required OIDC fields",
-            extra={
-                "tenant_id": str(tenant.id),
-                "tenant_name": tenant.name,
-                "discovery_endpoint": discovery_endpoint,
-                "has_issuer": bool(issuer),
-                "has_authorization_endpoint": bool(authorization_endpoint),
-                "has_token_endpoint": bool(token_endpoint),
-                "has_jwks_uri": bool(jwks_uri),
-                "discovery_keys": list(discovery_doc.keys()),
-            },
-        )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Discovery endpoint missing required fields",
-        )
-    if is_templated_issuer(cast(str, issuer)):
-        logger.error(
-            "Discovery endpoint names a templated issuer",
-            extra={
-                "tenant_id": str(tenant.id),
-                "discovery_endpoint": discovery_endpoint,
-                "issuer": issuer,
-            },
-        )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=TEMPLATED_ISSUER_GUIDANCE,
-        )
-
-    logger.debug(
-        "Discovery endpoint validated successfully",
-        extra={
-            "tenant_id": str(tenant.id),
-            "tenant_name": tenant.name,
-            "issuer": issuer,
-            "authorization_endpoint": authorization_endpoint,
-            "token_endpoint": token_endpoint,
-            "jwks_uri": jwks_uri,
-            "token_endpoint_auth_methods_supported": token_auth_methods_supported,
-        },
-    )
-
+        supported = [str(methods)]
     return {
-        "issuer": issuer,
-        "authorization_endpoint": authorization_endpoint,
-        "token_endpoint": token_endpoint,
-        "userinfo_endpoint": userinfo_endpoint,
-        "jwks_uri": jwks_uri,
-        "token_endpoint_auth_method": _select_token_auth_method(
-            token_auth_methods_supported
-        ),
-        "token_endpoint_auth_methods_supported": token_auth_methods_supported,
+        "issuer": profile.issuer,
+        "authorization_endpoint": profile.authorization_endpoint,
+        "token_endpoint": profile.token_endpoint,
+        "userinfo_endpoint": userinfo if isinstance(userinfo, str) else None,
+        "jwks_uri": profile.jwks_uri,
+        "token_endpoint_auth_method": profile.token_endpoint_auth_method,
+        "token_endpoint_auth_methods_supported": supported,
     }
 
 
 def _build_full_federation_config(
-    request: SetFederationRequest,
-    *,
-    encrypted_secret: str,
-    discovery_metadata: dict[str, Any],
+    request: SetFederationRequest, *, encrypted_secret: str
 ) -> dict[str, Any]:
     """Construct a complete federation config for PUT semantics."""
     federation_config = {
@@ -739,7 +647,6 @@ def _build_full_federation_config(
         "claims_mapping": _with_subject_claim({}, request.subject_claim),
         "encrypted_at": datetime.now(timezone.utc).isoformat(),
     }
-    federation_config.update(discovery_metadata)
 
     if request.canonical_public_origin:
         federation_config["canonical_public_origin"] = request.canonical_public_origin
@@ -765,7 +672,6 @@ def _merge_federation_config(
     updates: dict[str, Any],
     *,
     encrypted_secret: str | None,
-    discovery_metadata: dict[str, Any] | None,
 ) -> dict[str, Any]:
     """Merge PATCH updates into an existing federation config."""
     merged = existing_config.copy()
@@ -798,9 +704,6 @@ def _merge_federation_config(
     if encrypted_secret is not None:
         merged["client_secret"] = encrypted_secret
         merged["encrypted_at"] = datetime.now(timezone.utc).isoformat()
-
-    if discovery_metadata is not None:
-        merged.update(discovery_metadata)
 
     merged.setdefault("scopes", list(DEFAULT_SCOPES))
     merged.setdefault("claims_mapping", DEFAULT_CLAIMS_MAPPING.copy())
@@ -882,11 +785,9 @@ class TenantFederationService:
             )
 
         merged = _merge_federation_config(
-            current,
-            updates,
-            encrypted_secret=self._encrypt(patch.client_secret),
-            discovery_metadata=None,
+            current, updates, encrypted_secret=self._encrypt(patch.client_secret)
         )
+        _usable(merged)
         await self._save(
             tenant,
             current,
@@ -917,16 +818,12 @@ class TenantFederationService:
         self, tenant: TenantInDB, request: SetFederationRequest
     ) -> dict[str, Any]:
         """Register or replace the tenant's IdP (super API key)."""
-        discovery_metadata = await _fetch_discovery_metadata(
-            tenant=tenant,
-            discovery_endpoint=request.discovery_endpoint,
-            provider=request.provider,
-        )
+        discovery = await _discovery(request.discovery_endpoint)
         federation_config = _build_full_federation_config(
             request,
             encrypted_secret=self.encryption_service.encrypt(request.client_secret),
-            discovery_metadata=discovery_metadata,
         )
+        federation_config.update(_checked(federation_config, discovery))
 
         current = await self._lock(tenant)
         await self._save(
@@ -974,7 +871,6 @@ class TenantFederationService:
         federation_config = _build_full_federation_config(
             request,
             encrypted_secret=self.encryption_service.encrypt(request.client_secret),
-            discovery_metadata={},
         )
 
         current = await self._lock(tenant)
@@ -1008,15 +904,11 @@ class TenantFederationService:
         updates = request.model_dump(exclude_unset=True)
         _require_updates(updates)
 
-        discovery_metadata = None
-        if "discovery_endpoint" in updates:
-            discovery_metadata = await _fetch_discovery_metadata(
-                tenant=tenant,
-                discovery_endpoint=updates["discovery_endpoint"],
-                provider=updates.get("provider")
-                or tenant.federation_config.get("provider")
-                or "unknown",
-            )
+        discovery = (
+            await _discovery(updates["discovery_endpoint"])
+            if "discovery_endpoint" in updates
+            else None
+        )
         encrypted_secret = (
             self.encryption_service.encrypt(request.client_secret)
             if "client_secret" in updates and request.client_secret is not None
@@ -1027,11 +919,15 @@ class TenantFederationService:
         if not current:
             raise _no_config()
         federation_config = _merge_federation_config(
-            current,
-            updates,
-            encrypted_secret=encrypted_secret,
-            discovery_metadata=discovery_metadata,
+            current, updates, encrypted_secret=encrypted_secret
         )
+        if discovery is None:
+            _usable(federation_config)
+        else:
+            # Stored keys win over discovery: the old provider's go first.
+            for key in _DISCOVERY_KEYS:
+                federation_config.pop(key, None)
+            federation_config.update(_checked(federation_config, discovery))
         await self._save(
             tenant,
             current,
@@ -1069,7 +965,9 @@ class TenantFederationService:
         logger.info(f"Federation config deleted for tenant {tenant.name}")
 
     async def test_connection(self, tenant: TenantInDB) -> dict[str, Any]:
-        """Fetch the stored discovery document (super API key)."""
+        """Check the stored config against the provider's discovery document,
+        with the rules sign-in uses (super API key): 400 when sign-in could
+        not use it, 502 when the provider cannot be reached."""
         if not tenant.federation_config:
             raise _no_config()
 
@@ -1080,10 +978,6 @@ class TenantFederationService:
                 detail="No discovery endpoint in federation config",
             )
 
-        import aiohttp
-
-        from eneo.main.aiohttp_client import aiohttp_client
-
         logger.info(
             f"Testing federation config for tenant {tenant.name}",
             extra={
@@ -1092,72 +986,16 @@ class TenantFederationService:
                 "discovery_endpoint": discovery_endpoint,
             },
         )
-
+        discovery = await _discovery(discovery_endpoint)
         try:
-            async with aiohttp_client().get(discovery_endpoint) as resp:
-                if resp.status != 200:
-                    try:
-                        error_body = await resp.json()
-                    except Exception:
-                        error_body = await resp.text()
-
-                    logger.error(
-                        f"Test failed: Discovery endpoint returned HTTP {resp.status}",
-                        extra={
-                            "tenant_id": str(tenant.id),
-                            "tenant_name": tenant.name,
-                            "discovery_endpoint": discovery_endpoint,
-                            "http_status": resp.status,
-                            "error_response": error_body,
-                        },
-                    )
-                    raise HTTPException(
-                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        detail=f"Discovery endpoint returned HTTP {resp.status}",
-                    )
-                discovery = await resp.json()
-
-                required = [
-                    "issuer",
-                    "authorization_endpoint",
-                    "token_endpoint",
-                    "jwks_uri",
-                ]
-                missing = [f for f in required if f not in discovery]
-                if missing:
-                    logger.error(
-                        "Test failed: Discovery endpoint missing required fields",
-                        extra={
-                            "tenant_id": str(tenant.id),
-                            "tenant_name": tenant.name,
-                            "discovery_endpoint": discovery_endpoint,
-                            "missing_fields": missing,
-                            "discovery_keys": list(discovery.keys()),
-                        },
-                    )
-                    raise HTTPException(
-                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        detail=f"Discovery endpoint missing required fields: {missing}",
-                    )
-                if is_templated_issuer(str(discovery["issuer"])):
-                    raise HTTPException(
-                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        detail=TEMPLATED_ISSUER_GUIDANCE,
-                    )
-        except aiohttp.ClientError as e:
-            logger.error(
-                "Test failed: Could not connect to discovery endpoint",
-                extra={
-                    "tenant_id": str(tenant.id),
-                    "tenant_name": tenant.name,
-                    "discovery_endpoint": discovery_endpoint,
-                    "error": str(e),
-                    "error_type": type(e).__name__,
-                },
+            profile = build_profile(tenant.federation_config, discovery)
+        except OidcProviderError as exc:
+            logger.warning(
+                "Federation test refused the provider",
+                extra={"tenant_id": str(tenant.id), "reason": str(exc)},
             )
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to connect to discovery endpoint: {str(e)}",
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
             )
 
         logger.info(
@@ -1165,19 +1003,13 @@ class TenantFederationService:
             extra={
                 "tenant_id": str(tenant.id),
                 "tenant_name": tenant.name,
-                "issuer": discovery["issuer"],
-                "endpoints_validated": {
-                    "authorization": discovery.get("authorization_endpoint"),
-                    "token": discovery.get("token_endpoint"),
-                    "jwks": discovery.get("jwks_uri"),
-                },
+                "issuer": profile.issuer,
             },
         )
-
         return {
             "success": True,
             "message": "Federation config is valid and IdP is reachable",
-            "issuer": discovery["issuer"],
+            "issuer": profile.issuer,
         }
 
     # Shared

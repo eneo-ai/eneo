@@ -11,6 +11,7 @@ from uuid import uuid4
 
 import jwt
 import pytest
+from cryptography.fernet import Fernet
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
@@ -140,16 +141,32 @@ class AuthServiceStub:
     def get_payload_from_openid_jwt(self, **kwargs):  # noqa: ARG002
         return self.claims
 
-    def create_access_token_for_user(self, user: UserInDB):  # noqa: ARG002
+    def create_access_token_for_user(
+        self,
+        user: UserInDB,  # noqa: ARG002
+        auth_method: str | None = None,  # noqa: ARG002
+    ):
         return "access-token"
 
 
 class _SessionsHandBack:
-    """The callback route starts a browser session for the token it hands
-    out; these tests check the sign-in, so the token comes back unchanged."""
+    """The callback route starts a browser session for the user it admits;
+    these tests check the sign-in, so the token is what the auth service
+    mints for that user."""
 
-    async def start(self, access_token: str) -> str:
-        return access_token
+    def __init__(self, auth_service):
+        self.auth_service = auth_service
+
+    async def start(
+        self,
+        user: UserInDB,
+        *,
+        auth_method: str | None,
+        replacing: str | None = None,  # noqa: ARG002
+    ) -> str:
+        return self.auth_service.create_access_token_for_user(
+            user, auth_method=auth_method
+        )
 
 
 class MockContainer:
@@ -170,7 +187,7 @@ class MockContainer:
         self._identity_bindings = IdentityBindingsInMemory()
 
     def browser_session_service(self):
-        return _SessionsHandBack()
+        return _SessionsHandBack(self._auth_service)
 
     def tenant_repo(self):
         return self._tenant_repo
@@ -428,7 +445,9 @@ def test_initiate_auth_keeps_the_request_correlation_id(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_initiate_auth_single_tenant_accepts_db_redirect_uri(monkeypatch):
+async def test_env_mode_refuses_a_redirect_uri_only_the_stored_row_lists(monkeypatch):
+    # The OIDC_* settings are the whole sign-in in env mode; a stored row
+    # left from another mode adds nothing to it.
     tenant = TenantInDB(
         id=uuid4(),
         name="SingleTenant",
@@ -462,16 +481,17 @@ async def test_initiate_auth_single_tenant_accepts_db_redirect_uri(monkeypatch):
         encryption_service=EncryptionService(None),
     )
 
-    response = await federation_router.initiate_auth(
-        response=Response(),
-        tenant=None,
-        state=None,
-        redirect_uri_param="https://external.example.com/auth/callback",
-        container=container,
-    )
+    with pytest.raises(HTTPException) as exc:
+        await federation_router.initiate_auth(
+            response=Response(),
+            tenant=None,
+            state=None,
+            redirect_uri_param="https://external.example.com/auth/callback",
+            container=container,
+        )
 
-    query = parse_qs(urlparse(response.authorization_url).query)
-    assert query["redirect_uri"] == ["https://external.example.com/auth/callback"]
+    assert exc.value.status_code == 400
+    assert "not registered" in exc.value.detail
 
 
 @pytest.mark.asyncio
@@ -881,7 +901,7 @@ class MockContainerForJIT:
         self._allowed_origin_repo = allowed_origin_repo
 
     def browser_session_service(self):
-        return _SessionsHandBack()
+        return _SessionsHandBack(self._auth_service)
 
     def tenant_repo(self):
         return self._tenant_repo
@@ -1685,3 +1705,76 @@ async def test_initiate_refuses_a_templated_issuer_before_storing_anything(
     assert "template" in refused.json()["detail"]
     assert "authorization_url" not in refused.text
     assert redis_client._store == {}
+
+
+@pytest.mark.asyncio
+async def test_a_callback_decrypts_the_client_secret_once(monkeypatch, provider):
+    # Every sign-in question in one callback reads the same resolved config.
+    monkeypatch.setattr(
+        federation_router,
+        "get_settings",
+        lambda: DummySettings(federation_enabled=True),
+    )
+    encryption = EncryptionService(Fernet.generate_key().decode())
+    decrypted: list[str] = []
+    real_decrypt = encryption.decrypt
+
+    def counted(ciphertext: str) -> str:
+        decrypted.append(ciphertext)
+        return real_decrypt(ciphertext)
+
+    monkeypatch.setattr(encryption, "decrypt", counted)
+    redis_client = FakeRedis()
+    tenant = TenantInDB(
+        id=uuid4(),
+        name="Encrypted",
+        display_name="Encrypted",
+        slug="encrypted",
+        quota_limit=1024**3,
+        state=TenantState.ACTIVE,
+        modules=[],
+        api_credentials={},
+        federation_config={
+            "provider": "entra",
+            "client_id": "client",
+            "client_secret": encryption.encrypt("secret"),
+            "discovery_endpoint": "https://idp.example.com/.well-known/openid-configuration",
+            "canonical_public_origin": "https://encrypted.example.com",
+            "additional_redirect_uris": ["https://alt.example.com/login/callback"],
+            "allowed_domains": ["example.com"],
+        },
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    user = UserInDB(
+        id=uuid4(),
+        username="Tester",
+        email="user@Example.COM",
+        salt="salt",
+        password="hashed123",
+        used_tokens=0,
+        tenant_id=tenant.id,
+        tenant=tenant,
+        quota_limit=1024**3,
+        user_groups=[],
+        roles=[],
+        state="active",
+    )
+    container = MockContainer(
+        tenant_repo=TenantRepoStub(tenant),
+        user_repo=UserRepoStub(user),
+        auth_service=AuthServiceStub(),
+        redis_client=redis_client,
+        encryption_service=encryption,
+    )
+    callback = await _signed_callback(
+        redis_client,
+        provider,
+        tenant=tenant,
+        redirect_uri="https://alt.example.com/login/callback",
+    )
+
+    result = await federation_router.auth_callback(callback, container=container)
+
+    assert result["access_token"] == "access-token"
+    assert len(decrypted) == 1

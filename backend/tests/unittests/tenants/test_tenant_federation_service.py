@@ -253,6 +253,25 @@ class TestAdminView:
         assert view.redirect_uris == []
         assert view.redirect_uris_problem == "unresolvable"
 
+    def test_the_admin_view_lists_stored_redirect_uris_in_env_mode(
+        self, settings: Settings
+    ):
+        # The view shows the stored config, in either mode: in env mode it is
+        # what a move to stored mode would sign in with.
+        env_mode = settings.model_copy(
+            update={
+                "federation_enabled": False,
+                "oidc_discovery_endpoint": None,
+                "oidc_client_id": None,
+                "oidc_client_secret": None,
+            }
+        )
+
+        view = build_admin_view(_tenant(_config()), env_mode)
+
+        assert view.redirect_uris == ["https://org.eneo.test/login/callback"]
+        assert view.redirect_uris_problem is None
+
     @pytest.mark.parametrize(
         "config", [{}, {"canonical_public_origin": "https://org.eneo.test"}]
     )
@@ -281,7 +300,6 @@ class TestOperatorProviderKeys:
         return _build_full_federation_config(
             SetFederationRequest.model_validate({**self.BODY, **keys}),
             encrypted_secret=CIPHERTEXT,
-            discovery_metadata={},
         )
 
     def test_absent_keys_are_not_stored(self):
@@ -323,7 +341,6 @@ class TestOperatorProviderKeys:
                 stored,
                 request.model_dump(exclude_unset=True),
                 encrypted_secret=None,
-                discovery_metadata=None,
             )
 
         assert patch(email_verified_claims=["xms_edov"])["email_verified_claims"] == [
@@ -343,7 +360,6 @@ class TestSubjectClaim:
         return _build_full_federation_config(
             SetFederationRequest.model_validate({**self.BODY, **keys}),
             encrypted_secret=CIPHERTEXT,
-            discovery_metadata={},
         )
 
     @staticmethod
@@ -353,7 +369,6 @@ class TestSubjectClaim:
             stored,
             request.model_dump(exclude_unset=True, exclude={"revision"}),
             encrypted_secret=None,
-            discovery_metadata=None,
         )
 
     def test_put_stores_the_default_or_the_given_claim(self):

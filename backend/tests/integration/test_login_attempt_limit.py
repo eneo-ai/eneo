@@ -1,13 +1,20 @@
 """HTTP coverage for the failed password-login limit, with PostgreSQL and Redis."""
 
 import asyncio
+import time
 from uuid import uuid4
 
 import pytest
+import redis.asyncio as aioredis
+from dependency_injector import providers
 
 from eneo.authentication.login_attempts import LOGIN_ATTEMPT_LIMIT
+from eneo.main.config import get_settings
+from eneo.main.container.container import Container
+from eneo.redis.connection import build_redis_pool_kwargs
 from eneo.redis.rate_limit import RateLimitServiceUnavailableError
 from eneo.users import user_router
+from tests.silent_server import silent_server
 
 PASSWORD = "OriginalPassword1!"
 LIMIT = LOGIN_ATTEMPT_LIMIT.max_requests
@@ -152,3 +159,33 @@ async def test_login_still_works_when_the_limiter_is_unavailable(
     assert "attempts_remaining" not in failed.json()
 
     assert (await _login(client, email, PASSWORD)).status_code == 200
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_password_sign_in_is_not_held_by_a_silent_redis(
+    client, super_admin_token, patch_auth_service_jwt, mock_transcription_models
+):
+    # Redis accepts the connection and never answers. The attempt counter
+    # gives up at the read bound, and the sign-in goes on uncounted.
+    email = await _create_local_user(client, super_admin_token)
+    settings = get_settings().model_copy(update={"redis_conn_timeout": 1})
+
+    async with silent_server() as port:
+        silent = aioredis.Redis(
+            host="127.0.0.1",
+            port=port,
+            **build_redis_pool_kwargs(settings, decode_responses=False),
+        )
+        Container.redis_client.override(providers.Object(silent))
+        try:
+            started = time.monotonic()
+            async with asyncio.timeout(15):
+                response = await _login(client, email, PASSWORD)
+            elapsed = time.monotonic() - started
+        finally:
+            Container.redis_client.reset_last_overriding()
+            await silent.aclose()
+
+    assert response.status_code == 200, response.text
+    assert elapsed < 6

@@ -835,11 +835,8 @@ async def reactivate_user(username: str, container: AdminContainer):
     service = container.admin_service()
     current_user = container.user()
 
-    # Get old state
-    old_user = await service.get_tenant_user(username)
-
-    # Reactivate user
-    user = await service.reactivate_tenant_user(username)
+    # Reactivate user; a removed user is found too
+    old_state, user = await service.reactivate_tenant_user(username)
 
     # Audit logging
     audit_service = container.audit_service()
@@ -853,7 +850,7 @@ async def reactivate_user(username: str, container: AdminContainer):
         metadata=AuditMetadata.standard(
             actor=current_user,
             target=user,
-            changes={"state": {"old": str(old_user.state), "new": "active"}},
+            changes={"state": {"old": str(old_state), "new": "active"}},
         ),
     )
 

@@ -26,6 +26,7 @@ from eneo.authentication.auth_models import (
     ApiKeyOwnership,
     ApiKeyPermission,
     ApiKeyScopeType,
+    CredentialFacts,
 )
 from eneo.conversations.conversations_router import _validate_conversation_scope
 from eneo.main.request_context import clear_request_context, set_request_context
@@ -1791,8 +1792,9 @@ class TestFileDeleteScopeEnforcement:
         self._patch_settings(monkeypatch)
         request = self._build_request(marker=True)
 
-        _, returned_key = await svc._resolve_api_key("sk_test", request=request)
+        user, returned_key = await svc._resolve_api_key("sk_test", request=request)
         assert returned_key is key
+        assert user.credential == CredentialFacts(kind="api_key")
         svc._log_api_key_auth_failed.assert_not_awaited()
 
     @pytest.mark.asyncio

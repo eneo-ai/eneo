@@ -27,7 +27,7 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication import browser_session
 from eneo.authentication.api_key_v2_repo import ApiKeysV2Repository
-from eneo.authentication.auth_models import AccessToken
+from eneo.authentication.auth_models import CredentialFacts
 from eneo.authentication.auth_service import AuthService
 from eneo.authentication.browser_session import session_generation
 from eneo.authentication.browser_session_router import (
@@ -112,7 +112,7 @@ def mint(minutes: float = 15) -> str:
 
 
 def with_session(token: str, sid: str = "s" * 43) -> str:
-    """What the session store's ``start`` returns for a sign-in's token."""
+    """A token as the session store's ``start`` returns it."""
     return AuthService().add_session_id(token, sid)
 
 
@@ -139,7 +139,7 @@ def endpoints(
     monkeypatch.setattr(user_router, "count_login_attempt", count)
     monkeypatch.setattr(user_router, "clear_login_attempts", AsyncMock())
     sessions = AsyncMock(spec=BrowserSessionService)
-    sessions.start.side_effect = lambda token, replacing=None: with_session(token)
+    sessions.start.return_value = with_session(mint())
     login_container = Container(
         user_service=providers.Object(service),
         redis_client=providers.Object(object()),
@@ -147,6 +147,7 @@ def endpoints(
     )
 
     user = make_user()
+    service.login.return_value = user
     valid_tokens: set[str] = set()
 
     async def user_from_token(
@@ -233,17 +234,18 @@ def test_password_session_sets_cookie_without_token_in_body(
 ):
     with freeze_time(NOW):
         token = mint(15)
-        endpoints.login.return_value = AccessToken(
-            access_token=token, token_type="bearer"
-        )
+        endpoints.sessions.start.return_value = with_session(token)
 
         response = endpoints.client.post(SESSION_LOGIN, data=FORM, headers=SAME_ORIGIN)
         session_token = with_session(token)
 
     assert response.status_code == 204
     assert response.content == b""
-    # The cookie carries the login's token once the store recorded its session.
-    endpoints.sessions.start.assert_awaited_once_with(token, replacing=None)
+    # The cookie carries the token of the session the store started for the
+    # admitted user, a password session.
+    endpoints.sessions.start.assert_awaited_once_with(
+        endpoints.user, auth_method="password", replacing=None
+    )
     assert set_cookies(response) == [
         expected_set_cookie(SESSION, session_token, 15 * 60, production=True)
     ]
@@ -261,7 +263,7 @@ def test_password_session_sets_cookie_without_token_in_body(
 def test_password_session_replaces_a_planted_session(endpoints: Endpoints):
     planted = mint()
     issued = mint(30)
-    endpoints.login.return_value = AccessToken(access_token=issued, token_type="bearer")
+    endpoints.sessions.start.return_value = with_session(issued)
 
     response = endpoints.client.post(
         SESSION_LOGIN,
@@ -274,7 +276,9 @@ def test_password_session_replaces_a_planted_session(endpoints: Endpoints):
     assert cookie.startswith(f"{SESSION}={with_session(issued)};")
     assert planted not in cookie
     # The store ends whatever session the planted cookie names.
-    endpoints.sessions.start.assert_awaited_once_with(issued, replacing=planted)
+    endpoints.sessions.start.assert_awaited_once_with(
+        endpoints.user, auth_method="password", replacing=planted
+    )
 
 
 @pytest.mark.parametrize(
@@ -519,7 +523,7 @@ def test_logout_clears_what_the_page_expects_or_cannot_use(
 
 def test_token_login_hands_out_the_session_it_starts(endpoints: Endpoints):
     token = mint()
-    endpoints.login.return_value = AccessToken(access_token=token, token_type="bearer")
+    endpoints.sessions.start.return_value = with_session(token)
 
     response = endpoints.client.post(TOKEN_LOGIN, data=FORM)
 
@@ -528,7 +532,9 @@ def test_token_login_hands_out_the_session_it_starts(endpoints: Endpoints):
         "access_token": with_session(token),
         "token_type": "bearer",
     }
-    endpoints.sessions.start.assert_awaited_once_with(token)
+    endpoints.sessions.start.assert_awaited_once_with(
+        endpoints.user, auth_method="password"
+    )
     assert set_cookies(response) == []
 
 
@@ -1096,7 +1102,9 @@ def test_extend_is_refused_exactly_as_authentication_refuses(
     elif case == "password change required":
         endpoints.user.password = "stored-password-hash"
         endpoints.user.password_change_required = True
-        endpoints.user.session_auth_method = "password"
+        endpoints.user.credential = CredentialFacts(
+            kind="browser_session", auth_method="password"
+        )
         expected = (403, ErrorCodes.PASSWORD_CHANGE_REQUIRED.value)
     elif case == "token of another user":
         # Canonical authentication resolved someone else for this cookie.
