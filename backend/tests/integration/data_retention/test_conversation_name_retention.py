@@ -17,6 +17,10 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from eneo.data_retention.domain.retention import RetentionOverdue
+from eneo.data_retention.infrastructure.retention_job_run_repo import (
+    RetentionJobRunRepository,
+)
 from eneo.database.database import sessionmanager
 from eneo.database.tables.app_table import AppRuns, Apps
 from eneo.database.tables.assistant_table import Assistants
@@ -556,6 +560,83 @@ async def test_a_held_conversation_keeps_its_name_and_is_reported(
 
     assert await _texts(retention_session, held) == (held_name, 1, held_feedback)
     assert report.blocked[f"{STEP}.root_locked"] == 1
+
+
+async def test_a_held_name_or_feedback_text_past_its_time_is_reported_overdue(
+    retention_session: AsyncSession, test_tenant, admin_user, completion_model_factory
+):
+    """A name or feedback text still stored past its time and the overdue
+    window is overdue work, like a question, so health degrades on it.
+
+    Mutants: the overdue snapshot reads only questions and App runs; it counts
+    each text instead of each conversation; its oldest deadline reads a field's
+    time when that field has nothing to remove (a cleared name keeps its time).
+    """
+    model_id = (await completion_model_factory(retention_session, "gpt-4")).id
+    space = await _space(retention_session, tenant_id=test_tenant.id)
+    assistant = await _assistant(
+        retention_session,
+        model_id,
+        space=space,
+        user_id=admin_user.id,
+        days=30,
+    )
+    # Both texts past their time; the name is the older of the two.
+    both, _, _ = await _conversation(
+        retention_session,
+        user_id=admin_user.id,
+        assistant_id=assistant.id,
+        created_days_ago=60,
+        named_days_ago=60,
+        feedback_days_ago=45,
+    )
+    # A name already removed long ago keeps its time; only the feedback is due.
+    feedback_only, _, _ = await _conversation(
+        retention_session,
+        user_id=admin_user.id,
+        assistant_id=assistant.id,
+        created_days_ago=90,
+        named_days_ago=90,
+        feedback_days_ago=40,
+    )
+    await retention_session.execute(
+        sa.update(Sessions).where(Sessions.id == feedback_only).values(name="")
+    )
+    # A new question: the conversation is in use and no question is due.
+    retention_session.add(
+        Questions(
+            question="Question",
+            answer="Answer",
+            num_tokens_question=1,
+            num_tokens_answer=1,
+            tenant_id=test_tenant.id,
+            assistant_id=assistant.id,
+            session_id=both,
+        )
+    )
+    await retention_session.flush()
+    name_set_at = await retention_session.scalar(
+        sa.select(Sessions.name_set_at).where(Sessions.id == both)
+    )
+    await retention_session.commit()
+    await retention_session.begin()
+
+    async with sessionmanager.session() as holder, holder.begin():
+        await holder.execute(
+            sa.select(Sessions.id)
+            .where(Sessions.id.in_((both, feedback_only)))
+            .with_for_update()
+        )
+        report = await run_registered_retention(retention_session)
+
+    assert report.blocked[f"{STEP}.root_locked"] == 2
+    snapshot = await RetentionJobRunRepository(retention_session).latest_overdue(
+        "conversations.history"
+    )
+    assert snapshot is not None
+    assert snapshot.overdue == RetentionOverdue(
+        count=2, complete=True, oldest_due_at=name_set_at + timedelta(days=30)
+    )
 
 
 async def test_names_and_feedback_are_cleared_under_a_standing_backlog(

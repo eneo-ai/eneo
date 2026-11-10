@@ -293,7 +293,7 @@ stops the process at start with the reason.
 | `RETENTION_EMPTY_SESSION_GRACE_HOURS` | `24` | Minimum age of a session without a question |
 | `RETENTION_CHUNK_STATEMENT_TIMEOUT_MS` / `RETENTION_CHUNK_LOCK_TIMEOUT_MS` | `30000` / `2000` | PostgreSQL statement and lock timeouts, set first in every retention transaction and in the preview command |
 | `RETENTION_LEASE_STALE_SECONDS` | `3600` | A running execution whose heartbeat is older is taken over by the next run and reads `abandoned` in health |
-| `RETENTION_OVERDUE_WINDOW_DAYS` / `RETENTION_OVERDUE_MAX_ROWS` | `1` / `1000` | Due rows older than the window are overdue; the snapshot stops at this many overdue rows, or after a fixed number of pages per stream (`RETENTION_CONVERSATIONS_MAX_ROWS_PER_RUN` in owner pages; a page full of rows continues inside its owner), and then reports itself incomplete |
+| `RETENTION_OVERDUE_WINDOW_DAYS` / `RETENTION_OVERDUE_MAX_ROWS` | `1` / `1000` | Due rows older than the window are overdue, and so is a conversation whose name or feedback text is; the snapshot stops at this many overdue rows, or after a fixed number of pages per question or App-run stream (`RETENTION_CONVERSATIONS_MAX_ROWS_PER_RUN` in owner pages; a page full of rows continues inside its owner), and then reports itself incomplete |
 | `RETENTION_HEALTH_TIMEOUT_SECONDS` / `RETENTION_HEALTH_CACHE_SECONDS` | `1.0` / `30` | Longest health read; how long `/api/healthz` reuses one read |
 
 When the row or file budget is spent, the task stops. A unit that does not fit the

@@ -2,6 +2,7 @@
 
 from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
+from functools import partial
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -183,7 +184,18 @@ class ConversationHistoryRetentionTask:
     async def overdue(self) -> RetentionOverdue:
         remaining = self.overdue_rows
         snapshots: list[RetentionOverdue] = []
-        for repository in (self.questions, self.app_runs):
+        walks = [
+            partial(
+                repository.overdue,
+                window=self.overdue_window,
+                owner_page=self.allocation.page_size,
+                max_pages=self.overdue_owner_pages,
+            )
+            for repository in (self.questions, self.app_runs)
+        ]
+        # A name or feedback text goes on its own time, not its questions', so
+        # the conversations still holding one past it are a third stream.
+        for read in (*walks, partial(self.names.overdue, window=self.overdue_window)):
             if remaining == 0:
                 # Rows past the cap are not counted, so the next stream is not
                 # read at all: the snapshot is incomplete whatever it holds.
@@ -191,12 +203,7 @@ class ConversationHistoryRetentionTask:
                     RetentionOverdue(count=0, complete=False, oldest_due_at=None)
                 )
                 break
-            snapshot = await repository.overdue(
-                window=self.overdue_window,
-                limit=remaining,
-                owner_page=self.allocation.page_size,
-                max_pages=self.overdue_owner_pages,
-            )
+            snapshot = await read(limit=remaining)
             snapshots.append(snapshot)
             remaining -= snapshot.count
         deadlines = [
