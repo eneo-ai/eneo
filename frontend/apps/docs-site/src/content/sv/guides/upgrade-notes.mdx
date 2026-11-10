@@ -1,6 +1,6 @@
 ---
 title: Uppgraderingsanteckningar
-translationSource: guides/upgrade-notes.mdx@f1d0113b3c51
+translationSource: guides/upgrade-notes.mdx@016859f22082
 ---
 
 import { Callout } from "nextra/components";
@@ -423,7 +423,7 @@ Nästa version ändrar hur varje OIDC-inloggning verifieras och vilket konto den
 
 ### Filnamn försvinner ur granskningsloggen [#audit-names-removed]
 
-- **Vad ändras:** en migrering skriver om lagrade granskningsposter: filhändelser, anrop från MCP-appar, dokumentexporter och ändringar av assistentbilagor innehåller inte längre fil- eller konversationsnamn. Sökning i granskningsloggen på filnamn ger inte längre träffar. Fel vid uppladdning och extrahering namnger inte längre filen; databasfel skriver inte längre ut parametrar.
+- **Vad ändras:** en migrering skriver om lagrade granskningsposter: filhändelser, anrop från MCP-appar, dokumentexporter, sparade dokumentversioner och ändringar av assistentbilagor innehåller inte längre fil- eller konversationsnamn. Sökning i granskningsloggen på filnamn ger inte längre träffar. Fel vid uppladdning och extrahering namnger inte längre filen; databasfel skriver inte längre ut parametrar.
 - **Varför:** namnet på en borttagen fil får inte leva kvar i granskningsloggen eller i loggar.
 - **Vem agerar:** organisationer som sparar granskningsloggen som bevis.
 - **Före:** exportera granskningsloggen om du behöver namnen (till exempel vid bevarandeskyldighet).
@@ -451,11 +451,10 @@ Nästa version ändrar hur varje OIDC-inloggning verifieras och vilket konto den
 
 ### En fråga utan logg svarar 400 [#logging-not-logged]
 
-- **Vad ändras:** `GET /api/v1/logging/{message_id}/` svarar `400` (9007) "Question was not logged." i stället för `500` för frågor utan lagrad logg.
+- **Vad ändras:** `GET /api/v1/logging/{message_id}/` svarar `400` (9007) "Question was not logged." i stället för `500` för en fråga vars logg saknar anrop, till exempel en fråga till en assistent som inte loggar. En fråga helt utan logg svarade redan `400`.
 - **Varför:** en saknad logg är inget serverfel.
 - **Vem agerar:** API-konsumenter: behandla `400` som ingen logg.
 - **Återställning:** tidigare avbild.
-- **Guide:** [Uppgradera och återställ](/guides/deployment#uppgradera-och-återställ).
 
 ### `UPLOAD_TMP_DIR` måste vara ett lokalt filsystem [#upload-tmp-dir-local]
 

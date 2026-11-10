@@ -418,7 +418,7 @@ The next release changes how every OIDC sign-in is verified and which account it
 
 ### File names leave the audit log [#audit-names-removed]
 
-- **What changes:** a migration rewrites stored audit entries: file events, MCP app calls, document exports and assistant attachment changes no longer contain file or conversation names. Searching the audit log by file name stops matching. Upload and extraction errors no longer name the file; database errors no longer print parameters.
+- **What changes:** a migration rewrites stored audit entries: file events, MCP app calls, document exports, saved document versions and assistant attachment changes no longer contain file or conversation names. Searching the audit log by file name stops matching. Upload and extraction errors no longer name the file; database errors no longer print parameters.
 - **Why:** a removed file's name must not survive in the audit log or logs.
 - **Who acts:** organisations that keep the audit log as evidence.
 - **Before:** export the audit log if you need the names (for example under a legal hold).
@@ -446,11 +446,10 @@ The next release changes how every OIDC sign-in is verified and which account it
 
 ### A question without a log answers 400 [#logging-not-logged]
 
-- **What changes:** `GET /api/v1/logging/{message_id}/` answers `400` (9007) "Question was not logged." instead of `500` for questions without a stored log.
+- **What changes:** `GET /api/v1/logging/{message_id}/` answers `400` (9007) "Question was not logged." instead of `500` for a question whose log holds no request, such as one asked of an assistant that does not log. A question with no log at all already answered `400`.
 - **Why:** a missing log is not a server error.
 - **Who acts:** API consumers: treat `400` as no log.
 - **Rollback:** previous image.
-- **Guide:** [Drain work and stop old writers](/guides/deployment#drain-work-and-stop-old-writers).
 
 ### `UPLOAD_TMP_DIR` must be a local filesystem [#upload-tmp-dir-local]
 
