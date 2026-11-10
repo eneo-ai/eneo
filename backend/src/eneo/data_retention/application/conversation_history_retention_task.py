@@ -2,6 +2,7 @@
 
 from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
+from functools import partial
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,12 +18,17 @@ from eneo.data_retention.application.retention_runner import (
     RetentionBatch,
     RetentionStep,
     RetentionStepResult,
+    is_statement_timeout,
 )
 from eneo.data_retention.application.retention_step_order import rotate_retention_steps
+from eneo.data_retention.application.retention_units import RetentionEffects
 from eneo.data_retention.domain.retention import (
     RetentionOverdue,
 )
 from eneo.data_retention.domain.rules import RetentionRule, rule_task
+from eneo.data_retention.infrastructure.conversation_name_repo import (
+    ConversationNameRepository,
+)
 from eneo.data_retention.infrastructure.conversation_retention_repo import (
     ConversationRetentionRepository,
 )
@@ -37,6 +43,8 @@ class ConversationHistoryRetentionTask:
             *(kind.deleted_key for kind in ConversationRootKind),
             "sessions_deleted",
             "files_deleted",
+            "names_cleared",
+            "feedback_texts_cleared",
             *(
                 f"by_{level.value}_rule"
                 for level in rule_task(RetentionRule.CONVERSATION_HISTORY).levels
@@ -50,6 +58,7 @@ class ConversationHistoryRetentionTask:
     observation_keys = frozenset(
         {
             "owners_examined",
+            "sessions_examined",
             *(
                 reason.key
                 for reason in FileRetentionReason
@@ -90,6 +99,7 @@ class ConversationHistoryRetentionTask:
         self.app_runs = ConversationRetentionRepository(
             session, kind=ConversationRootKind.APP_RUN, now=self.now
         )
+        self.names = ConversationNameRepository(session, now=self.now)
         self.question_cost = ConversationRootCostEstimate()
         self.app_run_cost = ConversationRootCostEstimate()
 
@@ -98,8 +108,8 @@ class ConversationHistoryRetentionTask:
         return CONVERSATION_HISTORY_TASK
 
     def steps(self) -> Sequence[RetentionStep]:
-        # A standing backlog in one stream spends the budget before the next, so
-        # each stream goes first on some date.
+        # A standing backlog in one step spends the budget before the next, so
+        # each step goes first on some date.
         return rotate_retention_steps(
             (
                 RetentionStep(
@@ -114,6 +124,7 @@ class ConversationHistoryRetentionTask:
                     max_batch=self.allocation.max_batch,
                     max_files=self.allocation.unit_files,
                 ),
+                RetentionStep("names_and_feedback", self._names, max_files=0),
             ),
             execution_date=self.now.date(),
         )
@@ -136,10 +147,56 @@ class ConversationHistoryRetentionTask:
             gather_seconds=self.gather_seconds,
         )
 
+    async def _names(self, batch: RetentionBatch) -> RetentionStepResult:
+        """One window of conversations whose due names and feedback texts go.
+
+        Each windowed conversation charges its discovery row and at most one
+        more: its write, or its count when another transaction held it.
+        """
+        out = RetentionEffects()
+        limit = batch.rows // 2
+        if limit == 0:
+            return out.result(
+                rows=0, exhausted=False, deferred=True, cursor=batch.cursor
+            )
+        window = await self.names.window(batch.cursor, limit)
+        if not window:
+            return out.result(rows=0, exhausted=True, cursor=batch.cursor)
+        candidates = [key.id for key, passed in window if not passed]
+        cleared = await self.names.clear_due(candidates) if candidates else ()
+        # Only a conversation left unwritten can have been held: one written
+        # and due again (its period shortened meanwhile) waits for a later pass.
+        written = {session_id for session_id, *_ in cleared}
+        unwritten = [
+            session_id for session_id in candidates if session_id not in written
+        ]
+        held = await self.names.count_due(unwritten) if unwritten else 0
+        for _, tenant_id, name, feedback in cleared:
+            out.add(tenant_id, "names_cleared", int(name))
+            out.add(tenant_id, "feedback_texts_cleared", int(feedback))
+        out.blocked[ConversationBlockReason.ROOT_LOCKED.key] += held
+        out.add(None, "sessions_examined", len(window))
+        return out.result(
+            rows=len(window) + len(cleared) + held,
+            exhausted=len(window) < limit,
+            cursor=window[-1][0],
+        )
+
     async def overdue(self) -> RetentionOverdue:
         remaining = self.overdue_rows
         snapshots: list[RetentionOverdue] = []
-        for repository in (self.questions, self.app_runs):
+        walks = [
+            partial(
+                repository.overdue,
+                window=self.overdue_window,
+                owner_page=self.allocation.page_size,
+                max_pages=self.overdue_owner_pages,
+            )
+            for repository in (self.questions, self.app_runs)
+        ]
+        # A name or feedback text goes on its own time, not its questions', so
+        # the conversations still holding one past it are a third stream.
+        for read in (*walks, self._names_overdue):
             if remaining == 0:
                 # Rows past the cap are not counted, so the next stream is not
                 # read at all: the snapshot is incomplete whatever it holds.
@@ -147,12 +204,7 @@ class ConversationHistoryRetentionTask:
                     RetentionOverdue(count=0, complete=False, oldest_due_at=None)
                 )
                 break
-            snapshot = await repository.overdue(
-                window=self.overdue_window,
-                limit=remaining,
-                owner_page=self.allocation.page_size,
-                max_pages=self.overdue_owner_pages,
-            )
+            snapshot = await read(limit=remaining)
             snapshots.append(snapshot)
             remaining -= snapshot.count
         deadlines = [
@@ -165,3 +217,16 @@ class ConversationHistoryRetentionTask:
             complete=all(snapshot.complete for snapshot in snapshots),
             oldest_due_at=min(deadlines) if deadlines else None,
         )
+
+    async def _names_overdue(self, *, limit: int) -> RetentionOverdue:
+        """The names read has no page bound, so the statement timeout can stop
+        it. In its own savepoint, that leaves the transaction usable: the
+        snapshot keeps what the walks before it counted and says it is
+        incomplete. Any other error still fails the snapshot."""
+        try:
+            async with self.names.session.begin_nested():
+                return await self.names.overdue(window=self.overdue_window, limit=limit)
+        except Exception as exc:
+            if not is_statement_timeout(exc):
+                raise
+            return RetentionOverdue(count=0, complete=False, oldest_due_at=None)

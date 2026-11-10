@@ -241,15 +241,40 @@ class SessionRepository:
     async def add(self, session: SessionAdd) -> SessionInDB:
         return await self.delegate.add(session)
 
-    async def update(self, session: SessionUpdate) -> SessionInDB | None:
-        """None also for a copy whose source was removed: it stays unchanged."""
+    async def update(
+        self, session: SessionUpdate, *, title_from_turns_at: int | None = None
+    ) -> SessionInDB | None:
+        """None also for a copy whose source was removed: it stays unchanged.
+
+        A name the user sets starts its own retention time. A title made from
+        the turns read at history revision `title_from_turns_at` can quote any
+        of them. It is written only while that revision holds: a removal raises
+        it, so a title that may quote a removed turn is dropped and None is
+        returned. A written title keeps the time of the oldest question, so it
+        is due no later than that question.
+        """
+        name_set_at: sa.ColumnElement[datetime] = sa.func.now()
+        written: list[sa.ColumnElement[bool]] = [
+            Sessions.id == session.id,
+            copy_session_valid(Sessions.id.expression),
+        ]
+        if title_from_turns_at is not None:
+            written.append(Sessions.history_revision == title_from_turns_at)
+            oldest_question = (
+                sa.select(sa.func.min(Questions.created_at))
+                .where(Questions.session_id == Sessions.id)
+                .correlate(Sessions)
+                .scalar_subquery()
+            )
+            # least() skips the null of a conversation without questions.
+            name_set_at = sa.func.least(name_set_at, oldest_question)
         stmt = self._add_options(
             sa.update(Sessions)
-            .values(**session.model_dump(exclude_unset=True, exclude={"id"}))
-            .where(
-                Sessions.id == session.id,
-                copy_session_valid(Sessions.id.expression),
+            .values(
+                **session.model_dump(exclude_unset=True, exclude={"id"}),
+                name_set_at=name_set_at,
             )
+            .where(*written)
             .returning(Sessions)
         )
         updated = await self.session.scalar(stmt)
@@ -270,6 +295,8 @@ class SessionRepository:
         values: dict[str, object] = {"feedback_value": feedback.value}
         if feedback.text is not None or not keep_existing_text:
             values["feedback_text"] = feedback.text
+            # The text's own retention time starts again.
+            values["feedback_set_at"] = sa.func.now()
         stmt = (
             sa.Update(Sessions)
             .values(values)

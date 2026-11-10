@@ -1,7 +1,7 @@
 """Unused uploads adopt the same bounded execution as conversation retention."""
 
 from collections.abc import Sequence
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -49,10 +49,12 @@ class UnusedFileRetentionTask:
         execution_files: int,
         chunk_rows: int,
         gather_seconds: float,
+        now: datetime | None = None,
     ) -> None:
         self.session = session
         self.repository = FileUsageRepository(session)
         self.grace = grace
+        self.now = now
         self.family_rows = family_rows
         self.execution_files = execution_files
         self.chunk_rows = chunk_rows
@@ -77,6 +79,7 @@ class UnusedFileRetentionTask:
             root = await self.repository.next_retention_root(
                 after=(cursor.at, cursor.id) if cursor is not None else None,
                 older_than=self.grace,
+                now=self.now,
             )
             if root is None:
                 return None
@@ -95,6 +98,7 @@ class UnusedFileRetentionTask:
                         max_files=files,
                         max_family_rows=self.family_rows,
                         older_than=self.grace,
+                        now=self.now,
                     )
                     if result.needs_rollback:
                         await unit.rollback()

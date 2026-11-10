@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Sequence
+from datetime import datetime
 
 import sqlalchemy as sa
+from dependency_injector import providers
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.data_retention.application.retention_registration import (
@@ -21,9 +23,11 @@ from eneo.data_retention.domain.retention import RetentionBudget
 from eneo.data_retention.infrastructure.retention_job_run_repo import (
     RetentionJobRunRepository,
 )
+from eneo.database.database import sessionmanager
 from eneo.main.config import Settings, get_settings
 from eneo.main.container.container import Container
 from eneo.main.retention_tasks import retention_task_registrations
+from eneo.observability.error_log import log_error
 from eneo.worker.worker import Worker
 
 logger = logging.getLogger(__name__)
@@ -61,14 +65,40 @@ _settings = get_settings()
 )
 async def run_retention(container: Container) -> list[RetentionRunReport]:
     """Run each enabled task once; each task commits chunk by chunk."""
-    settings = get_settings()
     session = container.session()
     if not isinstance(session, AsyncSession):
         raise RetentionContractError("Retention cron requires an AsyncSession.")
+    return await _run_tasks(container, session, await _database_now(session))
+
+
+async def database_now() -> datetime:
+    async with sessionmanager.session() as session:
+        return await _database_now(session)
+
+
+async def run_retention_at(now: datetime) -> list[RetentionRunReport]:
+    """Run each enabled task once against a time the caller read.
+
+    The readback after a restore runs every round against the time it
+    started, so rows that fall due while it runs are left to the scheduled
+    run and a busy installation does not keep it removing.
+    """
+    async with sessionmanager.session() as session:
+        container = Container(session=providers.Object(session))
+        return await _run_tasks(container, session, now)
+
+
+async def _database_now(session: AsyncSession) -> datetime:
     # Due-ness follows the database's clock, read once for the whole execution,
     # so a worker whose clock is off neither removes early nor keeps late.
     async with session.begin():
-        now = (await session.execute(sa.select(sa.func.now()))).scalar_one()
+        return (await session.execute(sa.select(sa.func.now()))).scalar_one()
+
+
+async def _run_tasks(
+    container: Container, session: AsyncSession, now: datetime
+) -> list[RetentionRunReport]:
+    settings = get_settings()
     return await run_registered_tasks(
         session,
         retention_task_registrations(settings, now=now),
@@ -96,8 +126,14 @@ async def run_registered_tasks(
                 report = await runner.run(registration.build(session))
             else:
                 report = await runner.skip(registration.name)
-        except Exception:
-            logger.exception("Retention task %s raised; continuing.", registration.name)
+        except Exception as exc:
+            log_error(
+                logger,
+                logging.ERROR,
+                "Retention task %s raised; continuing",
+                registration.name,
+                error=exc,
+            )
             continue
         logger.info(
             "Retention task %s finished: %s",

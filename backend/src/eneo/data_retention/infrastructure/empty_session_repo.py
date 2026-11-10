@@ -34,6 +34,16 @@ class EmptySessionRepository:
             ~sa.select(Questions.id).where(Questions.session_id == Sessions.id).exists()
         )
 
+    def _releasable(self, ids: Sequence[UUID]) -> tuple[ColumnElement[bool], ...]:
+        """Which of these sessions are empty and due: one rule for the lock, the
+        count of what the lock skipped, and the delete."""
+        return (
+            uuid_in(Sessions.id, ids),
+            Sessions.created_at < self.now - self.grace,
+            self._unreferenced(),
+            outside_widgets(),
+        )
+
     async def window(
         self, cursor: RetentionKeyset | None, limit: int
     ) -> Sequence[tuple[RetentionKeyset, bool]]:
@@ -62,25 +72,23 @@ class EmptySessionRepository:
         statement = (
             sa.select(Sessions.id, cost)
             .outerjoin(HelpAssistantRuns, HelpAssistantRuns.session_id == Sessions.id)
-            .where(
-                uuid_in(Sessions.id, ids),
-                Sessions.created_at < self.now - self.grace,
-                self._unreferenced(),
-                outside_widgets(),
-            )
+            .where(*self._releasable(ids))
             .with_for_update(of=Sessions, skip_locked=True)
         )
         return dict((await self.session.execute(statement)).tuples().all())
 
+    async def count_empty(self, ids: Sequence[UUID]) -> int:
+        """How many of these sessions are still empty and due, without locking:
+        those another transaction held while lock_empty skipped them."""
+        statement = (
+            sa.select(sa.func.count())
+            .select_from(Sessions)
+            .where(*self._releasable(ids))
+        )
+        return (await self.session.execute(statement)).scalar_one()
+
     async def delete_due(self, ids: Sequence[UUID]) -> Sequence[UUID]:
         statement = (
-            sa.delete(Sessions)
-            .where(
-                uuid_in(Sessions.id, ids),
-                Sessions.created_at < self.now - self.grace,
-                self._unreferenced(),
-                outside_widgets(),
-            )
-            .returning(Sessions.id)
+            sa.delete(Sessions).where(*self._releasable(ids)).returning(Sessions.id)
         )
         return tuple((await self.session.scalars(statement)).all())

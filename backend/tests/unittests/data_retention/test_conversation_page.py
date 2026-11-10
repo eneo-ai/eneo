@@ -382,11 +382,11 @@ async def test_probed_owners_are_charged_and_a_full_owner_page_continues() -> No
 
 
 def test_every_history_step_goes_first_on_some_date() -> None:
-    """Mutant: a step is left out of the date rotation (app runs after
-    questions, which a standing backlog never lets run)."""
+    """Mutant: a step is left out of the date rotation, so a standing backlog
+    in the steps before it spends every execution's budget and it never runs."""
     allocation = _allocation(unit_rows=10, chunk_rows=30)
     orders: list[Sequence[str]] = []
-    for offset in range(2):
+    for offset in range(3):
         task = ConversationHistoryRetentionTask(
             AsyncSession(),
             allocation=allocation,
@@ -402,5 +402,59 @@ def test_every_history_step_goes_first_on_some_date() -> None:
         )
         orders.append([step.name for step in task.steps()])
 
-    assert {order[0] for order in orders} == {"questions", "app_runs"}
+    assert {order[0] for order in orders} == {
+        "questions",
+        "app_runs",
+        "names_and_feedback",
+    }
     assert all(sorted(order) == sorted(orders[0]) for order in orders)
+
+
+@dataclass
+class _Names:
+    """A window of conversations whose first one is written; the period then
+    shortens, so every one of them is due again when they are counted."""
+
+    keys: list[RetentionKeyset]
+    written: set[UUID]
+
+    async def window(
+        self, cursor: RetentionKeyset | None, limit: int
+    ) -> Sequence[tuple[RetentionKeyset, bool]]:
+        return tuple((key, False) for key in self.keys[:limit])
+
+    async def clear_due(
+        self, ids: Sequence[UUID]
+    ) -> Sequence[tuple[UUID, UUID, bool, bool]]:
+        return tuple((id_, _OWNER, True, False) for id_ in ids if id_ in self.written)
+
+    async def count_due(self, ids: Sequence[UUID]) -> int:
+        return len(ids)
+
+
+@pytest.mark.asyncio
+async def test_a_written_conversation_due_again_is_charged_once() -> None:
+    """Mutant: held conversations are counted among every candidate, so one
+    written and due again under a shortened period is charged twice and the
+    step spends more rows than its batch allows."""
+    keys = [RetentionKeyset(id=uuid4(), at=_STARTED) for _ in range(2)]
+    task = ConversationHistoryRetentionTask(
+        AsyncSession(),
+        allocation=_allocation(unit_rows=10, chunk_rows=30),
+        now=_STARTED,
+        overdue_window=timedelta(days=1),
+        overdue_rows=10,
+        overdue_owner_rows=1000,
+        gather_seconds=1.0,
+    )
+    task.names = _Names(keys, written={keys[0].id})  # type: ignore[assignment]
+
+    result = await task._names(
+        RetentionBatch(
+            job_run_id=uuid4(), batch_seq=0, rows=4, files=0, deadline=math.inf
+        )
+    )
+
+    # Two discovered, one written, one held.
+    assert result.rows == 4
+    assert result.blocked == {ConversationBlockReason.ROOT_LOCKED.key: 1}

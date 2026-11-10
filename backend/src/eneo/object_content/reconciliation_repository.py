@@ -149,6 +149,67 @@ class ObjectContentHealthFacts:
     last_object_cycle_completed_at: datetime | None
 
 
+@dataclass(frozen=True, slots=True)
+class RemovalReadback:
+    """Bytes to be removed that are not yet, by why: kept on purpose (minimum
+    retention or a hold), failed and to be retried, or not reached yet. Bytes
+    in the store that no content names any more, such as the remote copy a
+    move to PostgreSQL leaves, are not reached yet until their delete is
+    confirmed."""
+
+    held: int
+    retrying: int
+    waiting: int
+
+    @property
+    def pending(self) -> int:
+        return self.held + self.retrying + self.waiting
+
+
+@dataclass(frozen=True, slots=True)
+class InventoryListing:
+    """Where the store's two listings stand, as of `observed_at`. Each lists
+    one cycle at a time. A completed object cycle keeps its own start; a
+    completed multipart cycle keeps only when it completed."""
+
+    observed_at: datetime
+    last_completed_object_cycle_started_at: datetime | None
+    multipart_cycle_started_at: datetime
+    last_multipart_cycle_completed_at: datetime | None
+
+
+@dataclass(slots=True)
+class InventoryListingFollower:
+    """Follows the store's listings until each has been listed in full by a
+    cycle that began at `since` or later.
+
+    A completing multipart cycle begins the next at the same moment, so the
+    completion of a cycle begun before `since` can fall after it. The
+    follower notes the start of the first multipart cycle it sees begun at
+    `since` or later; one cycle runs at a time, so a completion after that
+    start completes that cycle or a later one. Call it after every page: a
+    cycle it did not see begin is not counted, only the one it sees next."""
+
+    since: datetime
+    _multipart_started_at: datetime | None = None
+
+    def listed_in_full(self, listing: InventoryListing) -> bool:
+        if (
+            self._multipart_started_at is None
+            and listing.multipart_cycle_started_at >= self.since
+        ):
+            self._multipart_started_at = listing.multipart_cycle_started_at
+        objects = listing.last_completed_object_cycle_started_at
+        multipart = listing.last_multipart_cycle_completed_at
+        return (
+            objects is not None
+            and objects >= self.since
+            and self._multipart_started_at is not None
+            and multipart is not None
+            and multipart > self._multipart_started_at
+        )
+
+
 CONTENT_REFERENCE_OWNER_COLUMNS = (
     (ContentOwner.FILE_CONTENT, FileContentReferences.content_id),
     (ContentOwner.KNOWLEDGE_FILE, InfoBlobContentReferences.content_id),
@@ -162,6 +223,84 @@ def _no_concrete_references() -> ColumnElement[bool]:
             ~exists(select(content_id).where(content_id == ObjectContents.id))
             for _owner, content_id in CONTENT_REFERENCE_OWNER_COLUMNS
         )
+    )
+
+
+def _orphan_key_is_live() -> ColumnElement[bool]:
+    """A content that is not tombstoned still names the orphan candidate's key."""
+    return exists(
+        select(ObjectStoreObjects.content_id)
+        .join(
+            ObjectContents,
+            ObjectContents.id == ObjectStoreObjects.content_id,
+        )
+        .where(
+            ObjectStoreObjects.object_key == ObjectContentOrphanCandidates.object_key,
+            ObjectContents.state != ContentState.TOMBSTONED.value,
+        )
+    )
+
+
+def _multipart_upload_is_live(now: datetime) -> ColumnElement[bool]:
+    """A pending content is still writing the multipart candidate's upload, or
+    a publication holds its key."""
+    active_upload = exists(
+        select(ObjectStoreObjects.content_id)
+        .join(
+            ObjectContents,
+            ObjectContents.id == ObjectStoreObjects.content_id,
+        )
+        .where(
+            ObjectStoreObjects.object_key
+            == ObjectContentMultipartCandidates.object_key,
+            ObjectStoreObjects.multipart_upload_id
+            == ObjectContentMultipartCandidates.upload_id,
+            ObjectContents.state == ContentState.PENDING.value,
+            ObjectContents.lease_until > now,
+        )
+    )
+    active_publication = exists(
+        select(ObjectContentOrphanCandidates.object_key).where(
+            ObjectContentOrphanCandidates.object_key
+            == ObjectContentMultipartCandidates.object_key,
+            ObjectContentOrphanCandidates.lease_until > now,
+        )
+    )
+    return or_(active_upload, active_publication)
+
+
+def _begin_inventory_cycles(
+    state: ObjectContentReconciliationState, now: datetime
+) -> None:
+    """Start both store listings, objects and multipart uploads, from the
+    beginning at `now`."""
+    state.object_cycle_id = uuid4()
+    state.object_continuation_token = None
+    state.object_cycle_started_at = now
+    state.multipart_cycle_id = uuid4()
+    state.multipart_key_marker = None
+    state.multipart_upload_id_marker = None
+    state.multipart_cycle_started_at = now
+
+
+def _retention_clear(now: datetime) -> ColumnElement[bool]:
+    """Neither a minimum retention nor an active hold keeps the content."""
+    active_hold = exists(
+        select(ObjectContentHolds.id).where(
+            ObjectContentHolds.content_id == ObjectContents.id,
+            ObjectContentHolds.released_at.is_(None),
+            or_(
+                ObjectContentHolds.expires_at.is_(None),
+                ObjectContentHolds.expires_at > now,
+            ),
+        )
+    )
+    return and_(
+        or_(
+            ObjectContents.minimum_retain_until.is_(None),
+            ObjectContents.minimum_retain_until <= now,
+        ),
+        ~active_hold,
     )
 
 
@@ -209,23 +348,7 @@ class ObjectContentReconciliationRepository:
             await self._session.flush()
             return len(unowned_pending)
 
-        active_hold = exists(
-            select(ObjectContentHolds.id).where(
-                ObjectContentHolds.content_id == ObjectContents.id,
-                ObjectContentHolds.released_at.is_(None),
-                or_(
-                    ObjectContentHolds.expires_at.is_(None),
-                    ObjectContentHolds.expires_at > now,
-                ),
-            )
-        )
-        retention_clear = and_(
-            or_(
-                ObjectContents.minimum_retain_until.is_(None),
-                ObjectContents.minimum_retain_until <= now,
-            ),
-            ~active_hold,
-        )
+        retention_clear = _retention_clear(now)
         eligible_retained = and_(
             ObjectContents.state == ContentState.RETAINED.value,
             retention_clear,
@@ -811,18 +934,6 @@ class ObjectContentReconciliationRepository:
         limit: int,
     ) -> tuple[OrphanDeleteLease, ...]:
         now = await self._database_now()
-        live_row_exists = exists(
-            select(ObjectStoreObjects.content_id)
-            .join(
-                ObjectContents,
-                ObjectContents.id == ObjectStoreObjects.content_id,
-            )
-            .where(
-                ObjectStoreObjects.object_key
-                == ObjectContentOrphanCandidates.object_key,
-                ObjectContents.state != ContentState.TOMBSTONED.value,
-            )
-        )
         rows = (
             await self._session.scalars(
                 select(ObjectContentOrphanCandidates)
@@ -834,7 +945,7 @@ class ObjectContentReconciliationRepository:
                         ObjectContentOrphanCandidates.lease_until.is_(None),
                         ObjectContentOrphanCandidates.lease_until <= now,
                     ),
-                    ~live_row_exists,
+                    ~_orphan_key_is_live(),
                 )
                 .order_by(
                     ObjectContentOrphanCandidates.eligible_after,
@@ -1053,28 +1164,6 @@ class ObjectContentReconciliationRepository:
         limit: int,
     ) -> tuple[MultipartAbortLease, ...]:
         now = await self._database_now()
-        active_upload = exists(
-            select(ObjectStoreObjects.content_id)
-            .join(
-                ObjectContents,
-                ObjectContents.id == ObjectStoreObjects.content_id,
-            )
-            .where(
-                ObjectStoreObjects.object_key
-                == ObjectContentMultipartCandidates.object_key,
-                ObjectStoreObjects.multipart_upload_id
-                == ObjectContentMultipartCandidates.upload_id,
-                ObjectContents.state == ContentState.PENDING.value,
-                ObjectContents.lease_until > now,
-            )
-        )
-        active_publication = exists(
-            select(ObjectContentOrphanCandidates.object_key).where(
-                ObjectContentOrphanCandidates.object_key
-                == ObjectContentMultipartCandidates.object_key,
-                ObjectContentOrphanCandidates.lease_until > now,
-            )
-        )
         rows = (
             await self._session.scalars(
                 select(ObjectContentMultipartCandidates)
@@ -1086,8 +1175,7 @@ class ObjectContentReconciliationRepository:
                         ObjectContentMultipartCandidates.lease_until.is_(None),
                         ObjectContentMultipartCandidates.lease_until <= now,
                     ),
-                    ~active_upload,
-                    ~active_publication,
+                    ~_multipart_upload_is_live(now),
                 )
                 .order_by(
                     ObjectContentMultipartCandidates.eligible_after,
@@ -1319,6 +1407,56 @@ class ObjectContentReconciliationRepository:
             content.lease_until = None
         await self._session.flush()
 
+    async def removal_readback(self) -> RemovalReadback:
+        """Every content no owner refers to whose bytes are not yet removed:
+        the states the lifecycle and the delete reconciliation move on, every
+        orphan in the store that waits for its delete, and every multipart
+        upload no content is writing, whose parts wait for their abort."""
+        now = await self._database_now()
+        clear = _retention_clear(now)
+        failed = ObjectContents.failure_code.is_not(None)
+        row = (
+            await self._session.execute(
+                select(
+                    func.count().filter(~clear),
+                    func.count().filter(clear, failed),
+                    func.count().filter(clear, ~failed),
+                ).where(
+                    or_(
+                        ObjectContents.state.in_(
+                            (
+                                ContentState.PENDING.value,
+                                ContentState.RETAINED.value,
+                                ContentState.DELETE_PENDING.value,
+                            )
+                        ),
+                        and_(
+                            ObjectContents.state == ContentState.FAILED.value,
+                            ObjectContents.delete_requested_at.is_not(None),
+                        ),
+                    ),
+                    ObjectContents.reference_count == 0,
+                    _no_concrete_references(),
+                )
+            )
+        ).one()
+        held, retrying, waiting = row
+        orphans = await self._session.scalar(
+            select(func.count())
+            .select_from(ObjectContentOrphanCandidates)
+            .where(~_orphan_key_is_live())
+        )
+        multipart = await self._session.scalar(
+            select(func.count())
+            .select_from(ObjectContentMultipartCandidates)
+            .where(~_multipart_upload_is_live(now))
+        )
+        return RemovalReadback(
+            held=held,
+            retrying=retrying,
+            waiting=waiting + (orphans or 0) + (multipart or 0),
+        )
+
     async def health_facts(self) -> ObjectContentHealthFacts:
         states = await self._content_state_facts()
         integrity_failures = await self._session.scalar(
@@ -1467,6 +1605,23 @@ class ObjectContentReconciliationRepository:
             ),
         )
 
+    async def inventory_listing(self) -> InventoryListing:
+        state = (
+            await self._session.scalars(
+                select(ObjectContentReconciliationState).where(
+                    ObjectContentReconciliationState.id == 1
+                )
+            )
+        ).one()
+        return InventoryListing(
+            observed_at=await self._database_now(),
+            last_completed_object_cycle_started_at=(
+                state.last_completed_object_cycle_started_at
+            ),
+            multipart_cycle_started_at=state.multipart_cycle_started_at,
+            last_multipart_cycle_completed_at=state.last_multipart_cycle_completed_at,
+        )
+
     async def reset_remote_inventory(self) -> None:
         """Restart both inventory cycles and drop cleanup candidates.
 
@@ -1476,14 +1631,7 @@ class ObjectContentReconciliationRepository:
         that no candidate row holds a live lease.
         """
         state = await self._state_for_update()
-        now = await self._database_now()
-        state.object_cycle_id = uuid4()
-        state.object_continuation_token = None
-        state.object_cycle_started_at = now
-        state.multipart_cycle_id = uuid4()
-        state.multipart_key_marker = None
-        state.multipart_upload_id_marker = None
-        state.multipart_cycle_started_at = now
+        _begin_inventory_cycles(state, await self._database_now())
         # The completed-cycle facts also describe the previous destination:
         # keeping them would let missing-marking consume the old bucket's
         # cutoff, and report its completion time as current, before the new

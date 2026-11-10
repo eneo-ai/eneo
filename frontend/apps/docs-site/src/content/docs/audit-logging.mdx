@@ -123,13 +123,36 @@ before keeps the period it was installed with.
 A removed conversation never returns. Questions without an owner Assistant follow no
 period, and scheduled retention does not remove them.
 
+#### Names and feedback text
+
+A conversation's name is its first question, a title made from its turns or a name
+its user chose, and its feedback text can quote the turns. A chosen name and feedback
+text keep the time they were last written. A title made from the turns keeps the time
+of the oldest question still there when it was made, so it goes no later than that
+question, however late it was made; a title whose turns lost one to removal while it
+was being made is not stored. Once that time is older than the conversation's period, conversation
+history replaces the name with an empty one, which both apps show as Untitled, and
+removes the feedback text; the feedback vote stays. This holds whether or not the
+conversation's questions are still there, so a name chosen later is kept as long as
+its own time allows. A group chat's name and feedback text follow the shortest period
+among its assistants. A conversation from before the upgrade that recorded these
+times counts from when it was created. After the upgrade, health can therefore read
+`degraded` until the step has cleared the older names and feedback texts: they are
+overdue, not a false alarm. The step `names_and_feedback` reports them as
+`names_cleared` and `feedback_texts_cleared`.
+
+If a period is lengthened or removed after a question was removed, a name taken from
+that question stays until the new period has passed, or for good when no period
+applies.
+
 ### Scheduled execution and limits
 
 ![One retention engine: chats, apps and uploads hand their due records to the engine, which locks, proves, checks again and deletes in bounded atomic units, audits every disposal without content, asks the Files owner whether a file is still in use, and leaves byte deletion to object content storage. Expiry and erasure are two different decisions.](/diagrams/retention-engine.svg)
 
 The general worker runs the shared retention engine once a day, at 03:30 by default.
 The time is read in the worker's time zone; the shipped image runs in UTC. The
-registered tasks remove due questions and App runs, sessions that were created more
+registered tasks remove due questions and App runs, the names and feedback texts of
+conversations past their period, sessions that were created more
 than `RETENTION_EMPTY_SESSION_GRACE_HOURS` ago and have no question, unused upload
 families and expired retention execution records. Each removal has this one scheduled
 path. Audit-log purging remains governed by the separate audit retention policy above.
@@ -209,13 +232,15 @@ event. No event holds content: identities and numbers only.
 `succeeded` means that every due row was visited within the budget; a row that was
 not removed is counted under a blocked reason. `partial` means the budget ended with
 due work left; the next execution resumes from the stored cursor. The question and
-App-run streams take turns going first on consecutive days, and the empty-session
-scan is its own task with its own budget, so a backlog in one stream cannot starve
-another. The empty-session and unused-upload sweeps examine every row of their
+App-run streams and the `names_and_feedback` step take turns going first on
+consecutive days, and the empty-session scan is its own task with its own budget,
+so a backlog in one of them cannot starve another. The empty-session and unused-upload sweeps examine every row of their
 population once per pass, so a pass takes about population divided by
 `RETENTION_MAX_ROWS_PER_RUN` nights and reports `partial` until it ends; an empty
 session can wait up to one pass. A session emptied by history retention is removed
-in the same unit unless a live chat holds it. The execution record
+in the same unit unless a live chat holds it. An empty session that another
+transaction holds is kept for a later execution and counted as `root_locked`. The
+execution record
 (`retention_job_runs`) keeps counts, blocked reasons, cursors and the overdue
 snapshot.
 
@@ -270,7 +295,7 @@ stops the process at start with the reason.
 | `RETENTION_EMPTY_SESSION_GRACE_HOURS` | `24` | Minimum age of a session without a question |
 | `RETENTION_CHUNK_STATEMENT_TIMEOUT_MS` / `RETENTION_CHUNK_LOCK_TIMEOUT_MS` | `30000` / `2000` | PostgreSQL statement and lock timeouts, set first in every retention transaction and in the preview command |
 | `RETENTION_LEASE_STALE_SECONDS` | `3600` | A running execution whose heartbeat is older is taken over by the next run and reads `abandoned` in health |
-| `RETENTION_OVERDUE_WINDOW_DAYS` / `RETENTION_OVERDUE_MAX_ROWS` | `1` / `1000` | Due rows older than the window are overdue; the snapshot stops at this many overdue rows, or after a fixed number of pages per stream (`RETENTION_CONVERSATIONS_MAX_ROWS_PER_RUN` in owner pages; a page full of rows continues inside its owner), and then reports itself incomplete |
+| `RETENTION_OVERDUE_WINDOW_DAYS` / `RETENTION_OVERDUE_MAX_ROWS` | `1` / `1000` | Due rows older than the window are overdue, and so is a conversation whose name or feedback text is; the snapshot stops at this many overdue rows, or after a fixed number of pages per question or App-run stream (`RETENTION_CONVERSATIONS_MAX_ROWS_PER_RUN` in owner pages; a page full of rows continues inside its owner), and then reports itself incomplete. The read of names and feedback texts has no page bound and stops at `RETENTION_CHUNK_STATEMENT_TIMEOUT_MS`; health then reads `unknown` or `degraded`, never `healthy` |
 | `RETENTION_HEALTH_TIMEOUT_SECONDS` / `RETENTION_HEALTH_CACHE_SECONDS` | `1.0` / `30` | Longest health read; how long `/api/healthz` reuses one read |
 
 When the row or file budget is spent, the task stops. A unit that does not fit the
@@ -409,6 +434,56 @@ LIMIT 5;
 
 Questions whose Assistant was deleted keep a null owner and follow no retention
 policy, so they do not expire. This is unchanged from earlier releases.
+
+#### Read back after a restore
+
+A restored database can hold rows that became due after its recovery point. Before
+traffic opens again, with the API closed, every worker stopped and every retention
+task turned on (each `RETENTION_*_ENABLED` setting `true`, the default), run
+retention until nothing due is left:
+
+```bash
+docker compose run --rm backend run-cron --until-complete run_retention
+```
+
+The command runs the registered tasks in its own process, round after round, and
+prints each round's outcome and the number of rows removed. Every round runs
+against the time the command started, so rows that fall due while it runs are
+left to the scheduled run. Retention is complete
+when every step of every task has finished a pass that began after the latest
+removal, because a removal can make other rows due (a removed question can leave
+its session empty). A pass resumed from a cursor stored before the restore does
+not count.
+
+It then runs object-content reconciliation and reports storage on its own line.
+Payloads that nothing refers to any more are known only from a listing of the
+store. Reconciliation lists the store one page per pass. The readback continues
+the listing under way and confirms storage only once a whole listing that began
+after the readback started has completed, and nothing is left to remove. It
+stops after a fixed number of passes, enough for two listings of a million
+objects at the default page size:
+
+| Line | Meaning |
+| --- | --- |
+| `storage: confirmed` | A listing begun after the readback started has completed, and the store has removed every payload that nothing refers to any more |
+| `storage: pending N (held H, retrying R, waiting W)` | Payloads are still kept by a minimum retention or a hold, wait for a retry after a failure, or were not reached yet. A payload the listing found is deleted once a second listing has seen it after its grace period (one hour by default): run the command again after that. Not confirmed erasure |
+| `storage: pending N (...), store not listed in full` | No listing that began after the readback started completed within its passes. Run the command again: it continues the listing. Not confirmed erasure |
+| `storage: not reachable (code)` | The store could not be checked |
+| `storage: failed (...)` | A store operation failed or could not be confirmed during reconciliation, such as an aborted upload whose parts are still listed |
+
+Exit code 0 means retention is complete and storage is confirmed or pending. Exit
+code 1 means it is not: the output names each task and reason, such as a missing
+report (the task raised; see the log), an execution held by another process (stop
+the workers), an outcome other than `succeeded` or `partial`, a blocked reason
+other than "no longer due" or "not old enough", a step that made no progress,
+"still removing after 10000 rounds" (run the command again: it continues), or a
+storage line other than `confirmed` or `pending`. A task turned off by its setting
+also fails the readback, since nothing shows that its work is done. Resolve the
+cause and run the command again.
+
+The readback covers what the retention engine removes. It does not replay manual
+deletions made after the recovery point and does not remove backup copies; see the
+[storage and restore procedures](/guides/object-content-storage#back-up-and-restore).
 
 ## Export formats
 

@@ -390,18 +390,18 @@ class RetentionJobRunRepository:
         )
 
     async def prune_after_audit_retention(
-        self, *, limit: int
+        self, *, limit: int, now: datetime | None = None
     ) -> RetentionJobPruneResult:
-        """Lock and prune at most `limit` expired, finished executions.
+        """Lock and prune at most `limit` executions expired at `now` (the
+        database's clock when None) that have finished.
 
         The caller audits and charges discovery plus deletion in its transaction.
         Running executions remain leases regardless of their start or heartbeat age.
         """
         if limit <= 0:
             raise ValueError("A job-history prune limit must be positive.")
-        cutoff = sa.func.now() - sa.func.make_interval(
-            0, 0, 0, deployment_audit_retention_days()
-        )
+        period = sa.func.make_interval(0, 0, 0, deployment_audit_retention_days())
+        cutoff = sa.func.now() - period if now is None else now - period
         expired = (
             RetentionJobRuns.finished_at < cutoff,
             RetentionJobRuns.outcome != _RUNNING,

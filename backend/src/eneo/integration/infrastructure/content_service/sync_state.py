@@ -1,5 +1,6 @@
 """Status, timestamp, token and sync-log bookkeeping shared by the content services."""
 
+import logging
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID
@@ -11,6 +12,7 @@ from eneo.integration.domain.repositories.integration_knowledge_repo import (
     SyncStateFields,
 )
 from eneo.main.logging import get_logger
+from eneo.observability.error_log import log_error
 from eneo.observability.error_text import user_visible_error
 
 if TYPE_CHECKING:
@@ -127,11 +129,13 @@ class SyncStateRecorder:
                 knowledge.delta_token = delta_token
                 fields["delta_token"] = delta_token
             await self._knowledge_repo.update_sync_state(knowledge_id, **fields)
-        except Exception:
-            logger.error(
+        except Exception as exc:
+            log_error(
+                logger,
+                logging.ERROR,
                 "Could not record sync failure on integration knowledge %s",
                 knowledge_id,
-                exc_info=True,
+                error=exc,
             )
         await self.add_log(
             SyncLog(
@@ -157,10 +161,12 @@ class SyncStateRecorder:
             return
         try:
             await self._sync_log_repo.add(sync_log)
-        except Exception:
-            logger.error(
+        except Exception as exc:
+            log_error(
+                logger,
+                logging.ERROR,
                 "Could not write the %s sync log for integration knowledge %s",
                 sync_log.status,
                 sync_log.integration_knowledge_id,
-                exc_info=True,
+                error=exc,
             )

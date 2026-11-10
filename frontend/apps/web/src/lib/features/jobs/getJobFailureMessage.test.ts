@@ -20,6 +20,9 @@ vi.mock("$lib/paraglide/messages", () => ({
     job_failure_storage_verification_failed: () => "storage_verification_failed",
     job_failure_knowledge_source_conflict: () => "knowledge_source_conflict",
     job_failure_unknown: () => "unknown",
+    job_failure_task_failed: () => "task_failed",
+    job_failure_task_stopped: () => "task_stopped",
+    job_failure_task_quota_exceeded: () => "task_quota_exceeded",
     crawl_failure_remote_unreachable: () => "remote_unreachable",
     crawl_failure_tenant_quota_exceeded: () => "tenant_quota_exceeded",
     crawl_failure_user_quota_exceeded: () => "user_quota_exceeded",
@@ -79,4 +82,15 @@ describe("getJobFailureMessage", () => {
       expect(getJobFailureMessage(code, "upload_info_blob")).toBe("unknown");
     }
   );
+
+  it.each([
+    ["processing_failed", "pull_sharepoint_content", "task_failed"],
+    ["cancelled", "sync_sharepoint_delta", "task_stopped"],
+    ["quota_exceeded", "run_app", "task_quota_exceeded"],
+    ["tenant_quota_exceeded", "pull_confluence_content", "upload:tenant_quota_exceeded"],
+    ["storage_unavailable", "run_app", "storage_unavailable"],
+    ["future_failure_code", "run_app", "task_failed"]
+  ] as const)("says %s of a %s job without a file", (code, task, message) => {
+    expect(getJobFailureMessage(code, task)).toBe(message);
+  });
 });

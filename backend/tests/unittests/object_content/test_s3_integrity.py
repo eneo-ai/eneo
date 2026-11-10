@@ -262,12 +262,26 @@ class _EventuallyDeletedClient:
 
 
 class _AbortClient:
-    def __init__(self, events: list[str]) -> None:
+    """After the abort, the upload is gone unless `parts` says what a listing
+    of its parts still returns."""
+
+    def __init__(
+        self, events: list[str], *, parts: dict[str, object] | ClientError | None = None
+    ) -> None:
         self._events = events
+        self._parts = parts
 
     def abort_multipart_upload(self, **_request: object) -> dict[str, object]:
         self._events.append("abort")
         return {}
+
+    def list_parts(self, **_request: object) -> dict[str, object]:
+        self._events.append("list_parts")
+        if isinstance(self._parts, dict):
+            return self._parts
+        raise self._parts or ClientError(
+            {"Error": {"Code": "NoSuchUpload", "Message": "missing"}}, "ListParts"
+        )
 
 
 class _DownloadClient:
@@ -798,7 +812,35 @@ async def test_multipart_abort_checkpoints_before_the_sdk_request() -> None:
         operation_checkpoint=checkpoint,
     )
 
-    assert events == ["checkpoint", "abort", "checkpoint"]
+    assert events == ["checkpoint", "abort", "checkpoint", "checkpoint", "list_parts"]
+
+
+@pytest.mark.parametrize(
+    "parts",
+    [
+        {"Parts": [{"PartNumber": 2, "Size": 5}], "IsTruncated": False},
+        {"Parts": [], "IsTruncated": True},
+        ClientError({"Error": {"Code": "AccessDenied", "Message": "no"}}, "ListParts"),
+    ],
+    ids=["a part left", "listing not complete", "listing refused"],
+)
+@pytest.mark.asyncio
+async def test_multipart_abort_is_confirmed_only_when_no_part_is_left(
+    parts: dict[str, object] | ClientError,
+) -> None:
+    """A part upload in flight during the abort can still complete and keep
+    its bytes, so an abort counts only once a listing of the upload's parts
+    says none is left."""
+    events: list[str] = []
+    settings = _settings()
+    store = S3ObjectStore(
+        settings, client=cast("S3Client", _AbortClient(events, parts=parts))
+    )
+
+    with pytest.raises(ObjectStoreUnavailableError):
+        await store.abort_multipart(new_object_key(settings), "upload-id")
+
+    assert events == ["abort", "list_parts"]
 
 
 @pytest.mark.asyncio

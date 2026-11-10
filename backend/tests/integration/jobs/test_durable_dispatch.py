@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -34,6 +34,7 @@ from eneo.jobs.task_models import (
 )
 from eneo.main.models import Status
 from eneo.object_content.content import StorageKind
+from tests.log_capture import SENTINEL, emitted
 
 pytestmark = pytest.mark.integration
 
@@ -253,9 +254,9 @@ async def test_redispatch_refusal_advances_but_complete_job_is_ignored(
 
 
 async def test_corrupt_envelope_fails_without_enqueue_or_path_influence(
-    async_session, admin_user, tmp_path, monkeypatch
+    async_session, admin_user, tmp_path
 ) -> None:
-    hostile_path = tmp_path / "hostile"
+    hostile_path = tmp_path / f"hostile-{SENTINEL}"
     hostile_path.write_text("untouched")
     job_id = await _insert_stale_job(
         async_session,
@@ -272,14 +273,9 @@ async def test_corrupt_envelope_fails_without_enqueue_or_path_influence(
         },
     )
     enqueue = AsyncMock()
-    failure_log = MagicMock()
-    monkeypatch.setattr(
-        durable_dispatch,
-        "logger",
-        SimpleNamespace(warning=failure_log),
-    )
 
-    await redispatch_stale_jobs(async_session, enqueue=enqueue)
+    with emitted(durable_dispatch.logger) as records:
+        await redispatch_stale_jobs(async_session, enqueue=enqueue)
 
     enqueue.assert_not_awaited()
     row = (
@@ -295,11 +291,14 @@ async def test_corrupt_envelope_fails_without_enqueue_or_path_influence(
     assert row.failure_code == JobFailureCode.INVALID_JOB_PAYLOAD.value
     assert row.result_location is None
     assert hostile_path.read_text() == "untouched"
-    failure_log.assert_called_once()
-    log_fields = failure_log.call_args.kwargs["extra"]
-    assert log_fields["job_id"] == str(job_id)
-    assert log_fields["task"] == Task.UPLOAD_FILE.value
-    assert log_fields["failure_code"] == JobFailureCode.INVALID_JOB_PAYLOAD.value
+    # The refusal quotes the invalid input, here a path; the log keeps its kind.
+    [record] = [record for record in records if record.levelno == logging.WARNING]
+    assert not record.exc_info
+    assert SENTINEL not in repr(record.__dict__)
+    assert getattr(record, "error_type") == "ValidationError"
+    assert getattr(record, "job_id") == str(job_id)
+    assert getattr(record, "task") == Task.UPLOAD_FILE.value
+    assert getattr(record, "failure_code") == JobFailureCode.INVALID_JOB_PAYLOAD.value
 
 
 def test_staging_path_depends_only_on_job_id(tmp_path: Path) -> None:

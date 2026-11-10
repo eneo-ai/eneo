@@ -821,6 +821,11 @@ async def test_reconciler_moves_verified_bytes_in_both_directions(
         candidate = await session.get(ObjectContentOrphanCandidates, object_key)
         assert candidate is not None
         assert candidate.completed_observations == 0
+        # The former remote copy keeps storage removal from being confirmed.
+        readback = await ObjectContentReconciliationRepository(
+            session
+        ).removal_readback()
+        assert readback.waiting == 1
         now = await session.scalar(select(func.now()))
         assert now is not None
         candidate.eligible_after = now - timedelta(seconds=1)
@@ -848,6 +853,11 @@ async def test_reconciler_moves_verified_bytes_in_both_directions(
     assert second_cleanup.orphan_objects_deleted == 1
     with pytest.raises(ObjectStoreNotFoundError):
         await real_object_store.store.head(object_key)
+    async with object_content_database.session() as session, session.begin():
+        readback = await ObjectContentReconciliationRepository(
+            session
+        ).removal_readback()
+        assert readback.pending == 0
     await inline_runtime.validate_configuration()
     await inline_runtime.stop()
 
@@ -1003,9 +1013,12 @@ async def test_store_outage_retries_without_changing_authority(
         )
 
     assert first.moves_processed == 1
+    # The store refused the move's upload: the pass reports a store failure.
+    assert first.store_failures == 1
     monkeypatch.setattr(real_object_store.store, "upload", original_upload)
     second = await reconciler.run_once()
     assert second.moves_processed == 1
+    assert second.store_failures == 0
     async with object_content_database.session() as session, session.begin():
         content = await session.get(ObjectContents, content_id)
         move = await session.get(ObjectContentMoves, content_id)

@@ -22,6 +22,7 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+from eneo.data_retention.application import retention_runner as runner_module
 from eneo.data_retention.application.job_history_retention_task import (
     JobHistoryRetentionTask,
 )
@@ -38,6 +39,7 @@ from eneo.data_retention.application.retention_runner import (
     RetentionRunner,
     RetentionRunReport,
     RetentionStep,
+    RetentionStepPass,
     RetentionStepResult,
     RetentionTenantEffect,
 )
@@ -50,6 +52,7 @@ from eneo.data_retention.domain.retention import (
     retention_batch_audit_id,
     retention_run_audit_id,
 )
+from eneo.data_retention.infrastructure import retention_worker
 from eneo.data_retention.infrastructure.retention_job_run_repo import (
     RetentionJobRunRepository,
 )
@@ -59,6 +62,7 @@ from eneo.database.database import sessionmanager
 from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
 from eneo.database.tables.audit_retention_policy_table import AuditRetentionPolicy
 from eneo.database.tables.retention_tables import RetentionJobRuns
+from tests.log_capture import chained_error, emitted, logged_errors
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.integration]
 
@@ -878,6 +882,47 @@ async def test_one_raising_task_does_not_stop_the_others(test_tenant) -> None:
     assert await _remaining(items) == 0
 
 
+async def test_a_failed_execution_logs_the_kind_of_error_not_its_text(
+    test_tenant,
+) -> None:
+    """An error met while removing can quote what was removed; the log keeps
+    its kinds and place. Mutants: a failed chunk, an overdue snapshot that
+    could not be written, or a task that raised is logged with its message
+    or traceback."""
+    await _work_items(1)
+
+    async def fail(batch: RetentionBatch) -> RetentionStepResult:
+        raise chained_error()
+
+    async def snapshot() -> RetentionOverdue:
+        raise chained_error()
+
+    def unbuildable(session: AsyncSession) -> _FakeTask:
+        raise chained_error()
+
+    budget = RetentionBudget(rows=100, files=100, seconds=60)
+    with emitted(runner_module.logger, retention_worker.logger) as records:
+        async with sessionmanager.session() as session:
+            report = await _runner(session).run(
+                _OverdueTask(
+                    session, snapshot, extra_steps=(RetentionStep("boom", fail),)
+                )
+            )
+            await run_registered_tasks(
+                session,
+                (
+                    RetentionTaskRegistration(
+                        name=_TASK, enabled=True, budget=budget, build=unbuildable
+                    ),
+                ),
+                lambda _: _runner(session),
+            )
+
+    assert report.error_code is RetentionErrorCode.CHUNK_FAILED
+    logged = {record.msg for record in logged_errors(records)}
+    assert len(logged) == 3, [record.getMessage() for record in records]
+
+
 @pytest.mark.parametrize("breach", ["over_charge", "undeclared_key"])
 async def test_a_step_breaking_its_contract_fails_and_commits_nothing(
     test_tenant, breach
@@ -972,6 +1017,61 @@ async def test_observations_are_progress_and_only_disposals_are_audited(
     assert run.log_metadata["counts"] == (
         {"items.deleted": 1} if kind == "disposed" else {}
     )
+
+
+async def test_the_report_shows_where_each_step_pass_began_and_ended(
+    test_tenant,
+) -> None:
+    """The readback after a restore tells a fresh pass from a resumed one, and
+    a finished pass from one the budget stopped, by these. Kills a report
+    without the steps the budget kept from running, or with the disposals of
+    another execution."""
+    await _work_items(3)
+    positions = [RetentionKeyset(at=_NOW, id=uuid4()) for _ in range(3)]
+
+    async def walk(batch: RetentionBatch) -> RetentionStepResult:
+        index = 0 if batch.cursor is None else positions.index(batch.cursor) + 1
+        if index == len(positions):
+            return RetentionStepResult(exhausted=True)
+        return RetentionStepResult(
+            rows=1,
+            effects=(RetentionTenantEffect(tenant_id=None, counts={"examined": 1}),),
+            cursor=positions[index],
+        )
+
+    async def last(batch: RetentionBatch) -> RetentionStepResult:
+        return RetentionStepResult(exhausted=True)
+
+    steps = (RetentionStep("walk", walk), RetentionStep("last", last))
+    reports: list[RetentionRunReport] = []
+    for _ in range(2):
+        async with sessionmanager.session() as session:
+            reports.append(
+                await _runner(session, budget_rows=5).run(
+                    _FakeTask(session, extra_steps=steps)
+                )
+            )
+    first, second = reports
+
+    finished = RetentionStepPass(started_at=None, ended_at=None, finished=True)
+    assert first.outcome is RetentionJobOutcome.PARTIAL
+    assert first.disposed == {"items.deleted": 3}
+    assert first.steps == {
+        "items": finished,
+        "walk": RetentionStepPass(
+            started_at=None, ended_at=positions[1], finished=False
+        ),
+        "last": None,
+    }
+    assert second.outcome is RetentionJobOutcome.SUCCEEDED
+    assert second.disposed == {}
+    assert second.steps == {
+        "items": finished,
+        "walk": RetentionStepPass(
+            started_at=positions[1], ended_at=None, finished=True
+        ),
+        "last": finished,
+    }
 
 
 async def test_the_batch_carries_the_execution_deadline() -> None:
