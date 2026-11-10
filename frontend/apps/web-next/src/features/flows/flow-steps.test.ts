@@ -78,6 +78,25 @@ describe("stepReaders", () => {
     expect(stepReaders(steps[0]!, steps).map((step) => step.step_order)).toEqual([3]);
     expect(stepReaders(steps[1]!, steps)).toEqual([]);
   });
+
+  it("counts a Word step whose field reads the step", () => {
+    const steps = [
+      makeStep(1),
+      makeStep(2),
+      makeStep(3, {
+        output_mode: "template_fill",
+        output_type: "docx",
+        output_config: {
+          placeholders: ["sammanfattning"],
+          bindings: { sammanfattning: "{{step_1.output.text}}" }
+        }
+      })
+    ];
+    expect(stepReaders(steps[0]!, steps).map((step) => step.step_order)).toEqual([3]);
+    expect(stepReads(steps[2]!, steps).map((read) => read.kind === "step" && read.order)).toEqual([
+      1, 2
+    ]);
+  });
 });
 
 describe("step orders", () => {

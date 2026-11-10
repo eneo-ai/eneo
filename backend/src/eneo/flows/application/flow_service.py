@@ -236,6 +236,50 @@ class FlowService:
             )
         return self.template_asset_service
 
+    async def _with_template_fields(
+        self,
+        steps: list[FlowStep],
+        *,
+        flow_id: UUID,
+        unchanged_step_ids: frozenset[UUID],
+    ) -> list[FlowStep]:
+        """A written Word step lists its template's fields as the flow's
+        template asset holds them: a write neither drops nor adds one, so a
+        field left without a binding stays in the list and the draft check
+        names it. A step whose template is not one of the flow's keeps what
+        it was given; publishing refuses it."""
+
+        def asset_id(step: FlowStep) -> str | None:
+            if step.output_mode != "template_fill" or step.id in unchanged_step_ids:
+                return None
+            value = (step.output_config or {}).get("template_asset_id")
+            return None if value in (None, "") else str(value)
+
+        if not any(asset_id(step) for step in steps):
+            return steps
+        assets = {
+            str(asset.id): asset
+            for asset in await self._require_template_asset_service().list_assets(
+                flow_id=flow_id
+            )
+        }
+        written: list[FlowStep] = []
+        for step in steps:
+            asset = assets.get(asset_id(step) or "")
+            written.append(
+                step
+                if asset is None
+                else step.model_copy(
+                    update={
+                        "output_config": {
+                            **(step.output_config or {}),
+                            "placeholders": list(asset.placeholders),
+                        }
+                    }
+                )
+            )
+        return written
+
     async def create_flow(
         self,
         *,
@@ -352,6 +396,9 @@ class FlowService:
             self._validate_update_step_identity(
                 incoming_steps=steps,
                 stored_steps=existing.steps,
+            )
+            steps = await self._with_template_fields(
+                steps, flow_id=flow_id, unchanged_step_ids=unchanged_step_ids
             )
         next_steps = (
             steps

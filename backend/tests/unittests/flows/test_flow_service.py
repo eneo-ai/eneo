@@ -2035,6 +2035,65 @@ def _published_flow_for_update(user, steps):
     )
 
 
+@pytest.mark.parametrize(
+    ("flow_has_the_asset", "stored_fields"),
+    [(True, ["datum", "sammanfattning"]), (False, ["datum"])],
+)
+@pytest.mark.asyncio
+async def test_update_flow_lists_the_fields_of_the_flows_template(
+    user, flow_has_the_asset, stored_fields
+):
+    """A write that leaves a Word field out of the step's list, as the flow
+    chat did when it dropped the field's binding, keeps the field: the list
+    is the template asset's, so the field stays and the draft check names it
+    unbound. A template that is not the flow's keeps the list it was given."""
+    asset_id = uuid4()
+    reads = "{{step_1.output.text}}"
+    first = _step(step_order=1)
+    saved = _step(step_order=2).model_copy(
+        update={
+            "output_mode": "template_fill",
+            "output_type": "docx",
+            "output_config": {
+                "template_asset_id": str(asset_id),
+                "placeholders": ["datum", "sammanfattning"],
+                "bindings": {"datum": reads, "sammanfattning": reads},
+            },
+        }
+    )
+    stored = _published_flow_for_update(user, [first, saved])
+    flow_repo = AsyncMock()
+    flow_repo.get.return_value = stored
+    flow_repo.update.side_effect = lambda flow, **kwargs: flow
+    service = _service(user=user, flow_repo=flow_repo, version_repo=AsyncMock())
+    service.template_asset_service.list_assets.return_value = [
+        SimpleNamespace(
+            id=asset_id if flow_has_the_asset else uuid4(),
+            placeholders=["datum", "sammanfattning"],
+        )
+    ]
+    written = saved.model_copy(
+        update={
+            "output_config": {
+                "template_asset_id": str(asset_id),
+                "placeholders": ["datum"],
+                "bindings": {"datum": reads},
+            }
+        }
+    )
+
+    updated = await service.update_flow(flow_id=stored.id, steps=[first, written])
+
+    assert updated.steps[1].output_config == {
+        "template_asset_id": str(asset_id),
+        "placeholders": stored_fields,
+        "bindings": {"datum": reads},
+    }
+    service.template_asset_service.list_assets.assert_awaited_once_with(
+        flow_id=stored.id
+    )
+
+
 @pytest.mark.asyncio
 async def test_update_flow_rejects_new_http_secret_when_encryption_inactive(user):
     step_id = uuid4()

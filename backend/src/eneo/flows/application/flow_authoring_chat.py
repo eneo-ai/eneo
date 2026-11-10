@@ -118,7 +118,11 @@ whole flow and names what to fix.
 Moving, removing or renaming a step, or renaming a run form field (send
 form_field_renames with the new metadata_json), keeps every read pointing where
 it pointed: the reads are rewritten, and a change that would leave a read without
-its step or field is refused. Change that read first when it is refused.
+its step or field is refused. The refusal names the step that reads it and
+where (output_config.bindings.<name> is a Word field). Never empty, unbind or
+rewrite that read just to let the change through: tell the user what would
+lose its source and ask what it should read instead, then change it as they
+answer.
 When two steps share an assistant, update_step with assistant_changes gives the
 edited step its own copy and leaves the other step's assistant as it was.
 An http_get step (input_source http_get) keeps its request in input_config and
@@ -132,8 +136,9 @@ credentials and custom headers are set by the user in the editor. An HTTP step
 without credentials is added through the tools like any other step; it does not
 depend on read_tool_options. When a tool refuses a change, the refusal names
 what to fix: correct it and try again rather than concluding that the change
-is impossible, and do not rely on an earlier refusal in this conversation
-without calling the tool again.
+is impossible (a read that would lose its step is the exception: ask, as
+above), and do not rely on an earlier refusal in this conversation without
+calling the tool again.
 """
 
 _TASK_TO_FLOW = """You build flows; you do not do the work a flow is for. When the user

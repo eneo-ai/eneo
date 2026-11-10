@@ -126,6 +126,16 @@ function toolArgumentTokens(step: FlowStep): string[] {
   return Object.values(args).flatMap((value) => (typeof value === "string" ? tokensOf(value) : []));
 }
 
+/** What a Word step's fields read (`output_config.bindings`). */
+function templateFieldTokens(step: FlowStep): string[] {
+  if (step.output_mode !== "template_fill") return [];
+  const config = isRecord(step.output_config) ? step.output_config : {};
+  const bindings = isRecord(config.bindings) ? config.bindings : {};
+  return Object.values(bindings).flatMap((value) =>
+    typeof value === "string" ? tokensOf(value) : []
+  );
+}
+
 type ReadFacts = {
   /** Earlier steps named in the step's bindings or tool arguments (alias or name). */
   named: Set<number>;
@@ -175,8 +185,9 @@ function readFacts(step: FlowStep, steps: readonly FlowStep[], prompt = ""): Rea
     }
   };
 
-  // The prompt is read whatever the step's material is.
+  // The prompt and a Word step's fields are read whatever the step's material is.
   tokensOf(prompt).forEach(readToken);
+  templateFieldTokens(step).forEach(readToken);
   const { question, refs } = bindingsOf(step);
   if (question.trim() || refs.length > 0) {
     tokensOf(question).forEach(readToken);

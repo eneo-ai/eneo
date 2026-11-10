@@ -1041,7 +1041,8 @@ async def remove_step(
     ctx: Context, expected_revision: int, step_id: UUID
 ) -> CallToolResult:
     """Remove a saved step and its managed assistant. Refused while another
-    step still reads it; change that read first."""
+    step still reads it: ask the user what that read should use instead
+    rather than emptying it to get the removal through."""
 
     async def operation(container, chat, request):
         from eneo.flows.application.flow_authoring_operations import get_flow
