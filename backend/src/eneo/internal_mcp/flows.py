@@ -36,9 +36,9 @@ mcp = FastMCP(
 Read the current saved revision and configuration before editing; use that revision
 on every change. Keep unchanged fields. Every change goes through the flow's own
 validation, permissions, classification and audit. The tools that change the flow
-are offered only while the chat is in edit mode (Redigera); when they are absent,
-say what you would change and that the person can switch the mode beside the send
-button.
+are offered only while the chat is in the mode "Redigera"; when they are absent,
+change nothing, say so first, and say that the person switches the button "Fråga"
+beside the send button to "Redigera" and sends the request again.
 read_flow's overview (the default) lists every step in short with what it reads and
 which later steps read it; section "steps" with steps=[...] gives those steps in
 full with their prompts, section "settings" the flow without its steps. Each step
@@ -165,11 +165,7 @@ async def _call(
             if isinstance(exc, ValidationError)
             else None
         )
-        message = (
-            "The submitted configuration is invalid."
-            if details is not None
-            else str(exc)
-        )
+        message = invalid_message(details) if details is not None else str(exc)
         return CallToolResult(
             isError=True,
             content=[
@@ -186,6 +182,22 @@ async def _call(
                 )
             ],
         )
+
+
+def invalid_message(errors: Any) -> str:
+    """The refusal of a configuration the core's models reject, with the
+    shape of an assistant when the model gave one a field it does not have."""
+    message = "The submitted configuration is invalid."
+    if any(
+        error.get("type") == "extra_forbidden"
+        and {"assistant", "assistants"} & set(error.get("loc", ()))
+        for error in errors
+    ):
+        message += (
+            " An assistant takes only its own fields: its instruction is"
+            ' {"prompt": {"text": "..."}}.'
+        )
+    return message
 
 
 async def _draft_suggestions(container, flow_id: UUID):
@@ -619,8 +631,10 @@ async def update_step(
     input_config.long_material). Renaming the step (user_description) rewrites
     the reads of its old name in every step. When other steps share the step's
     assistant, the step gets its own copy with assistant_changes and the others
-    keep theirs; the result names the step's assistant_id. A change that
-    reaches several steps goes in one update_steps call instead."""
+    keep theirs; the result names the step's assistant_id. assistant_changes
+    takes the assistant's own fields, for example {"prompt": {"text": "..."}};
+    an instruction is always prompt.text. A change that reaches several steps
+    goes in one update_steps call instead."""
 
     async def operation(container, chat, request):
         from eneo.flows.api.flow_models import FlowEditorUpdateRequest
@@ -656,7 +670,7 @@ async def update_step(
                 "assistant_id": str(saved_step.assistant_id),
                 "changes": edit.fields,
             },
-            [_changed_step(saved_step, edit.fields)],
+            [_changed_step(saved_step, edit.card_fields)],
             flow_id=chat.flow_id,
             revision=updated.draft_revision,
         )
@@ -723,17 +737,20 @@ class _StepEdit:
     """One step's part of an editor update, checked as update_step checks
     it: only configuration fields change, and no credential is sent or
     retargeted. ``fields`` is what the edit changes, each with its value
-    before and after."""
+    before and after, for the model; ``card_fields`` the same for the
+    chat's change card, which keeps more of each value."""
 
     def __init__(
         self,
         step_edits: list[dict[str, Any]],
         assistants: list[dict[str, Any]],
         fields: list[dict[str, Any]],
+        card_fields: list[dict[str, Any]],
     ):
         self.step_edits = step_edits
         self.assistants = assistants
         self.fields = fields
+        self.card_fields = card_fields
 
 
 def _step_edit(
@@ -760,6 +777,9 @@ def _step_edit(
     return _StepEdit(
         step_edits=[{"step_id": str(step_id), "changes": changes}] if changes else [],
         fields=step_changes(saved, changes, assistant_before, assistant_changes),
+        card_fields=step_changes(
+            saved, changes, assistant_before, assistant_changes, card=True
+        ),
         assistants=(
             []
             if assistant_changes is None
@@ -815,6 +835,7 @@ async def update_steps(
         assistants: list[dict[str, Any]] = []
         edited: list[UUID] = []
         fields: dict[UUID, list[dict[str, Any]]] = {}
+        card_fields: dict[UUID, list[dict[str, Any]]] = {}
         for edit in edits:
             if set(edit) - {"step_id", "changes", "assistant_changes"}:
                 raise BadRequestException(
@@ -841,6 +862,7 @@ async def update_steps(
             assistants.extend(part.assistants)
             edited.append(step_id)
             fields[step_id] = part.fields
+            card_fields[step_id] = part.card_fields
         updated = await apply_editor_update(
             chat.flow_id,
             request,
@@ -869,7 +891,7 @@ async def update_steps(
                     for step_id in edited
                 ],
             },
-            [_changed_step(by_id[step_id], fields[step_id]) for step_id in edited],
+            [_changed_step(by_id[step_id], card_fields[step_id]) for step_id in edited],
             flow_id=chat.flow_id,
             revision=updated.draft_revision,
         )
@@ -968,7 +990,11 @@ async def add_step(
 ) -> CallToolResult:
     """Add a step with a new managed assistant, atomically: last, or at `position`
     (1 is first). Reads of the steps after it move with them. Use the flow's own
-    configuration field names."""
+    configuration field names. assistant_changes takes the assistant's own
+    fields, for example {"prompt": {"text": "Sammanfatta brevet."}}: the
+    instruction is always prompt.text, never instructions or a bare string.
+    An http_post step needs its url in output_config: ask for the address
+    before adding it."""
 
     async def operation(container, chat, request):
         from eneo.flows.api.flow_models import FlowEditorUpdateRequest

@@ -14,23 +14,28 @@ vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 vi.mock("@/features/spaces/use-space", async () => {
   const { useSpaceFromQuery } = await import("@/features/spaces/testing/space-query");
   const { makeSpace } = await import("@/features/spaces/testing/space-fixture");
-  return { useSpace: () => useSpaceFromQuery(() => makeSpace({})) };
+  // A personal space: its own chat lists other conversations, the flow chat must not.
+  return { useSpace: () => useSpaceFromQuery(() => makeSpace({ overrides: { personal: true } })) };
 });
 // The conversation is the chat feature's; the panel decides its welcome, footer and placeholder.
 vi.mock("@/features/chat/chat-view", () => ({
   ChatView: ({
     footerActions,
     placeholder,
+    composerLabel,
     partner
   }: {
     footerActions?: unknown;
     placeholder?: string;
-    partner?: { description?: string };
+    composerLabel?: string;
+    partner?: { description?: string; personalSpace?: boolean };
   }) => (
     <div>
       <p>{partner?.description}</p>
+      {partner?.personalSpace ? <p>personal lists</p> : null}
       {footerActions as React.ReactNode}
       <p>{placeholder}</p>
+      <p>composer: {composerLabel ?? "partner"}</p>
     </div>
   )
 }));
@@ -134,6 +139,7 @@ describe("FlowChatPanel on a published flow", () => {
     expect(edit.getAttribute("aria-disabled")).toBe("true");
     expect(edit.textContent).toContain(messages.flows_chat_mode_edit_published);
     expect(screen.getByText(messages.flows_chat_placeholder_ask)).toBeTruthy();
+    expect(screen.getByText("composer: partner")).toBeTruthy();
     // The welcome promises no changes either.
     expect(screen.getByText(messages.flows_chat_partner_description_published)).toBeTruthy();
     expect(screen.queryByText(messages.flows_chat_partner_description)).toBeNull();
@@ -147,6 +153,19 @@ describe("FlowChatPanel on a published flow", () => {
     expect(screen.getByText(messages.flows_chat_placeholder_edit)).toBeTruthy();
     expect(screen.queryByText(messages.flows_chat_published_intro)).toBeNull();
     expect(screen.getByText(messages.flows_chat_partner_description)).toBeTruthy();
+    // The composer is named by what a message does in Redigera.
+    expect(screen.getByText(`composer: ${messages.flows_chat_composer_label_edit}`)).toBeTruthy();
+    // In a personal space too, the flow chat lists no other conversations.
+    expect(screen.queryByText("personal lists")).toBeNull();
+  });
+
+  it("promises building steps only in Redigera", async () => {
+    openChat(false);
+    renderPanel(makeFlow({ published_version: null }));
+
+    expect(await screen.findByRole("button", { name: "Läge: Fråga" })).toBeTruthy();
+    expect(screen.getByText(messages.flows_chat_partner_description_ask)).toBeTruthy();
+    expect(screen.queryByText(messages.flows_chat_partner_description)).toBeNull();
   });
 });
 

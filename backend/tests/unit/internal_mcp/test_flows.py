@@ -1193,3 +1193,32 @@ async def test_update_steps_refuses_a_bad_batch_without_saving(
 
     assert result.isError is True
     save.assert_not_awaited()
+
+
+def test_an_assistant_given_a_field_it_lacks_is_told_its_shape():
+    from pydantic import ValidationError
+
+    from eneo.flows.api.flow_models import FlowEditorUpdateRequest
+
+    with pytest.raises(ValidationError) as refused:
+        FlowEditorUpdateRequest.model_validate(
+            {
+                "expected_revision": 1,
+                "definition": {},
+                "new_steps": [
+                    {
+                        "name": "Sammanfatta",
+                        "configuration": {},
+                        "assistant": {"instructions": "Sammanfatta brevet."},
+                    }
+                ],
+            }
+        )
+    errors = refused.value.errors(include_input=False, include_context=False)
+
+    assert '{"prompt": {"text": "..."}}' in flows.invalid_message(errors)
+    # Any other invalid configuration keeps the plain refusal.
+    assert flows.invalid_message([]) == "The submitted configuration is invalid."
+    # The tools that take an assistant say its shape up front.
+    for tool in (flows.add_step, flows.update_step):
+        assert '{"prompt": {"text": ' in (tool.__doc__ or "")

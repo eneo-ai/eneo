@@ -236,4 +236,45 @@ describe("mapSessionMessages", () => {
     // The empty reference is skipped, not thrown on.
     expect(messages[1]!.parts).toHaveLength(1);
   });
+
+  it("offers no retry for a turn that may still be answering", () => {
+    const now = Date.parse("2026-11-10T08:00:00Z");
+    const turn = (created: string, updated: string) =>
+      mapSessionMessages(
+        [{ ...baseMessage, answer: "", created_at: created, updated_at: updated }],
+        now
+      );
+
+    // Written, never updated, a minute ago: still running, no empty answer either.
+    const running = turn("2026-11-10T07:59:00Z", "2026-11-10T07:59:00Z");
+    expect(running.map((message) => message.id)).toEqual(["m1-q"]);
+    expect(running[0]!.metadata).not.toHaveProperty("unanswered");
+    // Ended without an answer, or never updated for longer than a turn runs: failed.
+    expect(turn("2026-11-10T07:59:00Z", "2026-11-10T07:59:05Z")[0]!.metadata?.unanswered).toBe(
+      true
+    );
+    expect(turn("2026-11-10T07:00:00Z", "2026-11-10T07:00:00Z")[0]!.metadata?.unanswered).toBe(
+      true
+    );
+  });
+
+  it("leaves out an answer that never came and marks its question unanswered", () => {
+    const messages = mapSessionMessages([
+      { ...baseMessage, id: "m1" },
+      { ...baseMessage, id: "m2", question: "Lägg till ett steg", answer: "" }
+    ]);
+
+    expect(messages.map((message) => message.id)).toEqual(["m1-q", "m1", "m2-q"]);
+    expect(messages.at(-1)!.metadata?.unanswered).toBe(true);
+    expect(messages[0]!.metadata).not.toHaveProperty("unanswered");
+    // An answer made only of tool calls is still an answer.
+    const tools = mapSessionMessages([
+      {
+        ...baseMessage,
+        answer: "",
+        tool_calls: [{ server_name: "flows", tool_name: "read_flow", tool_call_id: "c1" }]
+      }
+    ]);
+    expect(tools).toHaveLength(2);
+  });
 });

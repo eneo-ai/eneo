@@ -191,6 +191,9 @@ function AuthoringConversation({
   const { space, routeId } = useSpace();
   const spaceName = useSpaceDisplayName();
   const [activity, setActivity] = useState<ActivityState | null>(null);
+  // The conversation shown first; a later one was started here ("Ny
+  // konversation"), and its composer takes the focus the dialog left behind.
+  const [firstSession] = useState(chat.session_id);
 
   const assistant = useQuery({
     queryKey: ["assistants", chat.assistant_id],
@@ -235,22 +238,27 @@ function AuthoringConversation({
   }
 
   const model = assistant.data;
+  const editing = chat.editing && !published;
   // The chat's assistant is hidden and named after the flow; the panel names
-  // it by what it does.
+  // it by what it does. A published flow has no draft to change (the panel's
+  // header says why); in Fråga the chat changes nothing either.
   const partner: ChatPartner = {
     type: "assistant",
     id: model.id,
     name: t("flows_chat_partner_name"),
-    // A published flow has no draft to change; the panel's header says why.
     description: published
       ? t("flows_chat_partner_description_published")
-      : t("flows_chat_partner_description"),
+      : editing
+        ? t("flows_chat_partner_description")
+        : t("flows_chat_partner_description_ask"),
     allowedAttachments: model.allowed_attachments,
     insightEnabled: false,
     iconId: null,
     knowledge: [],
     spaceName,
-    personalSpace: space.personal,
+    // The personal chat's lists ("Fortsätt", "Dina assistenter") are other
+    // conversations, not this flow's: the flow chat never shows them.
+    personalSpace: false,
     securityClassification: space.security_classification?.name ?? null,
     mcpServers: model.mcp_servers ?? [],
     enabledCapabilities: model.enabled_capabilities,
@@ -262,6 +270,7 @@ function AuthoringConversation({
   return (
     <ChatView
       key={chat.session_id}
+      focusComposerIfLost={chat.session_id !== firstSession}
       partner={partner}
       initialSessionId={chat.session_id}
       initialMessages={initialMessages}
@@ -275,11 +284,9 @@ function AuthoringConversation({
         flowRunCardFor(call, flow, routeId, onAskChat) ?? flowChangeCardFor(call)
       }
       footerActions={<ModePicker chat={chat} published={published} onRefused={onRefused} />}
-      placeholder={
-        chat.editing && !published
-          ? t("flows_chat_placeholder_edit")
-          : t("flows_chat_placeholder_ask")
-      }
+      placeholder={editing ? t("flows_chat_placeholder_edit") : t("flows_chat_placeholder_ask")}
+      // Named by what a message does in the mode it is sent in.
+      composerLabel={editing ? t("flows_chat_composer_label_edit") : undefined}
       onToolCallFinished={(call) => {
         if (isFlowsToolCall(call)) onFlowMayHaveChanged();
       }}

@@ -354,22 +354,28 @@ def run_summary(
 
 
 CHANGE_PREVIEW_CHARS = 240
-"""How much of a changed value the chat's change card shows."""
+"""How much of a changed value the model reads back in a change's result."""
+CHANGE_CARD_CHARS = 4000
+"""How much of a changed value the chat's change card keeps for "Visa hela"."""
 MAX_CHANGED_FIELDS = 12
 
 
-def _shown(value: object) -> object:
-    """A value as the change card shows it: a scalar as it is, text cut
-    short, a structure as compact JSON cut short."""
+def _shown(value: object, *, card: bool = False) -> object:
+    """A value as a change shows it: a scalar as it is, text cut short, a
+    structure as compact JSON cut short. For the ``card`` a structure that
+    fits stays a structure, which the card says in the editor's words."""
     if value is None or isinstance(value, (bool, int, float)):
         return value
+    limit = CHANGE_CARD_CHARS if card else CHANGE_PREVIEW_CHARS
     text = (
         value
         if isinstance(value, str)
         else json.dumps(value, ensure_ascii=False, default=str, separators=(",", ":"))
     )
-    if len(text) > CHANGE_PREVIEW_CHARS:
-        return text[:CHANGE_PREVIEW_CHARS] + "…"
+    if card and not isinstance(value, str) and len(text) <= limit:
+        return value
+    if len(text) > limit:
+        return text[:limit] + "…"
     return text
 
 
@@ -391,18 +397,25 @@ def step_changes(
     changes: Mapping[str, object] | None,
     assistant_before: Mapping[str, object] | None,
     assistant_changes: Mapping[str, object] | None,
+    *,
+    card: bool = False,
 ) -> list[dict[str, Any]]:
     """Each field a change sets to something else, with its value before and
-    after as short text: the step's own fields by name, its assistant's as
-    ``assistant.<field>``. ``saved`` and ``assistant_before`` are the API's
-    own reads, so a credential is a stored sentinel there, never the secret.
-    A field that keeps its value is left out."""
+    after as short text (``card``: as the change card shows it): the step's
+    own fields by name, its assistant's as ``assistant.<field>``. ``saved``
+    and ``assistant_before`` are the API's own reads, so a credential is a
+    stored sentinel there, never the secret. A field that keeps its value is
+    left out."""
     fields: list[dict[str, Any]] = []
     for name, after in (changes or {}).items():
         before = saved.get(name)
         if before != after:
             fields.append(
-                {"field": name, "before": _shown(before), "after": _shown(after)}
+                {
+                    "field": name,
+                    "before": _shown(before, card=card),
+                    "after": _shown(after, card=card),
+                }
             )
     for name, value in (assistant_changes or {}).items():
         before = _assistant_value(name, (assistant_before or {}).get(name))
@@ -411,8 +424,8 @@ def step_changes(
             fields.append(
                 {
                     "field": f"assistant.{name}",
-                    "before": _shown(before),
-                    "after": _shown(after),
+                    "before": _shown(before, card=card),
+                    "after": _shown(after, card=card),
                 }
             )
     return fields[:MAX_CHANGED_FIELDS]

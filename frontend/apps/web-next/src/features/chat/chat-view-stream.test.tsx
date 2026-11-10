@@ -1088,3 +1088,27 @@ describe("ChatView when generation fails", () => {
     }
   });
 });
+
+describe("ChatView with a saved question that got no answer", () => {
+  it("opens with the failure row, and Försök igen asks the question again", async () => {
+    spies.mode = "answer";
+    renderInApp(
+      <Harness
+        initialMessages={[
+          {
+            id: "m1-q",
+            role: "user",
+            parts: [{ type: "text", text: "Sammanfatta brevet" }],
+            metadata: { files: [], unanswered: true }
+          }
+        ]}
+      />
+    );
+
+    expect(screen.getByText("Det kom inget svar på frågan.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Försök igen" }));
+    await waitFor(() => expect(spies.sent).toHaveLength(1));
+    expect(spies.sent[0]!.text).toBe("Sammanfatta brevet");
+    await waitFor(() => expect(screen.queryByText("Det kom inget svar på frågan.")).toBeNull());
+  });
+});

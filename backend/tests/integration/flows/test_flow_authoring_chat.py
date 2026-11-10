@@ -72,7 +72,7 @@ async def enabled_flow(db_container, admin_user, client, flow_process_auth_heade
     return flow_response.json(), headers
 
 
-async def test_chat_bootstrap_is_idempotent_scoped_and_initially_read_only(
+async def test_chat_bootstrap_is_idempotent_scoped_and_builds_an_empty_draft(
     client, enabled_flow, db_container
 ):
     flow, headers = enabled_flow
@@ -83,7 +83,8 @@ async def test_chat_bootstrap_is_idempotent_scoped_and_initially_read_only(
     assert second.status_code == 200, second.text
     assert first.json() == second.json()
     chat = first.json()
-    assert chat["editing"] is False
+    # An empty draft is there to be built: its new chat starts in Redigera.
+    assert chat["editing"] is True
     async with db_container() as container:
         loaded = await load_authoring_chat(
             container,
@@ -356,6 +357,12 @@ async def test_flow_tools_act_on_the_chats_flow_only_in_edit_mode(
     flow, headers = enabled_flow
     url = f"/api/v1/flows/{flow['id']}/authoring-chat/"
     chat = (await client.post(url, headers=headers)).json()
+    ask = await client.patch(
+        url + chat["session_id"] + "/",
+        headers=headers,
+        json={"expected_revision": flow["draft_revision"], "editing": False},
+    )
+    assert ask.status_code == 200, ask.text
     ctx = _loopback_ctx(await _chat_token(db_container, admin_user, chat))
 
     read = await flows.read_flow(ctx)
@@ -864,7 +871,14 @@ async def model_choices(
     url = f"/api/v1/flows/{flow['id']}/authoring-chat/"
     opened = await client.post(url, headers=headers)
     assert opened.status_code == 200, opened.text
-    chat = opened.json()
+    # The mode tests start in Fråga; the empty draft's chat starts in Redigera.
+    asking = await client.patch(
+        url + opened.json()["session_id"] + "/",
+        headers=headers,
+        json={"expected_revision": flow["draft_revision"], "editing": False},
+    )
+    assert asking.status_code == 200, asking.text
+    chat = asking.json()
     assert chat["completion_model_id"] is None
     assert chat["default_completion_model_id"] in before
     return ModelChoices(

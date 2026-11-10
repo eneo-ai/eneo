@@ -4,7 +4,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 import type { ToolCallRecord } from "@/features/chat/side-panel/message-tool-calls";
-import { makeFlow } from "../flow-fixtures";
+import messages from "@/lib/i18n/messages/sv.json";
+import { makeFlow, makeStep } from "../flow-fixtures";
 import { FlowChangeCard, changedSteps, flowChangeCardFor } from "./flow-change-card";
 import { FlowReferences } from "./reference-pill";
 
@@ -91,7 +92,11 @@ describe("FlowChangeCard", () => {
     expect(within(card).getByText("Instruktion")).toBeTruthy();
     expect(within(card).getByText("Sammanfatta brevet.")).toBeTruthy();
     expect(within(card).getByText("Sammanfatta brevet i tre punkter.")).toBeTruthy();
-    expect(within(card).getByText("Resultattyp")).toBeTruthy();
+    // An enum value reads as the editor names it, under the editor's label.
+    expect(within(card).getByText(messages.flow_step_output_type)).toBeTruthy();
+    expect(within(card).getByText(messages.flow_output_type_text)).toBeTruthy();
+    expect(within(card).getByText(messages.flow_output_type_json)).toBeTruthy();
+    expect(within(card).queryByText("json")).toBeNull();
     // A field the card cannot name shows by its own name; nothing shows as "(tomt)".
     expect(within(card).getByText("mystery")).toBeTruthy();
     expect(within(card).getByText("(tomt)")).toBeTruthy();
@@ -124,5 +129,91 @@ describe("FlowChangeCard", () => {
     // The third step's own action, after the second's.
     fireEvent.click(within(card).getAllByRole("button", { name: "Visa steget" }).at(-1)!);
     expect(onShowStep).toHaveBeenCalledWith("step-3");
+  });
+});
+
+function cardFor(fields: { field: string; before: unknown; after: unknown }[]) {
+  return changedSteps(
+    call({ structuredContent: { changes: [{ step_id: "step-2", step_order: 2, fields }] } })
+  );
+}
+
+describe("FlowChangeCard's values", () => {
+  it("says a delivery's address and settings in words, only the parts that changed", () => {
+    const http = (url: string) => ({
+      url,
+      auth: { mode: "none" },
+      timeout_seconds: 30,
+      body: { mode: "auto" },
+      response_format: "text"
+    });
+    renderInApp(
+      <FlowChangeCard
+        steps={cardFor([
+          { field: "output_mode", before: "pass_through", after: "http_post" },
+          { field: "output_config", before: http(""), after: http("https://arende.kommun.se/in") }
+        ])}
+      />
+    );
+    expect(screen.getByText(messages.flow_output_mode_pass_through)).toBeTruthy();
+    expect(screen.getByText(messages.flow_output_mode_http_post)).toBeTruthy();
+    expect(
+      screen.getByText(`${messages.flow_step_editor_http_url_post}: https://arende.kommun.se/in`)
+    ).toBeTruthy();
+    expect(screen.getByText(`${messages.flow_step_editor_http_url_post}: (tomt)`)).toBeTruthy();
+    // What stayed the same (the sign-in, the body, the time limit) is left out.
+    expect(screen.queryByText(new RegExp(messages.flow_step_editor_http_auth))).toBeNull();
+    expect(screen.queryByText(/\{"url"/)).toBeNull();
+  });
+
+  it("names a Word field by its tag and folds a long value until Visa hela", () => {
+    const long = "Sammanfatta mötet. ".repeat(20);
+    renderInApp(
+      <FlowChangeCard
+        steps={cardFor([
+          {
+            field: "output_config",
+            before: { template_asset_id: "t-1", template_name: "Protokoll.docx", bindings: {} },
+            after: {
+              template_asset_id: "t-1",
+              template_name: "Protokoll.docx",
+              bindings: { deltagare: "{{step_1.output.text}}" }
+            }
+          },
+          { field: "assistant.prompt", before: "Kort.", after: long }
+        ])}
+      />
+    );
+    expect(screen.getByText("deltagare: {{step_1.output.text}}")).toBeTruthy();
+    // The template itself did not change.
+    expect(screen.queryByText(/Protokoll\.docx/)).toBeNull();
+    // The field was added: before, there was none.
+    expect(screen.getByText(messages.flows_change_card_empty)).toBeTruthy();
+    // The button's name says what it does; it carries no expanded state on top.
+    const more = screen.getByRole("button", { name: messages.flows_change_card_show_all });
+    expect(more.hasAttribute("aria-expanded")).toBe(false);
+    // Folded, the instruction is clamped to four lines; open, it shows whole.
+    expect(document.querySelector(".line-clamp-4")).not.toBeNull();
+    fireEvent.click(more);
+    expect(document.querySelector(".line-clamp-4")).toBeNull();
+    expect(screen.getByRole("button", { name: messages.flows_change_card_show_less })).toBeTruthy();
+    // A short value has nothing more to show.
+    expect(screen.getAllByRole("button", { name: /Visa/ })).toHaveLength(1);
+  });
+
+  it("opens the step at the changed field", () => {
+    const onShowStep = vi.fn(() => true);
+    const onConnectStep = vi.fn();
+    const flow = makeFlow({ steps: [makeStep(1), makeStep(2)] });
+    renderInApp(
+      <FlowReferences flow={flow} onShowStep={onShowStep} onConnectStep={onConnectStep}>
+        <FlowChangeCard
+          steps={cardFor([{ field: "assistant.prompt", before: "Kort.", after: "Längre." }])}
+        />
+      </FlowReferences>
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Visa steget" }));
+    expect(onConnectStep).toHaveBeenCalledWith("step-2", "prompt");
+    expect(onShowStep).not.toHaveBeenCalled();
   });
 });

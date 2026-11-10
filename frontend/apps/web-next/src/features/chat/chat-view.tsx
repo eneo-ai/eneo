@@ -261,6 +261,8 @@ type ChatViewProps = {
   footerActions?: ReactNode;
   /** The text field's placeholder, when the page has a better one than "Fråga …". */
   placeholder?: string;
+  /** The text field's name, when the page names it by more than its partner (the flow chat's mode). */
+  composerLabel?: string;
 };
 
 /**
@@ -302,7 +304,8 @@ function ConversationView({
   references,
   toolCards,
   footerActions,
-  placeholder
+  placeholder,
+  composerLabel: label
 }: ChatViewProps) {
   const t = useTranslations();
   const locale = useLocale();
@@ -364,7 +367,19 @@ function ConversationView({
   // save (a stop while it waits).
   const pendingAbort = useRef<AbortController | null>(null);
   // The last question and its files, for "Försök igen" after an error.
-  const [lastQuestion, setLastQuestion] = useState<{ text: string; files: SentFiles } | null>(null);
+  // A conversation saved with its last question unanswered (the turn failed
+  // or was stopped at once) opens with the failure row and its retry.
+  const [unanswered, setUnanswered] = useState(() => {
+    const last = initialMessages.at(-1);
+    return last?.role === "user" && last.metadata?.unanswered === true ? last : null;
+  });
+  const [lastQuestion, setLastQuestion] = useState<{ text: string; files: SentFiles } | null>(
+    () =>
+      unanswered && {
+        text: unanswered.parts.find((part) => part.type === "text")?.text ?? "",
+        files: unanswered.metadata?.files ?? []
+      }
+  );
   const isNewSession = useRef(initialSessionId === null);
   // False once the view unmounted: its stream may still be running.
   const mounted = useRef(false);
@@ -894,6 +909,7 @@ function ConversationView({
     first: boolean
   ) {
     clearError();
+    setUnanswered(null);
     setStreamError(null);
     streamErrorRef.current = null;
     streamStartedRef.current = false;
@@ -1091,7 +1107,11 @@ function ConversationView({
     if (deciding && activityOpen) closeActivity();
   }, [deciding, activityOpen, closeActivity]);
 
-  const failure = error ? describeChatFailure(error, streamError, t) : null;
+  const failure = error
+    ? describeChatFailure(error, streamError, t)
+    : unanswered
+      ? { message: t("chat_answer_missing"), details: [] }
+      : null;
 
   const partnerName = displayPartnerName(partner, t);
   const assistantIdentity = useMemo(
@@ -1131,7 +1151,7 @@ function ConversationView({
     />
   );
 
-  const composerLabel = t("chat_composer_label", { name: partnerName });
+  const composerLabel = label ?? t("chat_composer_label", { name: partnerName });
   const composerProps = {
     value: input,
     onChange: setInput,

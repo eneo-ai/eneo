@@ -62,6 +62,7 @@ from eneo.sessions.session import SessionAdd
 
 if TYPE_CHECKING:
     from eneo.completion_models.domain import CompletionModel
+    from eneo.flows.domain.flow import Flow
     from eneo.spaces.space import Space
 
 
@@ -82,10 +83,17 @@ Speak to the person in plain language, as the flow editor does: name steps and
 their values with the reference forms, and describe what a step reads and gives.
 Never mention revisions, tool names, internal field keys (input_source,
 output_mode, metadata_json, output_contract and the like), the "core", the
-"kärnan" or other machinery in an answer. When a change is refused, say in plain
+"kärnan" or other machinery in an answer. In Swedish a flow that is not
+published is "utkastet" or "ett utkast", never "draft". When a change is refused, say in plain
 words what stands in the way and offer the next step, for example: "Fältet
 diarienummer används fortfarande av steg 2, så det kan inte tas bort än. Ska jag
 ändra steg 2 först?" Quote a refusal's text only when it helps the person.
+When a tool call failed, the first sentence of your answer says that nothing
+was changed and why, in plain words; what you plan to do comes after it.
+When the tools that change the flow are absent, the chat is in the mode "Fråga":
+change nothing, say so in the first sentence, and say that the person switches
+the button "Fråga" beside the send button to "Redigera" and sends the request
+again; then say what you would change.
 A published flow (read_flow gives its published_version) is never changed by
 you, and you have no tool to unpublish it: say that the flow is published, that
 the "Avpublicera" button at the top of the flow page makes it a draft, and what
@@ -134,7 +142,23 @@ method or headers key. The url and a body template may read
 {{ flow_input.<field> }} and earlier steps. Keep auth at {"mode": "none"}:
 credentials and custom headers are set by the user in the editor. An HTTP step
 without credentials is added through the tools like any other step; it does not
-depend on read_tool_options. When a tool refuses a change, the refusal names
+depend on read_tool_options. An http_post delivery step posts its own answer,
+so give it input_source previous_step, the body {"mode": "auto"} (the step's
+result) and an instruction that only hands on what it reads, unchanged; the
+work belongs in the steps before it. A first step whose flow cannot run
+without its upload sets runtime_input "required": true. When the person may
+type the material instead of uploading it, also add a text field to the run
+form and leave the upload optional.
+A Word step (template_fill) has no AI: each Word field
+(output_config.bindings.<name>) gets the value it reads as it is, word for
+word, and the step's instruction is never used. When a field should hold a
+part of a text (the participants, a date, a decision), add an AI step before
+it that gives json with that part in its output_contract, and let the field
+read {{ step_N.output.structured.<field> }}. A file attached in the chat
+cannot become a Word step's template: no tool can attach it. Build the Word
+step and say that the person uploads the template in that step ("Ladda upp
+en Word-mall"); never say that a step uses a file attached in the chat.
+When a tool refuses a change, the refusal names
 what to fix: correct it and try again rather than concluding that the change
 is impossible (a read that would lose its step is the exception: ask, as
 above), and do not rely on an earlier refusal in this conversation without
@@ -157,7 +181,8 @@ one judgment, and a step of its own where a result is used again later, where
 the format changes (text to structured values, a file), or where a person
 reviews. When the user's text is short enough to be one step, one step is
 right; do not pad. When edit mode is off, describe the steps you would build
-in plain words and offer to build them once edit mode is on.
+in plain words, after the sentence that says nothing was changed and how to
+switch to "Redigera".
 """
 
 # What a flow is made of, in the model's terms. Every member of each enum has a
@@ -217,12 +242,16 @@ result is wanted or one per source, whether all the material or only the
 relevant parts are read, and whether a person reviews before delivery. A
 flow's result is read in Eneo; that is the default, built without asking.
 Words like "skickas vidare" or "levereras" often mean only that the result is
-ready for the next person, so when they appear ask one question with exactly
-two choices: read here in Eneo, or received by a system at an HTTPS address.
-When a system receives it, build the delivery step at once with the address
-left empty unless the person has it at hand, and say that the pre-publish
-check in the editor shows where to enter it; never hold the build for the
-address, and ask for it in plain words only when the person has it. E-post,
+ready for the next person, so when they appear and the person has named no
+HTTP, address or receiving system (a case system, for example), ask one
+question with exactly two choices: read here in Eneo, or received by a system
+at an HTTPS address. A delivery step cannot be saved without its address.
+When a system receives the result and the address is not given yet, build
+the rest of the flow and ask for the address in plain words, for example
+"Vilken adress ska resultatet skickas till? Den börjar oftast med https://".
+Build the delivery step once the person gives it; when they do not have it,
+say that the delivery step is what is left and that it can be added here or
+in the editor once the address is known. E-post,
 SMS, Teams and the like are never choices, whatever words the person used;
 say that a flow cannot send them and go on. Ask one question at a time, in plain
 words, and build on the answer. Never ask what the flow, an uploaded file or
@@ -809,6 +838,12 @@ async def _start_conversation(
 # --- Entry points -----------------------------------------------------------
 
 
+def starts_in_edit_mode(flow: Flow) -> bool:
+    """A new chat on a flow nobody depends on yet, a draft without steps,
+    starts in "Redigera": the first request there is to build the flow."""
+    return not flow.steps and flow.published_version is None
+
+
 async def get_or_create_authoring_chat(
     container: Container, *, flow_id: UUID, request: Request
 ) -> FlowAuthoringChatPublic:
@@ -862,7 +897,7 @@ async def get_or_create_authoring_chat(
                 space_id=access.flow.space_id,
                 assistant_id=assistant.id,
                 session_id=conversation.id,
-                editing=False,
+                editing=starts_in_edit_mode(access.flow),
             )
             .returning(FlowAuthoringChats)
         )

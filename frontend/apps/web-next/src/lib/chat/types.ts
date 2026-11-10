@@ -196,6 +196,8 @@ export type EneoMessageMetadata = {
   createdAt?: string | null;
   /** A saved answer's rating by the conversation's owner. */
   feedback?: AnswerRating;
+  /** A saved question whose turn ended without any answer (failed or stopped at once). */
+  unanswered?: boolean;
 };
 
 export type EneoUIMessage = UIMessage<EneoMessageMetadata, EneoDataParts>;

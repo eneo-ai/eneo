@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from eneo.flows.application.flow_authoring_chat import (
     AUTHORING_INSTRUCTIONS,
+    starts_in_edit_mode,
     tool_runtime_capabilities,
 )
 from eneo.flows.domain.flow_suggestions import (
@@ -79,10 +80,50 @@ def test_the_instructions_offer_only_what_a_flow_can_do() -> None:
     assert (
         "read here in Eneo, or received by a system at an HTTPS address" in instructions
     )
-    assert "never hold the build for the address" in instructions
+    assert "A delivery step cannot be saved without its address" in instructions
+    assert "ask for the address in plain words" in instructions
+    assert "address left empty" not in instructions
     assert "E-post, SMS, Teams and the like are never choices" in instructions
     assert "never offer a choice that stands for typing it" in instructions
     assert "An answer already given is settled" in instructions
+
+
+def test_the_instructions_name_the_switch_to_redigera_in_the_uis_words() -> None:
+    instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
+
+    assert 'switches the button "Fråga" beside the send button to "Redigera"' in (
+        instructions
+    )
+    assert "change nothing, say so in the first sentence" in instructions
+    assert '"utkastet" or "ett utkast", never "draft"' in instructions
+    assert "the first sentence of your answer says that nothing was changed" in (
+        instructions
+    )
+    # HTTP or a named receiver already answers where the result goes.
+    assert "the person has named no HTTP, address or receiving system" in (instructions)
+
+
+def test_the_instructions_say_what_a_word_step_and_a_delivery_step_can_do() -> None:
+    instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
+
+    assert "gets the value it reads as it is, word for word" in instructions
+    assert "add an AI step before it that gives json" in instructions
+    assert "A file attached in the chat cannot become a Word step's template" in (
+        instructions
+    )
+    assert '("Ladda upp en Word-mall")' in instructions
+    assert 'the body {"mode": "auto"}' in instructions
+    assert 'runtime_input "required": true' in instructions
+
+
+def test_a_new_chat_builds_an_empty_draft_and_only_reads_any_other_flow() -> None:
+    from types import SimpleNamespace
+
+    assert starts_in_edit_mode(SimpleNamespace(steps=[], published_version=None))
+    assert not starts_in_edit_mode(
+        SimpleNamespace(steps=[object()], published_version=None)
+    )
+    assert not starts_in_edit_mode(SimpleNamespace(steps=[], published_version=1))
 
 
 def test_the_instructions_explain_transcription_but_leave_its_choices() -> None:

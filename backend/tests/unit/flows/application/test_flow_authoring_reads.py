@@ -525,3 +525,24 @@ def test_a_changed_value_is_cut_short_and_a_new_field_has_no_before():
         {"field": "user_description", "before": None, "after": "x" * 240 + "…"}
     ]
     assert step_changes({"a": 1}, {"a": 1}, None, None) == []
+
+
+def test_the_change_card_keeps_a_structure_and_more_of_a_text():
+    saved = {"output_config": {"url": "", "auth": {"mode": "none"}}}
+    after = {"url": "https://arende.kommun.se/in", "auth": {"mode": "none"}}
+    long = "x" * 300
+
+    fields = step_changes(
+        saved, {"output_config": after, "user_description": long}, None, None, card=True
+    )
+
+    # The card says a configuration in the editor's words, so it gets the
+    # structure; the model's page keeps the short JSON preview.
+    assert fields[0] == {
+        "field": "output_config",
+        "before": saved["output_config"],
+        "after": after,
+    }
+    assert fields[1]["after"] == long
+    page = step_changes(saved, {"output_config": after}, None, None)
+    assert isinstance(page[0]["after"], str)
