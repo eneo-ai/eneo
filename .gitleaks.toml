@@ -110,3 +110,10 @@ paths = [
 ]
 regexTarget = "secret"
 regexes = ['''^v1\.eyJ(?:hdWQiOiJ4In0|zaWduZWQiOiJ0b2tlbiJ9)\.c2ln(?:bmF0dXJl)?$''']
+
+[[rules.allowlists]]
+description = "Keyword argument after auth_method=\"password\" in the session router tests that the generic rule reads as a key"
+condition = "AND"
+paths = ['''^backend/tests/unit/authentication/test_browser_session_router\.py$''']
+regexTarget = "secret"
+regexes = ['''^replacing=None$''']
