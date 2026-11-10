@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
@@ -187,7 +187,9 @@ describe("TemplateTextArea", () => {
     const area = screen.getByRole("textbox", { name: "Instruktion" }) as HTMLTextAreaElement;
     area.focus();
     area.setSelectionRange(3, 3);
-    fireEvent.blur(area);
+    // The focus leaves for real, as when the menu button is pressed; a caret
+    // moved after that is not where the author left the text.
+    act(() => area.blur());
     area.setSelectionRange(0, 0);
     fireEvent.click(screen.getByRole("button", { name: "Infoga variabel" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: /Dagens datum/ }));
