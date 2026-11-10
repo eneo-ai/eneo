@@ -64,8 +64,11 @@ removal. Every `RetentionRule` has exactly one disposition:
 
 The SQL that selects due conversations is built from the rule's levels
 (`rule_period`): a `COALESCE` and a level `CASE` in the rule's order, from
-the innermost level out. It refuses a rule with a bound, which needs its bound
-in SQL first. A parity test runs every combination of the three levels and
+the innermost level out. For a rule with a bound, each bounding level caps
+with the period that applies there, chosen or inherited, and the result is the
+`LEAST` of the nearest period and those caps; a separate parity test runs
+bounded rules through the database and through `resolve`. It refuses a rule
+without a column for each of its levels. A parity test runs every combination of the three levels and
 the organisation switch through the database and through `resolve_period`,
 and both must match the rule written out. The level a removal came from stays
 the audit count key: `by_assistant_or_app_rule`, `by_space_rule`,

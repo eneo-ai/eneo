@@ -14,13 +14,12 @@ OWN = PolicyLevel.ASSISTANT_OR_APP
 
 
 def test_the_sql_refuses_a_rule_it_cannot_resolve_like_the_kernel():
-    """Mutants: a bounded rule gets the nearest-wins SQL, so the bound is
-    silently dropped; a level without a column, or a column for a level the
-    rule does not declare, changes which period applies."""
+    """Mutants: a level without a column, or a column for a level the rule
+    does not declare, changes which period applies. A rule with a bound is
+    resolved (its parity runs in the database)."""
     columns = {SPACE: sa.literal(60), OWN: sa.literal(30)}
 
-    with pytest.raises(ValueError):
-        rule_period(RuleTask("bounded", (SPACE, OWN), frozenset({SPACE})), columns)
+    rule_period(RuleTask("bounded", (SPACE, OWN), frozenset({SPACE})), columns)
     with pytest.raises(ValueError):
         rule_period(RuleTask("partial", (SPACE, OWN)), {OWN: sa.literal(30)})
     with pytest.raises(ValueError):
