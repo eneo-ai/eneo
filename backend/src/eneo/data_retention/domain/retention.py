@@ -13,7 +13,9 @@ from datetime import datetime, timedelta
 from enum import StrEnum
 from uuid import UUID, uuid5
 
-# Every registered task runs once a day; health compares against this cadence.
+# Every registered task runs in the nightly run; a frequent one also runs every
+# five minutes while its due probe finds work. Health compares every task's
+# completions against this cadence.
 RETENTION_CADENCE = timedelta(days=1)
 # A task without a completed execution for this long is stale.
 RETENTION_STALE_AFTER = 2 * RETENTION_CADENCE

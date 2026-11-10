@@ -423,7 +423,46 @@ class RetentionRunner:
             )
             yield
 
+    async def run_when_due(self, task: RetentionTask) -> RetentionRunReport | None:
+        """Run `task` only when its due probe finds work; None when nothing is
+        due, with nothing claimed, written or audited.
+
+        The probe reads in a short transaction of its own, under the retention
+        timeouts and without the lease. A probe that fails or times out is
+        rolled back before any claim and logged, and the task runs anyway: a
+        broken probe must not stop removal quietly, and the run's job row
+        shows that it ran.
+        """
+        probe = due_probe(task)
+        if probe is None:
+            raise RetentionContractError(
+                f"{task.name} runs frequently without a due probe."
+            )
+        try:
+            async with self._transaction():
+                due = await probe.has_due()
+        except Exception as exc:
+            log_error(
+                logger,
+                logging.ERROR,
+                "Retention task %s could not read whether work is due; running it",
+                task.name,
+                error=exc,
+            )
+            due = True
+        if not due:
+            return None
+        # A claim that times out waits on the chunk another tick is running:
+        # the task is held, as with a lost claim, and that execution's row
+        # records the work. The nightly run records a claim timeout.
+        return await self._run(task, record_claim_timeout=False)
+
     async def run(self, task: RetentionTask) -> RetentionRunReport:
+        return await self._run(task, record_claim_timeout=True)
+
+    async def _run(
+        self, task: RetentionTask, *, record_claim_timeout: bool
+    ) -> RetentionRunReport:
         if not task.not_due_keys <= task.blocked_keys:
             raise RetentionContractError(
                 f"{task.name} declares not-due reasons that are not blocked reasons."
@@ -446,6 +485,17 @@ class RetentionRunner:
         except Exception as exc:
             if not is_retention_timeout(exc):
                 raise
+            if not record_claim_timeout:
+                logger.warning(
+                    "Retention task %s is held by another execution; not started.",
+                    task.name,
+                )
+                return RetentionRunReport(
+                    task=task.name,
+                    job_run_id=None,
+                    outcome=None,
+                    not_due=task.not_due_keys,
+                )
             return await self._record_claim_timeout(task.name)
 
         steps = task.steps()
