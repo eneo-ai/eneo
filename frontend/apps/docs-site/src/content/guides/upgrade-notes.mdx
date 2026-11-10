@@ -1,0 +1,580 @@
+import { Callout } from "nextra/components";
+
+# Upgrade notes
+
+This page is for operators, administrators and API consumers who upgrade from 2.3 to the next release. It lists every change since 2.3 that someone must act on, or must know about. Each entry says what changes, why, who acts, what to do before, during and after the upgrade, how to check the result and how to roll back.
+
+The general update procedure is in [Updating Eneo](/guides/deployment#updating-eneo). The changes in 2.3.0 to 2.3.2 are in their [release notes](https://github.com/eneo-ai/eneo/releases); changes up to 2.2 are in [Upgrading to 2.2.0](/guides/upgrade-2-2-0) and [Upgrading to 1.7.0](/guides/upgrade-1-7-0).
+
+## Before you upgrade [#before-you-upgrade]
+
+<Callout type="warning">
+  This release empties the stored content of every existing question log and deletes the logs that no question refers to, and that cannot be undone. Take a database backup and stop every backend and worker of the earlier version before running the migrations. See [Question logs are emptied](#question-logs-emptied).
+</Callout>
+
+Check at least these; each can stop the backend from starting, stop sign-in, or lose data:
+
+- A `pg_dump` backup, and every old backend and worker stopped. See [Question logs are emptied](#question-logs-emptied).
+- Object storage grants the three bucket permissions, the bucket has never had versioning (not even suspended), and Object Lock is off. See [Object storage must not keep old versions](#object-storage-versioning).
+- `UPLOAD_TMP_DIR` is on a local filesystem. See [`UPLOAD_TMP_DIR` must be a local filesystem](#upload-tmp-dir-local).
+- `BROWSER_SESSION_MAX_AGE`, if set, is at least `JWT_EXPIRY_TIME`; unset, the React app keeps people signed in for up to 30 days. See [Sign-out ends the session on the server](#server-side-sessions).
+- `DEFAULT_USER_PASSWORD`, if set, has at least 12 characters and at most 72 bytes. See [Password lifecycle](#password-lifecycle).
+- The OIDC items below. See [Sign-in with OIDC](#oidc-checklist).
+- `TRUSTED_PROXY_COUNT` matches the number of proxies. See [`TRUSTED_PROXY_COUNT` counts proxies exactly](#trusted-proxy-count).
+- The reference Compose file's new web-app router. See [The React web app runs on the main host](#react-web-app-main-host).
+- Users are told that the names and feedback comments of conversations older than their retention period are removed on the first night. See [Conversation names and feedback text follow the retention period](#names-and-feedback-follow-retention).
+- Downtime for `db-init`: migration `202611091200` rewrites every row of `sessions` and locks the table while it runs, and several migrations build indexes concurrently, which takes longer on large databases. If `db-init` is interrupted, run it again.
+
+**Rolling back to 2.3:** restore the `pg_dump` backup taken before `db-init`, with a matching object storage snapshot. A schema downgrade stops at migration `202610291900` ("Cannot discard approved Skill reference history") once an approved Skill revision references another Skill, and a downgrade never brings back emptied or deleted logs, cleared names or rewritten audit entries.
+
+## Sign-in with OIDC: what an existing setup must check [#oidc-checklist]
+
+The next release changes how every OIDC sign-in is verified and which account it opens. Find your setup below; each line links to the entry with the details. "Stored settings" means the provider is registered in Eneo (`FEDERATION_ENABLED=true`); "environment settings" means the `OIDC_*` variables (`FEDERATION_ENABLED=false`). Both apply to single- and multi-tenant installations.
+
+**Every provider** (Entra ID, MobilityGuard, Keycloak, Okta, Auth0, Zitadel or any other OIDC provider):
+
+- Every backend replica reaches the same Redis, version 6.2 or later, within 2 seconds. See [Redis is required for OIDC sign-in](#redis-required-for-sign-in).
+- The provider returns the `nonce`, signs ID tokens with an asymmetric key (not `HS256`) and puts a `kid` in the token header. See [Every OIDC sign-in is verified strictly](#strict-relying-party).
+- Discovery and the signing keys are reachable from every backend, the discovery URL names your own directory (no `{tenantid}` placeholder), and server clocks are synchronised. See [Discovery and signing keys must stay reachable](#discovery-and-jwks-reachable) and [A templated issuer is refused](#templated-issuer-refused).
+- The frontend and all backend replicas are replaced together; sign-ins that are in progress during the upgrade must be started again. See [Deploy frontend and backend together](#deploy-frontend-and-backend-together).
+- Accounts need nothing at the upgrade: each existing account is bound to its provider identity by email at its next sign-in, and sessions stay valid. See [Accounts are bound to one provider identity](#account-binding).
+
+**Providers that give each client its own `sub`** (Entra ID; any provider with pairwise subjects):
+
+- Stored settings: right after the upgrade, before people sign in, set the subject claim to a stable value (for Entra ID, `oid`). See [Accounts are bound to one provider identity](#account-binding).
+- Environment settings always use `sub`. Never change `OIDC_CLIENT_ID` without a migration window, or move the settings into Eneo first. See [Changing the client ID](/guides/oidc-federation#changing-the-client-id).
+
+**Environment settings** (`FEDERATION_ENABLED=false`):
+
+- `OIDC_DISCOVERY_ENDPOINT`, `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET` must all be set, or the login page shows only the password form. See [SSO is offered only when it can work](#sso-offered-only-when-usable).
+- `OIDC_TENANT_ID` does not choose the sign-in tenant; a sign-in that names no organization uses the first active tenant. See [MobilityGuard's own sign-in is removed](#mobilityguard-sign-in-removed).
+- Settings stored on the organization are ignored, for sign-in and for provider access tokens alike: only `{PUBLIC_ORIGIN}/login/callback` is accepted as redirect URI. See [Server-configured sign-in ignores stored settings](#env-sign-in-ignores-stored).
+
+**Stored settings** (`FEDERATION_ENABLED=true`):
+
+- The backend warns at startup about each `OIDC_*` variable it ignores; remove them. See [SSO is offered only when it can work](#sso-offered-only-when-usable).
+- Administrators can now change the client ID, secret, allowed domains and subject claim themselves. Check who holds the administrator role. See [Administrators can change the sign-in settings](#admins-change-sign-in-settings).
+- Automation that replaces the settings with `PUT` must send `subject_claim`. See [Accounts are bound to one provider identity](#account-binding).
+- If you moved the environment settings into Eneo with 2.3 or earlier, check the allowed domains. See [The move script dropped the allowed domains](#move-script-allowed-domains).
+- A provider is offered only when its stored settings name a discovery URL, client ID and client secret; the tenant list on the login page shows only such tenants. See [SSO is offered only when it can work](#sso-offered-only-when-usable) and [Multi-tenant sign-in](#multi-tenant-sign-in).
+- Scripts that save or test provider settings accept `502` for a provider whose discovery cannot be read. See [Saving provider settings checks what sign-in checks](#provider-save-checks-sign-in).
+
+**MobilityGuard-specific settings** (`MOBILITYGUARD_*`, `MOBILITY_GUARD_AUTH`): rename them to the `OIDC_*` names, `MOBILITYGUARD_TENANT_ID` included, and check the provider registration. See [MobilityGuard's own sign-in is removed](#mobilityguard-sign-in-removed).
+
+**Zitadel sign-in in the Svelte app** (`ZITADEL_INSTANCE_URL`, `ZITADEL_PROJECT_CLIENT_ID`): still works, but is deprecated. Move it to the OIDC settings before the release that removes it. See [Zitadel sign-in is deprecated](#zitadel-sign-in-deprecated).
+
+**API consumers:**
+
+- Integrations that send provider access tokens (`OIDC_RESOURCE_SERVER_ENABLED=true`): compare the issuer and subject of access tokens with ID tokens before upgrading; expect `401` for a token without the subject claim and `403 identity_conflict` for an account conflict. See [Provider access tokens go through the same binding](#resource-server-binding).
+- Clients that call `/api/v1/auth/initiate` and `/api/v1/auth/callback` themselves: forward `iss`, optionally bind the code to the client, read errors by `code` (the new refusals carry no `detail`), and call `POST /api/v1/users/logout/` on sign-out. See [Deploy frontend and backend together](#deploy-frontend-and-backend-together), [Codes are redeemed only by the client that started the sign-in](#client-bound-code-redemption), [One error format](#error-envelope) and [Sign-out ends the session on the server](#server-side-sessions).
+
+**Coming from 2.2 or earlier:** also read the sign-in changes in the [2.3.0 release notes](https://github.com/eneo-ai/eneo/releases/tag/v2.3.0).
+
+## Sign-in (OIDC) [#sign-in]
+
+### Accounts are bound to one provider identity [#account-binding]
+
+- **What changes:** the first federated sign-in binds the account, per tenant, to the provider identity: issuer, audience (the client ID), subject claim and subject value. Later sign-ins find the account by that binding and never by email: a changed email keeps the account, and a reused address cannot open it. A conflict answers `403` with code `identity_conflict` and writes nothing. Administrators can open a migration window or a one-time re-binding allowance (each at most 30 days) through six API routes under `/api/v1/admin/` (`users/{user_id}/identity`, `users/{user_id}/identity/rebinding`, `identity-migration-windows`); they need a signed-in administrator's session token, an API key gets `403 session_auth_required`, and there is no UI. The federation settings gain `subject_claim` (default `sub`; the email claim is refused with `422`). Environment settings always use `sub`. New audit actions: `identity_bound`, `identity_conflict`, `identity_rebinding_updated`, `identity_migration_window_updated`.
+- **Why:** matching by email alone let anyone who controls that address at a provider (a reused address, a second client, a second provider) sign in to the existing account.
+- **Who acts:** every OIDC installation, both configuration modes, single- and multi-tenant. Most action falls on providers whose `sub` differs per client (Entra ID). Keycloak, Okta, Auth0 and Zitadel use one `sub` for every client; for MobilityGuard, check the provider's documentation. Password, API-key and system administrator sign-ins are not bound.
+- **Before:** for per-client `sub` providers, choose a stable claim present in the ID token (and in access tokens if you use them). For Entra ID that is `oid`. A token without the chosen claim cannot sign in.
+- **During:** nothing. Existing accounts are bound by email at their next sign-in; sessions stay valid.
+- **After:** with stored settings and a per-client `sub` provider, set `subject_claim` right away, before people sign in (`PATCH /api/v1/sysadmin/tenants/{id}/federation` or `PATCH /api/v1/admin/federation`). If people are already bound under `sub`, open a window from the issuer and client ID to themselves first. Later: open a window before a new issuer or, with per-client `sub`, a new client ID; open a window to the same pair before changing the subject claim; automation that uses `PUT` must send `subject_claim`. Resolve conflicts from the reason in the audit log. Custom clients treat `403 identity_conflict` as a matter for an administrator, not a retry.
+- **Check:** sign in through every entry point; `GET /api/v1/admin/users/{user_id}/identity` lists one binding per provider and client; the audit log shows `identity_bound` with method `email_match`.
+- **Rollback:** downgrading migration `202611091110` drops bindings, windows and allowances, and email matching returns. Downgrading `202611091100` and upgrading again gives sessions new ids, so people sign in again.
+- **Guide:** [Account binding](/guides/oidc-federation#account-binding), [Sign-in conflicts](/guides/oidc-federation#sign-in-conflicts), [Re-opening a binding](/guides/oidc-federation#re-opening-a-binding), [Upgrading to account binding](/guides/oidc-federation#upgrading-to-account-binding).
+
+### Provider access tokens go through the same binding [#resource-server-binding]
+
+- **What changes:** with `OIDC_RESOURCE_SERVER_ENABLED=true`, an access token from the provider was matched by email alone in 2.3. It is now matched through the binding, with the issuer `OIDC_ACCEPTED_ISSUER`, the audience `OIDC_ACCEPTED_AUDIENCE` and the subject claim of the settings sign-in uses: with stored settings the stored subject claim (else `sub`) and the stored allowed domains, with environment settings always `sub` and `OIDC_ALLOWED_DOMAINS`. Whichever path is used first binds the account: if the browser binds first and the access token carries another issuer or subject, the token is refused with `403 identity_conflict` (`account_bound`), and the other way round. A token without the subject claim answers `401`. Keys marked `use=enc` are skipped.
+- **Why:** the same account takeover as in the browser sign-in. Each request is admitted in its own short transaction, so a slow identity store fails fast instead of exhausting the connection pool.
+- **Who acts:** installations with `OIDC_RESOURCE_SERVER_ENABLED=true`, and their API consumers.
+- **Before:** decode an ID token and an access token for the same person and compare `iss` and the subject value. If they match (typical for Keycloak, Okta, Auth0, Zitadel and MobilityGuard on the same realm), nothing to do. With Entra ID, request v2 access tokens (`accessTokenAcceptedVersion` 2 in the app manifest) and set `OIDC_ACCEPTED_ISSUER` to the `v2.0` issuer; if `sub` still differs, use stored settings with `subject_claim=oid` before anyone signs in.
+- **During:** nothing.
+- **After:** if the values cannot be made equal, an administrator opens a migration window from the sign-in issuer and client ID to `OIDC_ACCEPTED_ISSUER` and `OIDC_ACCEPTED_AUDIENCE` (or the reverse). It lasts at most 30 days; accounts bound later need a new window or an allowance. API consumers treat `403 identity_conflict` as an account matter and `401` as a token without the subject claim.
+- **Check:** the identity route lists two bindings for a person who uses both paths; an API call answers `200`; the audit log shows no `account_bound` conflicts.
+- **Rollback:** as for account binding. Switching the issuer or token version back later counts as a new issuer and needs a window.
+- **Guide:** [The subject claim](/guides/oidc-federation#the-subject-claim).
+
+### A removed account keeps its identity [#removed-accounts-keep-identity]
+
+- **What changes:** a binding stays on an account that is deactivated or removed (an administrator's delete, or SCIM `active=false`). That identity reaches only that account; while it is not active, sign-in answers `403` "User is inactive or has been removed". It never reaches another account with the same email. No API removes a binding.
+- **Why:** SCIM reactivation reuses the same account, and nobody else can take over the identity. Signing in must never undo a deprovisioning.
+- **Who acts:** administrators who remove accounts. If an account is bound after the upgrade, then removed, and a second account is created for the person, single sign-on is refused for that person. Accounts removed before the upgrade have no binding.
+- **Before / during:** nothing.
+- **After:** to let a removed person back in, reactivate the account: through SCIM (`active=true`, or a SCIM create with the same user name or email), or as an administrator with `POST /api/v1/admin/users/{username}/reactivate`. Either clears the removal, and the next sign-in reaches the account through its existing binding; API keys revoked at the removal stay revoked. The administrator's call answers `400` (code 9004) and changes nothing when another live account, in any organization, now holds the address. As a last resort, create a new account and remove the old account's binding in the database (`DELETE FROM identity_bindings WHERE user_id = '<old id>'`).
+- **Check:** `SELECT user_id FROM identity_bindings WHERE issuer = '…' AND subject = '…'` names the active account.
+- **Rollback:** as for account binding.
+- **Guide:** [Account binding](/guides/oidc-federation#account-binding).
+
+### Every OIDC sign-in is verified strictly [#strict-relying-party]
+
+- **What changes:** every sign-in uses `state`, `nonce` and PKCE (`S256`), stored once in Redis. The response `iss` parameter is checked (and required when the provider announces it). The ID token must carry `iss`, `sub`, `aud`, `exp`, `iat` and a `kid`; its algorithm must be asymmetric (RS, PS, ES 256/384/512 or EdDSA, never `none` or `HS*`); the issuer must equal the one the sign-in started with; `aud` must contain the client ID; `azp` must equal the client ID when present, and is required when `aud` has several values; the `nonce` must match, and `at_hash` when present; `iat` may be at most `OIDC_CLOCK_LEEWAY_SECONDS` (120) in the future. Allowed algorithms come from the stored `signing_algorithms`, else from discovery, else `RS256`. Refusals are typed: `503 oidc_login_unavailable`, `400 oidc_transaction_invalid`, `401 oidc_response_not_verified`; a bad signature, audience or expiry was a `500`. The login page shows the reason. Stored settings gain `signing_algorithms` and `email_verified_claims` (default `email_verified`, `xms_edov`).
+- **Why:** 2.3 trusted the signed state alone when Redis was down, did not check the issuer or nonce, accepted only `RS256`, fetched the signing keys on every sign-in, and answered `500` for invalid tokens.
+- **Who acts:** operators of every OIDC installation.
+- **Before:** per provider, check that ID tokens are signed asymmetrically (switch Auth0 or Keycloak clients from `HS256`), that the `nonce` is returned, that tokens carry a `kid`, and that server clocks use NTP.
+- **During:** see [Deploy frontend and backend together](#deploy-frontend-and-backend-together).
+- **After:** sign in once per provider and tenant.
+- **Check:** the authorization URL carries `nonce` and `code_challenge_method=S256`; the backend logs no `oidc_response_refused`, `oidc_transaction_refused` or `oidc_transaction_store_failed`.
+- **Rollback:** no migration; 2.3 ignores the new stored fields.
+- **Guide:** [Provider contract](/guides/oidc-federation#provider-contract), [Upgrading](/guides/oidc-federation#upgrading).
+
+### Redis is required for OIDC sign-in [#redis-required-for-sign-in]
+
+- **What changes:** the sign-in transaction lives in Redis for `OIDC_STATE_TTL_SECONDS` (600 by default) and is read once with `GETDEL`, which needs Redis 6.2 or later. If Redis does not answer within 2 seconds, or is older than 6.2, sign-in answers `503 oidc_login_unavailable`. In 2.3 Redis was optional for single sign-on. No new setting.
+- **Why:** a one-time transaction is what makes `state`, `nonce` and PKCE binding.
+- **Who acts:** operators of every OIDC installation; the reference Compose file's `redis:7-alpine` already qualifies.
+- **Before:** every backend replica reaches the same Redis (start and callback may hit different replicas), version 6.2 or later. Keep Redis's default `noeviction` policy (or set no `maxmemory` limit): any eviction policy, `allkeys-*` or `volatile-*`, can drop a sign-in in progress.
+- **During / after:** nothing.
+- **Check:** `redis-cli INFO server | grep redis_version` shows 6.2 or later; `redis-cli CONFIG GET maxmemory-policy` shows `noeviction`; keys `oidc:transaction:*` appear during a sign-in.
+- **Rollback:** a downgrade restores the state-only check.
+- **Guide:** [Sign-in transaction](/docs/authentication-architecture#sign-in-transaction).
+
+### Discovery and signing keys must stay reachable [#discovery-and-jwks-reachable]
+
+- **What changes:** discovery is read for every sign-in and cached per process for `OIDC_JWKS_CACHE_TTL_SECONDS` (3600), with no stale fallback. Signing keys are cached per key set, with at most one refetch every 30 seconds for an unknown `kid`. Stored endpoint values still take precedence.
+- **Why:** the strict checks need the provider's current issuer, algorithms and keys.
+- **Who acts:** operators whose backends reach the provider through egress rules, a proxy or internal DNS.
+- **Before:** every backend reaches the discovery URL, `jwks_uri` and the token endpoint within 5 seconds: every call to the provider is cut after 5 seconds. If not, nobody can sign in after the first hour, or at once after a restart.
+- **During / after:** nothing. Changes at the provider may take up to the cache lifetime to apply. After a failed discovery fetch, that URL is not tried again for 30 seconds, so sign-in can keep failing for up to 30 seconds after the provider recovers.
+- **Check:** `curl` the discovery URL from inside the backend container; sign in after a restart.
+- **Rollback:** a downgrade restores the old fetching.
+- **Guide:** [JWKS handling](/docs/authentication-architecture#jwks-handling).
+
+### A templated issuer is refused [#templated-issuer-refused]
+
+- **What changes:** a discovery document whose issuer contains `{` or `}` (Entra ID's `common` or `organizations` endpoints) is refused when saved, when tested and at sign-in.
+- **Why:** no ID token can match a placeholder issuer, so the issuer check would be skipped.
+- **Who acts:** installations that use a multi-directory Entra ID endpoint.
+- **Before:** use your own directory: `https://login.microsoftonline.com/{directory-tenant-id}/v2.0/.well-known/openid-configuration`. Environment settings: change `OIDC_DISCOVERY_ENDPOINT` and restart. Stored settings: `PATCH` `discovery_endpoint`. This works on 2.3 too, and changing it after the upgrade causes no conflict. An installation that relied on one configuration for several directories needs one Eneo tenant per directory.
+- **During / after:** nothing.
+- **Check:** the stored issuer has no braces; the federation test answers `200`.
+- **Rollback:** nothing to roll back.
+- **Guide:** [Upgrading](/guides/oidc-federation#upgrading).
+
+### Deploy frontend and backend together [#deploy-frontend-and-backend-together]
+
+- **What changes:** `POST /api/v1/auth/callback` takes `iss`, and requires it when discovery announces `authorization_response_iss_parameter_supported`. A sign-in started on 2.3 fails with `400` "Invalid state parameter"; an expired, used or foreign transaction answers `400 oidc_transaction_invalid`. The `detailCode` on the login page carries the typed codes instead of `http_400`, `unauthorized` or `http_500`.
+- **Why:** the issuer parameter protects against provider mix-up; one-time transactions stop code replay.
+- **Who acts:** operators, and API consumers with their own callback.
+- **Before:** check whether your provider's discovery document has `authorization_response_iss_parameter_supported: true` (Keycloak's does). Update monitoring that matches `detailCode`.
+- **During:** deploy the Svelte frontend and the backend from the same release, and replace all backend replicas at once. An older frontend does not forward `iss`, so such providers are refused. Tell users that a sign-in in progress must be started again.
+- **After:** custom clients forward `iss` from the redirect to the callback.
+- **Check:** one sign-in per provider; no `iss_parameter_missing` in the backend log.
+- **Rollback:** roll back frontend and backend together.
+- **Guide:** [Upgrading](/guides/oidc-federation#upgrading).
+
+### Codes are redeemed only by the client that started the sign-in [#client-bound-code-redemption]
+
+- **What changes:** the transaction records whether the browser or an API client started it. `GET /api/v1/auth/initiate` takes an optional `binding_challenge` (exactly 43 base64url characters) and `POST /api/v1/auth/callback` an optional `binding_verifier` (43 to 128 characters, as in PKCE). If a challenge was sent, the verifier is required; a verifier without a challenge is refused like a mismatch. An empty or malformed value answers `422`; a mismatch answers `400 oidc_transaction_invalid`. A refusal consumes nothing. The Svelte app keeps its verifier in the `HttpOnly` `oidc-login-resume` cookie.
+- **Why:** a code and state that leak through URLs, logs or the `Referer` header could be redeemed by someone else.
+- **Who acts:** nobody must act. API clients may bind their sign-ins; without binding they stay as exposed to replay as before.
+- **Before:** nothing.
+- **During:** deploy frontend and backend together; sign-ins in progress restart.
+- **After:** API clients generate at least 32 random bytes, send the unpadded base64url SHA-256 as the challenge and the value as the verifier (`eneo-js`: `bindingChallenge`, `bindingVerifier`).
+- **Check:** replaying a used callback answers `400`; the log shows `oidc_transaction_refused` with a reason such as `binding_mismatch`.
+- **Rollback:** frontend and backend together.
+- **Guide:** [Sign-in transaction](/docs/authentication-architecture#sign-in-transaction).
+
+### MobilityGuard's own sign-in is removed [#mobilityguard-sign-in-removed]
+
+- **What changes:** `POST /api/v1/users/login/openid-connect/mobilityguard/` answers `404`; MobilityGuard signs in through the generic OIDC path. The backend refuses to start when a `MOBILITYGUARD_*` variable is set without its `OIDC_*` counterpart, and warns when both are set. The Svelte app warns while `MOBILITY_GUARD_AUTH` or `MOBILITYGUARD_CLIENT_ID` is set. With environment settings, a sign-in that names no organization uses the first active tenant; `OIDC_TENANT_ID` only selects the tenant for provider access tokens.
+- **Why:** two verification paths for the same protocol; MobilityGuard is standard OIDC, and a silent fallback would hide a broken setup.
+- **Who acts:** installations with `MOBILITYGUARD_*` or `MOBILITY_GUARD_AUTH`. Installations that registered MobilityGuard as stored settings do nothing.
+- **Before:** rename `MOBILITYGUARD_DISCOVERY_ENDPOINT`, `MOBILITYGUARD_CLIENT_ID`, `MOBILITYGUARD_CLIENT_SECRET` and `MOBILITYGUARD_TENANT_ID` to `OIDC_DISCOVERY_ENDPOINT`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` and `OIDC_TENANT_ID`, with `FEDERATION_ENABLED=false`, or remove `MOBILITYGUARD_TENANT_ID`: browser sign-in no longer reads a tenant id. With several active tenants, keep one or move to stored settings. At MobilityGuard, register `{PUBLIC_ORIGIN}/login/callback`, allow the `profile` scope, accept `client_secret_post` and return the `nonce`.
+- **During:** remove the MobilityGuard variables from the frontend and upgrade frontend and backend together.
+- **After:** API clients use `/api/v1/auth/initiate` and `/api/v1/auth/callback`.
+- **Check:** no startup error or warning; `GET /api/v1/auth/federation-status` reports `has_global_oidc_config: true`; the old route answers `404`.
+- **Rollback:** no migration; 2.3 reads the `OIDC_*` names too, but its MobilityGuard button needs the frontend variables back.
+- **Guide:** [Migrate from the MobilityGuard settings](/guides/oidc-federation#migrate-from-the-mobilityguard-settings).
+
+### Zitadel sign-in is deprecated [#zitadel-sign-in-deprecated]
+
+- **What changes:** nothing stops working yet. The Svelte app warns at startup while `ZITADEL_INSTANCE_URL` or `ZITADEL_PROJECT_CLIENT_ID` is set. `POST /api/v1/users/provision/` is marked deprecated and logs a warning per call. A later release removes the Zitadel sign-in, the invitation and activation pages, the Zitadel password and name change, and the provision route. The React app has no Zitadel sign-in.
+- **Why:** a second sign-in path to keep correct (it has PKCE but no `nonce`); one release of warnings gives time to move.
+- **Who acts:** installations that sign in through Zitadel in the Svelte app.
+- **Before the removal release:** in Zitadel, register `{PUBLIC_ORIGIN}/login/callback`, use a client secret and turn on "User Info inside ID Token". In Eneo, set `OIDC_DISCOVERY_ENDPOINT` to `{ZITADEL_INSTANCE_URL}/.well-known/openid-configuration` plus the client ID and secret, or register it as stored settings. For automatic account creation, turn on provisioning and set the allowed domains. Remove the `ZITADEL_*` frontend variables and stop calling `/api/v1/users/provision/`. After the move, people change passwords and names in Zitadel; accounts are created at first sign-in or by SCIM.
+- **Check:** no Zitadel warning at startup; sign-in works through the OIDC button.
+- **Rollback:** set the Zitadel variables again.
+- **Guide:** [Migrate from the Zitadel settings](/guides/oidc-federation#migrate-from-the-zitadel-settings).
+
+### SSO is offered only when it can work [#sso-offered-only-when-usable]
+
+- **What changes:** one rule decides, for the login page, the organization selector and sign-in alike, whether single sign-on is offered: a discovery URL, a client ID and a client secret. With `FEDERATION_ENABLED=false`, `has_global_oidc_config` is true only when `OIDC_DISCOVERY_ENDPOINT`, `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET` are all set; otherwise the login page shows the password form instead of a button that cannot work. With `FEDERATION_ENABLED=true`, an organization is offered only when its stored settings have all three; a hand-edited row without a secret is no longer offered (every configuration Eneo saves has one). Each process logs one warning naming the `OIDC_*` variables it ignores. The documentation now recommends stored settings.
+- **Why:** 2.3 showed the button with only discovery and secret set, in either mode, and offered stored settings without a secret; the sign-in then failed.
+- **Who acts:** nobody must act. Environment settings need all three variables.
+- **After:** with stored settings, remove the variables the warning names (keep `OIDC_ALLOWED_DOMAINS` if provider access tokens rely on it).
+- **Check:** no warning at startup; the login page shows the expected button.
+- **Rollback:** no migration.
+- **Guide:** [Which setup do you need](/guides/oidc-federation#which-setup-do-you-need).
+
+### The move script dropped the allowed domains [#move-script-allowed-domains]
+
+- **What changes:** `backend/scripts/migrate_env_oidc_to_tenant_federation.py` now copies `OIDC_ALLOWED_DOMAINS`, validates the values and writes an audit entry. Versions up to 2.3 (and 2.2.4) left the stored allowed domains empty: no domain check at browser sign-in and no automatic account creation. The upgrade does not repair this.
+- **Why:** an empty domain list silently removed a sign-in restriction.
+- **Who acts:** single-tenant installations that ran the move script while `OIDC_ALLOWED_DOMAINS` was set. Everyone else does nothing.
+- **After:** read the stored settings (`GET /api/v1/sysadmin/tenants/{tenant_id}/federation`, or Administration > Sign-in (SSO)), compare with the old variable, `PATCH` `allowed_domains`, and review accounts created since the move.
+- **Check:** the stored list matches the intended domains.
+- **Rollback:** no migration.
+- **Guide:** [Check a move made with an earlier version](/guides/oidc-federation/single-tenant#check-a-move-made-with-an-earlier-version).
+
+### Administrators can change the sign-in settings [#admins-change-sign-in-settings]
+
+- **What changes:** `GET` and `PATCH /api/v1/admin/federation`, and the Svelte page Administration > Sign-in (SSO), let an organisation's administrator change the provider label, client ID, client secret, allowed domains and subject claim. It requires an interactive session (an API key gets `403 session_auth_required`) and a revision (`409` on a concurrent change). A save that sign-in could not use answers `400` with the reason; it fetches nothing from the provider, so a client ID or secret the provider rejects shows at the next sign-in. Every save writes an audit entry, even with audit logging off, and applies from the next sign-in. Only with `FEDERATION_ENABLED=true`.
+- **Why:** rotating a secret or adjusting domains no longer needs an operator or a restart, and the change is audited.
+- **Who acts:** installations with stored settings. Nothing changes until an administrator saves.
+- **After:** review who holds the administrator role. A wrong value stops single sign-on; `/login?showUsernameAndPassword=true` stays available for password accounts. Changing the client ID with a per-client `sub` provider, or changing the subject claim, needs a migration window first.
+- **Check:** the audit log shows `federation_updated` for each save.
+- **Rollback:** no migration; saved values keep working on 2.3.
+- **Guide:** [Change the settings in Eneo](/guides/oidc-federation/single-tenant#change-the-settings-in-eneo).
+
+### SCIM [#scim-changes]
+
+- **What changes:** the SCIM protocol is unchanged. SCIM accounts are bound at their first sign-in; an email change keeps the account; a removed account keeps its binding and is reused on reactivation. The SCIM API documentation pages (`/scim/v2/docs`, `/scim/v2/redoc`) answer `404` when a browser-session flag is on outside development; `openapi.json` stays.
+- **Why:** the binding rules above; the documentation pages' third-party scripts must not run on the session's origin.
+- **Who acts:** nobody must act. Keep provisioning off when SCIM creates accounts.
+- **Check:** a SCIM-created account signs in and the identity route lists its binding.
+- **Rollback:** as for account binding.
+- **Guide:** [Account binding](/guides/oidc-federation#account-binding).
+
+### Multi-tenant sign-in [#multi-tenant-sign-in]
+
+- **What changes:** with `FEDERATION_ENABLED=true`, the tenant list on the login page (`GET /api/v1/auth/tenants`) shows only tenants with a slug and a stored discovery endpoint, client ID and client secret. The documentation recommends one installation per organisation: multi-tenancy has basic support, will be phased out, and gives no data-separation guarantee because tenants share one database.
+- **Why:** a tenant without a provider cannot sign in, so offering it only produced an error.
+- **Who acts:** multi-tenant installations.
+- **After:** register a provider for any missing tenant; until then its people use password sign-in. Plan to move organisations to their own installations.
+- **Check:** every tenant that should sign in appears in the list.
+- **Rollback:** 2.3 lists them again, but they still cannot sign in.
+- **Guide:** [Which setup do you need](/guides/oidc-federation#which-setup-do-you-need).
+
+### Server-configured sign-in ignores stored settings [#env-sign-in-ignores-stored]
+
+- **What changes:** with `FEDERATION_ENABLED=false`, sign-in uses the `OIDC_*` settings and nothing stored on the organization. It accepts only `{PUBLIC_ORIGIN}/login/callback` as redirect URI: stored `additional_redirect_uris` no longer apply. Access tokens accepted with `OIDC_RESOURCE_SERVER_ENABLED` are bound under `sub` and admitted by `OIDC_ALLOWED_DOMAINS`, not by a stored subject claim or stored allowed domains. With `FEDERATION_ENABLED=true`, nothing changes.
+- **Why:** a provider row left on the organization could widen the redirect URIs or change whom an access token signs in as, while the environment settings decided everything else.
+- **Who acts:** installations with environment settings that relied on values stored on the organization.
+- **Before:** if you need stored values, register the provider in Eneo and set `FEDERATION_ENABLED=true`.
+- **Check:** a sign-in through `{PUBLIC_ORIGIN}/login/callback` works; an API call with a provider access token answers `200`.
+- **Rollback:** previous image.
+- **Guide:** [Which setup do you need](/guides/oidc-federation#which-setup-do-you-need).
+
+### Saving provider settings checks what sign-in checks [#provider-save-checks-sign-in]
+
+- **What changes:** saving provider settings (`PUT`/`PATCH /api/v1/sysadmin/tenants/{tenant_id}/federation`) and the test call (`POST /api/v1/sysadmin/tenants/{tenant_id}/federation/test`) read the provider the way sign-in does. They answer `502` when the discovery document cannot be read (a save answered `400`, the test `500`), and `400` with the reason when the provider or the settings fail the checks sign-in makes, including a discovery document that is read but malformed. A save stores the issuer, endpoints and client authentication method sign-in will use. An edit that does not change the discovery URL fetches nothing and checks the settings alone, so it answers `400` with the reason but never `502`.
+- **Why:** a configuration sign-in would refuse used to be saved, and failed at the next sign-in.
+- **Who acts:** operators and scripts that save or test provider settings.
+- **After:** scripts that expected `400` for an unreachable provider accept `502`.
+- **Check:** the test call answers `200` for a working provider.
+- **Rollback:** previous image.
+- **Guide:** [Change the settings in Eneo](/guides/oidc-federation/single-tenant#change-the-settings-in-eneo).
+
+### `REDIS_CONN_TIMEOUT` now also bounds reads [#redis-timeout-bounds-reads]
+
+- **What changes:** the setting (default 5 seconds) was only the connect timeout. It is now also the read timeout of every Redis client, the job queue's included. A Redis that has stopped answering fails a command or a background-job enqueue within about two timeouts, since a timed-out call is retried once (`REDIS_RETRY_ON_TIMEOUT`, default `true`), instead of waiting without end. A password sign-in then goes ahead without counting the attempt, and an audit entry that cannot be queued is logged as a warning. OIDC sign-in keeps its own 2-second limit.
+- **Why:** a Redis that accepted connections and never answered could hold sign-in, API-key checks and audit writes without end.
+- **Who acts:** operators whose Redis is slow to answer under normal load: raise the value.
+- **Check:** with Redis paused, a password sign-in answers within seconds and works again once Redis returns.
+- **Rollback:** previous image.
+
+## Sessions, passwords and the web app [#sessions]
+
+### Sign-out ends the session on the server [#server-side-sessions]
+
+- **What changes:** every password or OIDC sign-in in both web apps writes a `browser_sessions` row, and the token is accepted only while that row exists and matches the user and tenant. `POST /api/v1/users/logout/` ends the session: `204` means no usable session remains; `503 sign_out_unavailable` means keep the token and retry. Open WebSocket and job-event streams are checked every 30 seconds; `/ws` closes with `1008` "Session ended" or `1013` when the session store does not answer. A worker job at 00:30 UTC deletes expired rows. The React app warns two minutes before expiry and can renew up to `BROWSER_SESSION_MAX_AGE`. Startup checks: `BROWSER_SESSION_MAX_AGE` is 1 to 43200 minutes and at least `JWT_EXPIRY_TIME`; `WEB_APP_ENABLED=true` needs `BROWSER_SESSION_ENABLED=true`.
+- **Why:** sign-out only cleared cookies, so a copied token worked until it expired. The session-expiry warning was missing (WCAG 2.2.1).
+- **Who acts:** operators (settings), API consumers that use browser tokens.
+- **Before:** `BROWSER_SESSION_MAX_AGE` defaults to 43200 (30 days), so the React app lets people stay signed in for up to 30 days unless you lower it. If you set it, keep it at least `JWT_EXPIRY_TIME` (1440 in the template), or the backend does not start; set them equal to turn staying signed in off. Keep the worker running.
+- **During:** nothing. Tokens issued before the upgrade stay valid until they expire. Do not rotate `JWT_SECRET` for this: it also signs widget and module tokens, and hashes API keys when `API_KEY_HASH_SECRET` is unset.
+- **After:** API consumers call the logout route on sign-out (`204` done, `503` retry) and treat WebSocket `1008` as final and `1013` as retryable. Integrations should use API keys, not browser tokens. Sign-out ends Eneo's session, not the session at the provider, and not the tokens a session minted for MCP servers or modules, which run until they expire.
+- **Check:** a copied token answers `401` on `GET /api/v1/users/me/` after sign-out; the worker logs "Deleted expired browser sessions".
+- **Rollback:** downgrading `202611021100` drops the table (React users sign in again); on 2.3 sign-out only clears cookies again.
+- **Guide:** [Server-side sessions](/docs/authentication-architecture#server-side-sessions), [Main host and UI rollback](/guides/deployment#main-host-and-ui-rollback).
+
+### The Svelte sign-out is a form [#svelte-logout-form]
+
+- **What changes:** `GET /logout` shows a page with a sign-out button; signing out, clearing cookies and switching organisation are `POST` actions. `?clear_cookies` and `GET /login/switch-organisation` are removed. A cross-site form post answers `403`.
+- **Why:** a link or image could sign people out or reset their session.
+- **Who acts:** nobody must act. Bookmarks, links and provider front-channel logout to `/logout` now show the button.
+- **Check:** `/logout` shows the button; signing out works.
+- **Rollback:** previous frontend.
+- **Guide:** [Server-side sessions](/docs/authentication-architecture#server-side-sessions).
+
+### `TRUSTED_PROXY_COUNT` counts proxies exactly [#trusted-proxy-count]
+
+- **What changes:** with `N` greater than 0, the client address is the `N`-th `X-Forwarded-For` entry from the right (2.3 took the next one, with an `X-Real-IP` fallback). It feeds the audit log, API-key IP allow-lists, widget limits and the password-login log. One Traefik or Dokploy proxy with `N=1`: unchanged. One nginx with `N=1`: now the client. A load balancer in front of Traefik needs `N=2`.
+- **Why:** a forged `X-Forwarded-For` prefix could choose the address used for limits and allow-lists.
+- **Who acts:** operators with more than one proxy, or nginx.
+- **Before:** set `N` to the number of proxies that append to the header. Never set it higher.
+- **Check:** the login log's `source_ip` and the audit log show real client addresses; a request with a forged `X-Forwarded-For: 203.0.113.9` does not appear as that address.
+- **Rollback:** previous image.
+- **Guide:** [Behind a reverse proxy](/guides/embed-widget#behind-a-reverse-proxy).
+
+### The React web app runs on the main host [#react-web-app-main-host]
+
+- **What changes:** the React app is now a static app inside the backend image. The `eneo-web-next` image, its Node server, `SESSION_SECRET` and `env_web_next.template` are gone. The reference Compose file turns on `WEB_APP_ENABLED` and `BROWSER_SESSION_ENABLED` and adds a router for the main host; it is a placeholder (`your-domain.com`) until you edit it. Sign-in goes through the backend, which builds the callback from the request host. The help-centre and link settings move to `env_backend.env`. Custom builds need `--build-context web=./frontend`.
+- **Why:** one image and one sign-in path instead of a separate Node server with its own session secret.
+- **Who acts:** every operator using the reference Compose file.
+- **Before:** decide. To keep Svelte, set `WEB_APP_ENABLED=false` and `FRONTEND_ROUTER_PRIORITY=7`. To switch, set the host on the router, make the proxy pass the public `Host`, check that `https://<public host>/login/callback` is registered at the provider (`/auth/callback` is tried as a fallback), move off Zitadel first, and announce that everyone signs in again. Operators of the 2.3 beta remove the web-next profile and move its link settings to `env_backend.env`.
+- **During:** `docker compose up -d --remove-orphans`.
+- **After:** remove any HSTS your proxy adds on the main host, since the backend now sets it there outside development; people who used `/docs` switch to `/openapi.json`.
+- **Check:** `/` loads, `HEAD /healthz` answers `200`, sign-in sets the `__Host-eneo_web` cookie, and the log has no `browser_oidc_redirect_not_registered`.
+- **Rollback:** `FRONTEND_ROUTER_PRIORITY=7` brings Svelte back on the main host. There is no path back to the `eneo-web-next` image.
+- **Guide:** [Main host and UI rollback](/guides/deployment#main-host-and-ui-rollback), [Reverse proxy requirements](/guides/deployment#reverse-proxy-requirements), [Backend image and runtime settings](/guides/deployment#backend-image-and-runtime-settings).
+
+### HTTP hardening [#http-hardening]
+
+- **What changes:** outside development, `/docs` and `/redoc` answer `404` when a browser-session flag is on; `/openapi.json` stays. Every `/api/` response gets `Cache-Control: no-store`, `nosniff`, a locked-down CSP and, outside development, HSTS for one year, unless the endpoint sets its own. Loopback origins pass CORS only when `ENVIRONMENT` is development. A `*` in the host of `PUBLIC_ORIGIN` or `MCP_APP_HOST_ORIGINS` is refused at startup, and in `canonical_public_origin` when provider settings are saved. Health probes accept `HEAD`.
+- **Why:** with sessions in cookies, the documentation pages' third-party scripts must not run on the session's origin, and API responses must not be cached, sniffed or framed.
+- **Who acts:** operators whose proxy also sets HSTS or CSP, developers who reach a non-development backend from `localhost`.
+- **Before:** use concrete hosts; serve every host over HTTPS (browsers remember HSTS for a year); decide whether the proxy or Eneo owns HSTS and CSP. Add `http://localhost:*` to the allowed origins if you need it.
+- **Check:** `curl -I` shows one HSTS header.
+- **Rollback:** previous image; browsers keep HSTS.
+- **Guide:** [Reverse proxy requirements](/guides/deployment#reverse-proxy-requirements).
+
+### Password login responses [#password-login-responses]
+
+- **What changes:** on `POST /api/v1/users/login/token/`, a `422` lists only `loc`, `type` and `msg` (no echoed input). A correct password for an inactive account or a suspended organisation answers `403` (codes 9019 and 9025) instead of `500`. An unexpected failure answers `500` with code `login_unavailable`. The validation log no longer contains the email.
+- **Why:** an error must not echo credentials, and a blocked account is not a server error.
+- **Who acts:** API clients that sign in with a password; operators with alerts on these responses.
+- **After:** update `422` parsing, handle the two `403` codes, read `code` and `message` on `500`.
+- **Rollback:** previous image.
+- **Guide:** [Local password lifecycle](/docs/authentication-architecture#local-password-lifecycle).
+
+### Password lifecycle [#password-lifecycle]
+
+- **What changes:** passwords set by an administrator (the generated password in Administration > Users, the admin APIs, `DEFAULT_USER_PASSWORD`) must be changed at first sign-in. Until then the session reaches only the password-change routes, its own profile (`GET /api/v1/users/me/`) and sign-out; other routes answer `403` code 9070 `password_change_required`. Administrators can set a maximum password age (`GET`/`PATCH /api/v1/admin/password-policy`); existing passwords count from the upgrade. Database initialisation fails when `DEFAULT_USER_PASSWORD` is shorter than 12 characters or longer than 72 bytes (2.3 exited successfully and created nothing). OIDC, API keys, modules and system administrators are not affected.
+- **Why:** a password someone else chose should not stay in use.
+- **Who acts:** operators who seed users, administrators, integrations that sign in with a password.
+- **Before:** `DEFAULT_USER_PASSWORD` has at least 12 characters and at most 72 bytes. Leave `DEFAULT_USER_PASSWORD_CHANGE_REQUIRED` unset except in test stacks.
+- **During:** nothing is forced on existing passwords.
+- **After:** decide on a maximum age; integrations handle 9070 or use API keys.
+- **Check:** `GET /api/v1/users/me/` shows `password_status`.
+- **Rollback:** the downgrade of `202610161000` drops the columns.
+- **Guide:** [Local password lifecycle](/docs/authentication-architecture#local-password-lifecycle).
+
+## API contract [#api-contract]
+
+### One error format [#error-envelope]
+
+- **What changes:** HTTP errors, including `404` and `405`, answer `{message, eneo_error_code?, code?, context?, details?, request_id?}`. A copy in `detail` stays for one release. Extra fields such as `retry_after_seconds` move to the top level. `422` and `500` keep their shapes. The new OIDC refusals and `identity_conflict` have no `detail`. `Retry-After` on `429` is the seconds left in the window, also for API keys, whose limiter now sends `retry_after_seconds` (it sent `window_seconds`).
+- **Why:** clients and login pages can act on a code instead of parsing text.
+- **Who acts:** API consumers, generated clients and contract tests.
+- **After:** read `code` and `message` instead of `detail`; read extras at the top level; regenerate OpenAPI clients.
+- **Check:** `GET /api/v1/does-not-exist` returns `message` and `detail`.
+- **Rollback:** previous image.
+- **Guide:** [Errors](/docs/api#errors).
+
+### Icons [#icons]
+
+- **What changes:** deleting an icon still in use answers `409` (9075 `icon_in_use`); clear the `icon_id` instead, and the server deletes the replaced or cleared icon itself. A new `icon_id` must be an icon the calling user uploaded in their own tenant, else `400` (9076 `icon_not_attachable`). Service keys cannot upload icons (`403`). A migration clears icons that point across tenants (the resource shows the default avatar).
+- **Why:** icon ids are public, so anyone in a tenant could delete or attach any icon.
+- **Who acts:** API consumers that manage icons; administrators of multi-tenant installations.
+- **During:** deploy backend and both frontends together; people reload open tabs (an old page gets `409`).
+- **After:** re-upload cleared icons.
+- **Rollback:** the clearing cannot be undone; released icons come back only from a backup.
+- **Guide:** [Icons](/docs/api#icons).
+
+## Retention, logs and storage [#retention-logs-storage]
+
+### One retention engine [#retention-engine]
+
+- **What changes:** the nightly jobs `cleanup_old_data` (03:00), `delete_unused_files` (03:30) and `purge_old_conversations` (04:00) are replaced by `run_retention` at `RETENTION_CRON_HOUR`:`RETENTION_CRON_MINUTE` (03:30 worker time, UTC in the image). Each task can be switched off (`RETENTION_CONVERSATIONS_HISTORY_ENABLED`, `RETENTION_EMPTY_SESSIONS_ENABLED`, `RETENTION_UNUSED_FILES_ENABLED`, `RETENTION_JOB_HISTORY_ENABLED`, `RETENTION_DERIVED_COPIES_ENABLED`) and has a budget (`RETENTION_MAX_ROWS_PER_RUN` and siblings); a backlog clears over several nights. `/api/healthz` reports the retention state (`DEGRADED` with HTTP `200`, and the limiting setting). Every run is audited. Retention periods and their order are unchanged. A migration builds indexes concurrently.
+- **Why:** three engines had different rules; removal must be timed, bounded and traceable.
+- **Who acts:** operators with scripts, alerts or probes on the old job names, times or the cleanup command's output.
+- **Before:** update those scripts and alerts; plan time for the index build (rerun `db-init` if interrupted).
+- **During:** nothing.
+- **After:** if health names a limiting setting, raise only that setting. A completed run is not proof that bytes were erased at the storage provider; after a restore, [the readback](#readback-after-restore) reports storage separately.
+- **Check:** the audit log shows `data_retention_run` each night; the retention section of `/api/healthz` names no limiting setting.
+- **Rollback:** downgrade later migrations first; the 2.3 image runs the three old jobs.
+- **Guide:** [Scheduled execution and limits](/docs/audit-logging#scheduled-execution-and-limits), [Health](/docs/audit-logging#health).
+
+### Prompt Guide has no retention period of its own [#prompt-guide-retention]
+
+- **What changes:** a new installation of the Prompt Guide no longer sets 30 days; it follows the space, then the organisation, else conversations are kept. Existing guides keep their period.
+- **Why:** a default nobody chose must not remove conversations.
+- **Who acts:** administrators who want a period: set it explicitly.
+- **Rollback:** none needed.
+- **Guide:** [Conversation retention hierarchy](/docs/audit-logging#conversation-retention-hierarchy).
+
+### Copies of removed conversations [#derived-copies]
+
+- **What changes:** a conversation copied from a question that was later removed answers `410` (9085 `derived_source_removed`) and is left out of lists and exports. Queued app-run and insight jobs carry ids instead of text. A retention task (`RETENTION_DERIVED_COPIES_ENABLED`) removes such copies. Nothing produces copies yet, so no `410` appears today. On PostgreSQL 13 conversation reads cost more.
+- **Why:** a copy must not keep removed text, and queued job payloads were an unreachable copy.
+- **Who acts:** API consumers (treat `410` as gone); installations on PostgreSQL 13 should plan to move to 16.
+- **Before:** optionally drain the job queue.
+- **Rollback:** the downgrade drops the table; drain the queue before downgrading the application.
+- **Guide:** [Copies of removed conversations](/docs/audit-logging#copies-of-removed-conversations).
+
+### Question logs are emptied [#question-logs-emptied]
+
+- **What changes:** a migration (`202611090600`) empties the request, model settings and context of every question log written before the upgrade. Logs linked to a question keep their row; logs that no question refers to are deleted. Removing a question later also clears the logs of later turns. Old questions show "not logged" in insights, and `GET /api/v1/logging/{id}/` answers `400` "Question was not logged.".
+- **Why:** each log held the whole conversation history, so removed text survived in logs, and old logs cannot be told apart.
+- **Who acts:** every installation; this cannot be undone.
+- **Before:** take a `pg_dump` backup (the only way back). Stop every backend and worker of the earlier version, on every host: `docker compose --env-file .env --env-file release.env stop backend worker`, then check that `docker compose --env-file .env --env-file release.env ps --status running backend worker` lists nothing. A running old backend writes new content during the migration. On large tables plan room for the write-ahead log: the migration rewrites every stored log, in batches of 5000.
+- **During:** run `db-init`; it can be rerun.
+- **After:** tell administrators; API consumers treat `400` as no log.
+- **Check:** `SELECT count(*) FROM logging WHERE json_body <> 'null'::jsonb OR context IS NOT NULL OR model_kwargs <> '{}'::jsonb` returns 0 right after the migration.
+- **Rollback:** restore the backup; the content does not come back otherwise.
+- **Guide:** [Drain work and stop old writers](/guides/deployment#drain-work-and-stop-old-writers).
+
+### File names leave the audit log [#audit-names-removed]
+
+- **What changes:** a migration rewrites stored audit entries: file events, MCP app calls, document exports and assistant attachment changes no longer contain file or conversation names. Searching the audit log by file name stops matching. Upload and extraction errors no longer name the file; database errors no longer print parameters.
+- **Why:** a removed file's name must not survive in the audit log or logs.
+- **Who acts:** organisations that keep the audit log as evidence.
+- **Before:** export the audit log if you need the names (for example under a legal hold).
+- **After:** search by id.
+- **Rollback:** cannot be undone.
+- **Guide:** [Exporting audit logs](/guides/audit-logging#exporting-audit-logs).
+
+### Object storage must not keep old versions [#object-storage-versioning]
+
+- **What changes:** when an object store is configured (environment or Administration > File storage), backend and worker refuse to start unless they can read `s3:GetBucketVersioning`, `s3:GetBucketObjectLockConfiguration` and `s3:ListBucketVersions`, versioning has never been enabled or suspended, and Object Lock is off. A delete counts as confirmed only after a full version listing. The admin connection test reports the same problems.
+- **Why:** a versioned bucket keeps deleted bytes.
+- **Who acts:** installations with object storage. Inline-only installations do nothing.
+- **Before (on 2.3):** grant the three actions on the bucket ARN (`arn:aws:s3:::<bucket>`, not `/*`) for the active bucket and saved connections. Check that `get-bucket-versioning` shows no status and that the bucket has no Object Lock. If it was ever versioned or locked, create a new bucket, copy with `rclone`, change the storage location while 2.3 runs, and delete old versions at the provider.
+- **Check:** `/api/readyz` reports object content `ready`; after a delete, `list-object-versions` is empty.
+- **Rollback:** code only, but it means rolling back the whole release, including the emptied logs.
+- **Guide:** [Move to another S3-compatible service](/guides/object-content-storage#move-to-another-s3-compatible-service).
+
+### Bundled SeaweedFS image [#bundled-seaweedfs-image]
+
+- **What changes:** the bundled SeaweedFS image is `4.40-eneo.8`.
+- **Why:** a security fix in one of its dependencies (go-jose).
+- **Who acts:** installations with the bundled SeaweedFS: set `ENEO_SEAWEEDFS_IMAGE` to the digest in the release's `IMAGE-DIGESTS.txt`. Other installations do nothing.
+- **Rollback:** the previous digest.
+- **Guide:** [Pin the release image](/guides/object-content-storage#pin-the-release-image).
+
+### A question without a log answers 400 [#logging-not-logged]
+
+- **What changes:** `GET /api/v1/logging/{message_id}/` answers `400` (9007) "Question was not logged." instead of `500` for questions without a stored log.
+- **Why:** a missing log is not a server error.
+- **Who acts:** API consumers: treat `400` as no log.
+- **Rollback:** previous image.
+- **Guide:** [Drain work and stop old writers](/guides/deployment#drain-work-and-stop-old-writers).
+
+### `UPLOAD_TMP_DIR` must be a local filesystem [#upload-tmp-dir-local]
+
+- **What changes:** every backend and worker process keeps the files it works on (conversation uploads before they are stored, audio being converted or transcribed, crawled pages, SharePoint files being read) in a directory of its own, `$UPLOAD_TMP_DIR/eneo-scratch/proc-<id>/`, guarded by a file lock (`owner.lock`). A process removes its directory when it stops; the next process that starts on the same volume removes the directory of one that crashed, up to 64 at each start. Knowledge and transcription uploads that wait for their job stay in `$UPLOAD_TMP_DIR/job-staging/`. The crawler worker also removes the `eneo-crawl-*` directories that earlier versions left in the system temporary directory.
+- **Why:** a process that crashed left uploads, audio and crawled files on disk, out of retention's reach.
+- **Who acts:** operators.
+- **Before:** make sure `UPLOAD_TMP_DIR` (default `/tmp`) is on a local filesystem; a volume shared between hosts over NFS or SMB is not supported. Size it for audio and crawled files as well as uploads.
+- **During / after:** nothing.
+- **Check:** with the services running, `ls $UPLOAD_TMP_DIR/eneo-scratch/` shows one `proc-*` directory per running process; after a restart, none of a stopped process is left.
+- **Rollback:** earlier versions neither use nor clean `eneo-scratch/`: stop every process and remove `$UPLOAD_TMP_DIR/eneo-scratch/`.
+- **Guide:** [Temporary files](/guides/deployment#temporary-files).
+
+### Migration `202611091200` rewrites every conversation row [#sessions-migration]
+
+- **What changes:** the migration adds `sessions.name_set_at` and `sessions.feedback_set_at` and sets both to each conversation's creation time. The table stays locked while it runs: conversations cannot be read or written.
+- **Why:** a conversation's name and feedback text need their own time to follow retention.
+- **Who acts:** operators.
+- **During:** plan downtime in proportion to the size of `sessions`.
+- **Check:** `alembic current` shows `202611091200`.
+- **Rollback:** `alembic downgrade 202611091110` drops both columns; upgrading again resets both times to each conversation's creation time.
+
+### Conversation names and feedback text follow the retention period [#names-and-feedback-follow-retention]
+
+- **What changes:** where an organization, space, assistant or app has a retention period, a conversation's name is emptied (both apps show Untitled) and its feedback text removed once their own time is older than that period. The thumbs up or down stays. Where no period is set, nothing changes. Existing conversations get their creation time, so the first nightly run after the upgrade empties the name and feedback text of every conversation older than its period, including long-running ones whose name someone chose recently.
+- **Why:** a name or a comment can quote turns that retention has already removed.
+- **Who acts:** administrators: tell users before the upgrade. API consumers: `GET /api/v1/conversations/`, `GET /api/v1/conversations/{id}/` and the assistant and group chat session endpoints return `name: ""` and feedback `text: null` for such conversations.
+- **After:** until the first run has worked through the older names and texts, `GET /api/healthz` can read `degraded` for conversation history. That is overdue text, not a false alarm, and it clears when the step has caught up. `blocked_reasons` can include `names_and_feedback.root_locked` and `sessions.root_locked`.
+- **Check:** the run's audit entry counts `names_and_feedback.names_cleared` and `names_and_feedback.feedback_texts_cleared`.
+- **Rollback:** cleared names and texts do not come back. That is the intent.
+- **Guide:** [Copies that follow their source](/guides/data-retention#copies-that-follow-their-source), [Names and feedback text](/docs/audit-logging#names-and-feedback-text).
+
+### Failed jobs carry a code instead of error text [#failed-jobs-failure-code]
+
+- **What changes:** a failed app run, Confluence or SharePoint pull or SharePoint delta sync, and any job whose final commit failed, now has `failure_code` set and `result_location: null` in `GET /api/v1/jobs/`, `GET /api/v1/jobs/{id}/` and `GET /api/v1/jobs/events/`. Before, `result_location` held the cleaned exception text. Jobs recorded before the upgrade keep their text; jobs that already had typed codes (uploads, transcriptions, crawls) are unchanged. Both apps explain the code in words.
+- **Why:** an exception message can quote content that retention later removes.
+- **Who acts:** API consumers that read `result_location` of failed jobs: read `failure_code` instead.
+- **Rollback:** none needed; earlier versions read the old text and ignore the code.
+
+### Worker logs carry no error messages [#worker-logs-without-messages]
+
+- **What changes:** a failed job is logged with its job id, failure code, exception types and where it was raised, never the message or traceback. The same holds for integration syncs, the completion, embedding and transcription adapters and the retention runner. arq's start and failure lines carry no job arguments, results or error messages. Integration clients' progress logs still name the items they read.
+- **Why:** messages and tracebacks can quote removed content.
+- **Who acts:** operators with log alerts or runbooks that match exception text: match on `failure_code` and the exception type.
+- **Check:** let a test job fail; its log line shows the code and the types, and no message.
+
+### A new step after restoring a backup [#readback-after-restore]
+
+- **What changes:** `run-cron --until-complete run_retention` runs retention in its own process until nothing due is left, and reports separately whether the store has confirmed each removal.
+- **Why:** a restored database can hold rows that became due after its recovery point, and nothing showed when retention had caught up or whether the store had removed the bytes.
+- **Who acts:** operators, at every restore.
+- **After a restore:** with traffic closed, every worker stopped and every retention task turned on, run `docker compose --env-file .env --env-file release.env run --rm backend run-cron --until-complete run_retention` before traffic opens.
+- **Check:** exit code 0 with `retention: complete after N rounds` and `storage: confirmed` or `storage: pending …`.
+- **Guide:** [After a restore](/guides/data-retention#after-a-restore) says what the step promises, what can still come back and what to do with each result.
+
+## Models, tools and integrations [#integrations]
+
+### More tool rounds per turn [#tool-rounds]
+
+- **What changes:** `MAX_TOOL_ROUNDS` (default 40, was a fixed 10) and `COMPLETION_REQUEST_TIMEOUT_SECONDS` (default 600). LiteLLM's `REQUEST_TIMEOUT` no longer applies.
+- **Why:** ten rounds was too few for tasks such as reading a long attachment in pages.
+- **Who acts:** nobody must act. A tool-heavy turn can now cost up to four times the calls and tokens; set `MAX_TOOL_ROUNDS=10` to keep the old cap. Move a custom `REQUEST_TIMEOUT` to `COMPLETION_REQUEST_TIMEOUT_SECONDS`.
+- **Rollback:** previous image.
+- **Guide:** [Configuration and deployment](/docs/knowledge-retrieval-and-mcp#configuration-and-deployment).
+
+### Model providers [#model-providers]
+
+- **What changes:** provider types that cannot route (pricing groups such as `bedrock_converse` or `vertex_ai-*`, and `github_copilot`, `chatgpt`) are refused with `400`; the canonical type is stored (`vllm` becomes `hosted_vllm`). Catalogue model names no longer double the provider prefix. The connection check and the model list send no `Authorization` header for a keyless provider. The image sets `LITELLM_LOCAL_MODEL_COST_MAP=True`, so startup does not fetch from GitHub.
+- **Why:** such providers were saved but failed at the first request.
+- **Who acts:** administrators with models named with a doubled prefix (`mistral/mistral/…`) or providers of a refused type.
+- **After:** fix completion model names; embedding and reranking models need new models (and re-added knowledge or a new reranking choice); recreate refused providers as `bedrock` or `vertex_ai`.
+- **Rollback:** previous image.
+- **Guide:** [Adding a provider](/guides/ai-providers#adding-a-provider-admin-ui).
+
+### Images without apt [#images-without-apt]
+
+- **What changes:** the frontend and backend images no longer contain `apt`; the frontend image also no longer contains `npm`, `npx`, `corepack` or `yarn`.
+- **Why:** a vulnerability in `apt` failed the image scan.
+- **Who acts:** operators who build on the images or install packages in running containers.
+- **After:** install packages in a separate build stage; debug with a sidecar (`docker run --rm -it --network container:eneo_backend debian:bookworm-slim`).
+- **Rollback:** previous image.
+
+### `MCP_APP_CONTENT_BASE_URL` is validated [#mcp-app-content-base-url]
+
+- **What changes:** when set, it must be an absolute `http` or `https` URL of printable ASCII without spaces, backslashes, query, fragment or user info. Its host must be a DNS name of letters, digits and hyphens (no underscores, such as a Docker service name; international names in punycode), a dotted-decimal IPv4 address or an IPv6 address without a zone. Otherwise the backend does not start. It must still differ from `PUBLIC_ORIGIN`, as in 2.3. The value is normalized: the host in lower case, a default port dropped.
+- **Why:** this origin isolates MCP app content from Eneo.
+- **Who acts:** installations that set it; typical values pass.
+- **Rollback:** previous image.
+- **Guide:** [Backend image and runtime settings](/guides/deployment#backend-image-and-runtime-settings).
+
+### SharePoint [#sharepoint]
+
+- **What changes:** subscriptions get a lifecycle notification URL and are recreated when Eneo's public address changes: at their next renewal or sync, or at once with `POST /api/v1/admin/sharepoint/subscriptions/recreate-all` or a button under the SharePoint connection's watches. A catch-up job every 15 minutes resyncs sources whose notifications may have been lost (`SHAREPOINT_CATCH_UP_AFTER_HOURS`, `SHAREPOINT_CATCH_UP_MAX_SYNCS_PER_RUN`). Extraction uses the upload parsers: legacy `.doc` and `.ppt`, scanned, encrypted or oversized files are skipped and shown under Problems. Personal connections stop when the owner is deactivated. New error code strings for invalid credentials (`sharepoint_credentials_invalid`) and syncs in progress (`integration_knowledge_syncing`).
+- **Why:** lost notifications and unreadable files left assistants answering without the knowledge, with no signal.
+- **Who acts:** installations with SharePoint.
+- **Before:** let syncs finish or stop workers (a migration builds an index concurrently); keep the webhook routes open in the gateway.
+- **After:** if the public address changed, recreate subscriptions to switch at once; review the Problems tab; convert legacy files; re-import personal sources of departed owners.
+- **Check:** watches show Healthy.
+- **Rollback:** downgrading the migrations loses the health history.
+- **Guide:** [When Eneo's public address changes](/guides/sharepoint-integration#when-eneos-public-address-changes), [The Problems tab](/guides/sharepoint-integration#the-problems-tab).
+
+### Web widgets [#widgets]
+
+- **What changes:** new widget tables and a tenant policy; the `widgets` permission goes to predefined Owner roles. A migration replaces the sessions owner check. A question's model log is deleted with the question (see [Question logs are emptied](#question-logs-emptied)). Widgets add public routes under `/embed/` and `/widget/`, and the visitor API under `/api/v1/widgets/`. Rate limiting fails closed by default (`WIDGET_RATE_LIMIT_FAIL_OPEN=false`).
+- **Why:** publish an assistant on external websites, with removed conversations leaving no model log.
+- **Who acts:** operators (migration and proxy settings); administrators who enable widgets.
+- **Before:** set `TRUSTED_PROXY_COUNT`; run `SELECT count(*) FROM sessions WHERE (user_id IS NOT NULL)::int + (api_key_id IS NOT NULL)::int <> 1`, which must return 0; plan time for large session tables.
+- **After:** before activating a widget: Redis, review MCP servers, grant `widgets`, a shared space and the tenant policy.
+- **Rollback:** downgrades delete widget sessions and tables and remove `widgets` from all roles; deleted logs do not come back.
+- **Guide:** [For operators](/guides/embed-widget#for-operators-policy-templates-and-security).
+
+### Own Skills permission [#personal-skills]
+
+- **What changes:** a new permission, Own Skills (`personal_skills`), goes to predefined Owner roles. Nobody loses access. Without it the personal chat Skill layer is suspended.
+- **Why:** people can use their own Skills without the broader Skills permissions.
+- **Who acts:** administrators who want other roles to have it (Administration > Roles).
+- **Rollback:** the downgrade removes it from all roles.
+- **Guide:** [Your own Skills in personal chat](/guides/skills#your-own-skills-in-personal-chat).
+
+## Maintainers [#maintainers]
+
+### Managed release workflow [#managed-release-process]
+
+- **What changes:** releases can be prepared through Actions > Prepare and Publish Release. It is off until `RELEASE_MANAGED=true`; once on, a final `v*` tag without a reviewed release request fails its image build.
+- **Why:** a release should come from one reviewed request.
+- **Who acts:** maintainers only; operators do nothing. 2.3 patch releases are made as before.
+- **Rollback:** unset `RELEASE_MANAGED`.
+- **Guide:** `docs/DEPLOYMENT_WORKFLOW.md` in the repository.
