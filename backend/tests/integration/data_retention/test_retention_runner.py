@@ -75,6 +75,7 @@ class _FakeTask:
     count_keys = frozenset({"deleted"})
     observation_keys = frozenset({"examined"})
     blocked_keys: frozenset[str] = frozenset()
+    not_due_keys: frozenset[str] = frozenset()
     name = _TASK
 
     def __init__(
@@ -1318,3 +1319,21 @@ async def test_a_rerun_in_progress_after_a_failed_run_stays_degraded(
         )
     [task] = health.tasks
     assert (task.status, task.failed) == (RetentionHealthStatus.DEGRADED, True)
+
+
+async def test_a_not_due_reason_must_be_a_blocked_reason(test_tenant) -> None:
+    """Mutant: a task declares a not-due reason it can never report as blocked,
+    so the readback's exception has nothing behind it."""
+
+    class _Undeclared(_FakeTask):
+        not_due_keys = frozenset({"no_longer_due"})
+
+    async with sessionmanager.session() as session:
+        with pytest.raises(runner_module.RetentionContractError):
+            await _runner(session).run(_Undeclared(session))
+    async with _committed() as session:
+        assert (
+            await session.scalar(
+                sa.select(sa.func.count()).where(RetentionJobRuns.task == _TASK)
+            )
+        ) == 0

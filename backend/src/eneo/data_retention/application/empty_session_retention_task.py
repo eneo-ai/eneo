@@ -42,6 +42,7 @@ class EmptySessionRetentionTask:
     # Examined rows are progress, not disposal.
     observation_keys = frozenset({"sessions_examined"})
     blocked_keys = frozenset(reason.value for reason in EmptySessionBlockReason)
+    not_due_keys = frozenset({EmptySessionBlockReason.NO_LONGER_DUE.value})
 
     def __init__(
         self, session: AsyncSession, *, now: datetime, grace: timedelta

@@ -179,6 +179,11 @@ class RetentionTask(Protocol):
     @property
     def blocked_keys(self) -> frozenset[str]: ...
 
+    # The blocked reasons that say the work is not due (any longer, or yet):
+    # audited like any blocked reason, but they leave nothing due in place.
+    @property
+    def not_due_keys(self) -> frozenset[str]: ...
+
     def steps(self) -> Sequence[RetentionStep]: ...
 
 
@@ -287,6 +292,8 @@ class RetentionRunReport:
     steps: Mapping[str, RetentionStepPass | None] = field(
         default_factory=dict[str, RetentionStepPass | None]
     )
+    # The task's blocked reasons that say the work is not due.
+    not_due: frozenset[str] = frozenset()
 
 
 class RetentionOwnershipLost(RuntimeError):
@@ -400,6 +407,10 @@ class RetentionRunner:
             yield
 
     async def run(self, task: RetentionTask) -> RetentionRunReport:
+        if not task.not_due_keys <= task.blocked_keys:
+            raise RetentionContractError(
+                f"{task.name} declares not-due reasons that are not blocked reasons."
+            )
         try:
             async with self._transaction():
                 job_run_id = await self.job_runs.claim(
@@ -409,7 +420,12 @@ class RetentionRunner:
                     raise _ClaimLost
                 cursors = await self.job_runs.cursors(job_run_id)
         except _ClaimLost:
-            return RetentionRunReport(task=task.name, job_run_id=None, outcome=None)
+            return RetentionRunReport(
+                task=task.name,
+                job_run_id=None,
+                outcome=None,
+                not_due=task.not_due_keys,
+            )
         except Exception as exc:
             if not is_retention_timeout(exc):
                 raise
@@ -433,6 +449,7 @@ class RetentionRunner:
             logger.warning("Retention task %s was superseded; stopping.", task.name)
             return RetentionRunReport(
                 task=task.name,
+                not_due=task.not_due_keys,
                 job_run_id=job_run_id,
                 outcome=RetentionJobOutcome.SUPERSEDED,
                 counts=progress.counts,
@@ -484,6 +501,7 @@ class RetentionRunner:
             )
             return RetentionRunReport(
                 task=task.name,
+                not_due=task.not_due_keys,
                 job_run_id=job_run_id,
                 outcome=RetentionJobOutcome.RUNNING,
                 counts=progress.counts,
@@ -496,6 +514,7 @@ class RetentionRunner:
             outcome = RetentionJobOutcome.SUPERSEDED
         return RetentionRunReport(
             task=task.name,
+            not_due=task.not_due_keys,
             job_run_id=job_run_id,
             outcome=outcome,
             counts=progress.counts,

@@ -9,8 +9,8 @@ the rows before it, so neither counts.
 
 Anything that leaves due work in place fails it at once: a task without a
 report (it raised), a claim another execution holds, an execution that did not
-end as succeeded or partial, an error, or blocked work. A reason that means
-the work is not due yet does not.
+end as succeeded or partial, an error, or blocked work. A blocked reason the
+task declares as not due (any longer, or yet) does not.
 
 Every round runs against the time the readback started, with traffic and
 workers stopped, so nothing falls due under it and every pass ends, and a
@@ -24,24 +24,9 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
-from eneo.data_retention.application.conversation_retention import (
-    ConversationBlockReason,
-)
-from eneo.data_retention.application.empty_session_retention_task import (
-    EmptySessionBlockReason,
-)
 from eneo.data_retention.application.retention_runner import RetentionRunReport
 from eneo.data_retention.domain.retention import RetentionJobOutcome
-from eneo.files.file_retention import FileRetentionReason
 
-# Blocked reasons that say the work is not due (any longer, or yet).
-NOT_DUE = frozenset(
-    {
-        ConversationBlockReason.NO_LONGER_DUE.key,
-        EmptySessionBlockReason.NO_LONGER_DUE.value,
-        FileRetentionReason.NOT_OLD_ENOUGH.key,
-    }
-)
 _ENDED = frozenset({RetentionJobOutcome.SUCCEEDED, RetentionJobOutcome.PARTIAL})
 
 
@@ -138,7 +123,7 @@ class RetentionReadback:
             blocked = sorted(
                 f"{key} {count}"
                 for key, count in report.blocked.items()
-                if count and key.rpartition(".")[2] not in NOT_DUE
+                if count and key.rpartition(".")[2] not in report.not_due
             )
             if blocked:
                 reasons.append(f"{name}: blocked {', '.join(blocked)}")
