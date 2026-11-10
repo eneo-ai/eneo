@@ -172,7 +172,7 @@ The next release changes how every OIDC sign-in is verified and which account it
 - **Before:** nothing.
 - **During:** deploy frontend and backend together; sign-ins in progress restart.
 - **After:** API clients generate at least 32 random bytes, send the unpadded base64url SHA-256 as the challenge and the value as the verifier (`eneo-js`: `bindingChallenge`, `bindingVerifier`).
-- **Check:** replaying a used callback answers `400`; the log shows `oidc_transaction_refused` with a reason such as `binding_mismatch`.
+- **Check:** a callback with a wrong `binding_verifier` for a bound sign-in answers `400` and logs `oidc_transaction_refused` with reason `binding_mismatch`; replaying a used callback answers `400`.
 - **Rollback:** frontend and backend together.
 - **Guide:** [Sign-in transaction](/docs/authentication-architecture#sign-in-transaction).
 
@@ -259,7 +259,7 @@ The next release changes how every OIDC sign-in is verified and which account it
 
 ### Saving provider settings checks what sign-in checks [#provider-save-checks-sign-in]
 
-- **What changes:** saving provider settings (`PUT`/`PATCH /api/v1/sysadmin/tenants/{tenant_id}/federation`) and the test call (`POST /api/v1/sysadmin/tenants/{tenant_id}/federation/test`) read the provider the way sign-in does. They answer `502` when the discovery document cannot be read (a save answered `400`, the test `500`), and `400` with the reason when the provider or the settings fail the checks sign-in makes, including a discovery document that is read but malformed. A save stores the issuer, endpoints and client authentication method sign-in will use. A `PATCH` that does not send `discovery_endpoint` fetches nothing and checks the settings alone, so it answers `400` with the reason but never `502`. `PUT` always reads the provider.
+- **What changes:** saving provider settings (`PUT`/`PATCH /api/v1/sysadmin/tenants/{tenant_id}/federation`) and the test call (`POST /api/v1/sysadmin/tenants/{tenant_id}/federation/test`) read the provider the way sign-in does. They answer `502` when the discovery document cannot be read or parsed (a save answered `400`, the test `500`), and `400` with the reason when the provider or the settings fail the checks sign-in makes, including a discovery document that parses but lacks what sign-in needs. A save stores the issuer, endpoints and client authentication method sign-in will use. A `PATCH` that does not send `discovery_endpoint` fetches nothing and checks the settings alone, so it answers `400` with the reason but never `502`. `PUT` always reads the provider.
 - **Why:** a configuration sign-in would refuse used to be saved, and failed at the next sign-in.
 - **Who acts:** operators and scripts that save or test provider settings.
 - **After:** scripts that expected `400` for an unreachable provider accept `502`.
@@ -279,7 +279,7 @@ The next release changes how every OIDC sign-in is verified and which account it
 
 ### Sign-out ends the session on the server [#server-side-sessions]
 
-- **What changes:** every password or OIDC sign-in in both web apps writes a `browser_sessions` row, and the token is accepted only while that row exists and matches the user and tenant. `POST /api/v1/users/logout/` ends the session: `204` means no usable session remains; `503 sign_out_unavailable` means keep the token and retry. Open WebSocket and job-event streams are checked every 30 seconds; `/ws` closes with `1008` "Session ended" or `1013` when the session store does not answer. A worker job at 00:30 UTC deletes expired rows. The React app warns two minutes before expiry and can renew up to `BROWSER_SESSION_MAX_AGE`. Startup checks: `BROWSER_SESSION_MAX_AGE` is 1 to 43200 minutes and at least `JWT_EXPIRY_TIME`; `WEB_APP_ENABLED=true` needs `BROWSER_SESSION_ENABLED=true`.
+- **What changes:** every password or OIDC sign-in in both web apps writes a `browser_sessions` row, and the token is accepted only while that row exists and matches the user and tenant. `POST /api/v1/users/logout/` ends the session: `204` means no usable session remains; `503 sign_out_unavailable` means keep the token and retry. Open WebSocket and job-event streams are checked every 30 seconds; `/ws` closes with `1008` "Session ended" or `1013` when the session store does not answer. A worker job at 00:30 worker time (UTC unless `TZ` is set) deletes expired rows. The React app warns two minutes before expiry and can renew up to `BROWSER_SESSION_MAX_AGE`. Startup checks: `BROWSER_SESSION_MAX_AGE` is 1 to 43200 minutes and at least `JWT_EXPIRY_TIME`; `WEB_APP_ENABLED=true` needs `BROWSER_SESSION_ENABLED=true`.
 - **Why:** sign-out only cleared cookies, so a copied token worked until it expired. The session-expiry warning was missing (WCAG 2.2.1).
 - **Who acts:** operators (settings), API consumers that use browser tokens.
 - **Before:** `BROWSER_SESSION_MAX_AGE` defaults to 43200 (30 days), so the React app lets people stay signed in for up to 30 days unless you lower it. If you set it, keep it at least `JWT_EXPIRY_TIME` (1440 in the template), or the backend does not start; set them equal to turn staying signed in off. Keep the worker running.
@@ -314,7 +314,7 @@ The next release changes how every OIDC sign-in is verified and which account it
 - **Why:** one image and one sign-in path instead of a separate Node server with its own session secret.
 - **Who acts:** every operator using the reference Compose file.
 - **Before:** decide. To keep Svelte, set `WEB_APP_ENABLED=false` and `FRONTEND_ROUTER_PRIORITY=7`. To switch, set the host on the router, make the proxy pass the public `Host`, check that `https://<public host>/login/callback` is registered at the provider (`/auth/callback` is tried as a fallback), move off Zitadel first, and announce that everyone signs in again. Operators of the 2.3 beta remove the web-next profile and move its link settings to `env_backend.env`.
-- **During:** `docker compose --env-file .env --env-file release.env up -d --remove-orphans`, with your installation's Compose files and profiles; with the bundled store that is `--profile object-content -f docker-compose.yml -f docker-compose.object-content.yml` (see [Review network changes](/guides/deployment#review-network-changes)).
+- **During:** `docker compose --env-file .env --env-file release.env up -d --remove-orphans`, with your installation's Compose files and profiles between `docker compose` and `up`; with the bundled store that is `--profile object-content -f docker-compose.yml -f docker-compose.object-content.yml` (see [Review network changes](/guides/deployment#review-network-changes)).
 - **After:** remove any HSTS your proxy adds on the main host, since the backend now sets it there outside development; people who used `/docs` switch to `/openapi.json`.
 - **Check:** `/` loads, `HEAD /healthz` answers `200`, sign-in sets the `__Host-eneo_web` cookie, and the log has no `browser_oidc_redirect_not_registered`.
 - **Rollback:** `FRONTEND_ROUTER_PRIORITY=7` brings Svelte back on the main host. There is no path back to the `eneo-web-next` image.
@@ -341,7 +341,7 @@ The next release changes how every OIDC sign-in is verified and which account it
 
 ### Password lifecycle [#password-lifecycle]
 
-- **What changes:** passwords set by an administrator (the generated password in Administration > Users, the admin APIs, `DEFAULT_USER_PASSWORD`) must be changed at first sign-in. Until then the session reaches only the password-change routes, its own profile (`GET /api/v1/users/me/`) and sign-out; other routes answer `403` code 9070 `password_change_required`. Administrators can set a maximum password age (`GET`/`PATCH /api/v1/admin/password-policy`); existing passwords count from the upgrade. Database initialisation fails when `DEFAULT_USER_PASSWORD` is shorter than 12 characters or longer than 72 bytes (2.3 exited successfully and created nothing). OIDC, API keys, modules and system administrators are not affected.
+- **What changes:** passwords set by an administrator (the generated password in Administration > Users, the admin APIs, `DEFAULT_USER_PASSWORD`) must be changed at first sign-in. Until then the session reaches only the password-change routes, its own profile (`GET /api/v1/users/me/`) and sign-out; other routes answer `403` code 9070 `password_change_required`. Administrators can set a maximum password age (`GET`/`PATCH /api/v1/admin/password-policy`); existing passwords count from the upgrade. When db-init creates the default user, it fails if `DEFAULT_USER_PASSWORD` is shorter than 12 characters or longer than 72 bytes (2.3 exited successfully and created nothing). OIDC, API keys, modules and system administrators are not affected.
 - **Why:** a password someone else chose should not stay in use.
 - **Who acts:** operators who seed users, administrators, integrations that sign in with a password.
 - **Before:** `DEFAULT_USER_PASSWORD` has at least 12 characters and at most 72 bytes. Leave `DEFAULT_USER_PASSWORD_CHANGE_REQUIRED` unset except in test stacks.
@@ -355,7 +355,7 @@ The next release changes how every OIDC sign-in is verified and which account it
 
 ### One error format [#error-envelope]
 
-- **What changes:** HTTP errors, including `404` and `405`, answer `{message, eneo_error_code?, code?, context?, details?, request_id?}`. A copy in `detail` stays for one release. Extra fields such as `retry_after_seconds` move to the top level. `422` and `500` keep their shapes. The new OIDC refusals and `identity_conflict` have no `detail`. `Retry-After` on `429` is the seconds left in the window, also for API keys, whose limiter now sends `retry_after_seconds` (it sent `window_seconds`).
+- **What changes:** HTTP errors, including `404` and `405`, answer `{message, eneo_error_code?, code?, context?, details?, request_id?}`. A copy in `detail` stays for one release. Extra fields such as `retry_after_seconds` move to the top level. `422` and `500` keep their shapes. The new OIDC refusals and `identity_conflict` have no `detail`. `Retry-After` on `429` is the seconds left in the window, also for API keys, whose `Retry-After` was the full window length.
 - **Why:** clients and login pages can act on a code instead of parsing text.
 - **Who acts:** API consumers, generated clients and contract tests.
 - **After:** read `code` and `message` instead of `detail`; read extras at the top level; regenerate OpenAPI clients.
@@ -500,7 +500,7 @@ The next release changes how every OIDC sign-in is verified and which account it
 - **What changes:** `run-cron --until-complete run_retention` runs retention in its own process until nothing due is left, and reports separately whether the store has confirmed each removal.
 - **Why:** a restored database can hold rows that became due after its recovery point, and nothing showed when retention had caught up or whether the store had removed the bytes.
 - **Who acts:** operators, at every restore.
-- **After a restore:** with traffic closed, every worker stopped and every retention task turned on, run `docker compose --env-file .env --env-file release.env run --rm backend run-cron --until-complete run_retention` before traffic opens. Add your installation's Compose files and profiles; with the bundled store that is `--profile object-content -f docker-compose.yml -f docker-compose.object-content.yml`.
+- **After a restore:** with traffic closed, every worker stopped and every retention task turned on, run `docker compose --env-file .env --env-file release.env run --rm backend run-cron --until-complete run_retention` before traffic opens. Add your installation's Compose files and profiles between `docker compose` and `run`; with the bundled store that is `--profile object-content -f docker-compose.yml -f docker-compose.object-content.yml`.
 - **Check:** exit code 0 with `retention: complete after N rounds` and `storage: confirmed` or `storage: pending …`.
 - **Guide:** [After a restore](/guides/data-retention#after-a-restore) says what the step promises, what can still come back and what to do with each result.
 

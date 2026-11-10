@@ -253,7 +253,9 @@ So a turn normally goes within a day after its time. It stays longer when:
   run's limits; the turn is kept and reported, see [For operators](#for-operators);
 - the worker is stopped; nothing runs when it starts again, so the next
   scheduled run after the restart catches up. To run it at once, use
-  `docker compose --env-file .env --env-file release.env exec worker run-cron run_retention`.
+  `docker compose --env-file .env --env-file release.env exec worker run-cron run_retention`;
+  it queues the run on the worker and returns before it has run, so follow
+  the worker log.
 
 ## Change the rules [#change-the-rules]
 
@@ -405,7 +407,7 @@ every retention task turned on, run:
 docker compose --env-file .env --env-file release.env run --rm backend run-cron --until-complete run_retention
 ```
 
-Add your installation's Compose files and profiles to this command too; with the bundled store that is `--profile object-content -f docker-compose.yml -f docker-compose.object-content.yml` (see [Review network changes](/guides/deployment#review-network-changes)).
+Add your installation's Compose files and profiles to this command too. They go between `docker compose` and `run`; with the bundled store that is `--profile object-content -f docker-compose.yml -f docker-compose.object-content.yml` (see [Review network changes](/guides/deployment#review-network-changes)).
 
 The command runs every retention task in its own process, round after round,
 until nothing that the rules in the restored database make due is left. Every
@@ -439,7 +441,8 @@ The command does not cover web widget conversations or the audit log, which
 have jobs of their own on the worker. To remove what those make due before
 traffic opens, start only the worker, with the API still closed:
 `docker compose --env-file .env --env-file release.env up -d --no-deps worker`,
-with the same Compose files and profiles. Without `--no-deps`, Compose also
+with the same Compose files and profiles, here and in the two commands below,
+between `docker compose` and `up` or `exec`. Without `--no-deps`, Compose also
 starts the backend, which opens the API. Then run
 
 ```bash
@@ -447,8 +450,9 @@ docker compose --env-file .env --env-file release.env exec worker run-cron purge
 docker compose --env-file .env --env-file release.env exec worker run-cron purge_old_audit_logs
 ```
 
-and wait in the worker log for `Widget retention purge completed` with `errors`
-at 0 and no `Widget retention purge failed` line, and for `Audit log retention
+Each command only queues its job on the worker: it prints `Enqueued` and
+returns before the job has run. Wait in the worker log for `Widget retention
+purge completed` with `errors` at 0 and no `Widget retention purge failed` line, and for `Audit log retention
 purge completed successfully`. The error count shows only in JSON logs
 (`JSON_LOGS=true`, the default); without them, the absence of failed lines is
 the check. If either job reports errors, resolve them and run it again.

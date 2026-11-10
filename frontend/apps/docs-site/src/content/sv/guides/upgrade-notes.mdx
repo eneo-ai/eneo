@@ -1,6 +1,6 @@
 ---
 title: Uppgraderingsanteckningar
-translationSource: guides/upgrade-notes.mdx@81925368e270
+translationSource: guides/upgrade-notes.mdx@7754b2ab748c
 ---
 
 import { Callout } from "nextra/components";
@@ -177,7 +177,7 @@ Nästa version ändrar hur varje OIDC-inloggning verifieras och vilket konto den
 - **Före:** inget.
 - **Under:** driftsätt frontend och backend tillsammans; pågående inloggningar startas om.
 - **Efter:** API-klienter skapar minst 32 slumpmässiga byte, skickar SHA-256 i base64url utan utfyllnad som challenge och värdet som verifierare (`eneo-js`: `bindingChallenge`, `bindingVerifier`).
-- **Kontroll:** en återspelad callback svarar `400`; loggen visar `oidc_transaction_refused` med en orsak som `binding_mismatch`.
+- **Kontroll:** en callback med fel `binding_verifier` för en bunden inloggning svarar `400` och loggar `oidc_transaction_refused` med orsaken `binding_mismatch`; en återspelad callback svarar `400`.
 - **Återställning:** frontend och backend tillsammans.
 - **Guide:** [Inloggningstransaktion](/docs/authentication-architecture#sign-in-transaction).
 
@@ -264,7 +264,7 @@ Nästa version ändrar hur varje OIDC-inloggning verifieras och vilket konto den
 
 ### Att spara leverantörsinställningar kontrollerar det inloggningen kontrollerar [#provider-save-checks-sign-in]
 
-- **Vad ändras:** att spara leverantörsinställningar (`PUT`/`PATCH /api/v1/sysadmin/tenants/{tenant_id}/federation`) och testanropet (`POST /api/v1/sysadmin/tenants/{tenant_id}/federation/test`) läser leverantören på samma sätt som inloggningen. De svarar `502` när discovery-dokumentet inte kan läsas (en sparning svarade `400`, testet `500`), och `400` med orsaken när leverantören eller inställningarna inte klarar inloggningens kontroller, också när ett discovery-dokument läses men är felformat. En sparning lagrar utfärdaren, adresserna och den metod för klientautentisering som inloggningen kommer att använda. En `PATCH` som inte skickar `discovery_endpoint` hämtar ingenting och kontrollerar bara inställningarna, så den svarar `400` med orsaken men aldrig `502`. `PUT` läser alltid leverantören.
+- **Vad ändras:** att spara leverantörsinställningar (`PUT`/`PATCH /api/v1/sysadmin/tenants/{tenant_id}/federation`) och testanropet (`POST /api/v1/sysadmin/tenants/{tenant_id}/federation/test`) läser leverantören på samma sätt som inloggningen. De svarar `502` när discovery-dokumentet inte kan läsas eller tolkas (en sparning svarade `400`, testet `500`), och `400` med orsaken när leverantören eller inställningarna inte klarar inloggningens kontroller, också när ett discovery-dokument kan tolkas men saknar det inloggningen behöver. En sparning lagrar utfärdaren, adresserna och den metod för klientautentisering som inloggningen kommer att använda. En `PATCH` som inte skickar `discovery_endpoint` hämtar ingenting och kontrollerar bara inställningarna, så den svarar `400` med orsaken men aldrig `502`. `PUT` läser alltid leverantören.
 - **Varför:** en konfiguration som inloggningen skulle neka kunde sparas och misslyckades sedan vid nästa inloggning.
 - **Vem agerar:** driftansvariga och skript som sparar eller testar leverantörsinställningar.
 - **Efter:** skript som väntade sig `400` för en leverantör som inte nås godtar `502`.
@@ -284,7 +284,7 @@ Nästa version ändrar hur varje OIDC-inloggning verifieras och vilket konto den
 
 ### Utloggning avslutar sessionen på servern [#server-side-sessions]
 
-- **Vad ändras:** varje inloggning med lösenord eller OIDC i båda webbapparna skriver en rad i `browser_sessions`, och token accepteras bara så länge raden finns och stämmer med användare och organisation. `POST /api/v1/users/logout/` avslutar sessionen: `204` betyder att ingen användbar session finns kvar; `503 sign_out_unavailable` betyder behåll token och försök igen. Öppna WebSocket- och jobbhändelseströmmar kontrolleras var 30:e sekund; `/ws` stängs med `1008` "Session ended" eller `1013` när sessionslagret inte svarar. Ett worker-jobb klockan 00:30 UTC tar bort utgångna rader. React-appen varnar två minuter före utgång och kan förnya upp till `BROWSER_SESSION_MAX_AGE`. Kontroller vid start: `BROWSER_SESSION_MAX_AGE` är 1 till 43200 minuter och minst `JWT_EXPIRY_TIME`; `WEB_APP_ENABLED=true` kräver `BROWSER_SESSION_ENABLED=true`.
+- **Vad ändras:** varje inloggning med lösenord eller OIDC i båda webbapparna skriver en rad i `browser_sessions`, och token accepteras bara så länge raden finns och stämmer med användare och organisation. `POST /api/v1/users/logout/` avslutar sessionen: `204` betyder att ingen användbar session finns kvar; `503 sign_out_unavailable` betyder behåll token och försök igen. Öppna WebSocket- och jobbhändelseströmmar kontrolleras var 30:e sekund; `/ws` stängs med `1008` "Session ended" eller `1013` när sessionslagret inte svarar. Ett worker-jobb klockan 00:30 i workerns tid (UTC om inte `TZ` är satt) tar bort utgångna rader. React-appen varnar två minuter före utgång och kan förnya upp till `BROWSER_SESSION_MAX_AGE`. Kontroller vid start: `BROWSER_SESSION_MAX_AGE` är 1 till 43200 minuter och minst `JWT_EXPIRY_TIME`; `WEB_APP_ENABLED=true` kräver `BROWSER_SESSION_ENABLED=true`.
 - **Varför:** utloggning rensade bara kakor, så en kopierad token fungerade tills den gick ut. Varningen innan sessionen går ut saknades (WCAG 2.2.1).
 - **Vem agerar:** driftansvariga (inställningar), API-konsumenter som använder webbläsartoken.
 - **Före:** `BROWSER_SESSION_MAX_AGE` är 43200 (30 dagar) som standard, så React-appen låter personer vara inloggade i upp till 30 dagar om du inte sänker den. Om du sätter den, håll den minst lika stor som `JWT_EXPIRY_TIME` (1440 i mallen), annars startar inte backend; sätt dem lika för att stänga av möjligheten att förbli inloggad. Håll workern igång.
@@ -319,7 +319,7 @@ Nästa version ändrar hur varje OIDC-inloggning verifieras och vilket konto den
 - **Varför:** en avbild och en inloggningsväg i stället för en separat Node-server med egen sessionshemlighet.
 - **Vem agerar:** varje driftansvarig som använder referensfilen för Compose.
 - **Före:** bestäm dig. För att behålla Svelte, sätt `WEB_APP_ENABLED=false` och `FRONTEND_ROUTER_PRIORITY=7`. För att byta: sätt värden på routern, låt proxyn skicka vidare den publika `Host`, kontrollera att `https://<publik värd>/login/callback` är registrerad hos leverantören (`/auth/callback` prövas som reserv), flytta från Zitadel först och meddela att alla loggar in igen. Den som körde betan i 2.3 tar bort web-next-profilen och flyttar dess länkinställningar till `env_backend.env`.
-- **Under:** `docker compose --env-file .env --env-file release.env up -d --remove-orphans`, med installationens Compose-filer och profiler; med det medföljande lagret är det `--profile object-content -f docker-compose.yml -f docker-compose.object-content.yml` (se [Välj innehållslagring](/guides/object-content-storage)).
+- **Under:** `docker compose --env-file .env --env-file release.env up -d --remove-orphans`, med installationens Compose-filer och profiler mellan `docker compose` och `up`; med det medföljande lagret är det `--profile object-content -f docker-compose.yml -f docker-compose.object-content.yml` (se [Välj innehållslagring](/guides/object-content-storage)).
 - **Efter:** ta bort HSTS som din proxy lägger på huvudvärden, eftersom backend nu sätter det där utanför utveckling; den som använde `/docs` går över till `/openapi.json`.
 - **Kontroll:** `/` laddas, `HEAD /healthz` svarar `200`, inloggningen sätter kakan `__Host-eneo_web` och loggen har inget `browser_oidc_redirect_not_registered`.
 - **Återställning:** `FRONTEND_ROUTER_PRIORITY=7` tar tillbaka Svelte på huvudvärden. Det finns ingen väg tillbaka till avbilden `eneo-web-next`.
@@ -346,7 +346,7 @@ Nästa version ändrar hur varje OIDC-inloggning verifieras och vilket konto den
 
 ### Lösenordens livscykel [#password-lifecycle]
 
-- **Vad ändras:** lösenord som en administratör satt (det genererade lösenordet i Administration > Användare, administratörs-API:erna, `DEFAULT_USER_PASSWORD`) måste bytas vid första inloggningen. Till dess når sessionen bara vägarna för lösenordsbyte, den egna profilen (`GET /api/v1/users/me/`) och utloggningen; andra vägar svarar `403` med kod 9070 `password_change_required`. Administratörer kan sätta en högsta ålder för lösenord (`GET`/`PATCH /api/v1/admin/password-policy`); befintliga lösenord räknas från uppgraderingen. Databasinitieringen misslyckas när `DEFAULT_USER_PASSWORD` är kortare än 12 tecken eller längre än 72 byte (2.3 avslutade utan fel och skapade ingenting). OIDC, API-nycklar, moduler och systemadministratörer berörs inte.
+- **Vad ändras:** lösenord som en administratör satt (det genererade lösenordet i Administration > Användare, administratörs-API:erna, `DEFAULT_USER_PASSWORD`) måste bytas vid första inloggningen. Till dess når sessionen bara vägarna för lösenordsbyte, den egna profilen (`GET /api/v1/users/me/`) och utloggningen; andra vägar svarar `403` med kod 9070 `password_change_required`. Administratörer kan sätta en högsta ålder för lösenord (`GET`/`PATCH /api/v1/admin/password-policy`); befintliga lösenord räknas från uppgraderingen. När db-init skapar standardanvändaren misslyckas den om `DEFAULT_USER_PASSWORD` är kortare än 12 tecken eller längre än 72 byte (2.3 avslutade utan fel och skapade ingenting). OIDC, API-nycklar, moduler och systemadministratörer berörs inte.
 - **Varför:** ett lösenord som någon annan valt ska inte förbli i bruk.
 - **Vem agerar:** driftansvariga som skapar användare vid start, administratörer, integrationer som loggar in med lösenord.
 - **Före:** `DEFAULT_USER_PASSWORD` har minst 12 tecken och högst 72 byte. Lämna `DEFAULT_USER_PASSWORD_CHANGE_REQUIRED` osatt utom i testmiljöer.
@@ -360,7 +360,7 @@ Nästa version ändrar hur varje OIDC-inloggning verifieras och vilket konto den
 
 ### Ett felformat [#error-envelope]
 
-- **Vad ändras:** HTTP-fel, även `404` och `405`, svarar `{message, eneo_error_code?, code?, context?, details?, request_id?}`. En kopia i `detail` finns kvar i en version. Extra fält som `retry_after_seconds` flyttar till toppnivån. `422` och `500` behåller sina format. De nya OIDC-avvisningarna och `identity_conflict` har ingen `detail`. `Retry-After` på `429` är de sekunder som återstår av fönstret, också för API-nycklar, vars begränsare nu skickar `retry_after_seconds` (den skickade `window_seconds`).
+- **Vad ändras:** HTTP-fel, även `404` och `405`, svarar `{message, eneo_error_code?, code?, context?, details?, request_id?}`. En kopia i `detail` finns kvar i en version. Extra fält som `retry_after_seconds` flyttar till toppnivån. `422` och `500` behåller sina format. De nya OIDC-avvisningarna och `identity_conflict` har ingen `detail`. `Retry-After` på `429` är de sekunder som återstår av fönstret, också för API-nycklar, vars `Retry-After` var hela fönstrets längd.
 - **Varför:** klienter och inloggningssidor kan agera på en kod i stället för att tolka text.
 - **Vem agerar:** API-konsumenter, genererade klienter och kontraktstester.
 - **Efter:** läs `code` och `message` i stället för `detail`; läs extra fält på toppnivån; generera om OpenAPI-klienter.
@@ -505,7 +505,7 @@ Nästa version ändrar hur varje OIDC-inloggning verifieras och vilket konto den
 - **Vad ändras:** `run-cron --until-complete run_retention` kör gallringen i en egen process tills inget förfallet finns kvar, och rapporterar för sig om lagringen har bekräftat varje borttagning.
 - **Varför:** en återställd databas kan innehålla rader som blev förfallna efter dess återställningspunkt, och inget visade när gallringen hade kommit ikapp eller om lagringen hade tagit bort byten.
 - **Vem agerar:** driftansvariga, vid varje återställning.
-- **Efter en återställning:** med trafiken stängd, varje worker stoppad och varje gallringsuppgift påslagen, kör `docker compose --env-file .env --env-file release.env run --rm backend run-cron --until-complete run_retention` innan trafiken öppnas. Lägg till installationens Compose-filer och profiler; med det medföljande lagret är det `--profile object-content -f docker-compose.yml -f docker-compose.object-content.yml`.
+- **Efter en återställning:** med trafiken stängd, varje worker stoppad och varje gallringsuppgift påslagen, kör `docker compose --env-file .env --env-file release.env run --rm backend run-cron --until-complete run_retention` innan trafiken öppnas. Lägg till installationens Compose-filer och profiler mellan `docker compose` och `run`; med det medföljande lagret är det `--profile object-content -f docker-compose.yml -f docker-compose.object-content.yml`.
 - **Kontroll:** slutkod 0 med `retention: complete after N rounds` och `storage: confirmed` eller `storage: pending …`.
 - **Guide:** [Efter en återställning](/guides/data-retention#after-a-restore) säger vad steget lovar, vad som ändå kan komma tillbaka och vad du gör med varje resultat.
 

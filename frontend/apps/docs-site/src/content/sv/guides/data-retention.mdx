@@ -1,6 +1,6 @@
 ---
 title: Gallring
-translationSource: guides/data-retention.mdx@4f2ba09b971a
+translationSource: guides/data-retention.mdx@d006df9180ce
 ---
 
 import { Callout } from "nextra/components";
@@ -263,7 +263,9 @@ längre när:
   körningens gränser; turen sparas och rapporteras, se [För driften](#for-operators);
 - workern är stoppad; inget körs när den startar igen, så nästa schemalagda
   körning efter omstarten tar igen det. Kör den direkt med
-  `docker compose --env-file .env --env-file release.env exec worker run-cron run_retention`.
+  `docker compose --env-file .env --env-file release.env exec worker run-cron run_retention`;
+  kommandot köar körningen i workern och returnerar innan den har körts, så
+  följ workerns logg.
 
 ## Ändra reglerna [#change-the-rules]
 
@@ -420,7 +422,7 @@ gallringsuppgifter påslagna, kör:
 docker compose --env-file .env --env-file release.env run --rm backend run-cron --until-complete run_retention
 ```
 
-Lägg till installationens Compose-filer och profiler även i det här kommandot; med det medföljande lagret är det `--profile object-content -f docker-compose.yml -f docker-compose.object-content.yml` (se [Välj innehållslagring](/guides/object-content-storage)).
+Lägg till installationens Compose-filer och profiler även i det här kommandot. De står mellan `docker compose` och `run`; med det medföljande lagret är det `--profile object-content -f docker-compose.yml -f docker-compose.object-content.yml` (se [Välj innehållslagring](/guides/object-content-storage)).
 
 Kommandot kör varje gallringsuppgift i en egen process, omgång efter omgång,
 tills inget som reglerna i den återställda databasen gör aktuellt finns kvar.
@@ -457,15 +459,18 @@ Kommandot omfattar inte konversationer i webbwidgetar eller granskningsloggen,
 som har egna jobb i workern. För att ta bort det som de gör aktuellt innan
 trafiken öppnas: starta bara workern, med API:et fortfarande stängt:
 `docker compose --env-file .env --env-file release.env up -d --no-deps worker`,
-med samma Compose-filer och profiler. Utan `--no-deps` startar Compose också
-backend, som öppnar API:et. Kör sedan
+med samma Compose-filer och profiler, här och i de två kommandona nedan,
+mellan `docker compose` och `up` eller `exec`. Utan `--no-deps` startar Compose
+också backend, som öppnar API:et. Kör sedan
 
 ```bash
 docker compose --env-file .env --env-file release.env exec worker run-cron purge_widget_sessions
 docker compose --env-file .env --env-file release.env exec worker run-cron purge_old_audit_logs
 ```
 
-och vänta i workerns logg på `Widget retention purge completed` med `errors` 0
+Varje kommando köar bara sitt jobb i workern: det skriver `Enqueued` och
+returnerar innan jobbet har körts. Vänta i workerns logg på `Widget retention
+purge completed` med `errors` 0
 och utan någon rad `Widget retention purge failed`, och på `Audit log retention
 purge completed successfully`. Felräkningen syns bara i JSON-loggar
 (`JSON_LOGS=true`, standard); utan dem är frånvaron av rader om fel kontrollen.

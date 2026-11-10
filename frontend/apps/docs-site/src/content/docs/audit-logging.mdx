@@ -446,6 +446,8 @@ retention until nothing due is left:
 docker compose --env-file .env --env-file release.env run --rm backend run-cron --until-complete run_retention
 ```
 
+Add your installation's Compose files and profiles to this command too. They go between `docker compose` and `run`; with the bundled store that is `--profile object-content -f docker-compose.yml -f docker-compose.object-content.yml` (see [Review network changes](/guides/deployment#review-network-changes)).
+
 The command runs the registered tasks in its own process, round after round, and
 prints each round's outcome and the number of rows removed. Every round runs
 against the time the command started, so rows that fall due while it runs are
