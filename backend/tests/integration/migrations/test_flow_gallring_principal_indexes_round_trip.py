@@ -85,6 +85,7 @@ _LATER_INDEX_NAMES = frozenset(
         "ix_flow_runs_flow_service_listing",
         "ix_flow_runs_flow_user_status",
         "ix_flow_runs_flow_service_status",
+        "ix_flow_live_transcripts_bound_file_ids",
     }
 )
 
