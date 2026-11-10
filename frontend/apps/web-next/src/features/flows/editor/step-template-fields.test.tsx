@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderInApp } from "@/test/render";
 import messages from "@/lib/i18n/messages/sv.json";
 import { makeFlow, makeStep } from "../flow-fixtures";
+import { focusAnchor } from "./editor-fields";
 import { stepConfigOf } from "./step-types";
 import { variableGroups } from "./step-variables";
 
@@ -54,6 +55,7 @@ describe("TemplateFillFields", () => {
     const renderUnchosen = () =>
       renderInApp(
         <TemplateFillFields
+          formId="form"
           flow={flow}
           stepOrder={2}
           draft={{
@@ -120,6 +122,7 @@ describe("TemplateFillFields", () => {
     });
     renderInApp(
       <TemplateFillFields
+        formId="form"
         flow={flow}
         stepOrder={2}
         draft={{
@@ -196,6 +199,7 @@ function renderTemplate(outputConfig: Record<string, unknown> = {}) {
   const onChange = vi.fn();
   const view = renderInApp(
     <TemplateFillFields
+      formId="form"
       flow={flow}
       stepOrder={2}
       draft={{
@@ -334,5 +338,59 @@ describe("TemplateFillFields choices", () => {
     const options = within(await screen.findByRole("listbox", { name: "okant" }));
     expect(options.getByRole("option", { name: "Namn" })).toBeTruthy();
     expect(options.queryByRole("option", { name: "Deltagare" })).toBeNull();
+    // An earlier step's answer is named by its step, as it reads once chosen.
+    expect(options.getByRole("option", { name: "Steg 1: Beslut › text" })).toBeTruthy();
+  });
+
+  it("puts the field anchor on the first field that needs a value, so a blocker can focus it", async () => {
+    api.routes["GET /api/v1/flows/{id}/template-files/"] = () => ({
+      body: [asset("asset-1", "Beslut.docx")]
+    });
+    api.routes["GET /api/v1/flows/{id}/template-inspect/"] = () => ({ body: inspected });
+    renderTemplate({
+      template_asset_id: "asset-1",
+      template_name: "Beslut.docx",
+      placeholders: ["datum", "namn", "okant"],
+      bindings: { datum: "{{datum}}", namn: "" }
+    });
+    const okant = await screen.findByRole("combobox", { name: "okant" });
+    expect(focusAnchor("form", "output_config.template.fields")).toBe(true);
+    expect(document.activeElement).toBe(okant);
+  });
+
+  it("says a template that is gone, never the core's own words", async () => {
+    api.routes["GET /api/v1/flows/{id}/template-files/"] = () => ({
+      body: [asset("asset-1", "Beslut.docx")]
+    });
+    api.routes["GET /api/v1/flows/{id}/template-inspect/"] = () => ({
+      status: 404,
+      body: { message: "Flow not found.", code: 9000 }
+    });
+    renderTemplate({
+      template_asset_id: "asset-1",
+      template_name: "Beslut.docx",
+      placeholders: ["datum"],
+      bindings: {}
+    });
+    expect(
+      (await screen.findAllByText(messages.flow_step_editor_template_missing_help)).length
+    ).toBeGreaterThan(0);
+    expect(screen.queryByText("Flow not found.")).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "datum" })).toBeNull();
+  });
+
+  it("calls an empty file empty, without uploading it", async () => {
+    const upload = vi.fn(() => ({ body: asset("asset-1", "Tom.docx") }));
+    api.routes["GET /api/v1/flows/{id}/template-files/"] = () => ({ body: [] });
+    api.routes["POST /api/v1/flows/{id}/template-files/"] = upload;
+    const { container } = renderTemplate();
+    await screen.findByRole("button", { name: messages.flow_step_editor_template_upload_first });
+    fireEvent.change(container.querySelector<HTMLInputElement>('input[type="file"]')!, {
+      target: { files: [new File([], "Tom.docx")] }
+    });
+    expect(
+      (await screen.findAllByText(messages.flow_error_flow_runtime_file_empty)).length
+    ).toBeGreaterThan(0);
+    expect(upload).not.toHaveBeenCalled();
   });
 });

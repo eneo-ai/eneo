@@ -64,6 +64,51 @@ describe("FlowPackageExportDialog layout", () => {
     expect(api.POST).not.toHaveBeenCalled();
   });
 
+  it("refuses a version that is not three numbers, at the field", () => {
+    renderInApp(<FlowPackageExportDialog flow={makeFlow()} open onOpenChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Avancerat" }));
+    const version = screen.getByRole("textbox", { name: /Version/ });
+    fireEvent.change(version, { target: { value: "ett" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Exportera" }));
+
+    expect(document.activeElement).toBe(version);
+    expect(
+      screen.getByText("Skriv versionen som tre tal med punkt emellan, till exempel 1.0.0.")
+    ).toBeTruthy();
+    expect(api.POST).not.toHaveBeenCalled();
+  });
+
+  it("names the HTTP steps that cannot travel before export, and does not export", () => {
+    renderInApp(
+      <FlowPackageExportDialog
+        flow={makeFlow({
+          steps: [
+            makeStep(1, { input_source: "http_get", user_description: "Hämta ärendet" }),
+            makeStep(2),
+            makeStep(3, { output_mode: "http_post", user_description: "Skicka resultatet" })
+          ]
+        })}
+        open
+        onOpenChange={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("HTTP-steg följer inte med i paket")).toBeTruthy();
+    expect(screen.getByText("Steg 1: Hämta ärendet")).toBeTruthy();
+    expect(screen.getByText("Steg 3: Skicka resultatet")).toBeTruthy();
+    expect(screen.queryByText(/Steg nummer 2/)).toBeNull();
+    expect(
+      screen.getByText("Ta bort stegen före export och lägg till dem igen efter importen.")
+    ).toBeTruthy();
+    const exportButton = screen.getByRole("button", { name: "Exportera" });
+    expect(
+      exportButton.hasAttribute("disabled") || exportButton.getAttribute("aria-disabled") === "true"
+    ).toBe(true);
+    fireEvent.submit(exportButton.closest("dialog")!.querySelector("form")!);
+    expect(api.POST).not.toHaveBeenCalled();
+  });
+
   it("takes the whole screen on a phone, where a dialog's header would leave too little", () => {
     setViewport("phone");
     renderInApp(<FlowPackageExportDialog flow={makeFlow()} open onOpenChange={vi.fn()} />);

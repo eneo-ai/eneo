@@ -2,9 +2,23 @@ import { DropdownMenu, type DropdownMenuOption } from "@astryxdesign/core/Dropdo
 import { Heading, Text } from "@astryxdesign/core/Text";
 import { Braces } from "lucide-react";
 import { useTranslations } from "use-intl";
+import { createContext, useContext } from "react";
 import type { FieldAnchor } from "./field-problems";
 import { variableEntryLabel, variableGroupTitle } from "./step-labels";
-import type { VariableGroup } from "./step-variables";
+import type { FlowPublic } from "./step-types";
+import { formFieldsOf, type VariableGroup } from "./step-variables";
+
+/**
+ * The flow and the place of the step whose texts are edited, so a reference
+ * can be named for what it reads. The step editor provides it; without it a
+ * text still completes references but shows no chips. A webhook is sent once
+ * its step has answered, so its fields read at the next place (the core's
+ * `config_channel`).
+ */
+export const TemplateScope = createContext<{
+  flow: Pick<FlowPublic, "steps" | "metadata_json">;
+  stepOrder: number;
+} | null>(null);
 
 /** The status an Astryx field takes for a problem, or none. */
 export function problemStatus(message: string | null | undefined) {
@@ -85,7 +99,11 @@ export function EditorSection({
   );
 }
 
-/** A menu of the references a step can read; choosing one inserts `{{reference}}`. */
+/**
+ * A menu of the references a step can read; choosing one inserts
+ * `{{reference}}`. When the flow has no form fields, text above the rows says
+ * where they are added: not a disabled row, which the arrow keys skip.
+ */
 export function VariablePicker({
   groups,
   onInsert,
@@ -98,17 +116,21 @@ export function VariablePicker({
   isDisabled?: boolean;
 }) {
   const t = useTranslations();
-  const items: DropdownMenuOption[] = groups.map((group) => ({
-    type: "section",
-    id: group.type === "step" ? `step-${group.stepOrder}` : group.type,
-    title: variableGroupTitle(group, t),
-    items: group.entries.map((entry) => ({
-      id: entry.token,
-      label: variableEntryLabel(entry, t),
-      description: `{{${entry.token}}}`,
-      onClick: () => onInsert(entry.token)
+  const scope = useContext(TemplateScope);
+  const noFields = scope !== null && formFieldsOf(scope.flow).length === 0;
+  const items: DropdownMenuOption[] = [
+    ...groups.map((group) => ({
+      type: "section" as const,
+      id: group.type === "step" ? `step-${group.stepOrder}` : group.type,
+      title: variableGroupTitle(group, t),
+      items: group.entries.map((entry) => ({
+        id: entry.token,
+        label: variableEntryLabel(entry, t),
+        description: `{{${entry.token}}}`,
+        onClick: () => onInsert(entry.token)
+      }))
     }))
-  }));
+  ];
   return (
     <DropdownMenu
       presentation="adaptive"
@@ -122,6 +144,13 @@ export function VariablePicker({
         icon: <Braces className="size-4" aria-hidden="true" />,
         isDisabled: isDisabled || groups.length === 0
       }}
+      header={
+        noFields ? (
+          <Text type="supporting" size="sm" as="p" display="block" className="m-0">
+            {t("flow_step_editor_variables_no_fields")}
+          </Text>
+        ) : undefined
+      }
       items={items}
     />
   );

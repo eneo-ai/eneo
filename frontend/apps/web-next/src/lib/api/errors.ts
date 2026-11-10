@@ -242,6 +242,7 @@ const ERROR_MESSAGE_KEYS: Record<number, string> = {
   9038: "eneo_error_9038", // RESOURCE_NOT_READY
   // Files and website crawl lifecycle
   9056: "eneo_error_9056", // INVALID_FILENAME
+  9027: "eneo_error_9027", // FILE_EXTRACTION_ERROR
   9057: "eneo_error_9057", // INFO_BLOB_ORIGINAL_UNAVAILABLE
   9063: "eneo_error_9063", // WEBSITE_CRAWL_ACTIVE
   9064: "eneo_error_9064", // WEBSITE_CRAWL_CLEANUP_PENDING

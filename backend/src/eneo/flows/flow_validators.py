@@ -1444,6 +1444,7 @@ def validate_template_binding_scalar(
         raise FlowStepValidationError(
             f"Step {step_order}: template binding '{placeholder}' must resolve "
             "to a scalar value; select a text output or a scalar field from a declared contract.",
+            code=FlowGraphIssueCode.TEMPLATE_BINDING_NOT_SCALAR.value,
             context=context,
             step_order=step_order,
         )

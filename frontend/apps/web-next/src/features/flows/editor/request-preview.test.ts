@@ -40,13 +40,65 @@ describe("readMeaning", () => {
     expect(readMeaning("indata_text", 3, flow)).toEqual({ kind: "flow_input" });
   });
 
-  it("marks a reference to a removed or later step as one the run cannot read", () => {
-    expect(readMeaning("step_3.output.text", 2, flow)).toEqual({ kind: "missing", order: 3 });
-    expect(readMeaning("step_1_deleted.output.text", 2, flow)).toEqual({
-      kind: "missing",
-      order: 1
+  it("judges each reference as publish does (`_analyze_expression`, `_template_read_problem`)", () => {
+    const four = makeFlow({
+      steps: [
+        makeStep(1, { user_description: "Sammanfatta" }),
+        makeStep(2),
+        makeStep(3),
+        makeStep(4)
+      ],
+      metadata_json: {
+        form_schema: { fields: [{ name: "diarienummer", label: "Diarienummer", type: "text" }] }
+      }
     });
-    expect(readMeaning("okänd_variabel", 2, flow)).toEqual({ kind: "other" });
+    const cases: [token: string, stepOrder: number, expected: object][] = [
+      ["diarienummer", 3, { kind: "form_field", label: "Diarienummer" }],
+      ["flow.input.diarienummer", 3, { kind: "form_field", label: "Diarienummer" }],
+      ["diarienummer.del", 3, { kind: "other", token: "diarienummer.del" }],
+      ["flow_input.langd_i_ord", 3, { kind: "other", token: "flow_input.langd_i_ord" }],
+      ["flow_input.json", 3, { kind: "run_value" }],
+      ["steg_9.output.text", 3, { kind: "other", token: "steg_9.output.text" }],
+      ["step_4.output.text", 3, { kind: "later", order: 4 }],
+      ["step_3.output.text", 3, { kind: "later", order: 3, self: true }],
+      ["step_9.output.text", 3, { kind: "no_step", order: 9 }],
+      ["step_1_deleted.output.text", 3, { kind: "removed" }],
+      ["step_1.output.json.x", 3, { kind: "other", token: "step_1.output.json.x" }],
+      ["step_01.output.text", 3, { kind: "other", token: "step_01.output.text" }],
+      ["step_1.status", 3, { kind: "run_value" }],
+      ["step_1.error_message", 3, { kind: "run_value" }],
+      ["Sammanfatta.output.text", 3, { kind: "other", token: "Sammanfatta.output.text" }],
+      ["föregående_steg", 1, { kind: "no_step", order: 0 }],
+      ["datum.dag", 3, { kind: "other", token: "datum.dag" }],
+      ["step_input", 3, { kind: "other", token: "step_input" }],
+      ["step_input.file_ids", 3, { kind: "run_value" }],
+      ["okänd_variabel", 2, { kind: "other", token: "okänd_variabel" }]
+    ];
+    expect(cases.map(([token, order]) => readMeaning(token, order, four))).toEqual(
+      cases.map(([, , expected]) => expected)
+    );
+    expect(cases.map(([token, order]) => readTone(readMeaning(token, order, four)))).toEqual([
+      "reads",
+      "reads",
+      "warning",
+      "warning",
+      "reads",
+      "warning",
+      "missing",
+      "missing",
+      "missing",
+      "missing",
+      "warning",
+      "warning",
+      "reads",
+      "reads",
+      "warning",
+      "missing",
+      "warning",
+      "warning",
+      "reads",
+      "warning"
+    ]);
   });
 
   it("warns about a reference that reads nothing where it stands", () => {

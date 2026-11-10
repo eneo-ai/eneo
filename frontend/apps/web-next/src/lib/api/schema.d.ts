@@ -19923,6 +19923,7 @@ export interface components {
       | "output_contract_template_fill_incompatible"
       | "output_contract_type_mismatch"
       | "step_order_not_contiguous"
+      | "template_binding_not_scalar"
       | "template_fill_requires_docx"
       | "transcribe_only_violation"
       | "typed_io_audio_source_unsupported"
@@ -23044,6 +23045,16 @@ export interface components {
       completed_items?: number | null;
       /** @description Where and which rule a value broke in a step's input or output contract, or in the approved input schema of the step's tool (`typed_io_tool_invalid_arguments`). For a per-item, section or mapped step the rule can come from the bound the platform puts on one call, such as exactly one item. Absent when not recorded: a pointer longer than 400 characters, a violation found outside the platform's contract validator, or a run that failed before this field existed. Never contains the value itself. */
       contract_violation?: components["schemas"]["FlowRunContractViolation"] | null;
+      /**
+       * Http Host
+       * @description The host of the service an HTTP step called, for `typed_io_http_non_success`. Never the path or query.
+       */
+      http_host?: string | null;
+      /**
+       * Http Status
+       * @description The status an HTTP step's service answered with, for `typed_io_http_non_success`.
+       */
+      http_status?: number | null;
       /** Measured Bytes */
       measured_bytes?: number | null;
       /** @description Observed execution phase when the step failed or its budget expired. */
@@ -30967,7 +30978,8 @@ export interface components {
       | "HTTP_BLOCKED_URL"
       | "HTTP_RESPONSE_TOO_LARGE"
       | "HTTP_STATUS_ERROR"
-      | "HTTP_CREDENTIALS_REQUIRE_HTTPS";
+      | "HTTP_CREDENTIALS_REQUIRE_HTTPS"
+      | "HTTP_INVALID_HEADER_NAME";
     /** IconPublic */
     IconPublic: {
       /** Created At */

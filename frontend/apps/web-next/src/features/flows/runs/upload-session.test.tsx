@@ -132,3 +132,26 @@ it("aborts a removed upload through its local signal", async () => {
   expect(UploadRequest.sent[0]!.aborted).toBe(true);
   expect(hook.result.current.uploads["step-1"]).toEqual([]);
 });
+
+it("keeps a recorded part when a file is picked for a step that takes one", async () => {
+  const hook = renderHookInApp(() => useRuntimeUploads("flow-1", undefined));
+  const input = makeInput({ step_id: "step-1", max_files: 1, accepted_mimetypes: ["audio/webm"] });
+  act(() =>
+    hook.result.current.add(input, [new File(["audio"], "del-1.webm", { type: "audio/webm" })], {
+      recording: { sessionId: "rec-1", index: 0, durationMs: 1000 },
+      label: "Inspelning"
+    })
+  );
+  await waitFor(() => expect(UploadRequest.sent).toHaveLength(1));
+  const recorded = hook.result.current.uploads["step-1"]![0]!;
+
+  act(() =>
+    hook.result.current.add(input, [new File(["audio"], "fil.webm", { type: "audio/webm" })])
+  );
+
+  expect(UploadRequest.sent[0]!.aborted).toBe(false);
+  expect(hook.result.current.fileOf(recorded.key)).not.toBeNull();
+  const entries = hook.result.current.uploads["step-1"]!;
+  expect(entries[0]).toMatchObject({ key: recorded.key, state: "uploading" });
+  expect(entries[1]).toMatchObject({ name: "fil.webm", state: "failed" });
+});

@@ -103,6 +103,9 @@ function SecretField({
   );
 }
 
+/** A header name the request can send (an RFC 9110 token); the core refuses any other on save. */
+const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
+
 function HeaderRow({
   header,
   index,
@@ -116,7 +119,8 @@ function HeaderRow({
 }) {
   const t = useTranslations();
   // The core leaves a row without a name out of the request.
-  const unnamed = !header.name.trim() && header.value !== "";
+  const named = header.name.trim() !== "";
+  const unnamed = !named && header.value !== "";
   return (
     <li className="border-ax-border rounded-ax-element flex flex-col gap-3 border p-3">
       <div className="grid gap-3 sm:grid-cols-2">
@@ -126,9 +130,11 @@ function HeaderRow({
           onChange={(name) => onChange({ ...header, name })}
           autoComplete="off"
           status={
-            unnamed
-              ? { type: "warning", message: t("flow_step_editor_http_header_name_missing") }
-              : undefined
+            named && !HEADER_NAME.test(header.name)
+              ? { type: "error", message: t("flow_step_editor_http_header_name_invalid") }
+              : unnamed
+                ? { type: "warning", message: t("flow_step_editor_http_header_name_missing") }
+                : undefined
           }
         />
         {header.secret ? (
@@ -414,6 +420,10 @@ export function HttpFields({
   const authProblem = problems[`${base}.auth`];
   const bodyProblem = direction === "output" ? problems["output_config.http.body"] : undefined;
   const moreProblem = problems[`${base}.more`];
+  // A refused header name is said at its row (`HeaderRow`), not again above the rows.
+  const headerNameShownAtRow =
+    moreProblem === t("flow_step_editor_http_header_name_invalid") &&
+    config.custom_headers.some((header) => headerSent(header) && !HEADER_NAME.test(header.name));
   const bodyTemplated =
     config.body.mode === "json_template" || config.body.mode === "text_template";
   const urlId = useId();
@@ -421,6 +431,11 @@ export function HttpFields({
   const [showUrlProblem, setShowUrlProblem] = useState(false);
   const urlProblem = httpUrlProblem(config.url);
   const auth = config.auth;
+  // A run fills a templated name, so it is known only then.
+  const apiKeyHeaderInvalid =
+    auth.mode === "api_key" &&
+    !auth.header_name.includes("{{") &&
+    !HEADER_NAME.test(auth.header_name);
   const url = config.url.trim();
   // The core sends a credential only to https:// with the host written out.
   const insecureWithCredentials =
@@ -521,12 +536,16 @@ export function HttpFields({
               onChange={(header_name) => onChange({ ...config, auth: { ...auth, header_name } })}
               autoComplete="off"
               isRequired
+              status={problemStatus(
+                apiKeyHeaderInvalid ? t("flow_step_editor_http_header_name_invalid") : null
+              )}
             />
             <SecretField
               label={t("flow_step_editor_http_api_key")}
               value={auth.key}
               onChange={(key) => onChange({ ...config, auth: { ...auth, key } })}
-              status={problemStatus(authProblem)}
+              // A refused header name is said at the name.
+              status={problemStatus(apiKeyHeaderInvalid ? null : authProblem)}
             />
           </div>
         )}
@@ -614,7 +633,7 @@ export function HttpFields({
             }
           >
             <div className="flex flex-col gap-4 pt-3">
-              <FieldMessage message={moreProblem} />
+              <FieldMessage message={headerNameShownAtRow ? undefined : moreProblem} />
               <div className="flex flex-col gap-2">
                 <Text type="label" as="p" display="block" className="m-0">
                   {t("flow_step_editor_http_headers")}

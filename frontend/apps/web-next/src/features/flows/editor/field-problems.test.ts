@@ -63,7 +63,9 @@ describe("refusalAnchor", () => {
   it("gives a refusal's sentence the values it names", () => {
     const sentence = createTranslator({
       locale: "sv",
-      messages: { flow_error_template_binding_not_scalar: "Fältet {placeholder} tar ett värde." }
+      messages: {
+        flow_validation_msg_template_binding_not_scalar: "Fältet {placeholder} tar ett värde."
+      }
     }) as unknown as Translator;
     expect(
       refusalMessage("template_binding_not_scalar", sentence, { placeholder: "Deltagare" })
@@ -117,6 +119,23 @@ describe("describeSaveError", () => {
     expect(at("HTTP_INVALID_BODY_JSON")).toBe("output_config.http.body");
     expect(at("HTTP_MISSING_AUTH")).toBe("output_config.http.auth");
     expect(at("HTTP_TIMEOUT_OUT_OF_RANGE")).toBe("output_config.http.more");
+    expect(at("HTTP_INVALID_HEADER_NAME")).toBe("output_config.http.more");
+    // The core names the header; an API key's header name is a sign-in setting.
+    const header = (field: string) =>
+      describeSaveError(
+        refusal("typed_io_http_invalid_config", {
+          field,
+          http_error: "HTTP_INVALID_HEADER_NAME",
+          step_order: 2
+        }),
+        sending,
+        t
+      );
+    expect(header("output_config.custom_headers[1]").anchor).toBe("output_config.http.more");
+    expect(header("output_config.custom_headers[1]").message).toBe(
+      messages.flow_step_editor_http_header_name_invalid
+    );
+    expect(header("output_config.auth.header_name").anchor).toBe("output_config.http.auth");
     expect(at("HTTP_INVALID_URL")).toBe("output_config.http");
     // A fetching step has no body field: the address is where it is shown.
     expect(

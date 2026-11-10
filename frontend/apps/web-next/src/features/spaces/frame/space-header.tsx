@@ -51,6 +51,8 @@ export function SpaceHeader({
   const canChat =
     !space.organization && space.default_assistant != null && can("read", "default_assistant");
   const isOverview = route.section === "overview" && route.isSectionRoot;
+  // A flow's run page brings a trail that starts with the space: the label would say it twice.
+  const pageNamesSpace = route.section === "flows" && !route.isSectionRoot;
 
   return (
     <header className={cn("border-ax-border border-b px-6 pt-5", className)}>
@@ -107,7 +109,7 @@ export function SpaceHeader({
                   >
                     {name}
                   </Heading>
-                ) : (
+                ) : pageNamesSpace ? null : (
                   <p className="text-ax-text text-sm font-semibold break-words">{name}</p>
                 )}
                 <ClassificationToken name={classification?.name} />

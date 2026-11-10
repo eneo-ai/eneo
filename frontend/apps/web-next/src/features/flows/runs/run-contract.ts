@@ -36,6 +36,11 @@ export type UploadEntry = {
   /** The failure may pass (the network, a timeout, a busy server): the same file can be sent again. */
   retryable?: boolean;
   /**
+   * Never sent: the form refused the file before uploading it (its type, its size, one too
+   * many). The row says why; it does not keep the run from starting with the files it has.
+   */
+  refused?: boolean;
+  /**
    * A recorded part that failed and goes again by itself: when (epoch ms),
    * or null once no automatic attempt is left.
    */
@@ -196,7 +201,7 @@ export function inputProblem(
 ): InputProblem | null {
   const entries = uploads ?? [];
   if (entries.some((entry) => entry.state === "uploading")) return "uploading";
-  if (entries.some((entry) => entry.state === "failed")) return "failed";
+  if (entries.some((entry) => entry.state === "failed" && !entry.refused)) return "failed";
   const count = doneFiles(entries).length;
   if (input.max_files != null && count > input.max_files) return "too_many";
   if (input.required && count === 0) return "required";

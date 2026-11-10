@@ -98,6 +98,12 @@ describe("inputProblem", () => {
     expect(inputProblem(input, [done("a"), { ...done("b"), state: "failed" }])).toBe("failed");
   });
 
+  it("does not hold the run back for a file the form refused before sending it", () => {
+    // The row says why (the wrong type, too large, one too many); the good file goes.
+    const refused = { ...done("b"), state: "failed" as const, refused: true };
+    expect(inputProblem(input, [done("a"), refused])).toBeNull();
+  });
+
   it("asks for a required file and keeps to the step's count", () => {
     expect(inputProblem(input, [])).toBe("required");
     expect(inputProblem(input, [done("a"), done("b"), done("c")])).toBe("too_many");

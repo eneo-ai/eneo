@@ -4,7 +4,9 @@ import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import messages from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderInApp } from "@/test/render";
+import { renderInApp, testQueryClient } from "@/test/render";
+import { makeSpace } from "@/features/spaces/testing/space-fixture";
+import { SpaceProvider } from "@/features/spaces/use-space";
 import type { FlowPublic } from "./step-types";
 import {
   makeFlow,
@@ -73,9 +75,16 @@ function Harness({
   );
 }
 
-async function openDialog(position = 2, current = flow, { rows = true } = {}) {
+async function openDialog(position = 2, current = flow, { rows = true, personal = false } = {}) {
   const onSaved = vi.fn();
-  renderInApp(<Harness position={position} onSaved={onSaved} current={current} />);
+  const queryClient = testQueryClient();
+  queryClient.setQueryData(["spaces", "space-1"], makeSpace({ overrides: { personal } }));
+  renderInApp(
+    <SpaceProvider routeId="space-1">
+      <Harness position={position} onSaved={onSaved} current={current} />
+    </SpaceProvider>,
+    { queryClient }
+  );
   fireEvent.click(screen.getByRole("button", { name: "Lägg till" }));
   const dialog = await screen.findByRole("dialog", { name: messages.flow_step_editor_add_title });
   if (rows) await within(dialog).findAllByRole("radio");
@@ -313,6 +322,15 @@ describe("AddStepDialog", () => {
     expect((fetch as HTMLInputElement).checked).toBe(true);
     expect(document.activeElement).toBe(within(dialog).getByLabelText(/^Adress att hämta från/));
     expect(api.stub.calls.filter((call) => call.method === "PATCH")).toEqual([]);
+  });
+
+  it("folds the tool step in a personal space, saying why, instead of sending the person to an administrator", async () => {
+    api.routes[KINDS] = textKinds;
+    const { dialog } = await openDialog(2, textFlow, { personal: true });
+    expect(within(dialog).queryByRole("radio", { name: messages.flow_add_step_tool })).toBeNull();
+    fireEvent.click(within(dialog).getByText("1 stegtyp går inte att lägga till här"));
+    expect(within(dialog).getByText(messages.flow_step_editor_tools_personal)).toBeTruthy();
+    expect(within(dialog).queryByText(messages.flow_step_editor_tools_none)).toBeNull();
   });
 
   it("says that nothing can be added here, with the reasons open, when the core refuses all", async () => {

@@ -259,6 +259,11 @@ async def resolve_http_input_source_text(
             raise TypedIOValidationException(
                 f"Step {step.step_order}: HTTP {method} input returned status {response.status_code}.",
                 code=FlowApiErrorCode.TYPED_IO_HTTP_NON_SUCCESS.value,
+                # The host, not the path: a path can hold a case number.
+                context={
+                    "http_status": response.status_code,
+                    "http_host": httpx.URL(url).host,
+                },
             )
         response_text = deps.read_response_text(
             response=response,

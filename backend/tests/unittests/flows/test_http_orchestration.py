@@ -294,6 +294,8 @@ async def test_resolve_http_input_source_text_non_success_maps_to_typed_code(
         )
 
     assert exc.value.code == "typed_io_http_non_success"
+    # The status and the host, never the path: the run page names both.
+    assert exc.value.context == {"http_status": status_code, "http_host": "example.org"}
 
 
 @pytest.mark.asyncio

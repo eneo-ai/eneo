@@ -2678,6 +2678,34 @@ def test_template_fill_publish_rejects_non_scalar_bindings(expression: str) -> N
         )
 
 
+@pytest.mark.parametrize("field_type", ["list", "multiselect"])
+def test_template_fill_publish_names_the_word_field_a_list_cannot_fill(
+    field_type: str,
+) -> None:
+    """The refusal carries a code and the Word field, so the editor can name it."""
+    step = _step(
+        output_type="docx",
+        output_mode="template_fill",
+        output_config={
+            "template_asset_id": str(uuid4()),
+            "bindings": {"Deltagare": "{{deltagare}}"},
+        },
+    )
+    field: dict[str, object] = {"name": "deltagare", "type": field_type}
+    if field_type == "multiselect":
+        field["options"] = ["A", "B"]
+    with pytest.raises(FlowStepValidationError) as refused:
+        validate_steps(
+            [step],
+            metadata_json={"form_schema": {"fields": [field]}},
+            require_complete_template_fill_config=True,
+        )
+    assert refused.value.code == FlowGraphIssueCode.TEMPLATE_BINDING_NOT_SCALAR.value
+    assert refused.value.context is not None
+    assert refused.value.context["placeholder"] == "Deltagare"
+    assert refused.value.context["issue_code"] == "template_binding_not_scalar"
+
+
 @pytest.mark.parametrize(
     "title_schema",
     [

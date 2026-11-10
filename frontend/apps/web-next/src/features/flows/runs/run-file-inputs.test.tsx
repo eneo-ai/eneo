@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderInApp } from "@/test/render";
 import { setViewport } from "@/test/setup-dom";
 import { makeInput } from "./run-fixtures";
+import type { UploadEntry } from "./run-contract";
 import { focusFirstControl } from "./run-form-fields";
 import { inputFileAnchorId, RunFileInput } from "./run-file-inputs";
 
@@ -50,7 +51,7 @@ describe("RunFileInput", () => {
     renderInApp(
       <RunFileInput
         formId="form"
-        input={makeInput({ max_files: 3 })}
+        input={makeInput({ max_files: 2 })}
         entries={[
           { ...entry, key: "a", state: "done", progress: 1, fileId: "file-1" },
           { ...entry, key: "b", state: "uploading", progress: 0.5 },
@@ -62,7 +63,46 @@ describe("RunFileInput", () => {
         singleRecording={{ offered: false, value: false, onChange: () => {} }}
       />
     );
-    expect(screen.getByText("Filer: 2 av 3")).toBeTruthy();
+    expect(screen.getByText("Filer: 2 av 2")).toBeTruthy();
+  });
+
+  it("counts the files only near the limit", () => {
+    const entry = { name: "brev.pdf", size: 1, mimetype: "application/pdf" };
+    renderInApp(
+      <RunFileInput
+        formId="form"
+        input={makeInput({ max_files: 1000 })}
+        entries={[{ ...entry, key: "a", state: "done", progress: 1, fileId: "file-1" }]}
+        message={null}
+        onAdd={() => {}}
+        onRemove={() => {}}
+        singleRecording={{ offered: false, value: false, onChange: () => {} }}
+      />
+    );
+    expect(screen.queryByText(/^Filer:/)).toBeNull();
+  });
+
+  it("says a picked file is of the wrong type, in place of the form's earlier message", () => {
+    const onAdd = vi.fn();
+    const { container } = renderInApp(
+      <RunFileInput
+        formId="form"
+        input={makeInput({ accepted_mimetypes: ["application/pdf"] })}
+        entries={[]}
+        message="Välj en fil för Underlag."
+        onAdd={onAdd}
+        onRemove={() => {}}
+        singleRecording={{ offered: false, value: false, onChange: () => {} }}
+      />
+    );
+    expect(screen.getByText("Välj en fil för Underlag.")).toBeTruthy();
+    const picker = container.querySelector<HTMLInputElement>("input[type='file']")!;
+    fireEvent.change(picker, {
+      target: { files: [new File(["x"], "bild.png", { type: "image/png" })] }
+    });
+    expect(onAdd).not.toHaveBeenCalled();
+    expect(screen.queryByText("Välj en fil för Underlag.")).toBeNull();
+    expect(screen.getByText(/bild\.png/)).toBeTruthy();
   });
 
   it("keeps a recording running when a tablet is split down to a phone width", () => {
@@ -81,5 +121,32 @@ describe("RunFileInput", () => {
     // A phone turned sideways is still a phone: nothing moves.
     act(() => setViewport({ width: 844, height: 390, pointer: "coarse" }));
     expect(screen.getByRole("button", { name: "Spelar in 2" })).toBeTruthy();
+  });
+
+  it("keeps focus in the field when a file row is removed", async () => {
+    const file = { name: "brev.pdf", size: 1, mimetype: "application/pdf", progress: 1 };
+    function Field() {
+      const [entries, setEntries] = useState<UploadEntry[]>([
+        { ...file, key: "a", state: "done", fileId: "file-1" }
+      ]);
+      return (
+        <RunFileInput
+          formId="form"
+          input={makeInput({ max_files: 3 })}
+          entries={entries}
+          message={null}
+          onAdd={() => {}}
+          onRemove={(key) => setEntries((current) => current.filter((entry) => entry.key !== key))}
+          singleRecording={{ offered: false, value: false, onChange: () => {} }}
+        />
+      );
+    }
+    renderInApp(<Field />);
+    const remove = screen.getByRole("button", { name: "Ta bort brev.pdf" });
+    remove.focus();
+    fireEvent.click(remove);
+    await waitFor(() =>
+      expect(document.activeElement?.closest("[id='form-input-step-1-files']")).toBeTruthy()
+    );
   });
 });

@@ -11,7 +11,6 @@
 import { stepConnections } from "./chat/connections";
 import { httpAnchor, type FieldAnchor } from "./editor/field-problems";
 import { readMeaning, readTone, type ReadMeaning, type TextPlace } from "./editor/request-preview";
-import { formFieldsOf } from "./editor/step-variables";
 import {
   hasHttpConfig,
   headerSent,
@@ -25,7 +24,9 @@ import {
   toolArguments
 } from "./editor/step-configs";
 import {
+  boundFormField,
   chainIssue,
+  formFieldFitsArgument,
   outputModeIssue,
   stepUsesModel,
   templateReadiness,
@@ -120,10 +121,11 @@ export function problemAnchor(problem: StepProblem): FieldAnchor | null {
     case "tool_arguments_invalid":
       return "input_config.tool";
     case "template_missing":
-    case "template_unbound":
     case "template_orphaned":
-    case "template_structured":
       return "output_config.template";
+    case "template_unbound":
+    case "template_structured":
+      return "output_config.template.fields";
     case "speaker_participants_missing":
       return "output_config.speaker_mapping";
     case "model_missing":
@@ -131,47 +133,6 @@ export function problemAnchor(problem: StepProblem): FieldAnchor | null {
     case "classification":
       return null;
   }
-}
-
-/** The core's runtime variables (`RESERVED_RUNTIME_VARIABLES`). */
-const RUNTIME_HEADS = new Set([
-  "datum",
-  "flow",
-  "flow_input",
-  "step_input",
-  "transkribering",
-  "föregående_steg",
-  "indata_text",
-  "indata_json"
-]);
-
-/** The run input's own keys (`PRIMARY_FLOW_INPUT_KEYS`). */
-const FLOW_INPUT_KEYS = new Set([
-  "file_ids",
-  "json",
-  "structured",
-  "text",
-  "transcribed_text",
-  "transcription",
-  "transcript",
-  "transkribering"
-]);
-
-/**
- * Whether publish resolves a reference the editor has no name for
- * (`_analyze_expression` in the core): a runtime variable, a step by number
- * (`step_1.status`) or a form field by its bare name. The run input
- * (`flow_input.x`, `flow.input.x`) holds only its own keys and the form's
- * fields; anything else in it is refused.
- */
-function coreKnowsHead(token: string, flow: Pick<FlowPublic, "metadata_json">): boolean {
-  const [head = "", ...tail] = token.split(".").map((part) => part.trim());
-  const isField = (name: string) => formFieldsOf(flow).some((field) => field.name === name);
-  const inputKey =
-    head === "flow_input" ? tail[0] : head === "flow" && tail[0] === "input" ? tail[1] : null;
-  if (inputKey !== null)
-    return inputKey === undefined || FLOW_INPUT_KEYS.has(inputKey) || isField(inputKey);
-  return RUNTIME_HEADS.has(head) || /^step_\d+$/.test(head) || isField(head);
 }
 
 /**
@@ -258,7 +219,6 @@ function unreadReferences(
     for (const token of new Set(site.tokens)) {
       const meaning = readMeaning(token, site.order, flow, site.place);
       if (readTone(meaning) === "reads") continue;
-      if (meaning.kind === "other" && coreKnowsHead(token, flow)) continue;
       const reads = unread.get(site.anchor) ?? [];
       if (!reads.some((read) => read.token === token)) reads.push({ token, meaning });
       unread.set(site.anchor, reads);
@@ -373,11 +333,15 @@ function stepProblems(
         if (names.length > 0) problems.push({ code: "tool_arguments_missing", names });
         const properties = objectOf(objectOf(option.input_schema).properties);
         const invalid = declared
-          .filter(
-            (argument) =>
-              given(argument.name) &&
-              !fitsProperty(tool.arguments[argument.name], properties[argument.name])
-          )
+          .filter((argument) => {
+            if (!given(argument.name)) return false;
+            const value = tool.arguments[argument.name];
+            // A form field's value is known by its type before the run.
+            const field = boundFormField(value, flow);
+            return field
+              ? !formFieldFitsArgument(field.type, argument)
+              : !fitsProperty(value, properties[argument.name]);
+          })
           .map((argument) => argument.name);
         if (invalid.length > 0) problems.push({ code: "tool_arguments_invalid", names: invalid });
       }

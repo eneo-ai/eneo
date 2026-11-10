@@ -58,6 +58,28 @@ const graph = makeRunGraph([
   { order: 1, label: "Sammanfatta", status: "completed" },
   { order: 2, label: "Skriv svar", status: "completed" }
 ]);
+/** A run that failed in its first step: nothing for a retry to reuse. */
+const firstStepFailed = makeRunGraph([
+  { order: 1, label: "Sammanfatta", status: "failed" },
+  { order: 2, label: "Skriv svar", status: null }
+]);
+
+/** A failed run's error, by its code, retryable or not. */
+function failedWith(
+  code: string,
+  retryable: boolean,
+  extra: Partial<RunDetail["error"] & object> = {}
+) {
+  const failed = makeRunSummary({ status: "failed" });
+  answerRun(
+    failed,
+    makeRunDetail({
+      ...failed,
+      result: null,
+      error: { code, message: "technical", details: null, retryable, ...extra }
+    } as Partial<RunDetail>)
+  );
+}
 
 function answerRun(summary: RunSummary, detail: RunDetail = makeRunDetail(summary)) {
   state.routes[STATUS] = () => ({ body: summary });
@@ -603,7 +625,9 @@ describe("FlowRunPage", () => {
     });
     const cancelled = makeRunSummary({ status: "cancelled" });
     answerRun(cancelled, makeRunDetail({ ...cancelled, result: null }));
-    fireEvent.click(within(dialog).getByRole("button", { name: messages.flow_runs_cancel }));
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: messages.flow_runs_cancel_confirm })
+    );
 
     await waitFor(() =>
       expect(state.announce).toHaveBeenCalledWith(messages.flow_runs_cancel_done)
@@ -2590,6 +2614,8 @@ describe("FlowRunPage on a phone", () => {
     setViewport("phone");
     const failed = makeRunSummary({ status: "failed" });
     answerRun(failed, makeRunDetail({ ...failed, result: null }));
+    state.routes[GRAPH] = () => ({ body: firstStepFailed });
+    state.routes[STEPS] = () => ({ body: [makeRunStep(1, { status: "failed" })] });
     renderRun();
     expect(await screen.findByText(messages.flow_runs_result_none_stopped)).toBeTruthy();
     expect(screen.queryByText(messages.flow_runs_result_pending)).toBeNull();
@@ -2608,5 +2634,147 @@ describe("FlowRunPage on a phone", () => {
     renderRun();
     await screen.findByText("Beslutet är fattat.");
     expect(screen.getByRole("link", { name: "Flöden" })).toBeTruthy();
+  });
+
+  it("offers a new run, not a retry, when the first step failed and nothing can be reused", async () => {
+    failedWith("flow_step_timeout", true, { step_order: 1 });
+    state.routes[GRAPH] = () => ({ body: firstStepFailed });
+    const { container } = renderRun();
+
+    const again = await screen.findByRole("button", { name: messages.flow_runs_new_run });
+    expect(again.getAttribute("data-variant")).toBe("primary");
+    expect(screen.queryByRole("button", { name: messages.flow_runs_retry })).toBeNull();
+    await expectNoAxeViolations(container);
+
+    fireEvent.click(again);
+    expect(await screen.findByRole("dialog")).toBeTruthy();
+  });
+
+  it("leads with the retry when the error's code is not retryable: that says nothing about the same error", async () => {
+    // A 503 from a service ends with retryable false, yet running again may well succeed.
+    failedWith("typed_io_http_non_success", false, { step_order: 2 });
+    renderRun();
+
+    const retry = await screen.findByRole("button", { name: messages.flow_runs_retry });
+    expect(retry.getAttribute("data-variant")).toBe("primary");
+    expect(
+      screen.getByRole("button", { name: messages.flow_runs_new_run }).getAttribute("data-variant")
+    ).toBe("secondary");
+    expect(
+      screen
+        .getByRole("button", { name: messages.flow_run_show_failed_step })
+        .getAttribute("data-variant")
+    ).toBe("secondary");
+  });
+
+  it("offers a new run of a cancelled run", async () => {
+    const cancelled = makeRunSummary({ status: "cancelled" });
+    answerRun(cancelled, makeRunDetail({ ...cancelled, result: null }));
+    renderRun();
+
+    expect(
+      (await screen.findByRole("button", { name: messages.flow_runs_new_run })).getAttribute(
+        "data-variant"
+      )
+    ).toBe("primary");
+  });
+
+  it("says the flow is not published instead of offering to run it again", async () => {
+    failedWith("flow_step_timeout", true);
+    const queryClient = testQueryClient();
+    queryClient.setQueryData(flowKeys.flow("flow-1"), makeFlow({ published_version: null }));
+    queryClient.setQueryData(["spaces", "space-1"], makeSpace({}));
+    renderInApp(
+      <Suspense>
+        <FlowRunPage flowId="flow-1" runId="run-1" />
+      </Suspense>,
+      { queryClient, appContext: testAppContext({ permissions: ["flows_view", "flows_run"] }) }
+    );
+
+    expect(await screen.findByText(messages.flow_runs_not_published)).toBeTruthy();
+    expect(screen.queryByText(messages.flow_runs_retry_version_changed)).toBeNull();
+    expect(screen.queryByRole("button", { name: messages.flow_runs_new_run })).toBeNull();
+    expect(screen.queryByRole("button", { name: messages.flow_runs_retry })).toBeNull();
+    // Running again is not possible: no word on whether it would help.
+    expect(screen.queryByText(messages.flow_run_extras_failure_retryable)).toBeNull();
+  });
+
+  it("names the step that finished when a failed run has no final result", async () => {
+    failedWith("flow_step_timeout", true, { step_order: 2 });
+    state.routes[GRAPH] = () => ({
+      body: makeRunGraph([
+        { order: 1, label: "Sammanfatta", status: "completed" },
+        { order: 2, label: "Skriv svar", status: "failed" }
+      ])
+    });
+    renderRun();
+
+    const result = await resultSection();
+    expect(
+      await result.findByText(messages.flow_runs_result_none_after_step.replace("{order}", "1"))
+    ).toBeTruthy();
+  });
+
+  it("says the failure once: the failed step's card does not repeat the run's sentence", async () => {
+    failedWith("flow_step_timeout", true, { step_order: 2 });
+    state.routes[STEPS] = () => ({
+      body: [
+        makeRunStep(1),
+        makeRunStep(2, {
+          status: "failed",
+          error_code: "flow_step_timeout",
+          output_payload_json: null
+        })
+      ]
+    });
+    renderRun();
+
+    const card = await screen.findByRole("article", { name: "Steg 2: Skriv svar" });
+    expect(screen.getAllByText(messages.flow_error_flow_step_timeout)).toHaveLength(1);
+    expect(within(card).queryByText(messages.flow_error_flow_step_timeout)).toBeNull();
+  });
+
+  it("warns on a finished run whose uploaded file had no readable text", async () => {
+    answerRun(makeRunSummary());
+    state.routes[STEPS] = () => ({
+      body: [
+        makeRunStep(1, {
+          diagnostics: [
+            {
+              code: "runtime_input_source_text_unavailable",
+              message: "[no readable text extracted]",
+              severity: "warning"
+            }
+          ]
+        }),
+        makeRunStep(2)
+      ]
+    });
+    const { container } = renderRun();
+
+    expect(await screen.findByText(messages.flow_runs_input_loss_title)).toBeTruthy();
+    expect(
+      screen.getAllByText(messages.flow_step_warning_runtime_input_source_text_unavailable).length
+    ).toBeGreaterThan(0);
+    expect(screen.queryByText("[no readable text extracted]")).toBeNull();
+    await expectNoAxeViolations(container);
+  });
+
+  it("asks before cancelling with a confirm that says what it does, beside one to keep going", async () => {
+    const running = makeRunSummary({ status: "running", finished_at: null });
+    answerRun(running, makeRunDetail({ ...running, result: null }));
+    renderRun();
+
+    fireEvent.click(await screen.findByRole("button", { name: messages.flow_runs_cancel }));
+    const dialog = await screen.findByRole("alertdialog", {
+      name: messages.flow_runs_cancel_title
+    });
+    expect(
+      within(dialog).getByRole("button", { name: messages.flow_runs_cancel_confirm })
+    ).toBeTruthy();
+    expect(
+      within(dialog).getByRole("button", { name: messages.flow_runs_cancel_keep })
+    ).toBeTruthy();
+    expect(within(dialog).queryByRole("button", { name: messages.cancel })).toBeNull();
   });
 });

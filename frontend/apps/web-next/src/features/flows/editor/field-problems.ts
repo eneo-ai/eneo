@@ -36,6 +36,8 @@ export const FIELD_ANCHORS = [
   "output_config.http.body",
   "output_config.http.more",
   "output_config.template",
+  // The first of the template's fields that needs a value.
+  "output_config.template.fields",
   "output_config.speaker_mapping",
   "output_config.citation_mode",
   "output_config.retrieval_policy",
@@ -65,7 +67,8 @@ const HTTP_ERROR_PARTS: Record<string, HttpPart> = {
   HTTP_MISSING_AUTH: "auth",
   HTTP_INVALID_BODY_JSON: "body",
   HTTP_BODY_NOT_ALLOWED_FOR_GET: "body",
-  HTTP_TIMEOUT_OUT_OF_RANGE: "more"
+  HTTP_TIMEOUT_OUT_OF_RANGE: "more",
+  HTTP_INVALID_HEADER_NAME: "more"
 };
 
 /** The anchor of a part of the HTTP fields, or of the address for a part without one. */
@@ -198,6 +201,7 @@ const ISSUE_MESSAGE_KEYS: Record<string, string> = {
   duplicate_step_name: "flow_validation_msg_duplicate_step_name",
   citation_mode_unsupported: "flow_validation_msg_citation_mode_unsupported",
   template_fill_requires_docx: "flow_validation_msg_template_fill_requires_docx",
+  template_binding_not_scalar: "flow_validation_msg_template_binding_not_scalar",
   output_contract_template_fill_incompatible:
     "flow_validation_msg_output_contract_template_fill_incompatible",
   flow_review_policy_invalid: "flow_validation_msg_review_policy_invalid",
@@ -230,7 +234,8 @@ export const HTTP_ERROR_KEYS: Record<string, string> = {
   HTTP_CONNECTION_REFUSED: "http_test_unreachable",
   HTTP_BLOCKED_URL: "http_test_blocked",
   HTTP_RESPONSE_TOO_LARGE: "http_test_response_too_large",
-  HTTP_CREDENTIALS_REQUIRE_HTTPS: "flow_step_editor_http_credentials_need_https"
+  HTTP_CREDENTIALS_REQUIRE_HTTPS: "flow_step_editor_http_credentials_need_https",
+  HTTP_INVALID_HEADER_NAME: "flow_step_editor_http_header_name_invalid"
 };
 
 export type Translator = ((key: string, values?: Record<string, string | number>) => string) & {

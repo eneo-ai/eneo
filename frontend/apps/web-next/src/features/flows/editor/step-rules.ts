@@ -25,7 +25,8 @@ import {
   textProcessingEligibility,
   longMaterialEligibility,
   readLongMaterial,
-  withLongMaterial
+  withLongMaterial,
+  type ToolArgumentSpec
 } from "./step-configs";
 import type {
   FlowPublic,
@@ -556,16 +557,41 @@ export function templateBindingToken(binding: string): string | null {
   return parts.length === 1 && part?.kind === "read" ? part.token : null;
 }
 
+/** The form field a value reads as one whole reference (`{{flow_input.namn}}`), or null. */
+export function boundFormField(
+  value: unknown,
+  flow: Pick<FlowPublic, "metadata_json">
+): FormField | null {
+  const token = typeof value === "string" ? templateBindingToken(value) : null;
+  if (!token?.startsWith("flow_input.")) return null;
+  const name = token.slice("flow_input.".length);
+  return formFieldsOf(flow).find((candidate) => candidate.name === name) ?? null;
+}
+
 /** The form field a binding reads when that field holds several values (a list), or null. */
 export function templateBindingListField(
   binding: string,
   flow: Pick<FlowPublic, "metadata_json">
 ): FormField | null {
-  const token = templateBindingToken(binding);
-  if (!token?.startsWith("flow_input.")) return null;
-  const name = token.slice("flow_input.".length);
-  const field = formFieldsOf(flow).find((candidate) => candidate.name === name);
+  const field = boundFormField(binding, flow);
   return field && !formFieldHoldsOneValue(field.type) ? field : null;
+}
+
+/**
+ * Whether a tool argument of this type can take a form field's value as the
+ * run gives it (`flow_run_input_payload.py`): a number field a number, a list
+ * or several choices a list of text, any other field text. The core sends a
+ * bound value as it is and the tool refuses one outside its schema.
+ */
+export function formFieldFitsArgument(
+  fieldType: string,
+  argument: Pick<ToolArgumentSpec, "type" | "items">
+): boolean {
+  const { type, items } = argument;
+  if (!type) return true;
+  if (fieldType === "number") return type === "number" || type === "integer";
+  if (formFieldHoldsOneValue(fieldType)) return type === "string";
+  return type === "array" && (items === null || items === "string");
 }
 
 /**

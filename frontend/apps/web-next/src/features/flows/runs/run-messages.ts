@@ -56,6 +56,31 @@ function templateFillText(fill: unknown, t: Translator): string | null {
     : t(`flow_run_template_fill_${reason}_no_step`, { field });
 }
 
+/** The service and status an HTTP step was answered with (never the path, which can hold a case number). */
+function httpStatusText(facts: Record<string, unknown>, t: Translator): string | null {
+  const { http_status: status, http_host: host } = facts;
+  if (typeof status !== "number" || typeof host !== "string" || !host) return null;
+  const key =
+    status === 401 || status === 403
+      ? "flow_run_http_refused"
+      : status === 404
+        ? "flow_run_http_not_found"
+        : "flow_run_http_status";
+  return t(key, { host, status });
+}
+
+/** Refusals a space's administrator can lift: the tool or its server was turned off in the space. */
+const SPACE_REFUSALS = new Set(["server_not_in_space", "tool_switched_off_in_space"]);
+
+/** Why a step's tool was refused, in the editor's words, and who can turn it on again. */
+function toolRefusalText(refusal: string, t: Translator): string {
+  const key = `flow_step_editor_tool_refusal_${refusal}`;
+  const reason = t.has(key) ? t(key) : t("flow_step_editor_tool_refusal_other");
+  return SPACE_REFUSALS.has(refusal)
+    ? `${reason} ${t("flow_run_tool_refused_ask_space_admin")}`
+    : reason;
+}
+
 /** A sentence the special codes need from their `context` or `details`. */
 function contextualText(
   code: string | null | undefined,
@@ -68,6 +93,10 @@ function contextualText(
     return t("flow_runs_refusal_pdf_extraction_busy");
   }
   if (code === "typed_io_template_render_failed") return templateFillText(facts.template_fill, t);
+  if (code === "typed_io_http_non_success") return httpStatusText(facts, t);
+  if (code === "typed_io_tool_not_allowed" && typeof facts.tool_refusal === "string") {
+    return toolRefusalText(facts.tool_refusal, t);
+  }
   if (code === "typed_io_speaker_service_unavailable") {
     if (facts.speaker_service_gap === "not_chosen") return t("flow_runs_speakers_not_chosen");
     if (facts.speaker_service_gap === "picked_unavailable") {

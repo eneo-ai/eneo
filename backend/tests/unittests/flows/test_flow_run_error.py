@@ -689,3 +689,21 @@ def test_a_tool_error_text_longer_than_the_detail_holds_is_cut() -> None:
     details = FlowRunErrorDetails.from_budget_context({"tool_error_text": "x" * 600})
 
     assert details is not None and details.tool_error_text == "x" * 512
+
+
+def test_an_http_status_and_host_reach_the_run_error_as_typed_details() -> None:
+    # Kills the mutant that drops the HTTP facts from the context: the run page
+    # names the status and the service only from these two details.
+    details = FlowRunErrorDetails.from_budget_context(
+        {"http_status": 404, "http_host": "api.example.org"}
+    )
+
+    assert details is not None
+    assert (details.http_status, details.http_host) == (404, "api.example.org")
+
+
+def test_an_http_status_that_is_not_a_status_is_not_reported() -> None:
+    assert (
+        FlowRunErrorDetails.from_budget_context({"http_status": "404", "http_host": ""})
+        is None
+    )

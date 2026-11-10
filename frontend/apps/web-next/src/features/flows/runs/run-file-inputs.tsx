@@ -4,11 +4,12 @@ import { IconButton } from "@astryxdesign/core/IconButton";
 import { ProgressBar } from "@astryxdesign/core/ProgressBar";
 import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { CircleAlert, CircleCheck, Download, RotateCw, X } from "lucide-react";
-import { Fragment } from "react";
+import { Fragment, useState } from "react";
 import { useLocale, useTranslations } from "use-intl";
 import { saveUrl, signedFileUrl, toastDownloadError } from "@/features/files/signed-file-url";
 import { browserApi } from "@/lib/api/browser";
 import { formatBytes } from "@/lib/format";
+import { useFocusRescue } from "@/lib/focus-rescue";
 import { HANDHELD_QUERY } from "@/lib/hooks/use-media-match";
 import { UploadRetryHint } from "./recording/upload-retry-hint";
 import type { InputProblem, UploadEntry } from "./run-contract";
@@ -209,6 +210,16 @@ export function RunFileInput({
   const limits = inputLimitsText(input, t, locale);
   const description = [input.description?.trim(), limits].filter(Boolean).join(" ");
   const multiple = input.max_files == null || input.max_files > 1;
+  // A pick with no file the step takes: the field's own sentence (the wrong type or size, by
+  // name) says more than the form's earlier one, which would otherwise cover it.
+  const [pickRejected, setPickRejected] = useState(false);
+  const counted = entries.filter((entry) => entry.state !== "failed").length;
+  // A removed row takes its button with it: focus goes back to the field, not to the page.
+  const rescue = useFocusRescue();
+  const fieldControl = () =>
+    document
+      .getElementById(inputFileAnchorId(formId, input.step_id))
+      ?.querySelector<HTMLElement>("button") ?? null; // The field's trigger is its first button.
 
   const fileField = (
     <div key="files" id={inputFileAnchorId(formId, input.step_id)}>
@@ -218,6 +229,7 @@ export function RunFileInput({
         value={null}
         onChange={(files) => {
           const picked = Array.isArray(files) ? files : files ? [files] : [];
+          setPickRejected(picked.length === 0);
           if (picked.length > 0) onAdd(picked);
         }}
         accept={(input.accepted_mimetypes ?? []).join(",") || undefined}
@@ -229,7 +241,7 @@ export function RunFileInput({
             ? t(coarse ? "flow_runs_input_choose_files_touch" : "flow_runs_input_choose_files")
             : t(coarse ? "flow_runs_input_choose_file_touch" : "flow_runs_input_choose_file")
         }
-        status={message ? { type: "error", message } : undefined}
+        status={message && !pickRejected ? { type: "error", message } : undefined}
         statusVariant="detached"
         width="100%"
         {...(input.required ? { isRequired: true } : { isOptional: true })}
@@ -251,13 +263,10 @@ export function RunFileInput({
       <div className="flex flex-col gap-5">
         {handheld ? [recording, fileField] : [fileField, recording]}
       </div>
-      {entries.length > 0 && input.max_files != null && input.max_files > 1 ? (
+      {/* Only near the limit: "1 av 1000" says nothing. As the limit counts: a failed row holds no place. */}
+      {input.max_files != null && input.max_files > 1 && counted >= input.max_files * 0.8 ? (
         <p className="text-ax-text-secondary m-0 text-xs tabular-nums">
-          {t("flow_runs_start_files_count", {
-            // As the step's limit counts: a failed row holds no place.
-            count: entries.filter((entry) => entry.state !== "failed").length,
-            max: input.max_files
-          })}
+          {t("flow_runs_start_files_count", { count: counted, max: input.max_files })}
         </p>
       ) : null}
       {entries.length > 0 ? (
@@ -266,7 +275,10 @@ export function RunFileInput({
             <UploadRow
               key={entry.key}
               entry={entry}
-              onRemove={() => onRemove(entry.key)}
+              onRemove={() => {
+                rescue(fieldControl);
+                onRemove(entry.key);
+              }}
               onRetry={
                 entry.state === "failed" && entry.retryable && onRetry
                   ? () => onRetry(entry.key)

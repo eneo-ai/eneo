@@ -24,6 +24,7 @@ import { useSpaceDisplayName } from "@/features/spaces/space-display-name";
 import { spaceLandingHref } from "@/features/spaces/frame/space-sections";
 import { useSpace } from "@/features/spaces/use-space";
 import { formFieldsOf } from "../flow-form-fields";
+import { FlowRunStarter } from "../flow-run-starter";
 import { flowQueryOptions, type FlowPublic } from "../flows-api";
 import { CopyButton } from "./run-copy";
 import { formatSeconds } from "./run-format";
@@ -31,7 +32,7 @@ import { RunFailure } from "./run-failure";
 import { RunWebhookDeliveries } from "./run-webhooks";
 import { RunFiles } from "./run-files";
 import { JsonValue } from "./run-json";
-import { refusalText, runErrorText } from "./run-messages";
+import { refusalText, runErrorText, stepWarningText } from "./run-messages";
 import { outputText, progressSignature, runStepViews, type RunStepView } from "./run-progress";
 import { RunLiveProgress } from "./run-live-progress";
 import { RunKnowledge, searchedKnowledge } from "./run-knowledge";
@@ -78,6 +79,12 @@ import { useShownRead } from "./use-shown-read";
 
 type Notice = RunActionNotice;
 
+/** Step warnings that say the run lost part of what it was given. */
+const INPUT_LOSS_CODES = new Set([
+  "runtime_input_source_text_unavailable",
+  "empty_prior_step_input"
+]);
+
 /** The files the run's final result carries. */
 function resultFileIds(result: RunDetail["result"]): Set<string> {
   if (result?.kind === "artifact") return new Set(result.files.map((file) => file.file_id));
@@ -117,18 +124,33 @@ function copyableResult(result: RunDetail["result"] | undefined): unknown {
   return result?.kind === "structured" ? result.value : null;
 }
 
-/** The run's final result, by its kind. */
-function RunResult({ flowId, run }: { flowId: string; run: RunDetail }) {
+/**
+ * The run's final result, by its kind. A run that stopped with none points
+ * to the last step that finished, whose result is in the steps.
+ */
+function RunResult({
+  flowId,
+  run,
+  steps
+}: {
+  flowId: string;
+  run: RunDetail;
+  steps: readonly RunStepView[];
+}) {
   const t = useTranslations();
   const result = run.result;
   if (!result) {
+    const stopped = run.status === "failed" || run.status === "cancelled";
+    const finished = steps.findLast((step) => step.status === "completed");
     return (
       <p className="text-ax-text-secondary text-sm">
         {run.status === "completed"
           ? t("flow_runs_result_none")
-          : run.status === "failed" || run.status === "cancelled"
-            ? t("flow_runs_result_none_stopped")
-            : t("flow_runs_result_pending")}
+          : stopped && finished
+            ? t("flow_runs_result_none_after_step", { order: finished.order })
+            : stopped
+              ? t("flow_runs_result_none_stopped")
+              : t("flow_runs_result_pending")}
       </p>
     );
   }
@@ -193,12 +215,14 @@ function RunProblem({
   run,
   flow,
   steps,
-  onShowStep
+  onShowStep,
+  rerunOffered
 }: {
   run: RunDetail;
   flow: FlowPublic;
   steps: readonly RunStepView[];
   onShowStep: (order: number) => void;
+  rerunOffered: boolean;
 }) {
   const t = useTranslations();
   if (run.status === "failed" && run.error) {
@@ -208,6 +232,7 @@ function RunProblem({
         stepName={(order) => steps.find((step) => step.order === order)?.label.trim() || null}
         reviewSteps={flow.steps}
         onShowStep={onShowStep}
+        rerunOffered={rerunOffered}
       />
     );
   }
@@ -514,12 +539,30 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
 
   // Retrying needs the principal that started the run; said up front, not on refusal.
   const offers = summary
-    ? runActions(summary, {
-        canRun: can("flows_run"),
-        userId: user.id,
-        publishedVersion: flow.published_version
-      })
+    ? runActions(
+        summary,
+        {
+          canRun: can("flows_run") && flow.permissions.can_run,
+          userId: user.id,
+          publishedVersion: flow.published_version
+        },
+        { steps: stepViews }
+      )
     : null;
+  const [starting, setStarting] = useState(false);
+  // A finished run that lost an input: done, but its result may miss what the person sent.
+  const inputLoss =
+    status === "completed"
+      ? [
+          ...new Set(
+            stepViews.flatMap((step) =>
+              (step.result?.diagnostics ?? [])
+                .filter((item) => INPUT_LOSS_CODES.has(item.code))
+                .map((item) => stepWarningText(item.code, t) ?? "")
+            )
+          )
+        ].filter(Boolean)
+      : [];
   const offersRedispatch = summary !== undefined && canRedispatch(summary, now);
 
   // A finished run no longer changes: reading it again is offered only after a read failed.
@@ -552,7 +595,14 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
           flowId={flowId}
           runId={runId}
           report={setNotice}
-          variant="primary"
+          variant={offers.primary === "retry" ? "primary" : "secondary"}
+        />
+      ) : null}
+      {offers?.newRun ? (
+        <Button
+          label={t("flow_runs_new_run")}
+          variant={offers.primary === "new_run" ? "primary" : "secondary"}
+          onClick={() => setStarting(true)}
         />
       ) : null}
       {offers?.cancel ? (
@@ -592,6 +642,7 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
             runId={runId}
             steps={stepViews}
             runStatus={status}
+            failureShownFor={status === "failed" ? (detail.data?.error?.step_order ?? null) : null}
             transcripts={
               new Map(transcripts.map((target) => [target.stepId, transcriptHost(target.stepId)]))
             }
@@ -696,10 +747,13 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
             {run ? <RunUsageBrief run={run} /> : null}
           </div>
         ) : null}
-        {offers?.retryHeldBack === "version_changed" ? (
+        {offers?.heldBack === "unpublished" ? (
+          <p className="text-ax-text-secondary text-sm">{t("flow_runs_not_published")}</p>
+        ) : null}
+        {offers?.heldBack === "version_changed" ? (
           <p className="text-ax-text-secondary text-sm">{t("flow_runs_retry_version_changed")}</p>
         ) : null}
-        {summary && offers?.retryHeldBack === "starter_only" ? (
+        {summary && offers?.heldBack === "starter_only" ? (
           <p className="text-ax-text-secondary text-sm">
             {t("flow_runs_retry_starter_only", { name: starterName(summary, t) })}
           </p>
@@ -748,7 +802,21 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
               queries={[progress, detail, steps, ...(awaitingReview ? [review] : [])]}
             />
             {run ? (
-              <RunProblem run={run} flow={flow} steps={stepViews} onShowStep={revealStep} />
+              <RunProblem
+                run={run}
+                flow={flow}
+                steps={stepViews}
+                onShowStep={revealStep}
+                rerunOffered={Boolean(offers?.retry || offers?.newRun)}
+              />
+            ) : null}
+            {inputLoss.length > 0 ? (
+              <Banner
+                status="warning"
+                title={t("flow_runs_input_loss_title")}
+                description={inputLoss.join(" ")}
+                collapsible={false}
+              />
             ) : null}
             {awaitingReview && blockingError(review) ? (
               <ListError
@@ -791,7 +859,7 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
                 />
               ) : run ? (
                 <>
-                  <RunResult flowId={flowId} run={run} />
+                  <RunResult flowId={flowId} run={run} steps={stepViews} />
                   <RunOtherFiles flowId={flowId} run={run} />
                 </>
               ) : (
@@ -877,6 +945,7 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
           </>
         )}
       </div>
+      <FlowRunStarter flowId={flowId} open={starting} onOpenChange={setStarting} />
     </div>
   );
 }

@@ -96,6 +96,7 @@ class FlowGraphIssueCode(StrEnum):
     )
     OUTPUT_CONTRACT_TYPE_MISMATCH = "output_contract_type_mismatch"
     STEP_ORDER_NOT_CONTIGUOUS = "step_order_not_contiguous"
+    TEMPLATE_BINDING_NOT_SCALAR = "template_binding_not_scalar"
     TEMPLATE_FILL_REQUIRES_DOCX = "template_fill_requires_docx"
     TRANSCRIBE_ONLY_VIOLATION = "transcribe_only_violation"
     TYPED_IO_AUDIO_SOURCE_UNSUPPORTED = "typed_io_audio_source_unsupported"

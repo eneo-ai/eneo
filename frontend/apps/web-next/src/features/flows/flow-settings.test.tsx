@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import messages from "@/lib/i18n/messages/sv.json";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
@@ -614,7 +615,7 @@ describe("FlowSettings", () => {
         }
       });
     // A column beside the chat and the sidebar on a wide screen: too narrow for a label column.
-    resize(420);
+    resize(360);
     expect(placed()).toBe("DIV");
     resize(640);
     expect(placed()).toBe("DL");
@@ -778,6 +779,38 @@ describe("FlowSettings", () => {
     );
     await new Promise(requestAnimationFrame);
     expect(screen.queryByRole("textbox", { name: /^Namn/ })).toBeNull();
+  });
+
+  it("puts focus in a new field's label, and says nothing wrong before it is touched", async () => {
+    renderInApp(
+      <FlowSettings flow={flow} canEdit transcription={noTranscription} onSave={vi.fn()} />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Ändra inställningar" }));
+    fireEvent.click(screen.getByRole("button", { name: "Lägg till fält" }));
+    const field = screen.getByRole("group", { name: "Fält 2" });
+    await waitFor(() =>
+      expect(document.activeElement).toBe(within(field).getByRole("textbox", { name: /Etikett/ }))
+    );
+    expect(within(field).queryByText(messages.flows_field_problem_required)).toBeNull();
+  });
+
+  it("hints at a label another field of the form already has", () => {
+    renderInApp(
+      <FlowSettings flow={flow} canEdit transcription={noTranscription} onSave={vi.fn()} />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Ändra inställningar" }));
+    fireEvent.click(screen.getByRole("button", { name: "Lägg till fält" }));
+    const label = "Diarienummer";
+    const added = within(screen.getByRole("group", { name: "Fält 2" })).getByRole("textbox", {
+      name: /Etikett/
+    });
+    fireEvent.change(added, { target: { value: ` ${label.toLocaleUpperCase()} ` } });
+    const hint = messages.flows_field_label_taken.replace("{label}", label.toLocaleUpperCase());
+    expect(screen.getByText(hint)).toBeTruthy();
+    // A hint, not an error: the form still saves.
+    expect(added.getAttribute("aria-invalid")).not.toBe("true");
+    fireEvent.change(added, { target: { value: "Något annat" } });
+    expect(screen.queryByText(hint)).toBeNull();
   });
 
   it("explains an empty run form with an example, and adds the first field", async () => {

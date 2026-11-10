@@ -186,6 +186,25 @@ async def test_execute_http_test_returns_typed_variable_failure() -> None:
 
 
 @pytest.mark.asyncio
+async def test_execute_http_test_explains_an_invalid_header_name() -> None:
+    async def _send_http_request(**_kwargs: Any) -> httpx.Response:
+        raise AssertionError("request should not be sent with an invalid header name")
+
+    result = await execute_http_test(
+        config=_config(custom_headers=[CustomHeader(name="X Bad", value="v")]),
+        direction="output",
+        method="POST",
+        test_variables={},
+        interpolate=_transport_interpolate,
+        send_http_request=_send_http_request,
+        max_timeout=120,
+    )
+
+    assert result.error_code == HttpTransportError.INVALID_HEADER_NAME
+    assert result.error_message == "Invalid custom header name"
+
+
+@pytest.mark.asyncio
 async def test_execute_http_test_rejects_invalid_credentials_with_typed_config_error(
     encryption_service,
 ) -> None:

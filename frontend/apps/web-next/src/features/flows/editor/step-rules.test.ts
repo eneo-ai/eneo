@@ -5,7 +5,9 @@ import {
   applyInputTypeChange,
   applyOutputModeChange,
   applyOutputTypeChange,
+  boundFormField,
   chainIssue,
+  formFieldFitsArgument,
   inputSourceOptions,
   inputTypeOptions,
   outputModeIssue,
@@ -140,5 +142,46 @@ describe("output modes", () => {
       value: "copy_input",
       invalid: true
     });
+  });
+});
+
+describe("a form field read by a tool argument", () => {
+  const flow = {
+    metadata_json: {
+      form_schema: {
+        fields: [
+          { name: "deltagare", label: "Deltagare", type: "list" },
+          { name: "antal", label: "Antal", type: "number" },
+          { name: "namn", label: "Namn", type: "text" }
+        ]
+      }
+    }
+  };
+
+  it("finds the field a whole reference reads, and nothing else", () => {
+    expect(boundFormField("{{flow_input.deltagare}}", flow)).toMatchObject({
+      name: "deltagare",
+      type: "list"
+    });
+    expect(boundFormField("{{ flow_input.antal }}", flow)).toMatchObject({ name: "antal" });
+    expect(boundFormField("{{step_1.output.text}}", flow)).toBeNull();
+    expect(boundFormField("Hej {{flow_input.namn}}", flow)).toBeNull();
+    expect(boundFormField(5, flow)).toBeNull();
+  });
+
+  it("fits only the JSON type the run gives the field: text, a number or a list of text", () => {
+    const arg = (type: string | null, items: string | null = null) => ({ type, items });
+    // A list of text cannot be a list of numbers, nor one value.
+    expect(formFieldFitsArgument("list", arg("array", "number"))).toBe(false);
+    expect(formFieldFitsArgument("multiselect", arg("string"))).toBe(false);
+    expect(formFieldFitsArgument("list", arg("array", "string"))).toBe(true);
+    expect(formFieldFitsArgument("list", arg("array"))).toBe(true);
+    expect(formFieldFitsArgument("text", arg("number"))).toBe(false);
+    expect(formFieldFitsArgument("number", arg("integer"))).toBe(true);
+    expect(formFieldFitsArgument("number", arg("string"))).toBe(false);
+    expect(formFieldFitsArgument("date", arg("string"))).toBe(true);
+    expect(formFieldFitsArgument("select", arg("array", "string"))).toBe(false);
+    // An argument the schema does not type takes anything.
+    expect(formFieldFitsArgument("list", arg(null))).toBe(true);
   });
 });

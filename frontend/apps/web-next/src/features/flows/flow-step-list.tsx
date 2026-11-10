@@ -14,10 +14,12 @@ import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog"
 import { EmptyState } from "@/components/composites/empty-state";
 import { ListError } from "@/components/composites/query-state";
 import { flowAssistantQueryOptions } from "./editor/editor-api";
+import { FILE_INPUT_TYPES, readRuntimeInput } from "./editor/step-configs";
 import { stepUsesModel } from "./editor/step-rules";
 import type { FlowStep } from "./flows-api";
 import type { StepChange } from "./flow-changes";
 import { inputTypeLabel, producesLabel, readLabel, stepLabel } from "./flow-labels";
+import { useFlowReadLabel } from "./flow-read-layout";
 import { stepName, stepReaders, stepReads, type StepPrompts } from "./flow-steps";
 import {
   useSuggestionDismissal,
@@ -86,6 +88,7 @@ function StepCard({
   suggestions,
   speakerOffer,
   change,
+  label: labelColumn,
   actions
 }: {
   step: FlowStep;
@@ -108,6 +111,8 @@ function StepCard({
   speakerOffer: SpeakerStepOffer | null;
   /** What the chat just did to this step, while the mark lasts. */
   change: StepChange | null;
+  /** The read views' label column, as wide as the list allows. */
+  label: ReturnType<typeof useFlowReadLabel>;
   actions: StepActions & { onAskRemove: (step: FlowStep) => void };
 }) {
   const t = useTranslations();
@@ -116,6 +121,9 @@ function StepCard({
   const label = stepLabel(step, t);
   const reads = stepReads(step, steps, prompts);
   const review = step.review_policy?.mode;
+  // Files the run asks for, which "Tar emot" says beside the type (they may be required).
+  // A file type already names them, so there it adds only whether they are required.
+  const uploads = readRuntimeInput(step.input_config);
 
   return (
     <article
@@ -130,7 +138,7 @@ function StepCard({
       <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
         <div className="flex min-w-0 flex-[1_1_14rem] flex-col gap-1">
           <Heading level={3} id={titleId} weight="semibold" wordBreak="break-word">
-            <span className="text-ax-text-secondary block text-xs font-medium">
+            <span className="text-ax-text-secondary block text-sm font-medium">
               {t("flows_step_label_unnamed", { order: step.step_order })}
             </span>
             <span className="text-base">{stepName(step) ?? t("flows_step_unnamed")}</span>
@@ -221,7 +229,7 @@ function StepCard({
           ) : null}
         </div>
       </div>
-      <MetadataList label={{ position: "start", width: "7rem" }}>
+      <MetadataList label={labelColumn}>
         {/* Plain text like the rows below it; a read of a step that is gone
             says so in words, and in the error colour. */}
         <MetadataListItem label={t("flows_step_reads")}>
@@ -237,7 +245,17 @@ function StepCard({
           ))}
         </MetadataListItem>
         <MetadataListItem label={t("flows_step_takes")}>
-          {inputTypeLabel(step.input_type, t)}
+          {!uploads.enabled
+            ? inputTypeLabel(step.input_type, t)
+            : FILE_INPUT_TYPES.has(step.input_type)
+              ? uploads.required
+                ? t("flows_step_takes_required", { type: inputTypeLabel(step.input_type, t) })
+                : inputTypeLabel(step.input_type, t)
+              : t("flows_step_takes_uploads", {
+                  type: inputTypeLabel(step.input_type, t),
+                  format: uploads.inputFormat,
+                  required: uploads.required ? "yes" : "no"
+                })}
         </MetadataListItem>
         <MetadataListItem label={t("flows_step_produces")}>
           {producesLabel(step, t)}
@@ -371,6 +389,9 @@ export function FlowStepList({
   const fixOnCard = useSuggestionFix(suggestionFix, cardStep);
   const dismissOnCard = useSuggestionDismissal(dismissal, cardStep);
   const listHeading = () => document.getElementById(headingId);
+  // Measured on the section, which is there with or without steps.
+  const listRef = useRef<HTMLElement>(null);
+  const labelColumn = useFlowReadLabel(listRef);
   const readers = removing ? stepReaders(removing, steps, prompts) : [];
   // A step another step reads would be refused: the dialog leads to the reader instead.
   const reader = readers[0] ?? null;
@@ -385,7 +406,7 @@ export function FlowStepList({
   );
 
   return (
-    <section aria-labelledby={headingId} className="flex flex-col gap-3">
+    <section ref={listRef} aria-labelledby={headingId} className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <Heading
           level={2}
@@ -475,6 +496,7 @@ export function FlowStepList({
                 }}
                 speakerOffer={speakerOffer}
                 change={(step.id && changes?.get(step.id)) || null}
+                label={labelColumn}
                 actions={{ ...actions, onAskRemove: setRemoving }}
               />
             </li>

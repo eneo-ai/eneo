@@ -157,6 +157,7 @@ describe("FlowDraftCheck", () => {
     expect(
       await screen.findByText(
         "{{datun}}, {{step_1.output.structured.namn}} och {{step_3.output.text}} i instruktionen går inte att läsa. " +
+          "Hittar ingen variabel som heter datun. Välj en i Infoga variabel. " +
           "Steg 1: Sammanfatta svarar inte i fast format och har inga fält att läsa. " +
           "Läs svaret som text, eller låt steget svara i fast format."
       )

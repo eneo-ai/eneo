@@ -287,5 +287,6 @@ def _error_message(
         HttpTransportError.RESPONSE_TOO_LARGE: "HTTP response is too large to preview",
         HttpTransportError.STATUS_ERROR: "Server responded with error",
         HttpTransportError.CREDENTIALS_REQUIRE_HTTPS: "HTTP credentials require a fixed HTTPS origin",
+        HttpTransportError.INVALID_HEADER_NAME: "Invalid custom header name",
     }
     return messages.get(error, error.value)

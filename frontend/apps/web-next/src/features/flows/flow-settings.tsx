@@ -17,9 +17,8 @@ import { TextInput } from "@/components/astryx/text-input";
 import { EmptyState } from "@/components/composites/empty-state";
 import { LeaveConfirmation } from "@/components/composites/leave-confirmation";
 import { useAppContext } from "@/components/providers/app-context";
-import { useElementWidth } from "@/lib/hooks/use-element-width";
-import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { EditorSection } from "./editor/editor-fields";
+import { useFlowReadLabel } from "./flow-read-layout";
 import { FlowRetentionDialog, FlowRetentionSummary } from "./flow-retention";
 import type { FlowDefinitionUpdate, FlowPublic } from "./flows-api";
 import {
@@ -108,11 +107,6 @@ function savedValues(draft: SettingsDraft): string {
 
 type SpaceClassification = { name: string; security_level: number };
 
-/** The label column beside the values: the longest label ("Nedladdning av bevisunderlag") fits on one line. */
-const SUMMARY_LABEL_WIDTH = "13rem";
-/** Below this width (px) the summary puts its labels on top: the label column plus room for a value. */
-const SUMMARY_SIDE_LABELS_MIN = 448;
-
 /**
  * The read view: what a run asks for, how its audio is transcribed and whether
  * its evidence may be downloaded. Without `transcription` (a page that has not
@@ -140,15 +134,9 @@ export function SettingsSummary({
   ).length;
   const settings = transcriptionSettingsOf(flow.metadata_json);
   const transcribes = flowTakesAudio(flow.steps) || settings.enabled;
-  // Labels go on top wherever the summary itself is narrow (a phone, or a
-  // column beside the chat and the sidebar), not only on a phone; until it
-  // is measured, the screen decides.
+  // The flow read views' label column; on top wherever the summary itself is narrow.
   const rootRef = useRef<HTMLDivElement>(null);
-  const phone = usePhoneScreen();
-  const narrow = useElementWidth(rootRef, (width) => width < SUMMARY_SIDE_LABELS_MIN) ?? phone;
-  const label = narrow
-    ? ({ position: "top" } as const)
-    : ({ position: "start", width: SUMMARY_LABEL_WIDTH } as const);
+  const label = useFlowReadLabel(rootRef);
   // The transcription's own settings under their heading, after the rest, so they scan as one.
   const transcriptionDetails = transcribes && transcription;
   const list = (
@@ -242,7 +230,8 @@ function FormFieldRow({
   onChange,
   onMove,
   onRemove,
-  existingNames
+  existingNames,
+  labelTaken
 }: {
   field: FormFieldDraft;
   /** The field's label, or "Fält 2" until it has one. */
@@ -256,6 +245,8 @@ function FormFieldRow({
   onMove: (delta: -1 | 1) => void;
   onRemove: () => void;
   existingNames: readonly string[];
+  /** Another field of the form has the same label: the run form could not tell them apart. */
+  labelTaken: boolean;
 }) {
   const t = useTranslations();
   const legendId = useId();
@@ -273,6 +264,7 @@ function FormFieldRow({
     <div
       role="group"
       aria-labelledby={legendId}
+      data-field-key={field.key}
       className="border-ax-border rounded-ax-container flex flex-col gap-3 border p-3"
     >
       <div className="flex items-center justify-between gap-2">
@@ -318,6 +310,14 @@ function FormFieldRow({
           })
         }
         autoComplete="off"
+        status={
+          labelTaken
+            ? {
+                type: "warning",
+                message: t("flows_field_label_taken", { label: field.label.trim() })
+              }
+            : undefined
+        }
       />
       <Collapsible
         isOpen={nameOpen}
@@ -574,10 +574,10 @@ export function FlowSettings({
         }
       ])
     );
-    // The first field replaces the empty state, and the add button with it.
-    if (fields.length === 0) {
-      formRef.current?.querySelector<HTMLElement>("[data-add-field] button")?.focus();
-    }
+    // The new row's label is what to fill in first (the empty state and its button may be gone).
+    formRef.current
+      ?.querySelector<HTMLElement>(`[data-field-key="new-${nextKey.current}"] input`)
+      ?.focus();
   }
 
   const moveId = (key: string, direction: "up" | "down") => `${formId}-${key}-${direction}`;
@@ -768,6 +768,15 @@ export function FlowSettings({
                   existingNames={fields
                     .filter((other) => other.key !== field.key)
                     .map((other) => other.name)}
+                  labelTaken={
+                    field.label.trim() !== "" &&
+                    fields.some(
+                      (other) =>
+                        other.key !== field.key &&
+                        other.label.trim().toLocaleLowerCase() ===
+                          field.label.trim().toLocaleLowerCase()
+                    )
+                  }
                   onChange={(next) => setFields((current) => withFieldChanged(current, next))}
                   onRemove={() => {
                     setFields((current) =>

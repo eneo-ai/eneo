@@ -1,6 +1,7 @@
 import { Button } from "@astryxdesign/core/Button";
 import { Dialog } from "@astryxdesign/core/Dialog";
 import { Heading } from "@astryxdesign/core/Heading";
+import { Spinner } from "@astryxdesign/core/Spinner";
 import { useMediaQuery, useMergedRefs } from "@astryxdesign/core/hooks";
 import { Layout, LayoutContent, LayoutFooter, Stack } from "@astryxdesign/core/Layout";
 import { Text } from "@astryxdesign/core/Text";
@@ -52,8 +53,10 @@ type ConfirmSurfaceProps = {
  * from the backdrop, Escape cancels, Cancel focused on open, the destructive
  * action above Cancel on narrow screens) composed from Astryx Dialog, since
  * AlertDialog takes no field and disables its action while it loads. Busy, the
- * confirm button stays enabled (`isLoading` + `isInterruptible`) so it keeps
- * focus, and Cancel waits.
+ * confirm button keeps its label with a spinner beside it (Astryx's
+ * `isLoading` swaps the label for a 14 px spinner, which reads as an empty
+ * button while a slow action runs), stays enabled so it keeps focus, and
+ * ignores a press; Cancel waits.
  *
  * Mounted in <body> on first open and kept after it closes, so Astryx can
  * close it and return focus. The native closed dialog also keeps its content;
@@ -102,8 +105,10 @@ function ConfirmSurface({
       key="action"
       variant={variant === "destructive" ? "destructive" : "primary"}
       label={confirmLabel}
-      isLoading={busy}
-      isInterruptible
+      // Hidden from assistive tech: aria-busy carries the state, and the
+      // spinner's own "Loading" would join the button's name.
+      icon={busy ? <Spinner size="sm" shade="inherit" aria-hidden="true" /> : undefined}
+      aria-busy={busy || undefined}
       width={isSmallScreen ? "100%" : undefined}
       onClick={() => {
         if (!busy) onConfirm();

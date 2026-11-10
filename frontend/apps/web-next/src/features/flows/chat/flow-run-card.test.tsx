@@ -146,7 +146,9 @@ describe("FlowRunCard", () => {
     const dialog = await screen.findByRole("alertdialog", {
       name: messages.flow_runs_cancel_title
     });
-    fireEvent.click(within(dialog).getByRole("button", { name: messages.flow_runs_cancel }));
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: messages.flow_runs_cancel_confirm })
+    );
 
     await waitFor(() =>
       expect(error).toHaveBeenCalledWith(messages.flow_runs_cancel_failed, {

@@ -2,6 +2,7 @@ import { Banner } from "@astryxdesign/core/Banner";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { useLocale, useTranslations } from "use-intl";
 import { useId, type ReactNode, type Ref } from "react";
+import { formatCalendarDate } from "@/lib/calendar-date";
 import { formatBytes } from "@/lib/format";
 import { fieldLabel } from "./run-contract";
 import { inputLabel } from "./run-file-inputs";
@@ -79,7 +80,11 @@ export function StartRunSummary({
           {filesFirst ? files : null}
           {summary.fields.map(({ field, value }) => (
             <MetadataListItem key={field.name} label={fieldLabel(field)}>
-              <span className="break-words">{value}</span>
+              <span className="break-words">
+                {field.type === "date"
+                  ? formatCalendarDate(value, locale, { dateStyle: "long" })
+                  : value}
+              </span>
             </MetadataListItem>
           ))}
           {summary.freeText ? (

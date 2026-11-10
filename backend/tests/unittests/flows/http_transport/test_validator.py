@@ -6,6 +6,7 @@ from pydantic import ValidationError
 from eneo.flows.flow_validators_http import validate_authored_http_config
 from eneo.flows.http_transport.authored_config import (
     SECRET_SENTINEL,
+    CustomHeader,
     HttpAuthApiKey,
     HttpAuthBasicAuth,
     HttpAuthBearer,
@@ -406,3 +407,74 @@ def test_valid_config_returns_empty_error_list(url: str, authenticated: bool) ->
     errors = _validate(cfg)
 
     assert errors == []
+
+
+# --- Header names ---
+
+
+@pytest.mark.parametrize("name", ["X Ärende Nyckel", "X-Ärende", " X-Trace", "X:Trace"])
+def test_a_sent_header_name_that_is_no_http_token_is_refused(name: str) -> None:
+    # httpx refuses such a name only when the run sends it.
+    cfg = _config()
+    cfg.custom_headers = [CustomHeader(name=name, value="1")]
+
+    assert HttpTransportError.INVALID_HEADER_NAME in _validate(cfg)
+
+
+def test_header_names_that_are_http_tokens_or_unsent_are_accepted() -> None:
+    cfg = _config(auth=HttpAuthApiKey(header_name="X-API-Key", key="k"))
+    cfg.custom_headers = [
+        CustomHeader(name="X-Trace_id.1", value="1"),
+        CustomHeader(name="   ", value="left out"),
+    ]
+
+    assert _validate(cfg) == []
+
+
+def test_an_api_key_header_name_must_be_a_token_unless_a_run_fills_it() -> None:
+    refused = _config(auth=HttpAuthApiKey(header_name="API nyckel", key="k"))
+    filled = _config(auth=HttpAuthApiKey(header_name="{{ header }}", key="k"))
+
+    assert HttpTransportError.INVALID_HEADER_NAME in _validate(refused)
+    assert _validate(filled) == []
+
+
+@pytest.mark.parametrize(
+    ("config", "field"),
+    [
+        (
+            {
+                "url": "https://example.org/api",
+                "auth": {"mode": "none"},
+                "custom_headers": [
+                    {"name": "X-Trace", "value": "1", "secret": False},
+                    {"name": "X Ärende", "value": "2", "secret": False},
+                ],
+            },
+            "output_config.custom_headers[1]",
+        ),
+        (
+            {
+                "url": "https://example.org/api",
+                "auth": {"mode": "api_key", "header_name": "API nyckel", "key": "k"},
+            },
+            "output_config.auth.header_name",
+        ),
+    ],
+)
+def test_a_header_name_refusal_names_the_field(
+    config: dict[str, object], field: str
+) -> None:
+    with pytest.raises(BadRequestException) as refused:
+        validate_authored_http_config(
+            step_order=2,
+            label="output_config",
+            config=config,
+            method="POST",
+            direction="output",
+        )
+
+    assert refused.value.context == {
+        "field": field,
+        "http_error": "HTTP_INVALID_HEADER_NAME",
+    }

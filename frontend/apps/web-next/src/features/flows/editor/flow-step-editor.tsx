@@ -6,7 +6,7 @@ import { Heading, Text } from "@astryxdesign/core/Text";
 import { Token } from "@astryxdesign/core/Token";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";
-import { ArrowLeft, ArrowRight, Check, ChevronLeft, ChevronRight } from "lucide-react";
+import { ArrowLeft, Check, ChevronLeft, ChevronRight } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { Suspense, useEffect, useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
@@ -28,9 +28,8 @@ import {
   refreshFlowAssistant,
   updateFlowEditor
 } from "./editor-api";
-import { Anchor, focusAnchor, problemStatus } from "./editor-fields";
+import { Anchor, focusAnchor, problemStatus, TemplateScope } from "./editor-fields";
 import { RecordUploadProvider, useEditorUploads } from "./editor-uploads";
-import { TemplateScope } from "./reference-text-area";
 import {
   describeSaveError,
   FIELD_ANCHORS,
@@ -62,7 +61,7 @@ import {
 } from "./step-draft";
 import { StepInputSection } from "./step-input-section";
 import { stepNameTaken } from "./step-kinds";
-import { inputSourceLabel, outputModeLabel, stepLabel } from "./step-labels";
+import { stepLabel } from "./step-labels";
 import { StepOutputSection } from "./step-output-section";
 import { StepReadOnly } from "./step-read-only";
 import { StepRequestPreviewButton } from "./step-request-preview";
@@ -73,6 +72,7 @@ import {
   sameJson,
   stepConfigOf,
   type AssistantConfig,
+  type EditableStepField,
   type FlowAssistant,
   type FlowPublic,
   type StepConfig
@@ -275,6 +275,47 @@ const ASSISTANT_ANCHORS: Record<keyof AssistantConfig, FieldAnchor> = {
   attachments: "attachments"
 };
 
+/** The editor's label of each field a newer version can change under an edit. */
+const FIELD_LABELS: Record<EditableStepField | keyof AssistantConfig, string> = {
+  user_description: "flow_step_name",
+  input_source: "flow_step_editor_input_source",
+  input_type: "flow_step_input_type",
+  input_contract: "flows_change_field_input_contract",
+  input_bindings: "flow_step_editor_underlag_title",
+  input_config: "flow_step_editor_input_title",
+  output_mode: "flow_step_output_mode",
+  output_type: "flow_step_output_type",
+  output_contract: "flow_step_output_contract",
+  output_config: "flow_step_editor_output_title",
+  output_classification_override: "flow_step_security_classification",
+  review_policy: "flow_step_review_policy",
+  timeout_seconds: "flow_step_editor_timeout",
+  prompt: "flow_step_editor_instruction",
+  completion_model_id: "flow_step_editor_model",
+  completion_model_kwargs: "flows_change_field_assistant_completion_model_kwargs",
+  groups: "knowledge",
+  websites: "knowledge",
+  integration_knowledge_list: "knowledge",
+  attachments: "flow_step_editor_attachments"
+};
+
+/**
+ * The edited fields a newer version changed too: the saved value moved away
+ * from the one the edit started from, and the edit is not that new value.
+ */
+function conflictsOf<T extends object>(
+  bases: Partial<T>,
+  edits: Partial<T>,
+  saved: T
+): (keyof T)[] {
+  return (Object.keys(bases) as (keyof T)[]).filter(
+    (field) =>
+      field in edits &&
+      !sameJson(bases[field], saved[field]) &&
+      !sameJson(edits[field], saved[field])
+  );
+}
+
 type Session = {
   flow: FlowPublic;
   saved: StepConfig;
@@ -320,6 +361,10 @@ function StepEditorSession({
   const [stale, setStale] = useState(false);
   // How many saves have landed here: the save bar says so until the next edit.
   const [savedCount, setSavedCount] = useState(0);
+  // The saved value each edited field started from, to tell when a newer
+  // version (the chat, another tab) changed the same field.
+  const [stepBases, setStepBases] = useState<StepEdits>({});
+  const [assistantBases, setAssistantBases] = useState<AssistantEdits>({});
 
   const latestStep = findStep(latest, stepId);
   // Files uploaded in this edit go again when it ends without saving them.
@@ -381,6 +426,12 @@ function StepEditorSession({
     session !== null && session.dirty && session.flow.draft_revision < latest.draft_revision;
   const dirty = session?.dirty ?? false;
   const effectiveReadOnly = readOnly || latest.published_version != null;
+  // A save reported before the step was published says nothing once it is editable again.
+  const [savedMode, setSavedMode] = useState(effectiveReadOnly);
+  if (savedMode !== effectiveReadOnly) {
+    setSavedMode(effectiveReadOnly);
+    setSavedCount(0);
+  }
   // The page publishes only what is saved, so it holds Publicera back while
   // this is true; leaving the step (or saving it) says false again.
   const unsaved = dirty && !effectiveReadOnly;
@@ -440,6 +491,8 @@ function StepEditorSession({
       setStepEdits({});
       setAssistantEdits({});
       setContractDrafts({});
+      setStepBases({});
+      setAssistantBases({});
       setServerProblems({});
       setFormProblems([]);
       setChecked(false);
@@ -571,6 +624,11 @@ function StepEditorSession({
     const current = session.draft;
     const changed = EDITABLE_STEP_FIELDS.filter((field) => !sameJson(current[field], next[field]));
     if (changed.length === 0) return;
+    const saved = session.saved;
+    setStepBases((bases) => ({
+      ...Object.fromEntries(changed.map((field) => [field, saved[field]])),
+      ...bases
+    }));
     setStepEdits((edits) => ({
       ...edits,
       ...Object.fromEntries(changed.map((field) => [field, next[field]]))
@@ -585,6 +643,15 @@ function StepEditorSession({
 
   function changeAssistant(change: Partial<AssistantConfig>) {
     pin();
+    const saved = assistantSaved;
+    if (saved) {
+      setAssistantBases((bases) => ({
+        ...Object.fromEntries(
+          (Object.keys(change) as (keyof AssistantConfig)[]).map((field) => [field, saved[field]])
+        ),
+        ...bases
+      }));
+    }
     setAssistantEdits((edits) => ({ ...edits, ...change }));
     setServerProblems((problems) => {
       const cleared = new Set(
@@ -594,6 +661,58 @@ function StepEditorSession({
         Object.entries(problems).filter(([anchor]) => !cleared.has(anchor as FieldAnchor))
       );
     });
+  }
+
+  // --- A newer version under the edits -----------------------------------------------
+
+  // Shown while the edits sit on a version that changed the same fields; the
+  // newer-version banner covers the time before "Ladda om".
+  const stepConflicts = newerElsewhere ? [] : conflictsOf(stepBases, stepEdits, session.saved);
+  const assistantConflicts =
+    newerElsewhere || !assistantSaved
+      ? []
+      : conflictsOf(assistantBases, assistantEdits, assistantSaved);
+  const conflictFields = [
+    ...new Set([...stepConflicts, ...assistantConflicts].map((field) => t(FIELD_LABELS[field])))
+  ];
+
+  /** The person keeps their values: the newer ones become what the edits start from. */
+  function keepMine() {
+    const savedStep = session?.saved;
+    const savedAssistant = assistantSaved;
+    // The banner and its buttons go: focus waits where the banner was.
+    flushSync(() => {
+      if (savedStep) {
+        setStepBases((bases) => ({
+          ...bases,
+          ...Object.fromEntries(stepConflicts.map((field) => [field, savedStep[field]]))
+        }));
+      }
+      if (savedAssistant) {
+        setAssistantBases((bases) => ({
+          ...bases,
+          ...Object.fromEntries(assistantConflicts.map((field) => [field, savedAssistant[field]]))
+        }));
+      }
+    });
+    summaryRef.current?.focus();
+    announce(t("flow_step_editor_conflict_kept"));
+  }
+
+  /** The person takes the newer values: their edits of those fields go. */
+  function takeTheirs() {
+    const drop = <T extends object>(record: T, fields: readonly PropertyKey[]) =>
+      Object.fromEntries(Object.entries(record).filter(([field]) => !fields.includes(field))) as T;
+    flushSync(() => {
+      setStepEdits((edits) => drop(edits, stepConflicts));
+      setStepBases((bases) => drop(bases, stepConflicts));
+      // The contract fields show their typed text first: it goes with the edit.
+      setContractDrafts((drafts) => drop(drafts, stepConflicts));
+      setAssistantEdits((edits) => drop(edits, assistantConflicts));
+      setAssistantBases((bases) => drop(bases, assistantConflicts));
+    });
+    summaryRef.current?.focus();
+    announce(t("flow_step_editor_conflict_taken"));
   }
 
   // --- Checks before a save -----------------------------------------------------------
@@ -668,18 +787,11 @@ function StepEditorSession({
   const name = draft.user_description?.trim() || t("flow_step_editor_unnamed");
 
   const header = (
-    <header className="flex flex-col gap-2">
-      <Text type="supporting" size="sm">
-        {t("flow_step_editor_step_number", { order: stepOrder })}
-      </Text>
+    <header className="flex flex-col gap-3">
+      {/* The bar above says "Steg 2 av 5", and Källa and Vad steget gör are rows below. */}
       <Heading level={2} id={headingId}>
         {name}
       </Heading>
-      <div className="flex flex-wrap items-center gap-2">
-        <Token label={inputSourceLabel(draft.input_source, t)} size="sm" />
-        <ArrowRight className="text-ax-text-secondary size-4" aria-hidden="true" />
-        <Token label={outputModeLabel(draft.output_mode, t)} size="sm" color="blue" />
-      </div>
       <StepRequestPreviewButton
         flow={flow}
         stepOrder={stepOrder}
@@ -777,6 +889,31 @@ function StepEditorSession({
                     void refreshFlowAssistant(queryClient, latest.id, session.assistantId);
                   }}
                 />
+              }
+            />
+          )}
+          {conflictFields.length > 0 && (
+            <Banner
+              role="alert"
+              status="warning"
+              title={t("flow_step_editor_conflict_title", {
+                fields: conflictFields.join(", ")
+              })}
+              description={t("flow_step_editor_conflict_description")}
+              collapsible={false}
+              endContent={
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    label={t("flow_step_editor_conflict_keep_mine")}
+                    size="sm"
+                    onClick={keepMine}
+                  />
+                  <Button
+                    label={t("flow_step_editor_conflict_take_theirs")}
+                    size="sm"
+                    onClick={takeTheirs}
+                  />
+                </div>
               }
             />
           )}

@@ -186,6 +186,16 @@ describe("getErrorMessage", () => {
     }
   });
 
+  it("says in Swedish that an uploaded file cannot be read (9027), not the server's English", () => {
+    const error = apiErrorFromResponse(errorResponse(400), {
+      message: "PDF extraction failed. Is this really a PDF?",
+      eneo_error_code: 9027
+    });
+    expect(getErrorMessage(error, translator("sv", sv))).toBe(
+      "Filen går inte att läsa. Öppna den och spara den igen, eller välj en annan fil."
+    );
+  });
+
   it.each([
     ["provider_unavailable", "provider_failure_unavailable"],
     ["provider_timeout", "provider_failure_timeout"],

@@ -483,6 +483,19 @@ class FlowRunErrorDetails(BaseModel):
             "Refused before any audio was sent."
         ),
     )
+    http_status: int | None = Field(
+        default=None,
+        ge=100,
+        le=599,
+        strict=True,
+        description="The status an HTTP step's service answered with, for `typed_io_http_non_success`.",
+    )
+    http_host: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=253,
+        description="The host of the service an HTTP step called, for `typed_io_http_non_success`. Never the path or query.",
+    )
     completed_items: int | None = Field(
         default=None,
         ge=0,
@@ -552,6 +565,13 @@ class FlowRunErrorDetails(BaseModel):
             speaker_service_gap=_SPEAKER_SERVICE_GAPS.get(
                 str(context.get("speaker_service_gap"))
             ),
+            http_status=status
+            if type(status := context.get("http_status")) is int
+            and 100 <= status <= 599
+            else None,
+            http_host=host[:253]
+            if isinstance(host := context.get("http_host"), str) and host
+            else None,
         )
         return details if details.model_dump(exclude_none=True) else None
 

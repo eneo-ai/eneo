@@ -79,7 +79,7 @@ describe("references in an answer", () => {
 
   it("explains a reference the flow cannot read and offers what the step provides", async () => {
     const { composer } = renderAnswer("Utan {{step_1...}} går det inte.");
-    fireEvent.click(screen.getByRole("button", { name: "step_1..." }));
+    fireEvent.click(screen.getByRole("button", { name: "Okänd: step_1..." }));
     const card = await screen.findByRole("dialog", { name: "Referens" });
     expect(within(card).getByText("Flödet kan inte läsa step_1....")).toBeTruthy();
     expect(within(card).getByText("Steg 1: Extrahera ger i stället:")).toBeTruthy();

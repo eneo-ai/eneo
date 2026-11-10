@@ -750,10 +750,13 @@ for (const colorScheme of ["light", "dark"] as const) {
       await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
       await expect(page.getByRole("heading", { level: 2, name: /^(Steg|Steps)$/ })).toBeVisible();
       // The chat panel has settled: its composer (a combobox, as it offers
-      // references on "@"), or why the chat is not available.
+      // references on "@"; a new empty draft's chat starts in Redigera), or
+      // why the chat is not available.
       await expect(
         page
-          .getByRole("combobox", { name: /^(Fråga Flödesassistenten|Ask Flow assistant)$/ })
+          .getByRole("combobox", {
+            name: /^(Beskriv ändringen i flödet|Describe the change to the flow)$/
+          })
           .or(page.getByText(/^(Chatten är inte tillgänglig|The chat is not available)$/))
           .or(page.getByText(/^(Chatten kunde inte öppnas|The chat could not be opened)$/))
           .first()

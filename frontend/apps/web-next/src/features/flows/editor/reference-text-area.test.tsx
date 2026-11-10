@@ -6,7 +6,8 @@ import { expectNoAxeViolations } from "@/test/axe";
 import messages from "@/lib/i18n/messages/sv.json";
 import { renderInApp } from "@/test/render";
 import { makeFlow, makeStep } from "../flow-fixtures";
-import { TemplateScope, TemplateTextArea } from "./reference-text-area";
+import { TemplateScope } from "./editor-fields";
+import { TemplateTextArea } from "./reference-text-area";
 import { variableGroups } from "./step-variables";
 
 const state = vi.hoisted(() => ({ announce: vi.fn() }));
@@ -116,9 +117,113 @@ describe("TemplateTextArea", () => {
         .map((item) => item.textContent)
     ).toEqual([
       expect.stringContaining("Steg 1: Sammanfatta › text"),
-      expect.stringContaining("Steg 3 finns inte")
+      expect.stringContaining("Ett borttaget steg")
     ]);
     await expectNoAxeViolations(container);
+  });
+
+  it("says in words what an unknown name and a step that comes later read", () => {
+    renderInApp(<Field initial="Skriv {{datun}} och {{step_2.output.text}}" />);
+    const reads = screen.getByRole("list", { name: "Texten läser" });
+    expect(
+      within(reads)
+        .getAllByRole("listitem")
+        .map((item) => item.textContent)
+    ).toEqual([expect.stringContaining("Okänd: datun"), expect.stringContaining("Det här steget")]);
+    expect(
+      screen.getByText(
+        "Hittar ingen variabel som heter datun. Välj en i Infoga variabel. " +
+          "Ett steg kan bara läsa tidigare steg."
+      )
+    ).toBeTruthy();
+  });
+
+  it("warns about a reference that is opened and never closed", () => {
+    renderInApp(<Field initial="Läs {{transkribering} och svara" />);
+    expect(
+      screen.getByText(
+        "{{transkribering} saknar }} och skickas som vanlig text. Avsluta med }}, eller välj en i Infoga variabel."
+      )
+    ).toBeTruthy();
+  });
+
+  it("waits with the unclosed warning until the text moves past the reference or is left", () => {
+    renderInApp(<Field initial="" />);
+    const area = screen.getByRole("textbox", { name: "Instruktion" }) as HTMLTextAreaElement;
+    const unclosed = /saknar \}\} och skickas som vanlig text/;
+    // Not on each keystroke of the reference being typed.
+    for (const typed of ["Läs {{", "Läs {{d", "Läs {{dat"]) {
+      type(area, typed);
+      expect(screen.queryByText(unclosed)).toBeNull();
+    }
+    type(area, "Läs {{dat och");
+    expect(screen.getByText(unclosed).textContent).toMatch(/^\{\{dat saknar/);
+    type(area, "Läs {{dat");
+    expect(screen.queryByText(unclosed)).toBeNull();
+    fireEvent.blur(area);
+    expect(screen.getByText(unclosed).textContent).toMatch(/^\{\{dat saknar/);
+  });
+
+  it("keeps warning about an earlier unclosed reference while a new one is typed", () => {
+    renderInApp(<Field initial="" />);
+    const area = screen.getByRole("textbox", { name: "Instruktion" }) as HTMLTextAreaElement;
+    type(area, "Läs {{transkribering} och {{d");
+    expect(screen.getByText(/saknar \}\} och skickas som vanlig text/).textContent).toMatch(
+      /^\{\{transkribering\} saknar/
+    );
+  });
+
+  it("inserts from the menu at the end of a text never focused, apart from the word before", async () => {
+    renderInApp(<Field initial="Sammanfatta" />);
+    const area = screen.getByRole("textbox", { name: "Instruktion" }) as HTMLTextAreaElement;
+    area.setSelectionRange(0, 0);
+    fireEvent.click(screen.getByRole("button", { name: "Infoga variabel" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Dagens datum/ }));
+    await vi.waitFor(() => expect(area.value).toBe("Sammanfatta {{datum}}"));
+  });
+
+  it("inserts from the menu where the caret was when the text lost focus", async () => {
+    renderInApp(<Field initial="Läs noga" />);
+    const area = screen.getByRole("textbox", { name: "Instruktion" }) as HTMLTextAreaElement;
+    area.focus();
+    area.setSelectionRange(3, 3);
+    fireEvent.blur(area);
+    area.setSelectionRange(0, 0);
+    fireEvent.click(screen.getByRole("button", { name: "Infoga variabel" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Dagens datum/ }));
+    await vi.waitFor(() => expect(area.value).toBe("Läs {{datum}} noga"));
+  });
+
+  it("tells where form fields come from when the flow has none, as text and not a row", async () => {
+    renderInApp(<Field initial="" />);
+    fireEvent.click(screen.getByRole("button", { name: "Infoga variabel" }));
+    const menu = await screen.findByRole("dialog", { name: "Infoga variabel" });
+    expect(within(menu).getByText(messages.flow_step_editor_variables_no_fields)).toBeTruthy();
+    // Every row can be reached with the arrows: none is a disabled stand-in.
+    const rows = within(menu).getAllByRole("menuitem");
+    expect(rows.every((row) => row.getAttribute("aria-disabled") !== "true")).toBe(true);
+    expect(rows.map((row) => row.textContent).join(" ")).not.toContain("formulärfält");
+    await expectNoAxeViolations(document.body);
+  });
+
+  it("says nothing about missing form fields when the flow has fields it cannot read", async () => {
+    const withField = makeFlow({
+      ...flow,
+      metadata_json: { form_schema: { fields: [{ name: "text", label: "Text", type: "text" }] } }
+    });
+    renderInApp(
+      <TemplateScope value={{ flow: withField, stepOrder: 2 }}>
+        <TemplateTextArea
+          label="Instruktion"
+          value=""
+          onChange={() => {}}
+          groups={variableGroups({ flow: withField, stepOrder: 2 })}
+        />
+      </TemplateScope>
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Infoga variabel" }));
+    await screen.findAllByRole("menuitem");
+    expect(screen.queryByText(messages.flow_step_editor_variables_no_fields)).toBeNull();
   });
 
   it("warns at the field about fields of a step that answers in text", () => {

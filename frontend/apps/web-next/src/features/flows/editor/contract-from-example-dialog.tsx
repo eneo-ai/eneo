@@ -6,7 +6,7 @@ import { TextArea } from "@astryxdesign/core/TextArea";
 import { Token } from "@astryxdesign/core/Token";
 import { ClipboardPaste } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import {
   contractFromExample,
@@ -65,6 +65,13 @@ export function ContractFromExampleDialog({
   const [open, setOpen] = useState(false);
   const [example, setExample] = useState("");
   const [confirmReplace, setConfirmReplace] = useState(false);
+  const exampleRef = useRef<HTMLTextAreaElement>(null);
+  // The dialog is for pasting an example: open in the field. After Astryx
+  // Dialog's effects (a child's run first), so it has noted the opener to
+  // return to; `hasAutoFocus` would focus before that.
+  useEffect(() => {
+    if (open) exampleRef.current?.focus();
+  }, [open]);
   const reading = example.trim() ? contractFromExample(example) : null;
   const nonVariable = reading?.ok === true && reading.fields.some((field) => !field.variable);
 
@@ -105,6 +112,7 @@ export function ContractFromExampleDialog({
               <LayoutContent>
                 <div className="flex flex-col gap-4">
                   <TextArea
+                    ref={exampleRef}
                     label={t("flow_editor_tools_contract_example_label")}
                     value={example}
                     onChange={setExample}

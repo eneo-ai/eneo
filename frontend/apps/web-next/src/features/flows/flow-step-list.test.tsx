@@ -296,6 +296,47 @@ describe("FlowStepList", () => {
     await expectNoAxeViolations(container);
   });
 
+  it("says on the card that a run takes uploaded files, and whether they are required", () => {
+    const uploads = (required: boolean) =>
+      makeStep(1, {
+        user_description: "Läs underlaget",
+        input_config: {
+          runtime_input: { enabled: true, required, max_files: 3, input_format: "document" }
+        }
+      });
+    const show = (step: ReturnType<typeof makeStep>) =>
+      renderInApp(
+        <FlowStepList
+          flowId="flow-1"
+          draftRevision={4}
+          steps={[step]}
+          canEdit={false}
+          mayEdit={false}
+          headingRef={createRef()}
+          onOpen={vi.fn()}
+          onMove={vi.fn()}
+          onRemove={vi.fn(async () => {})}
+          onAdd={vi.fn()}
+        />
+      );
+    show(uploads(true));
+    expect(screen.getByText("Text och uppladdade dokument, krävs")).toBeTruthy();
+    cleanup();
+    show(uploads(false));
+    expect(screen.getByText("Text och uppladdade dokument")).toBeTruthy();
+    cleanup();
+    show(makeStep(1, { user_description: "Läs underlaget" }));
+    expect(screen.queryByText(/uppladdade/)).toBeNull();
+    cleanup();
+    // A document step always takes the uploads: the type says it, the card adds only "krävs".
+    show({ ...uploads(true), input_type: "document" });
+    expect(screen.getByText("Dokument, krävs")).toBeTruthy();
+    expect(screen.queryByText(/uppladdade/)).toBeNull();
+    cleanup();
+    show({ ...uploads(false), input_type: "document" });
+    expect(screen.getByText("Dokument")).toBeTruthy();
+  });
+
   it("adds what an AI step's prompt reads, and names a prompt reader before a removal", async () => {
     prompts.byAssistant = {
       "assistant-3": "Jämför med {{step_2.output.text}} och {{Sammanfatta}}."
@@ -458,9 +499,9 @@ describe("FlowStepList", () => {
     prompts.suggestions = [suggestionAbout("step-2", "a".repeat(64)), UNUSED_FIELD];
     renderList();
 
-    expect(
-      await screen.findByText("2 förslag kan göra flödet enklare eller billigare")
-    ).toBeTruthy();
+    const summary = await screen.findByText("2 förslag kan göra flödet enklare eller billigare");
+    // A quiet line above the cards that hold the suggestions, not a box of its own.
+    expect(summary.closest(".astryx-banner")).toBeNull();
     const form = screen.getByRole("button", {
       name: "1 förslag om körningens formulär, 1 kan åtgärdas"
     });
