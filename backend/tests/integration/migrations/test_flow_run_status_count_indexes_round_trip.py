@@ -34,6 +34,8 @@ NEW_INDEXES = (
     "ix_flow_runs_flow_user_status",
     "ix_flow_runs_flow_service_status",
 )
+# Held at REVISION: indexes later revisions add.
+_LATER_INDEX_NAMES = frozenset({"ix_flow_live_transcripts_bound_file_ids"})
 
 
 def _alembic_cfg(database_url: str) -> Config:
@@ -96,7 +98,7 @@ def _assert_upgraded(conn, engine) -> None:
         assert valid, name
         assert ddl_text(ddl) == ddl_text(_declared_ddl(name))
     assert all(valid for _, valid, _ in indexes.values())
-    assert index_drift(engine) == {}
+    assert index_drift(engine, introduced_later=_LATER_INDEX_NAMES) == {}
 
 
 def test_upgrade_matches_the_orm(round_trip_db):
@@ -113,7 +115,10 @@ def test_downgrade_drops_exactly_the_new_indexes_and_upgrade_restores_them(
     command.downgrade(cfg, PRE_REVISION)
     after = _flow_run_indexes(conn)
     assert after.keys() == before.keys() - set(NEW_INDEXES)
-    assert index_drift(engine, introduced_later=NEW_INDEXES) == {}
+    assert (
+        index_drift(engine, introduced_later=_LATER_INDEX_NAMES | set(NEW_INDEXES))
+        == {}
+    )
 
     command.upgrade(cfg, REVISION)
     _assert_upgraded(conn, engine)

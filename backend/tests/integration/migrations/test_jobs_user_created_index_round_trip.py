@@ -30,7 +30,6 @@ REVISION = "202611030830"
 INDEX = "ix_jobs_user_created"
 DEFINITION = f"CREATE INDEX {INDEX} ON public.jobs USING btree (user_id, created_at)"
 FLOWS_HEAD = "202611021200"  # origin/feat/flows-core-integration before the merge
-HEAD = "202611051000"
 # Develop's two migrations after 202611021100 and the widget tables, which the
 # Flows head never had.
 DEVELOP_BRANCH_DOWN = "202611031206@202611021100"
@@ -192,10 +191,14 @@ def _jobs_poll_indexes(conn) -> list[tuple[str, bool]]:
         return cursor.fetchall()
 
 
+def _heads(config) -> set[str]:
+    return set(ScriptDirectory.from_config(config).get_heads())
+
+
 def test_the_history_has_one_head(migrated_db):
     _conn, config = migrated_db
 
-    assert ScriptDirectory.from_config(config).get_heads() == [HEAD]
+    assert len(_heads(config)) == 1
 
 
 def test_a_fresh_database_migrates_to_head_with_the_index(migrated_db):
@@ -203,7 +206,7 @@ def test_a_fresh_database_migrates_to_head_with_the_index(migrated_db):
 
     command.upgrade(config, "head")
 
-    assert _stamps(conn) == {HEAD}
+    assert _stamps(conn) == _heads(config)
     assert _jobs_poll_indexes(conn) == [(DEFINITION, True)]
 
 
@@ -223,7 +226,7 @@ def test_the_merge_revisions_round_trip(migrated_db):
     assert _jobs_poll_indexes(conn) == []
 
     command.upgrade(config, "head")
-    assert _stamps(conn) == {HEAD}
+    assert _stamps(conn) == _heads(config)
     assert _jobs_poll_indexes(conn) == [(DEFINITION, True)]
 
 
@@ -241,7 +244,7 @@ def test_a_flows_database_with_the_branch_index_keeps_one_copy(migrated_db):
 
     command.upgrade(config, "head")
 
-    assert _stamps(conn) == {HEAD}
+    assert _stamps(conn) == _heads(config)
     assert _jobs_poll_indexes(conn) == [(DEFINITION, True)]
     with conn.cursor() as cursor:
         cursor.execute("SELECT to_regclass(%s)::oid::int", (INDEX,))

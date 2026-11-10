@@ -38,7 +38,11 @@ NEW_INDEXES = (
 # ORM-declared indexes that later revisions add, absent at REVISION and checked by
 # their own revision's test (202610241100: test_flow_run_status_count_indexes_round_trip).
 _LATER_INDEX_NAMES = frozenset(
-    {"ix_flow_runs_flow_user_status", "ix_flow_runs_flow_service_status"}
+    {
+        "ix_flow_runs_flow_user_status",
+        "ix_flow_runs_flow_service_status",
+        "ix_flow_live_transcripts_bound_file_ids",
+    }
 )
 REPLACED_INDEX = "ix_flow_runs_flow_id"
 REPLACED_DEFINITION = f"CREATE INDEX {REPLACED_INDEX} ON flow_runs (flow_id)"
