@@ -19,6 +19,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.data_retention.application.conversation_history_retention_task import (
     CONVERSATION_HISTORY_TASK,
+    ConversationHistoryRetentionTask,
+)
+from eneo.data_retention.application.conversation_retention import (
+    conversation_page_allocation,
 )
 from eneo.data_retention.application.retention_health import (
     RetentionHealthStatus,
@@ -703,6 +707,70 @@ async def test_a_names_read_stopped_by_the_statement_timeout_is_not_healthy(
         lease_stale_after=timedelta(hours=1),
     )
     assert health.status is not RetentionHealthStatus.HEALTHY
+
+
+async def test_the_names_read_gets_only_the_cap_the_questions_left(
+    retention_session: AsyncSession, test_tenant, admin_user, completion_model_factory
+):
+    """The overdue row cap is shared: one overdue question and two overdue
+    names under a cap of two count two, incomplete.
+
+    Mutant: the names read gets the whole cap instead of what is left.
+    """
+    model_id = (await completion_model_factory(retention_session, "gpt-4")).id
+    space = await _space(retention_session, tenant_id=test_tenant.id)
+    assistant = await _assistant(
+        retention_session,
+        model_id,
+        space=space,
+        user_id=admin_user.id,
+        days=30,
+    )
+    conversations = [
+        (
+            await _conversation(
+                retention_session,
+                user_id=admin_user.id,
+                assistant_id=assistant.id,
+                created_days_ago=60,
+                named_days_ago=60,
+            )
+        )[0]
+        for _ in range(2)
+    ]
+    retention_session.add(
+        Questions(
+            question="Question",
+            answer="Answer",
+            num_tokens_question=1,
+            num_tokens_answer=1,
+            tenant_id=test_tenant.id,
+            assistant_id=assistant.id,
+            session_id=conversations[0],
+            created_at=_ago(60),
+            updated_at=_ago(60),
+        )
+    )
+    await retention_session.flush()
+    task = ConversationHistoryRetentionTask(
+        retention_session,
+        allocation=conversation_page_allocation(
+            unit_rows=4,
+            chunk_rows=30,
+            execution_rows=1000,
+            execution_files=10,
+            family_rows=5,
+        ),
+        now=datetime.now(timezone.utc),
+        overdue_window=timedelta(days=1),
+        overdue_rows=2,
+        overdue_owner_rows=1000,
+        gather_seconds=1.0,
+    )
+
+    overdue = await task.overdue()
+
+    assert (overdue.count, overdue.complete) == (2, False)
 
 
 async def test_names_and_feedback_are_cleared_under_a_standing_backlog(
