@@ -55,9 +55,12 @@ from eneo.flows.domain.transcript_words import LocatedWord, locate_words
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.flows.flow_run_input_envelope import (
+    read_live_transcript_ids,
     read_max_speakers_decision,
     read_semantic_flow_input_payload,
+    read_single_recording_steps,
     read_speaker_labels_choice,
+    read_streamed_steps,
 )
 from eneo.flows.flow_run_step_inputs import FlowRunStepInputFiles
 from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
@@ -383,8 +386,18 @@ class FlowTranscriptRegenerationService:
             tenant_id=self.user.tenant_id,
             step_results=step_results,
         )
+        # The files keep how they were recorded, so the child reports it and a
+        # run started again from it sends the same; the transcript is imported.
+        live_transcript_ids = read_live_transcript_ids(source.input_payload_json)
+        single_recording_steps = read_single_recording_steps(source.input_payload_json)
+        streamed_steps = read_streamed_steps(source.input_payload_json)
         step_inputs = {
-            step.step_id: FlowRunStepInputFiles(file_ids=tuple(files[step.id]))
+            step.step_id: FlowRunStepInputFiles(
+                file_ids=tuple(files[step.id]),
+                live_transcript_id=live_transcript_ids.get(step.step_id),
+                single_recording=step.step_id in single_recording_steps,
+                streamed=step.step_id in streamed_steps,
+            )
             for step in step_results
             if step.id is not None and files.get(step.id)
         }

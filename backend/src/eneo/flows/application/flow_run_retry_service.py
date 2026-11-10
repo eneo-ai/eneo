@@ -326,21 +326,16 @@ class FlowRunRetryService:
                 source.input_payload_json
             ),
             expected_flow_version=source.flow_version,
-            # A step the retry executes again asks for the live text it asked for
-            # before; a reused step keeps its transcript and asks for none.
+            # Each step's files keep how they were recorded and the live text
+            # the source run asked for, so the child reports them and a run
+            # started again from it sends them again. A reused step keeps its
+            # transcript: the prefix seed, not these facts, decides that.
             step_inputs={
                 step.step_id: FlowRunStepInputFiles(
                     file_ids=tuple(files[step.id]),
-                    live_transcript_id=(
-                        live_transcript_ids.get(step.step_id)
-                        if step.step_order >= first_executed_step_order
-                        else None
-                    ),
+                    live_transcript_id=live_transcript_ids.get(step.step_id),
                     single_recording=step.step_id in single_recording_steps,
-                    streamed=(
-                        step.step_id in streamed_steps
-                        and step.step_order >= first_executed_step_order
-                    ),
+                    streamed=step.step_id in streamed_steps,
                 )
                 for step in steps
                 if files.get(step.id)

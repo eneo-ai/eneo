@@ -25,6 +25,7 @@ from eneo.flows.domain.transcript_corrections import (
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
+from eneo.flows.flow_run_step_inputs import FlowRunStepInputFiles
 from eneo.flows.runtime.speaker_mapping_runtime import (
     mapping_to_names,
     validate_speaker_mapping,
@@ -362,6 +363,38 @@ async def test_null_revision_can_regenerate_an_unedited_transcript(context):
     assert seed.provenance["correction_revision"] is None
     assert seed.transcript.text.count("[Överlappande tal – osäker talare]") == 3
     context.service.corrections_repo.copy_snapshot.assert_not_awaited()
+
+
+async def test_regeneration_keeps_how_the_recording_was_submitted(context):
+    """The child reports how the source's files were recorded, so a run started
+    again from it sends the same; it imports the transcript either way."""
+    recorded = context.results[0]
+    parts, transcript_id = (uuid4(), uuid4()), uuid4()
+    context.service.run_repo.list_current_step_input_file_ids_by_step_result_id.return_value = {
+        recorded.id: list(parts)
+    }
+    context.source.input_payload_json = {
+        "question": "Meeting",
+        "step_inputs": {
+            str(recorded.step_id): {
+                "streamed": True,
+                "live_transcript_id": str(transcript_id),
+                "single_recording": True,
+            }
+        },
+    }
+
+    await context.service.regenerate(**context.request)
+
+    inputs = context.service.run_service.create_run.await_args.kwargs["step_inputs"]
+    assert inputs == {
+        recorded.step_id: FlowRunStepInputFiles(
+            file_ids=parts,
+            live_transcript_id=transcript_id,
+            single_recording=True,
+            streamed=True,
+        )
+    }
 
 
 @pytest.mark.parametrize("label", [None, "Ärende 42"])

@@ -153,21 +153,34 @@ async def test_reuses_completed_prefix_and_preserves_creation_inputs(context):
     assert context.source.status == "failed"
 
 
-async def test_retry_preserves_live_transcript_for_steps_that_execute_again(context):
+async def test_retry_keeps_how_each_steps_audio_was_submitted(context):
+    """A reused step keeps its streamed audio and live transcript too: the child
+    run reports them, so a run started again from it sends them again. Whether
+    a step executes or binds is the prefix seed's to decide."""
     completed, failed = context.results[0], context.results[2]
     completed_live, failed_live = uuid4(), uuid4()
     context.files[completed.id] = [uuid4()]
     context.files[failed.id] = [uuid4()]
     context.source.input_payload_json["step_inputs"] = {
-        str(completed.step_id): {"live_transcript_id": str(completed_live)},
-        str(failed.step_id): {"live_transcript_id": str(failed_live)},
+        str(completed.step_id): {
+            "streamed": True,
+            "live_transcript_id": str(completed_live),
+        },
+        str(failed.step_id): {"streamed": True, "live_transcript_id": str(failed_live)},
     }
 
     await context.service.retry_from_failed_step(**context.request)
 
     args = context.service.run_service.create_run.await_args.kwargs
-    assert args["step_inputs"][failed.step_id].live_transcript_id == failed_live
-    assert args["step_inputs"][completed.step_id].live_transcript_id is None
+    assert [
+        (
+            args["step_inputs"][step].streamed,
+            args["step_inputs"][step].live_transcript_id,
+        )
+        for step in (completed.step_id, failed.step_id)
+    ] == [(True, completed_live), (True, failed_live)]
+    reused = args["prefix_seed"].reused_step_ids
+    assert completed.step_id in reused and failed.step_id not in reused
     assert args["input_payload_json"] == {"question": "Summarize"}
 
 

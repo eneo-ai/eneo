@@ -12,7 +12,7 @@ from dependency_injector import providers
 
 from eneo.database.database import sessionmanager
 from eneo.files.transcriber import TranscribedAudio
-from eneo.flows.api import flow_run_lifecycle_router
+from eneo.flows.api import flow_run_lifecycle_router, flow_run_retry_router
 from eneo.flows.application.flow_run_service import FlowRunService
 from eneo.flows.flow_input_limits import resolve_flow_input_limits
 from eneo.flows.flow_run_step_inputs import FlowRunStepInputFiles
@@ -101,7 +101,7 @@ async def live_recording(client, flow_process_auth_headers, db_container, monkey
 
 @asynccontextmanager
 async def _executed(
-    db_container, case, run_id: UUID, registry
+    db_container, case, run_id: UUID, registry, *, completion_service=None
 ) -> AsyncIterator[tuple[object, Container, dict[str, object]]]:
     """Run ``run_id`` in a worker whose batch transcription is ``registry``."""
     user, tenant, flow_id = case.user, case.tenant, case.flow.flow_id
@@ -124,7 +124,7 @@ async def _executed(
             flow_run_terminalizer=worker.flow_run_terminalizer(),
             flow_version_repo=worker.flow_version_repo(),
             space_repo=worker.tenant_scoped_space_repo(),
-            completion_service=AsyncMock(),
+            completion_service=completion_service or AsyncMock(),
             file_repo=worker.file_repo(),
             file_content_loader=worker.file_content_loader(),
             file_service=worker.file_service(),
@@ -602,6 +602,116 @@ async def test_the_run_graph_says_why_while_the_transcription_model_works(
     assert (node["run_status"], node["live_fallback_reason"]) == (
         "completed",
         "not_received",
+    )
+
+
+@pytest.mark.parametrize("usable", [True, False])
+async def test_a_run_started_again_from_a_retry_keeps_its_streamed_audio(
+    usable, client, flow_process_auth_headers, db_container, monkeypatch
+):
+    """A retry reuses the completed streamed step of a run whose next step
+    failed. Its steps say how that audio was submitted, so a run started again
+    from them uses the live text without the transcription model, or says why
+    it cannot. An unusable transcript is one the run named but could not bind."""
+    headers = dict(flow_process_auth_headers)
+    flow = await _published_flow(
+        client,
+        headers,
+        db_container,
+        wizard={"transcription_diarization": False},
+        summarize=True,
+    )
+    for router in (flow_run_lifecycle_router, flow_run_retry_router):
+        monkeypatch.setattr(
+            router, "dispatch_flow_run_recoverably_after_commit", AsyncMock()
+        )
+    file_id = await _upload_second_of_silence(client, headers, flow)
+    async with db_container() as container:
+        user, tenant = container.user(), container.tenant()
+        live_id = await LiveTranscriptRepository(container.session()).create(
+            LiveTranscriptionGrant(
+                tenant_id=user.tenant_id,
+                user_id=user.id,
+                flow_id=UUID(flow.flow_id),
+                flow_version=1,
+                step_id=UUID(flow.step_id),
+                model_id=UUID(flow.model_id),
+                recording_id="recording_retry",
+                max_seconds=60,
+            ),
+            text="Live text.",
+            segments=[{"text": "Live text.", "start": 0.0, "end": 1.0}],
+            received_audio_seconds=1.0,
+        )
+    if not usable:
+        live_id = uuid4()
+    case = SimpleNamespace(flow=flow, user=user, tenant=tenant)
+    base = f"/api/v1/flows/{flow.flow_id}"
+
+    async def run(step_input: dict[str, object], key: str) -> list[dict]:
+        created = await client.post(
+            f"{base}/runs/",
+            headers={**headers, "Idempotency-Key": key},
+            json={"step_inputs": {flow.step_id: step_input}},
+        )
+        assert created.status_code == 201, created.text
+        run_id = UUID(created.json()["id"])
+        batch = AsyncMock(return_value=TranscribedAudio("Batch text.", 1.0))
+        async with _executed(
+            db_container,
+            case,
+            run_id,
+            SimpleNamespace(transcribe_from_filepath=batch),
+            completion_service=AsyncMock(
+                get_response=AsyncMock(side_effect=RuntimeError("model down"))
+            ),
+        ) as (_, _, outcome):
+            assert outcome["status"] == "failed", outcome
+        assert batch.await_count == (0 if usable else 1)
+        steps = await client.get(f"{base}/runs/{run_id}/steps/", headers=headers)
+        assert steps.status_code == 200, steps.text
+        assert [step["status"] for step in steps.json()] == ["completed", "failed"]
+        transcribed = steps.json()[0]
+        assert (
+            transcribed["transcript_origin"],
+            transcribed["live_fallback_reason"],
+        ) == (("live", None) if usable else ("batch", "not_found"))
+        return [run_id, transcribed]
+
+    source_id, _ = await run(
+        {
+            "file_ids": [str(file_id)],
+            "streamed": True,
+            "live_transcript_id": str(live_id),
+        },
+        f"source-{usable}",
+    )
+    retried = await client.post(
+        f"{base}/runs/{source_id}/retry/",
+        headers={**headers, "Idempotency-Key": f"retry-{usable}"},
+    )
+    assert retried.status_code == 201, retried.text
+    assert retried.json()["reused_step_orders"] == [1]
+    child_id = retried.json()["run"]["id"]
+    child_steps = await client.get(f"{base}/runs/{child_id}/steps/", headers=headers)
+    assert child_steps.status_code == 200, child_steps.text
+    reused = child_steps.json()[0]
+    assert (
+        reused["runtime_input_streamed"],
+        reused["runtime_input_live_transcript_id"],
+    ) == (True, str(live_id))
+    graph = await client.get(f"{base}/graph/?run_id={child_id}", headers=headers)
+    (node,) = [n for n in graph.json()["nodes"] if n["id"] == flow.step_id]
+    assert node["live_fallback_reason"] == (None if usable else "not_found")
+
+    # A run started again from the retry's steps, as a client does it.
+    await run(
+        {
+            "file_ids": reused["runtime_input_file_ids"],
+            "streamed": reused["runtime_input_streamed"],
+            "live_transcript_id": reused["runtime_input_live_transcript_id"],
+        },
+        f"again-{usable}",
     )
 
 

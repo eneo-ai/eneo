@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -7,6 +8,8 @@ import pytest
 
 from eneo.database.tables.flow_tables import FlowLiveTranscripts
 from eneo.flows.api.flow_models import StepRunInput
+from eneo.flows.domain.flow import FlowStepResult
+from eneo.flows.domain.transcript_regeneration import FlowRunPrefixSeed
 from eneo.flows.flow_run_step_inputs import FlowRunStepInputFiles
 from eneo.main.exceptions import BadRequestException
 from tests.unittests.flows.test_flow_run_service import (
@@ -124,11 +127,13 @@ async def _submit(
     key=None,
     single_recording=False,
     streamed=True,
+    prefix_seed=None,
 ):
     return await case.service.create_run(
         flow_id=case.flow.id,
         input_payload_json=None,
         idempotency_key=key,
+        prefix_seed=prefix_seed,
         step_inputs={
             case.step.id: FlowRunStepInputFiles(
                 file_ids=tuple(
@@ -267,6 +272,34 @@ async def test_a_live_transcript_bound_to_other_files_is_not_rebound(admission):
     await _submit(case)
     assert _recorded(case)["live_transcript_refusal"] == "already_bound"
     assert case.row.bound_file_ids == [case.files[1].id]
+
+
+async def test_a_child_run_keeps_a_reused_steps_live_transcript_without_binding_it(
+    admission,
+):
+    """A retry's reused step reports how its audio was submitted. Its transcript
+    is imported, so admission binds nothing for it and records no refusal."""
+    case = admission
+    case.row.bound_file_id = case.files[1].id
+    case.row.bound_file_ids = [case.files[1].id]
+    reused = cast(FlowStepResult, SimpleNamespace(step_id=case.step.id))
+
+    await _submit(
+        case,
+        prefix_seed=FlowRunPrefixSeed(
+            source_run_id=uuid4(),
+            results=(reused,),
+            provenance={"version": 1},
+            kind="reused_prefix",
+        ),
+    )
+
+    assert _recorded(case) == {
+        "streamed": True,
+        "live_transcript_id": str(case.row.id),
+    }
+    assert case.row.bound_file_ids == [case.files[1].id]
+    case.repo.seed_validated_prefix.assert_awaited_once()
 
 
 async def test_live_transcript_binds_and_same_file_retry_is_accepted(admission):

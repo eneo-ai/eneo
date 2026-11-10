@@ -541,7 +541,18 @@ class FlowRunService:
                 flow_id=flow_id, input_payload_json=payload
             )
             prepared = replace(prepared, input_payload_json=payload)
-        live_transcript_ids = read_live_transcript_ids(prepared.input_payload_json)
+        # A step a child run imports keeps its transcript: the live transcript
+        # it reports is not bound again, for a step that does not execute.
+        reused_step_ids: frozenset[UUID] = (
+            prefix_seed.reused_step_ids if prefix_seed is not None else frozenset()
+        )
+        live_transcript_ids = {
+            step_id: transcript_id
+            for step_id, transcript_id in read_live_transcript_ids(
+                prepared.input_payload_json
+            ).items()
+            if step_id not in reused_step_ids
+        }
         if live_transcript_ids:
             file_ids_by_step = {
                 projection["step_id"]: projection["file_ids"]
