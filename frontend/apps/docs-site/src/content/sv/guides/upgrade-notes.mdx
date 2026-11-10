@@ -1,584 +1,375 @@
 ---
 title: Uppgraderingsanteckningar
-translationSource: guides/upgrade-notes.mdx@7754b2ab748c
+translationSource: guides/upgrade-notes.mdx@3d14dbcfe1ef
 ---
 
 import { Callout } from "nextra/components";
 
 # Uppgraderingsanteckningar
 
-Den här sidan är till för driftansvariga, administratörer och API-konsumenter som uppgraderar från 2.3 till nästa version. Den listar varje ändring sedan 2.3 som någon måste agera på, eller känna till. Varje post säger vad som ändras, varför, vem som agerar, vad som ska göras före, under och efter uppgraderingen, hur resultatet kontrolleras och hur man går tillbaka.
+Den här sidan är till för driftansvariga, administratörer och API-konsumenter som uppgraderar från 2.3 till nästa version. Gå igenom checklistan först och läs sedan tabellen för ditt område: "Inget" i kolumnen Gör kräver inget av dig, och en länkad ändring har ett detaljavsnitt längre ned.
 
 Den allmänna uppdateringsrutinen finns i [Uppgradera och återställ](/guides/deployment#uppgradera-och-återställ). Ändringarna i 2.3.0–2.3.2 finns i deras [versionsanteckningar](https://github.com/eneo-ai/eneo/releases); ändringar fram till 2.2 finns i [Uppgradera till 2.2.0](/guides/upgrade-2-2-0) och [Uppgradera till 1.7.0](/guides/upgrade-1-7-0).
 
-## Före uppgraderingen [#before-you-upgrade]
+## Gör detta före uppgraderingen [#before-you-upgrade]
 
 <Callout type="warning">
-  Den här versionen tömmer det lagrade innehållet i varje befintlig frågelogg och tar bort de loggar som ingen fråga hänvisar till, och det går inte att ångra. Ta en databassäkerhetskopia och stoppa varje backend och worker av den tidigare versionen innan migreringarna körs. Se [Frågeloggar töms](#question-logs-emptied).
+  Den här versionen tömmer det lagrade innehållet i varje befintlig frågelogg och tar bort de loggar som ingen fråga hänvisar till. Det går inte att ångra. Ta en databassäkerhetskopia och stoppa varje backend och worker av den tidigare versionen innan migreringarna körs.
 </Callout>
 
-Kontrollera åtminstone detta; varje punkt kan hindra backend från att starta, stoppa inloggningen eller förlora data:
+Varje punkt kan hindra backend från att starta, stoppa inloggningen eller förlora data:
 
-- En säkerhetskopia med `pg_dump`, och varje gammal backend och worker stoppad. Se [Frågeloggar töms](#question-logs-emptied).
-- Objektlagringen ger de tre bucket-behörigheterna, bucketen har aldrig haft versionshantering (inte ens pausad) och Object Lock är avstängt. Se [Objektlagringen får inte behålla gamla versioner](#object-storage-versioning).
-- `UPLOAD_TMP_DIR` ligger på ett lokalt filsystem. Se [`UPLOAD_TMP_DIR` måste vara ett lokalt filsystem](#upload-tmp-dir-local).
-- `BROWSER_SESSION_MAX_AGE`, om den är satt, är minst `JWT_EXPIRY_TIME`; utan den håller React-appen personer inloggade i upp till 30 dagar. Se [Utloggning avslutar sessionen på servern](#server-side-sessions).
-- `DEFAULT_USER_PASSWORD`, om den är satt, har minst 12 tecken och högst 72 byte. Se [Lösenordens livscykel](#password-lifecycle).
-- OIDC-punkterna nedan. Se [Inloggning med OIDC](#oidc-checklist).
-- `TRUSTED_PROXY_COUNT` stämmer med antalet proxyer. Se [`TRUSTED_PROXY_COUNT` räknar proxyer exakt](#trusted-proxy-count).
-- Den nya routern för webbappen i referensfilen för Compose. Se [React-webbappen körs på huvudvärden](#react-web-app-main-host).
-- Användarna har fått veta att namn och feedbackkommentarer på konversationer som är äldre än sin gallringstid tas bort den första natten. Se [Konversationers namn och feedbacktext följer gallringstiden](#names-and-feedback-follow-retention).
-- Driftstopp för `db-init`: migreringen `202611091200` skriver om varje rad i `sessions` och låser tabellen medan den körs, och flera migreringar bygger index samtidigt med drift, vilket tar längre tid i stora databaser. Om `db-init` avbryts, kör den igen.
+1. Ta en säkerhetskopia med `pg_dump` och stoppa varje gammal backend och worker. Se [Frågeloggar töms](#question-logs-emptied).
+2. Objektlagringen ger de tre bucket-behörigheterna, har aldrig haft versionshantering (inte ens pausad) och Object Lock är avstängt. Se [Objektlagring](#object-storage-versioning).
+3. `UPLOAD_TMP_DIR` ligger på ett lokalt filsystem. Se [`UPLOAD_TMP_DIR`](#upload-tmp-dir-local).
+4. `BROWSER_SESSION_MAX_AGE`, om den är satt, är minst `JWT_EXPIRY_TIME`; utan den håller React-appen personer inloggade i upp till 30 dagar. Se [Sessioner](#server-side-sessions).
+5. `DEFAULT_USER_PASSWORD`, om den är satt, har minst 12 tecken och högst 72 byte, annars misslyckas db-init när den skapar standardanvändaren. Se [Lösenordens livscykel](#password-lifecycle).
+6. Gå igenom [OIDC-checklistan](#oidc-checklist).
+7. `TRUSTED_PROXY_COUNT` stämmer med antalet proxyer. Se [`TRUSTED_PROXY_COUNT`](#trusted-proxy-count).
+8. Ändra den nya routern för webbappen i referensfilen för Compose. Se [React-webbappen](#react-web-app-main-host).
+9. Berätta för användarna att namn och feedbackkommentarer på konversationer som är äldre än sin gallringstid tas bort den första natten. Se [Namn och feedbacktext](#names-and-feedback-follow-retention).
+10. Planera driftstopp för `db-init`: migreringen `202611091200` låser `sessions` medan den skriver om varje rad, och flera migreringar bygger index samtidigt med drift. Om `db-init` avbryts, kör den igen. Se [Migreringen `202611091200`](#sessions-migration).
 
-**Gå tillbaka till 2.3:** läs tillbaka säkerhetskopian från `pg_dump` som togs före `db-init`, tillsammans med en matchande ögonblicksbild av objektlagringen. En nedgradering av schemat stannar vid migreringen `202610291900` ("Cannot discard approved Skill reference history") så snart en godkänd Skill-version hänvisar till en annan Skill, och en nedgradering tar aldrig tillbaka tömda eller borttagna loggar, tömda namn eller omskrivna granskningsposter.
+**Gå tillbaka till 2.3:** läs tillbaka säkerhetskopian från `pg_dump` som togs före `db-init`, tillsammans med en matchande ögonblicksbild av objektlagringen. En nedgradering av schemat stannar vid migreringen `202610291900` ("Cannot discard approved Skill reference history") så snart en godkänd Skill-version hänvisar till en annan Skill. En nedgradering tar aldrig tillbaka tömda eller borttagna loggar, tömda namn eller omskrivna granskningsposter.
 
 ## Inloggning med OIDC: vad en befintlig installation ska kontrollera [#oidc-checklist]
 
-Nästa version ändrar hur varje OIDC-inloggning verifieras och vilket konto den öppnar. Hitta din uppsättning nedan; varje rad länkar till posten med detaljerna. "Lagrade inställningar" betyder att leverantören är registrerad i Eneo (`FEDERATION_ENABLED=true`); "miljöinställningar" betyder variablerna `OIDC_*` (`FEDERATION_ENABLED=false`). Båda gäller installationer med en eller flera organisationer.
+Diagrammet visar en inloggning och, på prickade linjer, var en befintlig installation kan fastna. *Ett nytt klient-id kräver ett fönster bara med `sub` per klient.
 
-**Alla leverantörer** (Entra ID, MobilityGuard, Keycloak, Okta, Auth0, Zitadel eller annan OIDC-leverantör):
+```mermaid
+flowchart LR
+  accTitle: OIDC-inloggning efter uppgraderingen
+  accDescr: Webbläsaren startar inloggningen i backend, som håller transaktionen i Redis; leverantören ger discovery och nycklar; backends callback kontrollerar ID-token och bindningen och skriver en sessionsrad. Inloggningen stannar när Redis inte är 6.2 eller nyare eller inte svarar inom 2 sekunder, när discovery, nycklar eller token-endpoint inte nås inom 5 sekunder, när iss, nonce, en asymmetrisk nyckel eller kid inte stämmer, när binding_verifier inte stämmer, eller när en ny issuer, klient-id eller subject-claim kommer utan fönster.
+  browser["Webbläsare"] --> start["Backend, start\ntransaktion i Redis"]
+  start --> provider["Leverantör\ndiscovery · nycklar"]
+  provider --> callback["Backend, callback\nkontroll av ID-token · bindning"]
+  callback --> session["Sessionsrad"]
+  start -.- redis["Redis 6.2+ inom 2 s\nannars 503 oidc_login_unavailable"]
+  provider -.- reach["Discovery, nycklar, tokenadress\nnåbara inom 5 s"]
+  callback -.- token["iss · nonce\nasymmetrisk nyckel · kid"]
+  callback -.- verifier["binding_verifier stämmer inte: 400\nnär en challenge skickades"]
+  callback -.- conflict["Ny utfärdare, klient-id* eller subjektsanspråk\nutan fönster: 403 identity_conflict"]
+```
 
-- Alla backend-repliker når samma Redis, version 6.2 eller senare, inom 2 sekunder. Se [Redis krävs för OIDC-inloggning](#redis-required-for-sign-in).
-- Leverantören returnerar `nonce`, signerar ID-token med en asymmetrisk nyckel (inte `HS256`) och sätter `kid` i tokenhuvudet. Se [Varje OIDC-inloggning verifieras strikt](#strict-relying-party).
-- Discovery och signeringsnycklarna nås från varje backend, discovery-adressen anger din egen katalog (ingen platshållare `{tenantid}`) och serverklockorna är synkroniserade. Se [Discovery och signeringsnycklar måste förbli nåbara](#discovery-and-jwks-reachable) och [En utfärdare med platshållare nekas](#templated-issuer-refused).
-- Frontend och alla backend-repliker byts ut samtidigt; inloggningar som pågår under uppgraderingen måste startas om. Se [Driftsätt frontend och backend tillsammans](#deploy-frontend-and-backend-together).
-- Konton behöver inget vid uppgraderingen: varje befintligt konto binds till sin identitet hos leverantören via e-post vid nästa inloggning, och sessioner förblir giltiga. Se [Konton binds till en identitet hos leverantören](#account-binding).
+"Lagrade inställningar" betyder att leverantören är registrerad i Eneo (`FEDERATION_ENABLED=true`); "miljöinställningar" betyder variablerna `OIDC_*` (`FEDERATION_ENABLED=false`).
+
+**Alla leverantörer:**
+
+- Alla backend-repliker når samma Redis. [Redis](#redis-required-for-sign-in)
+- ID-token signeras asymmetriskt (inte `HS256`); klockorna är synkroniserade. [Strikt verifiering](#strict-relying-party)
+- Discovery-adressen anger din egen katalog (ingen `{tenantid}`). [Platshållare](#templated-issuer-refused), [Nåbarhet](#discovery-and-jwks-reachable)
+- Byt ut frontend och alla backend-repliker samtidigt; pågående inloggningar startas om. [Driftsätt tillsammans](#deploy-frontend-and-backend-together)
+- Konton behöver inget: varje konto binds via e-post vid nästa inloggning, och sessioner förblir giltiga. [Kontobindning](#account-binding)
 
 **Leverantörer som ger varje klient ett eget `sub`** (Entra ID; alla leverantörer med parvisa subjekt):
 
-- Lagrade inställningar: direkt efter uppgraderingen, innan någon loggar in, sätt subjektsanspråket till ett stabilt värde (för Entra ID `oid`). Se [Konton binds till en identitet hos leverantören](#account-binding).
-- Miljöinställningar använder alltid `sub`. Ändra aldrig `OIDC_CLIENT_ID` utan ett migreringsfönster, eller flytta först inställningarna in i Eneo. Se [Byta klient-id](/guides/oidc-federation#changing-the-client-id).
+- Lagrade inställningar: direkt efter uppgraderingen, innan någon loggar in, sätt subjektsanspråket (för Entra ID `oid`). [Kontobindning](#account-binding)
+- Miljöinställningar använder alltid `sub`. Ändra aldrig `OIDC_CLIENT_ID` utan ett migreringsfönster. [Byta klient-id](/guides/oidc-federation#changing-the-client-id)
 
-**Miljöinställningar** (`FEDERATION_ENABLED=false`):
+**Miljöinställningar:** sätt alla tre `OIDC_DISCOVERY_ENDPOINT`, `OIDC_CLIENT_ID` och `OIDC_CLIENT_SECRET`, annars visar inloggningssidan bara lösenordsformuläret. Inställningar som är lagrade på organisationen ignoreras, och en inloggning som inte anger någon organisation använder den första aktiva organisationen. [Inloggningstabellen](#sign-in)
 
-- `OIDC_DISCOVERY_ENDPOINT`, `OIDC_CLIENT_ID` och `OIDC_CLIENT_SECRET` måste alla vara satta, annars visar inloggningssidan bara lösenordsformuläret. Se [SSO erbjuds bara när den kan fungera](#sso-offered-only-when-usable).
-- `OIDC_TENANT_ID` väljer inte organisation för inloggning; en inloggning som inte anger någon organisation använder den första aktiva organisationen. Se [MobilityGuards egen inloggning är borttagen](#mobilityguard-sign-in-removed).
-- Inställningar som är lagrade på organisationen ignoreras, både vid inloggning och för åtkomsttoken från leverantören: bara `{PUBLIC_ORIGIN}/login/callback` godtas som omdirigeringsadress. Se [Inloggning med miljöinställningar ignorerar lagrade inställningar](#env-sign-in-ignores-stored).
+**Lagrade inställningar:** ta bort de `OIDC_*`-variabler som varningen vid start nämner; kontrollera vem som har administratörsrollen; automatisering med `PUT` skickar `subject_claim`; kontrollera de tillåtna domänerna om du använde flyttskriptet med 2.3 eller tidigare; skript godtar `502`. [Administratörer](#admins-change-sign-in-settings), [Flyttskriptet](#move-script-allowed-domains), [Spara inställningar](#provider-save-checks-sign-in)
 
-**Lagrade inställningar** (`FEDERATION_ENABLED=true`):
+**MobilityGuard-inställningar** (`MOBILITYGUARD_*`, `MOBILITY_GUARD_AUTH`): döp om till `OIDC_*`-namnen. [MobilityGuard](#mobilityguard-sign-in-removed)
 
-- Backend varnar vid start för varje `OIDC_*`-variabel som ignoreras; ta bort dem. Se [SSO erbjuds bara när den kan fungera](#sso-offered-only-when-usable).
-- Administratörer kan nu själva ändra klient-id, hemlighet, tillåtna domäner och subjektsanspråk. Kontrollera vem som har administratörsrollen. Se [Administratörer kan ändra inloggningsinställningarna](#admins-change-sign-in-settings).
-- Automatisering som ersätter inställningarna med `PUT` måste skicka `subject_claim`. Se [Konton binds till en identitet hos leverantören](#account-binding).
-- Om du flyttade miljöinställningarna in i Eneo med 2.3 eller tidigare: kontrollera de tillåtna domänerna. Se [Flyttskriptet tappade de tillåtna domänerna](#move-script-allowed-domains).
-- En leverantör erbjuds bara när dess lagrade inställningar anger discovery-adress, klient-id och klienthemlighet; organisationslistan på inloggningssidan visar bara sådana organisationer. Se [SSO erbjuds bara när den kan fungera](#sso-offered-only-when-usable) och [Inloggning med flera organisationer](#multi-tenant-sign-in).
-- Skript som sparar eller testar leverantörsinställningar godtar `502` för en leverantör vars discovery inte kan läsas. Se [Att spara leverantörsinställningar kontrollerar det inloggningen kontrollerar](#provider-save-checks-sign-in).
+**Zitadel i Svelte-appen:** fungerar fortfarande men är föråldrad; flytta den till OIDC-inställningarna före den version som tar bort den. [Inloggningstabellen](#sign-in)
 
-**MobilityGuard-specifika inställningar** (`MOBILITYGUARD_*`, `MOBILITY_GUARD_AUTH`): döp om dem till `OIDC_*`-namnen, även `MOBILITYGUARD_TENANT_ID`, och kontrollera registreringen hos leverantören. Se [MobilityGuards egen inloggning är borttagen](#mobilityguard-sign-in-removed).
-
-**Zitadel-inloggning i Svelte-appen** (`ZITADEL_INSTANCE_URL`, `ZITADEL_PROJECT_CLIENT_ID`): fungerar fortfarande men är föråldrad. Flytta den till OIDC-inställningarna före den version som tar bort den. Se [Zitadel-inloggningen är föråldrad](#zitadel-sign-in-deprecated).
-
-**API-konsumenter:**
-
-- Integrationer som skickar åtkomsttoken från leverantören (`OIDC_RESOURCE_SERVER_ENABLED=true`): jämför utfärdare och subjekt i åtkomsttoken och ID-token före uppgraderingen; räkna med `401` för en token utan subjektsanspråket och `403 identity_conflict` vid en kontokonflikt. Se [Åtkomsttoken från leverantören går genom samma bindning](#resource-server-binding).
-- Klienter som själva anropar `/api/v1/auth/initiate` och `/api/v1/auth/callback`: skicka vidare `iss`, bind gärna koden till klienten, läs fel via `code` (de nya avvisningarna saknar `detail`) och anropa `POST /api/v1/users/logout/` vid utloggning. Se [Driftsätt frontend och backend tillsammans](#deploy-frontend-and-backend-together), [Koder löses bara in av klienten som startade inloggningen](#client-bound-code-redemption), [Ett felformat](#error-envelope) och [Utloggning avslutar sessionen på servern](#server-side-sessions).
+**API-konsumenter:** med `OIDC_RESOURCE_SERVER_ENABLED=true`, jämför utfärdare och subjekt i åtkomsttoken och ID-token före uppgraderingen. Egna anropare av `/api/v1/auth/callback` skickar vidare `iss`, läser fel via `code` och anropar `POST /api/v1/users/logout/` vid utloggning. [Åtkomsttoken](#resource-server-binding), [Felformat](#error-envelope), [Sessioner](#server-side-sessions)
 
 **Från 2.2 eller tidigare:** läs också inloggningsändringarna i [versionsanteckningarna för 2.3.0](https://github.com/eneo-ai/eneo/releases/tag/v2.3.0).
 
-## Inloggning (OIDC) [#sign-in]
+## Vad ändras [#what-changes]
+
+### Inloggning (OIDC) [#sign-in]
+
+| Ändring | Vem | Gör |
+|---|---|---|
+| [Konton binds till en identitet hos leverantören](#account-binding) | Varje OIDC-installation | Sätt subjektsanspråket vid `sub` per klient |
+| [Åtkomsttoken från leverantören använder samma bindning](#resource-server-binding) | `OIDC_RESOURCE_SERVER_ENABLED=true` | Jämför utfärdare och subjekt i token |
+| [Ett borttaget konto behåller sin identitet](#removed-accounts-keep-identity) | Administratörer som tar bort konton | Återaktivera, skapa inte nytt |
+| [Varje OIDC-inloggning verifieras strikt](#strict-relying-party) | Varje OIDC-installation | Kontrollera algoritm, `nonce`, `kid`, NTP |
+| [Redis krävs för OIDC-inloggning](#redis-required-for-sign-in) | Varje OIDC-installation | Redis 6.2+, `noeviction` |
+| [Discovery och signeringsnycklar måste förbli nåbara](#discovery-and-jwks-reachable) | Backend bakom utgående regler eller proxy | Nå leverantören inom 5 s |
+| [En utfärdare med platshållare nekas](#templated-issuer-refused) | Entra ID-adress för flera kataloger | Använd din egen katalog |
+| [Driftsätt frontend och backend tillsammans](#deploy-frontend-and-backend-together) | Driftansvariga, egna callbacks | Driftsätt tillsammans, skicka vidare `iss` |
+| API-klienter kan binda koden med `binding_challenge` och `binding_verifier`; en felaktig `binding_verifier` svarar `400` och loggar `binding_mismatch`; en återanvänd callback svarar `400` | API-klienter | Inget; bindningen är frivillig |
+| [MobilityGuards egen inloggning är borttagen](#mobilityguard-sign-in-removed) | Installationer med `MOBILITYGUARD_*` | Döp om variablerna |
+| Zitadel-inloggningen i Svelte-appen är föråldrad; en senare version tar bort den | Zitadel-installationer | [Flytta](/guides/oidc-federation#migrate-from-the-zitadel-settings) före den versionen |
+| SSO erbjuds bara med discovery-adress, klient-id och klienthemlighet | Alla | Ta bort `OIDC_*`-variabler som varningen nämner; behåll `OIDC_ALLOWED_DOMAINS` om åtkomsttoken är beroende av den |
+| [Flyttskriptet tappade de tillåtna domänerna](#move-script-allowed-domains) | Körde flyttskriptet med `OIDC_ALLOWED_DOMAINS` satt | Kontrollera lagrade domäner |
+| [Administratörer kan ändra inloggningsinställningarna](#admins-change-sign-in-settings) | Lagrade inställningar | Granska administratörsrollen |
+| SCIM-konton binds vid första inloggningen | SCIM-installationer | Inget |
+| Organisationslistan vid inloggning visar bara organisationer med lagrad leverantör | Installationer med flera organisationer | Registrera saknade leverantörer |
+| Miljöinställningar ignorerar inställningar som är lagrade på organisationen; bara `{PUBLIC_ORIGIN}/login/callback` godtas | Miljöinställningar | Flytta lagrade värden in i Eneo vid behov |
+| [Att spara leverantörsinställningar kontrollerar det inloggningen kontrollerar](#provider-save-checks-sign-in) | Skript som sparar eller testar inställningar | Godta `502` |
+| `REDIS_CONN_TIMEOUT` (standard 5 s) är nu också lästidsgräns för de Redis-klienter som API och workers delar, och för deras köläggning av bakgrundsjobb | Långsam Redis | Höj värdet vid behov |
+
+### Sessioner, lösenord och webbappen [#sessions]
+
+| Ändring | Vem | Gör |
+|---|---|---|
+| [Utloggning avslutar sessionen på servern](#server-side-sessions) | Driftansvariga, API-konsumenter med webbläsartoken | Kontrollera `BROWSER_SESSION_MAX_AGE` |
+| `GET /logout` i Svelte visar en utloggningsknapp | Användare av `/logout`-länkar | Inget |
+| [`TRUSTED_PROXY_COUNT` räknar proxyer exakt](#trusted-proxy-count) | Mer än en proxy, eller nginx | Sätt den till antalet proxyer |
+| [React-webbappen körs på huvudvärden](#react-web-app-main-host) | Användare av referensfilen för Compose | Välj React eller Svelte |
+| [Härdning av HTTP](#http-hardening) | Proxyer som sätter HSTS eller CSP | Bestäm vem som äger HSTS och CSP |
+| Lösenordsinloggning: ett korrekt lösenord för ett inaktivt konto eller en avstängd organisation svarar `403` (9019, 9025) i stället för `500` | API-klienter med lösenord | Hantera de två koderna |
+| [Lösenordens livscykel](#password-lifecycle) | Förinlagda användare, lösenordsintegrationer | Kontrollera `DEFAULT_USER_PASSWORD` |
+
+### API-kontrakt [#api-contract]
+
+| Ändring | Vem | Gör |
+|---|---|---|
+| [Ett felformat](#error-envelope) | API-konsumenter, genererade klienter | Läs `code` och `message` |
+| [Ikoner](#icons) | API-konsumenter för ikoner, administratörer med flera organisationer | Driftsätt backend och båda frontends tillsammans |
+
+### Gallring, loggar och lagring [#retention-logs-storage]
+
+| Ändring | Vem | Gör |
+|---|---|---|
+| [En gallringsmotor](#retention-engine) | Skript och larm på de gamla jobben | Uppdatera dem |
+| En ny Promptguide sätter inte längre 30 dagar | Administratörer som vill ha en gallringstid | Sätt den uttryckligen |
+| Kopior av borttagna konversationer svarar `410`. Inget skapar kopior ännu, så inget `410` förekommer i dag | API-konsumenter | Behandla `410` som borta. Töm jobbkön före en nedgradering |
+| [Frågeloggar töms](#question-logs-emptied) | Alla | Säkerhetskopiera, stoppa gamla skrivare |
+| [Filnamn försvinner ur granskningsloggen](#audit-names-removed) | Granskningslogg som sparas som bevis | Exportera först om du behöver namnen |
+| [Objektlagringen får inte behålla gamla versioner](#object-storage-versioning) | Installationer med objektlagring | Ge behörigheter; ingen versionshantering |
+| Den medföljande SeaweedFS-avbilden är `4.40-eneo.8` | Medföljande SeaweedFS | Sätt `ENEO_SEAWEEDFS_IMAGE` till digesten i `IMAGE-DIGESTS.txt` |
+| En fråga vars logg inte innehåller något anrop svarar `400` i stället för `500` | API-konsumenter | Behandla `400` som ingen logg |
+| [`UPLOAD_TMP_DIR` måste vara ett lokalt filsystem](#upload-tmp-dir-local) | Driftansvariga | Håll den lokal |
+| [Migreringen `202611091200` skriver om varje konversationsrad](#sessions-migration) | Driftansvariga | Planera driftstopp |
+| [Namn och feedbacktext följer gallringstiden](#names-and-feedback-follow-retention) | Administratörer, API-konsumenter | Informera användarna |
+| Misslyckade jobb har `failure_code` i stället för feltext | API-konsumenter av misslyckade jobb | Läs `failure_code` |
+| Workerloggar innehåller inga felmeddelanden | Logglarm på feltext | Matcha på `failure_code` och typ |
+| [Ett nytt steg efter att en säkerhetskopia återställts](#readback-after-restore) | Driftansvariga, vid varje återställning | Kör kontrolläsningen |
+
+### Modeller, verktyg och integrationer [#integrations]
+
+| Ändring | Vem | Gör |
+|---|---|---|
+| `MAX_TOOL_ROUNDS` är som standard 40 (var fast 10) | Alla | Inget; `MAX_TOOL_ROUNDS=10` behåller det gamla taket |
+| Leverantörstyper som inte kan routas nekas med `400`; modellnamn dubblerar inte längre prefixet | Administratörer | Rätta `mistral/mistral/…`-namn på chattmodeller; inbäddnings- och omrankningsmodeller kräver nya modeller; [skapa om nekade leverantörer](/guides/ai-providers#adding-a-provider-admin-ui) |
+| Avbilderna saknar `apt` | Byggen ovanpå avbilderna | Installera i ett separat byggsteg |
+| `MCP_APP_CONTENT_BASE_URL` valideras vid start | Installationer som sätter den | Inget; vanliga värden godtas |
+| [SharePoint](#sharepoint) | Installationer med SharePoint | Låt synkar bli klara; gå igenom Problem |
+| [Webbwidgetar](#widgets) | Driftansvariga | Kör kontrollen av sessioner |
+| Ny behörighet Egna Skills (`personal_skills`) för Ägarroller | Administratörer | Inget; ge den till andra roller vid behov |
+
+### Underhållare [#maintainers]
+
+| Ändring | Vem | Gör |
+|---|---|---|
+| Styrt arbetsflöde för versioner, avstängt tills `RELEASE_MANAGED=true` | Bara underhållare | Inget |
+
+## Detaljer: inloggning [#details-sign-in]
 
 ### Konton binds till en identitet hos leverantören [#account-binding]
 
-- **Vad ändras:** den första federerade inloggningen binder kontot, per organisation, till identiteten hos leverantören: utfärdare, målgrupp (klient-id), subjektsanspråk och subjektsvärde. Senare inloggningar hittar kontot via bindningen och aldrig via e-post: en ändrad e-postadress behåller kontot och en återanvänd adress kan inte öppna det. En konflikt svarar `403` med koden `identity_conflict` och skriver ingenting. Administratörer kan öppna ett migreringsfönster eller ett engångstillstånd för ombindning (vart och ett högst 30 dagar) via sex API-vägar under `/api/v1/admin/` (`users/{user_id}/identity`, `users/{user_id}/identity/rebinding`, `identity-migration-windows`); de kräver en inloggad administratörs sessionstoken, en API-nyckel får `403 session_auth_required`, och det finns inget gränssnitt. Federationsinställningarna får `subject_claim` (standard `sub`; e-postanspråket nekas med `422`). Miljöinställningar använder alltid `sub`. Nya granskningshändelser: `identity_bound`, `identity_conflict`, `identity_rebinding_updated`, `identity_migration_window_updated`.
-- **Varför:** matchning enbart på e-post lät den som kontrollerar adressen hos en leverantör (en återanvänd adress, en andra klient, en andra leverantör) logga in på det befintliga kontot.
-- **Vem agerar:** varje OIDC-installation, båda konfigurationssätten, med en eller flera organisationer. Mest arbete gäller leverantörer vars `sub` skiljer sig per klient (Entra ID). Keycloak, Okta, Auth0 och Zitadel använder som standard samma `sub` för alla klienter; för MobilityGuard, kontrollera leverantörens dokumentation. Inloggning med lösenord, API-nyckel och systemadministratör binds inte.
-- **Före:** för leverantörer med `sub` per klient, välj ett stabilt anspråk som finns i ID-token (och i åtkomsttoken om du använder dem). För Entra ID är det `oid`. En token utan det valda anspråket kan inte logga in.
-- **Under:** inget. Befintliga konton binds via e-post vid nästa inloggning; sessioner förblir giltiga.
-- **Efter:** med lagrade inställningar och en leverantör med `sub` per klient, sätt `subject_claim` direkt, innan någon loggar in (`PATCH /api/v1/sysadmin/tenants/{id}/federation` eller `PATCH /api/v1/admin/federation`). Om personer redan är bundna under `sub`, öppna först ett fönster från utfärdaren och klient-id:t till sig själva. Senare: öppna ett fönster före en ny utfärdare eller, med `sub` per klient, ett nytt klient-id; öppna ett fönster till samma par innan subjektsanspråket ändras; automatisering som använder `PUT` måste skicka `subject_claim`. Lös konflikter utifrån orsaken i granskningsloggen. Egna klienter behandlar `403 identity_conflict` som en fråga för en administratör, inte som något att försöka igen.
-- **Kontroll:** logga in via varje ingång; `GET /api/v1/admin/users/{user_id}/identity` visar en bindning per leverantör och klient; granskningsloggen visar `identity_bound` med metoden `email_match`.
-- **Återställning:** nedgradering av migreringen `202611091110` tar bort bindningar, fönster och tillstånd, och e-postmatchningen kommer tillbaka. Nedgradering av `202611091100` följd av ny uppgradering ger sessionerna nya id:n, så alla loggar in igen.
-- **Guide:** [Kontobindning](/guides/oidc-federation#account-binding), [Inloggningskonflikter](/guides/oidc-federation#sign-in-conflicts), [Öppna en bindning igen](/guides/oidc-federation#re-opening-a-binding), [Uppgradera till kontobindning](/guides/oidc-federation#upgrading-to-account-binding).
+Den första federerade inloggningen binder kontot, per organisation, till utfärdare, klient-id, subjektsanspråk och subjektsvärde. Senare inloggningar matchar aldrig via e-post; en konflikt svarar `403 identity_conflict`. Keycloak, Okta, Auth0 och Zitadel använder som standard samma `sub` för alla klienter.
 
-### Åtkomsttoken från leverantören går genom samma bindning [#resource-server-binding]
+**Gör:** för leverantörer med `sub` per klient och lagrade inställningar, sätt `subject_claim` direkt efter uppgraderingen (`PATCH /api/v1/admin/federation`). Öppna ett migreringsfönster före en ny utfärdare, ett nytt klient-id med `sub` per klient, eller ett nytt subjektsanspråk.
 
-- **Vad ändras:** med `OIDC_RESOURCE_SERVER_ENABLED=true` matchades en åtkomsttoken från leverantören enbart på e-post i 2.3. Nu matchas den via bindningen, med utfärdaren `OIDC_ACCEPTED_ISSUER`, målgruppen `OIDC_ACCEPTED_AUDIENCE` och subjektsanspråket i de inställningar som inloggningen använder: med lagrade inställningar det lagrade subjektsanspråket (annars `sub`) och de lagrade tillåtna domänerna (`OIDC_ALLOWED_DOMAINS` när inga är lagrade), med miljöinställningar alltid `sub` och `OIDC_ALLOWED_DOMAINS`. Den väg som används först binder kontot: om webbläsaren binder först och åtkomsttoken har en annan utfärdare eller ett annat subjekt nekas token med `403 identity_conflict` (`account_bound`), och tvärtom. En token utan subjektsanspråket svarar `401`. Nycklar märkta `use=enc` hoppas över.
-- **Varför:** samma kontokapning som vid inloggning i webbläsaren. Varje anrop släpps in i en egen kort transaktion, så ett långsamt identitetslager ger snabbt fel i stället för att tömma anslutningspoolen.
-- **Vem agerar:** installationer med `OIDC_RESOURCE_SERVER_ENABLED=true` och deras API-konsumenter.
-- **Före:** avkoda en ID-token och en åtkomsttoken för samma person och jämför `iss` och subjektsvärdet. Om de stämmer (vanligt för Keycloak, Okta, Auth0, Zitadel och MobilityGuard i samma realm) behövs inget. Med Entra ID: begär åtkomsttoken av version 2 (`accessTokenAcceptedVersion` 2 i appmanifestet) och sätt `OIDC_ACCEPTED_ISSUER` till utfärdaren för `v2.0`; om `sub` fortfarande skiljer sig, använd lagrade inställningar med `subject_claim=oid` innan någon loggar in.
-- **Under:** inget.
-- **Efter:** om värdena inte kan göras lika öppnar en administratör ett migreringsfönster från inloggningens utfärdare och klient-id till `OIDC_ACCEPTED_ISSUER` och `OIDC_ACCEPTED_AUDIENCE` (eller omvänt). Det gäller högst 30 dagar; konton som binds senare behöver ett nytt fönster eller ett tillstånd. API-konsumenter behandlar `403 identity_conflict` som en kontofråga och `401` som en token utan subjektsanspråket.
-- **Kontroll:** identitetsvägen visar två bindningar för en person som använder båda vägarna; ett API-anrop svarar `200`; granskningsloggen visar inga `account_bound`-konflikter.
-- **Återställning:** som för kontobindning. Att senare byta tillbaka utfärdare eller tokenversion räknas som en ny utfärdare och kräver ett fönster.
-- **Guide:** [Subjektsanspråket](/guides/oidc-federation#the-subject-claim).
+**Kontroll:** `GET /api/v1/admin/users/{user_id}/identity` visar en bindning per leverantör och klient.
+
+**Återställning:** nedgradering av `202611091110` tar bort bindningar, fönster och tillstånd. Se [Uppgradera till kontobindning](/guides/oidc-federation#upgrading-to-account-binding).
+
+### Åtkomsttoken från leverantören använder samma bindning [#resource-server-binding]
+
+Med `OIDC_RESOURCE_SERVER_ENABLED=true` matchas åtkomsttoken via bindningen med `OIDC_ACCEPTED_ISSUER` och `OIDC_ACCEPTED_AUDIENCE`. Lagrade inställningar använder de lagrade tillåtna domänerna, eller `OIDC_ALLOWED_DOMAINS` när inga är lagrade. En token utan subjektsanspråket svarar `401`.
+
+**Gör:** jämför `iss` och subjekt i en ID-token och en åtkomsttoken för samma person. Med Entra ID, begär åtkomsttoken av version 2 och sätt `OIDC_ACCEPTED_ISSUER` till utfärdaren för `v2.0`. Om de inte kan bli lika öppnar en administratör ett migreringsfönster.
 
 ### Ett borttaget konto behåller sin identitet [#removed-accounts-keep-identity]
 
-- **Vad ändras:** en bindning ligger kvar på ett konto som inaktiveras eller tas bort (en administratörs borttagning, eller SCIM `active=false`). Identiteten når bara det kontot; så länge det inte är aktivt svarar inloggningen `403` "User is inactive or has been removed". Den når aldrig ett annat konto med samma e-post. Inget API tar bort en bindning.
-- **Varför:** återaktivering via SCIM återanvänder samma konto, och ingen annan kan ta över identiteten. En inloggning får aldrig upphäva en avregistrering.
-- **Vem agerar:** administratörer som tar bort konton. Om ett konto binds efter uppgraderingen, sedan tas bort, och ett andra konto skapas för personen, nekas enkel inloggning för personen. Konton som togs bort före uppgraderingen har ingen bindning.
-- **Före / under:** inget.
-- **Efter:** för att släppa in en borttagen person igen, återaktivera kontot: via SCIM (`active=true`, eller en SCIM-skapning med samma användarnamn eller e-post), eller som administratör med `POST /api/v1/admin/users/{username}/reactivate`. Båda upphäver borttagningen, och nästa inloggning når kontot via dess befintliga bindning; API-nycklar som återkallades vid borttagningen förblir återkallade. Administratörens anrop svarar `400` (kod 9004) och ändrar ingenting när ett annat aktivt konto, i någon organisation, nu har adressen. Som sista utväg: skapa ett nytt konto och ta bort det gamla kontots bindning i databasen (`DELETE FROM identity_bindings WHERE user_id = '<old id>'`).
-- **Kontroll:** `SELECT user_id FROM identity_bindings WHERE issuer = '…' AND subject = '…'` anger det aktiva kontot.
-- **Återställning:** som för kontobindning.
-- **Guide:** [Kontobindning](/guides/oidc-federation#account-binding).
+Ett borttaget konto behåller sin bindning, så ett andra konto för samma person kan inte använda inloggning via SSO.
+
+**Gör:** återaktivera via SCIM (`active=true`) eller `POST /api/v1/admin/users/{username}/reactivate`, som svarar `400` (kod 9004) när ett annat aktivt konto har adressen.
 
 ### Varje OIDC-inloggning verifieras strikt [#strict-relying-party]
 
-- **Vad ändras:** varje inloggning använder `state`, `nonce` och PKCE (`S256`), lagrade en gång i Redis. Svarsparametern `iss` kontrolleras (och krävs när leverantören annonserar den). ID-token måste ha `iss`, `sub`, `aud`, `exp`, `iat` och ett `kid`; algoritmen måste vara asymmetrisk (RS, PS, ES 256/384/512 eller EdDSA, aldrig `none` eller `HS*`); utfärdaren måste vara densamma som inloggningen startade med; `aud` måste innehålla klient-id:t; `azp` måste vara klient-id:t när det finns, och krävs när `aud` har flera värden; `nonce` måste stämma, liksom `at_hash` när det finns; `iat` får ligga högst `OIDC_CLOCK_LEEWAY_SECONDS` (120) fram i tiden. Tillåtna algoritmer kommer från lagrade `signing_algorithms`, annars från discovery, annars `RS256`. Avvisningar har egna felkoder: `503 oidc_login_unavailable`, `400 oidc_transaction_invalid`, `401 oidc_response_not_verified`; en felaktig signatur, målgrupp eller utgångstid gav tidigare `500`. Inloggningssidan visar orsaken. Lagrade inställningar får `signing_algorithms` och `email_verified_claims` (standard `email_verified`, `xms_edov`).
-- **Varför:** 2.3 litade enbart på det signerade state-värdet när Redis låg nere, kontrollerade inte utfärdare eller nonce, accepterade bara `RS256`, hämtade signeringsnycklarna vid varje inloggning och svarade `500` för ogiltiga token.
-- **Vem agerar:** driftansvariga för varje OIDC-installation.
-- **Före:** kontrollera per leverantör att ID-token signeras asymmetriskt (byt Auth0- eller Keycloak-klienter från `HS256`), att `nonce` returneras, att token har ett `kid` och att serverklockorna använder NTP.
-- **Under:** se [Driftsätt frontend och backend tillsammans](#deploy-frontend-and-backend-together).
-- **Efter:** logga in en gång per leverantör och organisation.
-- **Kontroll:** auktoriseringsadressen har `nonce` och `code_challenge_method=S256`; backend loggar inga `oidc_response_refused`, `oidc_transaction_refused` eller `oidc_transaction_store_failed`.
-- **Återställning:** ingen migrering; 2.3 ignorerar de nya lagrade fälten.
-- **Guide:** [Krav på leverantören](/guides/oidc-federation#provider-contract), [Uppgradera](/guides/oidc-federation#upgrading).
+Varje inloggning använder `state`, `nonce` och PKCE (`S256`). ID-token kräver en asymmetrisk algoritm (aldrig `none` eller `HS*`), en `kid` och den utfärdare som inloggningen startade med.
+
+**Gör:** byt Auth0- eller Keycloak-klienter från `HS256`; kontrollera att `nonce` returneras och att servrarna använder NTP.
+
+**Kontroll:** backend loggar inget `oidc_response_refused` eller `oidc_transaction_refused`.
 
 ### Redis krävs för OIDC-inloggning [#redis-required-for-sign-in]
 
-- **Vad ändras:** inloggningstransaktionen ligger i Redis i `OIDC_STATE_TTL_SECONDS` (600 som standard) och läses en gång med `GETDEL`, som kräver Redis 6.2 eller senare. Om Redis inte svarar inom 2 sekunder, eller är äldre än 6.2, svarar inloggningen `503 oidc_login_unavailable`. I 2.3 var Redis valfritt för enkel inloggning. Ingen ny inställning.
-- **Varför:** en engångstransaktion är det som gör `state`, `nonce` och PKCE bindande.
-- **Vem agerar:** driftansvariga för varje OIDC-installation; referensfilens `redis:7-alpine` uppfyller redan kravet.
-- **Före:** alla backend-repliker når samma Redis (start och callback kan hamna på olika repliker), version 6.2 eller senare. Behåll Redis standardvärde `noeviction` för eviction-policy (borttagningspolicy), eller sätt ingen gräns med `maxmemory`: varje eviction-policy, `allkeys-*` eller `volatile-*`, kan ta bort en pågående inloggning.
-- **Under / efter:** inget.
-- **Kontroll:** `redis-cli INFO server | grep redis_version` visar 6.2 eller senare; `redis-cli CONFIG GET maxmemory-policy` visar `noeviction`; nycklar `oidc:transaction:*` syns under en inloggning.
-- **Återställning:** en nedgradering återställer kontrollen som bara använder state.
-- **Guide:** [Inloggningstransaktion](/docs/authentication-architecture#sign-in-transaction).
+Inloggningstransaktionen ligger i Redis och läses en gång med `GETDEL`. Om Redis inte svarar inom 2 sekunder, eller är äldre än 6.2, svarar inloggningen `503 oidc_login_unavailable`.
+
+**Gör:** alla backend-repliker når samma Redis, 6.2 eller senare. Behåll standardpolicyn `noeviction`.
+
+**Kontroll:** `redis-cli CONFIG GET maxmemory-policy` visar `noeviction`.
 
 ### Discovery och signeringsnycklar måste förbli nåbara [#discovery-and-jwks-reachable]
 
-- **Vad ändras:** discovery läses för varje inloggning och cachas per process i `OIDC_JWKS_CACHE_TTL_SECONDS` (3600), utan reserv med gamla värden. Signeringsnycklar cachas per nyckeluppsättning, med högst en ny hämtning var 30:e sekund för ett okänt `kid`. Lagrade adresser har fortfarande företräde.
-- **Varför:** de strikta kontrollerna behöver leverantörens aktuella utfärdare, algoritmer och nycklar.
-- **Vem agerar:** driftansvariga vars backend når leverantören via utgående regler, en proxy eller intern DNS.
-- **Före:** varje backend når discovery-adressen, `jwks_uri` och tokenadressen inom 5 sekunder: varje anrop till leverantören avbryts efter 5 sekunder. Annars kan ingen logga in efter den första timmen, eller direkt efter en omstart.
-- **Under / efter:** inget. Ändringar hos leverantören kan ta upp till cachetiden att slå igenom. Efter en misslyckad hämtning av discovery prövas den adressen inte igen på 30 sekunder, så inloggningen kan fortsätta misslyckas i upp till 30 sekunder efter att leverantören fungerar igen.
-- **Kontroll:** kör `curl` mot discovery-adressen inifrån backend-containern; logga in efter en omstart.
-- **Återställning:** en nedgradering återställer den gamla hämtningen.
-- **Guide:** [JWKS-hantering](/docs/authentication-architecture#jwks-handling).
+Discovery cachas i `OIDC_JWKS_CACHE_TTL_SECONDS` (3600) utan reserv med gamla värden. Varje anrop till leverantören avbryts efter 5 sekunder.
+
+**Gör:** varje backend når discovery-adressen, `jwks_uri` och tokenadressen. Annars kan ingen logga in efter den första timmen, eller direkt efter en omstart.
+
+**Kontroll:** kör `curl` mot discovery-adressen inifrån backend-containern.
 
 ### En utfärdare med platshållare nekas [#templated-issuer-refused]
 
-- **Vad ändras:** ett discovery-dokument vars utfärdare innehåller `{` eller `}` (Entra ID:s adresser för `common` eller `organizations`) nekas när det sparas, testas och vid inloggning.
-- **Varför:** ingen ID-token kan matcha en utfärdare med platshållare, så kontrollen av utfärdaren skulle hoppas över.
-- **Vem agerar:** installationer som använder en Entra ID-adress för flera kataloger.
-- **Före:** använd din egen katalog: `https://login.microsoftonline.com/{directory-tenant-id}/v2.0/.well-known/openid-configuration`. Miljöinställningar: ändra `OIDC_DISCOVERY_ENDPOINT` och starta om. Lagrade inställningar: `PATCH` av `discovery_endpoint`. Det fungerar även på 2.3, och en ändring efter uppgraderingen ger ingen konflikt. En installation som använde en konfiguration för flera kataloger behöver en Eneo-organisation per katalog.
-- **Under / efter:** inget.
-- **Kontroll:** den lagrade utfärdaren saknar klammerparenteser; federationstestet svarar `200`.
-- **Återställning:** inget att återställa.
-- **Guide:** [Uppgradera](/guides/oidc-federation#upgrading).
+En utfärdare som innehåller `{` eller `}` (Entra ID:s `common` eller `organizations`) nekas.
+
+**Gör:** använd `https://login.microsoftonline.com/{directory-tenant-id}/v2.0/.well-known/openid-configuration`. Det fungerar också på 2.3.
 
 ### Driftsätt frontend och backend tillsammans [#deploy-frontend-and-backend-together]
 
-- **Vad ändras:** `POST /api/v1/auth/callback` tar emot `iss` och kräver den när discovery annonserar `authorization_response_iss_parameter_supported`. En inloggning som startades på 2.3 misslyckas med `400` "Invalid state parameter"; en utgången, använd eller främmande transaktion svarar `400 oidc_transaction_invalid`. `detailCode` på inloggningssidan bär de nya felkoderna i stället för `http_400`, `unauthorized` eller `http_500`.
-- **Varför:** utfärdarparametern skyddar mot förväxling av leverantörer; engångstransaktioner stoppar återspelning av koder.
-- **Vem agerar:** driftansvariga, och API-konsumenter med egen callback.
-- **Före:** kontrollera om din leverantörs discovery-dokument har `authorization_response_iss_parameter_supported: true` (Keycloaks har det). Uppdatera övervakning som matchar `detailCode`.
-- **Under:** driftsätt Svelte-frontend och backend från samma version och byt alla backend-repliker samtidigt. En äldre frontend skickar inte vidare `iss`, så sådana leverantörer nekas. Berätta för användarna att en pågående inloggning måste startas om.
-- **Efter:** egna klienter skickar vidare `iss` från omdirigeringen till callbacken.
-- **Kontroll:** en inloggning per leverantör; inget `iss_parameter_missing` i backend-loggen.
-- **Återställning:** återställ frontend och backend tillsammans.
-- **Guide:** [Uppgradera](/guides/oidc-federation#upgrading).
+`POST /api/v1/auth/callback` kräver `iss` när discovery anger `authorization_response_iss_parameter_supported`. En äldre frontend skickar inte vidare den.
 
-### Koder löses bara in av klienten som startade inloggningen [#client-bound-code-redemption]
+**Gör:** driftsätt Svelte-frontend och backend från samma version och byt ut alla backend-repliker samtidigt.
 
-- **Vad ändras:** transaktionen registrerar om webbläsaren eller en API-klient startade den. `GET /api/v1/auth/initiate` tar emot en valfri `binding_challenge` (exakt 43 base64url-tecken) och `POST /api/v1/auth/callback` en valfri `binding_verifier` (43 till 128 tecken, som i PKCE). Om en challenge skickades krävs verifieraren; en verifierare utan challenge nekas som ett värde som inte stämmer. Ett tomt eller felformat värde svarar `422`; ett värde som inte stämmer svarar `400 oidc_transaction_invalid`. En avvisning förbrukar ingenting. Svelte-appen håller sin verifierare i `HttpOnly`-kakan `oidc-login-resume`.
-- **Varför:** en kod och ett state som läcker via adresser, loggar eller `Referer`-huvudet kunde lösas in av någon annan.
-- **Vem agerar:** ingen måste agera. API-klienter kan binda sina inloggningar; utan bindning är de lika utsatta för återspelning som tidigare.
-- **Före:** inget.
-- **Under:** driftsätt frontend och backend tillsammans; pågående inloggningar startas om.
-- **Efter:** API-klienter skapar minst 32 slumpmässiga byte, skickar SHA-256 i base64url utan utfyllnad som challenge och värdet som verifierare (`eneo-js`: `bindingChallenge`, `bindingVerifier`).
-- **Kontroll:** en callback med fel `binding_verifier` för en bunden inloggning svarar `400` och loggar `oidc_transaction_refused` med orsaken `binding_mismatch`; en återspelad callback svarar `400`.
-- **Återställning:** frontend och backend tillsammans.
-- **Guide:** [Inloggningstransaktion](/docs/authentication-architecture#sign-in-transaction).
+**Återställning:** frontend och backend tillsammans.
 
 ### MobilityGuards egen inloggning är borttagen [#mobilityguard-sign-in-removed]
 
-- **Vad ändras:** `POST /api/v1/users/login/openid-connect/mobilityguard/` svarar `404`; MobilityGuard loggar in via den generiska OIDC-vägen. Backend vägrar starta när en `MOBILITYGUARD_*`-variabel är satt utan sin `OIDC_*`-motsvarighet, och varnar när båda är satta. Svelte-appen varnar så länge `MOBILITY_GUARD_AUTH` eller `MOBILITYGUARD_CLIENT_ID` är satt. Med miljöinställningar använder en inloggning som inte anger någon organisation den första aktiva organisationen; `OIDC_TENANT_ID` väljer bara organisation för åtkomsttoken från leverantören.
-- **Varför:** två verifieringsvägar för samma protokoll; MobilityGuard är standard-OIDC, och en tyst reserv skulle dölja en trasig uppsättning.
-- **Vem agerar:** installationer med `MOBILITYGUARD_*` eller `MOBILITY_GUARD_AUTH`. Installationer som registrerat MobilityGuard som lagrade inställningar gör inget.
-- **Före:** döp om `MOBILITYGUARD_DISCOVERY_ENDPOINT`, `MOBILITYGUARD_CLIENT_ID`, `MOBILITYGUARD_CLIENT_SECRET` och `MOBILITYGUARD_TENANT_ID` till `OIDC_DISCOVERY_ENDPOINT`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` och `OIDC_TENANT_ID`, med `FEDERATION_ENABLED=false`, eller ta bort `MOBILITYGUARD_TENANT_ID`: inloggning i webbläsaren läser inte längre något organisations-id. Med flera aktiva organisationer: behåll en eller gå över till lagrade inställningar. Hos MobilityGuard: registrera `{PUBLIC_ORIGIN}/login/callback`, tillåt scopet `profile`, acceptera `client_secret_post` och returnera `nonce`.
-- **Under:** ta bort MobilityGuard-variablerna från frontend och uppgradera frontend och backend tillsammans.
-- **Efter:** API-klienter använder `/api/v1/auth/initiate` och `/api/v1/auth/callback`.
-- **Kontroll:** inget startfel och ingen varning; `GET /api/v1/auth/federation-status` visar `has_global_oidc_config: true`; den gamla vägen svarar `404`.
-- **Återställning:** ingen migrering; 2.3 läser också `OIDC_*`-namnen, men dess MobilityGuard-knapp behöver frontendvariablerna tillbaka.
-- **Guide:** [Flytta från MobilityGuard-inställningarna](/guides/oidc-federation#migrate-from-the-mobilityguard-settings).
+Backend vägrar starta när en `MOBILITYGUARD_*`-variabel är satt utan sin `OIDC_*`-motsvarighet.
 
-### Zitadel-inloggningen är föråldrad [#zitadel-sign-in-deprecated]
-
-- **Vad ändras:** inget slutar fungera ännu. Svelte-appen varnar vid start så länge `ZITADEL_INSTANCE_URL` eller `ZITADEL_PROJECT_CLIENT_ID` är satt. `POST /api/v1/users/provision/` är markerad som föråldrad och loggar en varning per anrop. En senare version tar bort Zitadel-inloggningen, inbjudnings- och aktiveringssidorna, Zitadels byte av lösenord och namn samt provision-vägen. React-appen har ingen Zitadel-inloggning.
-- **Varför:** en andra inloggningsväg att hålla korrekt (den har PKCE men ingen `nonce`); en version med varningar ger tid att flytta.
-- **Vem agerar:** installationer som loggar in via Zitadel i Svelte-appen.
-- **Före versionen som tar bort den:** i Zitadel, registrera `{PUBLIC_ORIGIN}/login/callback`, använd en klienthemlighet och slå på "User Info inside ID Token". I Eneo, sätt `OIDC_DISCOVERY_ENDPOINT` till `{ZITADEL_INSTANCE_URL}/.well-known/openid-configuration` plus klient-id och hemlighet, eller registrera den som lagrade inställningar. För automatiskt skapade konton: slå på provisionering och ange tillåtna domäner. Ta bort frontendvariablerna `ZITADEL_*` och sluta anropa `/api/v1/users/provision/`. Efter flytten byter personer lösenord och namn i Zitadel; konton skapas vid första inloggningen eller via SCIM.
-- **Kontroll:** ingen Zitadel-varning vid start; inloggningen fungerar via OIDC-knappen.
-- **Återställning:** sätt Zitadel-variablerna igen.
-- **Guide:** [Flytta från Zitadel-inställningarna](/guides/oidc-federation#migrate-from-the-zitadel-settings).
-
-### SSO erbjuds bara när den kan fungera [#sso-offered-only-when-usable]
-
-- **Vad ändras:** en enda regel avgör, för inloggningssidan, organisationsväljaren och själva inloggningen, om enkel inloggning erbjuds: en discovery-adress, ett klient-id och en klienthemlighet. Med `FEDERATION_ENABLED=false` är `has_global_oidc_config` sann bara när `OIDC_DISCOVERY_ENDPOINT`, `OIDC_CLIENT_ID` och `OIDC_CLIENT_SECRET` alla är satta; annars visar inloggningssidan lösenordsformuläret i stället för en knapp som inte kan fungera. Med `FEDERATION_ENABLED=true` erbjuds en organisation bara när dess lagrade inställningar har alla tre; en handredigerad rad utan hemlighet erbjuds inte längre (varje konfiguration som Eneo sparar har en). Varje process loggar en varning som namnger de `OIDC_*`-variabler den ignorerar. Dokumentationen rekommenderar nu lagrade inställningar.
-- **Varför:** 2.3 visade knappen med bara discovery och hemlighet satta, i båda lägena, och erbjöd lagrade inställningar utan hemlighet; inloggningen misslyckades sedan.
-- **Vem agerar:** ingen måste agera. Miljöinställningar behöver alla tre variablerna.
-- **Efter:** med lagrade inställningar, ta bort variablerna som varningen namnger (behåll `OIDC_ALLOWED_DOMAINS` om åtkomsttoken från leverantören är beroende av den).
-- **Kontroll:** ingen varning vid start; inloggningssidan visar den förväntade knappen.
-- **Återställning:** ingen migrering.
-- **Guide:** [Vilken uppsättning behöver du](/guides/oidc-federation#which-setup-do-you-need).
+**Gör:** döp om `MOBILITYGUARD_DISCOVERY_ENDPOINT`, `MOBILITYGUARD_CLIENT_ID`, `MOBILITYGUARD_CLIENT_SECRET` och `MOBILITYGUARD_TENANT_ID` till `OIDC_DISCOVERY_ENDPOINT`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` och `OIDC_TENANT_ID`. Registrera `{PUBLIC_ORIGIN}/login/callback` hos MobilityGuard och se till att `nonce` returneras. Se [Flytta från MobilityGuard-inställningarna](/guides/oidc-federation#migrate-from-the-mobilityguard-settings).
 
 ### Flyttskriptet tappade de tillåtna domänerna [#move-script-allowed-domains]
 
-- **Vad ändras:** `backend/scripts/migrate_env_oidc_to_tenant_federation.py` kopierar nu `OIDC_ALLOWED_DOMAINS`, validerar värdena och skriver en granskningspost. Versioner till och med 2.3 (och 2.2.4) lämnade de lagrade tillåtna domänerna tomma: ingen domänkontroll vid inloggning i webbläsaren och inga automatiskt skapade konton. Uppgraderingen rättar inte detta.
-- **Varför:** en tom domänlista tog tyst bort en begränsning för inloggning.
-- **Vem agerar:** installationer med en organisation som körde flyttskriptet medan `OIDC_ALLOWED_DOMAINS` var satt. Alla andra gör inget.
-- **Efter:** läs de lagrade inställningarna (`GET /api/v1/sysadmin/tenants/{tenant_id}/federation`, eller Administration > Inloggning (SSO)), jämför med den gamla variabeln, gör `PATCH` av `allowed_domains` och gå igenom konton som skapats sedan flytten.
-- **Kontroll:** den lagrade listan stämmer med de avsedda domänerna.
-- **Återställning:** ingen migrering.
-- **Guide:** [Kontrollera en flytt gjord med en tidigare version](/guides/oidc-federation/single-tenant#check-a-move-made-with-an-earlier-version).
+Flyttskriptet till och med 2.3 lämnade de lagrade tillåtna domänerna tomma: ingen domänkontroll vid inloggning. Uppgraderingen rättar inte detta.
+
+**Gör:** jämför `GET /api/v1/sysadmin/tenants/{tenant_id}/federation` med den gamla `OIDC_ALLOWED_DOMAINS`, gör `PATCH` på `allowed_domains` och granska konton som skapats sedan flytten.
 
 ### Administratörer kan ändra inloggningsinställningarna [#admins-change-sign-in-settings]
 
-- **Vad ändras:** `GET` och `PATCH /api/v1/admin/federation`, och Svelte-sidan Administration > Inloggning (SSO), låter en organisations administratör ändra leverantörens etikett, klient-id, klienthemlighet, tillåtna domäner och subjektsanspråk. Det kräver en interaktiv session (en API-nyckel får `403 session_auth_required`) och en revision (`409` vid samtidig ändring). En sparning som inloggningen inte kan använda svarar `400` med orsaken; den hämtar ingenting från leverantören, så ett klient-id eller en hemlighet som leverantören avvisar märks vid nästa inloggning. Varje sparning skriver en granskningspost, även med granskningsloggning avstängd, och gäller från nästa inloggning. Bara med `FEDERATION_ENABLED=true`.
-- **Varför:** att byta hemlighet eller justera domäner kräver inte längre en driftansvarig eller en omstart, och ändringen skrivs till granskningsloggen.
-- **Vem agerar:** installationer med lagrade inställningar. Inget ändras förrän en administratör sparar.
-- **Efter:** gå igenom vem som har administratörsrollen. Ett felaktigt värde stoppar enkel inloggning; `/login?showUsernameAndPassword=true` finns kvar för lösenordskonton. Att byta klient-id med en leverantör med `sub` per klient, eller att byta subjektsanspråk, kräver ett migreringsfönster först.
-- **Kontroll:** granskningsloggen visar `federation_updated` för varje sparning.
-- **Återställning:** ingen migrering; sparade värden fungerar på 2.3.
-- **Guide:** [Ändra inställningarna i Eneo](/guides/oidc-federation/single-tenant#change-the-settings-in-eneo).
+Med lagrade inställningar kan en organisations administratör ändra klient-id, klienthemlighet, tillåtna domäner och subjektsanspråk.
 
-### SCIM [#scim-changes]
-
-- **Vad ändras:** SCIM-protokollet är oförändrat. SCIM-konton binds vid sin första inloggning; en ändrad e-postadress behåller kontot; ett borttaget konto behåller sin bindning och återanvänds vid återaktivering. SCIM:s API-dokumentationssidor (`/scim/v2/docs`, `/scim/v2/redoc`) svarar `404` när en flagga för webbläsarsessioner är på utanför utveckling; `openapi.json` finns kvar.
-- **Varför:** bindningsreglerna ovan; dokumentationssidornas skript från tredje part får inte köras på sessionens origin.
-- **Vem agerar:** ingen måste agera. Håll provisionering avstängd när SCIM skapar konton.
-- **Kontroll:** ett konto skapat via SCIM loggar in och identitetsvägen visar dess bindning.
-- **Återställning:** som för kontobindning.
-- **Guide:** [Kontobindning](/guides/oidc-federation#account-binding).
-
-### Inloggning med flera organisationer [#multi-tenant-sign-in]
-
-- **Vad ändras:** med `FEDERATION_ENABLED=true` visar organisationslistan på inloggningssidan (`GET /api/v1/auth/tenants`) bara organisationer med en slug och en lagrad discovery-adress, ett klient-id och en klienthemlighet. Dokumentationen rekommenderar en installation per organisation: stödet för flera organisationer är grundläggande, kommer att fasas ut och ger ingen garanti för dataseparation eftersom organisationerna delar en databas.
-- **Varför:** en organisation utan leverantör kan inte logga in, så att erbjuda den gav bara ett fel.
-- **Vem agerar:** installationer med flera organisationer.
-- **Efter:** registrera en leverantör för varje organisation som saknas; till dess använder dess personer lösenordsinloggning. Planera att flytta organisationer till egna installationer.
-- **Kontroll:** varje organisation som ska kunna logga in finns i listan.
-- **Återställning:** 2.3 visar dem igen, men de kan fortfarande inte logga in.
-- **Guide:** [Vilken uppsättning behöver du](/guides/oidc-federation#which-setup-do-you-need).
-
-### Inloggning med miljöinställningar ignorerar lagrade inställningar [#env-sign-in-ignores-stored]
-
-- **Vad ändras:** med `FEDERATION_ENABLED=false` använder inloggningen `OIDC_*`-inställningarna och ingenting som är lagrat på organisationen. Den godtar bara `{PUBLIC_ORIGIN}/login/callback` som omdirigeringsadress: lagrade `additional_redirect_uris` gäller inte längre. Åtkomsttoken som godtas med `OIDC_RESOURCE_SERVER_ENABLED` binds under `sub` och släpps in via `OIDC_ALLOWED_DOMAINS`, inte via ett lagrat subjektsanspråk eller lagrade tillåtna domäner. Med `FEDERATION_ENABLED=true` ändras inget.
-- **Varför:** en leverantörsrad som låg kvar på organisationen kunde vidga omdirigeringsadresserna eller ändra vem en åtkomsttoken loggar in som, medan miljöinställningarna avgjorde allt annat.
-- **Vem agerar:** installationer med miljöinställningar som förlitade sig på värden lagrade på organisationen.
-- **Före:** behöver du lagrade värden, registrera leverantören i Eneo och sätt `FEDERATION_ENABLED=true`.
-- **Kontroll:** en inloggning via `{PUBLIC_ORIGIN}/login/callback` fungerar; ett API-anrop med en åtkomsttoken från leverantören svarar `200`.
-- **Återställning:** tidigare avbild.
-- **Guide:** [Vilken uppsättning behöver du](/guides/oidc-federation#which-setup-do-you-need).
+**Gör:** granska vem som har administratörsrollen. Ett felaktigt värde stoppar inloggning via SSO; `/login?showUsernameAndPassword=true` finns kvar.
 
 ### Att spara leverantörsinställningar kontrollerar det inloggningen kontrollerar [#provider-save-checks-sign-in]
 
-- **Vad ändras:** att spara leverantörsinställningar (`PUT`/`PATCH /api/v1/sysadmin/tenants/{tenant_id}/federation`) och testanropet (`POST /api/v1/sysadmin/tenants/{tenant_id}/federation/test`) läser leverantören på samma sätt som inloggningen. De svarar `502` när discovery-dokumentet inte kan läsas eller tolkas (en sparning svarade `400`, testet `500`), och `400` med orsaken när leverantören eller inställningarna inte klarar inloggningens kontroller, också när ett discovery-dokument kan tolkas men saknar det inloggningen behöver. En sparning lagrar utfärdaren, adresserna och den metod för klientautentisering som inloggningen kommer att använda. En `PATCH` som inte skickar `discovery_endpoint` hämtar ingenting och kontrollerar bara inställningarna, så den svarar `400` med orsaken men aldrig `502`. `PUT` läser alltid leverantören.
-- **Varför:** en konfiguration som inloggningen skulle neka kunde sparas och misslyckades sedan vid nästa inloggning.
-- **Vem agerar:** driftansvariga och skript som sparar eller testar leverantörsinställningar.
-- **Efter:** skript som väntade sig `400` för en leverantör som inte nås godtar `502`.
-- **Kontroll:** testanropet svarar `200` för en fungerande leverantör.
-- **Återställning:** tidigare avbild.
-- **Guide:** [Ändra inställningarna i Eneo](/guides/oidc-federation/single-tenant#change-the-settings-in-eneo).
+Att spara och testa leverantörsinställningar svarar `502` när discovery inte kan läsas eller tolkas, och `400` när det går att tolka men saknar det inloggningen behöver. En `PATCH` utan `discovery_endpoint` hämtar ingenting och svarar därför aldrig `502`. `PUT` läser alltid leverantören.
 
-### `REDIS_CONN_TIMEOUT` begränsar nu också läsningar [#redis-timeout-bounds-reads]
+**Gör:** skript som väntade sig `400` för en leverantör som inte går att nå godtar `502`.
 
-- **Vad ändras:** inställningen (standard 5 sekunder) var bara tidsgränsen för att ansluta. Nu är den också lästidsgräns för de Redis-klienter som API:t och arbetarna delar, och för deras köande av bakgrundsjobb. En Redis som har slutat svara får ett kommando eller en köläggning av ett bakgrundsjobb att misslyckas inom ungefär två tidsgränser, eftersom ett anrop som når tidsgränsen försöks igen en gång (`REDIS_RETRY_ON_TIMEOUT`, standard `true`), i stället för att vänta utan slut. En inloggning med lösenord går då vidare utan att försöket räknas, och en granskningspost som inte kan köläggas loggas som en varning. OIDC-inloggningen behåller sin egen gräns på 2 sekunder.
-- **Varför:** en Redis som tog emot anslutningar men aldrig svarade kunde hålla inloggning, kontroller av API-nycklar och granskningsskrivningar utan slut.
-- **Vem agerar:** driftansvariga vars Redis svarar långsamt under normal last: höj värdet.
-- **Kontroll:** med Redis pausad svarar en inloggning med lösenord inom några sekunder och fungerar igen när Redis är tillbaka.
-- **Återställning:** tidigare avbild.
-
-## Sessioner, lösenord och webbappen [#sessions]
+## Detaljer: sessioner och webbappen [#details-sessions]
 
 ### Utloggning avslutar sessionen på servern [#server-side-sessions]
 
-- **Vad ändras:** varje inloggning med lösenord eller OIDC i båda webbapparna skriver en rad i `browser_sessions`, och token accepteras bara så länge raden finns och stämmer med användare och organisation. `POST /api/v1/users/logout/` avslutar sessionen: `204` betyder att ingen användbar session finns kvar; `503 sign_out_unavailable` betyder behåll token och försök igen. Öppna WebSocket- och jobbhändelseströmmar kontrolleras var 30:e sekund; `/ws` stängs med `1008` "Session ended" eller `1013` när sessionslagret inte svarar. Ett worker-jobb klockan 00:30 i workerns tid (UTC om inte `TZ` är satt) tar bort utgångna rader. React-appen varnar två minuter före utgång och kan förnya upp till `BROWSER_SESSION_MAX_AGE`. Kontroller vid start: `BROWSER_SESSION_MAX_AGE` är 1 till 43200 minuter och minst `JWT_EXPIRY_TIME`; `WEB_APP_ENABLED=true` kräver `BROWSER_SESSION_ENABLED=true`.
-- **Varför:** utloggning rensade bara kakor, så en kopierad token fungerade tills den gick ut. Varningen innan sessionen går ut saknades (WCAG 2.2.1).
-- **Vem agerar:** driftansvariga (inställningar), API-konsumenter som använder webbläsartoken.
-- **Före:** `BROWSER_SESSION_MAX_AGE` är 43200 (30 dagar) som standard, så React-appen låter personer vara inloggade i upp till 30 dagar om du inte sänker den. Om du sätter den, håll den minst lika stor som `JWT_EXPIRY_TIME` (1440 i mallen), annars startar inte backend; sätt dem lika för att stänga av möjligheten att förbli inloggad. Håll workern igång.
-- **Under:** inget. Token utfärdade före uppgraderingen gäller tills de går ut. Byt inte `JWT_SECRET` för detta: den signerar också widget- och modultoken, och hashar API-nycklar när `API_KEY_HASH_SECRET` inte är satt.
-- **Efter:** API-konsumenter anropar utloggningsvägen vid utloggning (`204` klart, `503` försök igen) och behandlar WebSocket `1008` som slutgiltigt och `1013` som värt att försöka igen. Integrationer bör använda API-nycklar, inte webbläsartoken. Utloggning avslutar Eneos session, inte sessionen hos leverantören och inte de token som en session har skapat för MCP-servrar eller moduler; de gäller tills de går ut.
-- **Kontroll:** en kopierad token svarar `401` på `GET /api/v1/users/me/` efter utloggning; workern loggar "Deleted expired browser sessions".
-- **Återställning:** nedgradering av `202611021100` tar bort tabellen (React-användare loggar in igen); på 2.3 rensar utloggning bara kakor igen.
-- **Guide:** [Sessioner på servern](/docs/authentication-architecture#server-side-sessions), [Huvuddomän och återställning av webbgränssnittet](/guides/deployment#main-host-and-ui-rollback).
+Varje inloggning med lösenord eller OIDC i båda webbapparna skriver en rad i `browser_sessions`. `POST /api/v1/users/logout/` avslutar sessionen (`204` klart, `503` försök igen). Ett workerjobb kl. 00:30 workerns tid (UTC om inte `TZ` är satt) tar bort utgångna rader.
 
-### Utloggningen i Svelte är ett formulär [#svelte-logout-form]
+**Gör:** om du sätter `BROWSER_SESSION_MAX_AGE` (standard 43200), håll den minst `JWT_EXPIRY_TIME`, annars startar inte backend. Håll workern igång.
 
-- **Vad ändras:** `GET /logout` visar en sida med en knapp för utloggning; utloggning, rensning av kakor och byte av organisation är `POST`-åtgärder. `?clear_cookies` och `GET /login/switch-organisation` är borttagna. Ett formulär som postas från en annan webbplats svarar `403`.
-- **Varför:** en länk eller bild kunde logga ut personer eller nollställa deras session.
-- **Vem agerar:** ingen måste agera. Bokmärken, länkar och leverantörens front-channel-utloggning till `/logout` visar nu knappen.
-- **Kontroll:** `/logout` visar knappen; utloggningen fungerar.
-- **Återställning:** tidigare frontend.
-- **Guide:** [Sessioner på servern](/docs/authentication-architecture#server-side-sessions).
+**Återställning:** nedgradering av `202611021100` tar bort tabellen; React-användare loggar in igen.
 
 ### `TRUSTED_PROXY_COUNT` räknar proxyer exakt [#trusted-proxy-count]
 
-- **Vad ändras:** med `N` större än 0 är klientadressen den `N`:e posten i `X-Forwarded-For` räknat från höger (2.3 tog nästa, med `X-Real-IP` som reserv). Den används i granskningsloggen, IP-listor för API-nycklar, widgetgränser och loggen för lösenordsinloggning. En Traefik- eller Dokploy-proxy med `N=1`: oförändrat. En nginx med `N=1`: nu klienten. En lastbalanserare framför Traefik kräver `N=2`.
-- **Varför:** ett förfalskat prefix i `X-Forwarded-For` kunde välja adressen som används för gränser och IP-listor.
-- **Vem agerar:** driftansvariga med mer än en proxy, eller nginx.
-- **Före:** sätt `N` till antalet proxyer som lägger till i huvudet. Sätt det aldrig högre.
-- **Kontroll:** `source_ip` i inloggningsloggen och granskningsloggen visar verkliga klientadresser; ett anrop med förfalskat `X-Forwarded-For: 203.0.113.9` visas inte som den adressen.
-- **Återställning:** tidigare avbild.
-- **Guide:** [Bakom en omvänd proxy](/guides/embed-widget#behind-a-reverse-proxy).
+Klientadressen är den `N`:te posten i `X-Forwarded-For` räknat från höger. En Traefik-proxy med `N=1`: oförändrat. En lastbalanserare framför Traefik behöver `N=2`.
+
+**Gör:** sätt `N` till antalet proxyer som lägger till i huvudet. Aldrig högre.
 
 ### React-webbappen körs på huvudvärden [#react-web-app-main-host]
 
-- **Vad ändras:** React-appen är nu en statisk app i backend-avbilden. Avbilden `eneo-web-next`, dess Node-server, `SESSION_SECRET` och `env_web_next.template` är borta. Referensfilen för Compose slår på `WEB_APP_ENABLED` och `BROWSER_SESSION_ENABLED` och lägger till en router för huvudvärden; den är en platshållare (`your-domain.com`) tills du ändrar den. Inloggningen går via backend, som bygger callbacken från anropets värd. Inställningarna för hjälpcenter och länkar flyttar till `env_backend.env`. Egna byggen behöver `--build-context web=./frontend`.
-- **Varför:** en avbild och en inloggningsväg i stället för en separat Node-server med egen sessionshemlighet.
-- **Vem agerar:** varje driftansvarig som använder referensfilen för Compose.
-- **Före:** bestäm dig. För att behålla Svelte, sätt `WEB_APP_ENABLED=false` och `FRONTEND_ROUTER_PRIORITY=7`. För att byta: sätt värden på routern, låt proxyn skicka vidare den publika `Host`, kontrollera att `https://<publik värd>/login/callback` är registrerad hos leverantören (`/auth/callback` prövas som reserv), flytta från Zitadel först och meddela att alla loggar in igen. Den som körde betan i 2.3 tar bort web-next-profilen och flyttar dess länkinställningar till `env_backend.env`.
-- **Under:** `docker compose --env-file .env --env-file release.env up -d --remove-orphans`, med installationens Compose-filer och profiler mellan `docker compose` och `up`; med det medföljande lagret är det `--profile object-content -f docker-compose.yml -f docker-compose.object-content.yml` (se [Välj innehållslagring](/guides/object-content-storage)).
-- **Efter:** ta bort HSTS som din proxy lägger på huvudvärden, eftersom backend nu sätter det där utanför utveckling; den som använde `/docs` går över till `/openapi.json`.
-- **Kontroll:** `/` laddas, `HEAD /healthz` svarar `200`, inloggningen sätter kakan `__Host-eneo_web` och loggen har inget `browser_oidc_redirect_not_registered`.
-- **Återställning:** `FRONTEND_ROUTER_PRIORITY=7` tar tillbaka Svelte på huvudvärden. Det finns ingen väg tillbaka till avbilden `eneo-web-next`.
-- **Guide:** [Huvuddomän och återställning av webbgränssnittet](/guides/deployment#main-host-and-ui-rollback), [Reverse proxy och nätverk](/guides/deployment#reverse-proxy-och-nätverk), [Backendavbildning och körmiljö](/guides/deployment#backendavbildning-och-körmiljö).
+React-appen ligger nu i backend-avbilden. Referensfilen för Compose lägger till en router för huvudvärden, en platshållare (`your-domain.com`) tills du ändrar den.
+
+**Gör:** för att behålla Svelte, sätt `WEB_APP_ENABLED=false` och `FRONTEND_ROUTER_PRIORITY=7`. För att byta: sätt värden på routern och registrera `https://<publik värd>/login/callback` hos leverantören. Kör sedan `docker compose --env-file .env --env-file release.env up -d --remove-orphans`, med installationens Compose-filer och profiler mellan `docker compose` och `up`; med det medföljande lagret är det `--profile object-content -f docker-compose.yml -f docker-compose.object-content.yml` (se [Välj innehållslagring](/guides/object-content-storage)).
+
+**Kontroll:** `HEAD /healthz` svarar `200`.
+
+**Återställning:** `FRONTEND_ROUTER_PRIORITY=7` tar tillbaka Svelte. Se [Huvuddomän och återställning av webbgränssnittet](/guides/deployment#main-host-and-ui-rollback).
 
 ### Härdning av HTTP [#http-hardening]
 
-- **Vad ändras:** utanför utveckling svarar `/docs` och `/redoc` `404` när en flagga för webbläsarsessioner är på; `/openapi.json` finns kvar. Varje `/api/`-svar har `Cache-Control: no-store`, `nosniff`, en låst CSP och, utanför utveckling, HSTS i ett år, om inte vägen sätter egna värden. Loopback-origins klarar CORS bara när `ENVIRONMENT` är utveckling. En `*` i värden för `PUBLIC_ORIGIN` eller `MCP_APP_HOST_ORIGINS` nekas vid start, och i `canonical_public_origin` när leverantörsinställningar sparas. Hälsokontroller tar emot `HEAD`.
-- **Varför:** med sessioner i kakor får dokumentationssidornas skript från tredje part inte köras på sessionens origin, och API-svar får inte cachas, tolkas om eller ramas in.
-- **Vem agerar:** driftansvariga vars proxy också sätter HSTS eller CSP, utvecklare som når en backend utanför utveckling från `localhost`.
-- **Före:** använd konkreta värdar; servera varje värd över HTTPS (webbläsare minns HSTS i ett år); bestäm om proxyn eller Eneo äger HSTS och CSP. Lägg till `http://localhost:*` i tillåtna origins vid behov.
-- **Kontroll:** `curl -I` visar ett enda HSTS-huvud.
-- **Återställning:** tidigare avbild; webbläsare behåller HSTS.
-- **Guide:** [Reverse proxy och nätverk](/guides/deployment#reverse-proxy-och-nätverk).
+Utanför utveckling får varje `/api/`-svar HSTS i ett år, om inte vägen sätter egna värden. En `*` i värden för `PUBLIC_ORIGIN` eller `MCP_APP_HOST_ORIGINS` nekas vid start.
 
-### Svar vid lösenordsinloggning [#password-login-responses]
+**Gör:** använd konkreta värdar, servera varje värd över HTTPS och bestäm om proxyn eller Eneo äger HSTS och CSP.
 
-- **Vad ändras:** på `POST /api/v1/users/login/token/` listar en `422` bara `loc`, `type` och `msg` (ingen återgiven indata). Ett korrekt lösenord för ett inaktivt konto eller en avstängd organisation svarar `403` (koderna 9019 och 9025) i stället för `500`. Ett oväntat fel svarar `500` med koden `login_unavailable`. Valideringsloggen innehåller inte längre e-postadressen.
-- **Varför:** ett fel får inte återge inloggningsuppgifter, och ett spärrat konto är inget serverfel.
-- **Vem agerar:** API-klienter som loggar in med lösenord; driftansvariga med larm på dessa svar.
-- **Efter:** uppdatera tolkningen av `422`, hantera de två `403`-koderna, läs `code` och `message` vid `500`.
-- **Återställning:** tidigare avbild.
-- **Guide:** [Lösenordens livscykel](/docs/authentication-architecture#local-password-lifecycle).
+**Återställning:** webbläsare minns HSTS.
 
 ### Lösenordens livscykel [#password-lifecycle]
 
-- **Vad ändras:** lösenord som en administratör satt (det genererade lösenordet i Administration > Användare, administratörs-API:erna, `DEFAULT_USER_PASSWORD`) måste bytas vid första inloggningen. Till dess når sessionen bara vägarna för lösenordsbyte, den egna profilen (`GET /api/v1/users/me/`) och utloggningen; andra vägar svarar `403` med kod 9070 `password_change_required`. Administratörer kan sätta en högsta ålder för lösenord (`GET`/`PATCH /api/v1/admin/password-policy`); befintliga lösenord räknas från uppgraderingen. När db-init skapar standardanvändaren misslyckas den om `DEFAULT_USER_PASSWORD` är kortare än 12 tecken eller längre än 72 byte (2.3 avslutade utan fel och skapade ingenting). OIDC, API-nycklar, moduler och systemadministratörer berörs inte.
-- **Varför:** ett lösenord som någon annan valt ska inte förbli i bruk.
-- **Vem agerar:** driftansvariga som skapar användare vid start, administratörer, integrationer som loggar in med lösenord.
-- **Före:** `DEFAULT_USER_PASSWORD` har minst 12 tecken och högst 72 byte. Lämna `DEFAULT_USER_PASSWORD_CHANGE_REQUIRED` osatt utom i testmiljöer.
-- **Under:** inget tvingas på befintliga lösenord.
-- **Efter:** bestäm en högsta ålder; integrationer hanterar 9070 eller använder API-nycklar.
-- **Kontroll:** `GET /api/v1/users/me/` visar `password_status`.
-- **Återställning:** nedgradering av `202610161000` tar bort kolumnerna.
-- **Guide:** [Lösenordens livscykel](/docs/authentication-architecture#local-password-lifecycle).
+Lösenord som en administratör satt måste bytas vid första inloggningen (`403` kod 9070 tills dess). När db-init skapar standardanvändaren misslyckas den om `DEFAULT_USER_PASSWORD` är kortare än 12 tecken eller längre än 72 byte.
 
-## API-kontrakt [#api-contract]
+**Gör:** kontrollera `DEFAULT_USER_PASSWORD`; integrationer hanterar 9070 eller använder API-nycklar.
+
+## Detaljer: API-kontrakt [#details-api-contract]
 
 ### Ett felformat [#error-envelope]
 
-- **Vad ändras:** HTTP-fel, även `404` och `405`, svarar `{message, eneo_error_code?, code?, context?, details?, request_id?}`. En kopia i `detail` finns kvar i en version. Extra fält som `retry_after_seconds` flyttar till toppnivån. `422` och `500` behåller sina format. De nya OIDC-avvisningarna och `identity_conflict` har ingen `detail`. `Retry-After` på `429` är de sekunder som återstår av fönstret, också för API-nycklar, vars `Retry-After` var hela fönstrets längd.
-- **Varför:** klienter och inloggningssidor kan agera på en kod i stället för att tolka text.
-- **Vem agerar:** API-konsumenter, genererade klienter och kontraktstester.
-- **Efter:** läs `code` och `message` i stället för `detail`; läs extra fält på toppnivån; generera om OpenAPI-klienter.
-- **Kontroll:** `GET /api/v1/does-not-exist` returnerar `message` och `detail`.
-- **Återställning:** tidigare avbild.
-- **Guide:** [Fel](/docs/api#errors).
+HTTP-fel svarar `{message, eneo_error_code?, code?, context?, details?, request_id?}`; en kopia i `detail` finns kvar i en version. `Retry-After` vid `429` är sekunderna kvar i fönstret, även för API-nycklar, vars `Retry-After` var hela fönstrets längd.
+
+**Gör:** läs `code` och `message` i stället för `detail`; generera om OpenAPI-klienter.
 
 ### Ikoner [#icons]
 
-- **Vad ändras:** att ta bort en ikon som används svarar `409` (9075 `icon_in_use`); töm `icon_id` i stället, så tar servern själv bort den ersatta eller tömda ikonen. Ett nytt `icon_id` måste vara en ikon som den anropande användaren laddat upp i sin egen organisation, annars `400` (9076 `icon_not_attachable`). Tjänstenycklar kan inte ladda upp ikoner (`403`). En migrering tömmer ikoner som pekar över organisationsgränser (resursen visar standardavataren).
-- **Varför:** ikon-id:n är publika, så vem som helst i en organisation kunde ta bort eller koppla vilken ikon som helst.
-- **Vem agerar:** API-konsumenter som hanterar ikoner; administratörer för installationer med flera organisationer.
-- **Under:** driftsätt backend och båda frontendapparna tillsammans; personer laddar om öppna flikar (en gammal sida får `409`).
-- **Efter:** ladda upp tömda ikoner igen.
-- **Återställning:** tömningen kan inte ångras; frigjorda ikoner kommer bara tillbaka från en säkerhetskopia.
-- **Guide:** [Ikoner](/docs/api#icons).
+En migrering tömmer ikoner som pekar över organisationsgränser.
 
-## Gallring, loggar och lagring [#retention-logs-storage]
+**Gör:** driftsätt backend och båda frontends tillsammans; ladda upp tömda ikoner igen.
+
+**Återställning:** tömningen går inte att ångra.
+
+## Detaljer: gallring, loggar och lagring [#details-retention]
 
 ### En gallringsmotor [#retention-engine]
 
-- **Vad ändras:** nattjobben `cleanup_old_data` (03:00), `delete_unused_files` (03:30) och `purge_old_conversations` (04:00) ersätts av `run_retention` vid `RETENTION_CRON_HOUR`:`RETENTION_CRON_MINUTE` (03:30 i workerns tid, UTC i avbilden). Varje uppgift kan stängas av (`RETENTION_CONVERSATIONS_HISTORY_ENABLED`, `RETENTION_EMPTY_SESSIONS_ENABLED`, `RETENTION_UNUSED_FILES_ENABLED`, `RETENTION_JOB_HISTORY_ENABLED`, `RETENTION_DERIVED_COPIES_ENABLED`) och har en budget (`RETENTION_MAX_ROWS_PER_RUN` med flera); en eftersläpning betas av under flera nätter. `/api/healthz` rapporterar gallringens läge (`DEGRADED` med HTTP `200`, och den begränsande inställningen). Varje körning skrivs till granskningsloggen. Gallringsperioder och deras ordning är oförändrade. En migrering bygger index samtidigt med drift.
-- **Varför:** tre motorer hade olika regler; borttagning måste vara schemalagd, begränsad och spårbar.
-- **Vem agerar:** driftansvariga med skript, larm eller hälsokontroller på de gamla jobbnamnen, tiderna eller utdata från rensningskommandot.
-- **Före:** uppdatera skripten och larmen; planera tid för indexbygget (kör `db-init` igen om det avbryts).
-- **Under:** inget.
-- **Efter:** om hälsokontrollen namnger en begränsande inställning, höj bara den. En slutförd körning är inget bevis på att byte raderats hos lagringsleverantören; efter en återställning rapporterar [kontrollkörningen](#readback-after-restore) lagringen för sig.
-- **Kontroll:** granskningsloggen visar `data_retention_run` varje natt; gallringsavsnittet i `/api/healthz` namnger ingen begränsande inställning.
-- **Återställning:** nedgradera senare migreringar först; avbilden för 2.3 kör de tre gamla jobben.
-- **Guide:** [Schemaläggning och gränser](/docs/audit-logging#scheduled-execution-and-limits), [Hälsa](/docs/audit-logging#health).
+`cleanup_old_data`, `delete_unused_files` och `purge_old_conversations` ersätts av `run_retention` (03:30 workerns tid, UTC i avbilden). Gallringstiderna är oförändrade.
 
-### Promptguiden har ingen egen gallringsperiod [#prompt-guide-retention]
+**Gör:** uppdatera skript och larm på de gamla jobbnamnen.
 
-- **Vad ändras:** en ny installation av promptguiden sätter inte längre 30 dagar; den följer utrymmet, sedan organisationen, annars sparas konversationerna. Befintliga guider behåller sin period.
-- **Varför:** ett standardvärde som ingen valt får inte ta bort konversationer.
-- **Vem agerar:** administratörer som vill ha en period: sätt den uttryckligen.
-- **Återställning:** behövs inte.
-- **Guide:** [Gallringshierarki för konversationer](/docs/audit-logging#conversation-retention-hierarchy).
-
-### Kopior av borttagna konversationer [#derived-copies]
-
-- **Vad ändras:** en konversation som kopierats från en fråga som senare tagits bort svarar `410` (9085 `derived_source_removed`) och utelämnas från listor och exporter. Köade jobb för appkörningar och insikter bär id:n i stället för text. En gallringsuppgift (`RETENTION_DERIVED_COPIES_ENABLED`) tar bort sådana kopior. Inget skapar kopior ännu, så inget `410` förekommer i dag. På PostgreSQL 13 kostar läsningar av konversationer mer.
-- **Varför:** en kopia får inte behålla borttagen text, och köade jobbdata var en kopia som inte gick att nå.
-- **Vem agerar:** API-konsumenter (behandla `410` som borta); installationer på PostgreSQL 13 bör planera en övergång till 16.
-- **Före:** töm gärna jobbkön.
-- **Återställning:** nedgraderingen tar bort tabellen; töm kön innan applikationen nedgraderas.
-- **Guide:** [Kopior av borttagna konversationer](/docs/audit-logging#copies-of-removed-conversations).
+**Återställning:** nedgradera senare migreringar först.
 
 ### Frågeloggar töms [#question-logs-emptied]
 
-- **Vad ändras:** en migrering (`202611090600`) tömmer anrop, modellinställningar och kontext i varje frågelogg som skrevs före uppgraderingen. Loggar som hör till en fråga behåller sin rad; loggar som ingen fråga hänvisar till tas bort. När en fråga tas bort senare töms även loggarna för senare turer. Gamla frågor visas som "inte loggad" i insikter, och `GET /api/v1/logging/{id}/` svarar `400` "Question was not logged.".
-- **Varför:** varje logg innehöll hela konversationshistoriken, så borttagen text levde kvar i loggar, och gamla loggar går inte att skilja åt.
-- **Vem agerar:** varje installation; det går inte att ångra.
-- **Före:** ta en säkerhetskopia med `pg_dump` (den enda vägen tillbaka). Stoppa varje backend och worker av den tidigare versionen, på varje värd: `docker compose --env-file .env --env-file release.env stop backend worker`, och kontrollera sedan att `docker compose --env-file .env --env-file release.env ps --status running backend worker` inte listar något. En gammal backend som körs skriver nytt innehåll under migreringen. På stora tabeller: planera utrymme för transaktionsloggen; migreringen skriver om varje lagrad logg, i omgångar om 5000.
-- **Under:** kör `db-init`; den kan köras igen.
-- **Efter:** informera administratörer; API-konsumenter behandlar `400` som ingen logg.
-- **Kontroll:** `SELECT count(*) FROM logging WHERE json_body <> 'null'::jsonb OR context IS NOT NULL OR model_kwargs <> '{}'::jsonb` returnerar 0 direkt efter migreringen.
-- **Återställning:** läs tillbaka säkerhetskopian; innehållet kommer inte tillbaka på annat sätt.
-- **Guide:** [Uppgradera och återställ](/guides/deployment#uppgradera-och-återställ).
+Migreringen `202611090600` tömmer varje frågelogg. Det går inte att ångra.
+
+**Gör:** ta en säkerhetskopia med `pg_dump`. Stoppa varje gammal backend och worker på varje värd: `docker compose --env-file .env --env-file release.env stop backend worker`, och kontrollera sedan att `docker compose --env-file .env --env-file release.env ps --status running backend worker` inte listar något.
+
+**Återställning:** läs tillbaka säkerhetskopian. Se [Uppgradera och återställ](/guides/deployment#uppgradera-och-återställ).
 
 ### Filnamn försvinner ur granskningsloggen [#audit-names-removed]
 
-- **Vad ändras:** en migrering skriver om lagrade granskningsposter: filhändelser, anrop från MCP-appar, dokumentexporter, sparade dokumentversioner och ändringar av assistentbilagor innehåller inte längre fil- eller konversationsnamn. Sökning i granskningsloggen på filnamn ger inte längre träffar. Fel vid uppladdning och extrahering namnger inte längre filen; databasfel skriver inte längre ut parametrar.
-- **Varför:** namnet på en borttagen fil får inte leva kvar i granskningsloggen eller i loggar.
-- **Vem agerar:** organisationer som sparar granskningsloggen som bevis.
-- **Före:** exportera granskningsloggen om du behöver namnen (till exempel vid bevarandeskyldighet).
-- **Efter:** sök på id.
-- **Återställning:** kan inte ångras.
-- **Guide:** [Exportera granskningsloggar](/guides/audit-logging#exporting-audit-logs).
+**Gör:** exportera granskningsloggen först om du behöver filnamnen.
+
+**Återställning:** går inte att ångra.
 
 ### Objektlagringen får inte behålla gamla versioner [#object-storage-versioning]
 
-- **Vad ändras:** när en objektlagring är konfigurerad (i miljön eller under Administration > Fillagring) vägrar backend och worker att starta om de inte kan läsa `s3:GetBucketVersioning`, `s3:GetBucketObjectLockConfiguration` och `s3:ListBucketVersions`, om versionshantering någon gång har slagits på eller pausats, eller om Object Lock är på. En borttagning räknas som bekräftad först efter en fullständig versionslistning. Administratörens anslutningstest rapporterar samma problem.
-- **Varför:** en versionerad bucket behåller borttagna byte.
-- **Vem agerar:** installationer med objektlagring. Installationer som bara lagrar i databasen gör inget.
-- **Före (på 2.3):** ge de tre åtgärderna på bucketens ARN (`arn:aws:s3:::<bucket>`, inte `/*`) för den aktiva bucketen och sparade anslutningar. Kontrollera att `get-bucket-versioning` inte visar någon status och att bucketen saknar Object Lock. Om den någon gång varit versionerad eller låst: skapa en ny bucket, kopiera med `rclone`, byt lagringsplats medan 2.3 körs och ta bort gamla versioner hos leverantören.
-- **Kontroll:** `/api/readyz` rapporterar objektinnehåll `ready`; efter en borttagning är `list-object-versions` tom.
-- **Återställning:** bara kod, men det innebär att hela versionen återställs, inklusive de tömda loggarna.
-- **Guide:** [Flytta till en annan S3-kompatibel tjänst](/guides/object-content-storage#move-to-another-s3-compatible-service).
+Backend och worker vägrar starta om de inte kan läsa `s3:GetBucketVersioning`, `s3:GetBucketObjectLockConfiguration` och `s3:ListBucketVersions`, om versionshantering någon gång har varit på eller pausad, eller om Object Lock är på.
 
-### Medföljande SeaweedFS-avbild [#bundled-seaweedfs-image]
+**Gör (på 2.3):** ge de tre åtgärderna på bucketens ARN. Om bucketen någon gång har haft versionshantering, [flytta till en ny bucket](/guides/object-content-storage#move-to-another-s3-compatible-service).
 
-- **Vad ändras:** den medföljande SeaweedFS-avbilden är `4.40-eneo.8`.
-- **Varför:** en säkerhetsrättning i ett av dess beroenden (go-jose).
-- **Vem agerar:** installationer med den medföljande SeaweedFS: sätt `ENEO_SEAWEEDFS_IMAGE` till digest-värdet i releasens `IMAGE-DIGESTS.txt`. Andra installationer gör inget.
-- **Återställning:** det tidigare digest-värdet.
-- **Guide:** [Lås releasens avbild](/guides/object-content-storage#pin-the-release-image).
-
-### En fråga utan logg svarar 400 [#logging-not-logged]
-
-- **Vad ändras:** `GET /api/v1/logging/{message_id}/` svarar `400` (9007) "Question was not logged." i stället för `500` för en fråga vars logg saknar anrop, till exempel en fråga till en assistent som inte loggar. En fråga helt utan logg svarade redan `400`.
-- **Varför:** en saknad logg är inget serverfel.
-- **Vem agerar:** API-konsumenter: behandla `400` som ingen logg.
-- **Återställning:** tidigare avbild.
+**Återställning:** innebär att hela versionen rullas tillbaka.
 
 ### `UPLOAD_TMP_DIR` måste vara ett lokalt filsystem [#upload-tmp-dir-local]
 
-- **Vad ändras:** varje backend- och workerprocess håller filerna den arbetar med (uppladdningar i konversationer innan de lagras, ljud som konverteras eller transkriberas, webbsidor som läses in, SharePoint-filer som läses) i en egen katalog, `$UPLOAD_TMP_DIR/eneo-scratch/proc-<id>/`, skyddad av ett fillås (`owner.lock`). En process tar bort sin katalog när den stannar; nästa process som startar på samma volym tar bort katalogen för en process som kraschat, upp till 64 vid varje start. Uppladdningar till kunskap och transkribering som väntar på sitt jobb ligger kvar i `$UPLOAD_TMP_DIR/job-staging/`. Crawlerns worker tar också bort de `eneo-crawl-*`-kataloger som tidigare versioner lämnade i systemets temporära katalog.
-- **Varför:** en process som kraschade lämnade uppladdningar, ljud och inlästa filer kvar på disk, utom räckhåll för gallringen.
-- **Vem agerar:** driftansvariga.
-- **Före:** se till att `UPLOAD_TMP_DIR` (standard `/tmp`) ligger på ett lokalt filsystem; en volym som delas mellan värdar via NFS eller SMB stöds inte. Dimensionera den för ljud och inlästa filer, inte bara uppladdningar.
-- **Under / efter:** inget.
-- **Kontroll:** med tjänsterna igång visar `ls $UPLOAD_TMP_DIR/eneo-scratch/` en `proc-*`-katalog per körande process; efter en omstart finns ingen kvar från en stoppad process.
-- **Återställning:** tidigare versioner varken använder eller städar `eneo-scratch/`: stoppa varje process och ta bort `$UPLOAD_TMP_DIR/eneo-scratch/`.
-- **Guide:** avsnittet om temporära filer i den engelska versionen av driftsättningsguiden.
+**Gör:** håll `UPLOAD_TMP_DIR` (standard `/tmp`) på ett lokalt filsystem; NFS eller SMB stöds inte. Se avsnittet om temporära filer i den engelska versionen av driftsättningsguiden.
+
+**Återställning:** ta bort `$UPLOAD_TMP_DIR/eneo-scratch/`.
 
 ### Migreringen `202611091200` skriver om varje konversationsrad [#sessions-migration]
 
-- **Vad ändras:** migreringen lägger till `sessions.name_set_at` och `sessions.feedback_set_at` och sätter båda till konversationens skapandetid. Tabellen är låst medan den körs: konversationer kan varken läsas eller skrivas.
-- **Varför:** en konversations namn och feedbacktext behöver en egen tid för att kunna följa gallringen.
-- **Vem agerar:** driftansvariga.
-- **Under:** planera driftstopp i proportion till storleken på `sessions`.
-- **Kontroll:** `alembic current` visar `202611091200`.
-- **Återställning:** `alembic downgrade 202611091110` tar bort båda kolumnerna; en ny uppgradering sätter åter båda tiderna till konversationens skapandetid.
+**Gör:** planera driftstopp i proportion till storleken på `sessions`.
 
-### Konversationers namn och feedbacktext följer gallringstiden [#names-and-feedback-follow-retention]
+**Återställning:** `alembic downgrade 202611091110` tar bort `sessions.name_set_at` och `sessions.feedback_set_at`.
 
-- **Vad ändras:** där en organisation, ett utrymme, en assistent eller en app har en gallringstid töms en konversations namn (båda apparna visar Namnlös) och dess feedbacktext tas bort när deras egen tid är äldre än gallringstiden. Tummen upp eller ned finns kvar. Där ingen gallringstid är satt ändras inget. Befintliga konversationer får sin skapandetid, så den första nattliga körningen efter uppgraderingen tömmer namn och feedbacktext för varje konversation som är äldre än sin gallringstid, även långlivade konversationer vars namn någon nyligen valt.
-- **Varför:** ett namn eller en kommentar kan citera turer som gallringen redan tagit bort.
-- **Vem agerar:** administratörer: informera användarna före uppgraderingen. API-konsumenter: `GET /api/v1/conversations/`, `GET /api/v1/conversations/{id}/` och sessionsvägarna för assistenter och gruppchattar returnerar `name: ""` och feedback med `text: null` för sådana konversationer.
-- **Efter:** tills den första körningen har betat av de äldre namnen och texterna kan `GET /api/healthz` visa `degraded` för konversationshistoriken. Det är försenad text, inte ett falskt larm, och det försvinner när steget har kommit ikapp. `blocked_reasons` kan innehålla `names_and_feedback.root_locked`, och för uppgiften för tomma sessioner (`sessions.empty`) `sessions.root_locked`.
-- **Kontroll:** körningens granskningspost räknar `names_and_feedback.names_cleared` och `names_and_feedback.feedback_texts_cleared`.
-- **Återställning:** tömda namn och texter kommer inte tillbaka. Det är avsikten.
-- **Guide:** [Kopior som följer sin källa](/guides/data-retention#copies-that-follow-their-source), [Namn och feedbacktext](/docs/audit-logging#names-and-feedback-text).
+### Namn och feedbacktext följer gallringstiden [#names-and-feedback-follow-retention]
 
-### Misslyckade jobb har en kod i stället för feltext [#failed-jobs-failure-code]
+Den första nattliga körningen tömmer namn och feedbacktext för varje konversation som är äldre än sin gallringstid.
 
-- **Vad ändras:** en misslyckad appkörning, Confluence- eller SharePoint-hämtning eller SharePoint-deltasynkning, och varje jobb vars sista commit misslyckades, har nu `failure_code` satt och `result_location: null` i `GET /api/v1/jobs/`, `GET /api/v1/jobs/{id}/` och `GET /api/v1/jobs/events/`. Tidigare innehöll `result_location` den rensade undantagstexten. Jobb som registrerades före uppgraderingen behåller sin text; jobb som redan hade egna felkoder (uppladdningar, transkriberingar, webbläsningar) är oförändrade. Båda apparna förklarar koden i ord.
-- **Varför:** ett undantagsmeddelande kan citera innehåll som gallringen senare tar bort.
-- **Vem agerar:** API-konsumenter som läser `result_location` för misslyckade jobb: läs `failure_code` i stället.
-- **Återställning:** behövs inte; tidigare versioner läser den gamla texten och ignorerar koden.
+**Gör:** informera användarna före uppgraderingen.
 
-### Workerloggar innehåller inga felmeddelanden [#worker-logs-without-messages]
-
-- **Vad ändras:** ett misslyckat jobb loggas med jobb-id, felkod, undantagstyper och var felet uppstod, aldrig med meddelandet eller stackspårningen. Detsamma gäller integrationssynkningar, adaptrarna för chatt, inbäddning och transkribering samt gallringskörningen. arq:s rader för start och fel innehåller inga jobbargument, resultat eller felmeddelanden. Integrationsklienternas förloppsloggar namnger fortfarande de objekt de läser.
-- **Varför:** meddelanden och stackspårningar kan citera borttaget innehåll.
-- **Vem agerar:** driftansvariga med logglarm eller rutiner som matchar undantagstext: matcha på `failure_code` och undantagstypen.
-- **Kontroll:** låt ett testjobb misslyckas; dess loggrad visar koden och typerna, och inget meddelande.
+**Kontroll:** `GET /api/healthz` kan visa `degraded` tills körningen har kommit ikapp. `blocked_reasons` kan innehålla `names_and_feedback.root_locked`, och för uppgiften för tomma sessioner (`sessions.empty`) `sessions.root_locked`. Se [Kopior som följer sin källa](/guides/data-retention#copies-that-follow-their-source).
 
 ### Ett nytt steg efter att en säkerhetskopia återställts [#readback-after-restore]
 
-- **Vad ändras:** `run-cron --until-complete run_retention` kör gallringen i en egen process tills inget förfallet finns kvar, och rapporterar för sig om lagringen har bekräftat varje borttagning.
-- **Varför:** en återställd databas kan innehålla rader som blev förfallna efter dess återställningspunkt, och inget visade när gallringen hade kommit ikapp eller om lagringen hade tagit bort byten.
-- **Vem agerar:** driftansvariga, vid varje återställning.
-- **Efter en återställning:** med trafiken stängd, varje worker stoppad och varje gallringsuppgift påslagen, kör `docker compose --env-file .env --env-file release.env run --rm backend run-cron --until-complete run_retention` innan trafiken öppnas. Lägg till installationens Compose-filer och profiler mellan `docker compose` och `run`; med det medföljande lagret är det `--profile object-content -f docker-compose.yml -f docker-compose.object-content.yml`.
-- **Kontroll:** slutkod 0 med `retention: complete after N rounds` och `storage: confirmed` eller `storage: pending …`.
-- **Guide:** [Efter en återställning](/guides/data-retention#after-a-restore) säger vad steget lovar, vad som ändå kan komma tillbaka och vad du gör med varje resultat.
+**Gör:** med trafiken stängd, varje worker stoppad och varje gallringsuppgift påslagen, kör `docker compose --env-file .env --env-file release.env run --rm backend run-cron --until-complete run_retention` innan trafiken öppnas. Lägg till installationens Compose-filer och profiler mellan `docker compose` och `run`; med det medföljande lagret är det `--profile object-content -f docker-compose.yml -f docker-compose.object-content.yml`.
 
-## Modeller, verktyg och integrationer [#integrations]
+**Kontroll:** slutkod 0. [Efter en återställning](/guides/data-retention#after-a-restore) har hela rutinen.
 
-### Fler verktygsrundor per tur [#tool-rounds]
-
-- **Vad ändras:** `MAX_TOOL_ROUNDS` (standard 40, tidigare fast 10) och `COMPLETION_REQUEST_TIMEOUT_SECONDS` (standard 600). LiteLLM:s `REQUEST_TIMEOUT` gäller inte längre.
-- **Varför:** tio rundor räckte inte för uppgifter som att läsa en lång bilaga sida för sida.
-- **Vem agerar:** ingen måste agera. En verktygstung tur kan nu kosta upp till fyra gånger så många anrop och token; sätt `MAX_TOOL_ROUNDS=10` för att behålla det gamla taket. Flytta en egen `REQUEST_TIMEOUT` till `COMPLETION_REQUEST_TIMEOUT_SECONDS`.
-- **Återställning:** tidigare avbild.
-- **Guide:** [Konfiguration och driftsättning](/docs/knowledge-retrieval-and-mcp#configuration-and-deployment).
-
-### Modelleverantörer [#model-providers]
-
-- **Vad ändras:** leverantörstyper som inte kan routas (prisgrupper som `bedrock_converse` eller `vertex_ai-*`, samt `github_copilot` och `chatgpt`) nekas med `400`; den kanoniska typen lagras (`vllm` blir `hosted_vllm`). Modellnamn i katalogen dubblerar inte längre leverantörsprefixet. Anslutningskontrollen och modellistan skickar inget `Authorization`-huvud för en leverantör utan nyckel. Avbilden sätter `LITELLM_LOCAL_MODEL_COST_MAP=True`, så starten hämtar inget från GitHub.
-- **Varför:** sådana leverantörer sparades men misslyckades vid första anropet.
-- **Vem agerar:** administratörer med modeller vars namn har dubblerat prefix (`mistral/mistral/…`) eller leverantörer av en nekad typ.
-- **Efter:** rätta namnen på chattmodeller; inbäddnings- och omrankningsmodeller behöver nya modeller (och kunskap som läggs till igen eller ett nytt val för omrankning); skapa nekade leverantörer på nytt som `bedrock` eller `vertex_ai`.
-- **Återställning:** tidigare avbild.
-- **Guide:** [Lägga till en leverantör](/guides/ai-providers#adding-a-provider-admin-ui).
-
-### Avbilder utan apt [#images-without-apt]
-
-- **Vad ändras:** frontend- och backend-avbilderna innehåller inte längre `apt`; frontend-avbilden innehåller inte heller längre `npm`, `npx`, `corepack` eller `yarn`.
-- **Varför:** en sårbarhet i `apt` stoppade avbildsskanningen.
-- **Vem agerar:** driftansvariga som bygger vidare på avbilderna eller installerar paket i körande containrar.
-- **Efter:** installera paket i ett separat byggsteg; felsök med en sidovagn (`docker run --rm -it --network container:eneo_backend debian:bookworm-slim`).
-- **Återställning:** tidigare avbild.
-
-### `MCP_APP_CONTENT_BASE_URL` valideras [#mcp-app-content-base-url]
-
-- **Vad ändras:** när den är satt måste den vara en absolut `http`- eller `https`-adress av skrivbara ASCII-tecken utan mellanslag, omvänt snedstreck, frågesträng, fragment eller användaruppgifter. Värden måste vara ett DNS-namn av bokstäver, siffror och bindestreck (inga understreck, som i ett Docker-tjänstnamn; internationella namn i punycode), en IPv4-adress med punkter eller en IPv6-adress utan zon. Annars startar inte backend. Den måste fortfarande skilja sig från `PUBLIC_ORIGIN`, som i 2.3. Värdet normaliseras: värden med gemener, en standardport tas bort.
-- **Varför:** denna origin isolerar innehåll från MCP-appar från Eneo.
-- **Vem agerar:** installationer som sätter den; vanliga värden godkänns.
-- **Återställning:** tidigare avbild.
-- **Guide:** [Backendavbildning och körmiljö](/guides/deployment#backendavbildning-och-körmiljö).
+## Detaljer: integrationer [#details-integrations]
 
 ### SharePoint [#sharepoint]
 
-- **Vad ändras:** prenumerationer får en adress för livscykelaviseringar och skapas om när Eneos publika adress ändras: vid nästa förnyelse eller synkning, eller direkt med `POST /api/v1/admin/sharepoint/subscriptions/recreate-all` eller en knapp under SharePoint-anslutningens bevakningar. Ett ikappjobb var 15:e minut synkar om källor vars aviseringar kan ha gått förlorade (`SHAREPOINT_CATCH_UP_AFTER_HOURS`, `SHAREPOINT_CATCH_UP_MAX_SYNCS_PER_RUN`). Extraheringen använder uppladdningens tolkare: äldre `.doc` och `.ppt`, skannade, krypterade eller för stora filer hoppas över och visas under Problem. Personliga anslutningar stoppas när ägaren inaktiveras. Nya felkoder för ogiltiga inloggningsuppgifter (`sharepoint_credentials_invalid`) och pågående synkningar (`integration_knowledge_syncing`).
-- **Varför:** förlorade aviseringar och oläsbara filer fick assistenter att svara utan kunskapen, utan någon signal.
-- **Vem agerar:** installationer med SharePoint.
-- **Före:** låt synkningar bli klara eller stoppa workers (en migrering bygger ett index samtidigt med drift); håll webhook-vägarna öppna i gatewayen.
-- **Efter:** om den publika adressen ändrats, skapa om prenumerationerna för att byta direkt; gå igenom fliken Problem; konvertera äldre filer; importera om personliga källor för ägare som slutat.
-- **Kontroll:** bevakningarna visar Frisk.
-- **Återställning:** nedgradering av migreringarna tar bort hälsohistoriken.
-- **Guide:** [När Eneos publika adress ändras](/guides/sharepoint-integration#when-eneos-public-address-changes), [Fliken Problem](/guides/sharepoint-integration#the-problems-tab).
+**Gör:** före, låt synkar bli klara eller stoppa workers. Efter, skapa om prenumerationer om den publika adressen har ändrats och gå igenom fliken Problem.
+
+**Återställning:** nedgradering tappar hälsohistoriken.
 
 ### Webbwidgetar [#widgets]
 
-- **Vad ändras:** nya widgettabeller och en policy per organisation; behörigheten `widgets` ges till de fördefinierade ägarrollerna. En migrering ersätter kontrollen av vem som äger en session. En frågas modellogg tas bort tillsammans med frågan (se [Frågeloggar töms](#question-logs-emptied)). Widgetar lägger till publika vägar under `/embed/` och `/widget/`, och besökar-API:t under `/api/v1/widgets/`. Hastighetsbegränsningen stänger vid fel som standard (`WIDGET_RATE_LIMIT_FAIL_OPEN=false`).
-- **Varför:** publicera en assistent på externa webbplatser, där borttagna konversationer inte lämnar någon modellogg kvar.
-- **Vem agerar:** driftansvariga (migrering och proxyinställningar); administratörer som slår på widgetar.
-- **Före:** sätt `TRUSTED_PROXY_COUNT`; kör `SELECT count(*) FROM sessions WHERE (user_id IS NOT NULL)::int + (api_key_id IS NOT NULL)::int <> 1`, som måste returnera 0; planera tid för stora sessionstabeller.
-- **Efter:** innan en widget aktiveras: Redis, granska MCP-servrar, ge `widgets`, ett delat utrymme och organisationens policy.
-- **Återställning:** nedgraderingar tar bort widgetsessioner och tabeller och tar bort `widgets` från alla roller; borttagna loggar kommer inte tillbaka.
-- **Guide:** [För driftansvariga](/guides/embed-widget#for-operators-policy-templates-and-security).
+**Gör:** sätt `TRUSTED_PROXY_COUNT`; kör `SELECT count(*) FROM sessions WHERE (user_id IS NOT NULL)::int + (api_key_id IS NOT NULL)::int <> 1`, som måste returnera 0.
 
-### Behörigheten Egna Skills [#personal-skills]
-
-- **Vad ändras:** en ny behörighet, Egna Skills (`personal_skills`), ges till de fördefinierade ägarrollerna. Ingen förlorar åtkomst. Utan den pausas Skill-lagret i den personliga chatten.
-- **Varför:** personer kan använda egna Skills utan de bredare Skills-behörigheterna.
-- **Vem agerar:** administratörer som vill ge den till andra roller (Administration > Roller).
-- **Återställning:** nedgraderingen tar bort den från alla roller.
-- **Guide:** [Egna Skills i den personliga chatten](/guides/skills#your-own-skills-in-personal-chat).
-
-## Underhållare [#maintainers]
-
-### Styrt arbetsflöde för versioner [#managed-release-process]
-
-- **Vad ändras:** versioner kan förberedas via Actions > Prepare and Publish Release. Det är avstängt tills `RELEASE_MANAGED=true`; när det är på misslyckas avbildsbygget för en slutlig `v*`-tagg utan granskad versionsbegäran.
-- **Varför:** en version ska komma från en granskad begäran.
-- **Vem agerar:** bara underhållare; driftansvariga gör inget. Patchversioner av 2.3 tas fram som tidigare.
-- **Återställning:** ta bort `RELEASE_MANAGED`.
-- **Guide:** `docs/DEPLOYMENT_WORKFLOW.md` i kodförrådet.
+**Återställning:** nedgraderingar tar bort widgetsessioner och tabeller.

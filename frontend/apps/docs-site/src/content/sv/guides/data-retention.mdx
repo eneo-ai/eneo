@@ -1,511 +1,348 @@
 ---
 title: Gallring
-translationSource: guides/data-retention.mdx@d006df9180ce
+translationSource: guides/data-retention.mdx@2a128f7e9b07
 ---
-
-import { Callout } from "nextra/components";
 
 # Gallring
 
-Gallring tar bort lagrat innehåll när den tid som valts för det har gått ut.
-Den här guiden förklarar vad borttagning betyder i Eneo, var varje tid ställs
-in, hur nivåerna samverkar, när borttagningen körs och vad en återställning
-från backup tar tillbaka. Gränser, räknare och hälsofält finns på den tekniska
-sidan, [Retention](/docs/audit-logging#retention) (på engelska).
-
-<Callout type="info">
-  Ingen regel, ingen gallring: Eneo tar bara bort chattar och appkörningar där
-  någon har valt en tid för dem. En ny installation sparar dem tills en yta, en
-  assistent eller en app får en tid. Undantaget är webbwidgetar: en ny widget
-  har 30 dagar från början.
-</Callout>
-
-## Ingen regel, ingen gallring [#no-rule-no-removal]
-
-Eneo håller isär två sorters borttagning:
-
-- **Gallring** tar bort chattar och appkörningar för att någon har valt en tid
-  för dem, på en yta, en assistent eller en app. Där ingen har valt en tid tar
-  gallringen inte bort något.
-- **Städning av rester** körs oavsett vilka regler som finns. Den tar bort det
-  som inget längre använder, till exempel en uppladdning som aldrig bifogades
-  till en chatt, och register som har en egen period, till exempel
-  granskningsloggen.
-
-Utan någon tid inställd tar gallringen inte bort något:
-
-```text
-Organisation: inget inställt
-└ Yta: inget inställt
-  ├ Assistent A, inget inställt → chattar sparas
-  ├ Gruppchatt → varje tur följer assistenten som svarade: sparas
-  └ App B, inget inställt → körningar sparas
+```mermaid
+flowchart TB
+  accTitle: Så fungerar gallring
+  accDescr: En gallringstid på en assistent eller app, annars på dess yta, avgör. Utan tid tas inget bort. Med en tid tar nattkörningen klockan 03:30 i workerns tid bort chattar och appkörningar som är äldre än sin tid, och de kopior Eneo har av dem följer med. Städning av rester körs oavsett regler. Säkerhetskopior, nedladdningar, AI-leverantörer och kunskapsbaser ligger utanför Eneos räckvidd.
+  subgraph eneo["Eneo"]
+    time["Gallringstid\nassistent eller app, annars dess yta"] -->|"ingen tid satt"| keep["Sparas: inget tas bort"]
+    time -->|"tid satt"| run["Nattkörning, 03:30 i workerns tid\ntar bort chattar och appkörningar äldre än sin tid"]
+    run --> copies["Kopior följer sin källa\nnamn och feedback · kopierade konversationer · temporära filer"]
+    cleanup["Städning av rester, oavsett regler\noanvända uppladdningar · konversationer utan fråga · körningsregister"]
+  end
+  outside["Utanför Eneos räckvidd\nsäkerhetskopior · nedladdningar · AI-leverantörer · kunskapsbaser"]
+  style eneo stroke-dasharray: 6 4
 ```
 
-Städningen av rester körs ändå i den installationen; den
-[andra tabellen nedan](#cleanup-of-leftovers) visar vad den tar bort och när.
+Gallring tar bort lagrat innehåll när den tid som valts för det har gått ut.
+Ingen regel, ingen gallring: chattar och appkörningar tas bara bort där någon
+har valt en tid; en ny webbwidget har 30 dagar från början. Gallring enligt en
+regel hålls isär från städning av rester, som körs oavsett vilka regler som
+finns. Kopior följer sin källa: när en tur tas bort försvinner också de kopior
+Eneo har av den.
 
-## Vad borttagning betyder [#what-removal-means]
+Gränser, räknare, hälsofält och granskningshändelser finns på den tekniska
+sidan, [Retention](/docs/audit-logging#retention) (på engelska).
 
-När gallringen **tar bort** något raderar Eneo det ur databasen tillsammans med
-de kopior Eneo har av det, och innehållslagringen raderar filernas bytes.
-Därefter kan Eneo varken visa det eller ta tillbaka det. När en tur i en
-konversation tas bort omfattar det:
+## För administratören [#for-the-administrator]
+
+### Ingen regel, ingen gallring [#no-rule-no-removal]
+
+Där ingen har valt en tid på en yta, en assistent eller en app tar gallringen
+inte bort något. Städningen av rester tar ändå bort det som inget längre
+använder, till exempel en uppladdning som aldrig bifogades till en chatt, och
+register med en egen period, till exempel granskningsloggen; se
+[Städning av rester](#cleanup-of-leftovers).
+
+### Hur nivåerna samverkar [#how-the-levels-combine]
+
+En tur i en chatt följer tiden för assistenten som svarade. En appkörning
+följer sin app. Den närmaste nivån som har en tid avgör, från den närmaste och
+utåt:
+
+1. assistenten eller appen;
+2. dess yta;
+3. organisationen: en äldre period, `conversation_retention_days`, som bara
+   räknas medan dess brytare `conversation_retention_enabled` är påslagen, i
+   `audit_retention_policies`. Ingen vy och inget API i den här versionen
+   sätter eller visar dem.
+
+När ingen nivå har en tid tas inget bort.
+
+Den närmaste nivån avgör **även när dess tid är längre** än tiden på en nivå
+utanför: ytans tid är ett standardvärde, inte ett tak.
+
+- **Gruppchattar:** varje tur följer assistenten som svarade, så en tidigare
+  tur kan finnas kvar medan en senare tas bort. En tur vars assistent har
+  raderats följer ingen tid och tas inte bort.
+- **När en assistent raderas** raderas dess chattar. En fråga som inte
+  ställdes till en assistent, till exempel en tjänstekörning, sparas tills
+  dess tjänst eller organisationen raderas.
+- **Hjälpassistenter**, till exempel Promptguiden, ligger i organisationsytan,
+  som ingen vy ger en tid. Ge hjälpassistenten en egen tid om dess chattar ska
+  tas bort.
+- **Webbwidgetar** följer bara widgetens egen tid, hållen inom organisationens
+  widgetpolicy som den ser ut natten för varje körning. Hela konversationen
+  tas bort på en gång, räknat från när den startade.
+- **Granskningsloggen** har en period för organisationen, oberoende av alla
+  tider för konversationer.
+
+| Ändring av en tid | Effekt vid nästa körning |
+| --- | --- |
+| Kortare | Äldre konversationer blir aktuella och tas bort |
+| Längre | Konversationer som inte längre är aktuella sparas |
+| Borttagen | Nivån följer nästa nivå utåt, som kan vara kortare, längre eller ingen |
+| Första tiden | Konversationer äldre än den tas bort |
+
+En borttagen konversation kommer aldrig tillbaka.
+
+### Ställ in tiden [#change-the-rules]
+
+Varje tid är ett helt antal dagar.
+
+**En yta** (den som får redigera ytan; organisationsytan har ingen
+gallringsinställning):
+
+- **Svelte-appen:** **Delat**, ytan, **Inställningar**, **Säkerhet &
+  Integritet**, **Gallring av konversationshistorik**. Slå på **Åsidosätt
+  policy**, ange dagarna (1 till 2555), **Spara ändringar**.
+- **React-appen (beta):** **Delat**, ytan, **Inställningar**, **Säkerhet och
+  integritet**, **Gallring av konversationshistorik**. Tomt betyder **Ingen
+  gräns**. Värdet sparas när du lämnar fältet.
+- **API:** `PATCH /api/v1/spaces/{space_id}/` med
+  `{"data_retention_days": 30}`; `null` tar bort tiden, utelämnat behåller den.
+
+**En assistent eller en app** (i en delad yta eller organisationsytan den som
+får redigera ytan; i en personlig yta dess ägare):
+
+- **Svelte-appen:** ytan, **Assistenter** (eller **Appar**), radens meny
+  **Åtgärder**, **Redigera**, **Säkerhet & Integritet**, **Gallring av
+  konversationshistorik**. Slå på **Åsidosätt policy**, ange dagarna, **Spara
+  ändringar**.
+- **React-appen (beta):** ytan, **Assistenter** (eller **Appar**),
+  **Redigera**, **Säkerhet och integritet**, **Gallring av
+  konversationshistorik**. Tomt följer ytan.
+- **API:** `POST /api/v1/assistants/{assistant_id}/` eller
+  `PATCH /api/v1/apps/{app_id}/` med `data_retention_days`; `null` följer ytan.
+
+Hjälpassistenter: **Administratör → Hjälpassistenter → Öppna inställningar**,
+på samma sätt.
+
+**Webbwidgetar:** intervallet finns under **Administratör → Webbwidgetar →
+Policy** (**Minst dagar**, **Högst dagar**, vardera 0 till 3650; 0 till 365
+tills en policy sparas). En widgets egen tid finns under **Webbwidget → Öppna
+widgetinställningar → Regler → Integritet → Lagringstid i dagar**. Se
+[Bädda in en chattwidget](/guides/embed-widget#conversation-retention).
+
+**Granskningsloggen** (1 till 2555 dagar): i Svelte-appen **Administratör →
+Granskningsloggar**, ange skälet till åtkomsten, och öppna sedan
+**Gallringspolicy** på fliken **Loggar** och klicka på **Redigera**;
+**Administratör → Inställningar → Gallringspolicy → Ändra** i React-appen
+(beta); eller `PUT /api/v1/audit/retention-policy` med
+`{"retention_days": 365}`.
+
+En borttagning går inte att ångra, så kontrollera en kortare tid innan du
+sparar den.
+
+### Vad som tas bort [#what-removal-means]
+
+När en tur tas bort raderar Eneo den ur databasen tillsammans med de kopior
+Eneo har, och innehållslagringen raderar filernas bytes. Därefter kan Eneo
+varken visa den eller ta tillbaka den. Borttagningen omfattar:
 
 - frågan och dess svar;
-- de filer som bara den här turen använde, till exempel uppladdade dokument,
-  ljudinspelningar och deras transkriberingar, med filerna som härletts ur dem;
-- med utökad loggning turens lagrade logg, och innehållet i varje senare logg
-  i samma konversation, eftersom varje logg upprepar de tidigare turerna;
+- filer som bara den här turen använde, till exempel uppladdningar,
+  ljudinspelningar och deras transkriberingar, och filer som härletts ur dem;
+- med utökad loggning turens lagrade logg och innehållet i varje senare logg i
+  konversationen;
 - själva konversationen, när dess sista fråga är borta.
+
+Turen visas inte längre när borttagningen genomförs. Filernas bytes raderas
+efteråt, i bakgrunden, så en borttagen fil kan vara oåtkomlig medan dess bytes
+väntar. Se
+[What happens when a File is deleted?](/guides/object-content-storage#what-happens-when-a-file-is-deleted)
+(på engelska).
 
 ### Kopior som följer sin källa [#copies-that-follow-their-source]
 
 | Kopia | Hur den följer |
 | --- | --- |
-| En konversations namn (första frågan, en genererad rubrik eller ett namn någon valt) och dess feedbacktext | Var och en registrerar när den skrevs. När den tiden är äldre än konversationens period töms namnet (båda apparna visar Namnlös) och feedbacktexten tas bort, även medan frågor finns kvar. Tummen upp eller ned finns kvar. En gruppchatt följer den kortaste perioden bland sina assistenter |
+| En konversations namn (första frågan, en genererad rubrik eller ett namn någon valt) och dess feedbacktext | När tiden då den skrevs är äldre än konversationens period töms namnet (båda apparna visar Namnlös) och feedbacktexten tas bort, även medan frågor finns kvar. Tummen upp eller ned finns kvar. En gruppchatt följer den kortaste perioden bland sina assistenter |
 | En konversation som kopierats från en annan | Går inte att läsa så snart en fråga den kopierades från tas bort, och tas sedan bort själv. Se [Copies of removed conversations](/docs/audit-logging#copies-of-removed-conversations) (på engelska) |
-| Temporära filer för en uppladdning, en transkribering, en webbläsning eller en SharePoint-import | Ligger i en katalog som tillhör processen som arbetar med dem och tas bort när den stannar. Efter en krasch tar nästa process som startar på samma volym bort dem. `UPLOAD_TMP_DIR` måste därför ligga på ett lokalt filsystem |
-| Registret för ett misslyckat jobb | Behåller en felkod, aldrig feltexten, som kunde citera innehållet. Jobb som registrerades före uppgraderingen behåller sin text |
+| Temporära filer för en uppladdning, en transkribering, en webbläsning eller en SharePoint-import | Tas bort när processen stannar; efter en krasch av nästa process på samma volym. `UPLOAD_TMP_DIR` måste därför ligga på ett lokalt filsystem |
+| Registret för ett misslyckat jobb | Behåller en felkod, aldrig feltexten. Jobb som registrerades före uppgraderingen behåller sin text |
 
-Två ögonblick spelar roll, och Eneo håller isär dem:
+### Kopior utom räckhåll för Eneo [#copies-outside-eneos-reach]
 
-| Ögonblick | Vad det betyder |
-| --- | --- |
-| **Visas inte längre** | Eneo slutar visa eller returnera innehållet. För en tur som gallras sker det när borttagningen genomförs. |
-| **Borttagningen bekräftad** | Raderna i databasen är raderade och genomförda, och innehållslagringen har raderat filernas bytes och kontrollerat att lagret inte längre har dem. |
+Gallringen tar aldrig bort backuper och deras ögonblicksbilder (se
+[Efter en återställning](#after-a-restore)), nedladdade dokument och exporter,
+innehåll som skickats till en leverantör av AI-modeller eller en annan extern
+tjänst, eller text som lagts till i en kunskapsbas. Ett svar i Insikter sparas
+i 24 timmar efter att det senast uppdaterades, även när konversationerna bakom
+det är borta. En kopia av databasvolymen kan fortfarande innehålla raderade
+rader; en backup med `pg_dump` innehåller bara befintliga rader.
 
-En gallringskörning som rapporterar att den lyckats har gjort klart sitt
-arbete i databasen. Filernas bytes raderas av innehållslagringen efteråt, i
-egna omgångar i bakgrunden, och ett lager som inte svarar försöks igen. En
-borttagen fil kan alltså redan vara oåtkomlig medan dess bytes väntar på att
-raderas. Se
-[What happens when a File is deleted?](/guides/object-content-storage#what-happens-when-a-file-is-deleted)
-(på engelska).
+### När borttagningen sker [#when-removal-happens]
 
-### Kopior utom räckhåll för Eneo
-
-Gallringen tar aldrig bort dessa:
-
-- backuper av databasen och objektlagret, och deras ögonblicksbilder; se
-  [Efter en återställning](#after-a-restore);
-- ett dokument eller en export som någon har laddat ned;
-- innehåll som skickats till en leverantör av AI-modeller eller en annan
-  extern tjänst;
-- text som lagts till i en kunskapsbas, som finns kvar tills den tas bort där;
-- granskningsloggen, som registrerar vem som gjorde vad och när men inget
-  borttaget innehåll; den följer en egen period ([Granskningslogg](#audit-log)).
-
-En kopia inne i Eneo kan leva längre än en borttagning: ett svar i Insikter som
-byggts på konversationer sparas i 24 timmar efter att det senast uppdaterades,
-och den som har tillgång till Insikter för assistenten eller gruppchatten kan
-öppna det under den tiden, även när konversationerna bakom det har tagits bort.
-
-PostgreSQL skriver inte över raderade rader direkt. En raderad rad ligger kvar
-i databasfilerna tills PostgreSQL återanvänder utrymmet eller tabellen skrivs
-om, så en kopia av databasvolymen kan fortfarande innehålla den. En backup med
-`pg_dump` innehåller bara de rader som finns när den körs.
-
-## I korthet [#at-a-glance]
-
-### Gallring: tas bort för att någon valt en tid [#retention-by-a-rule]
-
-| Vad | Var tiden ställs in | Utan val | Tas bort av |
-| --- | --- | --- | --- |
-| Chattar med assistenter, gruppchattar och hjälpassistenter | Assistenten, annars dess yta | Sparas | Nattkörningen |
-| Appkörningar | Appen, annars dess yta | Sparas | Nattkörningen |
-| Filer som bifogats till en tur eller en appkörning | De följer turen eller körningen; en fil som används någon annanstans finns kvar | Sparas | Nattkörningen, med turen eller körningen |
-| Konversationers namn och feedbacktext | De följer konversationens period, räknat från när de skrevs | Sparas | Nattkörningen |
-| Konversationer i webbwidgetar | Widgeten, inom organisationens widgetpolicy | 30 dagar, visas på en ny widget | Widgetjobbet, varje natt |
-
-"Sparas" betyder att inget tar bort det förrän någon väljer en tid eller
-raderar det.
-
-### Städning av rester: körs oavsett regler [#cleanup-of-leftovers]
-
-Städningen är påslagen från början. Driften kan stänga av städningen av
-oanvända uppladdningar, konversationer utan fråga och gallringens
-körningsregister; se [Inställningar](#settings).
-
-| Vad | Tas bort | Ställs in av | Tas bort av |
-| --- | --- | --- | --- |
-| Uppladdningar som inget använder | 24 timmar efter uppladdningen | Driftinställning | Nattkörningen |
-| Konversationer utan fråga | 24 timmar efter att de startade | Driftinställning | Nattkörningen |
-| En process temporära filer | När processen stannar; efter en krasch när nästa process startar på samma volym | Fast | Processen |
-| Förberedda filer för en kunskapsimport | När importen är klar; filer för en import som inte längre finns efter 1 timme | Fast | Ett städjobb i workern |
-| Granskningslogg | Efter 365 dagar, om inte organisationen väljer en annan period | Organisationen | Den dagliga rensningen av granskningsloggen |
-| Exporter av granskningsloggen | Kan laddas ned i 24 timmar; filen vid nästa dagliga städning därefter | Driftinställning (`export_max_age_hours`) | Den dagliga städningen av exporter |
-| Gallringens körningsregister | Efter granskningsloggens period | Granskningsloggens period | Nattkörningen |
-
-Backuper är ingetdera: ert backupsystem sparar dem, aldrig Eneo. Se
-[Efter en återställning](#after-a-restore).
-
-## Hur nivåerna samverkar [#how-the-levels-combine]
-
-### Chattar och appkörningar
-
-En fråga i en chatt, med sitt svar, följer tiden för assistenten som svarade.
-En appkörning följer sin app. Tiden väljs på dessa nivåer, från den närmaste
-och utåt:
-
-1. assistenten eller appen;
-2. dess yta;
-3. organisationen: en äldre period som bara räknas medan dess brytare är
-   påslagen. Brytaren är `conversation_retention_enabled`, bredvid
-   `conversation_retention_days` på organisationens rad i
-   `audit_retention_policies`. Ingen vy och inget API i den här versionen
-   sätter, tömmer eller visar någon av kolumnerna, så de räknas bara där någon
-   har satt dem direkt i databasen.
-
-**Den närmaste nivån som har en tid avgör, även när tiden är längre än tiden på
-en nivå utanför.** Ytans tid är ett standardvärde för assistenter och appar som
-saknar egen tid, inte ett tak. När ingen nivå har en tid tas inget bort.
-
-```text
-Yta: 30 dagar
-├ Assistent A, inget inställt → 30 dagar (följer ytan)
-├ Assistent B, 7 dagar → 7 dagar
-├ Assistent C, 60 dagar → 60 dagar (den närmaste nivån avgör, även när den är längre)
-├ App D, inget inställt → 30 dagar (följer ytan)
-└ Ny assistent eller app, inget inställt → 30 dagar, tills någon väljer en tid
-```
-
-I en gruppchatt följer varje tur tiden för assistenten som svarade, så en
-tidigare tur kan finnas kvar medan en senare tas bort:
-
-```text
-Gruppchatt i en yta med 30 dagar
-├ Tur 1, besvarad av assistent B (inget inställt) → tas bort efter 30 dagar
-└ Tur 2, besvarad av assistent A (7 dagar) → tas bort efter 7 dagar, före tur 1
-```
-
-När en assistent raderas raderas dess chattar. En tur i en gruppchatt vars
-svarande assistent har raderats har ingen assistent kvar, så den följer ingen
-tid och gallringen tar inte bort den. En fråga som inte ställdes till en
-assistent, till exempel en tjänstekörning, tas inte heller bort av gallringen;
-den sparas tills dess tjänst eller organisationen raderas.
-
-Hjälpassistenter, till exempel Promptguiden, är assistenter i
-organisationsytan. En ny hjälpassistent har ingen egen tid, och ingen vy
-ställer in en tid för organisationsytan, så ge hjälpassistenten en egen tid om
-dess chattar ska tas bort.
-
-### När en tid ändras
-
-| Ändring | Effekt vid nästa körning |
-| --- | --- |
-| En kortare tid | Äldre konversationer blir aktuella och tas bort |
-| En längre tid | Konversationer som inte längre är aktuella sparas |
-| En tid tas bort | Nivån följer nästa nivå utåt, som kan vara kortare, längre eller ingen |
-| En första tid | Konversationer äldre än den tas bort |
-
-En borttagen konversation kommer aldrig tillbaka. Ett namn som tagits från en
-fråga som tagits bort tidigare finns kvar tills den nya tiden har gått, eller
-för alltid när ingen tid längre gäller.
-
-### Webbwidgetar
-
-Konversationer i en webbwidget följer bara widgetens egen tid, hållen inom
-intervallet i organisationens widgetpolicy. Tiderna för assistenten, dess yta
-och organisationen når aldrig dem.
-
-```text
-Widgetpolicy: minst 7, högst 90 dagar
-├ Widget A, 30 dagar → 30 dagar
-├ Widget B, 0 dagar sparat innan minimum höjdes → inget sparas efter svaret
-├ Widget C, 365 dagar sparat innan maximum sänktes → 90 dagar
-└ Widget D, 3 dagar sparat innan minimum höjdes → 7 dagar
-```
-
-Intervallet gäller som det ser ut natten för varje körning, även för widgetar
-som sparades innan det ändrades. En widgetkonversations ålder räknas från när
-den startade, och hela konversationen tas bort på en gång, med sina senare
-turer.
-
-### Granskningslogg [#audit-log]
-
-Granskningsloggen har en period för hela organisationen, 365 dagar om inte en
-administratör väljer en annan mellan 1 och 2555 dagar. Den är oberoende av
-alla tider för konversationer.
-
-## När borttagningen sker [#when-removal-happens]
-
-Gallringen körs på schema; inget tas bort i samma stund som en tid går ut.
 Innehåll blir **aktuellt** när det är äldre än sin tid, räknat från när det
-skapades; för chattar och appkörningar avgör databasens klocka. Nästa körning
-tar bort det.
+skapades. Nästa schemalagda körning tar bort det.
 
-| Vad | Körs |
-| --- | --- |
-| Chattar och appkörningar, namn och feedbacktext, konversationer utan fråga, filer som inget använder, gallringens körningsregister | En gång per natt, 03:30 som standard (`RETENTION_CRON_HOUR`, `RETENTION_CRON_MINUTE`) |
-| Konversationer i webbwidgetar | En gång per natt, 03:30 |
-| Granskningslogg | En gång per dygn, 02:00 |
-| Exporter av granskningsloggen | En gång per dygn, 03:00: filer äldre än 24 timmar |
-| Filernas bytes i innehållslagringen | I bakgrunden, varje minut, efter att filen raderats |
+#### Gallring enligt en regel [#retention-by-a-rule]
 
-Tiderna gäller i workerns tidszon. Containeravbilden sätter ingen, så de är UTC
-om du inte sätter `TZ` för workern.
+| Vad | Tiden ställs in på | Utan val | Körs |
+| --- | --- | --- | --- |
+| Chattar, gruppchattar och chattar med hjälpassistenter | Assistenten, annars dess yta | Sparas | Varje natt, 03:30 som standard (`RETENTION_CRON_HOUR`, `RETENTION_CRON_MINUTE`) |
+| Appkörningar | Appen, annars dess yta | Sparas | Varje natt, med chattarna |
+| Filer i en tur eller appkörning | De följer den; en fil som används någon annanstans finns kvar | Sparas | Med turen eller körningen |
+| Namn och feedbacktext | Konversationens period | Sparas | Varje natt, med chattarna |
+| Konversationer i webbwidgetar | Widgeten, inom widgetpolicyn | 30 dagar | Varje natt, 03:30 |
 
-```text
-Assistent med 30 dagar, worker i UTC
-├ 1 mars 14:00   frågan ställs
-├ 31 mars 03:30  nattkörning: 29 dagar och 13½ timme gammal → sparas
-├ 31 mars 14:00  30 dagar gammal → aktuell
-└ 1 april 03:30  nattkörning → tas bort
-```
+#### Städning av rester [#cleanup-of-leftovers]
 
-En tur tas alltså normalt bort inom ett dygn efter sin tid. Den finns kvar
-längre när:
+Påslagen från början. Driften kan stänga av städningen av oanvända
+uppladdningar, konversationer utan fråga och gallringens körningsregister; se
+[Inställningar](#settings).
 
-- körningen har mer aktuellt arbete än den får göra på en natt; nästa natt
-  fortsätter där den slutade;
-- något håller en rad som körningen behöver, eller en konversation är större än
-  körningens gränser; turen sparas och rapporteras, se [För driften](#for-operators);
-- workern är stoppad; inget körs när den startar igen, så nästa schemalagda
-  körning efter omstarten tar igen det. Kör den direkt med
-  `docker compose --env-file .env --env-file release.env exec worker run-cron run_retention`;
-  kommandot köar körningen i workern och returnerar innan den har körts, så
-  följ workerns logg.
+| Vad | Tas bort | Körs |
+| --- | --- | --- |
+| Uppladdningar som inget använder | 24 timmar efter uppladdningen | Varje natt, med chattarna |
+| Konversationer utan fråga | 24 timmar efter att de startade | Varje natt, med chattarna |
+| En process temporära filer | När processen stannar; efter en krasch när nästa process startar på samma volym | Processen |
+| Förberedda filer för en kunskapsimport | När importen är klar; efter 1 timme om importen inte längre finns | Ett städjobb i workern |
+| Granskningslogg | Efter 365 dagar eller organisationens period | Varje dygn, 02:00 |
+| Exporter av granskningsloggen | Kan laddas ned i 24 timmar; filen vid nästa dagliga städning (`export_max_age_hours`) | Varje dygn, 03:00 |
+| Gallringens körningsregister | Efter granskningsloggens period | Varje natt, med chattarna |
 
-## Ändra reglerna [#change-the-rules]
+Tiderna gäller i workerns tidszon: UTC om du inte sätter `TZ` för workern.
+Filernas bytes i innehållslagringen raderas i bakgrunden, varje minut, efter
+att filen raderats. En tur tas normalt bort inom ett dygn efter sin tid. Den finns kvar längre när en
+natt har mer aktuellt arbete än tillåtet (nästa natt fortsätter), när en rad
+hålls eller en konversation överskrider körningens gränser (den sparas och
+rapporteras; se [För driftansvariga](#for-operators)), eller när workern är
+stoppad (nästa schemalagda körning tar igen det). Kör den direkt med
+`docker compose --env-file .env --env-file release.env exec worker run-cron run_retention`;
+kommandot köar bara körningen och returnerar innan den har körts, så följ
+workerns logg.
 
-Varje tid är ett helt antal dagar. Klickvägarna nedan använder de svenska
-etiketterna.
+## För driftansvariga [#for-operators]
 
-### En yta
+### Hälsa [#health]
 
-Vem: den som får redigera ytan. Organisationsytan har ingen
-gallringsinställning i någon av apparna.
-
-**Svelte-appen:**
-
-1. Öppna **Delat**, välj ytan och sedan **Inställningar**.
-2. Under **Säkerhet & Integritet**, leta upp **Gallring av
-   konversationshistorik**.
-3. Slå på **Åsidosätt policy** och ange antalet dagar (1 till 2555). Avslagen
-   har ytan ingen egen tid.
-4. Klicka på **Spara ändringar**.
-
-**React-appen (beta):**
-
-1. Öppna **Delat**, välj ytan och sedan **Inställningar**.
-2. Under **Säkerhet och integritet**, ange dagarna i **Gallring av
-   konversationshistorik**, eller lämna fältet tomt för **Ingen gräns**.
-3. Värdet sparas när du lämnar fältet.
-
-**API:** `PATCH /api/v1/spaces/{space_id}/` med
-`{"data_retention_days": 30}`; `null` tar bort ytans tid, och om fältet
-utelämnas behålls den.
-
-### En assistent eller en app
-
-Vem: i en delad yta eller organisationsytan den som får redigera ytan. I en
-personlig yta dess ägare. Behörighet att redigera en assistent eller en app
-ger inte i sig rätt att ändra dess gallringstid.
-
-**Svelte-appen:**
-
-1. Öppna ytan och sedan **Assistenter** (eller **Appar**). Öppna radens meny
-   **Åtgärder** och välj **Redigera**.
-2. Under **Säkerhet & Integritet**, leta upp **Gallring av
-   konversationshistorik**. Talet inom parentes är ytans tid.
-3. Slå på **Åsidosätt policy** och ange dagarna. Avslagen följer assistenten
-   eller appen sin yta.
-4. Klicka på **Spara ändringar**.
-
-**React-appen (beta):**
-
-1. Öppna ytan och sedan **Assistenter** (eller **Appar**), och välj
-   **Redigera** i radens meny.
-2. Under **Säkerhet och integritet**, ange dagarna i **Gallring av
-   konversationshistorik**. Platshållaren visar ytans tid, eller `∞` när ytan
-   saknar tid. Lämna fältet tomt för att följa ytan.
-3. Värdet sparas när du lämnar fältet.
-
-**API:** `POST /api/v1/assistants/{assistant_id}/` eller
-`PATCH /api/v1/apps/{app_id}/` med `data_retention_days`: ett antal dagar,
-`null` för att följa ytan, eller utelämnat för att behålla det nuvarande värdet.
-
-Hjälpassistenterna, till exempel Promptguiden, ställs in på samma sätt under
-**Administratör → Hjälpassistenter → Öppna inställningar**.
-
-### Webbwidgetar
-
-En administratör ställer in intervallet som widgetar får använda under
-**Administratör → Webbwidgetar → Policy**, i **Minst dagar** och **Högst dagar**
-(vardera 0 till 3650). Tills en administratör sparar en policy är intervallet 0
-till 365 dagar. En widgets egen tid finns under assistentens **Webbwidget →
-Öppna widgetinställningar → Regler → Integritet → Lagringstid i dagar**. `0`
-sparar ingen konversation efter svaret. Se
-[Bädda in en chattwidget](/guides/embed-widget#conversation-retention).
-
-### Granskningslogg
-
-En administratör ställer in granskningsloggens period i dagar (1 till 2555):
-
-- **Svelte-appen:** **Administratör → Granskningsloggar**, ange skälet till
-  åtkomsten, och öppna sedan **Gallringspolicy** på fliken **Loggar** och
-  klicka på **Redigera**.
-- **React-appen (beta):** **Administratör → Inställningar → Gallringspolicy →
-  Ändra**, eller samma avsnitt längst ned på fliken **Granskningsloggar**.
-- **API:** `PUT /api/v1/audit/retention-policy` med `{"retention_days": 365}`;
-  `GET` på samma sökväg läser den.
-
-### Kontrollera resultatet
-
-- Öppna assistenten eller appen igen och se vilket värde den visar, eller läs
-  `data_retention_days` på ytan, assistenten och appen. `null` på assistenten
-  eller appen betyder att den följer ytan.
-- När du sparar skrivs en granskningshändelse, `space_updated`,
-  `assistant_updated` eller `app_updated`, vars ändringar visar den gamla och
-  den nya tiden under `data_retention_days`.
-- Nästa körning tar bort det som den nya tiden gör aktuellt. En borttagning går
-  inte att ångra, så kontrollera en kortare tid innan du sparar den.
-
-## För driften [#for-operators]
-
-### Hälsa
-
-`GET /api/healthz` rapporterar varje gallringsuppgift med en status: `healthy`,
+`GET /api/healthz` rapporterar varje gallringsuppgift som `healthy`,
 `degraded`, `unknown`, `initializing` eller `disabled`. En uppgift är
 `degraded` när dess senaste körning misslyckades, när ingen körning blivit klar
 på två dygn, eller när den senaste körningen hittade innehåll som varit
-aktuellt i mer än ett dygn (`RETENTION_OVERDUE_WINDOW_DAYS`), namn och
-feedbacktexter inräknade. `limiting_settings` anger den inställning vars gräns
-höll kvar aktuellt innehåll. Problem med gallringen gör aldrig ett i övrigt
-redo API otillgängligt. Statusarna och flaggorna finns i
-[Health](/docs/audit-logging#health) (på engelska).
-
-### Granskningshändelser och register
-
-Varje körning skriver granskningshändelsen `data_retention_run` med utfall och
-räknare, och varje omgång som tog bort eller höll kvar något skriver en
-`data_retention_batch` per organisation. En avstängd uppgift skriver
-`data_retention_skipped`. Rensningen av granskningsloggen skriver
-`retention_policy_applied` med antalet raderade händelser, men bara för en
-organisation där den raderade minst en händelse: en natt utan något att radera
-skriver ingen händelse, så en saknad händelse betyder inte att rensningen
-misslyckades. Ingen av händelserna innehåller borttaget innehåll, bara
-identiteter och tal.
-
-Tabellen `retention_job_runs` sparar varje körnings utfall, räknare,
-spärrorsaker och position; [Operator view](/docs/audit-logging#operator-view)
-(på engelska) har en fråga.
+aktuellt i mer än ett dygn (`RETENTION_OVERDUE_WINDOW_DAYS`).
+`limiting_settings` anger den inställning vars gräns höll kvar aktuellt
+innehåll. Problem med gallringen gör aldrig ett i övrigt redo API
+otillgängligt. Se [Health](/docs/audit-logging#health) och
+[Scheduled execution and limits](/docs/audit-logging#scheduled-execution-and-limits)
+(på engelska).
 
 ### Inställningar [#settings]
 
 Schemat, brytarna per uppgift och gränserna är miljöinställningar för workern;
-de listas i [Settings](/docs/audit-logging#settings) (på engelska). En avstängd
-uppgift behåller det innehåll den skulle ha tagit bort. Brytarna är en
-nödbroms vid fel, inte ett sätt att behålla innehåll: en avstängd uppgift får
-också återläsningen efter en återställning att misslyckas.
+se [Settings](/docs/audit-logging#settings) (på engelska). En avstängd uppgift
+behåller det den skulle ha tagit bort. Brytarna är en nödbroms, inte ett sätt
+att behålla innehåll: en avstängd uppgift får också återläsningen efter en
+återställning att misslyckas.
 
-### Objektlagring
+### Objektlagring [#object-storage]
 
-Använd en hink som aldrig haft versionshantering eller Object Lock. Med något
+Använd en hink som aldrig haft versionshantering eller Object Lock; med något
 av dem går en raderad fil att läsa som en gammal version, så Eneo startar inte
-med en sådan hink och rapporterar ingen radering som klar medan en gammal
-version finns kvar. Se [Välj innehållslagring](/guides/object-content-storage).
+med en sådan hink. Se [Välj innehållslagring](/guides/object-content-storage).
 
 ## Efter en återställning [#after-a-restore]
 
-Gallringen når inte backuper. En backup som togs före en borttagning innehåller
-fortfarande det som togs bort, och en återställning från den tar tillbaka
-innehållet till databasen och lagret. Så här gör Eneo, och här slutar det.
+Gallringen når inte backuper. En återställning tar tillbaka det som togs bort
+efter att backupen togs. Så här gör Eneo, och här slutar det.
 
 ### Gallringen körs ikapp innan trafiken öppnas [#retention-catches-up]
 
-Innan trafiken öppnas, med API:et stängt, alla workers stoppade och alla
-gallringsuppgifter påslagna, kör:
+```mermaid
+flowchart LR
+  accTitle: Gallring efter en återställning
+  accDescr: Med API:et stängt och workers stoppade kör du återläsningskommandot. Slutkod 1: åtgärda den angivna orsaken och kör igen. Slutkod 0: läs lagringsraden; listades lagret inte helt, kör igen. När lagringen är bekräftad eller väntande startar du bara workern med API:et stängt och kör rensningen av widgetar och granskningslogg tills loggraderna är rena, eller lämnar dem åt nattjobben. Öppna sedan trafiken.
+  closed["API stängt\nworkers stoppade"] --> readback["Återläsningskommandot"]
+  readback --> exit{"Slutkod"}
+  exit -->|1| fix["Åtgärda den namngivna orsaken"] --> readback
+  exit -->|0| done["Gallringen klar"] --> storage{"Raden om lagringen"}
+  storage -->|not listed in full| readback
+  storage -->|confirmed eller pending| worker["Bara workern, API stängt:\nwidget- och granskningsrensning"]
+  worker --> logs{"Loggraderna utan fel?"}
+  logs -->|fel| rerun["Åtgärda och kör jobbet igen"] --> logs
+  logs -->|ja| open["Öppna trafiken"]
+  storage -.->|eller lämna åt nattjobben| open
+```
+
+Med API:et stängt, alla workers stoppade och alla gallringsuppgifter påslagna
+(varje `RETENTION_*_ENABLED` som `true`, standardvärdet), kör
+återläsningskommandot:
 
 ```bash
 docker compose --env-file .env --env-file release.env run --rm backend run-cron --until-complete run_retention
 ```
 
-Lägg till installationens Compose-filer och profiler även i det här kommandot. De står mellan `docker compose` och `run`; med det medföljande lagret är det `--profile object-content -f docker-compose.yml -f docker-compose.object-content.yml` (se [Välj innehållslagring](/guides/object-content-storage)).
+Lägg till installationens Compose-filer och profiler mellan `docker compose`
+och `run`. Med det medföljande lagret är det
+`--profile object-content -f docker-compose.yml -f docker-compose.object-content.yml`
+(se [Välj innehållslagring](/guides/object-content-storage)).
 
-Kommandot kör varje gallringsuppgift i en egen process, omgång efter omgång,
-tills inget som reglerna i den återställda databasen gör aktuellt finns kvar.
-Varje omgång räknar mot den tid då kommandot startade, så det som blir aktuellt
-medan det körs lämnas åt nattkörningen. Innehåll som de reglerna väljer tas
-bort igen innan någon kan nå det.
-
-Alla gallringsuppgifter måste vara påslagna medan det körs: behåll varje
-`RETENTION_*_ENABLED` som `true`, standardvärdet. En avstängd uppgift får
-kommandot att misslyckas, till exempel `conversations.history: skipped
-(disabled_by_deployment_setting)`, eftersom den kan hålla försenat innehåll och
-inget visar att dess arbete är gjort.
-
-Kommandot avslutar med att redovisa lagringen på en egen rad, eftersom rader
-som är borta ur databasen inte betyder att lagret har raderat filernas bytes:
-
-| Sista raden | Vad du gör |
-| --- | --- |
-| `storage: confirmed` | Inget. En fullständig listning av lagret som började efter att kommandot startade hittade inget kvar att ta bort |
-| `storage: pending N (held H, retrying R, waiting W)` | Gallringen är klar och trafiken får öppnas, men lagret har inte bekräftat varje borttagning. Workern fortsätter borttagningarna när den körs; `held` ligger kvar tills spärren eller minimiretentionen löper ut. Vill du se `confirmed`: kör kommandot igen med trafiken stängd och workers stoppade, efter karenstiden (`OBJECT_CONTENT_ORPHAN_GRACE_SECONDS`, en timme som standard) |
-| `storage: pending N (...), store not listed in full` | Lagret är större än en körning hinner lista. Kör kommandot igen; det fortsätter listningen |
-
+Det tar bort, omgång efter omgång, det som reglerna i den återställda databasen
+gör aktuellt, så att det innehållet tas bort igen innan någon kan nå det; det
+som blir aktuellt medan det körs lämnas åt nattkörningen.
 Slutkod 0 betyder att gallringen är klar och att lagringen är bekräftad eller
-väntande. Slutkod 1 betyder att den inte är det: utskriften namnger varje
-uppgift och orsaken, till exempel en avstängd uppgift, en körning som en annan
-process håller (en worker körs fortfarande), spärrat arbete, en omgång utan
-framsteg, `still removing after 10000 rounds` (kör igen; det fortsätter) eller
-ett lager som inte gick att nå eller som misslyckades. Åtgärda orsaken och kör
-kommandot igen. Varje rad förklaras i
+väntande. Slutkod 1 namnger varje uppgift och orsaken, till exempel en
+avstängd uppgift (`conversations.history: skipped (disabled_by_deployment_setting)`),
+en worker som fortfarande körs eller `still removing after 10000 rounds`;
+åtgärda orsaken och kör kommandot igen.
+
+Sista raden redovisar lagringen, eftersom rader som är borta ur databasen inte
+betyder att lagret har raderat filernas bytes. `storage: confirmed` kräver
+inget. `storage: pending N (held H, retrying R, waiting W)` betyder att
+gallringen är klar och att trafiken får öppnas, men att lagret inte har
+bekräftat varje borttagning. Workern fortsätter borttagningarna när den körs;
+`held` ligger kvar tills spärren eller minimiretentionen löper ut. Vill du se
+`confirmed`: kör igen med trafiken stängd och workers stoppade, efter
+karenstiden (`OBJECT_CONTENT_ORPHAN_GRACE_SECONDS`, en timme som standard).
+Efter `store not listed in full`: kör kommandot igen; det fortsätter
+listningen. Varje rad förklaras i
 [Read back after a restore](/docs/audit-logging#read-back-after-a-restore)
 (på engelska).
 
-Kommandot omfattar inte konversationer i webbwidgetar eller granskningsloggen,
-som har egna jobb i workern. För att ta bort det som de gör aktuellt innan
-trafiken öppnas: starta bara workern, med API:et fortfarande stängt:
-`docker compose --env-file .env --env-file release.env up -d --no-deps worker`,
-med samma Compose-filer och profiler, här och i de två kommandona nedan,
-mellan `docker compose` och `up` eller `exec`. Utan `--no-deps` startar Compose
-också backend, som öppnar API:et. Kör sedan
+Kommandot omfattar inte konversationer i webbwidgetar eller granskningsloggen.
+För att ta bort det som de gör aktuellt innan trafiken öppnas: starta bara
+workern, med API:et fortfarande stängt:
 
 ```bash
+docker compose --env-file .env --env-file release.env up -d --no-deps worker
 docker compose --env-file .env --env-file release.env exec worker run-cron purge_widget_sessions
 docker compose --env-file .env --env-file release.env exec worker run-cron purge_old_audit_logs
 ```
 
-Varje kommando köar bara sitt jobb i workern: det skriver `Enqueued` och
-returnerar innan jobbet har körts. Vänta i workerns logg på `Widget retention
-purge completed` med `errors` 0
-och utan någon rad `Widget retention purge failed`, och på `Audit log retention
-purge completed successfully`. Felräkningen syns bara i JSON-loggar
-(`JSON_LOGS=true`, standard); utan dem är frånvaron av rader om fel kontrollen.
-Rapporterar ett jobb fel: åtgärda dem och kör jobbet igen. Annars tar deras
-nattliga jobb bort det.
+Lägg till samma Compose-filer och profiler mellan `docker compose` och `up`
+eller `exec`. Utan `--no-deps` startar Compose också backend, som öppnar
+API:et. Varje `exec` köar bara sitt jobb: det skriver `Enqueued` och returnerar
+innan jobbet har körts. Vänta i workerns logg på `Widget retention purge
+completed` med `errors` 0 och utan någon rad `Widget retention purge failed`,
+och på `Audit log retention purge completed successfully`. Felräkningen syns
+bara i JSON-loggar (`JSON_LOGS=true`, standard); utan dem är frånvaron av rader
+om fel kontrollen. Rapporterar ett jobb fel: åtgärda dem och kör jobbet igen.
+Hoppar du över steget tar deras nattliga jobb bort det.
 
 ### Det här kan komma tillbaka [#what-can-come-back]
 
-Kommandot tar bort det som reglerna i den återställda databasen väljer. Det vet
-inte vad som hände efter att backupen togs, så detta kan komma tillbaka tills
-de ansvariga har lagt in sina regler igen:
+Kommandot känner bara reglerna i den återställda databasen. Detta kan komma
+tillbaka tills de ansvariga har lagt in sina ändringar igen:
 
-- innehåll som en person tog bort för hand efter backupen, till exempel en
-  raderad konversation, fil, assistent eller app;
+- innehåll som togs bort för hand efter backupen, till exempel en
+  konversation, fil, assistent eller app;
 - innehåll som gallrades enligt en regel som sattes eller kortades efter
-  backupen: den återställda databasen har den gamla regeln, eller ingen.
+  backupen.
 
-För en förteckning över sådana ändringar utanför backupen, och gör om dem när
-systemet är återställt och innan trafiken öppnas.
+För en förteckning över sådana ändringar utanför backupen, och gör om dem innan
+trafiken öppnas.
 
 ### Backuperna är ert ansvar [#backups-are-yours]
 
-Eneo tar aldrig bort backupkopior, och en lyckad gallringskörning, eller raden
+Eneo tar aldrig bort backupkopior. En lyckad körning, eller
 `storage: confirmed`, är inte bevis för att alla kopior är borta: backuper och
-ögonblicksbilder av databasen och lagret behåller det de innehåller så länge ni
-sparar dem. Bestäm hur länge backuper lever, och vem som får läsa dem, så att
-det stämmer med era beslut om gallring. Återställningen av lagret beskrivs i
+ögonblicksbilder behåller det de innehåller så länge ni sparar dem. Bestäm hur
+länge backuper lever, och vem som får läsa dem, så att det stämmer med era
+beslut om gallring. Se
 [Back up and restore](/guides/object-content-storage#back-up-and-restore)
 (på engelska).
 
 ### Känd begränsning [#restore-known-limit]
 
-Kommandot förutsätter att Eneos del av hinken (prefixet `v1/<deployment id>/`)
-bara innehåller det som Eneo skrivit. Ett objekt eller en ofullständig
-multipart-uppladdning där som Eneo inte skrivit stoppar det med ett fel,
-slutkod 1, före raden om lagringen, och den schemalagda avstämningen
-misslyckas på samma sätt. Ta bort objektet eller avbryt uppladdningen i lagret
-och kör sedan kommandot igen.
+Kommandot förutsätter att Eneos prefix i hinken (`v1/<deployment id>/`) bara
+innehåller det som Eneo skrivit. Ett främmande objekt eller en ofullständig
+multipart-uppladdning där stoppar det med slutkod 1, före raden om lagringen,
+och den schemalagda avstämningen misslyckas på samma sätt. Ta bort objektet
+eller avbryt uppladdningen och kör sedan kommandot igen.
