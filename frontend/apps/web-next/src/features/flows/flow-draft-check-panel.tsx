@@ -4,14 +4,15 @@ import { useAnnounce } from "@astryxdesign/core/hooks";
 import { Spinner } from "@astryxdesign/core/Spinner";
 import { Heading, Text } from "@astryxdesign/core/Text";
 import { useQueries, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { CircleCheck, Lightbulb } from "lucide-react";
-import { useTranslations } from "use-intl";
+import { CircleAlert, CircleCheck, Lightbulb } from "lucide-react";
+import { useFormatter, useTranslations } from "use-intl";
 import { useEffect, useId, useRef, type RefObject } from "react";
 import { Banner } from "@astryxdesign/core/Banner";
 import { useFocusRescue } from "@/lib/focus-rescue";
 import {
   classificationPreviewQueryOptions,
   flowAssistantQueryOptions,
+  templateInspectionQueryOptions,
   toolOptionsQueryOptions
 } from "./editor/editor-api";
 import {
@@ -22,10 +23,12 @@ import {
   type RemovedRead
 } from "./editor/reference-repair";
 import type { FieldAnchor } from "./editor/field-problems";
+import { readTemplateFill } from "./editor/step-configs";
 import { savedFlowPreviewRequest } from "./editor/step-draft";
 import {
   chainIssueText,
   outputModeIssueText,
+  readWarning,
   stepLabel as stepNumberLabel
 } from "./editor/step-labels";
 import { stepUsesModel } from "./editor/step-rules";
@@ -57,8 +60,26 @@ import {
 } from "./flow-suggestions";
 
 type Translate = ReturnType<typeof useTranslations>;
+type Format = ReturnType<typeof useFormatter>;
 
-function stepProblemText(problem: StepProblem, t: Translate): string {
+/** Where in its step a reference sits, as the check's sentence names it. */
+function referenceSite(anchor: FieldAnchor): string {
+  if (anchor === "prompt") return "prompt";
+  if (anchor === "input_bindings") return "bindings";
+  return anchor === "input_config.tool" ? "tool" : "http";
+}
+
+/**
+ * A problem of a step as a sentence. `flow` names the steps a warning is
+ * about; `fieldLabel` names a Word field as the editor shows it.
+ */
+function stepProblemText(
+  problem: StepProblem,
+  flow: FlowPublic,
+  t: Translate,
+  format: Format,
+  fieldLabel: (name: string) => string
+): string {
   switch (problem.code) {
     case "chain":
       return chainIssueText(problem.issue, t);
@@ -84,8 +105,20 @@ function stepProblemText(problem: StepProblem, t: Translate): string {
       });
     case "template_missing":
       return t("flow_editor_tools_check_template_missing");
+    case "tool_arguments_invalid":
+      return t("flow_editor_tools_check_tool_arguments_invalid", {
+        count: problem.names.length,
+        names: format.list(problem.names)
+      });
     case "template_unbound":
-      return t("flow_editor_tools_check_template_unbound");
+      return t("flow_editor_tools_check_template_unbound", {
+        count: problem.names.length,
+        names: format.list(
+          problem.names.map((name) =>
+            t("flow_editor_tools_check_quoted", { text: fieldLabel(name) })
+          )
+        )
+      });
     case "template_orphaned":
       return t("flow_editor_tools_check_template_orphaned");
     case "template_structured":
@@ -94,8 +127,19 @@ function stepProblemText(problem: StepProblem, t: Translate): string {
       return t("flow_editor_tools_check_speaker_participants_missing");
     case "model_missing":
       return t("flow_editor_tools_check_model_missing");
-    case "deleted_reference":
-      return t("flow_editor_tools_check_deleted_reference");
+    case "reference": {
+      // What each read means comes with the sentence where the editor words it.
+      const warnings = new Set(
+        problem.reads.flatMap((read) => readWarning(read.meaning, flow, t) ?? [])
+      );
+      return [
+        t("flow_editor_tools_check_reference", {
+          site: referenceSite(problem.anchor),
+          tokens: format.list(problem.reads.map((read) => `{{${read.token}}}`))
+        }),
+        ...warnings
+      ].join(" ");
+    }
     case "classification": {
       const key = `flow_error_${problem.violation.code}`;
       return t.has(key) ? t(key) : problem.violation.message;
@@ -124,11 +168,11 @@ const SETTINGS_FIELD: Partial<Record<FlowProblem["code"], SettingsField>> = {
   live_model_unavailable: "live_model"
 };
 
-function resultSentence(check: DraftCheck, t: Translate): string {
+/** The check's verdict; a clean check beside the core's refusal says the refusal stands. */
+function resultSentence(check: DraftCheck, t: Translate, refused: boolean): string {
   const count = problemCount(check);
-  return count === 0
-    ? t("flow_editor_tools_check_clean")
-    : t("flow_editor_tools_check_problems", { count });
+  if (count > 0) return t("flow_editor_tools_check_problems", { count });
+  return refused ? t("flow_editor_tools_check_refused") : t("flow_editor_tools_check_clean");
 }
 
 /** What the core answered for the draft, as the query cache holds it now. */
@@ -226,7 +270,9 @@ function RemovedReadRepair({
  * fixed: the settings field (`onOpenSettings`). A flow without steps has no
  * check: the page shows its empty step list instead.
  * A clean draft is one quiet line, "Redo att publicera"; only problems get a
- * banner. The page is told the problem count (`onProblemCount`) and can put
+ * banner. While the page shows the core's refusal of a publish (`refused`),
+ * the line says so instead: the core saw what the check cannot. The page is
+ * told the problem count (`onProblemCount`) and can put
  * focus on the heading (`headingRef`). A read of a removed step in a step's
  * underlag can be replaced here in one choice (`onRepair` saves it). The
  * core's suggestions are not listed here, they sit on the step cards: while
@@ -242,7 +288,8 @@ export function FlowDraftCheck({
   onRepair,
   onOpenSettings,
   onProblemCount,
-  headingRef: pageHeadingRef
+  headingRef: pageHeadingRef,
+  refused = false
 }: {
   flow: FlowPublic;
   /**
@@ -263,8 +310,11 @@ export function FlowDraftCheck({
   onProblemCount?: (count: number | null) => void;
   /** The heading, for the page to bring the check into view and focus (Publicera does). */
   headingRef?: RefObject<HTMLHeadingElement | null>;
+  /** The page shows the core's refusal of a publish of this draft. */
+  refused?: boolean;
 }) {
   const t = useTranslations();
+  const format = useFormatter();
   const announce = useAnnounce();
   const queryClient = useQueryClient();
   const rescue = useFocusRescue();
@@ -285,6 +335,28 @@ export function FlowDraftCheck({
     flowSuggestionsQueryOptions(flow.id, flow.draft_revision, suggestionRuns)
   );
   const suggested = suggestionCount(suggestionsOnPage(suggestions.data?.items, flow.steps));
+  // A Word field is named as the editor shows it once its template was read
+  // there; reading one here would start the template runtime for a label.
+  const templateIds = [
+    ...new Set(
+      flow.steps.flatMap((step) =>
+        step.output_mode === "template_fill"
+          ? (readTemplateFill(step.output_config).templateAssetId ?? [])
+          : []
+      )
+    )
+  ];
+  const inspections = useQueries({
+    queries: templateIds.map((id) => ({
+      ...templateInspectionQueryOptions(flow.id, id),
+      enabled: false
+    }))
+  });
+  const fieldLabel = (step: FlowStep) => (name: string) => {
+    const index = templateIds.indexOf(readTemplateFill(step.output_config).templateAssetId ?? "");
+    const placeholders = inspections[index]?.data?.placeholders ?? [];
+    return placeholders.find((placeholder) => placeholder.name === name)?.label || name;
+  };
 
   const pending =
     assistants.some((query) => query.isPending) ||
@@ -321,7 +393,11 @@ export function FlowDraftCheck({
     announce(
       results.some((result) => result.isError)
         ? t("flow_editor_tools_check_incomplete")
-        : resultSentence(checkDraft(flow, cachedFacts(queryClient, flow, transcription)), t)
+        : resultSentence(
+            checkDraft(flow, cachedFacts(queryClient, flow, transcription)),
+            t,
+            refused
+          )
     );
   }
 
@@ -360,11 +436,17 @@ export function FlowDraftCheck({
         <div className="flex min-h-6 items-center gap-2">
           {pending ? (
             <Spinner size="md" aria-hidden="true" />
+          ) : refused ? (
+            <CircleAlert aria-hidden="true" className="text-ax-text-secondary size-4 shrink-0" />
           ) : (
             <CircleCheck aria-hidden="true" className="text-ax-success size-4 shrink-0" />
           )}
           <Text size="sm" as="p" display="block" className="m-0">
-            {pending ? t("flow_editor_tools_check_running") : t("flow_editor_tools_check_clean")}
+            {pending
+              ? t("flow_editor_tools_check_running")
+              : refused
+                ? t("flow_editor_tools_check_refused")
+                : t("flow_editor_tools_check_clean")}
           </Text>
         </div>
       ) : count === 0 ? (
@@ -429,10 +511,12 @@ export function FlowDraftCheck({
                   </div>
                   <ul className="text-ax-text m-0 flex list-disc flex-col gap-0.5 pl-5 text-sm">
                     {problems.map((problem, index) => (
-                      <li key={`${problem.code}-${index}`}>{stepProblemText(problem, t)}</li>
+                      <li key={`${problem.code}-${index}`} className="break-words">
+                        {stepProblemText(problem, flow, t, format, fieldLabel(step))}
+                      </li>
                     ))}
                   </ul>
-                  {onRepair && problems.some((problem) => problem.code === "deleted_reference")
+                  {onRepair
                     ? removedReads(step, flow.steps).map((read) => (
                         <RemovedReadRepair
                           key={

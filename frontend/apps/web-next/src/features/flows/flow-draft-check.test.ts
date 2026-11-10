@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { makeAssistant } from "./editor/testing/fixtures";
 import { checkDraft, problemAnchor, problemCount, type DraftFacts } from "./flow-draft-check";
 import { makeFlow, makeStep } from "./flow-fixtures";
+import type { FlowStep } from "./flows-api";
 
 const none: DraftFacts = {
   assistants: new Map(),
@@ -42,7 +43,7 @@ describe("checkDraft", () => {
     const check = checkDraft(flow, none);
     expect(check.steps.map(({ step, problems }) => [step.step_order, problems])).toEqual([
       [1, [{ code: "http_url_missing", anchor: "input_config.http" }]],
-      [2, [{ code: "template_unbound" }, { code: "template_orphaned" }]],
+      [2, [{ code: "template_unbound", names: ["datum"] }, { code: "template_orphaned" }]],
       [3, [{ code: "name_missing" }, { code: "tool_missing" }]]
     ]);
     expect(problemCount(check)).toBe(5);
@@ -263,14 +264,195 @@ describe("checkDraft", () => {
       check.steps.map(({ step, problems }) => [
         step.step_order,
         problems.flatMap((problem) =>
-          problem.code === "deleted_reference" ? [problemAnchor(problem)] : []
+          problem.code === "reference"
+            ? [[problemAnchor(problem), problem.reads.map((read) => read.token)]]
+            : []
         )
       ])
     ).toEqual([
-      [1, ["input_bindings"]],
-      [2, ["input_config.tool"]],
-      [3, ["prompt"]]
+      [1, [["input_bindings", ["step_3_deleted"]]]],
+      [2, [["input_config.tool", ["step_3_deleted"]]]],
+      [3, [["prompt", ["step_4_deleted.output.text"]]]]
     ]);
+  });
+
+  it("names every reference of an instruction that reads nothing, as publish refuses them", () => {
+    const flow = makeFlow({
+      steps: [makeStep(1), makeStep(2), makeStep(3), makeStep(4)]
+    });
+    const prompt = (text: string, order = 2, overrides = {}) =>
+      checkDraft(
+        makeFlow({
+          steps: flow.steps.map((step) =>
+            step.step_order === order ? { ...step, ...overrides } : step
+          )
+        }),
+        {
+          ...none,
+          assistants: new Map([
+            [
+              `assistant-${order}`,
+              makeAssistant({
+                id: `assistant-${order}`,
+                prompt: { text, description: null }
+              } as never)
+            ]
+          ])
+        }
+      ).steps.flatMap(({ problems }) => problems);
+
+    const text = [
+      "Skriv {{datun}} och {{steg_9.output.text}}.",
+      "Läs {{step_4.output.text}}, {{ step_9.output.text }} och {{step_1_deleted.output.text}}.",
+      "Det här läses: {{datum}}, {{step_1.output.text}}, {{datun}} igen och en lös {{ klammer."
+    ].join("\n");
+    expect(prompt(text)).toEqual([
+      {
+        code: "reference",
+        anchor: "prompt",
+        reads: [
+          { token: "datun", meaning: { kind: "other" } },
+          { token: "steg_9.output.text", meaning: { kind: "other" } },
+          { token: "step_4.output.text", meaning: { kind: "missing", order: 4 } },
+          { token: "step_9.output.text", meaning: { kind: "missing", order: 9 } },
+          { token: "step_1_deleted.output.text", meaning: { kind: "missing", order: 1 } }
+        ]
+      }
+    ]);
+    // A step that runs no model has no instruction publish reads.
+    expect(prompt(text, 2, { output_mode: "template_fill", output_type: "docx" })).toEqual(
+      expect.not.arrayContaining([expect.objectContaining({ code: "reference" })])
+    );
+  });
+
+  it("leaves the reads publish resolves though the editor has no name for them", () => {
+    const flow = makeFlow({
+      steps: [makeStep(1), makeStep(2)],
+      metadata_json: {
+        form_schema: { fields: [{ name: "arende", label: "Ärende", type: "text" }] }
+      }
+    });
+    const problems = checkDraft(flow, {
+      ...none,
+      assistants: new Map([
+        [
+          "assistant-2",
+          makeAssistant({
+            id: "assistant-2",
+            prompt: {
+              text: "{{arende}} {{flow.input.arende}} {{step_1.status}} {{step_1.error_message}} {{indata_json}} {{datun}}",
+              description: null
+            }
+          } as never)
+        ]
+      ])
+    }).steps.flatMap(({ problems }) => problems);
+    expect(problems).toEqual([
+      {
+        code: "reference",
+        anchor: "prompt",
+        reads: [{ token: "datun", meaning: { kind: "other" } }]
+      }
+    ]);
+  });
+
+  it("checks the texts of an HTTP call, a webhook reading its own step's answer", () => {
+    const problems = (step: Partial<FlowStep>) =>
+      checkDraft(makeFlow({ steps: [makeStep(1), makeStep(2, step)] }), none)
+        .steps.flatMap(({ problems }) => problems)
+        .filter((problem) => problem.code === "reference");
+
+    expect(
+      problems({
+        output_mode: "http_post",
+        output_config: {
+          url: "https://hooks.example.se/{{flow_input.arende}}",
+          auth: { mode: "basic_auth", username: "{{step_2.output.text}}", password: "x" },
+          custom_headers: [
+            { name: "X-Fall", value: "{{okand}}" },
+            { name: "X-Hemlig", value: "{{hemlig}}", secret: true }
+          ],
+          body: {
+            mode: "json_template",
+            template: '{"svar": "{{step_2.output.text}}", "x": "{{datun}}"}'
+          }
+        }
+      }).map((problem) =>
+        problem.code === "reference"
+          ? [problem.anchor, problem.reads.map((read) => read.token)]
+          : null
+      )
+    ).toEqual([
+      ["output_config.http", ["flow_input.arende"]],
+      ["output_config.http.more", ["okand"]],
+      ["output_config.http.body", ["datun"]]
+    ]);
+    // An HTTP source is read before the step answers: its own answer is not there yet.
+    expect(
+      problems({
+        input_source: "http_get",
+        input_config: {
+          url: "https://api.example.se/{{step_2.output.text}}",
+          auth: { mode: "none" }
+        }
+      }).map((problem) => problem.code === "reference" && problem.anchor)
+    ).toEqual(["input_config.http"]);
+  });
+
+  it("refuses a fixed tool value its input schema refuses, and leaves a reference to the run", () => {
+    const codes = (args: Record<string, unknown>) =>
+      checkDraft(
+        makeFlow({
+          steps: [
+            makeStep(1, {
+              input_source: "tool",
+              input_config: { tool: { mcp_server_id: "s-1", tool_id: "search", arguments: args } }
+            })
+          ]
+        }),
+        {
+          ...none,
+          toolOptions: [
+            {
+              mcp_server_id: "s-1",
+              mcp_server_name: "Arkiv",
+              mcp_server_security_level: null,
+              tool_id: "search",
+              tool_name: "Sök",
+              tool_description: null,
+              refusal: null,
+              input_schema: {
+                properties: {
+                  query: { type: "string" },
+                  tags: { type: "array" },
+                  order: { enum: ["asc", "desc"] },
+                  limit: { type: "integer", minimum: 1, maximum: 50 },
+                  extra: {}
+                },
+                required: ["query"]
+              }
+            }
+          ]
+        }
+      ).steps.flatMap(({ problems }) =>
+        problems.flatMap((problem) =>
+          problem.code === "tool_arguments_invalid" ? [problem.names] : []
+        )
+      );
+
+    expect(codes({ query: "beslut", tags: ["a"], order: "asc", limit: 10, extra: 5 })).toEqual([]);
+    expect(codes({ query: 5, tags: "a", order: "upp", limit: 51 })).toEqual([
+      ["query", "tags", "order", "limit"]
+    ]);
+    expect(codes({ query: "x", limit: 0 })).toEqual([["limit"]]);
+    expect(codes({ query: "x", limit: 2.5 })).toEqual([["limit"]]);
+    // A reference is read when the step runs, and judged then.
+    expect(
+      codes({ query: "x", tags: "{{flow_input.taggar}}", limit: "{{ step_1.output.text }}" })
+    ).toEqual([]);
+    expect(problemAnchor({ code: "tool_arguments_invalid", names: ["limit"] })).toBe(
+      "input_config.tool"
+    );
   });
 
   it("asks an audio flow for its transcription model and the service its speakers need", () => {

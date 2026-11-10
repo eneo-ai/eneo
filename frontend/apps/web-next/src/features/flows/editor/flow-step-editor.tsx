@@ -102,8 +102,12 @@ type EditorProps = {
   suggestionRuns?: number;
   /** The steps before and after this one, for "Föregående steg" and "Nästa steg". */
   navigation?: StepNavigation;
-  /** A field to focus once the form is on the page ("Anslut tjänst" opens a connection field). */
-  initialAnchor?: FieldAnchor | null;
+  /**
+   * A field to focus once the form is on the page ("Anslut tjänst" opens a
+   * connection field). Each new request moves focus again, so the page can
+   * point at a field of the step already open.
+   */
+  anchorRequest?: { anchor: FieldAnchor } | null;
   /** Told true while the step has edits that are not saved, and false once it has none. */
   onUnsavedChange?: (unsaved: boolean) => void;
 };
@@ -290,7 +294,7 @@ function StepEditorSession({
   suggestionFix,
   suggestionDismissal,
   suggestionRuns = 0,
-  initialAnchor = null,
+  anchorRequest = null,
   onUnsavedChange
 }: Omit<EditorProps, "navigation">) {
   const t = useTranslations();
@@ -363,16 +367,16 @@ function StepEditorSession({
   // A field can still be loading (the Word templates are fetched): it is
   // tried each frame for about two seconds.
   useEffect(() => {
-    if (!initialAnchor || !formReady) return;
+    if (!anchorRequest || !formReady) return;
     let tries = 0;
     let frame = 0;
     const attempt = () => {
-      if (focusAnchor(formId, initialAnchor) || ++tries > 120) return;
+      if (focusAnchor(formId, anchorRequest.anchor) || ++tries > 120) return;
       frame = requestAnimationFrame(attempt);
     };
     frame = requestAnimationFrame(attempt);
     return () => cancelAnimationFrame(frame);
-  }, [initialAnchor, formReady, formId]);
+  }, [anchorRequest, formReady, formId]);
   const newerElsewhere =
     session !== null && session.dirty && session.flow.draft_revision < latest.draft_revision;
   const dirty = session?.dirty ?? false;

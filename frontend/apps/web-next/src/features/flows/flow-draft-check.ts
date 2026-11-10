@@ -9,14 +9,18 @@
  * Pure and unit-tested.
  */
 import { stepConnections } from "./chat/connections";
-import type { FieldAnchor } from "./editor/field-problems";
-import { removedReads } from "./editor/reference-repair";
+import { httpAnchor, type FieldAnchor } from "./editor/field-problems";
+import { readMeaning, readTone, type ReadMeaning, type TextPlace } from "./editor/request-preview";
+import { formFieldsOf } from "./editor/step-variables";
 import {
   hasHttpConfig,
+  headerSent,
   isStructuredTemplateBinding,
   readHttpConfig,
+  readInputBindings,
   readSpeakerMapping,
   readTemplateFill,
+  readTextProcessingMode,
   readToolConfig,
   toolArguments
 } from "./editor/step-configs";
@@ -28,9 +32,15 @@ import {
   type ChainIssue,
   type OutputModeIssue
 } from "./editor/step-rules";
-import type { FlowAssistant, StepClassification, ToolOption } from "./editor/step-types";
+import {
+  isJsonObject,
+  objectOf,
+  type FlowAssistant,
+  type StepClassification,
+  type ToolOption
+} from "./editor/step-types";
 import type { FlowPublic, FlowStep } from "./flows-api";
-import { readTarget, tokensOf } from "./flow-steps";
+import { tokensOf } from "./flow-steps";
 import {
   flowTakesAudio,
   liveModelState,
@@ -40,6 +50,9 @@ import {
   transcriptionSettingsOf,
   type TranscriptionResources
 } from "./flow-transcription";
+
+/** A reference in a step that reads nothing the run has, and what it names. */
+export type UnreadReference = { token: string; meaning: ReadMeaning };
 
 export type StepProblem =
   | { code: "chain"; issue: ChainIssue }
@@ -52,13 +65,17 @@ export type StepProblem =
   | { code: "tool_unavailable" }
   | { code: "tool_refused"; refusal: NonNullable<ToolOption["refusal"]> }
   | { code: "tool_arguments_missing"; names: string[] }
+  /** Fixed argument values the tool's input schema refuses. */
+  | { code: "tool_arguments_invalid"; names: string[] }
   | { code: "template_missing" }
-  | { code: "template_unbound" }
+  /** The Word fields, by their tags, that nothing fills. */
+  | { code: "template_unbound"; names: string[] }
   | { code: "template_orphaned" }
   | { code: "template_structured" }
   | { code: "speaker_participants_missing" }
   | { code: "model_missing" }
-  | { code: "deleted_reference"; anchor: FieldAnchor }
+  /** Every reference in one field of the step that reads nothing the run has. */
+  | { code: "reference"; anchor: FieldAnchor; reads: UnreadReference[] }
   | { code: "classification"; violation: NonNullable<StepClassification["violation"]> };
 
 export type FlowProblem =
@@ -94,12 +111,13 @@ export function problemAnchor(problem: StepProblem): FieldAnchor | null {
       return "prompt";
     case "http_url_missing":
     case "http_credential_missing":
-    case "deleted_reference":
+    case "reference":
       return problem.anchor;
     case "tool_missing":
     case "tool_unavailable":
     case "tool_refused":
     case "tool_arguments_missing":
+    case "tool_arguments_invalid":
       return "input_config.tool";
     case "template_missing":
     case "template_unbound":
@@ -115,26 +133,180 @@ export function problemAnchor(problem: StepProblem): FieldAnchor | null {
   }
 }
 
+/** The core's runtime variables (`RESERVED_RUNTIME_VARIABLES`). */
+const RUNTIME_HEADS = new Set([
+  "datum",
+  "flow",
+  "flow_input",
+  "step_input",
+  "transkribering",
+  "föregående_steg",
+  "indata_text",
+  "indata_json"
+]);
+
+/** The run input's own keys (`PRIMARY_FLOW_INPUT_KEYS`). */
+const FLOW_INPUT_KEYS = new Set([
+  "file_ids",
+  "json",
+  "structured",
+  "text",
+  "transcribed_text",
+  "transcription",
+  "transcript",
+  "transkribering"
+]);
+
 /**
- * Where the step still reads a step a change removed (`step_2_deleted`): its
- * underlag, its tool arguments or its prompt; null when it reads none.
+ * Whether publish resolves a reference the editor has no name for
+ * (`_analyze_expression` in the core): a runtime variable, a step by number
+ * (`step_1.status`) or a form field by its bare name. The run input
+ * (`flow_input.x`, `flow.input.x`) holds only its own keys and the form's
+ * fields; anything else in it is refused.
  */
-function deletedReference(
+function coreKnowsHead(token: string, flow: Pick<FlowPublic, "metadata_json">): boolean {
+  const [head = "", ...tail] = token.split(".").map((part) => part.trim());
+  const isField = (name: string) => formFieldsOf(flow).some((field) => field.name === name);
+  const inputKey =
+    head === "flow_input" ? tail[0] : head === "flow" && tail[0] === "input" ? tail[1] : null;
+  if (inputKey !== null)
+    return inputKey === undefined || FLOW_INPUT_KEYS.has(inputKey) || isField(inputKey);
+  return RUNTIME_HEADS.has(head) || /^step_\d+$/.test(head) || isField(head);
+}
+
+/**
+ * The references of a step that read nothing the run has, per field: the
+ * places publish reads them (`_validate_template_reads`,
+ * `_validate_binding_references` and the tool's rule in the core). Its
+ * instruction only when the step runs a model, its underlag, its tool
+ * arguments and the texts of its HTTP call. A webhook is built once the step
+ * has answered, so it reads the step's own result too. A Word step's fields
+ * are the template rule's (`template_unbound`).
+ */
+function unreadReferences(
   step: FlowStep,
-  steps: readonly FlowStep[],
+  flow: Pick<FlowPublic, "steps" | "metadata_json">,
   assistant: FlowAssistant | undefined
-): FieldAnchor | null {
-  if (removedReads(step, steps).length > 0) return "input_bindings";
-  const readsRemoved = (text: string) =>
-    tokensOf(text).some((token) => readTarget(token, step, steps).kind === "deleted");
-  const tool = readToolConfig(step.input_config);
-  if (
-    tool &&
-    Object.values(tool.arguments).some((value) => typeof value === "string" && readsRemoved(value))
-  ) {
-    return "input_config.tool";
+): StepProblem[] {
+  const sites: { anchor: FieldAnchor; tokens: string[]; order: number; place?: TextPlace }[] = [];
+  if (stepUsesModel(step) && assistant) {
+    sites.push({
+      anchor: "prompt",
+      tokens: tokensOf(assistant.prompt?.text ?? ""),
+      order: step.step_order,
+      place: { sectionIndex: readTextProcessingMode(step.input_config) === "process_each_section" }
+    });
   }
-  return readsRemoved(assistant?.prompt?.text ?? "") ? "prompt" : null;
+  const bindings = readInputBindings(step.input_bindings);
+  if (bindings.status === "valid") {
+    sites.push({
+      anchor: "input_bindings",
+      tokens: [...tokensOf(bindings.question), ...bindings.sourceRefs.map((ref) => ref.stepRef)],
+      order: step.step_order
+    });
+  }
+  const tool = step.input_source === "tool" ? readToolConfig(step.input_config) : null;
+  if (tool) {
+    sites.push({
+      anchor: "input_config.tool",
+      tokens: Object.values(tool.arguments).flatMap((value) =>
+        typeof value === "string" ? tokensOf(value) : []
+      ),
+      order: step.step_order
+    });
+  }
+  const calls = [
+    step.input_source === "http_get" && hasHttpConfig(step.input_config)
+      ? { base: "input_config.http" as const, config: step.input_config, order: step.step_order }
+      : null,
+    step.output_mode === "http_post" && hasHttpConfig(step.output_config)
+      ? {
+          base: "output_config.http" as const,
+          config: step.output_config,
+          order: step.step_order + 1
+        }
+      : null
+  ];
+  for (const call of calls) {
+    if (!call) continue;
+    const http = readHttpConfig(
+      call.config,
+      call.base === "input_config.http" ? "input" : "output"
+    );
+    const at = (anchor: FieldAnchor, texts: string[]) =>
+      sites.push({ anchor, tokens: texts.flatMap(tokensOf), order: call.order });
+    at(call.base, [http.url]);
+    at(httpAnchor(call.base, "auth"), [
+      http.auth.mode === "api_key" ? http.auth.header_name : "",
+      http.auth.mode === "basic_auth" ? http.auth.username : ""
+    ]);
+    at(
+      httpAnchor(call.base, "more"),
+      http.custom_headers.flatMap((header) =>
+        headerSent(header) && !header.secret && typeof header.value === "string"
+          ? [header.value]
+          : []
+      )
+    );
+    if (http.body.mode === "json_template" || http.body.mode === "text_template") {
+      at(httpAnchor(call.base, "body"), [http.body.template ?? ""]);
+    }
+  }
+
+  const unread = new Map<FieldAnchor, UnreadReference[]>();
+  for (const site of sites) {
+    for (const token of new Set(site.tokens)) {
+      const meaning = readMeaning(token, site.order, flow, site.place);
+      if (readTone(meaning) === "reads") continue;
+      if (meaning.kind === "other" && coreKnowsHead(token, flow)) continue;
+      const reads = unread.get(site.anchor) ?? [];
+      if (!reads.some((read) => read.token === token)) reads.push({ token, meaning });
+      unread.set(site.anchor, reads);
+    }
+  }
+  return [...unread].map(([anchor, reads]) => ({ code: "reference", anchor, reads }));
+}
+
+/** What publish checks of a fixed argument's value against its property schema. */
+const JSON_TYPES: Record<string, (value: unknown) => boolean> = {
+  string: (value) => typeof value === "string",
+  number: (value) => typeof value === "number",
+  integer: (value) => Number.isInteger(value),
+  boolean: (value) => typeof value === "boolean",
+  array: (value) => Array.isArray(value),
+  object: isJsonObject,
+  null: (value) => value === null
+};
+
+/**
+ * Whether a fixed argument value fits its property in the tool's input
+ * schema: its type, its allowed values and its bounds. A reference is read
+ * when the step runs and is judged then.
+ */
+// ponytail: type, enum and bounds only; publish runs the full JSON Schema
+// (`check_fixed_tool_properties`). Add rules here when an author meets one.
+function fitsProperty(value: unknown, property: unknown): boolean {
+  if (typeof value === "string" && tokensOf(value).length > 0) return true;
+  const schema = objectOf(property);
+  const types = typeof schema.type === "string" ? [schema.type] : schema.type;
+  if (
+    Array.isArray(types) &&
+    types.length > 0 &&
+    !types.some((type) => typeof type !== "string" || (JSON_TYPES[type]?.(value) ?? true))
+  ) {
+    return false;
+  }
+  if (
+    Array.isArray(schema.enum) &&
+    !schema.enum.some((option) => JSON.stringify(option) === JSON.stringify(value))
+  ) {
+    return false;
+  }
+  if (typeof value === "number") {
+    if (typeof schema.minimum === "number" && value < schema.minimum) return false;
+    if (typeof schema.maximum === "number" && value > schema.maximum) return false;
+  }
+  return true;
 }
 
 function stepProblems(
@@ -190,14 +362,24 @@ function stepProblems(
       if (!option) problems.push({ code: "tool_unavailable" });
       else if (option.refusal) problems.push({ code: "tool_refused", refusal: option.refusal });
       else {
-        const names = toolArguments(option.input_schema)
-          .filter((argument) => argument.required)
-          .map((argument) => argument.name)
-          .filter((name) => {
-            const value = tool.arguments[name];
-            return value === undefined || value === null || value === "";
-          });
+        const given = (name: string) => {
+          const value = tool.arguments[name];
+          return value !== undefined && value !== null && value !== "";
+        };
+        const declared = toolArguments(option.input_schema);
+        const names = declared
+          .filter((argument) => argument.required && !given(argument.name))
+          .map((argument) => argument.name);
         if (names.length > 0) problems.push({ code: "tool_arguments_missing", names });
+        const properties = objectOf(objectOf(option.input_schema).properties);
+        const invalid = declared
+          .filter(
+            (argument) =>
+              given(argument.name) &&
+              !fitsProperty(tool.arguments[argument.name], properties[argument.name])
+          )
+          .map((argument) => argument.name);
+        if (invalid.length > 0) problems.push({ code: "tool_arguments_invalid", names: invalid });
       }
     }
   }
@@ -213,13 +395,11 @@ function stepProblems(
       }
       // A field filled from a source the flow no longer has is as unfilled as
       // one never chosen: the editor's field count says the same.
-      if (
-        templateReadiness(step, flow)
-          .unbound.map((name) => bindings[name])
-          .some((binding) => binding === undefined || !isStructuredTemplateBinding(binding))
-      ) {
-        problems.push({ code: "template_unbound" });
-      }
+      const unbound = templateReadiness(step, flow).unbound.filter((name) => {
+        const binding = bindings[name];
+        return binding === undefined || !isStructuredTemplateBinding(binding);
+      });
+      if (unbound.length > 0) problems.push({ code: "template_unbound", names: unbound });
       if (
         template.placeholders.length > 0 &&
         Object.keys(bindings).some((name) => !template.placeholders.includes(name))
@@ -249,8 +429,7 @@ function stepProblems(
   if (stepUsesModel(step) && assistant && !assistant.completion_model) {
     problems.push({ code: "model_missing" });
   }
-  const removed = deletedReference(step, ordered, assistant);
-  if (removed) problems.push({ code: "deleted_reference", anchor: removed });
+  problems.push(...unreadReferences(step, flow, assistant));
 
   const classification =
     facts.classification?.find((item) => item.step_id === step.id) ??

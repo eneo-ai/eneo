@@ -4,7 +4,7 @@ import {
   getErrorMessageForCode,
   getErrorMessageForReason
 } from "@/lib/api/errors";
-import { refusalMessage } from "./editor/field-problems";
+import { refusalAnchor, refusalMessage, type FieldAnchor } from "./editor/field-problems";
 import { readTemplateFill } from "./editor/step-configs";
 import type { FlowStep } from "./flows-api";
 import { stepLabel } from "./flow-labels";
@@ -32,6 +32,18 @@ const READ_REASONS = new Set([
   "producer_renamed",
   "would_read_another_step"
 ]);
+
+/**
+ * The sentence for a read the core names, by why it reads nothing: a name the
+ * flow does not have, a step with no result yet, a step order the flow does
+ * not have, or a part its value does not have.
+ */
+const REFERENCE_SENTENCES: Record<string, string> = {
+  flow_input_binding_invalid_step_reference: "flows_refusal_reference_unknown",
+  flow_input_binding_future_step_reference: "flows_refusal_reference_later",
+  flow_input_binding_unknown_step_order: "flows_refusal_reference_no_step",
+  flow_input_binding_unsupported_key: "flows_refusal_reference_path"
+};
 
 /** Where in a step a read sits, as the core names it (`prompt`, `input_bindings.question`). */
 function siteLabel(site: unknown, t: Translator): string {
@@ -64,6 +76,25 @@ function draftCheckSentence(
   return readTemplateFill(step.output_config).templateAssetId
     ? null
     : t("flow_editor_tools_check_template_missing");
+}
+
+/**
+ * What a refusal names, for its sentence: the read (`reference`; a path's
+ * `key`, except a key of the underlag itself or a step it lists in
+ * `source_refs`), as written in braces, the Word field (`placeholder`) and
+ * where in the step (`site`). Empty when not named.
+ */
+const KEY_IS_NO_READ = new Set(["input_bindings", "input_bindings.source_refs"]);
+
+function namedValues(context: Record<string, unknown>, t: Translator) {
+  const text = (value: unknown) => (typeof value === "string" ? value : "");
+  const read =
+    text(context.reference) || (KEY_IS_NO_READ.has(text(context.field)) ? "" : text(context.key));
+  return {
+    reference: read ? `{{${read}}}` : "",
+    placeholder: text(context.placeholder),
+    site: siteLabel(context.field, t)
+  };
 }
 
 function labelAt(steps: readonly FlowStep[], order: unknown, t: Translator, id?: unknown) {
@@ -129,10 +160,15 @@ export function flowRefusalMessage(
   if (code === "insufficient_space_permission") return t("flows_refusal_no_permission");
 
   const issue = typeof context.issue_code === "string" ? context.issue_code : null;
+  const values = namedValues(context, t);
+  const named = values.reference
+    ? (REFERENCE_SENTENCES[issue ?? ""] ?? REFERENCE_SENTENCES[code ?? ""])
+    : undefined;
   const message =
-    refusalMessage(issue, t) ??
+    (named ? t(named, values) : null) ??
+    refusalMessage(issue, t, values) ??
     draftCheckSentence(code, stepAt(steps, context.step_order, context.step_id), t) ??
-    refusalMessage(code, t) ??
+    refusalMessage(code, t, values) ??
     getErrorMessageForReason(code, t) ??
     getErrorMessageForCode(error.code, t);
   // Publication refusals name the step they are about; the page offers to open it.
@@ -145,10 +181,22 @@ export function flowRefusalMessage(
   return message ?? t("request_failed");
 }
 
-/** The step of the draft a refusal is about, for a way to open it; null when it names none. */
-export function refusalStep(error: unknown, steps: readonly FlowStep[]): FlowStep | null {
+/**
+ * The step of the draft a refusal is about and the field in it, for a way to
+ * open it there; null when it names no step of the draft.
+ */
+export function refusalStep(
+  error: unknown,
+  steps: readonly FlowStep[]
+): { step: FlowStep; anchor: FieldAnchor | null } | null {
   if (!(error instanceof EneoApiError)) return null;
   const context = error.context ?? {};
   if (context.step_order === undefined && context.step_id === undefined) return null;
-  return stepAt(steps, context.step_order, context.step_id);
+  const step = stepAt(steps, context.step_order, context.step_id);
+  if (!step) return null;
+  // A lost read names its place as `site`, a publication refusal as `field`.
+  const field =
+    [context.field, context.site].find((value): value is string => typeof value === "string") ??
+    null;
+  return { step, anchor: refusalAnchor(context, error.reason, step, field) };
 }

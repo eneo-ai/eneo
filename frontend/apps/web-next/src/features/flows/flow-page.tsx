@@ -22,7 +22,8 @@ import {
   useMemo,
   useRef,
   useState,
-  type ComponentProps
+  type ComponentProps,
+  type CSSProperties
 } from "react";
 import { flushSync } from "react-dom";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
@@ -98,10 +99,14 @@ type Notice = {
   status: "error" | "warning" | "info";
   title: string;
   description: string;
-  /** The step the refusal is about, which the notice offers to open. */
+  /** The step the refusal is about, which the notice offers to open at `anchor`. */
   step?: FlowStep | null;
-  /** Unsaved edits held publishing back: the notice goes once they are saved or dropped. */
-  cause?: "unsaved";
+  anchor?: FieldAnchor | null;
+  /**
+   * Unsaved edits held publishing back: the notice goes once they are saved
+   * or dropped. Or the core refused to publish the draft on screen.
+   */
+  cause?: "unsaved" | "publish";
 };
 type View = "definition" | "chat";
 type PageTab = "definition" | "runs";
@@ -218,6 +223,29 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
     maxSize: "60%",
     autoSaveId: CHAT_WIDTH_STORAGE_KEY
   });
+  // Below lg the chat is a tab under the page's header and tabs. It takes the
+  // height the page panel (main, which scrolls) has left under them, so its
+  // composer is in view without scrolling the page. A notice above it and
+  // the keyboard (which shrinks the panel) change that height.
+  const headerRef = useRef<HTMLDivElement>(null);
+  const chatRef = useRef<HTMLElement>(null);
+  const [chatHeight, setChatHeight] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const section = chatRef.current;
+    const main = section?.closest("main");
+    if (beside || view !== "chat" || !section || !main) return;
+    const fit = () => {
+      const top =
+        section.getBoundingClientRect().top - main.getBoundingClientRect().top + main.scrollTop;
+      const bottom = Number.parseFloat(getComputedStyle(main).paddingBottom) || 0;
+      setChatHeight(Math.round(main.clientHeight - top - bottom));
+    };
+    fit();
+    const observer = new ResizeObserver(fit);
+    observer.observe(main);
+    if (headerRef.current) observer.observe(headerRef.current);
+    return () => observer.disconnect();
+  }, [beside, view]);
   const [addAt, setAddAt] = useState<number | null>(null);
   // Edits on screen that are not saved: the open step's, or the settings form
   // while it is open (the two are never on screen together).
@@ -242,8 +270,9 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
   const search = parseFlowSearch({ step: searchParams.get("step"), tab: searchParams.get("tab") });
   const openStepId = search.step ?? null;
   const tab: PageTab = canViewRuns && search.tab === "runs" ? "runs" : "definition";
-  // The field the editor opens at when a step is opened to connect a service.
-  const [requestedAnchor, setRequestedAnchor] = useState<FieldAnchor | null>(null);
+  // The field the editor moves focus to: a step opened to connect a service,
+  // or the field a refusal names (again, while that step is open).
+  const [anchorRequest, setAnchorRequest] = useState<{ anchor: FieldAnchor } | null>(null);
   const tabsId = useId();
   const tabId = (id: NarrowTab) => `${tabsId}-tab-${id}`;
   const panelId = `${tabsId}-panel`;
@@ -276,16 +305,19 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
 
   /** A refusal above both columns; a stale draft is reloaded first. */
   const refused = useCallback(
-    (error: unknown, title: string, against: readonly FlowStep[]) => {
+    (error: unknown, title: string, against: readonly FlowStep[], cause?: Notice["cause"]) => {
       const stale = refusalCode(error) === STALE_REVISION;
       if (stale) void queryClient.invalidateQueries({ queryKey: flowKeys.flow(flowId) });
+      const about = refusalStep(error, against);
       noticeKey.current += 1;
       setNotice({
         key: noticeKey.current,
         status: stale ? "warning" : "error",
         title: stale ? t("flows_notice_stale_title") : title,
         description: flowRefusalMessage(error, against, t),
-        step: refusalStep(error, against)
+        step: about?.step,
+        anchor: about?.anchor,
+        cause: stale ? undefined : cause
       });
     },
     [flowId, queryClient, t]
@@ -497,7 +529,7 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
       // Publicera has gone; what the flow is for now takes its place.
       rescue(() => runButtonRef.current ?? unpublishButtonRef.current);
     },
-    onError: (error) => refused(error, t("flows_notice_not_published"), steps)
+    onError: (error) => refused(error, t("flows_notice_not_published"), steps, "publish")
   });
 
   const unpublish = useMutation({
@@ -619,7 +651,7 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
    */
   function openStep(step: Pick<FlowStep, "id">, anchor: FieldAnchor | null = null) {
     if (!step.id) return;
-    setRequestedAnchor(anchor);
+    setAnchorRequest(anchor ? { anchor } : null);
     pushUrl(stepUrl(step.id), {
       state: { flowStepDepth: (readUrlState().flowStepDepth ?? 0) + 1 }
     });
@@ -886,6 +918,7 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
         onOpenSettings={openSettings}
         onProblemCount={setDraftProblems}
         headingRef={checkHeadingRef}
+        refused={notice?.cause === "publish"}
       />
     ) : null,
     stepList,
@@ -900,7 +933,10 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
       composer={composer}
     >
       <div className="flex min-w-0 flex-1 flex-col lg:min-h-0">
-        <div className="border-ax-border flex flex-col gap-3 border-b px-6 pt-4 pb-3 max-lg:border-b-0 max-lg:pb-1">
+        <div
+          ref={headerRef}
+          className="border-ax-border flex flex-col gap-3 border-b px-6 pt-4 pb-3 max-lg:border-b-0 max-lg:pb-1"
+        >
           <PageHeader
             title={flow.name}
             description={flow.description?.trim() || undefined}
@@ -939,7 +975,13 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
                       step: stepLabel(notice.step, t)
                     })}
                     size="sm"
-                    onClick={() => notice.step && openStep(notice.step)}
+                    onClick={() => notice.step && openStep(notice.step, notice.anchor)}
+                  />
+                ) : notice.step?.id && notice.anchor ? (
+                  <Button
+                    label={t("flows_notice_go_to_field")}
+                    size="sm"
+                    onClick={() => notice.anchor && setAnchorRequest({ anchor: notice.anchor })}
                   />
                 ) : undefined
               }
@@ -1049,7 +1091,7 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
                   <FlowStepEditor
                     flow={flow}
                     stepId={openedStep.id}
-                    initialAnchor={requestedAnchor}
+                    anchorRequest={anchorRequest}
                     readOnly={!canEdit}
                     onAskChat={askChat}
                     suggestionFix={suggestionFix}
@@ -1100,13 +1142,20 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
             />
           )}
           <section
+            ref={chatRef}
             id={chatPanelId}
             role={beside ? undefined : "tabpanel"}
             aria-labelledby={beside ? undefined : tabId("chat")}
             aria-label={beside ? t("flows_chat_heading") : undefined}
-            style={beside ? { width: chat.size } : undefined}
+            style={
+              beside
+                ? { width: chat.size }
+                : chatHeight !== null
+                  ? ({ "--flow-chat-h": `${chatHeight}px` } as CSSProperties)
+                  : undefined
+            }
             className={cn(
-              "border-ax-border flex h-[85dvh] min-h-[28rem] min-w-0 flex-col border-t lg:h-auto lg:min-h-0 lg:shrink-0 lg:border-t-0",
+              "border-ax-border flex h-[var(--flow-chat-h,85dvh)] min-h-[28rem] min-w-0 flex-col border-t lg:h-auto lg:min-h-0 lg:shrink-0 lg:border-t-0",
               view !== "chat" && "max-lg:hidden"
             )}
           >

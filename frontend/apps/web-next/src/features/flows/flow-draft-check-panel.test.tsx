@@ -21,6 +21,7 @@ vi.mock("@astryxdesign/core/hooks", async (importOriginal) => ({
   useAnnounce: () => state.announce
 }));
 
+import { templateInspectionQueryOptions } from "./editor/editor-api";
 import { FlowDraftCheck } from "./flow-draft-check-panel";
 import { SUGGESTIONS_SUMMARY_ID } from "./flow-suggestions-section";
 import { flowSuggestionsQueryOptions } from "./flow-suggestions";
@@ -120,9 +121,7 @@ describe("FlowDraftCheck", () => {
     );
 
     expect(
-      await screen.findByText(
-        "Hänvisningen {{step_3_deleted.output.text}} gäller ett steg som inte finns längre."
-      )
+      await screen.findByText("{{step_3_deleted.output.text}} i underlaget går inte att läsa.")
     ).toBeTruthy();
     await expectNoAxeViolations(container);
     fireEvent.click(
@@ -134,6 +133,95 @@ describe("FlowDraftCheck", () => {
     expect(onRepair).toHaveBeenCalledWith(flow.steps[1], {
       question: "Svara på {{step_1.output.text}}"
     });
+  });
+
+  it("names the references a step cannot read, and what each one reads wrong", async () => {
+    route({
+      "assistant-1": makeAssistant({ id: "assistant-1" }),
+      "assistant-2": makeAssistant({
+        id: "assistant-2",
+        prompt: {
+          text: "Skriv {{datun}} och {{step_1.output.structured.namn}} och {{step_3.output.text}}.",
+          description: null
+        }
+      } as never)
+    });
+    renderInApp(
+      <FlowDraftCheck
+        flow={makeFlow()}
+        transcription={{ models: [], services: [] }}
+        onOpenStep={vi.fn()}
+      />
+    );
+
+    expect(
+      await screen.findByText(
+        "{{datun}}, {{step_1.output.structured.namn}} och {{step_3.output.text}} i instruktionen går inte att läsa. " +
+          "Steg 1: Sammanfatta svarar inte i fast format och har inga fält att läsa. " +
+          "Läs svaret som text, eller låt steget svara i fast format."
+      )
+    ).toBeTruthy();
+  });
+
+  it("names the Word fields nothing fills as the template titles them", async () => {
+    route(ASSISTANTS);
+    const queryClient = testQueryClient();
+    queryClient.setQueryData(templateInspectionQueryOptions("flow-1", "t-1").queryKey, {
+      file_id: "f-1",
+      file_name: "Beslut.docx",
+      placeholders: [
+        { name: "arende", label: "Ärende", kind: "text", location: "body" },
+        { name: "datum_tag", label: "", kind: "text", location: "body" }
+      ]
+    });
+    renderInApp(
+      <FlowDraftCheck
+        flow={makeFlow({
+          steps: [
+            makeStep(1, {
+              user_description: "Fyll mallen",
+              output_mode: "template_fill",
+              output_type: "docx",
+              output_config: {
+                template_asset_id: "t-1",
+                placeholders: ["arende", "datum_tag"],
+                bindings: {}
+              }
+            })
+          ]
+        })}
+        transcription={{ models: [], services: [] }}
+        onOpenStep={vi.fn()}
+      />,
+      { queryClient }
+    );
+
+    // A field without a title is named by its tag, as the editor does.
+    expect(
+      await screen.findByText(
+        "Välj vad som ska stå i fälten ”Ärende” och ”datum_tag” i Word-mallen."
+      )
+    ).toBeTruthy();
+  });
+
+  it("does not say the draft is ready while the page shows publishing was refused", async () => {
+    route(ASSISTANTS);
+    renderInApp(
+      <FlowDraftCheck
+        flow={makeFlow()}
+        transcription={{ models: [], services: [] }}
+        onOpenStep={vi.fn()}
+        refused
+      />
+    );
+
+    expect(await screen.findByText("Publiceringen nekades. Se meddelandet ovan.")).toBeTruthy();
+    expect(screen.queryByText("Redo att publicera")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Kontrollera igen" }));
+    await waitFor(() =>
+      expect(state.announce).toHaveBeenCalledWith("Publiceringen nekades. Se meddelandet ovan.")
+    );
+    expect(state.announce).not.toHaveBeenCalledWith("Redo att publicera");
   });
 
   it("fixes the flow's own problems where they are fixed: in its settings", async () => {

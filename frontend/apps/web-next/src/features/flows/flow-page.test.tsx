@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { focusManager } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { Suspense } from "react";
+import { Suspense, useEffect, useRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { openMenuOnRelease, tap } from "@/test/menus";
@@ -57,7 +57,9 @@ const state = vi.hoisted(() => ({
     insertToken: (token: { value: string }) => state.inserted.push(token.value)
   },
   /** The step assistants' prompts by assistant id; null leaves the reads unanswered. */
-  prompts: null as Record<string, string> | null
+  prompts: null as Record<string, string> | null,
+  /** The draft's classification preview; null leaves it unanswered. */
+  preview: null as unknown
 }));
 
 const ASSISTANT = "/api/v1/flows/{id}/assistants/{assistant_id}/";
@@ -99,6 +101,9 @@ const api = vi.hoisted(() => ({
   POST: vi.fn(async (path: string) => {
     if (path === "/api/v1/flows/{id}/authoring-chat/") return state.chat;
     if (path === "/api/v1/flows/{id}/publish/") return state.publish;
+    if (path === "/api/v1/flows/{id}/security-classification/preview" && state.preview) {
+      return state.preview;
+    }
     if (path === "/api/v1/flows/{id}/unpublish/") return state.unpublish;
     if (path === "/api/v1/flows/{id}/suggestions/apply/") return state.apply;
     if (path === "/api/v1/flows/{id}/suggestions/{fingerprint}/dismissal/") return state.dismiss;
@@ -179,9 +184,11 @@ vi.mock("./editor/flow-step-editor", async () => {
       onCancel,
       navigation,
       suggestionFix,
-      suggestionRuns
+      suggestionRuns,
+      anchorRequest
     }: {
       stepId: string;
+      anchorRequest?: { anchor: string } | null;
       onCancel: () => void;
       navigation: { next: { id: string } | null; onGo: (id: string) => void };
       suggestionFix?: {
@@ -191,9 +198,20 @@ vi.mock("./editor/flow-step-editor", async () => {
       suggestionRuns?: number;
     }) {
       const next = navigation.next;
+      // Like the editor: each request moves focus to its field.
+      const field = useRef<HTMLInputElement>(null);
+      useEffect(() => {
+        if (anchorRequest) field.current?.focus();
+      }, [anchorRequest]);
       return (
         <div>
           <p>Redigerar {stepId}</p>
+          {anchorRequest ? (
+            <>
+              <p>Vid fältet {anchorRequest.anchor}</p>
+              <input ref={field} aria-label={`Fältet ${anchorRequest.anchor}`} />
+            </>
+          ) : null}
           {suggestionRuns ? <p>Förslagen räknas med {suggestionRuns} körningar</p> : null}
           {suggestionFix ? (
             <button
@@ -393,6 +411,7 @@ afterEach(() => {
   window.history.replaceState(null, "", "/");
   vi.useRealTimers();
   state.prompts = null;
+  state.preview = null;
 });
 
 function assistantReads() {
@@ -633,6 +652,41 @@ describe("FlowPage", () => {
     // The step it names is one press away.
     fireEvent.click(within(alert).getByRole("button", { name: "Öppna Steg 2: Skriv svar" }));
     expect(await screen.findByText("Redigerar step-2")).toBeTruthy();
+  });
+
+  it("names the read publish refused, opens the step at it, and stops calling the draft ready", async () => {
+    state.prompts = { "assistant-1": "Sammanfatta brevet.", "assistant-2": "Skriv ett svar." };
+    state.preview = ok({ steps: [] });
+    state.publish = refused(400, {
+      code: "flow_input_binding_invalid_step_reference",
+      message: "Step 2 references unknown step 'datun'.",
+      context: { step_order: 2, field: "prompt", reference: "datun" }
+    });
+    renderPage();
+    expect(await within(draftCheck()).findByText("Redo att publicera")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Publicera" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(
+      within(alert).getByText(
+        "Steg 2: Skriv svar: Steget läser {{datun}} i sin instruktion, men inget i flödet heter så. Välj en variabel med Infoga variabel."
+      )
+    ).toBeTruthy();
+    // The check saw nothing; the core did. The two do not contradict each other.
+    expect(within(draftCheck()).queryByText("Redo att publicera")).toBeNull();
+    expect(
+      within(draftCheck()).getByText("Publiceringen nekades. Se meddelandet ovan.")
+    ).toBeTruthy();
+    // One press opens the step at the instruction.
+    fireEvent.click(within(alert).getByRole("button", { name: "Öppna Steg 2: Skriv svar" }));
+    expect(await screen.findByText("Redigerar step-2")).toBeTruthy();
+    expect(screen.getByText("Vid fältet prompt")).toBeTruthy();
+    const field = screen.getByRole("textbox", { name: "Fältet prompt" });
+    await waitFor(() => expect(document.activeElement).toBe(field));
+    // With the step open, the notice still takes focus back to the field.
+    field.blur();
+    fireEvent.click(within(alert).getByRole("button", { name: messages.flows_notice_go_to_field }));
+    await waitFor(() => expect(document.activeElement).toBe(field));
   });
 
   it("puts focus on Kör flödet once published, where Publicera was", async () => {

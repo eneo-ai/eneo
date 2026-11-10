@@ -7,6 +7,8 @@ import {
   anchorForPath,
   describeSaveError,
   isStaleRevision,
+  refusalAnchor,
+  refusalMessage,
   type Translator
 } from "./field-problems";
 
@@ -37,6 +39,35 @@ describe("anchorForPath", () => {
         output_mode: "template_fill"
       })
     ).toBe("output_config.template");
+  });
+});
+
+describe("refusalAnchor", () => {
+  it("opens a publish refusal where the editor shows its field, then its code's field", () => {
+    expect(refusalAnchor({ field: "prompt", reference: "datun" }, "x", step.config)).toBe("prompt");
+    expect(
+      refusalAnchor({ field: "input_config", http_error: "HTTP_MISSING_AUTH" }, "x", step.config)
+    ).toBe("input_config.http.auth");
+    // A field given by the caller (a lost read's site) wins over the context's.
+    expect(refusalAnchor({}, "x", step.config, "input_bindings.question")).toBe("input_bindings");
+    expect(
+      refusalAnchor(
+        { issue_code: "typed_io_incompatible_type_chain" },
+        "flow_step_invalid",
+        step.config
+      )
+    ).toBe("input_type");
+    expect(refusalAnchor({}, "something_new", step.config)).toBeNull();
+  });
+
+  it("gives a refusal's sentence the values it names", () => {
+    const sentence = createTranslator({
+      locale: "sv",
+      messages: { flow_error_template_binding_not_scalar: "Fältet {placeholder} tar ett värde." }
+    }) as unknown as Translator;
+    expect(
+      refusalMessage("template_binding_not_scalar", sentence, { placeholder: "Deltagare" })
+    ).toBe("Fältet Deltagare tar ett värde.");
   });
 });
 

@@ -68,7 +68,8 @@ const HTTP_ERROR_PARTS: Record<string, HttpPart> = {
   HTTP_TIMEOUT_OUT_OF_RANGE: "more"
 };
 
-function httpAnchor(
+/** The anchor of a part of the HTTP fields, or of the address for a part without one. */
+export function httpAnchor(
   base: "input_config.http" | "output_config.http",
   part: HttpPart | null | undefined
 ): FieldAnchor {
@@ -236,13 +237,20 @@ export type Translator = ((key: string, values?: Record<string, string | number>
   has: (key: string) => boolean;
 };
 
-/** The reader's sentence for a flow refusal code, or null when the catalog has none. */
-export function refusalMessage(code: string | null | undefined, t: Translator): string | null {
+/**
+ * The reader's sentence for a flow refusal code, or null when the catalog has
+ * none. `values` fill what the sentence names (a refusal's `reference`).
+ */
+export function refusalMessage(
+  code: string | null | undefined,
+  t: Translator,
+  values?: Record<string, string>
+): string | null {
   if (!code) return null;
   const issueKey = ISSUE_MESSAGE_KEYS[code];
-  if (issueKey && t.has(issueKey)) return t(issueKey);
+  if (issueKey && t.has(issueKey)) return t(issueKey, values);
   const errorKey = `flow_error_${code}`;
-  return t.has(errorKey) ? t(errorKey) : null;
+  return t.has(errorKey) ? t(errorKey, values) : null;
 }
 
 export type EditorProblem = {
@@ -325,17 +333,37 @@ export function describeSaveError(
   }
 
   const field = contextString(context, "field") ?? validationPaths(error)[0] ?? null;
-  const fieldAnchor = field ? anchorForPath(field, step.config) : null;
+  return {
+    anchor: refusalAnchor(context, code, step.config, field),
+    message,
+    otherStepOrder: null,
+    code
+  };
+}
+
+/**
+ * The field of `step` a refusal is about: the one its `field` path names (the
+ * part of the HTTP config its defect names), else the one its codes are about;
+ * null for none.
+ */
+export function refusalAnchor(
+  context: Record<string, unknown>,
+  code: string | null | undefined,
+  step: Pick<StepConfig, "input_source" | "output_mode">,
+  field: string | null = contextString(context, "field")
+): FieldAnchor | null {
+  const fieldAnchor = field ? anchorForPath(field, step) : null;
+  const issueCode = contextString(context, "issue_code");
   // A refusal of the whole HTTP config names its defect: show it at that part.
   const httpErrorPart = HTTP_ERROR_PARTS[contextString(context, "http_error") ?? ""];
-  const anchor =
+  return (
     (fieldAnchor === "input_config.http" || fieldAnchor === "output_config.http"
       ? httpAnchor(fieldAnchor, httpErrorPart)
       : fieldAnchor) ??
     (issueCode ? CODE_ANCHORS[issueCode] : undefined) ??
     (code ? CODE_ANCHORS[code] : undefined) ??
-    null;
-  return { anchor, message, otherStepOrder: null, code };
+    null
+  );
 }
 
 export function isStaleRevision(error: unknown): boolean {
