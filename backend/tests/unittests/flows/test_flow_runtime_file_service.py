@@ -42,6 +42,7 @@ from eneo.flows.published_definition import (
     FLOW_DEFINITION_SCHEMA_VERSION,
     published_definition_checksum,
 )
+from eneo.main import process_scratch
 from eneo.main.config import get_settings
 from eneo.main.exceptions import (
     BadRequestException,
@@ -1852,6 +1853,7 @@ def test_runtime_pdf_upload_error_response(tmp_path, monkeypatch, failure):
         assert body["context"] == {"limit": "pages", "measured": 2, "ceiling": 1}
     # Uploads are written into the process scratch directory under it; nothing
     # is left there beside the directory's own lock marker.
+    assert process_scratch.directory().parent == upload_directory / "eneo-scratch"
     assert [
         path
         for path in upload_directory.rglob("*")
