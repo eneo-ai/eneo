@@ -260,7 +260,12 @@ async def _save(
     )
     try:
         update = editor_update(
-            flow, change, position=position, step_id=step_id, name="Added step"
+            flow,
+            change,
+            expected_revision=flow.draft_revision,
+            position=position,
+            step_id=step_id,
+            name="Added step",
         )
         await flow_authoring_operations.apply_editor_update(
             flow.require_persisted_id(),
@@ -387,3 +392,17 @@ def test_a_step_added_first_takes_the_run_input_over() -> None:
     assert by_kind[FlowStepKind.REVIEW].refusals[0].issue_code == (
         "typed_io_invalid_input_source_position"
     )
+
+
+def test_the_update_carries_the_revision_its_caller_read() -> None:
+    # The caller read revision 1; the draft has moved on to 3 since. The
+    # update is saved against what the caller read, so the save refuses it
+    # as stale instead of applying it over a change the caller never saw.
+    flow = _flow([_step(1)])
+    change = step_kind_answer(flow, prompts={}, positions=[2], step_ids=[])
+    option = change.insertions[0].options[0]
+
+    update = editor_update(flow, option.change, expected_revision=1, position=2)
+
+    assert flow.draft_revision == 3
+    assert update.expected_revision == 1

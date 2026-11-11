@@ -233,19 +233,22 @@ def editor_update(
     flow: Flow,
     change: StepKindChange,
     *,
+    expected_revision: int,
     position: int | None = None,
     step_id: UUID | None = None,
     name: str = "New step",
 ) -> FlowEditorUpdateRequest:
     """The editor update that makes ``change``: adding a step named ``name``
-    at ``position``, or turning the saved step ``step_id``."""
+    at ``position``, or turning the saved step ``step_id``. It is saved
+    against ``expected_revision``, the revision its caller read: a draft that
+    changed since is refused as stale, never changed over."""
 
     step_edits = [
         {"step_id": str(edited), "changes": changes}
         for edited, changes in change.step_edits
     ]
     payload: dict[str, object] = {
-        "expected_revision": flow.draft_revision,
+        "expected_revision": expected_revision,
         "definition": (
             {"metadata_json": _with_transcription_on(flow.metadata_json)}
             if change.turns_on_transcription
@@ -357,7 +360,14 @@ def _option(
             kind=kind,
             change=step_change(flow, kind, step=step),
             refusals=judge_editor_update(
-                flow, editor_update(flow, judged, step_id=step.id), prompts=prompts
+                flow,
+                editor_update(
+                    flow,
+                    judged,
+                    expected_revision=flow.draft_revision,
+                    step_id=step.id,
+                ),
+                prompts=prompts,
             ),
         )
     assert position is not None
@@ -367,7 +377,14 @@ def _option(
         change=insertion_change(flow, kind, position=position),
         refusals=_growth_refusals(flow)
         or judge_editor_update(
-            flow, editor_update(flow, judged, position=position), prompts=prompts
+            flow,
+            editor_update(
+                flow,
+                judged,
+                expected_revision=flow.draft_revision,
+                position=position,
+            ),
+            prompts=prompts,
         ),
     )
 
