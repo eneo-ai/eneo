@@ -24,6 +24,7 @@ Each item can stop the backend from starting, stop sign-in or lose data:
 8. Edit the reference Compose file's new web-app router. See [The React web app](#react-web-app-main-host).
 9. Tell users that names and feedback comments of conversations older than their retention period are removed on the first night. See [Names and feedback text](#names-and-feedback-follow-retention).
 10. Plan downtime for `db-init`: migration `202611091200` locks `sessions` while it rewrites every row, and several migrations build indexes concurrently. If `db-init` is interrupted, run it again. See [Migration `202611091200`](#sessions-migration).
+11. Export the audit log first if you need file names: the upgrade removes them for good. See [Exporting audit logs](/guides/audit-logging#exporting-audit-logs).
 
 **Rolling back to 2.3:** restore the `pg_dump` backup taken before `db-init`, with a matching object storage snapshot. A schema downgrade stops at migration `202610291900` ("Cannot discard approved Skill reference history") once an approved Skill revision references another Skill. A downgrade never brings back emptied or deleted logs, cleared names or rewritten audit entries.
 
@@ -63,7 +64,12 @@ flowchart TB
 
 **Environment settings:** set all of `OIDC_DISCOVERY_ENDPOINT`, `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET`, or the login page shows only the password form. Stored settings on the organization are ignored, and a sign-in that names no organization uses the first active tenant. [Sign-in table](#sign-in)
 
-**Stored settings:** remove the `OIDC_*` variables the startup warning names; check who holds the administrator role; `PUT` automation sends `subject_claim`; check the allowed domains if you used the move script with 2.3 or earlier; scripts accept `502`. [Administrators](#admins-change-sign-in-settings), [Move script](#move-script-allowed-domains), [Saving settings](#provider-save-checks-sign-in)
+**Stored settings:**
+
+- Remove the `OIDC_*` variables the startup warning names. [Sign-in table](#sign-in)
+- Check who holds the administrator role. [Administrators](#admins-change-sign-in-settings)
+- `PUT` automation sends `subject_claim`; scripts accept `502`. [Saving settings](#provider-save-checks-sign-in)
+- Check the allowed domains if you used the move script with 2.3 or earlier. [Move script](#move-script-allowed-domains)
 
 **MobilityGuard settings** (`MOBILITYGUARD_*`, `MOBILITY_GUARD_AUTH`): rename to the `OIDC_*` names. [MobilityGuard](#mobilityguard-sign-in-removed)
 
@@ -94,8 +100,8 @@ flowchart TB
 | [The move script dropped the allowed domains](#move-script-allowed-domains) | Ran the move script with `OIDC_ALLOWED_DOMAINS` set | Check stored domains |
 | [Administrators can change the sign-in settings](#admins-change-sign-in-settings) | Stored settings | Review the administrator role |
 | SCIM accounts are bound at first sign-in | SCIM installations | Nothing |
-| The login tenant list shows only tenants with a stored provider | Multi-tenant installations | Register missing providers |
-| Environment settings ignore settings stored on the organization; only `{PUBLIC_ORIGIN}/login/callback` is accepted | Environment settings | Move stored values into Eneo if needed |
+| The login tenant list shows only tenants with a stored provider | Multi-tenant installations | [Register](/guides/oidc-federation) missing providers |
+| Environment settings ignore settings stored on the organization; only `{PUBLIC_ORIGIN}/login/callback` is accepted; a sign-in that names no organization uses the first active tenant | Environment settings | Move stored values into Eneo if needed ([OIDC settings](/guides/oidc-federation)) |
 | [Saving provider settings checks what sign-in checks](#provider-save-checks-sign-in) | Scripts that save or test settings | Accept `502` |
 | `REDIS_CONN_TIMEOUT` (default 5 s) is now also the read timeout of the Redis clients the API and workers share, and of their background-job enqueue | Slow Redis | Raise the value if needed |
 
@@ -108,7 +114,7 @@ flowchart TB
 | [`TRUSTED_PROXY_COUNT` counts proxies exactly](#trusted-proxy-count) | More than one proxy, or nginx | Set it to the proxy count |
 | [The React web app runs on the main host](#react-web-app-main-host) | Reference Compose file users | Choose React or Svelte |
 | [HTTP hardening](#http-hardening) | Proxies that set HSTS or CSP | Decide who owns HSTS and CSP |
-| Password login: a correct password for an inactive account or suspended organisation answers `403` (9019, 9025) instead of `500` | Password API clients | Handle the two codes |
+| Password login: a correct password for an inactive account or suspended organisation answers `403` (9019, 9025) instead of `500`; `422` lists only `loc`, `type` and `msg`; an unexpected failure answers `500` with code `login_unavailable` | Password API clients | Handle the two codes; update `422` parsing |
 | [Password lifecycle](#password-lifecycle) | Seeded users, password integrations | Check `DEFAULT_USER_PASSWORD` |
 
 ### API contract [#api-contract]
@@ -123,12 +129,12 @@ flowchart TB
 | Change | Who | Do |
 |---|---|---|
 | [One retention engine](#retention-engine) | Scripts and alerts on the old jobs | Update them |
-| A new Prompt Guide no longer sets 30 days | Administrators who want a period | Set it explicitly |
-| Copies of removed conversations answer `410`. Nothing produces copies yet, so no `410` appears today | API consumers | Treat `410` as gone. Before a downgrade, drain the job queue |
+| A new Prompt Guide no longer sets 30 days; existing guides keep their period | Administrators who want a period | [Set it](/guides/data-retention#change-the-rules) explicitly |
+| Copies of removed conversations answer `410`. Nothing produces copies yet, so no `410` appears today. On PostgreSQL 13 conversation reads cost more | API consumers; PostgreSQL 13 installations | Treat `410` as gone. Before a downgrade, drain the job queue. On PostgreSQL 13, plan a move to 16 |
 | [Question logs are emptied](#question-logs-emptied) | Everyone | Back up, stop old writers |
 | [File names leave the audit log](#audit-names-removed) | Audit log kept as evidence | Export first if you need names |
 | [Object storage must not keep old versions](#object-storage-versioning) | Object storage installations | Grant permissions; no versioning |
-| Bundled SeaweedFS image is `4.40-eneo.8` | Bundled SeaweedFS | Set `ENEO_SEAWEEDFS_IMAGE` to the digest in `IMAGE-DIGESTS.txt` |
+| Bundled SeaweedFS image is `4.40-eneo.8` | Bundled SeaweedFS | Set `ENEO_SEAWEEDFS_IMAGE` to the digest in `IMAGE-DIGESTS.txt` ([Pin the release image](/guides/object-content-storage#pin-the-release-image)) |
 | A question whose log holds no request answers `400` instead of `500` | API consumers | Treat `400` as no log |
 | [`UPLOAD_TMP_DIR` must be a local filesystem](#upload-tmp-dir-local) | Operators | Keep it local |
 | [Migration `202611091200` rewrites every conversation row](#sessions-migration) | Operators | Plan downtime |
@@ -141,11 +147,11 @@ flowchart TB
 
 | Change | Who | Do |
 |---|---|---|
-| `MAX_TOOL_ROUNDS` defaults to 40 (was a fixed 10) | Everyone | Nothing; `MAX_TOOL_ROUNDS=10` keeps the old cap |
+| `MAX_TOOL_ROUNDS` defaults to 40 (was a fixed 10), so a tool-heavy turn can cost up to four times the calls and tokens; LiteLLM's `REQUEST_TIMEOUT` no longer applies | Everyone | `MAX_TOOL_ROUNDS=10` keeps the old cap; move a custom `REQUEST_TIMEOUT` to `COMPLETION_REQUEST_TIMEOUT_SECONDS` (default 600) |
 | Provider types that cannot route are refused with `400`; model names no longer double the prefix | Administrators | Fix `mistral/mistral/…` completion model names; embedding and reranking need new models; [recreate refused providers](/guides/ai-providers#adding-a-provider-admin-ui) |
-| Images have no `apt` | Builds on the images | Install in a separate build stage |
+| Images have no `apt`; the frontend image also has no `npm`, `npx`, `corepack` or `yarn` | Builds on the images | Install in a separate build stage |
 | `MCP_APP_CONTENT_BASE_URL` is validated at startup | Installations that set it | Nothing; typical values pass |
-| [SharePoint](#sharepoint) | SharePoint installations | Let syncs finish; review Problems |
+| [SharePoint](#sharepoint) | SharePoint installations | Let syncs finish; review Problems; re-import personal sources of deactivated owners |
 | [Web widgets](#widgets) | Operators | Run the sessions check |
 | New permission Own Skills (`personal_skills`) for Owner roles | Administrators | Nothing; grant it to other roles if wanted |
 
@@ -213,7 +219,7 @@ An issuer containing `{` or `}` (Entra ID's `common` or `organizations`) is refu
 
 `POST /api/v1/auth/callback` requires `iss` when discovery announces `authorization_response_iss_parameter_supported`. An older frontend does not forward it.
 
-**Do:** deploy the Svelte frontend and the backend from the same release, replace all backend replicas at once.
+**Do:** deploy the Svelte frontend and the backend from the same release, replace all backend replicas at once. The login page's `detailCode` now carries the typed codes instead of `http_400`, `unauthorized` or `http_500`: update monitoring that matches it.
 
 **Rollback:** frontend and backend together.
 
@@ -221,7 +227,7 @@ An issuer containing `{` or `}` (Entra ID's `common` or `organizations`) is refu
 
 The backend refuses to start when a `MOBILITYGUARD_*` variable is set without its `OIDC_*` counterpart.
 
-**Do:** rename `MOBILITYGUARD_DISCOVERY_ENDPOINT`, `MOBILITYGUARD_CLIENT_ID`, `MOBILITYGUARD_CLIENT_SECRET` and `MOBILITYGUARD_TENANT_ID` to `OIDC_DISCOVERY_ENDPOINT`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` and `OIDC_TENANT_ID`. At MobilityGuard, register `{PUBLIC_ORIGIN}/login/callback` and return the `nonce`. See [Migrate from the MobilityGuard settings](/guides/oidc-federation#migrate-from-the-mobilityguard-settings).
+**Do:** rename `MOBILITYGUARD_DISCOVERY_ENDPOINT`, `MOBILITYGUARD_CLIENT_ID`, `MOBILITYGUARD_CLIENT_SECRET` and `MOBILITYGUARD_TENANT_ID` to `OIDC_DISCOVERY_ENDPOINT`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` and `OIDC_TENANT_ID`. With several active tenants, keep one or move to stored settings. At MobilityGuard, register `{PUBLIC_ORIGIN}/login/callback`, allow the `profile` scope, accept `client_secret_post` and return the `nonce`. API clients move to `/api/v1/auth/initiate` and `/api/v1/auth/callback`; the old route answers `404`. See [Migrate from the MobilityGuard settings](/guides/oidc-federation#migrate-from-the-mobilityguard-settings).
 
 ### The move script dropped the allowed domains [#move-script-allowed-domains]
 
@@ -247,7 +253,7 @@ Saving and testing provider settings answer `502` when discovery cannot be read 
 
 Every password or OIDC sign-in in both web apps writes a `browser_sessions` row. `POST /api/v1/users/logout/` ends the session (`204` done, `503` retry). A worker job at 00:30 worker time (UTC unless `TZ` is set) deletes expired rows.
 
-**Do:** if you set `BROWSER_SESSION_MAX_AGE` (default 43200), keep it at least `JWT_EXPIRY_TIME`, or the backend does not start. Keep the worker running.
+**Do:** if you set `BROWSER_SESSION_MAX_AGE` (default 43200), keep it at least `JWT_EXPIRY_TIME`, or the backend does not start. Keep the worker running. Do not rotate `JWT_SECRET` for this: it also signs widget and module tokens, and hashes API keys when `API_KEY_HASH_SECRET` is unset. API consumers treat WebSocket `1008` as final and `1013` as retryable.
 
 **Rollback:** downgrading `202611021100` drops the table; React users sign in again.
 
@@ -261,7 +267,7 @@ The client address is the `N`-th `X-Forwarded-For` entry from the right. One Tra
 
 The React app is now inside the backend image. The reference Compose file adds a router for the main host, a placeholder (`your-domain.com`) until you edit it.
 
-**Do:** to keep Svelte, set `WEB_APP_ENABLED=false` and `FRONTEND_ROUTER_PRIORITY=7`. To switch, set the router host and register `https://<public host>/login/callback` at the provider. Then run `docker compose --env-file .env --env-file release.env up -d --remove-orphans`, with your installation's Compose files and profiles between `docker compose` and `up`; with the bundled store that is `--profile object-content -f docker-compose.yml -f docker-compose.object-content.yml` (see [Review network changes](/guides/deployment#review-network-changes)).
+**Do:** to keep Svelte, set `WEB_APP_ENABLED=false` and `FRONTEND_ROUTER_PRIORITY=7`. To switch, set the router host, make the proxy pass the public `Host`, register `https://<public host>/login/callback` at the provider, with Zitadel [move to the OIDC settings](/guides/oidc-federation#migrate-from-the-zitadel-settings) first (the React app has no Zitadel sign-in), and announce that everyone signs in again. Custom builds need `--build-context web=./frontend`; operators of the 2.3 beta remove the web-next profile and move its link settings to `env_backend.env`. Then run `docker compose --env-file .env --env-file release.env up -d --remove-orphans`, with your installation's Compose files and profiles between `docker compose` and `up`; with the bundled store that is `--profile object-content -f docker-compose.yml -f docker-compose.object-content.yml` (see [Review network changes](/guides/deployment#review-network-changes)).
 
 **Check:** `HEAD /healthz` answers `200`.
 
@@ -269,9 +275,9 @@ The React app is now inside the backend image. The reference Compose file adds a
 
 ### HTTP hardening [#http-hardening]
 
-Outside development, every `/api/` response gets HSTS for one year, unless the endpoint sets its own. A `*` in the host of `PUBLIC_ORIGIN` or `MCP_APP_HOST_ORIGINS` is refused at startup.
+Outside development, every `/api/` response gets HSTS for one year, unless the endpoint sets its own. A `*` in the host of `PUBLIC_ORIGIN` or `MCP_APP_HOST_ORIGINS` is refused at startup. Outside development, `/docs` and `/redoc` answer `404` when a browser-session flag is on, and loopback origins pass CORS only in development.
 
-**Do:** use concrete hosts, serve every host over HTTPS, and decide whether the proxy or Eneo owns HSTS and CSP.
+**Do:** use concrete hosts, serve every host over HTTPS, and decide whether the proxy or Eneo owns HSTS and CSP. Use `/openapi.json` instead of `/docs`; add `http://localhost:*` to the allowed origins if you need it.
 
 **Rollback:** browsers keep HSTS.
 
@@ -285,15 +291,15 @@ Passwords set by an administrator must be changed at first sign-in (`403` code 9
 
 ### One error format [#error-envelope]
 
-HTTP errors answer `{message, eneo_error_code?, code?, context?, details?, request_id?}`; a copy in `detail` stays for one release. `Retry-After` on `429` is the seconds left in the window, also for API keys, whose `Retry-After` was the full window length.
+HTTP errors answer `{message, eneo_error_code?, code?, context?, details?, request_id?}`; a copy in `detail` stays for one release. `422` and unexpected `500` keep their shapes; the new OIDC refusals and `identity_conflict` have no `detail`; extra fields such as `retry_after_seconds` move to the top level. `Retry-After` on `429` is the seconds left in the window, also for API keys, whose `Retry-After` was the full window length.
 
-**Do:** read `code` and `message` instead of `detail`; regenerate OpenAPI clients.
+**Do:** read `code` and `message` instead of `detail`, and extras at the top level; regenerate OpenAPI clients. See [Errors](/docs/api#errors).
 
 ### Icons [#icons]
 
-A migration clears icons that point across tenants.
+A migration clears icons that point across tenants. Deleting an icon in use answers `409`; clear the `icon_id` instead. A new `icon_id` must be an icon the calling user uploaded in their own tenant, else `400`. Service keys cannot upload icons (`403`).
 
-**Do:** deploy backend and both frontends together; re-upload cleared icons.
+**Do:** deploy backend and both frontends together; re-upload cleared icons. See [Icons](/docs/api#icons).
 
 **Rollback:** the clearing cannot be undone.
 
@@ -301,7 +307,7 @@ A migration clears icons that point across tenants.
 
 ### One retention engine [#retention-engine]
 
-`cleanup_old_data`, `delete_unused_files` and `purge_old_conversations` are replaced by `run_retention` (03:30 worker time, UTC in the image). Retention periods are unchanged.
+`cleanup_old_data`, `delete_unused_files` and `purge_old_conversations` are replaced by `run_retention` at `RETENTION_CRON_HOUR`:`RETENTION_CRON_MINUTE` (03:30 worker time by default, UTC in the image). Retention periods are unchanged.
 
 **Do:** update scripts and alerts on the old job names.
 
@@ -311,13 +317,15 @@ A migration clears icons that point across tenants.
 
 Migration `202611090600` empties every question log. This cannot be undone.
 
-**Do:** take a `pg_dump` backup. Stop every old backend and worker on every host: `docker compose --env-file .env --env-file release.env stop backend worker`, then check that `docker compose --env-file .env --env-file release.env ps --status running backend worker` lists nothing.
+**Do:** take a `pg_dump` backup. Stop every old backend and worker on every host: `docker compose --env-file .env --env-file release.env stop backend worker`, then check that `docker compose --env-file .env --env-file release.env ps --status running backend worker` lists nothing. On large tables, plan room for the write-ahead log: the migration rewrites every stored log in batches of 5000.
 
 **Rollback:** restore the backup. See [Drain work and stop old writers](/guides/deployment#drain-work-and-stop-old-writers).
 
 ### File names leave the audit log [#audit-names-removed]
 
-**Do:** export the audit log first if you need file names.
+A migration removes file and conversation names from stored audit entries; searching the audit log by file name stops matching.
+
+**Do:** export the audit log first if you need file names. See [Exporting audit logs](/guides/audit-logging#exporting-audit-logs).
 
 **Rollback:** cannot be undone.
 
@@ -325,7 +333,7 @@ Migration `202611090600` empties every question log. This cannot be undone.
 
 Backend and worker refuse to start unless they can read `s3:GetBucketVersioning`, `s3:GetBucketObjectLockConfiguration` and `s3:ListBucketVersions`, versioning has never been enabled or suspended, and Object Lock is off.
 
-**Do (on 2.3):** grant the three actions on the bucket ARN. If the bucket was ever versioned, [move to a new bucket](/guides/object-content-storage#move-to-another-s3-compatible-service).
+**Do (on 2.3):** grant the three actions on the bucket ARN (`arn:aws:s3:::<bucket>`, not `/*`) for the active bucket and saved connections. If the bucket was ever versioned or locked, [move to a new bucket](/guides/object-content-storage#move-to-another-s3-compatible-service).
 
 **Rollback:** means rolling back the whole release.
 
@@ -333,7 +341,7 @@ Backend and worker refuse to start unless they can read `s3:GetBucketVersioning`
 
 **Do:** keep `UPLOAD_TMP_DIR` (default `/tmp`) on a local filesystem; NFS or SMB is not supported. See [Temporary files](/guides/deployment#temporary-files).
 
-**Rollback:** remove `$UPLOAD_TMP_DIR/eneo-scratch/`.
+**Rollback:** stop every process, then remove `$UPLOAD_TMP_DIR/eneo-scratch/`.
 
 ### Migration `202611091200` rewrites every conversation row [#sessions-migration]
 
@@ -343,7 +351,7 @@ Backend and worker refuse to start unless they can read `s3:GetBucketVersioning`
 
 ### Names and feedback text follow the retention period [#names-and-feedback-follow-retention]
 
-The first nightly run empties the name and feedback text of every conversation older than its period.
+The first nightly run empties the name and feedback text of every conversation older than its period, including long-running ones whose name someone chose recently. The conversation and session endpoints then return `name: ""` and feedback `text: null`. See [Names and feedback text](/docs/audit-logging#names-and-feedback-text).
 
 **Do:** tell users before the upgrade.
 
@@ -359,7 +367,7 @@ The first nightly run empties the name and feedback text of every conversation o
 
 ### SharePoint [#sharepoint]
 
-**Do:** before, let syncs finish or stop workers. After, recreate subscriptions if the public address changed and review the Problems tab.
+**Do:** before, let syncs finish or stop workers. After, recreate subscriptions if the public address changed, review the Problems tab and convert legacy files. Personal connections stop syncing when their owner is deactivated; re-import those sources with an active account.
 
 **Rollback:** downgrading loses the health history.
 

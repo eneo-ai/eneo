@@ -3,11 +3,11 @@
 ```mermaid
 flowchart TB
   accTitle: How retention works
-  accDescr: A retention time on an assistant or app, else on its space, decides. With no time set, nothing is removed. With a time set, the nightly run at 03:30 worker time removes chats and app runs older than their time, and the copies Eneo keeps of them follow. Cleanup of leftovers runs whatever the rules. Backups, downloads, AI model providers and knowledge bases are outside Eneo's reach.
+  accDescr: A retention time on an assistant or app, else on its space, else the organization's legacy period, decides. With no time set, nothing is removed. With a time set, the nightly run, at 03:30 worker time by default, removes chats and app runs older than their time, and the copies Eneo keeps of them follow. Cleanup of leftovers runs whatever the rules. Backups, downloads, AI model providers and knowledge bases are outside Eneo's reach.
   subgraph eneo["Eneo"]
     direction TB
-    time["Retention time\nassistant or app, else its space"] -->|"no time set"| keep["Kept: nothing is removed"]
-    time -->|"time set"| run["Nightly run, 03:30 worker time\nremoves chats and app runs older than their time"]
+    time["Retention time\nassistant or app, else its space,\nelse the organization's legacy period"] -->|"no time set"| keep["Kept: nothing is removed"]
+    time -->|"time set"| run["Nightly run, 03:30 by default\nremoves chats and app runs older than their time"]
     run --> copies["Copies follow their source\nnames and feedback · copied conversations · temporary files"]
     cleanup["Cleanup of leftovers, whatever the rules\nunused uploads · conversations without a question · run records"]
   end
@@ -63,7 +63,8 @@ it: the space's time is a default, not a maximum.
   which no screen gives a time. Give the help assistant its own time if its
   chats should be removed.
 - **Web widgets** follow only the widget's own time, held to the organization's
-  widget policy as it stands on the night of each run. The whole conversation
+  widget policy as it stands on the night of each run. A widget set to `0`
+  keeps no conversation after the answer, even when the minimum is higher. The whole conversation
   goes at once, counted from when it started.
 - **The audit log** has one period for the organization, independent of every
   conversation time.
@@ -94,7 +95,8 @@ retention setting):
   `{"data_retention_days": 30}`; `null` removes the time, leaving it out keeps it.
 
 **An assistant or an app** (in a shared or organization space, someone who may
-edit the space; in a personal space, its owner):
+edit the space; in a personal space, its owner; permission to edit an assistant
+or app does not by itself include its retention time):
 
 - **Svelte app:** the space, **Assistants** (or **Apps**), the row's
   **Actions** menu, **Edit**, **Security & Privacy**, **Conversation History
@@ -111,7 +113,8 @@ Help assistants: **Admin → Help assistants → Open settings**, the same way.
 **Web widgets:** the range is under **Admin → Web widgets → Policy**
 (**Minimum days**, **Maximum days**, each 0 to 3650; 0 to 365 until a policy
 is saved). A widget's own time is under **Web widget → Open widget settings →
-Rules → Privacy → Retention in days**. See
+Rules → Privacy → Retention in days**. `0` keeps no conversation after the
+answer. See
 [Embed an Assistant](/guides/embed-widget#conversation-retention).
 
 **The audit log** (1 to 2555 days): in the Svelte app, **Admin → Audit Logs**,
@@ -196,9 +199,15 @@ A turn normally goes within a day after its time. It stays longer when a night
 has more due work than allowed (the next night continues), when a row is held
 or a conversation exceeds the run's limits (it is kept and reported; see
 [For operators](#for-operators)), or when the worker is stopped (the next
-scheduled run catches up). To run it at once, use
-`docker compose --env-file .env --env-file release.env exec worker run-cron run_retention`;
-it only queues the run and returns before it has run, so follow the worker log.
+scheduled run catches up).
+
+To run it at once:
+
+```bash
+docker compose --env-file .env --env-file release.env exec worker run-cron run_retention
+```
+
+It only queues the run and returns before it has run, so follow the worker log.
 
 ## For operators [#for-operators]
 
@@ -211,6 +220,10 @@ found content due for more than a day (`RETENTION_OVERDUE_WINDOW_DAYS`). `limiti
 names the setting whose limit kept due content. Retention problems never make
 an otherwise ready API unavailable. See [Health](/docs/audit-logging#health)
 and [Scheduled execution and limits](/docs/audit-logging#scheduled-execution-and-limits).
+
+The audit log purge writes `retention_policy_applied` only for an organization
+where it deleted at least one event, so a missing event does not mean the
+purge failed.
 
 ### Settings [#settings]
 

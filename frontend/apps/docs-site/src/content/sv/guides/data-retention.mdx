@@ -1,6 +1,6 @@
 ---
 title: Gallring
-translationSource: guides/data-retention.mdx@54a0aab4082f
+translationSource: guides/data-retention.mdx@073e868a371a
 ---
 
 # Gallring
@@ -8,11 +8,11 @@ translationSource: guides/data-retention.mdx@54a0aab4082f
 ```mermaid
 flowchart TB
   accTitle: Så fungerar gallring
-  accDescr: En gallringstid på en assistent eller app, annars på dess yta, avgör. Utan tid tas inget bort. Med en tid tar nattkörningen klockan 03:30 i workerns tid bort chattar och appkörningar som är äldre än sin tid, och de kopior Eneo har av dem följer med. Städning av rester körs oavsett regler. Säkerhetskopior, nedladdningar, AI-leverantörer och kunskapsbaser ligger utanför Eneos räckvidd.
+  accDescr: En gallringstid på en assistent eller app, annars på dess yta, annars organisationens äldre period, avgör. Utan tid tas inget bort. Med en tid tar nattkörningen, klockan 03:30 i workerns tid som förval, bort chattar och appkörningar som är äldre än sin tid, och de kopior Eneo har av dem följer med. Städning av rester körs oavsett regler. Säkerhetskopior, nedladdningar, AI-leverantörer och kunskapsbaser ligger utanför Eneos räckvidd.
   subgraph eneo["Eneo"]
     direction TB
-    time["Gallringstid\nassistent eller app, annars dess yta"] -->|"ingen tid satt"| keep["Sparas: inget tas bort"]
-    time -->|"tid satt"| run["Nattkörning, 03:30 i workerns tid\ntar bort chattar och appkörningar äldre än sin tid"]
+    time["Gallringstid\nassistent eller app, annars dess yta,\nannars organisationens äldre period"] -->|"ingen tid satt"| keep["Sparas: inget tas bort"]
+    time -->|"tid satt"| run["Nattkörning, 03:30 som förval\ntar bort chattar och appkörningar äldre än sin tid"]
     run --> copies["Kopior följer sin källa\nnamn och feedback · kopierade konversationer · temporära filer"]
     cleanup["Städning av rester, oavsett regler\noanvända uppladdningar · konversationer utan fråga · körningsregister"]
   end
@@ -69,7 +69,8 @@ utanför: ytans tid är ett standardvärde, inte ett tak.
   som ingen vy ger en tid. Ge hjälpassistenten en egen tid om dess chattar ska
   tas bort.
 - **Webbwidgetar** följer bara widgetens egen tid, hållen inom organisationens
-  widgetpolicy som den ser ut natten för varje körning. Hela konversationen
+  widgetpolicy som den ser ut natten för varje körning. En widget med `0`
+  sparar ingen konversation efter svaret, även när minimum är högre. Hela konversationen
   tas bort på en gång, räknat från när den startade.
 - **Granskningsloggen** har en period för organisationen, oberoende av alla
   tider för konversationer.
@@ -100,7 +101,8 @@ gallringsinställning):
   `{"data_retention_days": 30}`; `null` tar bort tiden, utelämnat behåller den.
 
 **En assistent eller en app** (i en delad yta eller organisationsytan den som
-får redigera ytan; i en personlig yta dess ägare):
+får redigera ytan; i en personlig yta dess ägare; behörighet att redigera en
+assistent eller app ger inte i sig rätt att ändra dess gallringstid):
 
 - **Svelte-appen:** ytan, **Assistenter** (eller **Appar**), radens meny
   **Åtgärder**, **Redigera**, **Säkerhet & Integritet**, **Gallring av
@@ -118,7 +120,8 @@ på samma sätt.
 **Webbwidgetar:** intervallet finns under **Administratör → Webbwidgetar →
 Policy** (**Minst dagar**, **Högst dagar**, vardera 0 till 3650; 0 till 365
 tills en policy sparas). En widgets egen tid finns under **Webbwidget → Öppna
-widgetinställningar → Regler → Integritet → Lagringstid i dagar**. Se
+widgetinställningar → Regler → Integritet → Lagringstid i dagar**. `0` sparar
+ingen konversation efter svaret. Se
 [Bädda in en chattwidget](/guides/embed-widget#conversation-retention).
 
 **Granskningsloggen** (1 till 2555 dagar): i Svelte-appen **Administratör →
@@ -206,9 +209,15 @@ att filen raderats. En tur tas normalt bort inom ett dygn efter sin tid. Den fin
 natt har mer aktuellt arbete än tillåtet (nästa natt fortsätter), när en rad
 hålls eller en konversation överskrider körningens gränser (den sparas och
 rapporteras; se [För driftansvariga](#for-operators)), eller när workern är
-stoppad (nästa schemalagda körning tar igen det). Kör den direkt med
-`docker compose --env-file .env --env-file release.env exec worker run-cron run_retention`;
-kommandot köar bara körningen och returnerar innan den har körts, så följ
+stoppad (nästa schemalagda körning tar igen det).
+
+Kör den direkt:
+
+```bash
+docker compose --env-file .env --env-file release.env exec worker run-cron run_retention
+```
+
+Kommandot köar bara körningen och returnerar innan den har körts, så följ
 workerns logg.
 
 ## För driftansvariga [#for-operators]
@@ -225,6 +234,10 @@ innehåll. Problem med gallringen gör aldrig ett i övrigt redo API
 otillgängligt. Se [Health](/docs/audit-logging#health) och
 [Scheduled execution and limits](/docs/audit-logging#scheduled-execution-and-limits)
 (på engelska).
+
+Rensningen av granskningsloggen skriver `retention_policy_applied` bara för en
+organisation där den raderade minst en händelse, så en saknad händelse betyder
+inte att rensningen misslyckades.
 
 ### Inställningar [#settings]
 

@@ -1,6 +1,6 @@
 ---
 title: Uppgraderingsanteckningar
-translationSource: guides/upgrade-notes.mdx@e23829ee6e13
+translationSource: guides/upgrade-notes.mdx@7f89d8058262
 ---
 
 import { Callout } from "nextra/components";
@@ -29,6 +29,7 @@ Varje punkt kan hindra backend från att starta, stoppa inloggningen eller förl
 8. Ändra den nya routern för webbappen i referensfilen för Compose. Se [React-webbappen](#react-web-app-main-host).
 9. Berätta för användarna att namn och feedbackkommentarer på konversationer som är äldre än sin gallringstid tas bort den första natten. Se [Namn och feedbacktext](#names-and-feedback-follow-retention).
 10. Planera driftstopp för `db-init`: migreringen `202611091200` låser `sessions` medan den skriver om varje rad, och flera migreringar bygger index samtidigt med drift. Om `db-init` avbryts, kör den igen. Se [Migreringen `202611091200`](#sessions-migration).
+11. Exportera granskningsloggen först om du behöver filnamnen: uppgraderingen tar bort dem för gott. Se [Exportera granskningsloggar](/guides/audit-logging#exporting-audit-logs).
 
 **Gå tillbaka till 2.3:** läs tillbaka säkerhetskopian från `pg_dump` som togs före `db-init`, tillsammans med en matchande ögonblicksbild av objektlagringen. En nedgradering av schemat stannar vid migreringen `202610291900` ("Cannot discard approved Skill reference history") så snart en godkänd Skill-version hänvisar till en annan Skill. En nedgradering tar aldrig tillbaka tömda eller borttagna loggar, tömda namn eller omskrivna granskningsposter.
 
@@ -68,7 +69,12 @@ flowchart TB
 
 **Miljöinställningar:** sätt alla tre `OIDC_DISCOVERY_ENDPOINT`, `OIDC_CLIENT_ID` och `OIDC_CLIENT_SECRET`, annars visar inloggningssidan bara lösenordsformuläret. Inställningar som är lagrade på organisationen ignoreras, och en inloggning som inte anger någon organisation använder den första aktiva organisationen. [Inloggningstabellen](#sign-in)
 
-**Lagrade inställningar:** ta bort de `OIDC_*`-variabler som varningen vid start nämner; kontrollera vem som har administratörsrollen; automatisering med `PUT` skickar `subject_claim`; kontrollera de tillåtna domänerna om du använde flyttskriptet med 2.3 eller tidigare; skript godtar `502`. [Administratörer](#admins-change-sign-in-settings), [Flyttskriptet](#move-script-allowed-domains), [Spara inställningar](#provider-save-checks-sign-in)
+**Lagrade inställningar:**
+
+- Ta bort de `OIDC_*`-variabler som varningen vid start nämner. [Inloggningstabellen](#sign-in)
+- Kontrollera vem som har administratörsrollen. [Administratörer](#admins-change-sign-in-settings)
+- Automatisering med `PUT` skickar `subject_claim`; skript godtar `502`. [Spara inställningar](#provider-save-checks-sign-in)
+- Kontrollera de tillåtna domänerna om du använde flyttskriptet med 2.3 eller tidigare. [Flyttskriptet](#move-script-allowed-domains)
 
 **MobilityGuard-inställningar** (`MOBILITYGUARD_*`, `MOBILITY_GUARD_AUTH`): döp om till `OIDC_*`-namnen. [MobilityGuard](#mobilityguard-sign-in-removed)
 
@@ -99,8 +105,8 @@ flowchart TB
 | [Flyttskriptet tappade de tillåtna domänerna](#move-script-allowed-domains) | Körde flyttskriptet med `OIDC_ALLOWED_DOMAINS` satt | Kontrollera lagrade domäner |
 | [Administratörer kan ändra inloggningsinställningarna](#admins-change-sign-in-settings) | Lagrade inställningar | Granska administratörsrollen |
 | SCIM-konton binds vid första inloggningen | SCIM-installationer | Inget |
-| Organisationslistan vid inloggning visar bara organisationer med lagrad leverantör | Installationer med flera organisationer | Registrera saknade leverantörer |
-| Miljöinställningar ignorerar inställningar som är lagrade på organisationen; bara `{PUBLIC_ORIGIN}/login/callback` godtas | Miljöinställningar | Flytta lagrade värden in i Eneo vid behov |
+| Organisationslistan vid inloggning visar bara organisationer med lagrad leverantör | Installationer med flera organisationer | [Registrera](/guides/oidc-federation) saknade leverantörer |
+| Miljöinställningar ignorerar inställningar som är lagrade på organisationen; bara `{PUBLIC_ORIGIN}/login/callback` godtas; en inloggning som inte anger någon organisation använder den första aktiva organisationen | Miljöinställningar | Flytta lagrade värden in i Eneo vid behov ([OIDC-inställningar](/guides/oidc-federation)) |
 | [Att spara leverantörsinställningar kontrollerar det inloggningen kontrollerar](#provider-save-checks-sign-in) | Skript som sparar eller testar inställningar | Godta `502` |
 | `REDIS_CONN_TIMEOUT` (standard 5 s) är nu också lästidsgräns för de Redis-klienter som API och workers delar, och för deras köläggning av bakgrundsjobb | Långsam Redis | Höj värdet vid behov |
 
@@ -113,7 +119,7 @@ flowchart TB
 | [`TRUSTED_PROXY_COUNT` räknar proxyer exakt](#trusted-proxy-count) | Mer än en proxy, eller nginx | Sätt den till antalet proxyer |
 | [React-webbappen körs på huvudvärden](#react-web-app-main-host) | Användare av referensfilen för Compose | Välj React eller Svelte |
 | [Härdning av HTTP](#http-hardening) | Proxyer som sätter HSTS eller CSP | Bestäm vem som äger HSTS och CSP |
-| Lösenordsinloggning: ett korrekt lösenord för ett inaktivt konto eller en avstängd organisation svarar `403` (9019, 9025) i stället för `500` | API-klienter med lösenord | Hantera de två koderna |
+| Lösenordsinloggning: ett korrekt lösenord för ett inaktivt konto eller en avstängd organisation svarar `403` (9019, 9025) i stället för `500`; `422` listar bara `loc`, `type` och `msg`; ett oväntat fel svarar `500` med koden `login_unavailable` | API-klienter med lösenord | Hantera de två koderna; uppdatera tolkningen av `422` |
 | [Lösenordens livscykel](#password-lifecycle) | Förinlagda användare, lösenordsintegrationer | Kontrollera `DEFAULT_USER_PASSWORD` |
 
 ### API-kontrakt [#api-contract]
@@ -128,12 +134,12 @@ flowchart TB
 | Ändring | Vem | Gör |
 |---|---|---|
 | [En gallringsmotor](#retention-engine) | Skript och larm på de gamla jobben | Uppdatera dem |
-| En ny Promptguide sätter inte längre 30 dagar | Administratörer som vill ha en gallringstid | Sätt den uttryckligen |
-| Kopior av borttagna konversationer svarar `410`. Inget skapar kopior ännu, så inget `410` förekommer i dag | API-konsumenter | Behandla `410` som borta. Töm jobbkön före en nedgradering |
+| En ny Promptguide sätter inte längre 30 dagar; befintliga guider behåller sin period | Administratörer som vill ha en gallringstid | [Sätt den](/guides/data-retention#change-the-rules) uttryckligen |
+| Kopior av borttagna konversationer svarar `410`. Inget skapar kopior ännu, så inget `410` förekommer i dag. På PostgreSQL 13 kostar läsningar av konversationer mer | API-konsumenter; installationer på PostgreSQL 13 | Behandla `410` som borta. Töm jobbkön före en nedgradering. På PostgreSQL 13, planera en övergång till 16 |
 | [Frågeloggar töms](#question-logs-emptied) | Alla | Säkerhetskopiera, stoppa gamla skrivare |
 | [Filnamn försvinner ur granskningsloggen](#audit-names-removed) | Granskningslogg som sparas som bevis | Exportera först om du behöver namnen |
 | [Objektlagringen får inte behålla gamla versioner](#object-storage-versioning) | Installationer med objektlagring | Ge behörigheter; ingen versionshantering |
-| Den medföljande SeaweedFS-avbilden är `4.40-eneo.8` | Medföljande SeaweedFS | Sätt `ENEO_SEAWEEDFS_IMAGE` till digesten i `IMAGE-DIGESTS.txt` |
+| Den medföljande SeaweedFS-avbilden är `4.40-eneo.8` | Medföljande SeaweedFS | Sätt `ENEO_SEAWEEDFS_IMAGE` till digesten i `IMAGE-DIGESTS.txt` ([Lås versionens avbild](/guides/object-content-storage#pin-the-release-image)) |
 | En fråga vars logg inte innehåller något anrop svarar `400` i stället för `500` | API-konsumenter | Behandla `400` som ingen logg |
 | [`UPLOAD_TMP_DIR` måste vara ett lokalt filsystem](#upload-tmp-dir-local) | Driftansvariga | Håll den lokal |
 | [Migreringen `202611091200` skriver om varje konversationsrad](#sessions-migration) | Driftansvariga | Planera driftstopp |
@@ -146,11 +152,11 @@ flowchart TB
 
 | Ändring | Vem | Gör |
 |---|---|---|
-| `MAX_TOOL_ROUNDS` är som standard 40 (var fast 10) | Alla | Inget; `MAX_TOOL_ROUNDS=10` behåller det gamla taket |
+| `MAX_TOOL_ROUNDS` är som standard 40 (var fast 10), så en verktygstung tur kan kosta upp till fyra gånger så många anrop och token; LiteLLM:s `REQUEST_TIMEOUT` gäller inte längre | Alla | `MAX_TOOL_ROUNDS=10` behåller det gamla taket; flytta en egen `REQUEST_TIMEOUT` till `COMPLETION_REQUEST_TIMEOUT_SECONDS` (standard 600) |
 | Leverantörstyper som inte kan routas nekas med `400`; modellnamn dubblerar inte längre prefixet | Administratörer | Rätta `mistral/mistral/…`-namn på chattmodeller; inbäddnings- och omrankningsmodeller kräver nya modeller; [skapa om nekade leverantörer](/guides/ai-providers#adding-a-provider-admin-ui) |
-| Avbilderna saknar `apt` | Byggen ovanpå avbilderna | Installera i ett separat byggsteg |
+| Avbilderna saknar `apt`; frontend-avbilden saknar också `npm`, `npx`, `corepack` och `yarn` | Byggen ovanpå avbilderna | Installera i ett separat byggsteg |
 | `MCP_APP_CONTENT_BASE_URL` valideras vid start | Installationer som sätter den | Inget; vanliga värden godtas |
-| [SharePoint](#sharepoint) | Installationer med SharePoint | Låt synkar bli klara; gå igenom Problem |
+| [SharePoint](#sharepoint) | Installationer med SharePoint | Låt synkar bli klara; gå igenom Problem; importera om personliga källor för inaktiverade ägare |
 | [Webbwidgetar](#widgets) | Driftansvariga | Kör kontrollen av sessioner |
 | Ny behörighet Egna Skills (`personal_skills`) för Ägarroller | Administratörer | Inget; ge den till andra roller vid behov |
 
@@ -218,7 +224,7 @@ En utfärdare som innehåller `{` eller `}` (Entra ID:s `common` eller `organiza
 
 `POST /api/v1/auth/callback` kräver `iss` när discovery anger `authorization_response_iss_parameter_supported`. En äldre frontend skickar inte vidare den.
 
-**Gör:** driftsätt Svelte-frontend och backend från samma version och byt ut alla backend-repliker samtidigt.
+**Gör:** driftsätt Svelte-frontend och backend från samma version och byt ut alla backend-repliker samtidigt. `detailCode` på inloggningssidan bär nu de nya felkoderna i stället för `http_400`, `unauthorized` eller `http_500`: uppdatera övervakning som matchar den.
 
 **Återställning:** frontend och backend tillsammans.
 
@@ -226,7 +232,7 @@ En utfärdare som innehåller `{` eller `}` (Entra ID:s `common` eller `organiza
 
 Backend vägrar starta när en `MOBILITYGUARD_*`-variabel är satt utan sin `OIDC_*`-motsvarighet.
 
-**Gör:** döp om `MOBILITYGUARD_DISCOVERY_ENDPOINT`, `MOBILITYGUARD_CLIENT_ID`, `MOBILITYGUARD_CLIENT_SECRET` och `MOBILITYGUARD_TENANT_ID` till `OIDC_DISCOVERY_ENDPOINT`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` och `OIDC_TENANT_ID`. Registrera `{PUBLIC_ORIGIN}/login/callback` hos MobilityGuard och se till att `nonce` returneras. Se [Flytta från MobilityGuard-inställningarna](/guides/oidc-federation#migrate-from-the-mobilityguard-settings).
+**Gör:** döp om `MOBILITYGUARD_DISCOVERY_ENDPOINT`, `MOBILITYGUARD_CLIENT_ID`, `MOBILITYGUARD_CLIENT_SECRET` och `MOBILITYGUARD_TENANT_ID` till `OIDC_DISCOVERY_ENDPOINT`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` och `OIDC_TENANT_ID`. Med flera aktiva organisationer: behåll en eller gå över till lagrade inställningar. Hos MobilityGuard: registrera `{PUBLIC_ORIGIN}/login/callback`, tillåt scopet `profile`, acceptera `client_secret_post` och se till att `nonce` returneras. API-klienter går över till `/api/v1/auth/initiate` och `/api/v1/auth/callback`; den gamla vägen svarar `404`. Se [Flytta från MobilityGuard-inställningarna](/guides/oidc-federation#migrate-from-the-mobilityguard-settings).
 
 ### Flyttskriptet tappade de tillåtna domänerna [#move-script-allowed-domains]
 
@@ -252,7 +258,7 @@ Att spara och testa leverantörsinställningar svarar `502` när discovery inte 
 
 Varje inloggning med lösenord eller OIDC i båda webbapparna skriver en rad i `browser_sessions`. `POST /api/v1/users/logout/` avslutar sessionen (`204` klart, `503` försök igen). Ett workerjobb kl. 00:30 workerns tid (UTC om inte `TZ` är satt) tar bort utgångna rader.
 
-**Gör:** om du sätter `BROWSER_SESSION_MAX_AGE` (standard 43200), håll den minst `JWT_EXPIRY_TIME`, annars startar inte backend. Håll workern igång.
+**Gör:** om du sätter `BROWSER_SESSION_MAX_AGE` (standard 43200), håll den minst `JWT_EXPIRY_TIME`, annars startar inte backend. Håll workern igång. Byt inte `JWT_SECRET` för detta: den signerar också widget- och modultoken, och hashar API-nycklar när `API_KEY_HASH_SECRET` inte är satt. API-konsumenter behandlar WebSocket `1008` som slutgiltigt och `1013` som värt att försöka igen.
 
 **Återställning:** nedgradering av `202611021100` tar bort tabellen; React-användare loggar in igen.
 
@@ -266,7 +272,7 @@ Klientadressen är den `N`:te posten i `X-Forwarded-For` räknat från höger. E
 
 React-appen ligger nu i backend-avbilden. Referensfilen för Compose lägger till en router för huvudvärden, en platshållare (`your-domain.com`) tills du ändrar den.
 
-**Gör:** för att behålla Svelte, sätt `WEB_APP_ENABLED=false` och `FRONTEND_ROUTER_PRIORITY=7`. För att byta: sätt värden på routern och registrera `https://<publik värd>/login/callback` hos leverantören. Kör sedan `docker compose --env-file .env --env-file release.env up -d --remove-orphans`, med installationens Compose-filer och profiler mellan `docker compose` och `up`; med det medföljande lagret är det `--profile object-content -f docker-compose.yml -f docker-compose.object-content.yml` (se [Välj innehållslagring](/guides/object-content-storage)).
+**Gör:** för att behålla Svelte, sätt `WEB_APP_ENABLED=false` och `FRONTEND_ROUTER_PRIORITY=7`. För att byta: sätt värden på routern, låt proxyn skicka vidare den publika `Host`, registrera `https://<publik värd>/login/callback` hos leverantören, [flytta från Zitadel till OIDC-inställningarna](/guides/oidc-federation#migrate-from-the-zitadel-settings) först om du använder Zitadel (React-appen har ingen Zitadel-inloggning) och meddela att alla loggar in igen. Egna byggen behöver `--build-context web=./frontend`; den som körde betan i 2.3 tar bort web-next-profilen och flyttar dess länkinställningar till `env_backend.env`. Kör sedan `docker compose --env-file .env --env-file release.env up -d --remove-orphans`, med installationens Compose-filer och profiler mellan `docker compose` och `up`; med det medföljande lagret är det `--profile object-content -f docker-compose.yml -f docker-compose.object-content.yml` (se [Välj innehållslagring](/guides/object-content-storage)).
 
 **Kontroll:** `HEAD /healthz` svarar `200`.
 
@@ -274,9 +280,9 @@ React-appen ligger nu i backend-avbilden. Referensfilen för Compose lägger til
 
 ### Härdning av HTTP [#http-hardening]
 
-Utanför utveckling får varje `/api/`-svar HSTS i ett år, om inte vägen sätter egna värden. En `*` i värden för `PUBLIC_ORIGIN` eller `MCP_APP_HOST_ORIGINS` nekas vid start.
+Utanför utveckling får varje `/api/`-svar HSTS i ett år, om inte vägen sätter egna värden. En `*` i värden för `PUBLIC_ORIGIN` eller `MCP_APP_HOST_ORIGINS` nekas vid start. Utanför utveckling svarar `/docs` och `/redoc` `404` när en flagga för webbläsarsessioner är på, och loopback-origins klarar CORS bara i utveckling.
 
-**Gör:** använd konkreta värdar, servera varje värd över HTTPS och bestäm om proxyn eller Eneo äger HSTS och CSP.
+**Gör:** använd konkreta värdar, servera varje värd över HTTPS och bestäm om proxyn eller Eneo äger HSTS och CSP. Använd `/openapi.json` i stället för `/docs`; lägg till `http://localhost:*` i tillåtna origins vid behov.
 
 **Återställning:** webbläsare minns HSTS.
 
@@ -290,15 +296,15 @@ Lösenord som en administratör satt måste bytas vid första inloggningen (`403
 
 ### Ett felformat [#error-envelope]
 
-HTTP-fel svarar `{message, eneo_error_code?, code?, context?, details?, request_id?}`; en kopia i `detail` finns kvar i en version. `Retry-After` vid `429` är sekunderna kvar i fönstret, även för API-nycklar, vars `Retry-After` var hela fönstrets längd.
+HTTP-fel svarar `{message, eneo_error_code?, code?, context?, details?, request_id?}`; en kopia i `detail` finns kvar i en version. `422` och oväntade `500` behåller sina format; de nya OIDC-avvisningarna och `identity_conflict` har ingen `detail`; extra fält som `retry_after_seconds` flyttar till toppnivån. `Retry-After` vid `429` är sekunderna kvar i fönstret, även för API-nycklar, vars `Retry-After` var hela fönstrets längd.
 
-**Gör:** läs `code` och `message` i stället för `detail`; generera om OpenAPI-klienter.
+**Gör:** läs `code` och `message` i stället för `detail`, och extra fält på toppnivån; generera om OpenAPI-klienter. Se [Errors](/docs/api#errors).
 
 ### Ikoner [#icons]
 
-En migrering tömmer ikoner som pekar över organisationsgränser.
+En migrering tömmer ikoner som pekar över organisationsgränser. Att ta bort en ikon som används svarar `409`; töm `icon_id` i stället. Ett nytt `icon_id` måste vara en ikon som den anropande användaren laddat upp i sin egen organisation, annars `400`. Tjänstenycklar kan inte ladda upp ikoner (`403`).
 
-**Gör:** driftsätt backend och båda frontends tillsammans; ladda upp tömda ikoner igen.
+**Gör:** driftsätt backend och båda frontends tillsammans; ladda upp tömda ikoner igen. Se [Icons](/docs/api#icons).
 
 **Återställning:** tömningen går inte att ångra.
 
@@ -306,7 +312,7 @@ En migrering tömmer ikoner som pekar över organisationsgränser.
 
 ### En gallringsmotor [#retention-engine]
 
-`cleanup_old_data`, `delete_unused_files` och `purge_old_conversations` ersätts av `run_retention` (03:30 workerns tid, UTC i avbilden). Gallringstiderna är oförändrade.
+`cleanup_old_data`, `delete_unused_files` och `purge_old_conversations` ersätts av `run_retention` vid `RETENTION_CRON_HOUR`:`RETENTION_CRON_MINUTE` (03:30 i workerns tid som förval, UTC i avbilden). Gallringstiderna är oförändrade.
 
 **Gör:** uppdatera skript och larm på de gamla jobbnamnen.
 
@@ -316,13 +322,15 @@ En migrering tömmer ikoner som pekar över organisationsgränser.
 
 Migreringen `202611090600` tömmer varje frågelogg. Det går inte att ångra.
 
-**Gör:** ta en säkerhetskopia med `pg_dump`. Stoppa varje gammal backend och worker på varje värd: `docker compose --env-file .env --env-file release.env stop backend worker`, och kontrollera sedan att `docker compose --env-file .env --env-file release.env ps --status running backend worker` inte listar något.
+**Gör:** ta en säkerhetskopia med `pg_dump`. Stoppa varje gammal backend och worker på varje värd: `docker compose --env-file .env --env-file release.env stop backend worker`, och kontrollera sedan att `docker compose --env-file .env --env-file release.env ps --status running backend worker` inte listar något. På stora tabeller: planera utrymme för transaktionsloggen; migreringen skriver om varje lagrad logg, i omgångar om 5000.
 
 **Återställning:** läs tillbaka säkerhetskopian. Se [Uppgradera och återställ](/guides/deployment#uppgradera-och-återställ).
 
 ### Filnamn försvinner ur granskningsloggen [#audit-names-removed]
 
-**Gör:** exportera granskningsloggen först om du behöver filnamnen.
+En migrering tar bort fil- och konversationsnamn ur lagrade granskningsposter; sökning i granskningsloggen på filnamn ger inte längre träffar.
+
+**Gör:** exportera granskningsloggen först om du behöver filnamnen. Se [Exportera granskningsloggar](/guides/audit-logging#exporting-audit-logs).
 
 **Återställning:** går inte att ångra.
 
@@ -330,7 +338,7 @@ Migreringen `202611090600` tömmer varje frågelogg. Det går inte att ångra.
 
 Backend och worker vägrar starta om de inte kan läsa `s3:GetBucketVersioning`, `s3:GetBucketObjectLockConfiguration` och `s3:ListBucketVersions`, om versionshantering någon gång har varit på eller pausad, eller om Object Lock är på.
 
-**Gör (på 2.3):** ge de tre åtgärderna på bucketens ARN. Om bucketen någon gång har haft versionshantering, [flytta till en ny bucket](/guides/object-content-storage#move-to-another-s3-compatible-service).
+**Gör (på 2.3):** ge de tre åtgärderna på bucketens ARN (`arn:aws:s3:::<bucket>`, inte `/*`) för den aktiva bucketen och sparade anslutningar. Om bucketen någon gång har haft versionshantering eller varit låst, [flytta till en ny bucket](/guides/object-content-storage#move-to-another-s3-compatible-service).
 
 **Återställning:** innebär att hela versionen rullas tillbaka.
 
@@ -338,7 +346,7 @@ Backend och worker vägrar starta om de inte kan läsa `s3:GetBucketVersioning`,
 
 **Gör:** håll `UPLOAD_TMP_DIR` (standard `/tmp`) på ett lokalt filsystem; NFS eller SMB stöds inte. Se avsnittet om temporära filer i den engelska versionen av driftsättningsguiden.
 
-**Återställning:** ta bort `$UPLOAD_TMP_DIR/eneo-scratch/`.
+**Återställning:** stoppa varje process och ta sedan bort `$UPLOAD_TMP_DIR/eneo-scratch/`.
 
 ### Migreringen `202611091200` skriver om varje konversationsrad [#sessions-migration]
 
@@ -348,7 +356,7 @@ Backend och worker vägrar starta om de inte kan läsa `s3:GetBucketVersioning`,
 
 ### Namn och feedbacktext följer gallringstiden [#names-and-feedback-follow-retention]
 
-Den första nattliga körningen tömmer namn och feedbacktext för varje konversation som är äldre än sin gallringstid.
+Den första nattliga körningen tömmer namn och feedbacktext för varje konversation som är äldre än sin gallringstid, även långlivade konversationer vars namn någon valt nyligen. Konversations- och sessionsvägarna returnerar då `name: ""` och feedback med `text: null`. Se [Namn och feedbacktext](/docs/audit-logging#names-and-feedback-text).
 
 **Gör:** informera användarna före uppgraderingen.
 
@@ -364,7 +372,7 @@ Den första nattliga körningen tömmer namn och feedbacktext för varje konvers
 
 ### SharePoint [#sharepoint]
 
-**Gör:** före, låt synkar bli klara eller stoppa workers. Efter, skapa om prenumerationer om den publika adressen har ändrats och gå igenom fliken Problem.
+**Gör:** före, låt synkar bli klara eller stoppa workers. Efter, skapa om prenumerationer om den publika adressen har ändrats, gå igenom fliken Problem och konvertera äldre filer. Personliga anslutningar slutar synka när ägaren inaktiveras; importera om de källorna med ett aktivt konto.
 
 **Återställning:** nedgradering tappar hälsohistoriken.
 
