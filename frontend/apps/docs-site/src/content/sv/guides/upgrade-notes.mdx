@@ -187,12 +187,14 @@ Den första federerade inloggningen binder kontot, per organisation, till utfär
 
 Med `OIDC_RESOURCE_SERVER_ENABLED=true` matchas åtkomsttoken via bindningen med `OIDC_ACCEPTED_ISSUER` och `OIDC_ACCEPTED_AUDIENCE`. En token utan subjektsanspråket svarar `401`.
 
-Åtkomsttoken släpper in samma personer som inloggningen i webbläsaren: lagrade inställningar använder bara de lagrade tillåtna domänerna, miljöinställningar använder `OIDC_ALLOWED_DOMAINS`. Med lagrade inställningar och inga lagrade domäner (eller ingen lagrad leverantör alls) gäller det åt båda hållen:
+Åtkomsttoken använder de tillåtna domänerna i de valda inställningarna: med `FEDERATION_ENABLED=true` bara domänerna som är lagrade hos leverantören, annars `OIDC_ALLOWED_DOMAINS`. Med `FEDERATION_ENABLED=true` och inga lagrade domäner, eller ingen lagrad leverantör alls:
 
 - en åtkomsttoken skapar inte längre konton utifrån `OIDC_ALLOWED_DOMAINS`;
-- ett befintligt konto utanför `OIDC_ALLOWED_DOMAINS` släpps nu in med token, som det redan släpps in i webbläsaren.
+- en åtkomsttoken släpper in varje befintligt konto i organisationen vars e-post stämmer, också utanför `OIDC_ALLOWED_DOMAINS`. Med en lagrad leverantör släppte inloggningen i webbläsaren redan in dem; utan lagrad leverantör finns ingen inloggning i webbläsaren att jämföra med.
 
-**Gör:** jämför `iss` och subjekt i en ID-token och en åtkomsttoken för samma person. Med Entra ID, begär åtkomsttoken av version 2 och sätt `OIDC_ACCEPTED_ISSUER` till utfärdaren för `v2.0`. Om de inte kan bli lika öppnar en administratör ett migreringsfönster. Om åtkomsttoken skapade konton utifrån `OIDC_ALLOWED_DOMAINS`: gör `PATCH` på `allowed_domains` hos leverantören.
+Nycklarna som kontrollerar åtkomsttoken följer [reglerna för anrop till leverantören](#provider-requests-on-its-host), utan lista över andra värdar.
+
+**Gör:** jämför `iss` och subjekt i en ID-token och en åtkomsttoken för samma person. Med Entra ID, begär åtkomsttoken av version 2 och sätt `OIDC_ACCEPTED_ISSUER` till utfärdaren för `v2.0`. Om de inte kan bli lika öppnar en administratör ett migreringsfönster. Om åtkomsttoken skapade konton utifrån `OIDC_ALLOWED_DOMAINS`: med en lagrad leverantör, gör `PATCH` på `allowed_domains` hos den; utan lagrad leverantör (en `PATCH` svarar `404`), lagra en med `PUT /api/v1/sysadmin/tenants/{tenant_id}/federation` eller sätt `FEDERATION_ENABLED=false`.
 
 ### Ett borttaget konto behåller sin identitet [#removed-accounts-keep-identity]
 
@@ -234,9 +236,11 @@ Discovery, tokenanropet och signeringsnycklarna, vid inloggning och när instäl
 
 En `discovery_endpoint` som inget anrop får gå till svarar `422`. Att spara eller testa svarar `502` när discovery omdirigerar, är större än 256 KiB eller inte är ett JSON-objekt; 2.3 följde omdirigeringen, läste vilken storlek som helst och svarade `400` för ett dokument som inte var ett objekt. När lagrade inställningar bryter mot reglerna svarar `/api/v1/auth/initiate` och callbacken `500` med ett fast meddelande, och backenden loggar `OIDC provider configuration is unusable` med skälet. Listan är ny, så för en sådan organisation slutar inloggningen fungera vid uppgraderingen tills driftansvarig lägger till värden.
 
+Med `OIDC_RESOURCE_SERVER_ENABLED=true` gäller samma regler för discovery-dokumentet för `OIDC_ACCEPTED_ISSUER` och för dess `jwks_uri`, som måste ligga på utfärdarens värd. `allowed_endpoint_hosts` gäller inte de här anropen, och att flytta inställningarna till Eneo ändrar inte det. En leverantör som bryter mot en regel får varje bearer-token att svara `401`, och backenden loggar `Failed to fetch JWKS for IdP token validation`.
+
 **Gör:** före uppgraderingen, kör `curl -s <discovery-adress> | jq -r '.issuer, .token_endpoint, .jwks_uri'` och jämför värdarna. Direkt efter uppgraderingen, gör `PATCH` på `allowed_endpoint_hosts` med varje annan värd. Med miljöinställningar och en annan värd: [flytta inställningarna till Eneo](/guides/oidc-federation/single-tenant#move-the-settings-into-eneo) och lägg till listan. En leverantör på backendens maskin: sätt `ENVIRONMENT=development` (bara i utveckling) eller ge leverantören en riktig värd.
 
-**Kontroll:** backenden loggar inget `OIDC provider configuration is unusable`.
+**Kontroll:** backenden loggar inget `OIDC provider configuration is unusable` och, med åtkomsttoken, inget `Failed to fetch JWKS for IdP token validation`.
 
 ### En utfärdare med platshållare nekas [#templated-issuer-refused]
 

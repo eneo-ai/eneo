@@ -732,3 +732,46 @@ async def test_with_no_stored_domains_an_existing_account_is_admitted_as_in_the_
     )
 
     assert admitted.id == user.id
+
+
+@pytest.mark.asyncio
+async def test_keys_on_another_host_than_the_issuer_are_never_fetched(setup):
+    """Resource-server mode has no list of other hosts: a jwks_uri off the
+    issuer's host fails every bearer token, and nothing is sent there."""
+    other = "https://keys.other.example/jwks"
+    setup.http.routes[DISCOVERY_URL] = {"jwks_uri": other}
+    setup.http.routes[other] = setup.http.routes[JWKS_URL]
+
+    with pytest.raises(AuthenticationException):
+        await setup.service.authenticate(
+            token=_make_idp_token(setup.private_pem, "kid-a")
+        )
+
+    assert other not in setup.http.calls
+
+
+@pytest.mark.asyncio
+async def test_without_a_stored_provider_access_tokens_create_no_account(
+    monkeypatch, idp_key
+):
+    """FEDERATION_ENABLED=true and no provider stored: there is no browser
+    sign-in, and OIDC_ALLOWED_DOMAINS does not let a token create one."""
+    private_pem, jwk = idp_key
+    tenant = _make_tenant(provisioning=True, federation_config={})
+    user_repo = UserRepoStub(tenant)
+    http = FakeHttpClient(
+        {DISCOVERY_URL: {"jwks_uri": JWKS_URL}, JWKS_URL: {"keys": [jwk]}}
+    )
+    settings = _make_settings(oidc_allowed_domains=["example.org"])
+    monkeypatch.setattr(user_service_module, "get_settings", lambda: settings)
+    monkeypatch.setattr(oidc_resource_server, "get_settings", lambda: settings)
+    monkeypatch.setattr(aiohttp_client, "session", http)
+    service = _make_user_service(user_repo, TenantRepoStub(tenant), AuditServiceStub())
+
+    with pytest.raises(HTTPException) as refused:
+        await service.authenticate(
+            token=_make_idp_token(private_pem, "kid-a", email="new@example.org")
+        )
+
+    assert refused.value.status_code == 403
+    assert user_repo.add_calls == 0

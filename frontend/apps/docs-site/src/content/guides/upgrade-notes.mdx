@@ -182,12 +182,14 @@ The first federated sign-in binds the account, per tenant, to issuer, client ID,
 
 With `OIDC_RESOURCE_SERVER_ENABLED=true`, access tokens are matched through the binding with `OIDC_ACCEPTED_ISSUER` and `OIDC_ACCEPTED_AUDIENCE`. A token without the subject claim answers `401`.
 
-Access tokens admit the same people as browser sign-in: stored settings use only the stored allowed domains, environment settings use `OIDC_ALLOWED_DOMAINS`. With stored settings and no stored domains (or no provider stored at all), this works both ways:
+Access tokens use the allowed domains of the selected settings: with `FEDERATION_ENABLED=true` only the domains stored on the provider, otherwise `OIDC_ALLOWED_DOMAINS`. With `FEDERATION_ENABLED=true` and no stored domains, or no provider stored at all:
 
 - an access token no longer creates accounts from `OIDC_ALLOWED_DOMAINS`;
-- an existing account outside `OIDC_ALLOWED_DOMAINS` is now admitted by token, as it already was in the browser.
+- an access token admits every existing account in the organisation whose email matches, also outside `OIDC_ALLOWED_DOMAINS`. With a stored provider, browser sign-in already admitted them; with none stored, there is no browser sign-in to compare with.
 
-**Do:** compare `iss` and subject of an ID token and an access token for the same person. With Entra ID, request v2 access tokens and set `OIDC_ACCEPTED_ISSUER` to the `v2.0` issuer. If they cannot match, an administrator opens a migration window. If access tokens created accounts from `OIDC_ALLOWED_DOMAINS`, `PATCH` `allowed_domains` on the provider.
+The keys that validate access tokens follow the [rules for requests to the provider](#provider-requests-on-its-host), with no list of other hosts.
+
+**Do:** compare `iss` and subject of an ID token and an access token for the same person. With Entra ID, request v2 access tokens and set `OIDC_ACCEPTED_ISSUER` to the `v2.0` issuer. If they cannot match, an administrator opens a migration window. If access tokens created accounts from `OIDC_ALLOWED_DOMAINS`: with a stored provider, `PATCH` `allowed_domains` on it; with none stored (a `PATCH` answers `404`), store one with `PUT /api/v1/sysadmin/tenants/{tenant_id}/federation` or set `FEDERATION_ENABLED=false`.
 
 ### A removed account keeps its identity [#removed-accounts-keep-identity]
 
@@ -229,9 +231,11 @@ Discovery, the token request and the signing keys, at sign-in and when settings 
 
 A `discovery_endpoint` no request may go to answers `422`. Saving or testing answers `502` when discovery redirects, is over 256 KiB or is not a JSON object; 2.3 followed the redirect, read any size and answered `400` for a document that was not an object. When stored settings break these rules, `/api/v1/auth/initiate` and the callback answer `500` with a fixed message and the backend logs `OIDC provider configuration is unusable` with the reason. The list is new, so for such an organisation sign-in stops at the upgrade until the operator adds the host.
 
+With `OIDC_RESOURCE_SERVER_ENABLED=true`, the same rules apply to the discovery document of `OIDC_ACCEPTED_ISSUER` and to its `jwks_uri`, which must be on the issuer's host. `allowed_endpoint_hosts` does not apply to these requests, and moving the settings into Eneo does not change that. A provider that breaks a rule fails every bearer token with `401`, and the backend logs `Failed to fetch JWKS for IdP token validation`.
+
 **Do:** before the upgrade, run `curl -s <discovery URL> | jq -r '.issuer, .token_endpoint, .jwks_uri'` and compare the hosts. Right after it, `PATCH` `allowed_endpoint_hosts` with every other host. With environment settings and another host, [move the settings into Eneo](/guides/oidc-federation/single-tenant#move-the-settings-into-eneo) and add the list. A provider on the backend's machine: set `ENVIRONMENT=development` (only in development) or give the provider a real host.
 
-**Check:** the backend logs no `OIDC provider configuration is unusable`.
+**Check:** the backend logs no `OIDC provider configuration is unusable` and, with access tokens, no `Failed to fetch JWKS for IdP token validation`.
 
 ### A templated issuer is refused [#templated-issuer-refused]
 

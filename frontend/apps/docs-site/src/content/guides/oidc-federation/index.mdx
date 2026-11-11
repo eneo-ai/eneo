@@ -102,6 +102,7 @@ A response that fails any check ends the sign-in with `401` (`oidc_response_not_
 - Private network addresses are allowed; link-local addresses (such as `169.254.169.254`), cloud metadata addresses and IPv4 addresses inside IPv6 are not, whatever a name resolves to.
 - Redirects are not followed: a provider answering `3xx` counts as a failed request.
 - Each request ends after 5 seconds, and an answer larger than 256 KiB is refused.
+- With `OIDC_RESOURCE_SERVER_ENABLED=true`, the same rules hold for the discovery document of `OIDC_ACCEPTED_ISSUER` and its `jwks_uri`, which must be on the issuer's host: `allowed_endpoint_hosts` does not apply to these requests, also after the settings are moved into Eneo. A provider that breaks one fails every bearer token with `401`, and the backend logs `Failed to fetch JWKS for IdP token validation`.
 
 The provider-bound Zitadel login in the Svelte frontend is deprecated and is removed in the next release; see [Migrate from the Zitadel settings](#migrate-from-the-zitadel-settings). Until then it keeps its own requests: it sends PKCE but no `nonce`.
 
