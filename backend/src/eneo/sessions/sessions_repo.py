@@ -20,8 +20,8 @@ from eneo.database.repositories.base import BaseRepositoryDelegate
 from eneo.database.tables.api_keys_v2_table import ApiKeysV2
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.group_chats_table import GroupChatsTable
-from eneo.database.tables.help_assistant_runs_table import HelpAssistantRuns
 from eneo.database.tables.info_blobs_table import InfoBlobs
+from eneo.database.tables.insight_conversations_table import InsightConversations
 from eneo.database.tables.questions_table import (
     InfoBlobReferences,
     QuestionFeedback,
@@ -41,6 +41,7 @@ from eneo.mcp_apps.infrastructure.repo_impl.mcp_app_view_repo_impl import (
 )
 from eneo.questions.question import MessageFeedback
 from eneo.questions.question_file_projection import attach_question_files
+from eneo.sessions.hidden_sessions import hidden_session_clause
 from eneo.sessions.session import (
     SessionAdd,
     SessionFeedback,
@@ -217,21 +218,16 @@ class SessionRepository:
     # ownership and the chat partner do not, so a refusal can be explained.
     @staticmethod
     def _exclude_helper_run_sessions(query: sa.Select[Any]) -> sa.Select[Any]:
-        """Exclude sessions referenced by a help_assistant_runs row.
+        """Exclude hidden sessions: helper runs and insights conversations.
 
-        Helper conversations live in the regular sessions/questions tables so
-        streaming, RAG, model selection, and tool calling all work — but they
+        Hidden conversations live in the regular sessions/questions tables so
+        streaming, RAG, model selection, and tool calling all work, but they
         must never appear in normal session / conversation / insights / export
-        endpoints. This is the single rule, one place. Every method in this
-        repo that returns session rows must apply it. See PRD §4.
+        endpoints. The rule itself is :mod:`eneo.sessions.hidden_sessions`.
+        Every method in this repo that returns session rows must apply it.
+        See PRD §4.
         """
-        return query.where(
-            ~sa.exists(
-                sa.select(HelpAssistantRuns.id).where(
-                    HelpAssistantRuns.session_id == Sessions.id
-                )
-            )
-        )
+        return query.where(hidden_session_clause(Sessions.id))
 
     @staticmethod
     def _exclude_unreadable_copies(query: sa.Select[Any]) -> sa.Select[Any]:
@@ -703,6 +699,34 @@ class SessionRepository:
         )
         await self.session.execute(
             sa.delete(QuestionFeedback).where(QuestionFeedback.question_id.in_(owned))
+        )
+
+    async def get_for_insight_conversation(
+        self, id: UUID, tenant_id: UUID
+    ) -> SessionInDB | None:
+        """Load an insights conversation with its prior questions eager-loaded.
+
+        Documented exception to ``_exclude_helper_run_sessions``: the
+        InsightConversationService needs the hidden session for follow-up
+        turns, history and tool results. Restricted to sessions that carry an
+        ``insight_conversations`` row and tenant-scoped via
+        :meth:`_filter_by_tenant`; the caller authorizes against that row's
+        actor and the target's insight access. No other code path may call
+        this method.
+        """
+        query = self._filter_by_tenant(
+            sa.select(Sessions).where(
+                Sessions.id == id,
+                sa.exists(
+                    sa.select(InsightConversations.id).where(
+                        InsightConversations.session_id == Sessions.id
+                    )
+                ),
+            ),
+            tenant_id,
+        )
+        return await self._hydrate_optional(
+            await self.delegate.get_model_from_query(query)
         )
 
     async def get_for_helper_run(self, id: UUID, tenant_id: UUID) -> SessionInDB | None:

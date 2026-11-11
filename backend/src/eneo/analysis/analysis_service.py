@@ -28,6 +28,7 @@ from eneo.completion_models.infrastructure.completion_service import CompletionS
 from eneo.completion_models.infrastructure.static_prompts import ANALYSIS_PROMPT
 from eneo.data_retention.derivations import DerivedSourceRemovedError
 from eneo.group_chat.application.group_chat_service import GroupChatService
+from eneo.group_chat.domain.entities.group_chat import GroupChat
 from eneo.main.exceptions import (
     BadRequestException,
     NotFoundException,
@@ -640,13 +641,14 @@ class AnalysisService:
         self,
         group_chat_id: UUID | None = None,
         assistant_id: UUID | None = None,
-    ):
+    ) -> tuple[Assistant | GroupChat, Space]:
         if assistant_id:
             space = await self.space_service.get_space_by_assistant(
                 assistant_id=assistant_id
             )
             assistant = space.get_assistant(assistant_id=assistant_id)
             self._require_assistant_insight_access(space=space, assistant=assistant)
+            return assistant, space
 
         elif group_chat_id:
             space = await self.space_service.get_space_by_group_chat(
@@ -661,6 +663,7 @@ class AnalysisService:
                 raise UnauthorizedException(
                     "Insights are not enabled for this group chat"
                 )
+            return group_chat, space
         else:
             raise BadRequestException(
                 "Either assistant_id or group_chat_id must be provided"
@@ -676,6 +679,32 @@ class AnalysisService:
             assistant_id=job.assistant_id,
             group_chat_id=job.group_chat_id,
         )
+
+    async def assert_insight_access(
+        self,
+        *,
+        assistant_id: UUID | None = None,
+        group_chat_id: UUID | None = None,
+    ) -> tuple[Assistant | GroupChat, Space]:
+        """The insight-view decision for one assistant or group chat, as the
+        insights chat and its tools ask it on every read.
+
+        The target's insight access, and in a personal space the insights
+        permission. Returns the target and its space, so a caller that needs
+        them (the chat picks its model from the space) loads them once.
+        """
+        target, space = await self._check_insight_access(
+            assistant_id=assistant_id, group_chat_id=group_chat_id
+        )
+        self.check_space_permissions(space)
+        return target, space
+
+    def check_space_permissions(self, space: Space) -> None:
+        """Insights in a personal space need the insights permission."""
+        if space.is_personal() and Permission.INSIGHTS not in self.user.permissions:
+            raise UnauthorizedException(
+                f"Need permission {Permission.INSIGHTS.value} in order to access"
+            )
 
     async def get_questions_since(
         self,

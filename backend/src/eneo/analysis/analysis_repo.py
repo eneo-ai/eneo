@@ -10,7 +10,6 @@ from eneo.analysis.analysis import MessageFeedbackCounts
 from eneo.data_retention.derivations import copy_session_valid, readable_sessions
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.group_chats_table import GroupChatsTable
-from eneo.database.tables.help_assistant_runs_table import HelpAssistantRuns
 from eneo.database.tables.questions_table import (
     QuestionFeedback,
     Questions,
@@ -20,6 +19,7 @@ from eneo.database.tables.users_table import Users
 from eneo.files.file_content_loader import FileContentLoader
 from eneo.info_blobs.info_blob_repo import InfoBlobRepository
 from eneo.questions.question_file_projection import attach_question_files
+from eneo.sessions.hidden_sessions import hidden_session_clause
 from eneo.sessions.session import SessionInDB
 from eneo.sessions.sessions_repo import session_turn_options
 
@@ -47,20 +47,15 @@ def _hour_bucket(
 def _exclude_helper_run_sessions(
     query: sa.Select[Any], session_id_col: Any
 ) -> sa.Select[Any]:
-    """Exclude rows whose session is referenced by a ``help_assistant_runs`` row.
+    """Exclude rows whose session is hidden: a helper run or an insights
+    conversation (the rule is :mod:`eneo.sessions.hidden_sessions`).
 
-    Helper conversations live in the regular ``sessions`` / ``questions``
+    Hidden conversations live in the regular ``sessions`` / ``questions``
     tables so streaming, RAG, model selection, and tool calling all work — but
     they must never appear in normal conversation / insights / analytics /
     export endpoints. See PRD §4.
     """
-    return query.where(
-        ~sa.exists(
-            sa.select(HelpAssistantRuns.id).where(
-                HelpAssistantRuns.session_id == session_id_col
-            )
-        )
-    )
+    return query.where(hidden_session_clause(session_id_col))
 
 
 def _exclude_hidden_assistants(query: sa.Select[Any]) -> sa.Select[Any]:

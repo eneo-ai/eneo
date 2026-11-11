@@ -62,6 +62,9 @@ GET /api/v1/analysis/assistants/{assistant_id}/
 GET /api/v1/analysis/assistants/{assistant_id}/feedback/
 GET /api/v1/analysis/assistants/{assistant_id}/questions/
 GET /api/v1/analysis/conversation-insights/
+GET /api/v1/analysis/conversation-insights/chat/
+GET /api/v1/analysis/conversation-insights/chat/{session_id}/
+GET /api/v1/analysis/conversation-insights/chat/{session_id}/tool-calls/{tool_call_id}/result/
 GET /api/v1/analysis/conversation-insights/jobs/{job_id}/
 GET /api/v1/analysis/conversation-insights/sessions/
 GET /api/v1/analysis/conversation-insights/sessions/{session_id}/

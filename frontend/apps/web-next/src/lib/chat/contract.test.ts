@@ -68,6 +68,7 @@ it("covers every fixture the backend ships", () => {
     "cancelled-mid-stream",
     "file-part",
     "generated-document",
+    "insights-tool-call",
     "plain-text",
     "reasoning-and-text",
     "sources",

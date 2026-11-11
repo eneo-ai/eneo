@@ -83,6 +83,10 @@ class ActionType(str, Enum):
     SKILL_DELETED = "skill_deleted"
     SESSION_STARTED = "session_started"
     SESSION_ENDED = "session_ended"
+    # An operator's analysis chat about an assistant's or group chat's
+    # conversations (the insights chat).
+    INSIGHT_CONVERSATION_STARTED = "insight_conversation_started"
+    INSIGHT_CONVERSATION_DELETED = "insight_conversation_deleted"
     TOOL_APPROVAL_SUBMITTED = "tool_approval_submitted"
     FILE_UPLOADED = "file_uploaded"
     FILE_DELETED = "file_deleted"
