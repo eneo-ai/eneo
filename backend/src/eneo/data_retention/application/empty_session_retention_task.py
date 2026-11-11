@@ -6,8 +6,9 @@ were emptied by other paths, or were held by a live chat when their last
 question went. Its own task, not a step of conversation history: every session
 older than the grace period is scanned, a standing population rather than a due
 backlog, and sharing a budget with due history would let that scan spend it
-first. Widget sessions are left to widget retention and each widget's period:
-the window reads them, charges them and passes them.
+first. Widget sessions are left to widget retention and each widget's period,
+and a Flow authoring chat's session to conversation history, which removes it
+with its last question: the window reads them, charges them and passes them.
 """
 
 from collections.abc import Mapping, Sequence
@@ -61,7 +62,7 @@ class EmptySessionRetentionTask:
         """
         out = RetentionEffects()
         # Each windowed session charges its discovery row and at most one
-        # release; a widget session only its discovery row.
+        # release; a passed session only its discovery row.
         limit = batch.rows // (1 + EmptySessionRepository.MAX_RELEASE_ROWS)
         if limit == 0:
             return out.result(

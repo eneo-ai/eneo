@@ -4,6 +4,7 @@ conversation history removes the session its last question leaves empty."""
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
@@ -16,6 +17,9 @@ from eneo.data_retention.application.empty_session_retention_task import (
     EmptySessionRetentionTask,
 )
 from eneo.data_retention.application.retention_runner import RetentionBatch
+from eneo.data_retention.infrastructure.empty_session_repo import (
+    EmptySessionRepository,
+)
 from eneo.database.database import sessionmanager
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.flow_authoring_chats_table import FlowAuthoringChats
@@ -298,10 +302,17 @@ async def test_history_leaves_a_held_session_to_the_sweep(
 
 
 async def _flow_authoring_chat(
-    session: AsyncSession, *, tenant_id: UUID, user_id: UUID, created_at: datetime
-) -> Sessions:
-    """A Flow authoring chat that has not been asked anything yet."""
+    session: AsyncSession,
+    *,
+    tenant_id: UUID,
+    user_id: UUID,
+    created_at: datetime,
+    space_days: int | None = None,
+) -> FlowAuthoringChats:
+    """A Flow authoring chat that has not been asked anything yet, in a space
+    whose conversation time is `space_days`."""
     space = await _space(session, tenant_id=tenant_id, user_id=user_id)
+    space.data_retention_days = space_days
     flow = Flows(
         name="Authoring chat flow",
         tenant_id=tenant_id,
@@ -323,27 +334,27 @@ async def _flow_authoring_chat(
     session.add_all([flow, assistant])
     await session.flush()
     conversation = await _session(session, user_id=user_id, created_at=created_at)
-    session.add(
-        FlowAuthoringChats(
-            session_id=conversation.id,
-            assistant_id=assistant.id,
-            tenant_id=tenant_id,
-            space_id=space.id,
-            user_id=user_id,
-            flow_id=flow.id,
-        )
+    chat = FlowAuthoringChats(
+        session_id=conversation.id,
+        assistant_id=assistant.id,
+        tenant_id=tenant_id,
+        space_id=space.id,
+        user_id=user_id,
+        flow_id=flow.id,
     )
+    session.add(chat)
     await session.flush()
-    return conversation
+    return chat
 
 
 async def test_an_empty_flow_authoring_chat_is_kept(
     retention_session: AsyncSession, test_tenant, admin_user
 ):
-    """A Flow authoring chat keeps its conversation, model and edit mode in a
-    row the session's deletion cascades to; an empty one past the grace period
-    is Flow data, not an abandoned chat. Mutant: the chat guard is dropped, so
-    the sweep deletes the session and the chat with it."""
+    """A Flow authoring chat keeps its model and edit mode in a row the
+    session's deletion cascades to, and it is empty until its first question:
+    the sweep passes it and leaves it to conversation history. Mutant: the
+    window does not pass authoring chats, so the sweep deletes the session and
+    the chat with it."""
     old = datetime.now(timezone.utc) - timedelta(days=3)
     chat = await _flow_authoring_chat(
         retention_session,
@@ -351,12 +362,78 @@ async def test_an_empty_flow_authoring_chat_is_kept(
         user_id=admin_user.id,
         created_at=old,
     )
-    chat_id = chat.id
+    chat_id = chat.session_id
 
     report = await run_registered_retention(
         retention_session, task_name=EMPTY_SESSIONS_TASK
     )
 
-    assert "sessions.sessions_deleted" not in report.counts
+    assert report.counts == {"sessions.sessions_examined": 1}
     assert await retention_session.get(Sessions, chat_id) is not None
     assert await retention_session.get(FlowAuthoringChats, chat_id) is not None
+
+
+async def _due_authoring_chat(
+    session: AsyncSession, *, tenant_id: UUID, user_id: UUID
+) -> FlowAuthoringChats:
+    """An authoring chat whose only question is past its space's 30 days."""
+    old = datetime.now(timezone.utc) - timedelta(days=60)
+    chat = await _flow_authoring_chat(
+        session, tenant_id=tenant_id, user_id=user_id, created_at=old, space_days=30
+    )
+    await _question(
+        session,
+        tenant_id=tenant_id,
+        session_id=chat.session_id,
+        assistant_id=chat.assistant_id,
+        created_at=old,
+    )
+    return chat
+
+
+async def test_history_removes_an_authoring_chat_with_its_last_question(
+    retention_session: AsyncSession, test_tenant, admin_user, monkeypatch
+):
+    """A Flow authoring chat follows its space's conversation time like any
+    chat: its last due question goes, then its session and the chat row the
+    session's deletion cascades to, and the release charges that row. Mutants:
+    the release refuses authoring chats; the lock does not charge the chat."""
+    chat = await _due_authoring_chat(
+        retention_session, tenant_id=test_tenant.id, user_id=admin_user.id
+    )
+    chat_id = chat.session_id
+    charged: list[Mapping[UUID, int]] = []
+    lock_empty = EmptySessionRepository.lock_empty
+
+    async def recorded(self: EmptySessionRepository, ids: Sequence[UUID]):
+        costs = await lock_empty(self, ids)
+        charged.append(dict(costs))
+        return costs
+
+    monkeypatch.setattr(EmptySessionRepository, "lock_empty", recorded)
+
+    report = await run_registered_retention(retention_session)
+
+    assert report.counts["questions.questions_deleted"] == 1
+    assert report.counts["questions.sessions_deleted"] == 1
+    # The session row and its chat row.
+    assert {chat_id: 2} in charged
+    assert await retention_session.get(Sessions, chat_id) is None
+    assert await retention_session.get(FlowAuthoringChats, chat_id) is None
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="The chat's hidden assistant is not removed with its conversation yet.",
+)
+async def test_history_removes_an_authoring_chats_hidden_assistant(
+    retention_session: AsyncSession, test_tenant, admin_user
+):
+    chat = await _due_authoring_chat(
+        retention_session, tenant_id=test_tenant.id, user_id=admin_user.id
+    )
+    assistant_id = chat.assistant_id
+
+    await run_registered_retention(retention_session)
+
+    assert await retention_session.get(Assistants, assistant_id) is None

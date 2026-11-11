@@ -19,8 +19,10 @@ from eneo.database.tables.sessions_table import Sessions
 
 class EmptySessionRepository:
     # The most one session's release reads and deletes: its lock and proof, the
-    # session row and its UNIQUE help-assistant helper row. Every caller that
-    # funds a release before locking reserves this much.
+    # session row and the one row its deletion cascades to, a help assistant's
+    # run or a Flow authoring chat (both UNIQUE on the session, and each makes
+    # its own session). Every caller that funds a release before locking
+    # reserves this much.
     MAX_RELEASE_ROWS: Final = 3
 
     def __init__(
@@ -35,27 +37,13 @@ class EmptySessionRepository:
             ~sa.select(Questions.id).where(Questions.session_id == Sessions.id).exists()
         )
 
-    def _unbound(self) -> ColumnElement[bool]:
-        # A Flow authoring chat keeps its model and edit mode in a row the
-        # session's deletion cascades to, so its session is Flow data even
-        # before its first question.
-        return ~(
-            sa.select(FlowAuthoringChats.session_id)
-            .where(FlowAuthoringChats.session_id == Sessions.id)
-            .exists()
-        )
-
     def _releasable(self, ids: Sequence[UUID]) -> tuple[ColumnElement[bool], ...]:
-        """Which of these sessions are empty, due and no Flow authoring chat's:
-        one rule for the lock, the count of what the lock skipped, and the
-        delete. Every release goes through it: the empty-session sweep, the
-        copy edges' release and the release of a session its last due question
-        left empty."""
+        """Which of these sessions are empty and due: one rule for the lock, the
+        count of what the lock skipped, and the delete."""
         return (
             uuid_in(Sessions.id, ids),
             Sessions.created_at < self.now - self.grace,
             self._unreferenced(),
-            self._unbound(),
             outside_widgets(),
         )
 
@@ -63,12 +51,22 @@ class EmptySessionRepository:
         self, cursor: RetentionKeyset | None, limit: int
     ) -> Sequence[tuple[RetentionKeyset, bool]]:
         """The next `limit` sessions past the grace period in keyset order, each
-        with whether a widget owns it (to be passed: widget retention removes
-        it). The keyset index reads exactly the rows returned, so retained
-        widget sessions never make one window an unbounded read; the lock and
-        the delete refuse them again."""
+        with whether another owner removes it, to be passed. Widget retention
+        removes a widget's session, and the lock and the delete refuse it again.
+        Conversation history removes a Flow authoring chat's session with its
+        last question; before its first one the chat is empty, and its model and
+        edit mode live in a row the session's deletion cascades to. The keyset
+        index reads exactly the rows returned, so passed sessions never make one
+        window an unbounded read."""
+        authoring_chat = (
+            sa.select(FlowAuthoringChats.session_id)
+            .where(FlowAuthoringChats.session_id == Sessions.id)
+            .exists()
+        )
         statement = sa.select(
-            Sessions.id, Sessions.created_at, (~outside_widgets()).label("passed")
+            Sessions.id,
+            Sessions.created_at,
+            (~outside_widgets() | authoring_chat).label("passed"),
         ).where(Sessions.created_at < self.now - self.grace)
         if cursor is not None:
             statement = statement.where(
@@ -82,11 +80,17 @@ class EmptySessionRepository:
         )
 
     async def lock_empty(self, ids: Sequence[UUID]) -> Mapping[UUID, int]:
-        # The helper's UNIQUE session_id bounds its cascade to at most one row.
-        cost = 1 + sa.case((HelpAssistantRuns.id.is_not(None), 1), else_=0)
+        # The helper's and the authoring chat's UNIQUE session_id bound each
+        # cascade to at most one row.
+        cost = (
+            1
+            + sa.case((HelpAssistantRuns.id.is_not(None), 1), else_=0)
+            + sa.case((FlowAuthoringChats.session_id.is_not(None), 1), else_=0)
+        )
         statement = (
             sa.select(Sessions.id, cost)
             .outerjoin(HelpAssistantRuns, HelpAssistantRuns.session_id == Sessions.id)
+            .outerjoin(FlowAuthoringChats, FlowAuthoringChats.session_id == Sessions.id)
             .where(*self._releasable(ids))
             .with_for_update(of=Sessions, skip_locked=True)
         )
