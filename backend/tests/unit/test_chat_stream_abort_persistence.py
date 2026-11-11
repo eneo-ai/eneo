@@ -1397,6 +1397,34 @@ _SKILL_STEP = _always_active_skill_step()
             [(_SKILL_STEP.tool_call_id, True, "completed")],
             id="skill-step-with-text",
         ),
+        pytest.param(
+            [
+                _chunk(ResponseType.TOOL_CALL, _SKILL_STEP),
+                _chunk(
+                    ResponseType.TOOL_CALL,
+                    _call("call-1", "succeeded", "ok", approved=True),
+                ),
+            ],
+            [
+                (_SKILL_STEP.tool_call_id, True, "completed"),
+                ("call-1", True, "succeeded"),
+            ],
+            id="skill-step-then-finished",
+        ),
+        pytest.param(
+            [
+                _chunk(ResponseType.TOOL_CALL, _SKILL_STEP),
+                _chunk(
+                    ResponseType.TOOL_CALL,
+                    _call("call-1", "denied", approved=False),
+                ),
+            ],
+            [
+                (_SKILL_STEP.tool_call_id, True, "completed"),
+                ("call-1", False, "denied"),
+            ],
+            id="skill-step-then-denied",
+        ),
     ],
 )
 async def test_streaming_abort_saves_tool_calls_that_ran_or_were_refused(
