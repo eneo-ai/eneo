@@ -39,6 +39,7 @@ from eneo.users.user import UserInDB
 from eneo.users.user_service import UserService
 from tests.fake_oidc_provider import DROP, FakeOidcProvider, install
 from tests.identity_bindings_in_memory import IdentityBindingsInMemory
+from tests.log_capture import emitted
 
 
 class DummySettings(SimpleNamespace):
@@ -1698,11 +1699,16 @@ async def test_initiate_refuses_a_templated_issuer_before_storing_anything(
         "https://login.microsoftonline.com/{tenantid}/v2.0"
     )
 
-    async with _http(container) as client:
-        refused = await client.get("/auth/initiate", params={"tenant": SINGLE_USE_SLUG})
+    with emitted(federation_router.logger) as records:
+        async with _http(container) as client:
+            refused = await client.get(
+                "/auth/initiate", params={"tenant": SINGLE_USE_SLUG}
+            )
 
+    # A server error answers without the raiser's text; the reason is logged.
     assert refused.status_code == 500
-    assert "template" in refused.json()["detail"]
+    assert refused.json()["code"] == "internal_error"
+    assert any("template" in str(getattr(record, "reason", "")) for record in records)
     assert "authorization_url" not in refused.text
     assert redis_client._store == {}
 

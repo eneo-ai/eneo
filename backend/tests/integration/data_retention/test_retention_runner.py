@@ -1136,5 +1136,6 @@ async def test_the_execution_ends_with_one_audit_event_in_its_finish(
         "counts": {"items.deleted": 2},
         "blocked": {},
         "batch_count": 2,
+        "actor": {"type": "system", "via": "data_retention_run"},
     }
     assert event.description == ("Retention tests.fake finished: partial; deleted 2")

@@ -26,6 +26,7 @@ def recording(tmp_path, monkeypatch):
     temp_dir = tmp_path / "temp"
     temp_dir.mkdir()
     monkeypatch.setattr(audio.tempfile, "tempdir", str(temp_dir))
+    monkeypatch.setattr(audio.process_scratch, "directory", lambda: temp_dir)
     return source, samples, temp_dir
 
 

@@ -50,7 +50,6 @@ def test_attachment_changes_keep_ids_and_modes_without_names() -> None:
         ),
         old_assistant=old,
         updated_assistant=updated,
-        completion_model_id=None,
         description=None,
         old_mcp_tool_overrides=None,
     )

@@ -9,6 +9,10 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.ai_models.completion_models.completion_model import ModelKwargs
+from eneo.completion_models.domain.model_kwargs_capabilities import (
+    SupportedModelKwargs,
+)
 from eneo.services import service_protocol, service_runner
 from eneo.services.service import DatastoreResult
 from eneo.services.service_runner import ServiceRunner
@@ -22,9 +26,17 @@ async def test_a_service_run_never_logs_its_answer(
         service_runner, "logger", logging.getLogger("eneo.test.service_runner")
     )
     caplog.set_level(logging.DEBUG, logger="eneo.test.service_runner")
-    model = SimpleNamespace(id=uuid4(), name="model", vision=False)
+    model = SimpleNamespace(
+        id=uuid4(),
+        name="model",
+        vision=False,
+        supported_model_kwargs=SupportedModelKwargs(),
+    )
     service = SimpleNamespace(
-        id=uuid4(), groups=[], completion_model=model, completion_model_kwargs=None
+        id=uuid4(),
+        groups=[],
+        completion_model=model,
+        completion_model_kwargs=ModelKwargs(),
     )
     output = MagicMock()
     output.to_string.return_value = "private answer"

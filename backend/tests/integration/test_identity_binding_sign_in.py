@@ -342,6 +342,7 @@ async def test_another_subject_under_the_bound_pair_is_refused_and_writes_nothin
         "subject": "someone-else",
         "account_ids": [str(account)],
         "correlation_id": None,
+        "actor": {"type": "system", "via": "identity_conflict"},
     }
     assert EMAIL not in json.dumps(conflict)
 

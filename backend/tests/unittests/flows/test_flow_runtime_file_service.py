@@ -1850,6 +1850,12 @@ def test_runtime_pdf_upload_error_response(tmp_path, monkeypatch, failure):
     else:
         assert body["code"] == "flow_run_upload_pdf_exceeds_limit"
         assert body["context"] == {"limit": "pages", "measured": 2, "ceiling": 1}
-    assert list(upload_directory.iterdir()) == []
+    # Uploads are written into the process scratch directory under it; nothing
+    # is left there beside the directory's own lock marker.
+    assert [
+        path
+        for path in upload_directory.rglob("*")
+        if path.is_file() and path.name != "owner.lock"
+    ] == []
     service.runtime_upload_repo.create.assert_not_awaited()
     service.audit_service.log.assert_not_awaited()

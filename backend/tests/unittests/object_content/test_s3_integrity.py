@@ -1077,6 +1077,7 @@ async def test_verified_path_is_opt_in_and_owned_by_read(
     from eneo.object_content.content_service import detach_content_read
 
     monkeypatch.setattr("tempfile.tempdir", str(tmp_path))
+    monkeypatch.setattr(verified_spool.process_scratch, "directory", lambda: tmp_path)
     payload = b"verified audio"
     client = _DownloadClient(payload)
     store = S3ObjectStore(_settings(), client=cast("S3Client", client))

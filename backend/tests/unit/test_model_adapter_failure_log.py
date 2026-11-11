@@ -119,7 +119,7 @@ async def test_a_failed_transcription_request_is_logged_without_the_providers_me
     )
 
     with pytest.raises(ProviderRejectedRequestException):
-        await transcribe_chunk(adapter, chunk)
+        await transcribe_chunk(adapter, chunk, audio_seconds=1.0)
 
     record = _failure(caplog)
     assert record.__dict__["provider"] == "openai"
