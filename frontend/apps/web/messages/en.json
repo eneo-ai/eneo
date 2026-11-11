@@ -5821,6 +5821,7 @@
   "federation_admin_domains": "Allowed email domains",
   "federation_admin_domains_help": "One domain per line, such as example.org. When the list has domains, only email addresses in them can sign in through the identity provider.",
   "federation_admin_editable": "Settings you can change",
+  "federation_admin_endpoint_host_refused": "Nothing was saved. The identity provider's token endpoint or signing keys are on {host}, which is neither the provider's own host nor a host your operator has allowed. Ask your operator to add {host} to the provider's allowed hosts (allowed_endpoint_hosts); until then nobody can sign in through the provider.",
   "federation_admin_encryption_unavailable": "The secret cannot be saved because encryption is not configured. Contact your operator.",
   "federation_admin_field_refused": "The value was not accepted. Check it and try again.",
   "federation_admin_issuer": "Issuer",

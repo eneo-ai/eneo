@@ -246,6 +246,9 @@
       case "encryption_unavailable":
         formError = m.federation_admin_encryption_unavailable();
         break;
+      case "endpoint_host":
+        formError = m.federation_admin_endpoint_host_refused({ host: failure.host });
+        break;
       default:
         formError = m.federation_admin_save_error();
     }
