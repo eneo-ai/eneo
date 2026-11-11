@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Optional
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -22,7 +22,7 @@ from eneo.files.file_models import FileType, FileUsageKind
 FILE_USAGE_INFO_KEY = "file_usage"
 
 
-def file_usage(kind: FileUsageKind | None) -> dict[str, Any]:
+def file_usage(kind: FileUsageKind | None) -> dict[str, FileUsageKind | None]:
     """Column ``info`` for a foreign key to ``files.id``.
 
     Every such column declares, where it is defined, whether it keeps the File
@@ -55,7 +55,6 @@ class Files(BasePublic):
     # Set for files derived from another upload (for example extracted images).
     parent_file_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey("files.id", ondelete="CASCADE"),
-        index=True,
         info=file_usage(None),
     )
 
@@ -127,5 +126,12 @@ class Files(BasePublic):
             "owner_service_id",
             "created_at",
             postgresql_where=sa.text("owner_type = 'service_key'"),
+        ),
+        Index("ix_files_parent_file_id_id", "parent_file_id", "id"),
+        Index(
+            "ix_files_root_created_id",
+            "created_at",
+            "id",
+            postgresql_where=sa.text("parent_file_id IS NULL"),
         ),
     )

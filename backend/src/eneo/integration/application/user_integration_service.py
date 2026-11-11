@@ -1,3 +1,4 @@
+import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Optional, cast
 
@@ -13,6 +14,7 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from eneo.main.logging import get_logger
+from eneo.observability.error_log import log_error
 from eneo.roles.permissions import Permission
 
 logger = get_logger(__name__)
@@ -296,11 +298,12 @@ class UserIntegrationService:
             )
             logger.info("Deleted Graph subscription %s", graph_subscription_id)
         except Exception as exc:
-            logger.warning(
-                "Failed to delete Graph subscription %s: %s "
-                "(subscription will expire naturally at Microsoft)",
+            log_error(
+                logger,
+                logging.WARNING,
+                "Failed to delete Graph subscription %s (subscription will expire naturally at Microsoft)",
                 graph_subscription_id,
-                exc,
+                error=exc,
             )
 
     async def get_available_integrations_for_space(
@@ -333,8 +336,11 @@ class UserIntegrationService:
                     else None
                 )
             except Exception as e:
-                logger.warning(
-                    f"Failed to fetch tenant SharePoint app: {type(e).__name__}: {str(e)}",
+                log_error(
+                    logger,
+                    logging.WARNING,
+                    "Failed to fetch tenant SharePoint app",
+                    error=e,
                     extra={"tenant_id": str(self.user.tenant_id)},
                 )
 

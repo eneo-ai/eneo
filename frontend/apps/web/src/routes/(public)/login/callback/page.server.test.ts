@@ -1,17 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  clearMobilityguardCookie: vi.fn(),
   clearZitadelCookie: vi.fn(),
-  loginWithMobilityguard: vi.fn(),
   loginWithOidc: vi.fn(),
   loginWithZitadel: vi.fn()
 }));
 
-vi.mock("$lib/features/auth/mobilityguard.server", () => ({
-  clearMobilityguardCookie: mocks.clearMobilityguardCookie,
-  loginWithMobilityguard: mocks.loginWithMobilityguard
-}));
 vi.mock("$lib/features/auth/oidc.server", () => ({
   loginWithOidc: mocks.loginWithOidc
 }));
@@ -20,6 +14,7 @@ vi.mock("$lib/features/auth/zitadel.server", () => ({
   loginWithZitadel: mocks.loginWithZitadel
 }));
 
+import { LoginError } from "$lib/features/auth/LoginError";
 import { load as authCallbackLoad } from "../../auth/callback/+page.server";
 import { load as loginCallbackLoad } from "./+page.server";
 import { DEFAULT_LANDING_PAGE } from "$lib/core/constants";
@@ -27,6 +22,7 @@ import { DEFAULT_LANDING_PAGE } from "$lib/core/constants";
 const RESUME_COOKIE = "oidc-login-resume";
 const ATTEMPT_ID = "11111111-1111-4111-8111-111111111111";
 const OTHER_ATTEMPT_ID = "22222222-2222-4222-8222-222222222222";
+const VERIFIER = "binding-verifier".padEnd(43, "0");
 
 function frontendState(destination: string | null, attemptId = ATTEMPT_ID): string {
   return JSON.stringify({ loginMethod: "oidc", next: destination, attemptId });
@@ -47,7 +43,10 @@ function cookieJar(
 ) {
   const values = new Map<string, string>([["auth", "existing-session"]]);
   if (destination !== undefined) {
-    values.set(RESUME_COOKIE, JSON.stringify({ attemptId, destination, expiresAt }));
+    values.set(
+      RESUME_COOKIE,
+      JSON.stringify({ attemptId, destination, expiresAt, bindingVerifier: VERIFIER })
+    );
   }
   return {
     get: vi.fn((name: string) => values.get(name)),
@@ -95,7 +94,9 @@ describe("generic OIDC browser-bound callback", () => {
     expect(mocks.loginWithOidc).toHaveBeenCalledWith(
       "authorization-code",
       signedState,
-      expect.any(Function)
+      VERIFIER,
+      expect.any(Function),
+      null
     );
     expect(cookies.delete).toHaveBeenCalledWith(RESUME_COOKIE, { path: "/" });
   });
@@ -127,6 +128,22 @@ describe("generic OIDC browser-bound callback", () => {
       () => {
         const cookies = cookieJar();
         cookies.set(RESUME_COOKIE, JSON.stringify({ attemptId: ATTEMPT_ID, destination: "/" }));
+        cookies.set.mockClear();
+        return cookies;
+      }
+    ],
+    [
+      "cookie without a binding verifier",
+      () => {
+        const cookies = cookieJar();
+        cookies.set(
+          RESUME_COOKIE,
+          JSON.stringify({
+            attemptId: ATTEMPT_ID,
+            destination: null,
+            expiresAt: Math.floor(Date.now() / 1000) + 600
+          })
+        );
         cookies.set.mockClear();
         return cookies;
       }
@@ -202,12 +219,9 @@ describe("generic OIDC browser-bound callback", () => {
     expect(mocks.loginWithOidc).not.toHaveBeenCalled();
   });
 
-  test.each([
-    ["mobilityguard", mocks.loginWithMobilityguard],
-    ["zitadel", mocks.loginWithZitadel]
-  ])("%s retains its existing local PKCE login path", async (loginMethod, login) => {
-    const state = JSON.stringify({ loginMethod, next: "/spaces" });
-    login.mockResolvedValue(true);
+  test("zitadel retains its existing local PKCE login path", async () => {
+    const state = JSON.stringify({ loginMethod: "zitadel", next: "/spaces" });
+    mocks.loginWithZitadel.mockResolvedValue(true);
     await expect(
       loginCallbackLoad(
         callbackEvent(
@@ -215,8 +229,21 @@ describe("generic OIDC browser-bound callback", () => {
         ) as never
       )
     ).rejects.toMatchObject({ location: "/spaces" });
-    expect(login).toHaveBeenCalledWith("legacy-code");
+    expect(mocks.loginWithZitadel).toHaveBeenCalledWith("legacy-code");
     expect(mocks.loginWithOidc).not.toHaveBeenCalled();
+  });
+
+  test("a sign-in begun on the removed MobilityGuard link is refused before any exchange", async () => {
+    // A browser can still hold a provider redirect from before the upgrade.
+    const state = JSON.stringify({ loginMethod: "mobilityguard", next: "/spaces" });
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    await expect(
+      loginCallbackLoad(
+        callbackEvent(`/login/callback?code=stale-code&state=${encodeURIComponent(state)}`) as never
+      )
+    ).rejects.toMatchObject({ location: "/login?message=oidc_attempt_rejected" });
+    expect(mocks.loginWithOidc).not.toHaveBeenCalled();
+    expect(mocks.loginWithZitadel).not.toHaveBeenCalled();
   });
 
   test("an IdP error consumes the cookie and carries only the safe local resume to login", async () => {
@@ -275,5 +302,57 @@ describe("generic OIDC browser-bound callback", () => {
     );
     expect(location.pathname).toBe("/login/failed");
     expect(location.searchParams.get("next")).toBe(destination);
+  });
+
+  test("forwards the provider's iss parameter with the code", async () => {
+    const state = frontendState(null);
+    mocks.loginWithOidc.mockResolvedValue({ frontendState: state });
+
+    await expect(
+      loginCallbackLoad(
+        callbackEvent(
+          `/login/callback?code=authorization-code&state=${callbackState(state)}&iss=${encodeURIComponent("https://idp.example")}`,
+          cookieJar(null)
+        ) as never
+      )
+    ).rejects.toMatchObject({ status: 302 });
+
+    expect(mocks.loginWithOidc).toHaveBeenCalledWith(
+      "authorization-code",
+      callbackState(state),
+      VERIFIER,
+      expect.any(Function),
+      "https://idp.example"
+    );
+  });
+
+  test.each([
+    ["LOGIN_UNAVAILABLE", "oidc_callback_failed", "login_unavailable"],
+    ["ATTEMPT_EXPIRED", "oidc_attempt_rejected", null],
+    ["IDENTITY_CONFLICT", "oidc_callback_failed", "identity_conflict"]
+  ] as const)("a %s refusal shows %s on the login page", async (code, message, detailCode) => {
+    const state = frontendState(null);
+    mocks.loginWithOidc.mockRejectedValue(new LoginError("oidc", code));
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    let redirectError: unknown;
+    try {
+      await loginCallbackLoad(
+        callbackEvent(
+          `/login/callback?code=authorization-code&state=${callbackState(state)}`,
+          cookieJar(null)
+        ) as never
+      );
+    } catch (caught) {
+      redirectError = caught;
+    }
+
+    const location = new URL(
+      (redirectError as { location: string }).location,
+      "https://eneo.example"
+    );
+    expect(location.pathname).toBe("/login");
+    expect(location.searchParams.get("message")).toBe(message);
+    expect(location.searchParams.get("detailCode")).toBe(detailCode);
   });
 });

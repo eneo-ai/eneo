@@ -13,8 +13,7 @@ const LISTED_UNDER: Record<string, { href: string; labelKey: string }> = {
 const AREAS = adminNavGroups({
   usingTemplates: true,
   canManageModules: true,
-  flowsEnabled: true,
-  federationEnabled: true
+  flowsEnabled: true
 })
   .flatMap((group) => group.items)
   .filter((item) => item.href !== "/admin");

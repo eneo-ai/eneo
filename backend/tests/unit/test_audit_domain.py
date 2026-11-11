@@ -13,12 +13,11 @@ from eneo.audit.domain.constants import (
     DEFAULT_RETENTION_DAYS,
     MAX_DESCRIPTION_LENGTH,
     MAX_ERROR_MESSAGE_LENGTH,
-    MAX_RETENTION_DAYS,
     MAX_USER_AGENT_LENGTH,
-    MIN_RETENTION_DAYS,
 )
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.domain.outcome import Outcome
+from eneo.data_retention.constants import MAX_RETENTION_DAYS, MIN_RETENTION_DAYS
 
 
 class TestAuditLogCreation:

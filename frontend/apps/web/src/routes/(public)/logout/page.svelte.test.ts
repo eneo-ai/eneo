@@ -39,4 +39,29 @@ describe("logout page", () => {
     expect(document.querySelector("form")?.method).toBe("post");
     expect(document.querySelector("form")?.getAttribute("action")).toBe("/logout?/logout");
   });
+
+  test.each([
+    ["logout", "expired"],
+    ["switchOrganisation", "logout"],
+    ["clearCookies", "logout"]
+  ] as const)(
+    "a %s the server could not complete says so and retries it",
+    async (action, message) => {
+      render(LogoutPage, {
+        data: { message: "logout", signedIn: true },
+        form: { signOutFailed: action, message }
+      });
+      await expect
+        .element(page.getByRole("heading", { level: 1 }))
+        .toHaveTextContent("logout_unavailable");
+      await expect.element(page.getByText("logout_unavailable_description")).toBeVisible();
+      await expect
+        .element(page.getByRole("button", { name: "retry" }))
+        .toHaveAttribute("type", "submit");
+      const form = document.querySelector("form");
+      expect(form?.method).toBe("post");
+      expect(form?.getAttribute("action")).toBe(`/logout?/${action}`);
+      expect(form?.querySelector<HTMLInputElement>("input[name=message]")?.value).toBe(message);
+    }
+  );
 });

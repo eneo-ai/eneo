@@ -1,15 +1,11 @@
-import json
-import time
 import traceback
 from typing import Annotated, Optional, Protocol, cast
-from urllib.parse import urlparse
 from uuid import UUID
 
-import aiohttp
-import jwt
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.security import OAuth2PasswordRequestForm
+from fastapi.security.utils import get_authorization_scheme_param
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,7 +23,6 @@ from eneo.authentication.auth_dependencies import (
 from eneo.authentication.auth_models import (
     AccessToken,
     ApiKeyPermission,
-    OpenIdConnectLogin,
 )
 from eneo.authentication.endpoint_access import (
     Authentication,
@@ -39,11 +34,8 @@ from eneo.authentication.login_attempts import (
     clear_login_attempts,
     count_login_attempt,
 )
-from eneo.main import config
-from eneo.main.aiohttp_client import aiohttp_client
-from eneo.main.config import serialize_origin, validate_public_origin
 from eneo.main.container.container import Container
-from eneo.main.exceptions import AuthenticationException, FederatedLoginDenied
+from eneo.main.exceptions import AuthenticationException
 from eneo.main.logging import get_logger, redact_values
 from eneo.main.models import CursorPaginatedResponse
 from eneo.main.request_context import ensure_correlation_id, get_request_context
@@ -64,7 +56,7 @@ from eneo.users.password import (
     LocalPasswordPolicy,
     PasswordChangeError,
 )
-from eneo.users.password_lifecycle import password_status_for
+from eneo.users.password_lifecycle import PASSWORD_AUTH_METHOD, password_status_for
 from eneo.users.user import (
     EneoPasswordChangeCapabilityPublic,
     ExternalPasswordChangeCapabilityPublic,
@@ -98,148 +90,6 @@ class _ProvisioningService(Protocol):
     async def provision_user(self, *, access_token: str) -> None: ...
 
 
-async def _load_single_tenant_allowed_origins(
-    *,
-    container: Container,
-    tenant_id: UUID,
-    correlation_id: str,
-) -> set[str]:
-    origins: set[str] = set()
-
-    class _AllowedOriginRepoProtocol:
-        async def get_by_tenant(self, tenant_id: UUID): ...
-
-    get_allowed_origin_repo = getattr(container, "allowed_origin_repo", None)
-    if not callable(get_allowed_origin_repo):
-        return origins
-
-    try:
-        allowed_origin_repo = cast(
-            Optional[_AllowedOriginRepoProtocol], get_allowed_origin_repo()
-        )
-    except Exception as exc:
-        logger.warning(
-            "Failed to initialize allowed origin repository during single-tenant OIDC redirect validation",
-            extra={
-                "tenant_id": str(tenant_id),
-                "correlation_id": correlation_id,
-                "error": str(exc),
-            },
-        )
-        return origins
-
-    if allowed_origin_repo is None:
-        return origins
-
-    try:
-        allowed_origins = await allowed_origin_repo.get_by_tenant(tenant_id)
-    except Exception as exc:
-        logger.warning(
-            "Failed to load allowed origins during single-tenant OIDC redirect validation",
-            extra={
-                "tenant_id": str(tenant_id),
-                "correlation_id": correlation_id,
-                "error": str(exc),
-            },
-        )
-        return origins
-
-    if allowed_origins is None:
-        return origins
-
-    allowed_origins_list = cast(list[object], allowed_origins)
-    for allowed_origin in allowed_origins_list:
-        raw_origin = getattr(allowed_origin, "url", None)
-        if not raw_origin:
-            continue
-
-        try:
-            normalized_origin = validate_public_origin(raw_origin)
-        except ValueError:
-            logger.warning(
-                "Skipping invalid allowed origin during single-tenant OIDC redirect validation",
-                extra={
-                    "tenant_id": str(tenant_id),
-                    "correlation_id": correlation_id,
-                    "origin": raw_origin,
-                },
-            )
-            continue
-        if normalized_origin is None:
-            continue
-
-        origins.add(normalized_origin.rstrip("/"))
-
-    return origins
-
-
-async def _resolve_single_tenant_redirect_uri(
-    *,
-    container: Container,
-    settings: config.Settings,
-    redirect_uri: str,
-    request_origin: str | None,
-    correlation_id: str,
-) -> str:
-    if not request_origin:
-        return redirect_uri
-
-    try:
-        normalized_request_origin = validate_public_origin(request_origin)
-    except ValueError:
-        return redirect_uri
-    if normalized_request_origin is None:
-        return redirect_uri
-    normalized_request_origin = normalized_request_origin.rstrip("/")
-
-    parsed_redirect = urlparse(redirect_uri)
-    if not parsed_redirect.scheme or not parsed_redirect.hostname:
-        return redirect_uri
-
-    if normalized_request_origin == serialize_origin(redirect_uri):
-        return redirect_uri
-
-    if not settings.oidc_tenant_id:
-        return redirect_uri
-
-    try:
-        oidc_tenant_id = UUID(settings.oidc_tenant_id)
-    except ValueError:
-        logger.warning(
-            "OIDC_TENANT_ID is invalid - skipping allowed origin override for single-tenant OIDC redirect",
-            extra={
-                "correlation_id": correlation_id,
-                "oidc_tenant_id": settings.oidc_tenant_id,
-            },
-        )
-        return redirect_uri
-
-    allowed_origins = await _load_single_tenant_allowed_origins(
-        container=container,
-        tenant_id=oidc_tenant_id,
-        correlation_id=correlation_id,
-    )
-    if normalized_request_origin not in allowed_origins:
-        return redirect_uri
-
-    redirect_path = parsed_redirect.path or "/login/callback"
-    if not redirect_path.startswith("/"):
-        redirect_path = "/login/callback"
-
-    resolved_redirect_uri = f"{normalized_request_origin}{redirect_path}"
-    logger.info(
-        "Using allowed request origin for single-tenant OIDC redirect URI",
-        extra={
-            "tenant_id": str(oidc_tenant_id),
-            "correlation_id": correlation_id,
-            "request_origin": normalized_request_origin,
-            "redirect_uri": resolved_redirect_uri,
-        },
-    )
-
-    return resolved_redirect_uri
-
-
 # ``UserLogin`` validates the OAuth2 form, whose field for the email is
 # ``username``. Report locations the way FastAPI reports the form itself.
 _LOGIN_FORM_FIELDS = {"email": "username"}
@@ -254,12 +104,13 @@ def _login_form_location(loc: tuple[int | str, ...]) -> tuple[int | str, ...]:
 
 async def login_with_password(
     *, request: Request, email: str, password: str, container: Container
-) -> AccessToken:
+) -> UserInDB:
     """The password login flow: validation, the failed-attempt limiter, logging
     and the public error contract (401 invalid_credentials with
     attempts_remaining, 429 too_many_login_attempts with retry_after_seconds and
     Retry-After, 403 account states, 422 form locations, login_unavailable).
-    Every password login endpoint calls it."""
+    Every password login endpoint calls it, then starts the admitted user's
+    session (``BrowserSessionService.start``)."""
 
     correlation_id = ensure_correlation_id()
     # Trusted-proxy-aware, resolved once by RequestContextMiddleware; a raw
@@ -335,7 +186,7 @@ async def login_with_password(
     service = container.user_service()
 
     try:
-        result = await service.login(email, password, correlation_id, source_ip)
+        user = await service.login(email, password, correlation_id, source_ip)
 
         if attempt is not None:
             try:
@@ -357,7 +208,7 @@ async def login_with_password(
             },
         )
 
-        return result
+        return user
 
     except AuthenticationException:
         # Expected authentication failure - use warning level (not error)
@@ -445,371 +296,62 @@ async def login_with_password(
 async def user_login_with_email_and_password(
     request: Request,
     form_data: Annotated[OAuth2PasswordRequestForm, Depends(OAuth2PasswordRequestForm)],
-    container: Annotated[Container, Depends(get_container())],
+    # The session commits before the token leaves, so its first request is
+    # admitted.
+    container: Annotated[
+        Container, Depends(get_container(transaction_scope="function"))
+    ],
 ) -> AccessToken:
     """OAuth2 Login with comprehensive error handling and logging"""
-    return await login_with_password(
+    user = await login_with_password(
         request=request,
         email=form_data.username,
         password=form_data.password,
         container=container,
     )
+    # The token names its session, so signing out (POST /users/logout/)
+    # ends every copy of it.
+    return AccessToken(
+        access_token=await container.browser_session_service().start(
+            user, auth_method=PASSWORD_AUTH_METHOD
+        ),
+        token_type="bearer",
+    )
 
 
 @router.post(
-    "/login/openid-connect/mobilityguard/",
-    response_model=AccessToken,
-    description="Authenticate via OpenID Connect (MobilityGuard / generic OIDC provider).",
-    responses=responses.get_responses([400, 401, 403, 500, 502]),
+    "/logout/",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+    response_model=None,
+    name="Sign out",
+    description=(
+        "End the Eneo session the Bearer token names: a copy of the token "
+        "stops working at once. 204 means no session remains that this token "
+        "can use, also when it named none to end: no or an invalid token, a "
+        "token without a session, a provider token, or one expired for longer "
+        "than it was valid. A token without a session is not revoked and works "
+        "until it expires. 503 "
+        "`sign_out_unavailable` means the end is not confirmed: the session "
+        "may already have ended, or the token may still work. Keep the token "
+        "and retry; once the session has ended, a retry answers 204."
+    ),
+    responses=responses.get_responses([503]),
 )
 @endpoint_access(
     authentication=Authentication.PUBLIC,
     authorization=Authorization.PUBLIC,
-    reason="Login or provisioning entry point; the authentication service validates supplied credentials before granting a session.",
+    reason="Sign-out must also end a session whose token no longer authenticates (expired, restricted account); it reads only the Authorization header, never a cookie, so another site cannot sign a browser out.",
 )
-async def login_with_mobilityguard(
+async def sign_out(
     request: Request,
-    openid_connect_login: OpenIdConnectLogin,
-    container: Annotated[Container, Depends(get_container())],
-):
-    """OpenID Connect Login (generic OIDC provider)."""
-    correlation_id = ensure_correlation_id()
-    start_time = time.time()
-
-    logger.debug(
-        "OIDC login initiated",
-        extra={
-            "correlation_id": correlation_id,
-            "client_id": openid_connect_login.client_id,
-            "redirect_uri": openid_connect_login.redirect_uri,
-            "has_code": bool(openid_connect_login.code),
-            "has_code_verifier": bool(openid_connect_login.code_verifier),
-        },
-    )
-
-    settings = config.get_settings()
-
-    # Compute redirect_uri server-side (ignore frontend-provided value)
-    encryption_service = container.encryption_service()
-    from eneo.settings.credential_resolver import CredentialResolver
-
-    credential_resolver = CredentialResolver(
-        tenant=None,  # Single-tenant mode - no tenant context
-        settings=settings,
-        encryption_service=encryption_service,
-    )
-
-    try:
-        redirect_uri = credential_resolver.get_redirect_uri()
-    except ValueError as e:
-        logger.error(
-            "Failed to resolve redirect_uri",
-            extra={
-                "correlation_id": correlation_id,
-                "error": str(e),
-            },
-        )
-        raise HTTPException(
-            500,
-            "OIDC redirect_uri not configured. Set PUBLIC_ORIGIN environment variable.",
-        )
-
-    redirect_uri = await _resolve_single_tenant_redirect_uri(
-        container=container,
-        settings=settings,
-        redirect_uri=redirect_uri,
-        request_origin=request.headers.get("origin"),
-        correlation_id=correlation_id,
-    )
-
-    # Override frontend-provided redirect_uri with server-computed value (defense in depth)
-    if openid_connect_login.redirect_uri != redirect_uri:
-        logger.warning(
-            "Redirect URI mismatch - using server-configured value",
-            extra={
-                "correlation_id": correlation_id,
-                "frontend_provided": openid_connect_login.redirect_uri,
-                "server_computed": redirect_uri,
-            },
-        )
-        openid_connect_login.redirect_uri = redirect_uri
-
-    logger.info(
-        "OIDC login initiated (single-tenant)",
-        extra={
-            "correlation_id": correlation_id,
-            "redirect_uri": redirect_uri,
-            "source": "server-computed from PUBLIC_ORIGIN",
-        },
-    )
-
-    # Check required configuration
-    if not settings.oidc_discovery_endpoint:
-        logger.error(
-            "OIDC discovery endpoint not configured",
-            extra={"correlation_id": correlation_id, "provider": "oidc"},
-        )
-        raise HTTPException(500, "OIDC provider not properly configured")
-
-    if not settings.oidc_client_secret:
-        logger.error(
-            "OIDC client secret not configured",
-            extra={"correlation_id": correlation_id, "provider": "oidc"},
-        )
-        raise HTTPException(500, "OIDC provider not properly configured")
-
-    if not settings.oidc_tenant_id:
-        logger.warning(
-            "OIDC tenant ID not configured - new user creation will fail",
-            extra={"correlation_id": correlation_id, "provider": "oidc"},
-        )
-
-    try:
-        # Get the endpoints from discovery endpoint
-        discovery_start = time.time()
-        logger.debug(
-            f"Fetching OIDC discovery endpoint: {settings.oidc_discovery_endpoint}",
-            extra={"correlation_id": correlation_id, "provider": "oidc"},
-        )
-
-        async with aiohttp_client().get(settings.oidc_discovery_endpoint) as resp:
-            discovery_time = time.time() - discovery_start
-
-            if resp.status != 200:
-                response_text = await resp.text()
-                logger.error(
-                    f"OIDC discovery endpoint failed with status {resp.status}",
-                    extra={
-                        "correlation_id": correlation_id,
-                        "provider": "oidc",
-                        "status": resp.status,
-                        "response": response_text[:500],  # Truncate for logging
-                        "duration_ms": discovery_time * 1000,
-                    },
-                )
-                raise HTTPException(502, "Failed to fetch OIDC discovery endpoint")
-
-            endpoints = await resp.json()
-            logger.debug(
-                "OIDC discovery endpoint fetched successfully",
-                extra={
-                    "correlation_id": correlation_id,
-                    "provider": "oidc",
-                    "duration_ms": discovery_time * 1000,
-                    "token_endpoint": endpoints.get("token_endpoint"),
-                    "jwks_uri": endpoints.get("jwks_uri"),
-                    "userinfo_endpoint": endpoints.get("userinfo_endpoint"),
-                    "authorization_endpoint": endpoints.get("authorization_endpoint"),
-                },
-            )
-
-    except aiohttp.ClientError as e:
-        logger.error(
-            f"Network error fetching OIDC discovery endpoint: {str(e)}",
-            extra={
-                "correlation_id": correlation_id,
-                "provider": "oidc",
-                "error_type": type(e).__name__,
-                "error": str(e),
-            },
-        )
-        raise HTTPException(502, "Network error during OIDC authentication")
-
-    token_endpoint = endpoints["token_endpoint"]
-    jwks_endpoint = endpoints["jwks_uri"]
-    signing_algos = endpoints["id_token_signing_alg_values_supported"]
-
-    # Exchange code for a token
-    token_exchange_start = time.time()
-    logger.debug(
-        f"OIDC token exchange at: {token_endpoint}",
-        extra={
-            "correlation_id": correlation_id,
-            "provider": "oidc",
-            "client_id": openid_connect_login.client_id,
-            "grant_type": openid_connect_login.grant_type,
-            "scope": openid_connect_login.scope,
-        },
-    )
-
-    try:
-        async with aiohttp_client().post(
-            token_endpoint,
-            data=openid_connect_login.model_dump(),
-            auth=aiohttp.BasicAuth(
-                openid_connect_login.client_id,
-                settings.oidc_client_secret,
-            ),
-        ) as resp:
-            token_exchange_time = time.time() - token_exchange_start
-            response_text = await resp.text()
-
-            if resp.status != 200:
-                logger.error(
-                    f"OIDC token exchange failed with status {resp.status}",
-                    extra={
-                        "correlation_id": correlation_id,
-                        "provider": "oidc",
-                        "status": resp.status,
-                        "response": response_text[:500],  # Truncate sensitive data
-                        "duration_ms": token_exchange_time * 1000,
-                        "client_id": openid_connect_login.client_id,
-                    },
-                )
-                if resp.status == 401:
-                    raise HTTPException(
-                        401, "Invalid client credentials or authorization code"
-                    )
-                elif resp.status == 400:
-                    raise HTTPException(400, "Invalid token request - check parameters")
-                else:
-                    raise HTTPException(
-                        resp.status, f"OIDC token exchange failed: {resp.status}"
-                    )
-
-            try:
-                token_response = json.loads(response_text)
-            except json.JSONDecodeError:
-                logger.error(
-                    "OIDC token response is not valid JSON",
-                    extra={
-                        "correlation_id": correlation_id,
-                        "provider": "oidc",
-                        "response": response_text[:500],
-                    },
-                )
-                raise HTTPException(502, "Invalid OIDC token response format")
-
-            logger.debug(
-                "OIDC token exchange successful",
-                extra={
-                    "correlation_id": correlation_id,
-                    "provider": "oidc",
-                    "duration_ms": token_exchange_time * 1000,
-                    "has_id_token": "id_token" in token_response,
-                    "has_access_token": "access_token" in token_response,
-                    "has_refresh_token": "refresh_token" in token_response,
-                    "token_type": token_response.get("token_type"),
-                    "expires_in": token_response.get("expires_in"),
-                },
-            )
-
-    except aiohttp.ClientError as e:
-        logger.error(
-            f"Network error during OIDC token exchange: {str(e)}",
-            extra={
-                "correlation_id": correlation_id,
-                "provider": "oidc",
-                "error_type": type(e).__name__,
-                "error": str(e),
-            },
-        )
-        raise HTTPException(502, "Network error during OIDC token exchange")
-
-    if "id_token" not in token_response or "access_token" not in token_response:
-        logger.error(
-            "OIDC token response missing required fields",
-            extra={
-                "correlation_id": correlation_id,
-                "provider": "oidc",
-                "fields_received": list(token_response.keys()),
-                "fields_required": ["id_token", "access_token"],
-            },
-        )
-        raise HTTPException(
-            502, "Invalid OIDC token response - missing id_token or access_token"
-        )
-
-    id_token = token_response["id_token"]
-    access_token = token_response["access_token"]
-
-    # Get the jwks
-    jwks_start = time.time()
-    logger.debug(
-        f"Fetching JWKS from: {jwks_endpoint}", extra={"correlation_id": correlation_id}
-    )
-
-    try:
-        jwks_client = jwt.PyJWKClient(jwks_endpoint)
-        signing_key = jwks_client.get_signing_key_from_jwt(id_token)
-        jwks_time = time.time() - jwks_start
-
-        logger.debug(
-            "OIDC JWKS fetched and signing key extracted",
-            extra={
-                "correlation_id": correlation_id,
-                "duration_ms": jwks_time * 1000,
-                "key_id": signing_key.key_id
-                if hasattr(signing_key, "key_id")
-                else None,
-            },
-        )
-    except Exception as e:
-        logger.error(
-            f"Failed to get signing key from OIDC JWKS: {str(e)}",
-            extra={
-                "correlation_id": correlation_id,
-                "provider": "oidc",
-                "error_type": type(e).__name__,
-                "error": str(e),
-                "jwks_uri": jwks_endpoint,
-            },
-        )
-        raise HTTPException(502, "Failed to verify OIDC token signature")
-
-    # Sign in
-    user_service = container.user_service()
-
-    try:
-        service_start = time.time()
-        (
-            eneo_token,
-            was_federated,
-            user_in_db,
-        ) = await user_service.login_with_mobilityguard(
-            id_token=id_token,
-            access_token=access_token,
-            key=signing_key,
-            signing_algos=signing_algos,
-            correlation_id=correlation_id,  # Pass correlation ID to service
-        )
-        service_time = time.time() - service_start
-
-        total_time = time.time() - start_time
-        logger.info(
-            "OIDC login successful",
-            extra={
-                "correlation_id": correlation_id,
-                "was_federated": was_federated,
-                "user_id": str(user_in_db.id) if user_in_db else None,
-                "user_email": user_in_db.email if user_in_db else None,
-                "service_duration_ms": service_time * 1000,
-                "total_duration_ms": total_time * 1000,
-            },
-        )
-
-    except FederatedLoginDenied as exc:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=str(exc),
-            headers={"X-Correlation-ID": correlation_id},
-        ) from exc
-    except Exception as e:
-        total_time = time.time() - start_time
-        logger.error(
-            f"OIDC user service login failed: {str(e)}",
-            extra={
-                "correlation_id": correlation_id,
-                "provider": "oidc",
-                "error_type": type(e).__name__,
-                "error": str(e),
-                "traceback": traceback.format_exc(),
-                "total_duration_ms": total_time * 1000,
-            },
-        )
-        raise HTTPException(401, "OIDC authentication failed")
-
-    return eneo_token
+    # The deletion commits before the response says signed out.
+    container: Annotated[Container, Depends(get_container(with_transaction=False))],
+) -> Response:
+    scheme, token = get_authorization_scheme_param(request.headers.get("Authorization"))
+    if scheme.lower() == "bearer" and token:
+        await container.browser_session_service().revoke(token)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get(
@@ -1397,12 +939,22 @@ async def delete_user(
     )
 
 
+_ZITADEL_MIGRATION_GUIDE_URL = (
+    "https://docs.eneo.ai/guides/oidc-federation#migrate-from-the-zitadel-settings"
+)
+
+
 @router.post(
     "/provision/",
     status_code=201,
-    description="Provision a user from a Zitadel access token.",
+    description=(
+        "Deprecated, removed in the next release, together with the Zitadel "
+        "sign-in it served. People are created at their first OIDC sign-in, "
+        "under the organisation's provisioning setting."
+    ),
     response_model=None,
     responses=responses.get_responses([403]),
+    deprecated=True,
 )
 @endpoint_access(
     authentication=Authentication.PUBLIC,
@@ -1413,6 +965,12 @@ async def provision_user(
     user_provision: UserProvision,
     container: Annotated[Container, Depends(get_container())],
 ):
+    # Before the service lookup, so every call is logged; never the token.
+    logger.warning(
+        "POST /api/v1/users/provision/ is deprecated and will be removed in the "
+        "next release. People are created at their first OIDC sign-in instead. "
+        f"See {_ZITADEL_MIGRATION_GUIDE_URL}"
+    )
     user_service = cast(_ProvisioningService, container.user_creation_service())  # pyright: ignore[reportUnknownMemberType]  # not yet in container's typed interface
 
     await user_service.provision_user(access_token=user_provision.zitadel_token)

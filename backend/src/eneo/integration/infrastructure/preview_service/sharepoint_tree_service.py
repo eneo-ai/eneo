@@ -1,3 +1,4 @@
+import logging
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Optional, cast
 from uuid import UUID
 
@@ -22,6 +23,7 @@ from eneo.integration.infrastructure.preview_service.sharepoint_search import (
 )
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
+from eneo.observability.error_log import log_error
 
 if TYPE_CHECKING:
     pass
@@ -109,10 +111,12 @@ class SharePointTreeService:
                         extra={"site_id": site_id, "drive_id": actual_drive_id},
                     )
                 except Exception as e:
-                    logger.error(
-                        f"Failed to get drive ID: {type(e).__name__}: {str(e)}",
+                    log_error(
+                        logger,
+                        logging.ERROR,
+                        "Failed to get drive ID",
+                        error=e,
                         extra={"site_id": site_id},
-                        exc_info=True,
                     )
                     raise ValueError(
                         f"Failed to get drive ID for site {site_id}: {str(e)}"
@@ -154,14 +158,16 @@ class SharePointTreeService:
                     },
                 )
             except Exception as e:
-                logger.error(
-                    f"Failed to get folder items: {type(e).__name__}: {str(e)}",
+                log_error(
+                    logger,
+                    logging.ERROR,
+                    "Failed to get folder items",
+                    error=e,
                     extra={
                         "site_id": site_id,
                         "drive_id": actual_drive_id,
                         "folder_id": folder_id,
                     },
-                    exc_info=True,
                 )
                 raise ValueError(
                     f"Failed to fetch folder items for folder {folder_id}: {str(e)}"
@@ -230,8 +236,11 @@ class SharePointTreeService:
                         "Parent folder ID obtained", extra={"parent_id": parent_id}
                     )
                 except Exception as e:
-                    logger.warning(
-                        f"Could not get parent folder ID: {type(e).__name__}: {str(e)}",
+                    log_error(
+                        logger,
+                        logging.WARNING,
+                        "Could not get parent folder ID",
+                        error=e,
                         extra={"folder_id": folder_id},
                     )
 
@@ -366,10 +375,12 @@ class SharePointTreeService:
         try:
             definitions = await content_client.get_list_columns(drive_id)
         except Exception as e:  # noqa: BLE001 - enrichment only
-            logger.warning(
-                "Could not read library columns for drive %s while browsing: %s",
+            log_error(
+                logger,
+                logging.WARNING,
+                "Could not read library columns for drive %s while browsing",
                 drive_id,
-                e,
+                error=e,
             )
             return SharePointColumnCatalog()
         return SharePointColumnCatalog.from_graph(definitions)

@@ -19,17 +19,25 @@ from fastapi.testclient import TestClient
 from eneo.authentication import browser_session_router as routes
 from eneo.authentication.browser_session import safe_next_path, txn_cookie_name
 from eneo.authentication.browser_session_service import BrowserSessionService
-from eneo.authentication.federation_router import InitiateAuthResponse
+from eneo.authentication.federation_router import (
+    FederatedSignIn,
+    InitiateAuthResponse,
+)
+from eneo.authentication.oidc.transaction import code_challenge
 from eneo.main.config import Settings, get_settings, set_settings
 from eneo.main.container.container import Container
 from eneo.server.endpoint_routes import endpoint_routes
 from eneo.server.main import get_application
+from eneo.users.user import UserInDB
+from tests.fake_oidc_provider import FakeOidcProvider, install
+from tests.fixtures import TEST_USER
 from tests.unit.browser_session_test_utils import expected_set_cookie
 
 INITIATE = "/api/v1/auth/browser/initiate"
 CALLBACKS = ("/login/callback", "/auth/callback")
 SAME_ORIGIN = {"Sec-Fetch-Site": "same-origin"}
-TXN = "browser-transaction-sentinel"
+# Shaped like the transaction cookie: secrets.token_urlsafe(32).
+TXN = "browser-transaction-sentinel".ljust(43, "0")
 
 
 CASES = json.loads(
@@ -84,8 +92,9 @@ class Federation:
     client: TestClient
     initiate: AsyncMock
     callback: AsyncMock
-    # The callback's token, and the one the session store returns for it.
-    token: str
+    # The user the callback admits, and the token of the session the store
+    # starts for that user.
+    user: UserInDB
     start: AsyncMock
     session_token: str
 
@@ -100,14 +109,11 @@ def federation(monkeypatch: pytest.MonkeyPatch) -> Iterator[Federation]:
     )
     exp = int(time.time()) + 900
     secret = get_settings().jwt_secret
-    token = jwt.encode({"exp": exp}, secret, algorithm="HS256")
     session_token = jwt.encode({"exp": exp, "sid": "s" * 43}, secret, algorithm="HS256")
-    callback = AsyncMock(
-        return_value={"access_token": token, "frontend_state": "ignored"}
-    )
+    callback = AsyncMock(return_value=FederatedSignIn(TEST_USER, "ignored"))
     start = AsyncMock(return_value=session_token)
-    monkeypatch.setattr(routes, "initiate_auth", initiate, raising=False)
-    monkeypatch.setattr(routes, "auth_callback", callback, raising=False)
+    monkeypatch.setattr(routes, "initiate_federated_sign_in", initiate, raising=False)
+    monkeypatch.setattr(routes, "federated_sign_in", callback, raising=False)
     monkeypatch.setattr(BrowserSessionService, "start", start)
     app = get_application()
     for route in endpoint_routes(app.routes):
@@ -119,9 +125,21 @@ def federation(monkeypatch: pytest.MonkeyPatch) -> Iterator[Federation]:
                     )
     client = TestClient(app, base_url="https://beta.example.se", follow_redirects=False)
     try:
-        yield Federation(client, initiate, callback, token, start, session_token)
+        yield Federation(client, initiate, callback, TEST_USER, start, session_token)
     finally:
         client.close()
+
+
+def _provider(monkeypatch: pytest.MonkeyPatch) -> FakeOidcProvider:
+    from tests.unittests.authentication.test_federation_router import (
+        PROVIDER_ISSUER,
+    )
+
+    provider = FakeOidcProvider(
+        issuer=PROVIDER_ISSUER, client_id="client", client_secret="secret"
+    )
+    install(monkeypatch, provider)
+    return provider
 
 
 def detail_code(response) -> str:
@@ -147,6 +165,8 @@ def test_initiate_binds_transaction_and_registered_host(federation: Federation) 
     kwargs = federation.initiate.await_args.kwargs
     assert kwargs["redirect_uri_param"] == "https://beta.example.se/login/callback"
     assert kwargs["tenant"] == "city"
+    assert kwargs["channel"] == "browser"
+    assert kwargs["binding_challenge"] == code_challenge(transaction)
     assert (
         kwargs["state"]
         == hashlib.sha256(transaction.encode()).hexdigest() + ":/dashboard?tab=a"
@@ -230,8 +250,11 @@ def test_callback_sets_session_and_clears_transaction(
     for cookie in cookies:
         parsed.load(cookie)
     assert 0 < int(parsed["__Host-eneo_web"]["max-age"]) <= 900
-    # The cookie carries the callback's token once the store recorded it.
-    federation.start.assert_awaited_once_with(federation.token, replacing=None)
+    # The cookie carries the session the store started for the admitted
+    # user, which is no password session.
+    federation.start.assert_awaited_once_with(
+        federation.user, auth_method=None, replacing=None
+    )
     assert parsed["__Host-eneo_web"].value == federation.session_token
     assert any(
         cookie.startswith("__Host-eneo_web=")
@@ -245,6 +268,9 @@ def test_callback_sets_session_and_clears_transaction(
     assert response.headers["cache-control"] == "no-store"
     assert response.headers["referrer-policy"] == "no-referrer"
     federation.callback.assert_awaited_once()
+    (sent, _), kwargs = federation.callback.await_args
+    assert sent.binding_verifier == TXN
+    assert kwargs == {"channel": "browser"}
 
 
 @pytest.mark.parametrize(
@@ -557,24 +583,26 @@ def test_callback_http_failure_rolls_back_before_redirect(
     assert query["rawDetail"] == ["Public refusal"]
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("redis_failure", [False, True])
-async def test_real_federation_admits_one_callback_and_fails_closed(
-    monkeypatch: pytest.MonkeyPatch, browser_settings: Settings, redis_failure: bool
-) -> None:
-    import asyncio
-
-    from httpx import ASGITransport, AsyncClient
-
+async def _real_browser_callback(
+    monkeypatch: pytest.MonkeyPatch,
+    browser_settings: Settings,
+    provider: FakeOidcProvider,
+    redis_client,
+    paths: tuple[str, ...],
+):
+    """A cookie-flow sign-in started for TXN, its callback state and an app
+    whose ``paths`` run the real federation."""
     from eneo.authentication import federation_router
     from tests.unittests.authentication.test_federation_router import (
-        FailingStateRedis,
-        InterleavingRedis,
         _single_use_callback,
     )
 
     callback, container = await _single_use_callback(
-        monkeypatch, FailingStateRedis() if redis_failure else InterleavingRedis()
+        monkeypatch,
+        provider,
+        redis_client,
+        channel="browser",
+        binding_challenge=code_challenge(TXN),
     )
     browser_settings.jwt_secret = federation_router.get_settings().jwt_secret
     payload = jwt.decode(
@@ -585,18 +613,39 @@ async def test_real_federation_admits_one_callback_and_fails_closed(
     token = jwt.encode(
         {"exp": int(time.time()) + 900}, browser_settings.jwt_secret, algorithm="HS256"
     )
-    monkeypatch.setattr(
-        container._auth_service, "create_access_token_for_user", lambda user: token
-    )
     sessions = AsyncMock(spec=BrowserSessionService)
-    sessions.start.side_effect = lambda issued, replacing=None: issued
+    sessions.start.return_value = token
     container.browser_session_service = lambda: sessions
     app = get_application()
     for route in endpoint_routes(app.routes):
-        if route.path in CALLBACKS and route.dependant:
+        if route.path in paths and route.dependant:
             for dependency in route.dependant.dependencies:
                 if dependency.name == "container":
                     app.dependency_overrides[dependency.call] = lambda: container
+    return callback.code, state, app
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("redis_failure", [False, True])
+async def test_real_federation_admits_one_callback_and_fails_closed(
+    monkeypatch: pytest.MonkeyPatch, browser_settings: Settings, redis_failure: bool
+) -> None:
+    import asyncio
+
+    from httpx import ASGITransport, AsyncClient
+
+    from tests.unittests.authentication.test_federation_router import (
+        FailingStateRedis,
+        InterleavingRedis,
+    )
+
+    code, state, app = await _real_browser_callback(
+        monkeypatch,
+        browser_settings,
+        _provider(monkeypatch),
+        FailingStateRedis() if redis_failure else InterleavingRedis(),
+        CALLBACKS,
+    )
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="https://beta.example.se",
@@ -606,7 +655,7 @@ async def test_real_federation_admits_one_callback_and_fails_closed(
         async def attempt():
             return await client.get(
                 CALLBACKS[0],
-                params={"state": state, "code": callback.code},
+                params={"state": state, "code": code},
                 headers={
                     "Cookie": "__Host-eneo_oidc_txn=" + TXN,
                     "Sec-Fetch-Site": "cross-site",
@@ -617,10 +666,13 @@ async def test_real_federation_admits_one_callback_and_fails_closed(
         assert sum(r.headers["location"] == "/dashboard" for r in responses) == (
             0 if redis_failure else 1
         )
+        refusal = (
+            "oidc_login_unavailable" if redis_failure else "oidc_transaction_invalid"
+        )
         for response in responses:
             assert response.status_code == 303
             if response.headers["location"] != "/dashboard":
-                assert detail_code(response) == "http_400"
+                assert detail_code(response) == refusal
                 assert not any(
                     cookie.startswith("__Host-eneo_web=")
                     for cookie in response.headers.get_list("set-cookie")
@@ -630,7 +682,62 @@ async def test_real_federation_admits_one_callback_and_fails_closed(
             ) in response.headers.get_list("set-cookie")
         # Replaying after both responses cannot issue another session either.
         replay = await attempt()
-        assert detail_code(replay) == "http_400"
+        assert detail_code(replay) == refusal
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "verifier", [None, TXN], ids=["without-verifier", "with-the-cookie"]
+)
+async def test_the_api_callback_never_redeems_a_browser_sign_in(
+    monkeypatch: pytest.MonkeyPatch, browser_settings: Settings, verifier: str | None
+) -> None:
+    """Whoever holds the code, the state and even the cookie gets no bearer
+    token for a cookie-flow sign-in; the browser still finishes it."""
+    from httpx import ASGITransport, AsyncClient
+
+    from tests.unittests.authentication.test_federation_router import (
+        FakeRedis,
+        _token_exchanges,
+    )
+
+    provider = _provider(monkeypatch)
+    code, state, app = await _real_browser_callback(
+        monkeypatch,
+        browser_settings,
+        provider,
+        FakeRedis(),
+        ("/api/v1/auth/callback", CALLBACKS[0]),
+    )
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="https://beta.example.se",
+        follow_redirects=False,
+    ) as client:
+        refused = await client.post(
+            "/api/v1/auth/callback",
+            json={
+                "code": code,
+                "state": state,
+                **({"binding_verifier": verifier} if verifier else {}),
+            },
+        )
+        assert refused.status_code == 400
+        assert refused.json()["code"] == "oidc_transaction_invalid"
+        assert _token_exchanges(provider) == 0
+
+        signed_in = await client.get(
+            CALLBACKS[0],
+            params={"state": state, "code": code},
+            headers={
+                "Cookie": "__Host-eneo_oidc_txn=" + TXN,
+                "Sec-Fetch-Site": "cross-site",
+            },
+        )
+
+    assert signed_in.status_code == 303
+    assert signed_in.headers["location"] == "/dashboard"
+    assert _token_exchanges(provider) == 1
 
 
 @pytest.mark.asyncio
@@ -642,25 +749,15 @@ async def test_real_initiate_writes_state_only_for_registered_callback(
 
     from eneo.authentication import federation_router
     from tests.unittests.authentication.test_federation_router import (
-        FakeAioHttpClient,
         FakeRedis,
-        FakeResponse,
-        _single_use_callback,
+        _single_use_tenant,
     )
 
+    _provider(monkeypatch)
     redis = FakeRedis()
-    _, container = await _single_use_callback(monkeypatch, redis)
-    redis._store.clear()
-    tenant = container._tenant_repo._tenant
+    tenant, container = _single_use_tenant(monkeypatch, redis)
     tenant.federation_config["additional_redirect_uris"] = (
         ["https://beta.example.se" + registered_path] if registered_path else []
-    )
-    monkeypatch.setattr(
-        federation_router,
-        "aiohttp_client",
-        lambda: FakeAioHttpClient(
-            FakeResponse({"authorization_endpoint": "https://idp.example/authorize"})
-        ),
     )
     app = get_application()
     for route in endpoint_routes(app.routes):
@@ -686,7 +783,10 @@ async def test_real_initiate_writes_state_only_for_registered_callback(
             assert query["redirect_uri"] == [
                 "https://beta.example.se" + registered_path
             ]
-            assert len(redis._store) == 1
+            (stored,) = (json.loads(raw) for raw in redis._store.values())
+            cookie = client.cookies["__Host-eneo_oidc_txn"]
+            assert stored["channel"] == "browser"
+            assert stored["binding_challenge"] == code_challenge(cookie)
             state = jwt.decode(
                 query["state"][0],
                 federation_router.get_settings().jwt_secret,
@@ -698,3 +798,42 @@ async def test_real_initiate_writes_state_only_for_registered_callback(
                 ).hexdigest()
                 + ":/dashboard"
             )
+
+
+@pytest.mark.asyncio
+async def test_real_initiate_refuses_a_templated_issuer_without_a_cookie(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from httpx import ASGITransport, AsyncClient
+
+    from tests.unittests.authentication.test_federation_router import (
+        FakeRedis,
+        _single_use_tenant,
+    )
+
+    _provider(monkeypatch)
+    redis = FakeRedis()
+    tenant, container = _single_use_tenant(monkeypatch, redis)
+    tenant.federation_config["issuer"] = (
+        "https://login.microsoftonline.com/{tenantid}/v2.0"
+    )
+    tenant.federation_config["additional_redirect_uris"] = [
+        "https://beta.example.se/login/callback"
+    ]
+    app = get_application()
+    for route in endpoint_routes(app.routes):
+        if route.path == INITIATE and route.dependant:
+            for dependency in route.dependant.dependencies:
+                if dependency.name == "container":
+                    app.dependency_overrides[dependency.call] = lambda: container
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="https://beta.example.se"
+    ) as client:
+        response = await client.get(
+            INITIATE, params={"tenant": tenant.slug}, headers=SAME_ORIGIN
+        )
+
+    assert response.status_code == 303
+    assert detail_code(response) == "http_500"
+    assert "set-cookie" not in response.headers
+    assert redis._store == {}

@@ -1,11 +1,15 @@
 """Server-side browser sessions: one ``browser_sessions`` row per sign-in.
 
-The token a browser sign-in issues carries a ``sid`` claim naming its row.
-Canonical authentication (``UserService``) admits such a token, as the cookie
-or as Bearer, only while the row exists, matches the token's user and tenant
-and is unexpired. Sign-out deletes the row, so a copied token stops working
-at once. Tokens without ``sid`` (the token login, API, module and MCP tokens)
-are not browser sessions and keep their own lifetime.
+The token a browser sign-in issues carries a ``sid`` claim naming its row,
+and the row's stable, non-secret id as ``session_ref`` (tokens issued before
+rows had one carry the sid alone). Canonical authentication (``UserService``)
+admits such a token, as the cookie or as Bearer, only while the row exists,
+matches the token's user, tenant and ``session_ref`` and is unexpired.
+Sign-out deletes the row, so a copied token stops working at once. Every
+sign-in a person makes starts one (the cookie and token logins, password or
+OIDC). Tokens without ``sid`` (API, module and MCP tokens, and tokens
+issued before sign-ins started sessions) are not browser sessions and keep
+their own lifetime.
 
 The rows live in PostgreSQL, not Redis: a revoked session must stay revoked
 after a crash, and restoring a Redis snapshot can bring a deleted key back.
@@ -17,10 +21,10 @@ renew itself.
 
 Admission is checked when a request authenticates. Finite HTTP and SSE work
 admitted before sign-out may still finish. The job-event stream
-(``GET /jobs/events/``) stays open until the client leaves, so while it serves
-a browser session it re-runs authentication (``SessionWatch``) and ends at the
-token's expiry. A WebSocket keeps its user for as long as it is open, so a
-browser session's token cannot open one.
+(``GET /jobs/events/``) and the socket (``/ws``) stay open until the client
+leaves, so while they serve a browser session they re-run authentication
+(``SessionWatch``) and end at the token's expiry; the socket closes with 1008,
+or with 1013 for a retry when the store cannot answer the check.
 """
 
 import asyncio
@@ -29,11 +33,12 @@ import secrets
 import time
 from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import sqlalchemy as sa
 from dependency_injector import providers
-from fastapi import HTTPException, Request, status
+from fastapi import HTTPException, status
+from starlette.requests import HTTPConnection
 
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
@@ -41,11 +46,20 @@ from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication.auth_models import JWTPayload
 from eneo.authentication.auth_service import AuthService
 from eneo.authentication.browser_session import session_generation
+from eneo.database.affected_rows import affected_row_count
 from eneo.database.database import AsyncSession, sessionmanager
 from eneo.database.tables.browser_sessions_table import BrowserSessions
 from eneo.main.config import get_settings
-from eneo.main.exceptions import AuthenticationException
+from eneo.main.exceptions import (
+    AuthenticationException,
+    TenantSuspendedException,
+    UserInactiveException,
+)
 from eneo.main.logging import get_logger
+from eneo.users.password_lifecycle import (
+    PASSWORD_AUTH_METHOD,
+    PasswordChangeRequiredError,
+)
 
 if TYPE_CHECKING:
     from eneo.audit.application.audit_service import AuditService
@@ -55,13 +69,23 @@ logger = get_logger(__name__)
 
 # How often a response that stays open re-runs admission for its session.
 RECHECK_SECONDS = 30.0
-# How long sign-out or that check waits for the database, from taking a
-# connection to the commit, before it gives up (503, or the response ends).
+# How long sign-out, renewal, that check or a provider token's admission
+# (UserService) waits for the database, from taking a connection to the
+# commit, before it gives up (503, the response ends, or the request fails).
 STORE_DEADLINE_SECONDS = 5.0
+# What ``UserService.authenticate_payload`` raises when it refuses the token
+# for a route that streams to its own user. Any other error is a check that got
+# no answer.
+_REFUSALS = (
+    AuthenticationException,
+    UserInactiveException,
+    TenantSuspendedException,
+    PasswordChangeRequiredError,
+)
 
 
 @contextlib.asynccontextmanager
-async def _store_transaction(session: AsyncSession) -> AsyncGenerator[None]:
+async def store_transaction(session: AsyncSession) -> AsyncGenerator[None]:
     """A transaction on ``session`` that ends within ``STORE_DEADLINE_SECONDS``.
 
     The database itself gives up on a statement, a lock wait included, after
@@ -82,6 +106,19 @@ async def _store_transaction(session: AsyncSession) -> AsyncGenerator[None]:
         yield
 
 
+def _same_session(payload: JWTPayload) -> list[sa.ColumnElement[bool]]:
+    """The row a verified session token names: its sid, user and tenant,
+    and its stable id when the token carries one."""
+    conditions = [
+        BrowserSessions.sid == payload.sid,
+        BrowserSessions.user_id == payload.user_id,
+        BrowserSessions.tenant_id == payload.tenant_id,
+    ]
+    if payload.session_ref is not None:
+        conditions.append(BrowserSessions.id == payload.session_ref)
+    return conditions
+
+
 class BrowserSessionService:
     def __init__(
         self,
@@ -93,60 +130,61 @@ class BrowserSessionService:
         self.auth_service = auth_service
         self.audit_service = audit_service
 
-    async def start(self, token: str, replacing: str | None = None) -> str:
-        """Record a browser session for the token a sign-in just issued.
+    async def start(
+        self,
+        user: "UserInDB",
+        *,
+        auth_method: Literal["password"] | None,
+        replacing: str | None = None,
+    ) -> str:
+        """Start a browser session for ``user``, whom a sign-in just admitted.
 
-        Returns the token the session cookie carries: the same claims and
-        expiry with a new ``sid``. Runs in the sign-in's transaction, so the
-        cookie is sent only once the row is committed. The user's expired
-        rows are deleted here too, and so is the session ``replacing`` (the
-        cookie the browser signed in with) names: the new cookie replaces it,
-        so it would otherwise stay valid with nobody holding it.
+        Returns the session's token: ``user``'s claims, ``auth_method``
+        (``"password"`` for a password sign-in, for the password lifecycle
+        gate), a new ``sid`` and the new row's stable id as ``session_ref``.
+        Every token that names a session is minted here or by ``renew``.
+        Runs in the sign-in's transaction, so the token is handed out only
+        once the row is committed. The session ``replacing`` (the cookie the
+        browser signed in with) names is deleted too: the new cookie replaces
+        it, so it would otherwise stay valid with nobody holding it. Expired
+        rows are left to ``delete_expired``.
         """
+        token = self.auth_service.create_access_token_for_user(
+            user, auth_method=auth_method
+        )
         payload = self._verified_payload(token)
         replaced = self._named_session(replacing) if replacing else None
         if replaced is not None:
             await self.session.execute(
-                sa.delete(BrowserSessions).where(
-                    BrowserSessions.sid == replaced.sid,
-                    BrowserSessions.user_id == replaced.user_id,
-                    BrowserSessions.tenant_id == replaced.tenant_id,
-                )
+                sa.delete(BrowserSessions).where(*_same_session(replaced))
             )
-        # ponytail: a user who never signs in again keeps expired rows until
-        # the user is deleted; join a daily maintenance job if that grows.
-        await self.session.execute(
-            sa.delete(BrowserSessions).where(
-                BrowserSessions.user_id == payload.user_id,
-                BrowserSessions.expires_at <= datetime.now(timezone.utc),
-            )
-        )
         # 256 bits; JWTCreds.sid accepts exactly this form.
         sid = secrets.token_urlsafe(32)
-        await self.session.execute(
-            sa.insert(BrowserSessions).values(
+        session_ref = await self.session.scalar(
+            sa.insert(BrowserSessions)
+            .values(
                 sid=sid,
                 user_id=payload.user_id,
                 tenant_id=payload.tenant_id,
                 expires_at=datetime.fromtimestamp(payload.exp, timezone.utc),
             )
+            .returning(BrowserSessions.id)
         )
-        return self.auth_service.add_session_id(token, sid)
+        return self.auth_service.add_session_id(token, sid, session_ref)
 
     async def admit(self, payload: JWTPayload) -> None:
         """Refuse a verified token whose browser session has ended.
 
-        The row must exist, belong to the token's user and tenant and be
-        unexpired. Independent of ``BROWSER_SESSION_ENABLED``: a ``sid`` token
-        presented as Bearer is checked all the same.
+        The row must exist, belong to the token's user and tenant, be the one
+        its ``session_ref`` names when it carries one, and be unexpired.
+        Independent of ``BROWSER_SESSION_ENABLED``: a ``sid`` token presented
+        as Bearer is checked all the same.
         """
         if (
             payload.sid is None
             or await self.session.scalar(
                 sa.select(BrowserSessions.sid).where(
-                    BrowserSessions.sid == payload.sid,
-                    BrowserSessions.user_id == payload.user_id,
-                    BrowserSessions.tenant_id == payload.tenant_id,
+                    *_same_session(payload),
                     BrowserSessions.expires_at > datetime.now(timezone.utc),
                 )
             )
@@ -154,35 +192,81 @@ class BrowserSessionService:
         ):
             raise AuthenticationException("Could not validate token credentials.")
 
-    async def renew(self, current: JWTPayload, token: str, user: "UserInDB") -> str:
-        """Renew the browser session ``current`` names with ``token``.
+    async def delete_expired(self) -> int:
+        """Delete every expired session, in the caller's transaction, and
+        return how many there were. An expired row admits nothing, so this
+        only keeps the table small."""
+        result = await self.session.execute(
+            sa.delete(BrowserSessions).where(
+                BrowserSessions.expires_at <= datetime.now(timezone.utc)
+            )
+        )
+        return affected_row_count(result)
 
-        ``token`` was just issued to ``user`` to replace the admitted session
-        token ``current``. Returns it carrying the same ``sid``, so the
-        session (and its sign-out) stays the same one. The session's row moves
-        to the new token's expiry unless another renewal already moved it
-        later (renewals can be recorded in another order than they were
-        issued), and the renewal is audited, in one transaction that commits
-        within ``STORE_DEADLINE_SECONDS``, before the caller sets the cookie.
-        A session that has ended meanwhile (its row is gone or expired) is
-        refused, and nothing is written.
+    async def renew(self, token: str, user: "UserInDB") -> str:
+        """Renew the browser session the admitted session ``token`` names.
+
+        ``user`` is the account authentication admitted ``token`` for.
+        Returns a new token for the same session, valid for
+        ``JWT_EXPIRY_TIME`` again but never past ``BROWSER_SESSION_MAX_AGE``
+        after the original sign-in. It carries exactly these claims from
+        ``token``: the session (``sid``, and ``session_ref``, absent for a
+        session started before sessions had one), so the session and its
+        sign-out stay the same one; the sign-in time (``auth_time``, the
+        token's ``iat`` for tokens issued before it existed); and a password
+        sign-in's ``auth_method``, for the password lifecycle gate. The rest
+        is minted again for ``user`` as it is now. A claim a sign-in adds is
+        lost on the first renewal unless it is carried here.
+
+        The session's row moves to the new token's expiry unless another
+        renewal already moved it later (renewals can be recorded in another
+        order than they were issued), and the renewal is audited, in one
+        transaction that commits within ``STORE_DEADLINE_SECONDS``, before
+        the caller sets the cookie. A session that has ended meanwhile (its
+        row is gone or expired) is refused, and nothing is written.
 
         Commits on its own: the caller's session must have no transaction open.
         """
-        if current.sid is None:
+        settings = get_settings()
+        current, claims = self._verified_claims(token)
+        if (
+            current.sid is None
+            or current.user_id != user.id
+            or current.tenant_id != user.tenant_id
+        ):
             raise AuthenticationException("No browser session")
-        renewed = self.auth_service.add_session_id(token, current.sid)
+        signed_in_at = claims.get("auth_time", current.iat)
+        if isinstance(signed_in_at, bool) or not isinstance(signed_in_at, int | float):
+            raise AuthenticationException("Could not validate token credentials.")
+        # Renewal never moves the original sign-in, so a captured cookie still
+        # ends BROWSER_SESSION_MAX_AGE after it.
+        seconds_left = (
+            signed_in_at + settings.browser_session_max_age * 60 - time.time()
+        )
+        if seconds_left <= 0:
+            raise AuthenticationException("The session has reached its maximum age")
+        issued = self.auth_service.create_access_token_for_user(
+            user,
+            expires_in=min(settings.jwt_expiry_time, seconds_left / 60),
+            extra_claims={"auth_time": signed_in_at},
+            auth_method=(
+                PASSWORD_AUTH_METHOD
+                if current.auth_method == PASSWORD_AUTH_METHOD
+                else None
+            ),
+        )
+        renewed = self.auth_service.add_session_id(
+            issued, current.sid, current.session_ref
+        )
         expires_at = datetime.fromtimestamp(
             self._verified_payload(renewed).exp, timezone.utc
         )
         try:
-            async with _store_transaction(self.session):
+            async with store_transaction(self.session):
                 moved = await self.session.scalar(
                     sa.update(BrowserSessions)
                     .where(
-                        BrowserSessions.sid == current.sid,
-                        BrowserSessions.user_id == current.user_id,
-                        BrowserSessions.tenant_id == current.tenant_id,
+                        *_same_session(current),
                         BrowserSessions.expires_at > datetime.now(timezone.utc),
                     )
                     .values(
@@ -235,8 +319,8 @@ class BrowserSessionService:
             ) from None
         return renewed
 
-    async def end(self, token: str) -> None:
-        """Delete the session a sign-out's cookie names.
+    async def revoke(self, token: str) -> None:
+        """Delete the session a sign-out's token names.
 
         Only a token that meets the local-token contract (signature, issuer,
         audience, typed claims) names a session; any other cookie, or a token
@@ -256,13 +340,9 @@ class BrowserSessionService:
         if payload is None:
             return
         try:
-            async with _store_transaction(self.session):
+            async with store_transaction(self.session):
                 await self.session.execute(
-                    sa.delete(BrowserSessions).where(
-                        BrowserSessions.sid == payload.sid,
-                        BrowserSessions.user_id == payload.user_id,
-                        BrowserSessions.tenant_id == payload.tenant_id,
-                    )
+                    sa.delete(BrowserSessions).where(*_same_session(payload))
                 )
         except Exception as exc:
             logger.error(
@@ -300,15 +380,19 @@ class BrowserSessionService:
         return payload
 
     def _verified_payload(self, token: str, *, verify_exp: bool = True) -> JWTPayload:
+        return self._verified_claims(token, verify_exp=verify_exp)[0]
+
+    def _verified_claims(
+        self, token: str, *, verify_exp: bool = True
+    ) -> tuple[JWTPayload, dict[str, object]]:
         settings = get_settings()
-        payload, _ = self.auth_service.get_jwt_payload_with_claims(
+        return self.auth_service.get_jwt_payload_with_claims(
             token,
             key=str(settings.jwt_secret),
             aud=settings.jwt_audience,
             algs=[settings.jwt_algorithm],
             verify_exp=verify_exp,
         )
-        return payload
 
 
 class SessionWatch:
@@ -320,10 +404,12 @@ class SessionWatch:
     (``UserService.authenticate_payload``), in a database session of its own
     held only for that check, so what refuses a new request ends the response
     too: sign-out, a password change, signing out everywhere, a deactivated
-    account or a suspended tenant. In between, the answer is the clock against
-    the token's expiry. A refusal, the expiry or a check that fails or does
-    not finish within ``STORE_DEADLINE_SECONDS`` ends the response, and the
-    client reconnects through ordinary authentication.
+    account, a suspended tenant or a required password change. In between,
+    the answer is the clock against the token's expiry. A refusal or the
+    expiry ends the response for good. A check that fails or does not finish
+    within ``STORE_DEADLINE_SECONDS`` ends it too, but proves nothing about
+    the session: ``unanswered`` says so, and the client reconnects through
+    ordinary authentication.
 
     The expiry is the admitted token's, not the row's: a renewal issues a new
     token for the session, and a response opened with the old one still ends
@@ -331,10 +417,12 @@ class SessionWatch:
     serves past its own ``exp``.
     """
 
-    def __init__(self, payload: JWTPayload, request: Request):
+    def __init__(self, payload: JWTPayload, connection: HTTPConnection):
         self._payload = payload
-        self._request = request
+        self._connection = connection
         self._admitted = True
+        # Set when a check ended the response without an answer.
+        self.unanswered = False
         # The request has just authenticated.
         self._next_check = time.monotonic() + RECHECK_SECONDS
 
@@ -352,13 +440,13 @@ class SessionWatch:
         from eneo.main.container.request_container import request_container
 
         try:
-            async with sessionmanager.session() as session, _store_transaction(session):
+            async with sessionmanager.session() as session, store_transaction(session):
                 container = request_container(session=providers.Object(session))
                 await container.user_service().authenticate_payload(
-                    self._payload, self._request
+                    self._payload, self._connection
                 )
             return True
-        except AuthenticationException:
+        except _REFUSALS:
             return False
         except Exception as exc:
             logger.warning(
@@ -369,4 +457,5 @@ class SessionWatch:
                     "error_type": type(exc).__name__,
                 },
             )
+            self.unanswered = True
             return False

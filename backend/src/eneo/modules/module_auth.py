@@ -27,6 +27,7 @@ from eneo.authentication.auth_models import (
     ApiKeyType,
     ApiKeyV2,
     ApiKeyV2InDB,
+    CredentialFacts,
     JWTPayload,
     compute_effective_state,
 )
@@ -327,15 +328,17 @@ class ModuleAuthBroker:
 
         ticket = secrets.token_urlsafe(32)
         ttl = settings.module_auth_ticket_ttl_seconds
-        payload = json.dumps(
-            {
-                "user_id": str(user.id),
-                "tenant_id": str(user.tenant_id),
-                "module_id": str(module.id),
-                "token_version": 2,
-                "credential_version": user.credential_version,
-            }
-        )
+        handoff: dict[str, object] = {
+            "user_id": str(user.id),
+            "tenant_id": str(user.tenant_id),
+            "module_id": str(module.id),
+            "token_version": 2,
+            "credential_version": user.credential_version,
+        }
+        # The browser session the handoff starts from, for the module token.
+        if user.credential is not None and user.credential.session_ref is not None:
+            handoff["session_ref"] = str(user.credential.session_ref)
+        payload = json.dumps(handoff)
         await self.redis_client.setex(_ticket_redis_key(ticket), ttl, payload)
 
         await self.audit_service.log_async(
@@ -379,6 +382,12 @@ class ModuleAuthBroker:
         # It must not mint a new identity-bound token after the cutover.
         if data.get("token_version") != 2:
             raise AuthenticationException("Invalid or expired module ticket.")
+        # A ticket issued outside a browser session, or before tickets named
+        # one, carries no session_ref; one that names it must name a session.
+        try:
+            session_ref = UUID(data["session_ref"]) if "session_ref" in data else None
+        except (TypeError, ValueError, AttributeError) as exc:
+            raise AuthenticationException("Invalid or expired module ticket.") from exc
         module = await self.module_repo.get_module(UUID(data["module_id"]))
         tenant_id = UUID(data["tenant_id"])
         module_id = UUID(data["module_id"])
@@ -430,6 +439,7 @@ class ModuleAuthBroker:
             extra_claims={
                 MODULE_HANDOFF_AT_CLAIM: handoff_at,
             },
+            derived_from=CredentialFacts(kind="derived", session_ref=session_ref),
         )
 
         await self.audit_service.log_async(
@@ -511,6 +521,8 @@ class ModuleAuthBroker:
             ) from exc
 
         expires_in_seconds, session_expires_at = self._token_window(handoff_at)
+        # The session the presented token signed (resource authentication
+        # read it), never the session row's latest.
         access_token = self.auth_service.create_access_token_for_user(
             user,
             audience=module_audience(module.name),
@@ -518,6 +530,7 @@ class ModuleAuthBroker:
             extra_claims={
                 MODULE_HANDOFF_AT_CLAIM: handoff_at,
             },
+            derived_from=user.credential,
         )
 
         await self.audit_service.log_async(
@@ -614,6 +627,9 @@ class ModuleAuthBroker:
 
         await self.user_service.validate_active_identity(
             user, correlation_id="module-resource-auth"
+        )
+        user.credential = CredentialFacts(
+            kind="derived", session_ref=claims.session_ref
         )
         return ModuleRequestPrincipal(
             module=module, user=user, api_key=api_key, access_token=access_token

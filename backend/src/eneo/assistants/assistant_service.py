@@ -74,7 +74,6 @@ from eneo.internal_mcp import (
     resolve_internal_mcp_availability,
 )
 from eneo.internal_mcp.builtin_tools import with_live_builtin_tools
-from eneo.logging.logging import LoggingDetails
 from eneo.main.exceptions import (
     BadRequestException,
     FileTooLargeException,
@@ -549,7 +548,10 @@ class AssistantService:
         if not is_builtin_provider(server.http_auth_type):
             return server
         token = self.auth_service.create_scoped_mcp_token(
-            self.user, assistant_id=assistant_id, mcp_server_id=server.id
+            self.user,
+            assistant_id=assistant_id,
+            mcp_server_id=server.id,
+            derived_from=self.user.credential,
         )
         authenticated = copy.copy(server)
         authenticated.http_auth_config_schema = {"token": token}
@@ -3381,8 +3383,8 @@ class AssistantService:
                         completion_model=cast("AICompletionModel", completion_model),
                         info_blob_chunks=reference_chunks,
                         generated_files=generated_files,
-                        logging_details=response.extended_logging
-                        or LoggingDetails(model_kwargs={}),
+                        logging_details=response.extended_logging,
+                        history_revision=session.history_revision,
                         tool_calls=tool_calls if tool_calls else None,
                         mcp_tool_references=filter_mcp_tool_references(
                             response_string=response_string,
@@ -3624,8 +3626,8 @@ class AssistantService:
                 generated_files=generated_files,
                 completion_model=cast("AICompletionModel", completion_model),
                 info_blob_chunks=reference_chunks,
-                logging_details=response.extended_logging
-                or LoggingDetails(model_kwargs={}),
+                logging_details=response.extended_logging,
+                history_revision=session.history_revision,
                 tool_calls=non_streaming_tool_calls or None,
                 mcp_tool_references=non_streaming_mcp_refs or None,
                 reasoning=final_reasoning,
@@ -4117,6 +4119,7 @@ class AssistantService:
                         session.id if prepared.authoring_flow_id is not None else None
                     ),
                     table_tools=table_tools_attached,
+                    derived_from=self.user.credential,
                 )
             return scoped_token
 

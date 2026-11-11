@@ -4,6 +4,8 @@ import asyncio
 import base64
 import hashlib
 import json
+import logging
+from contextlib import suppress
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 from uuid import uuid4
@@ -45,6 +47,7 @@ from eneo.mcp_servers.infrastructure.tool_approval import (
 from eneo.model_providers.infrastructure.litellm_transport import (
     PROVIDER_UNREACHABLE,
 )
+from tests.log_capture import CHAIN, SENTINEL, chained_error, emitted, logged_errors
 
 
 class _AsyncChunkStream:
@@ -715,6 +718,55 @@ async def test_provider_connectivity_failure_returns_unreachable_error(
     span.record_exception.assert_called_once()
 
 
+def _unreachable_error() -> RuntimeError:
+    """A provider that cannot be reached, its errors quoting `SENTINEL`."""
+    try:
+        try:
+            raise httpx.ConnectError(f"cannot reach {SENTINEL}")
+        except httpx.ConnectError as cause:
+            raise RuntimeError(f"failed on {SENTINEL}") from cause
+    except RuntimeError as error:
+        return error
+
+
+class _FailingStream:
+    def __aiter__(self) -> "_FailingStream":
+        return self
+
+    async def __anext__(self) -> object:
+        raise chained_error()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "path",
+    ["completion", "provider_unavailable", "stream_preparation", "stream_iteration"],
+)
+async def test_a_failed_response_logs_the_kind_of_error_not_its_text(path: str):
+    """A provider's error can echo the prompt it was sent. Mutant: one of the
+    failure paths logs it with its message or a traceback that ends in it."""
+    adapter = _make_completion_adapter()
+    error = _unreachable_error() if path == "provider_unavailable" else chained_error()
+
+    with (
+        emitted(tenant_model_adapter.logger) as records,
+        patch(
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+            AsyncMock(side_effect=error),
+        ),
+        suppress(Exception),
+    ):
+        if path == "stream_preparation":
+            await adapter.prepare_streaming(context=SimpleNamespace(), model_kwargs={})
+        elif path == "stream_iteration":
+            await _collect(adapter, _FailingStream())
+        else:
+            await adapter.get_response(context=SimpleNamespace(), model_kwargs={})
+
+    chain = "RuntimeError <- ConnectError" if path == "provider_unavailable" else CHAIN
+    assert logged_errors(records, chain), [record.getMessage() for record in records]
+
+
 @pytest.mark.asyncio
 async def test_wrapped_provider_failure_returns_unreachable_error():
     adapter = _make_completion_adapter()
@@ -847,6 +899,34 @@ async def test_non_streaming_supports_multiple_tool_rounds():
     assert {ref.uri for ref in completion.mcp_tool_references} == {
         "https://example.test/shared"
     }
+
+
+async def test_non_streaming_never_logs_the_answer_or_its_reasoning(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Retention can remove a conversation; a log line would keep a copy of it."""
+    adapter = _make_completion_adapter()
+    monkeypatch.setattr(
+        tenant_model_adapter, "logger", logging.getLogger("eneo.test.model_adapter")
+    )
+    caplog.set_level(logging.DEBUG, logger="eneo.test.model_adapter")
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(
+            return_value=_response(
+                content="private answer", reasoning_content="private reasoning"
+            )
+        ),
+    ):
+        completion = await adapter.get_response(
+            context=SimpleNamespace(), model_kwargs={}
+        )
+
+    assert completion.text == "private answer"
+    assert caplog.records
+    assert "private answer" not in caplog.text
+    assert "private reasoning" not in caplog.text
 
 
 class _ErrorSecondRoundMCPProxy(_FakeMCPProxy):

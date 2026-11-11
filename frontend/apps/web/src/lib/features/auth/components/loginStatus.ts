@@ -26,32 +26,6 @@ export function resolveLoginStatus(message: string | null): LoginStatus | null {
       return { tone: "warning", description: m.password_changed_sessions_remain() };
     case "expired":
       return { tone: "warning", description: m.session_expired_please_login_again() };
-    case "mobilityguard_login_error":
-      return {
-        tone: "error",
-        title: m.authentication_failed(),
-        description: m.authentication_failed_details(),
-        reasons: [
-          m.invalid_credentials(),
-          m.account_restrictions(),
-          m.system_configuration_issues()
-        ],
-        footer: m.try_again_contact_admin()
-      };
-    case "mobilityguard_oauth_error":
-      return {
-        tone: "error",
-        title: m.authentication_provider_error(),
-        description: m.authentication_service_error()
-      };
-    case "mobilityguard_access_denied":
-      return { tone: "error", title: m.access_denied(), description: m.access_denied_eneo() };
-    case "mobilityguard_invalid_request":
-      return {
-        tone: "warning",
-        title: m.invalid_request(),
-        description: m.invalid_login_request()
-      };
     case "no_code_received":
     case "no_state_received":
       return {

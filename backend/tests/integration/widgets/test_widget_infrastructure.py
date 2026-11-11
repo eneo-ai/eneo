@@ -37,7 +37,10 @@ from eneo.widgets.domain.widget_template import WidgetTemplate
 from eneo.widgets.infrastructure.widget_overview_repo_impl import WidgetOverviewRepoImpl
 from eneo.widgets.infrastructure.widget_repo_impl import WidgetRepoImpl
 from eneo.widgets.infrastructure.widget_usage_repo_impl import WidgetUsageRepoImpl
-from tests.integration.flows.statement_capture_support import capture_queries
+from tests.integration.flows.statement_capture_support import (
+    capture_queries,
+    without_copy_source_probe,
+)
 
 
 async def _load_widget(widget_id: str):
@@ -124,7 +127,7 @@ async def test_history_metadata_is_scoped_to_widget_and_visitor(
             query.sql
             for query in queries
             if any(
-                table in query.sql
+                table in without_copy_source_probe(query.sql)
                 for table in (
                     "FROM questions",
                     "JOIN questions",

@@ -11,7 +11,6 @@ import hashlib
 import hmac
 import re
 import secrets
-import time
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from typing import Annotated, Any, cast
@@ -27,7 +26,6 @@ from starlette.types import Message, Receive, Scope, Send
 
 from eneo.authentication.auth_dependencies import get_current_active_user
 from eneo.authentication.auth_models import BrowserSessionExtension
-from eneo.authentication.auth_service import AuthService
 from eneo.authentication.browser_session import (
     SAFE_METHODS,
     SESSION_EXPIRES_IN_HEADER,
@@ -53,9 +51,11 @@ from eneo.authentication.endpoint_access import (
 )
 from eneo.authentication.federation_router import (
     CallbackRequest,
-    auth_callback,
-    initiate_auth,
+    federated_sign_in,
+    initiate_federated_sign_in,
 )
+from eneo.authentication.oidc.errors import OidcSignInError
+from eneo.authentication.oidc.transaction import code_challenge
 from eneo.main.config import (
     LOOPBACK_HOSTS,
     get_settings,
@@ -68,6 +68,7 @@ from eneo.main.request_context import ensure_correlation_id
 from eneo.server.dependencies.container import get_container
 from eneo.server.exception_handlers import http_exception_response
 from eneo.server.protocol import responses
+from eneo.users.identity_binding_repo import IdentityConflictError
 from eneo.users.password_lifecycle import PASSWORD_AUTH_METHOD
 from eneo.users.user import UserInDB
 from eneo.users.user_router import login_with_password
@@ -139,14 +140,16 @@ async def create_browser_session(
         Container, Depends(get_container(transaction_scope="function"))
     ],
 ) -> Response:
-    token = await login_with_password(
+    user = await login_with_password(
         request=request,
         email=form_data.username,
         password=form_data.password,
         container=container,
     )
     session_token = await container.browser_session_service().start(
-        token.access_token, replacing=session_cookie(request, get_settings())
+        user,
+        auth_method=PASSWORD_AUTH_METHOD,
+        replacing=session_cookie(request, get_settings()),
     )
     response = Response(status_code=status.HTTP_204_NO_CONTENT)
     # A new token every time, never one the request brought (session fixation).
@@ -164,9 +167,10 @@ async def create_browser_session(
         "End the browser's Eneo session on the server and clear its cookies: "
         "a copy of the session token stops working at once. The identity "
         "provider's session stays. With `Eneo-Session-Generation`, a session "
-        "other than the one named is left in place (401). When the session "
-        "cannot be ended, nothing is cleared (503). Only for requests from the "
-        "site's own pages."
+        "other than the one named is left in place (401). When the end cannot "
+        "be confirmed, nothing is cleared (503): the session may already have "
+        "ended, and a retry with the same cookie completes the sign-out. Only "
+        "for requests from the site's own pages."
     ),
     responses=responses.get_responses([401, 403, 404, 503]),
 )
@@ -184,7 +188,7 @@ async def end_browser_session(
     token = session_cookie(request, settings)
     if token is not None:
         refuse_superseded_session(request, token)
-        await container.browser_session_service().end(token)
+        await container.browser_session_service().revoke(token)
     response = Response(status_code=status.HTTP_204_NO_CONTENT)
     clear_session_cookies(response, settings=settings)
     return response
@@ -266,39 +270,11 @@ async def extend_browser_session(
     ],
 ) -> BrowserSessionExtension:
     settings = get_settings()
-    user = container.user()
-    auth_service = AuthService()
-    current, claims = auth_service.get_jwt_payload_with_claims(
-        _admitted_session_token(request),
-        key=str(settings.jwt_secret),
-        aud=settings.jwt_audience,
-        algs=[settings.jwt_algorithm],
-    )
-    if current.user_id != user.id or current.tenant_id != user.tenant_id:
-        raise AuthenticationException("No browser session")
-    # Tokens issued before auth_time existed started at their iat.
-    signed_in_at = claims.get("auth_time", current.iat)
-    if isinstance(signed_in_at, bool) or not isinstance(signed_in_at, int | float):
-        raise AuthenticationException("Could not validate token credentials.")
-    # Renewal never moves the original sign-in, so a captured cookie still
-    # ends BROWSER_SESSION_MAX_AGE after it.
-    seconds_left = signed_in_at + settings.browser_session_max_age * 60 - time.time()
-    if seconds_left <= 0:
-        raise AuthenticationException("The session has reached its maximum age")
-    issued = auth_service.create_access_token_for_user(
-        user,
-        expires_in=min(settings.jwt_expiry_time, seconds_left / 60),
-        extra_claims={"auth_time": signed_in_at},
-        # The password lifecycle gate applies to password sessions only.
-        auth_method=(
-            PASSWORD_AUTH_METHOD
-            if current.auth_method == PASSWORD_AUTH_METHOD
-            else None
-        ),
-    )
     # The same session, so sign-out still ends it. A renewal that cannot be
     # recorded or audited fails instead, and the cookie stays as it was.
-    token = await container.browser_session_service().renew(current, issued, user)
+    token = await container.browser_session_service().renew(
+        _admitted_session_token(request), container.user()
+    )
     set_session_cookie(response, token, settings=settings)
     return BrowserSessionExtension(
         generation=session_generation(token),
@@ -333,8 +309,9 @@ def _http_federation_failure(
     *,
     next_path: str | None = None,
     raw_detail: str | None = None,
+    detail_code: str | None = None,
 ) -> RedirectResponse:
-    code = {403: "access_denied", 401: "unauthorized"}.get(
+    code = detail_code or {403: "access_denied", 401: "unauthorized"}.get(
         status_code, f"http_{status_code}"
     )
     return _federation_failure(
@@ -386,12 +363,15 @@ async def initiate_browser_federation(
     for path in ("/login/callback", "/auth/callback"):
         metadata = Response()
         try:
-            result = await initiate_auth(
-                response=metadata,
-                container=container,
+            result = await initiate_federated_sign_in(
+                metadata,
+                container,
                 tenant=tenant,
                 state=binding,
                 redirect_uri_param=origin + path,
+                channel="browser",
+                # Only the browser holding the cookie can redeem the sign-in.
+                binding_challenge=code_challenge(transaction),
             )
         except HTTPException as exc:
             if exc.status_code == 400 and exc.detail.startswith(
@@ -401,6 +381,8 @@ async def initiate_browser_federation(
             return _http_federation_failure(
                 exc.status_code, (exc.headers or {}).get("X-Correlation-ID")
             )
+        except OidcSignInError as exc:
+            return _federation_failure(exc.code, ensure_correlation_id())
         response = RedirectResponse(
             result.authorization_url,
             status_code=303,
@@ -421,6 +403,8 @@ async def initiate_browser_federation(
 class _CallbackFailure:
     next_path: str | None = None
     public_detail: str | None = None
+    # A typed sign-in refusal's string code, which names it better than its status.
+    detail_code: str | None = None
 
 
 class _BrowserCallbackRoute(APIRoute):
@@ -453,6 +437,7 @@ class _BrowserCallbackRoute(APIRoute):
                         headers.get("X-Correlation-ID"),
                         next_path=diagnostics.next_path,
                         raw_detail=diagnostics.public_detail,
+                        detail_code=diagnostics.detail_code,
                     )
                     message = {
                         "type": "http.response.start",
@@ -531,6 +516,7 @@ async def complete_browser_federation(
     code: str | None = None,
     state: str | None = None,
     error: str | None = None,
+    iss: str | None = None,
 ) -> Response:
     settings = get_settings()
     transaction = transaction_cookie(request, settings)
@@ -574,14 +560,23 @@ async def complete_browser_federation(
     if not code:
         return _federation_failure("no_code_received", next_path=diagnostics.next_path)
     try:
-        token = await auth_callback(CallbackRequest(code=code, state=state), container)
+        signed_in = await federated_sign_in(
+            CallbackRequest(
+                code=code, state=state, iss=iss, binding_verifier=transaction
+            ),
+            container,
+            channel="browser",
+        )
     except HTTPException as exc:
         diagnostics.public_detail = exc.detail
         # The function-scoped transaction must roll back before the ASGI owner
         # turns the public HTTP failure into a redirect.
         raise
+    except (OidcSignInError, IdentityConflictError) as exc:
+        diagnostics.detail_code = exc.code
+        raise
     session_token = await container.browser_session_service().start(
-        token["access_token"], replacing=session_cookie(request, settings)
+        signed_in.user, auth_method=None, replacing=session_cookie(request, settings)
     )
     response = RedirectResponse(diagnostics.next_path, status_code=303)
     set_session_cookie(response, session_token, settings=settings)

@@ -3,9 +3,9 @@
 Two doors use it. The operator's super-key routes (tenant_federation_router)
 register, replace, patch, test and delete a tenant's identity provider. An org
 admin in an interactive session (tenant_self_federation_router) edits the label,
-client ID, secret and allowed domains of their own tenant's IdP; the
-authorization server and everything derived from it, the redirect topology and
-the claim mapping stay with the operator.
+client ID, secret, allowed domains and subject claim of their own tenant's IdP;
+the authorization server and everything derived from it, the redirect topology
+and the rest of the claim mapping stay with the operator.
 
 Every write reads the stored config with the tenant row locked, is audited as
 FEDERATION_UPDATED in the same transaction (always, whatever the tenant's audit
@@ -28,6 +28,17 @@ from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.oidc import sign_in_source
+from eneo.authentication.oidc.profile import (
+    DEFAULT_SCOPES,
+    SIGNING_ALGORITHM_ALLOWLIST,
+    OidcProviderError,
+    OidcProviderUnavailable,
+    build_profile,
+    check_config,
+    download_discovery,
+    subject_claim,
+)
 from eneo.main.config import (
     Settings,
     get_settings,
@@ -36,7 +47,6 @@ from eneo.main.config import (
     validate_redirect_uri,
 )
 from eneo.main.logging import get_logger
-from eneo.settings.credential_resolver import CredentialResolver
 from eneo.settings.encryption_service import EncryptionService
 from eneo.tenants.masking import looks_masked
 from eneo.tenants.tenant import TenantInDB
@@ -49,9 +59,11 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-DEFAULT_FEDERATION_SCOPES = ["openid", "email", "profile"]
 DEFAULT_CLAIMS_MAPPING = {
     "email": "email",
+    # The claim an account is bound to (identity_bindings). An existing
+    # mapping without the key means "sub" as well.
+    "subject": "sub",
     "username": "sub",
     "name": "name",
 }
@@ -60,6 +72,54 @@ DEFAULT_CLAIMS_MAPPING = {
 _REGISTRATION_FIELDS = ("provider", "client_id", "client_secret", "discovery_endpoint")
 _DOMAIN_PATTERN = re.compile(r"^[a-z0-9]+([\-\.]{1}[a-z0-9]+)*\.[a-z]{2,}$")
 _OPERATOR_ACTOR = {"type": "sysadmin", "via": "eneo_super_api_key"}
+# The operator runs the move on the server; no API key is involved.
+_ENV_MOVE_VIA = "env_oidc_migration_script"
+
+
+_SUBJECT_CLAIM = (
+    "The token claim an account is bound to, stored as claims_mapping.subject: "
+    "an immutable id the provider never gives to another person, never the email "
+    "claim. Changing it after people are bound needs a migration window from each "
+    "issuer and audience to itself first. "
+)
+# PUT writes a whole new mapping; PATCH merges into the stored one.
+_SUBJECT_CLAIM_PUT_DESCRIPTION = (
+    _SUBJECT_CLAIM + "Omitted, PUT stores 'sub': send the current claim to keep it."
+)
+_SUBJECT_CLAIM_PATCH_DESCRIPTION = _SUBJECT_CLAIM + "Omitted, the stored claim is kept."
+
+
+def _validate_claim_name(value: str | None) -> str | None:
+    if value is None:
+        return None
+    claim = value.strip()
+    if not claim:
+        raise ValueError("subject_claim must name a claim")
+    return claim
+
+
+def _with_subject_claim(config: Mapping[str, Any], claim: str | None) -> dict[str, Any]:
+    """The config's claims mapping with ``claim`` as its subject claim when
+    given. Refused (422) when it names the mapping's email claim or the
+    standard ``email`` claim: an address can be reassigned, and the subject is
+    what keeps it out of the account."""
+    stored = config.get("claims_mapping")
+    mapping = (
+        dict(cast(Mapping[str, Any], stored))
+        if isinstance(stored, Mapping)
+        else DEFAULT_CLAIMS_MAPPING.copy()
+    )
+    if claim is not None:
+        mapping["subject"] = claim
+        try:
+            subject_claim(mapping, email_claim=_text(mapping.get("email")) or "email")
+        except OidcProviderError as exc:
+            raise _error(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "federation_subject_claim_is_email_claim",
+                "The subject claim cannot be the email claim.",
+            ) from exc
+    return mapping
 
 
 def _validate_domains(domains: list[str] | None) -> list[str] | None:
@@ -117,6 +177,34 @@ class FederationRequestBase(BaseModel):
         ),
         examples=[["https://qwerty.sundsvall.se/api/eneo/login/callback"]],
     )
+    signing_algorithms: list[str] | None = Field(
+        None,
+        description=(
+            "ID token signing algorithms to accept. Omitted: the ones the "
+            "provider's discovery lists, else RS256. Symmetric algorithms and "
+            "'none' are refused."
+        ),
+        examples=[["RS256", "ES256"]],
+    )
+    email_verified_claims: list[str] | None = Field(
+        None,
+        description=(
+            "Claims that say the email is verified, in order; the first one "
+            "present decides. Omitted: ['email_verified', 'xms_edov']."
+        ),
+        examples=[["email_verified"]],
+    )
+    subject_claim: str | None = Field(
+        None,
+        max_length=255,
+        description=_SUBJECT_CLAIM_PATCH_DESCRIPTION,
+        examples=["oid"],
+    )
+
+    @field_validator("subject_claim")
+    @classmethod
+    def validate_subject_claim(cls, value: str | None) -> str | None:
+        return _validate_claim_name(value)
 
     @field_validator("client_secret")
     @classmethod
@@ -156,6 +244,31 @@ class FederationRequestBase(BaseModel):
         validated = [validate_redirect_uri(uri) for uri in value]
         return [uri for uri in validated if uri is not None]
 
+    @field_validator("signing_algorithms")
+    @classmethod
+    def validate_signing_algorithms(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        refused = sorted(set(value) - SIGNING_ALGORITHM_ALLOWLIST)
+        if not value or refused:
+            raise ValueError(
+                "signing_algorithms must name at least one of "
+                f"{sorted(SIGNING_ALGORITHM_ALLOWLIST)}"
+            )
+        return list(dict.fromkeys(value))
+
+    @field_validator("email_verified_claims")
+    @classmethod
+    def validate_email_verified_claims(
+        cls, value: list[str] | None
+    ) -> list[str] | None:
+        if value is None:
+            return None
+        claims = [claim.strip() for claim in value]
+        if not claims or not all(claims):
+            raise ValueError("email_verified_claims must name at least one claim")
+        return claims
+
 
 class SetFederationRequest(FederationRequestBase):
     """Request model for providing a full tenant federation config."""
@@ -180,6 +293,12 @@ class SetFederationRequest(FederationRequestBase):
         description="Email domains allowed for this tenant (e.g., ['stockholm.se'])",
         examples=[["stockholm.se", "stockholm.gov.se"]],
     )
+    subject_claim: str | None = Field(
+        None,
+        max_length=255,
+        description=_SUBJECT_CLAIM_PUT_DESCRIPTION,
+        examples=["oid"],
+    )
 
 
 class PatchFederationRequest(FederationRequestBase):
@@ -194,6 +313,7 @@ class PatchFederationRequest(FederationRequestBase):
                 "discovery_endpoint",
                 "client_id",
                 "client_secret",
+                "subject_claim",
             )
             if field in self.model_fields_set and getattr(self, field) is None
         ]
@@ -208,8 +328,8 @@ class TenantAdminFederationPatch(BaseModel):
     """What an org admin may change in their tenant's registered IdP.
 
     Every other field (the authorization server and its endpoints, redirect
-    topology, scopes, claim mapping, token auth method) is operator-owned and
-    refused as an unknown field.
+    topology, scopes, the rest of the claim mapping, token auth method) is
+    operator-owned and refused as an unknown field.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -247,6 +367,16 @@ class TenantAdminFederationPatch(BaseModel):
         description="Email domains allowed to sign in (e.g., ['stockholm.se'])",
         examples=[["stockholm.se", "stockholm.gov.se"]],
     )
+    subject_claim: (
+        Annotated[str, Field(min_length=1, max_length=255)] | SkipJsonSchema[None]
+    ) = Field(
+        default=None, description=_SUBJECT_CLAIM_PATCH_DESCRIPTION, examples=["oid"]
+    )
+
+    @field_validator("subject_claim")
+    @classmethod
+    def validate_subject_claim(cls, value: str | None) -> str | None:
+        return _validate_claim_name(value)
 
     @field_validator("provider", "client_id", "client_secret", mode="before")
     @classmethod
@@ -306,6 +436,9 @@ class TenantFederationAdminView(BaseModel):
         default=None, description="Set when the redirect URIs cannot be computed"
     )
     scopes: list[str] = Field(default_factory=list)
+    subject_claim: str = Field(
+        default="sub", description="The token claim an account is bound to"
+    )
     token_endpoint_auth_method: Optional[str] = None
     revision: Optional[str] = Field(
         default=None,
@@ -388,6 +521,17 @@ def federation_changes(
     return changes
 
 
+def stored_subject_claim(config: Mapping[str, Any]) -> str:
+    """The subject claim a stored config names, ``sub`` when it names none."""
+    mapping = config.get("claims_mapping")
+    claim = (
+        cast(Mapping[str, Any], mapping).get("subject")
+        if isinstance(mapping, Mapping)
+        else None
+    )
+    return _text(claim) or "sub"
+
+
 def build_admin_view(
     tenant: TenantInDB, settings: Settings
 ) -> TenantFederationAdminView:
@@ -399,10 +543,8 @@ def build_admin_view(
     secret_updated_at = _timestamp(config.get("encrypted_at"))
     redirect_problem: Literal["unresolvable"] | None = None
     try:
-        # No encryption service: listing the URIs never decrypts the secret.
-        redirect_uris = CredentialResolver(
-            tenant=tenant, settings=settings
-        ).get_valid_redirect_uris()
+        _, accepted = sign_in_source.redirect_uris(config, settings)
+        redirect_uris = list(accepted)
     except ValueError:
         redirect_uris, redirect_problem = [], "unresolvable"
 
@@ -420,157 +562,79 @@ def build_admin_view(
         allowed_domains=_texts(config.get("allowed_domains")),
         redirect_uris=redirect_uris,
         redirect_uris_problem=redirect_problem,
-        scopes=_texts(config.get("scopes", DEFAULT_FEDERATION_SCOPES)),
+        scopes=_texts(config.get("scopes", list(DEFAULT_SCOPES))),
+        subject_claim=stored_subject_claim(config),
         token_endpoint_auth_method=_text(config.get("token_endpoint_auth_method")),
         revision=federation_revision(config),
         configured_at=secret_updated_at or tenant.updated_at,
     )
 
 
-def _select_token_auth_method(methods: list[str]) -> str:
-    normalized = [str(m).lower() for m in methods if m]
-    if "client_secret_post" in normalized:
-        return "client_secret_post"
-    if "client_secret_basic" in normalized:
-        return "client_secret_basic"
-    return normalized[0] if normalized else "client_secret_post"
+# What discovery decides, stored with the config by every save that reads it.
+_DISCOVERY_KEYS = (
+    "issuer",
+    "authorization_endpoint",
+    "token_endpoint",
+    "userinfo_endpoint",
+    "jwks_uri",
+    "token_endpoint_auth_method",
+    "token_endpoint_auth_methods_supported",
+)
 
 
-async def _fetch_discovery_metadata(
-    *,
-    tenant: TenantInDB,
-    discovery_endpoint: str,
-    provider: str,
-) -> dict[str, Any]:
-    """Fetch and validate discovery metadata for a federation configuration."""
-    import aiohttp
-
-    from eneo.main.aiohttp_client import aiohttp_client
-
-    logger.info(
-        "Validating OIDC discovery endpoint",
-        extra={
-            "tenant_id": str(tenant.id),
-            "tenant_name": tenant.name,
-            "discovery_endpoint": discovery_endpoint,
-            "provider": provider,
-        },
-    )
-
+async def _discovery(endpoint: str) -> dict[str, object]:
+    """The provider's discovery document: 502 when it cannot be read."""
     try:
-        async with aiohttp_client().get(discovery_endpoint) as resp:
-            if resp.status != 200:
-                try:
-                    error_body = await resp.json()
-                except Exception:
-                    error_body = await resp.text()
+        return await download_discovery(endpoint)
+    except OidcProviderUnavailable as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+    except OidcProviderError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
-                logger.error(
-                    f"Discovery endpoint validation failed: HTTP {resp.status}",
-                    extra={
-                        "tenant_id": str(tenant.id),
-                        "tenant_name": tenant.name,
-                        "discovery_endpoint": discovery_endpoint,
-                        "http_status": resp.status,
-                        "error_response": error_body,
-                    },
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Failed to fetch discovery endpoint: HTTP {resp.status}",
-                )
-            discovery = await resp.json()
-    except aiohttp.ClientError as e:
-        logger.error(
-            "Failed to connect to discovery endpoint",
-            extra={
-                "tenant_id": str(tenant.id),
-                "tenant_name": tenant.name,
-                "discovery_endpoint": discovery_endpoint,
-                "error": str(e),
-                "error_type": type(e).__name__,
-            },
-        )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to fetch discovery endpoint: {str(e)}",
-        )
 
-    # resp.json() returns Any; cast to typed dict at the HTTP boundary.
-    discovery_doc: dict[str, object] = (
-        cast(dict[str, object], discovery) if isinstance(discovery, dict) else {}
-    )
+def _usable(config: Mapping[str, Any]) -> None:
+    """Refuse a config that no discovery document can make usable (400).
 
-    def _str_field(key: str) -> str | None:
-        v = discovery_doc.get(key)
-        return v if isinstance(v, str) else None
+    The sign-in's own rules, applied without fetching anything.
+    """
+    try:
+        check_config(config)
+    except OidcProviderError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
-    issuer = _str_field("issuer")
-    authorization_endpoint = _str_field("authorization_endpoint")
-    token_endpoint = _str_field("token_endpoint")
-    userinfo_endpoint = _str_field("userinfo_endpoint")
-    jwks_uri = _str_field("jwks_uri")
-    methods_raw: object = (
-        discovery_doc.get("token_endpoint_auth_methods_supported") or []
-    )
-    if isinstance(methods_raw, list):
-        methods_list: list[object] = cast(list[object], methods_raw)
-        token_auth_methods_supported: list[str] = [str(m) for m in methods_list if m]
-    elif methods_raw:
-        token_auth_methods_supported = [str(methods_raw)]
+
+def _checked(
+    config: Mapping[str, Any], discovery: Mapping[str, object]
+) -> dict[str, Any]:
+    """The discovery keys to store, from the profile sign-in would build.
+
+    A provider that sign-in cannot use is refused (400). Stored issuer and
+    endpoints win over discovery, so a caller storing a new discovery
+    endpoint removes the old discovery keys from ``config`` first.
+    """
+    try:
+        profile = build_profile(config, discovery)
+    except OidcProviderError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    userinfo = discovery.get("userinfo_endpoint")
+    methods: object = discovery.get("token_endpoint_auth_methods_supported") or []
+    if isinstance(methods, list):
+        supported = [str(method) for method in cast(list[object], methods) if method]
     else:
-        token_auth_methods_supported = []
-
-    if not all([issuer, authorization_endpoint, token_endpoint, jwks_uri]):
-        logger.error(
-            "Discovery endpoint missing required OIDC fields",
-            extra={
-                "tenant_id": str(tenant.id),
-                "tenant_name": tenant.name,
-                "discovery_endpoint": discovery_endpoint,
-                "has_issuer": bool(issuer),
-                "has_authorization_endpoint": bool(authorization_endpoint),
-                "has_token_endpoint": bool(token_endpoint),
-                "has_jwks_uri": bool(jwks_uri),
-                "discovery_keys": list(discovery_doc.keys()),
-            },
-        )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Discovery endpoint missing required fields",
-        )
-
-    logger.debug(
-        "Discovery endpoint validated successfully",
-        extra={
-            "tenant_id": str(tenant.id),
-            "tenant_name": tenant.name,
-            "issuer": issuer,
-            "authorization_endpoint": authorization_endpoint,
-            "token_endpoint": token_endpoint,
-            "jwks_uri": jwks_uri,
-            "token_endpoint_auth_methods_supported": token_auth_methods_supported,
-        },
-    )
-
+        supported = [str(methods)]
     return {
-        "issuer": issuer,
-        "authorization_endpoint": authorization_endpoint,
-        "token_endpoint": token_endpoint,
-        "userinfo_endpoint": userinfo_endpoint,
-        "jwks_uri": jwks_uri,
-        "token_endpoint_auth_method": _select_token_auth_method(
-            token_auth_methods_supported
-        ),
-        "token_endpoint_auth_methods_supported": token_auth_methods_supported,
+        "issuer": profile.issuer,
+        "authorization_endpoint": profile.authorization_endpoint,
+        "token_endpoint": profile.token_endpoint,
+        "userinfo_endpoint": userinfo if isinstance(userinfo, str) else None,
+        "jwks_uri": profile.jwks_uri,
+        "token_endpoint_auth_method": profile.token_endpoint_auth_method,
+        "token_endpoint_auth_methods_supported": supported,
     }
 
 
 def _build_full_federation_config(
-    request: SetFederationRequest,
-    *,
-    encrypted_secret: str,
-    discovery_metadata: dict[str, Any],
+    request: SetFederationRequest, *, encrypted_secret: str
 ) -> dict[str, Any]:
     """Construct a complete federation config for PUT semantics."""
     federation_config = {
@@ -578,12 +642,11 @@ def _build_full_federation_config(
         "discovery_endpoint": request.discovery_endpoint,
         "client_id": request.client_id,
         "client_secret": encrypted_secret,
-        "scopes": DEFAULT_FEDERATION_SCOPES.copy(),
+        "scopes": list(DEFAULT_SCOPES),
         "allowed_domains": request.allowed_domains,
-        "claims_mapping": DEFAULT_CLAIMS_MAPPING.copy(),
+        "claims_mapping": _with_subject_claim({}, request.subject_claim),
         "encrypted_at": datetime.now(timezone.utc).isoformat(),
     }
-    federation_config.update(discovery_metadata)
 
     if request.canonical_public_origin:
         federation_config["canonical_public_origin"] = request.canonical_public_origin
@@ -594,6 +657,13 @@ def _build_full_federation_config(
     if request.additional_redirect_uris is not None:
         federation_config["additional_redirect_uris"] = request.additional_redirect_uris
 
+    # Stored only when given: an absent key keeps the built-in default.
+    if request.signing_algorithms is not None:
+        federation_config["signing_algorithms"] = request.signing_algorithms
+
+    if request.email_verified_claims is not None:
+        federation_config["email_verified_claims"] = request.email_verified_claims
+
     return federation_config
 
 
@@ -602,7 +672,6 @@ def _merge_federation_config(
     updates: dict[str, Any],
     *,
     encrypted_secret: str | None,
-    discovery_metadata: dict[str, Any] | None,
 ) -> dict[str, Any]:
     """Merge PATCH updates into an existing federation config."""
     merged = existing_config.copy()
@@ -618,6 +687,8 @@ def _merge_federation_config(
         "canonical_public_origin",
         "redirect_path",
         "additional_redirect_uris",
+        "signing_algorithms",
+        "email_verified_claims",
     ):
         if field not in updates:
             continue
@@ -627,14 +698,14 @@ def _merge_federation_config(
         else:
             merged[field] = value
 
+    if "subject_claim" in updates:
+        merged["claims_mapping"] = _with_subject_claim(merged, updates["subject_claim"])
+
     if encrypted_secret is not None:
         merged["client_secret"] = encrypted_secret
         merged["encrypted_at"] = datetime.now(timezone.utc).isoformat()
 
-    if discovery_metadata is not None:
-        merged.update(discovery_metadata)
-
-    merged.setdefault("scopes", DEFAULT_FEDERATION_SCOPES.copy())
+    merged.setdefault("scopes", list(DEFAULT_SCOPES))
     merged.setdefault("claims_mapping", DEFAULT_CLAIMS_MAPPING.copy())
     merged.setdefault("allowed_domains", [])
 
@@ -714,11 +785,9 @@ class TenantFederationService:
             )
 
         merged = _merge_federation_config(
-            current,
-            updates,
-            encrypted_secret=self._encrypt(patch.client_secret),
-            discovery_metadata=None,
+            current, updates, encrypted_secret=self._encrypt(patch.client_secret)
         )
+        _usable(merged)
         await self._save(
             tenant,
             current,
@@ -749,16 +818,12 @@ class TenantFederationService:
         self, tenant: TenantInDB, request: SetFederationRequest
     ) -> dict[str, Any]:
         """Register or replace the tenant's IdP (super API key)."""
-        discovery_metadata = await _fetch_discovery_metadata(
-            tenant=tenant,
-            discovery_endpoint=request.discovery_endpoint,
-            provider=request.provider,
-        )
+        discovery = await _discovery(request.discovery_endpoint)
         federation_config = _build_full_federation_config(
             request,
             encrypted_secret=self.encryption_service.encrypt(request.client_secret),
-            discovery_metadata=discovery_metadata,
         )
+        federation_config.update(_checked(federation_config, discovery))
 
         current = await self._lock(tenant)
         await self._save(
@@ -788,6 +853,45 @@ class TenantFederationService:
         )
         return federation_config
 
+    async def store_env_settings(
+        self,
+        tenant: TenantInDB,
+        request: SetFederationRequest,
+        *,
+        expected: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Store the OIDC_* settings as the tenant's registration: the move
+        into Eneo.
+
+        Fetches nothing. Sign-in reads the issuer and endpoints from discovery,
+        as env mode did, so the move works while the provider is unreachable.
+        It stores only over the settings the caller read (``expected``), so a
+        registration made meanwhile is never overwritten.
+        """
+        federation_config = _build_full_federation_config(
+            request,
+            encrypted_secret=self.encryption_service.encrypt(request.client_secret),
+        )
+
+        current = await self._lock(tenant)
+        if federation_revision(current) != federation_revision(expected):
+            raise _error(
+                status.HTTP_409_CONFLICT,
+                "federation_config_revision_conflict",
+                "The sign-in settings changed while the OIDC_* settings were being "
+                "moved. Nothing was stored; check the current settings.",
+            )
+        await self._save(
+            tenant,
+            current,
+            federation_config,
+            user=None,
+            secret_replaced=True,
+            description=f"The OIDC_* settings of {tenant.name} were moved into Eneo",
+            via=_ENV_MOVE_VIA,
+        )
+        return federation_config
+
     async def patch(
         self, tenant: TenantInDB, request: PatchFederationRequest
     ) -> dict[str, Any]:
@@ -800,15 +904,11 @@ class TenantFederationService:
         updates = request.model_dump(exclude_unset=True)
         _require_updates(updates)
 
-        discovery_metadata = None
-        if "discovery_endpoint" in updates:
-            discovery_metadata = await _fetch_discovery_metadata(
-                tenant=tenant,
-                discovery_endpoint=updates["discovery_endpoint"],
-                provider=updates.get("provider")
-                or tenant.federation_config.get("provider")
-                or "unknown",
-            )
+        discovery = (
+            await _discovery(updates["discovery_endpoint"])
+            if "discovery_endpoint" in updates
+            else None
+        )
         encrypted_secret = (
             self.encryption_service.encrypt(request.client_secret)
             if "client_secret" in updates and request.client_secret is not None
@@ -819,11 +919,15 @@ class TenantFederationService:
         if not current:
             raise _no_config()
         federation_config = _merge_federation_config(
-            current,
-            updates,
-            encrypted_secret=encrypted_secret,
-            discovery_metadata=discovery_metadata,
+            current, updates, encrypted_secret=encrypted_secret
         )
+        if discovery is None:
+            _usable(federation_config)
+        else:
+            # Stored keys win over discovery: the old provider's go first.
+            for key in _DISCOVERY_KEYS:
+                federation_config.pop(key, None)
+            federation_config.update(_checked(federation_config, discovery))
         await self._save(
             tenant,
             current,
@@ -861,7 +965,9 @@ class TenantFederationService:
         logger.info(f"Federation config deleted for tenant {tenant.name}")
 
     async def test_connection(self, tenant: TenantInDB) -> dict[str, Any]:
-        """Fetch the stored discovery document (super API key)."""
+        """Check the stored config against the provider's discovery document,
+        with the rules sign-in uses (super API key): 400 when sign-in could
+        not use it, 502 when the provider cannot be reached."""
         if not tenant.federation_config:
             raise _no_config()
 
@@ -872,10 +978,6 @@ class TenantFederationService:
                 detail="No discovery endpoint in federation config",
             )
 
-        import aiohttp
-
-        from eneo.main.aiohttp_client import aiohttp_client
-
         logger.info(
             f"Testing federation config for tenant {tenant.name}",
             extra={
@@ -884,67 +986,16 @@ class TenantFederationService:
                 "discovery_endpoint": discovery_endpoint,
             },
         )
-
+        discovery = await _discovery(discovery_endpoint)
         try:
-            async with aiohttp_client().get(discovery_endpoint) as resp:
-                if resp.status != 200:
-                    try:
-                        error_body = await resp.json()
-                    except Exception:
-                        error_body = await resp.text()
-
-                    logger.error(
-                        f"Test failed: Discovery endpoint returned HTTP {resp.status}",
-                        extra={
-                            "tenant_id": str(tenant.id),
-                            "tenant_name": tenant.name,
-                            "discovery_endpoint": discovery_endpoint,
-                            "http_status": resp.status,
-                            "error_response": error_body,
-                        },
-                    )
-                    raise HTTPException(
-                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        detail=f"Discovery endpoint returned HTTP {resp.status}",
-                    )
-                discovery = await resp.json()
-
-                required = [
-                    "issuer",
-                    "authorization_endpoint",
-                    "token_endpoint",
-                    "jwks_uri",
-                ]
-                missing = [f for f in required if f not in discovery]
-                if missing:
-                    logger.error(
-                        "Test failed: Discovery endpoint missing required fields",
-                        extra={
-                            "tenant_id": str(tenant.id),
-                            "tenant_name": tenant.name,
-                            "discovery_endpoint": discovery_endpoint,
-                            "missing_fields": missing,
-                            "discovery_keys": list(discovery.keys()),
-                        },
-                    )
-                    raise HTTPException(
-                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        detail=f"Discovery endpoint missing required fields: {missing}",
-                    )
-        except aiohttp.ClientError as e:
-            logger.error(
-                "Test failed: Could not connect to discovery endpoint",
-                extra={
-                    "tenant_id": str(tenant.id),
-                    "tenant_name": tenant.name,
-                    "discovery_endpoint": discovery_endpoint,
-                    "error": str(e),
-                    "error_type": type(e).__name__,
-                },
+            profile = build_profile(tenant.federation_config, discovery)
+        except OidcProviderError as exc:
+            logger.warning(
+                "Federation test refused the provider",
+                extra={"tenant_id": str(tenant.id), "reason": str(exc)},
             )
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to connect to discovery endpoint: {str(e)}",
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
             )
 
         logger.info(
@@ -952,19 +1003,13 @@ class TenantFederationService:
             extra={
                 "tenant_id": str(tenant.id),
                 "tenant_name": tenant.name,
-                "issuer": discovery["issuer"],
-                "endpoints_validated": {
-                    "authorization": discovery.get("authorization_endpoint"),
-                    "token": discovery.get("token_endpoint"),
-                    "jwks": discovery.get("jwks_uri"),
-                },
+                "issuer": profile.issuer,
             },
         )
-
         return {
             "success": True,
             "message": "Federation config is valid and IdP is reachable",
-            "issuer": discovery["issuer"],
+            "issuer": profile.issuer,
         }
 
     # Shared
@@ -985,6 +1030,7 @@ class TenantFederationService:
         user: Optional["UserInDB"],
         secret_replaced: bool,
         description: str,
+        via: str = "super_api_key",
     ) -> None:
         await self.tenant_repo.update_federation_config(
             tenant_id=tenant.id, federation_config=new
@@ -996,6 +1042,7 @@ class TenantFederationService:
             user=user,
             secret_replaced=secret_replaced,
             description=description,
+            via=via,
         )
 
     async def _audit(
@@ -1007,9 +1054,11 @@ class TenantFederationService:
         user: Optional["UserInDB"],
         secret_replaced: bool,
         description: str,
+        via: str = "super_api_key",
     ) -> None:
         """FEDERATION_UPDATED in the caller's transaction: if this write fails,
-        the settings change rolls back with it."""
+        the settings change rolls back with it. ``via`` names the system door
+        when no user made the change."""
         target: dict[str, Any] = {
             "tenant_id": str(tenant.id),
             "tenant_name": tenant.name,
@@ -1020,11 +1069,16 @@ class TenantFederationService:
         }
         if not new:
             target["action"] = "deleted"
+        operator = (
+            _OPERATOR_ACTOR
+            if via == "super_api_key"
+            else {"type": "sysadmin", "via": via}
+        )
         metadata: dict[str, Any] = {
-            "actor": _OPERATOR_ACTOR if user is None else AuditMetadata.actor(user),
+            "actor": operator if user is None else AuditMetadata.actor(user),
             "target": target,
             "changes": federation_changes(old, new, secret_replaced=secret_replaced),
-            "via": "super_api_key" if user is None else "admin",
+            "via": via if user is None else "admin",
         }
         await self.audit_service.log(
             tenant_id=tenant.id,

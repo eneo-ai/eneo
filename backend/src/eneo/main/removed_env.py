@@ -21,6 +21,14 @@ from dataclasses import dataclass
 from pydantic import TypeAdapter, ValidationError
 
 UPGRADE_GUIDE_URL = "https://docs.eneo.ai/v2.2/guides/upgrade-2-2-0"
+OIDC_MIGRATION_GUIDE_URL = (
+    "https://docs.eneo.ai/guides/oidc-federation"
+    "#migrate-from-the-mobilityguard-settings"
+)
+OIDC_STORED_MODE_GUIDE_URL = (
+    "https://docs.eneo.ai/guides/oidc-federation/single-tenant"
+    "#move-the-settings-into-eneo"
+)
 
 
 @dataclass(frozen=True)
@@ -32,8 +40,17 @@ class RemovedVariable:
     # settings that now govern what it controlled, if there are any.
     old_default: str | None = None
     replaced_by: tuple[str, ...] = ()
-    removed_in: str = "2.2"
-    upgrade_guide_url: str | None = UPGRADE_GUIDE_URL
+    removed_in: str | None = "Eneo 2.2"
+    guide_url: str | None = UPGRADE_GUIDE_URL
+
+    @property
+    def no_longer_read(self) -> str:
+        return f"{self.name} is no longer read{self.removed}."
+
+    @property
+    def removed(self) -> str:
+        """The release that removed it, or nothing when none is named."""
+        return f" (removed in {self.removed_in})" if self.removed_in else ""
 
 
 _MODULES_PERMISSION_NOTE = (
@@ -52,8 +69,8 @@ REMOVED_VARIABLES: tuple[RemovedVariable, ...] = (
         RemovedVariable(
             name,
             note=_SPEAKER_SERVICE_NOTE,
-            removed_in="2.3",
-            upgrade_guide_url=None,
+            removed_in="Eneo 2.3",
+            guide_url=None,
         )
         for name in (
             "FLOW_TRANSCRIPTION_SERVICE_URL",
@@ -69,8 +86,8 @@ REMOVED_VARIABLES: tuple[RemovedVariable, ...] = (
     RemovedVariable(
         "OBJECT_CONTENT_INLINE_MAXIMUM_BYTES",
         note="Upload limits are managed in Admin > File storage. The stored policy takes precedence.",
-        removed_in="2.3",
-        upgrade_guide_url=None,
+        removed_in="Eneo 2.3",
+        guide_url=None,
     ),
     RemovedVariable("INTRIC_SUPER_API_KEY", replacement="ENEO_SUPER_API_KEY"),
     RemovedVariable("INTRIC_SUPER_DUPER_API_KEY", note=_MODULES_PERMISSION_NOTE),
@@ -132,6 +149,15 @@ REMOVED_VARIABLES: tuple[RemovedVariable, ...] = (
         old_default="1.0",
         note="The crawler retries pages by its own policy.",
     ),
+    *(
+        RemovedVariable(
+            f"MOBILITYGUARD_{suffix}",
+            replacement=f"OIDC_{suffix}",
+            removed_in=None,
+            guide_url=OIDC_MIGRATION_GUIDE_URL,
+        )
+        for suffix in ("DISCOVERY_ENDPOINT", "CLIENT_ID", "CLIENT_SECRET", "TENANT_ID")
+    ),
 )
 
 
@@ -166,18 +192,23 @@ def _is_old_default(value: str, default: str) -> bool:
         return False
 
 
+def _see(guide_url: str | None) -> str:
+    return f" See {guide_url}" if guide_url else ""
+
+
 def _check_retired_setting(
-    variable: RemovedVariable, value: str, blocking: list[str]
+    variable: RemovedVariable,
+    value: str,
+    blocking: list[tuple[str, str | None]],
 ) -> None:
     assert variable.old_default is not None
     if _is_old_default(value, variable.old_default):
         logging.warning(
-            "%s is no longer read (removed in Eneo %s). It is at its old default "
-            "(%s), so dropping it changes nothing. Remove the variable.%s",
-            variable.name,
-            variable.removed_in,
+            "%s It is at its old default (%s), so dropping it changes nothing. "
+            "Remove the variable.%s",
+            variable.no_longer_read,
             variable.old_default,
-            f" See {variable.upgrade_guide_url}" if variable.upgrade_guide_url else "",
+            _see(variable.guide_url),
         )
         return
     if variable.replaced_by:
@@ -185,10 +216,15 @@ def _check_retired_setting(
     else:
         action = "It is no longer configurable; remove it."
     lost = (
-        f"{variable.name}={value} is no longer read (removed in Eneo {variable.removed_in}); its old "
+        f"{variable.name}={value} is no longer read{variable.removed}; its old "
         f"default was {variable.old_default}, so this value would be lost."
     )
-    blocking.append(" ".join(part for part in (lost, variable.note, action) if part))
+    blocking.append(
+        (
+            " ".join(part for part in (lost, variable.note, action) if part),
+            variable.guide_url,
+        )
+    )
 
 
 def check_removed_variables(
@@ -201,7 +237,8 @@ def check_removed_variables(
     lost, and the failure would otherwise surface far from its cause (a bare 401
     on every sysadmin call, or crawls that no longer follow the old limits).
     """
-    blocking: list[str] = []
+    # What stops startup, each with the guide that explains it.
+    blocking: list[tuple[str, str | None]] = []
     for variable in REMOVED_VARIABLES:
         value = _value_of(variable.name, environ, values)
         if value is None:
@@ -210,13 +247,10 @@ def check_removed_variables(
             _check_retired_setting(variable, value, blocking)
         elif variable.replacement is None:
             logging.error(
-                "%s is no longer read (removed in Eneo %s). %s Remove the variable.%s",
-                variable.name,
-                variable.removed_in,
+                "%s %s Remove the variable.%s",
+                variable.no_longer_read,
                 variable.note,
-                f" See {variable.upgrade_guide_url}"
-                if variable.upgrade_guide_url
-                else "",
+                _see(variable.guide_url),
             )
         elif _is_set(variable.replacement, environ, values):
             logging.warning(
@@ -227,14 +261,17 @@ def check_removed_variables(
             )
         else:
             blocking.append(
-                f"{variable.name} is no longer read (removed in Eneo {variable.removed_in}). "
-                f"Rename it to {variable.replacement}."
+                (
+                    f"{variable.no_longer_read} Rename it to {variable.replacement}.",
+                    variable.guide_url,
+                )
             )
 
     if blocking:
+        guides = [guide for guide in dict.fromkeys(g for _, g in blocking) if guide]
         logging.error(
-            "Eneo cannot start while removed environment variables are set:\n  %s\nSee %s",
-            "\n  ".join(blocking),
-            UPGRADE_GUIDE_URL,
+            "Eneo cannot start while removed environment variables are set:\n  %s%s",
+            "\n  ".join(message for message, _ in blocking),
+            "\nSee " + "\n  ".join(guides) if guides else "",
         )
         sys.exit(1)

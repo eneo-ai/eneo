@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from arq.connections import RedisSettings
+from redis.asyncio.connection import AbstractConnection
 
 from eneo.main.config import Settings, get_settings
 
@@ -43,6 +45,21 @@ def build_arq_redis_settings(settings: Settings | None = None) -> RedisSettings:
     )
 
 
+async def _connect_without_health_check(connection: AbstractConnection) -> None:
+    """Set up a new connection without first checking its health.
+
+    redis-py checks health from inside its own setup. Against a Redis that
+    accepts connections and never answers, each failed check reconnects into
+    another check, so no read timeout ends the wait. A connection that has
+    just connected needs no check: its interval starts now.
+    """
+    # ponytail: a workaround for redis-py 5.x; recheck it, and drop it if the
+    # silent-Redis tests pass without it, whenever redis-py is upgraded.
+    loop = asyncio.get_running_loop()
+    connection.next_health_check = loop.time() + connection.health_check_interval
+    await connection.on_connect()
+
+
 def build_redis_pool_kwargs(
     settings: Settings | None = None,
     *,
@@ -54,9 +71,13 @@ def build_redis_pool_kwargs(
         **build_redis_auth_kwargs(resolved_settings),
         "decode_responses": decode_responses,
         "socket_connect_timeout": resolved_settings.redis_conn_timeout,
+        # A Redis that accepts connections and never answers must not hold a
+        # request: every read ends at the same bound as the connect.
+        "socket_timeout": resolved_settings.redis_conn_timeout,
         "retry_on_timeout": resolved_settings.redis_retry_on_timeout,
         "socket_keepalive": resolved_settings.redis_socket_keepalive,
         "health_check_interval": resolved_settings.redis_health_check_interval,
+        "redis_connect_func": _connect_without_health_check,
     }
 
     if resolved_settings.redis_max_connections is not None:

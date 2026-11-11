@@ -18,7 +18,10 @@ from eneo.database.tables.sessions_table import Sessions
 from eneo.main.models import ModelId
 from eneo.questions.question import QuestionAdd
 from eneo.users.user import UserAdd, UserInDB, UserState
-from tests.integration.flows.statement_capture_support import capture_queries
+from tests.integration.flows.statement_capture_support import (
+    capture_queries,
+    without_copy_source_probe,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -141,7 +144,9 @@ async def _turn_reads(db_container, request) -> tuple[int, int]:
     assert bind is not None
     with capture_queries(bind.engine) as queries:
         response = await request
-    return response.status_code, sum(1 for q in queries if _TURNS.search(q.sql))
+    return response.status_code, sum(
+        1 for q in queries if _TURNS.search(without_copy_source_probe(q.sql))
+    )
 
 
 async def test_the_owner_reads_the_turns_only_for_a_response_that_returns_them(

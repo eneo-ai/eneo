@@ -131,9 +131,10 @@ INTENTIONALLY_UNGUARDED = {
     "/settings": "Admin settings endpoints are mounted on a dedicated router with admin scope + admin key guards",
     "/users": "Admin mutation endpoints (POST /admin/invite/, PATCH /admin/{id}/, DELETE /admin/{id}/) are on users_admin_router with admin scope + admin key guards. GET / carries route-level admin scope + admin key guards (no-op for bearer tokens) so scoped API keys cannot enumerate the tenant directory while space-admin bearer users still populate member pickers. /me/ and /tenant/ safe for any scoped key.",
     "/admin": "Admin endpoints are mounted with admin scope + admin key guards, "
-    "except /admin/modules (Permission.MODULES) and /admin/federation "
-    "(Permission.ADMIN), which are session-only (Authentication.SESSION) and "
-    "reject API keys outright",
+    "except /admin/modules (Permission.MODULES), /admin/federation and the "
+    "sign-in identity routes (/admin/users/{user_id}/identity..., "
+    "/admin/identity-migration-windows; Permission.ADMIN), which are "
+    "session-only (Authentication.SESSION) and reject API keys outright",
     "/dashboard": "Read-only aggregation endpoint with scope guard",
     "/icons": "Public static assets",
     "/limits": "Authenticated limit info (with_user=True)",
@@ -1074,6 +1075,11 @@ MUTATING_ALLOWLIST_PREFIXES: dict[str, str] = {
 # reason and a rationale for why the basic method→permission + scope check is
 # sufficient for this endpoint.
 MUTATING_ALLOWLIST_EXACT: dict[tuple[str, str], str] = {
+    (
+        "POST",
+        "/users/logout/",
+    ): "Public sign-out: ends only the session the Bearer token it verifies names; "
+    "an API key names no session, so it has nothing to end.",
     (
         "POST",
         "/icons/",

@@ -7,14 +7,14 @@ import uuid
 from pathlib import Path
 from typing import IO
 
-from eneo.main.config import get_settings
+from eneo.main import process_scratch
 
 
 class FileSizeService:
     @staticmethod
     async def save_file_to_disk(file: IO[bytes]):
-        destination = os.path.join(str(get_settings().upload_tmp_dir), uuid.uuid4().hex)
-        destination_path = Path(destination)
+        destination_path = process_scratch.directory() / uuid.uuid4().hex
+        destination = str(destination_path)
 
         try:
             with destination_path.open("wb") as buffer:

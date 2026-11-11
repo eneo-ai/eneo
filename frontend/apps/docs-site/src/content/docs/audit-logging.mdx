@@ -68,6 +68,7 @@ Key fields include:
 
 Metadata follows a consistent schema via `AuditMetadata` to prevent drift. It stores actor and target snapshots so log entries remain meaningful even if users or entities are renamed or deleted.
 
+Eneo does not copy names that retention removes into a log. A log about a file records the file by its id, with its size and MIME type where known, under a fixed description for each action and the target name `file`; an upload to a collection names the collection, not the file. A log about a conversation (a tool view's call, a document export or a saved document version) names its target `conversation`, and an assistant update records attached files by id, scope and mode. Logs stored before this behaviour are changed the same way on upgrade. The justification and search text an auditor enters are the auditor's own input: they are kept with the log of that access, under the audit log's retention.
 ### Actor attribution
 
 `metadata.actor` records who acted, captured when the event happens: a user (`type`, `id`, `name`, `email`), a service key (`type`, `id`, `name`, `key_prefix`), a Flow service principal (`type`, `id`, `name`, `scope_type`, `scope_id`, `actor_api_key_id`), or the system (`{"type": "system", "via": ...}`). `AuditService` adds it when the caller supplied none and never replaces one the caller supplied. Flow lifecycle events capture it in the run transaction and the outbox delivery copies it unchanged. A service key run records its service principal: the principal identity and name survive deletion of the key, and the key id is included when it is still known. A user already deleted at that moment is recorded with its `type` and `id` and no name; a user deleted later keeps the name from the snapshot. An event queued for the audit worker keeps its row and actor block when the user or key is deleted before the worker writes it.
@@ -106,7 +107,7 @@ Audit queries support filters for:
 - actions (single or multi-select)
 - date range
 
-Free-text search matches the log `description` field. If you want reliable search for a name or identifier, include it in `description` or metadata.
+Free-text search matches the log `description` field. If you want reliable search for a name or identifier, include it in `description` or metadata. Eneo does not copy file and conversation names into logs, so a search for one finds nothing.
 
 For data subject access requests, `GET /api/v1/audit/logs/user/{user_id}` returns every log where the user is the actor or the target (GDPR Article 15). The same `user_id` filter is accepted by the synchronous export.
 
@@ -120,21 +121,414 @@ The policy is read and updated with `GET`/`PUT /api/v1/audit/retention-policy`. 
 
 ### Conversation retention hierarchy
 
-Conversation data (questions and app runs) follows a hierarchical retention policy:
+Conversation data (questions and app runs) follows a hierarchical retention policy.
+The nearest chosen period wins, also when it is longer than an outer one:
 
 1. Assistant or App `data_retention_days` (if set)
 2. Space `data_retention_days`
-3. `null` means keep forever
+3. The legacy organization period, while its switch is on (see below)
+4. With none of these set, the conversation is kept
 
-When the purge job deletes a question or app run, it also deletes the files attached to it, such as uploaded documents, audio recordings and their transcriptions, once no other chat, assistant, app or app run uses them. A file that is still used elsewhere is kept until its last use is removed. The stored bytes are then removed by the object content lifecycle; see [Files nothing uses anymore](/guides/object-content-storage#files-nothing-uses-anymore).
+A question or App run is due when it is older than that period. Its age is measured
+against the database's clock, read once at the start of each execution, so a worker
+whose clock is off neither removes early nor keeps late. Each removal is counted under
+the level that chose the period: `by_assistant_or_app_rule`, `by_space_rule` or
+`by_organization_rule`.
 
-There is no tenant-level conversation retention setting: it was removed from the retention-policy API (`PUT /api/v1/audit/retention-policy` accepts only `retention_days`) to prevent accidental data loss. The purge job still honours the legacy `conversation_retention_enabled`/`conversation_retention_days` columns on the tenant's audit retention policy row if they were set directly in the database, but no API or UI writes them.
+Web widget conversations are outside this hierarchy. Each widget's own retention
+applies, held to the organization's widget policy as it stands that night, and the
+widget's own nightly job removes them; see [Conversation retention](/guides/embed-widget#conversation-retention).
+The retention engine leaves them alone: an assistant, space or organization period
+never reaches them, and neither does the empty-session sweep.
+
+When scheduled retention deletes a question or app run, it also deletes the files attached to it, such as uploaded documents, audio recordings and their transcriptions, once no other chat, assistant, app or app run uses them. A file that is still used elsewhere is kept until its last use is removed. The stored bytes are then removed by the object content lifecycle; see [Files nothing uses anymore](/guides/object-content-storage#files-nothing-uses-anymore).
+
+There is no tenant-level conversation retention setting: it was removed from the retention-policy API (`PUT /api/v1/audit/retention-policy` accepts only `retention_days`) to prevent accidental data loss. Scheduled conversation retention still honours the legacy `conversation_retention_enabled`/`conversation_retention_days` columns on the tenant's audit retention policy row if they were set directly in the database, but no API or UI writes them.
 
 Use assistant/app-level overrides when you need a different period from the Space default. A null child value removes that override and falls back to its parent. The shared daily retention worker removes conversation data after its effective configured period; this includes flow authoring chats, which are ordinary conversations.
 
 In shared and organization spaces, changing or clearing an assistant/app override requires the same space administration permission as changing the space policy. Editors can continue editing other settings but cannot change retention. Personal-space owners retain control of their own assistants and apps.
 
-The existing valid range is 1–2555 days. The space value is a default, not a maximum: administrators can choose a shorter or longer assistant/app override within that range. Setting the override to `null` restores inheritance; omitting it from an update leaves it unchanged. If neither the assistant/app nor its space has a policy, data is kept indefinitely (unless a legacy tenant policy applies).
+The existing valid range is 1–2555 days, a technical bound that the audit log and every conversation period share; web widgets keep their own range of 0–3650 days, where 0 stores nothing. The space value is a default, not a maximum: administrators can choose a shorter or longer assistant/app override within that range. Setting the override to `null` restores inheritance; omitting it from an update leaves it unchanged. If neither the assistant/app nor its space has a policy, data is kept indefinitely (unless a legacy tenant policy applies).
+
+A newly installed Prompt Guide has no period of its own: its conversations follow its
+space or the organization until an administrator chooses one. A Prompt Guide installed
+before keeps the period it was installed with.
+
+#### When a period changes
+
+| Change | Effect |
+| --- | --- |
+| A shorter period | Older conversations become due at the next execution |
+| A longer period | Conversations no longer due are kept; the check inside the delete sees the new period |
+| A cleared period | The level inherits the next chosen period outward, which can be shorter, longer or none, so more conversations can become due |
+| A first period | Conversations older than it become due at the next execution |
+
+A removed conversation never returns. Questions without an owner Assistant follow no
+period, and scheduled retention does not remove them.
+
+#### Names and feedback text
+
+A conversation's name is its first question, a title made from its turns or a name
+its user chose, and its feedback text can quote the turns. A chosen name and feedback
+text keep the time they were last written. A title made from the turns keeps the time
+of the oldest question still there when it was made, so it goes no later than that
+question, however late it was made; a title whose turns lost one to removal while it
+was being made is not stored. Once that time is older than the conversation's period, conversation
+history replaces the name with an empty one, which both apps show as Untitled, and
+removes the feedback text; the feedback vote stays. This holds whether or not the
+conversation's questions are still there, so a name chosen later is kept as long as
+its own time allows. A group chat's name and feedback text follow the shortest period
+among its assistants. A conversation from before the upgrade that recorded these
+times counts from when it was created. After the upgrade, health can therefore read
+`degraded` until the step has cleared the older names and feedback texts: they are
+overdue, not a false alarm. The step `names_and_feedback` reports them as
+`names_cleared` and `feedback_texts_cleared`.
+
+If a period is lengthened or removed after a question was removed, a name taken from
+that question stays until the new period has passed, or for good when no period
+applies.
+
+### Scheduled execution and limits
+
+![One retention engine: chats, apps and uploads hand their due records to the engine, which locks, proves, checks again and deletes in bounded atomic units, audits every disposal without content, asks the Files owner whether a file is still in use, and leaves byte deletion to object content storage. Expiry and erasure are two different decisions.](/diagrams/retention-engine.svg)
+
+The general worker runs the shared retention engine once a day, at 03:30 by default.
+The time is read in the worker's time zone; the shipped image runs in UTC. The
+registered tasks remove due questions and App runs, the names and feedback texts of
+conversations past their period, sessions that were created more
+than `RETENTION_EMPTY_SESSION_GRACE_HOURS` ago and have no question, unused upload
+families and expired retention execution records. Each removal has this one scheduled
+path. Audit-log purging remains governed by the separate audit retention policy above.
+
+Work runs in bounded chunks. Each chunk is one database transaction with durable
+progress. Within a chunk, one question or App run and the files its last use released
+form an atomic unit: the engine rechecks the retention policy inside the deleting
+statement, rechecks each linked file family's use and organization under the family
+locks right before deleting it, and removes a session left without any question in
+the same unit. A unit that cannot complete is rolled back whole. A lock held on a row
+the unit locks first (the root, its session, a file family) blocks only that unit; the
+other candidates proceed. A lock wait on any other row (a cascaded child row, an
+object content row) ends after the lock timeout: a question or App run is then kept
+and reported as `cascade_locked` and charged the bound of the statement that waited
+(its proved cascade for the delete, two rows for the session release, the family
+limit for a file release); the chunk commits and the execution continues with the
+next chunk. The same chunk admits further units only while its gather window is
+still open, which at the default settings (a one-second window, a two-second lock
+timeout) it is not. In the unused-files task a file family that waits ends the
+chunk and the execution ends as `partial` with `chunk_timeout`.
+
+Discovery, proof and deletion rows count against the execution budget: a question or
+App run costs its discovery row, the child rows its proof examined (one bounded read
+per root), its own delete and the file work; a file family costs one lock, one fresh
+proof and one delete per member. Bookkeeping reads, usage probes and the overdue
+snapshot are not charged. A unit whose cascade, or a file family, is larger than the
+configured limit is examined up to that limit, charged, kept and reported as blocked;
+an operator must resolve the cause or raise the applicable limit. Manual conversation
+deletion continues to release unused files immediately.
+
+With extended logging, the log of each turn holds the earlier turns of its
+conversation. Removing a question clears every later log of its conversation that
+still holds content, in the same unit, so access to the removed turn ends with the
+question. The removal reads every log of the conversation that still holds content,
+and the unit is charged one row for each: in a group chat each turn follows its own
+Assistant's period, so earlier turns can be kept. The logs are never cleared in
+parts. A question whose conversation has more such logs than
+`RETENTION_CONVERSATIONS_MAX_UNIT_ROWS` allows is kept as `unit_exceeds_budget`, and
+health names `retention_conversations_max_unit_rows` in `limiting_settings`. Each
+file charges at least three rows, so when three times `RETENTION_MAX_FILES_PER_RUN`
+is below the unit limit, health names `retention_max_files_per_run` as well. The
+first execution after the limits allow the question removes it.
+
+A log stored before this version can hold turns that earlier removals left in it,
+and nothing tells them apart from kept turns, so the upgrade empties every stored
+log: its request body, model settings and retrieved context. The rows stay, and
+their questions read as not logged. Logs stored after the upgrade are kept as before.
+
+Only this version and later ones check for a removal before they store a log. When
+upgrading, stop the backend and worker of the earlier version before the migration
+runs: an answer an earlier version finishes after the migration can store a log that
+holds a turn removed meanwhile, or a log that no question refers to.
+[Updating Eneo](/guides/deployment#updating-eneo) gives the commands.
+
+#### What the records say
+
+A task reports three kinds of counts under names it declares:
+
+- disposal facts, for example `questions_deleted`, `app_runs_deleted`,
+  `sessions_deleted` and `files_deleted`;
+- observations, for example `owners_examined`, `sessions_examined` and
+  `files_in_use`;
+- blocked reasons, for example `root_locked`, `unit_exceeds_budget` and
+  `files_locked`.
+
+A chunk that removed or blocked something writes one required `data_retention_batch`
+audit event per affected organization. Its text names the task, the step and the
+counts, for example "Retention conversations.history, step questions: questions
+deleted 12, sessions deleted 3, files deleted 5, by space rule 12; kept 1 root
+locked". A chunk that only examined
+rows records its observations on the execution record and writes no audit event.
+Every execution that finishes writes one `data_retention_run` event with its outcome
+(`succeeded`, `partial` or `failed`), its totals and its blocked reasons. A task
+turned off by its setting records a skipped execution and a `data_retention_skipped`
+event. No event holds content: identities and numbers only.
+
+`succeeded` means that every due row was visited within the budget; a row that was
+not removed is counted under a blocked reason. `partial` means the budget ended with
+due work left; the next execution resumes from the stored cursor. The question and
+App-run streams and the `names_and_feedback` step take turns going first on
+consecutive days, and the empty-session scan is its own task with its own budget,
+so a backlog in one of them cannot starve another. The empty-session and unused-upload sweeps examine every row of their
+population once per pass, so a pass takes about population divided by
+`RETENTION_MAX_ROWS_PER_RUN` nights and reports `partial` until it ends; an empty
+session can wait up to one pass. A session emptied by history retention is removed
+in the same unit unless a live chat holds it. An empty session that another
+transaction holds is kept for a later execution and counted as `root_locked`. The
+execution record
+(`retention_job_runs`) keeps counts, blocked reasons, cursors and the overdue
+snapshot.
+
+A successful retention execution reports completed database work, not confirmed
+physical erasure of every associated file. File deletion counts refer to File
+records; object content performs byte deletion separately. Blocked work and
+pending storage deletion must not be presented as completed erasure.
+For each deleted question or App run, `files_in_use`, `files_missing`,
+`files_not_root` and `files_tenant_mismatch` report linked File candidates that were
+kept; these are observations, not a deduplicated file inventory. A remaining
+reference describes technical use, not a legal basis for keeping personal data.
+Storage versions, previous destinations and backups need the separate
+[storage and restore procedures](/guides/object-content-storage#back-up-and-restore).
+
+#### Worked example: one file, two spaces
+
+![A file shared by two spaces: on night 31 the chat in Space A is removed and the file is kept because Space B still uses it; on night 61 the chat in Space B is removed, the last use is gone, and the file and its bytes are deleted.](/diagrams/retention-shared-file.svg)
+
+Space A keeps chat history for 30 days and Space B for 60 days; the same uploaded
+file is attached to a chat in each. On night 31 the chat in Space A is due: the
+engine locks it, re-checks its policy inside the deleting statement, deletes the
+chat and its links (and its session, if nothing else is left in it), then asks the
+Files owner to release the file. The owner locks the file family and re-checks every
+use under the lock, finds the link from Space B's chat and keeps the file. The audit
+event records `questions_deleted: 1` and `by_space_rule: 1` and no blocked reason;
+the execution record holds the observation `questions.files_in_use: 1`. On night 61
+the chat in Space B is due; the same unit runs, no use is left, the file rows are
+deleted and object content storage removes the bytes. The audit event records
+`questions_deleted: 1`, `by_space_rule: 1` and `files_deleted: 1`. Space A's shorter
+period never reaches Space B's data. Erasing a file from every place at once is a
+separate, explicit decision, never a side effect of expiry.
+
+#### Settings
+
+Every limit is an operator setting with a default. The worker and the API read them
+at start; restart after a change. A value outside its range or a failed cross-check
+stops the process at start with the reason.
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `RETENTION_CRON_HOUR` / `RETENTION_CRON_MINUTE` | `3` / `30` | Daily start time in the worker's time zone (UTC in the shipped image) |
+| `RETENTION_CONVERSATIONS_HISTORY_ENABLED` / `RETENTION_DERIVED_COPIES_ENABLED` / `RETENTION_EMPTY_SESSIONS_ENABLED` / `RETENTION_UNUSED_FILES_ENABLED` / `RETENTION_JOB_HISTORY_ENABLED` | `true` | Per-task switches; a task turned off records a skipped execution and an audit event |
+| `RETENTION_MAX_ROWS_PER_RUN` | `50000` | Rows charged per execution of the session, file and job tasks; each task has its own budget |
+| `RETENTION_CONVERSATIONS_MAX_ROWS_PER_RUN` | `250000` | Rows charged per execution of the conversation task |
+| `RETENTION_MAX_FILES_PER_RUN` | `10000` | File rows deleted per execution, including derived files |
+| `RETENTION_MAX_SECONDS_PER_RUN` | `1800` | Seconds per execution; no new unit starts after it, the unit in progress completes |
+| `RETENTION_CHUNK_ROWS` | `500` (4 to 2000) | Rows per chunk transaction; one large unit may use more; a value near 4 makes every transaction hold one root |
+| `RETENTION_CHUNK_GATHER_SECONDS` | `1.0` | Longest time a chunk admits new units, so the rows it locks stay locked for a short time |
+| `RETENTION_CONVERSATIONS_MAX_UNIT_ROWS` | `5000` (min 4) | Largest question or App-run unit, including proof, cascade and the logs of its conversation a question's removal reads; must fit the conversation row budget. The minimum admits one question with its session and helper row |
+| `RETENTION_MAX_FAMILY_ROWS` | `5000` (3 to 100000) | Largest file family, including proof; must fit the row budget plus one discovery row, and at most three times `RETENTION_MAX_FILES_PER_RUN`. The minimum admits one member |
+| `RETENTION_UNUSED_FILE_GRACE_HOURS` | `24` | Minimum age of an upload that nothing uses |
+| `RETENTION_EMPTY_SESSION_GRACE_HOURS` | `24` | Minimum age of a session without a question |
+| `RETENTION_CHUNK_STATEMENT_TIMEOUT_MS` / `RETENTION_CHUNK_LOCK_TIMEOUT_MS` | `30000` / `2000` | PostgreSQL statement and lock timeouts, set first in every retention transaction and in the preview command |
+| `RETENTION_LEASE_STALE_SECONDS` | `3600` | A running execution whose heartbeat is older is taken over by the next run and reads `abandoned` in health |
+| `RETENTION_OVERDUE_WINDOW_DAYS` / `RETENTION_OVERDUE_MAX_ROWS` | `1` / `1000` | Due rows older than the window are overdue, and so is a conversation whose name or feedback text is; the snapshot stops at this many overdue rows, or after a fixed number of pages per question or App-run stream (`RETENTION_CONVERSATIONS_MAX_ROWS_PER_RUN` in owner pages; a page full of rows continues inside its owner), and then reports itself incomplete. The read of names and feedback texts has no page bound and stops at `RETENTION_CHUNK_STATEMENT_TIMEOUT_MS`; health then reads `unknown` or `degraded`, never `healthy` |
+| `RETENTION_HEALTH_TIMEOUT_SECONDS` / `RETENTION_HEALTH_CACHE_SECONDS` | `1.0` / `30` | Longest health read; how long `/api/healthz` reuses one read |
+
+When the row or file budget is spent, the task stops. A unit that does not fit the
+remaining budget is kept and resumed from the stored cursor on a later execution. A
+question, App run or file family is never partly deleted to fit.
+
+#### Removals that run without a choice
+
+Conversation history removes only what an assistant, App, space or legacy
+organization period selects; with none set, it keeps everything. The tasks below
+remove data that no such period selects. Eneo removed this data before the engine
+existed, or it is the engine's own record. They are on by default, and the operator
+can switch each one off:
+
+| Task | Removes | Switch |
+| --- | --- | --- |
+| `sessions.empty` | Sessions without a question, older than `RETENTION_EMPTY_SESSION_GRACE_HOURS` | `RETENTION_EMPTY_SESSIONS_ENABLED` |
+| `files.unused` | Upload families nothing uses, older than `RETENTION_UNUSED_FILE_GRACE_HOURS` | `RETENTION_UNUSED_FILES_ENABLED` |
+| `retention.jobs` | Retention execution records past the audit retention period | `RETENTION_JOB_HISTORY_ENABLED` |
+
+`conversations.derived_copies` also runs without a choice: it follows a removal
+already made (see [Copies of removed conversations](#copies-of-removed-conversations)).
+
+A task added later is off by default unless it removes only what such a period
+selects, is added to this list or follows a removal already made; a test fails
+until it is declared one of these.
+Web widget conversations are not an engine task: the widget's own nightly job removes
+them by each widget's retention.
+
+Outside the engine, the audit log also runs without a choice: it keeps 365 days unless
+an administrator changes the period on the audit log page (see
+[Audit log retention](#audit-log-retention)).
+
+#### Copies of removed conversations
+
+A feature that stores content copied from another conversation records, before it
+returns that content, which questions the copy came from. No feature in this release
+records copies yet, so the rules below apply as soon as one does. For such a copy:
+
+1. It is due by its own conversation period, and at the latest when the first
+   question it was copied from is removed, by a user, with its Assistant or by
+   retention.
+2. From the moment that removal commits, Eneo's conversation reads no longer return
+   the copy, whether or not the task below runs. Its detail, tool result, title,
+   rename, conversation feedback, document, Assistant session, helper run, insight and
+   message logging routes answer `410` with code `derived_source_removed` (`9085`) to a
+   caller who passed the usual access checks, and a rename or conversation feedback
+   changes nothing; anyone else gets the usual refusal. Conversation lists and their
+   totals, recent conversations, exports and insights leave it out, while aggregate
+   insight statistics count it until it is removed. A follow-up question finds no
+   conversation. The user can still delete it.
+3. The task `conversations.derived_copies` removes its questions, their Files and the
+   session, within the conversation budgets, and then the records of where the copy
+   came from. A copy left without questions is removed once it is a day old, so a
+   feature that is still writing it is not cut short.
+
+| Task | Removes | Switch |
+| --- | --- | --- |
+| `conversations.derived_copies` | Copies whose source question was removed: step `copies` (questions, Files, the emptied session), step `edges` (the records of removed copies, copies left without questions) | `RETENTION_DERIVED_COPIES_ENABLED` |
+
+Switching the task off keeps such copies stored but still unreadable. These copies are
+outside the rules: a document or export a user downloaded, content sent to a model
+provider or another external service, and text added to a knowledge base, which stays
+until it is removed there. An insights job keeps its question and its answer, which
+may quote conversations, in its job record until 24 hours after the job last changed
+state.
+
+Queued App run and insights jobs no longer carry their prompt or question: an App run
+reads its prompt from the stored run and an insights job its question from its job
+record. These jobs and audit jobs keep no result after they finish; an audit job still
+carries its event's details until the event is written. Jobs queued before an upgrade
+still run, except an insights job whose job record has expired: it fails, and the
+insights request has to be made again.
+
+#### Health
+
+`/api/healthz` reports each retention task with a status and typed flags only. Counts
+and times are in the audit log and the execution record. The endpoint is public, so
+one health read is shared by all probes within `RETENTION_HEALTH_CACHE_SECONDS`.
+Retention problems degrade this status without making an otherwise ready API
+unavailable.
+
+| Status | Meaning |
+| --- | --- |
+| `initializing` | No task has written an execution record yet, or this task's first execution is still running and has not written its overdue snapshot |
+| `healthy` | No stored execution contradicts it: the latest execution did not fail, the task is not stale, nothing is overdue, and no running execution has a stale heartbeat |
+| `degraded` | The latest execution failed, no execution completed for two days, or overdue rows exist |
+| `unknown` | The latest execution was superseded, timed out on its claim or has a stale heartbeat; the task has no execution although another task has; the overdue snapshot is missing, stale, or was cut off before it found any overdue row; or the health read failed |
+| `disabled` | The operator turned the task off: the worker skipped its latest execution, or, before any execution, the API's own setting turns it off. The overall status leaves the task out |
+
+| Flag | Meaning |
+| --- | --- |
+| `disabled` | The latest execution was skipped because the task is turned off |
+| `failed` | The latest execution failed; `error_code` says why |
+| `stale` | No execution completed for two days |
+| `abandoned` | A running execution has a heartbeat older than `RETENTION_LEASE_STALE_SECONDS` |
+| `overdue` | The latest snapshot found due rows older than the window; `overdue_complete: false` means the count was capped |
+| `overdue_snapshot_stale` | The latest snapshot is older than two days |
+| `no_execution` | The task has no execution record |
+| `no_overdue_snapshot` | The task reports overdue work but no execution has written a snapshot |
+| `latest_outcome`, `error_code`, `blocked_reasons` | From the latest execution; blocked reasons read `<step>.<reason>` |
+| `limiting_settings` | Settings whose limit kept due data in the latest execution, for example `retention_conversations_max_unit_rows` for `unit_exceeds_budget`; raising the named settings lets a later execution remove the data |
+
+`error_code` names why an execution did not succeed:
+
+| Error code | Outcome | Meaning |
+| --- | --- | --- |
+| `chunk_timeout` | `partial` | A chunk hit the statement or lock timeout; the next execution resumes from the cursor |
+| `chunk_deadlock` | `partial` | PostgreSQL ended a chunk to break a deadlock; the next execution resumes |
+| `chunk_failed` | `failed` | A chunk failed for another reason; the log has the exception |
+| `contract_violation` | `failed` | A task reported a key it did not declare or charged work it did not report; a defect, not a data problem |
+| `claim_timeout` | `skipped` | The claim waited on another execution's lock past the lock timeout; nothing ran |
+| `finish_timeout` | `running` | The work was done but the outcome could not be written; the next execution records the row as superseded |
+| `disabled_by_deployment_setting` | `skipped` | The task is turned off |
+
+An execution whose run event cannot be written (the audit store is down, or the
+deployment has no tenant to hold the event) does not record an outcome: the row
+stays `running`, health reads `unknown` with `abandoned` once the lease is stale,
+and the next execution records the row as `superseded`. An outcome never commits
+without its event.
+
+#### Operator view
+
+The execution record answers the questions the health flags raise. One read-only
+query shows the latest executions of a task with their outcome, counts, blocked
+reasons and cursors:
+
+```sql
+SELECT task, outcome, error_code, started_at, finished_at,
+       counts, blocked, cursors, overdue_count, overdue_complete
+FROM retention_job_runs
+WHERE task = 'conversations.history'
+ORDER BY started_at DESC
+LIMIT 5;
+```
+
+Questions whose Assistant was deleted keep a null owner and follow no retention
+policy, so they do not expire. This is unchanged from earlier releases.
+
+#### Read back after a restore
+
+A restored database can hold rows that became due after its recovery point. Before
+traffic opens again, with the API closed, every worker stopped and every retention
+task turned on (each `RETENTION_*_ENABLED` setting `true`, the default), run
+retention until nothing due is left:
+
+```bash
+docker compose --env-file .env --env-file release.env run --rm backend run-cron --until-complete run_retention
+```
+
+Add your installation's Compose files and profiles to this command too. They go between `docker compose` and `run`; with the bundled store that is `--profile object-content -f docker-compose.yml -f docker-compose.object-content.yml` (see [Review network changes](/guides/deployment#review-network-changes)).
+
+The command runs the registered tasks in its own process, round after round, and
+prints each round's outcome and the number of rows removed. Every round runs
+against the time the command started, so rows that fall due while it runs are
+left to the scheduled run. Retention is complete
+when every step of every task has finished a pass that began after the latest
+removal, because a removal can make other rows due (a removed question can leave
+its session empty). A pass resumed from a cursor stored before the restore does
+not count.
+
+It then runs object-content reconciliation and reports storage on its own line.
+Payloads that nothing refers to any more are known only from a listing of the
+store. Reconciliation lists the store one page per pass. The readback continues
+the listing under way and confirms storage only once a whole listing that began
+after the readback started has completed, and nothing is left to remove. It
+stops after a fixed number of passes, enough for two listings of a million
+objects at the default page size:
+
+| Line | Meaning |
+| --- | --- |
+| `storage: confirmed` | A listing begun after the readback started has completed, and the store has removed every payload that nothing refers to any more |
+| `storage: pending N (held H, retrying R, waiting W)` | Payloads are still kept by a minimum retention or a hold, wait for a retry after a failure, or were not reached yet. A payload the listing found is deleted once a second listing has seen it after its grace period (one hour by default): run the command again after that. Not confirmed erasure |
+| `storage: pending N (...), store not listed in full` | No listing that began after the readback started completed within its passes. Run the command again: it continues the listing. Not confirmed erasure |
+| `storage: not reachable (code)` | The store could not be checked |
+| `storage: failed (...)` | A store operation failed or could not be confirmed during reconciliation, such as an aborted upload whose parts are still listed |
+
+Exit code 0 means retention is complete and storage is confirmed or pending. Exit
+code 1 means it is not: the output names each task and reason, such as a missing
+report (the task raised; see the log), an execution held by another process (stop
+the workers), an outcome other than `succeeded` or `partial`, a blocked reason
+other than "no longer due" or "not old enough", a step that made no progress,
+"still removing after 10000 rounds" (run the command again: it continues), or a
+storage line other than `confirmed` or `pending`. A task turned off by its setting
+also fails the readback, since nothing shows that its work is done. Resolve the
+cause and run the command again.
+
+What the readback promises, what can still come back after a restore and what
+it leaves to you are in [After a restore](/guides/data-retention#after-a-restore).
 
 Flow run and step history is separate. Its dedicated Organization → Space → Flow policy never authorizes scheduled deletion and only sets eligibility or a human-review queue. See [Data retention and deletion](/guides/data-retention).
 

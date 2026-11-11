@@ -560,7 +560,7 @@ export interface paths {
     head?: never;
     /**
      * Change the organisation's sign-in settings
-     * @description Change the label, client ID, client secret or allowed email domains of the registered identity provider. Send the revision from GET; a save against an older revision is refused with 409. Operator-owned fields are refused with 422. Every change is audited.
+     * @description Change the label, client ID, client secret, subject claim or allowed email domains of the registered identity provider. Send the revision from GET; a save against an older revision is refused with 409. Operator-owned fields are refused with 422. Every change is audited. A new client ID gives every person a new issuer and audience pair: with a provider that issues a subject per client, open an identity migration window from the old pair to the new one first, or bound accounts are refused `account_bound`; with one subject for every client, the new pair binds by the same subject.
      */
     patch: operations["patch_federation_api_v1_admin_federation_patch"];
     trace?: never;
@@ -686,6 +686,50 @@ export interface paths {
     put?: never;
     post?: never;
     delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/identity-migration-windows": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List open identity migration windows
+     * @description The organisation's migration windows that are still open.
+     */
+    get: operations["list_identity_migration_windows_api_v1_admin_identity_migration_windows_get"];
+    put?: never;
+    /**
+     * Open an identity migration window
+     * @description Until `closes_at` (at most 30 days ahead), an account bound under the from issuer and audience also binds under the to pair by its email. The from binding stays, so the first entry point keeps signing in. Use it before a client change or when adding an entry point. A window from a pair to itself is for a change of subject claim: an account bound there before the window opened has its subject replaced once. Audited.
+     */
+    post: operations["open_identity_migration_window_api_v1_admin_identity_migration_windows_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/identity-migration-windows/{id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Close an identity migration window
+     * @description Closes an open window now. Audited.
+     */
+    delete: operations["close_identity_migration_window_api_v1_admin_identity_migration_windows__id__delete"];
     options?: never;
     head?: never;
     patch?: never;
@@ -2429,6 +2473,50 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/users/{user_id}/identity": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get a user's sign-in identities
+     * @description The identity provider identities bound to the account (issuer, audience, subject) and its open re-binding allowance, if any. A bound account signs in only with its identities; its email binds no other. The account is named by its id, the `id` of the user list.
+     */
+    get: operations["get_user_identity_api_v1_admin_users__user_id__identity_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/users/{user_id}/identity/rebinding": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Allow a user to bind a new sign-in identity
+     * @description Until `allowed_until` (at most 30 days ahead), the account's next sign-in by email binds the identity it presents, replacing the account's subject under that issuer and audience. Single use: the allowance closes with that sign-in. It never takes an identity another account holds. Audited.
+     */
+    put: operations["allow_user_identity_rebinding_api_v1_admin_users__user_id__identity_rebinding_put"];
+    post?: never;
+    /**
+     * Withdraw a user's sign-in re-binding
+     * @description Closes the account's re-binding allowance. Audited.
+     */
+    delete: operations["withdraw_user_identity_rebinding_api_v1_admin_users__user_id__identity_rebinding_delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/users/{username}": {
     parameters: {
       query?: never;
@@ -3703,7 +3791,7 @@ export interface paths {
     };
     /**
      * Get per-action audit configuration
-     * @description Retrieve all 224 actions with their enabled status for the modal UI.
+     * @description Retrieve all 231 actions with their enabled status for the modal UI.
      */
     get: operations["get_action_config_api_v1_audit_config_actions_get"];
     put?: never;
@@ -4013,7 +4101,7 @@ export interface paths {
     put?: never;
     /**
      * Sign Out The Browser
-     * @description End the browser's Eneo session on the server and clear its cookies: a copy of the session token stops working at once. The identity provider's session stays. With `Eneo-Session-Generation`, a session other than the one named is left in place (401). When the session cannot be ended, nothing is cleared (503). Only for requests from the site's own pages.
+     * @description End the browser's Eneo session on the server and clear its cookies: a copy of the session token stops working at once. The identity provider's session stays. With `Eneo-Session-Generation`, a session other than the one named is left in place (401). When the end cannot be confirmed, nothing is cleared (503): the session may already have ended, and a retry with the same cookie completes the sign-out. Only for requests from the site's own pages.
      */
     post: operations["Sign_out_the_browser_api_v1_auth_session_logout__post"];
     delete?: never;
@@ -11712,26 +11800,6 @@ export interface paths {
     patch: operations["update_user_api_v1_users_admin__id___patch"];
     trace?: never;
   };
-  "/api/v1/users/login/openid-connect/mobilityguard/": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /**
-     * Login With Mobilityguard
-     * @description Authenticate via OpenID Connect (MobilityGuard / generic OIDC provider).
-     */
-    post: operations["login_with_mobilityguard_api_v1_users_login_openid_connect_mobilityguard__post"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/api/v1/users/login/token/": {
     parameters: {
       query?: never;
@@ -11746,6 +11814,26 @@ export interface paths {
      * @description Authenticate with email and password (OAuth2 password flow).
      */
     post: operations["Login_api_v1_users_login_token__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/users/logout/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Sign Out
+     * @description End the Eneo session the Bearer token names: a copy of the token stops working at once. 204 means no session remains that this token can use, also when it named none to end: no or an invalid token, a token without a session, a provider token, or one expired for longer than it was valid. A token without a session is not revoked and works until it expires. 503 `sign_out_unavailable` means the end is not confirmed: the session may already have ended, or the token may still work. Keep the token and retry; once the session has ended, a retry answers 204.
+     */
+    post: operations["Sign_out_api_v1_users_logout__post"];
     delete?: never;
     options?: never;
     head?: never;
@@ -11840,7 +11928,8 @@ export interface paths {
     put?: never;
     /**
      * Provision User
-     * @description Provision a user from a Zitadel access token.
+     * @deprecated
+     * @description Deprecated, removed in the next release, together with the Zitadel sign-in it served. People are created at their first OIDC sign-in, under the organisation's provisioning setting.
      */
     post: operations["provision_user_api_v1_users_provision__post"];
     delete?: never;
@@ -12607,6 +12696,19 @@ export interface components {
       frontend_state: string;
     };
     /**
+     * AccountIdentity
+     * @description The provider identities that sign in to one account.
+     */
+    AccountIdentity: {
+      /** Bindings */
+      bindings: components["schemas"]["IdentityBindingPublic"][];
+      /**
+       * Rebinding Allowed Until
+       * @description While set, the account's next sign-in by email binds the identity it presents, replacing the account's subject under that issuer and audience if it has one. Single use.
+       */
+      rebinding_allowed_until: string | null;
+    };
+    /**
      * ActionConfig
      * @description Configuration for a single action type.
      *
@@ -12724,6 +12826,10 @@ export interface components {
       | "password_change_failed"
       | "sessions_invalidated"
       | "session_extended"
+      | "identity_bound"
+      | "identity_conflict"
+      | "identity_rebinding_updated"
+      | "identity_migration_window_updated"
       | "assistant_created"
       | "assistant_deleted"
       | "assistant_updated"
@@ -12893,6 +12999,9 @@ export interface components {
       | "scim_token_created"
       | "scim_token_revoked"
       | "retention_policy_applied"
+      | "data_retention_batch"
+      | "data_retention_run"
+      | "data_retention_skipped"
       | "encryption_key_rotated"
       | "system_maintenance"
       | "audit_session_created"
@@ -15468,10 +15577,17 @@ export interface components {
      *     }
      */
     CallbackRequest: {
+      /**
+       * Binding Verifier
+       * @description The secret whose S256 hash was sent as binding_challenge at initiate. Required for a bound sign-in and refused for an unbound one.
+       */
+      binding_verifier?: string | null;
       /** Code */
       code: string;
       /** Code Verifier */
       code_verifier?: string | null;
+      /** Iss */
+      iss?: string | null;
       /** State */
       state: string;
     };
@@ -18110,8 +18226,13 @@ export interface components {
       | 9070
       | 9075
       | 9076
+      | 9077
+      | 9078
+      | 9079
       | 9080
       | 9081
+      | 9082
+      | 9085
       | 9090;
     /** EvidenceArtifactAvailabilitySummary */
     EvidenceArtifactAvailabilitySummary: {
@@ -18761,6 +18882,8 @@ export interface components {
        * Format: date-time
        */
       configured_at: string;
+      /** Email Verified Claims */
+      email_verified_claims?: string[] | null;
       /**
        * Encryption Status
        * @enum {string}
@@ -18772,6 +18895,14 @@ export interface components {
       masked_secret: string;
       /** Provider */
       provider: string;
+      /** Signing Algorithms */
+      signing_algorithms?: string[] | null;
+      /**
+       * Subject Claim
+       * @description The token claim an account is bound to
+       * @default sub
+       */
+      subject_claim?: string;
     };
     /**
      * FederationStatusResponse
@@ -31081,6 +31212,87 @@ export interface components {
       /** Updated At */
       updated_at?: string | null;
     };
+    /** IdentityBindingPublic */
+    IdentityBindingPublic: {
+      /**
+       * Audience
+       * @description The client id of a browser sign-in, or the accepted API audience of a provider's access token.
+       */
+      audience: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /** Issuer */
+      issuer: string;
+      /** Subject */
+      subject: string;
+      /**
+       * Subject Claim
+       * @description The token claim the subject was read from; a sign-in under another subject claim does not match this binding.
+       */
+      subject_claim: string;
+    };
+    /**
+     * IdentityMigrationWindowCreate
+     * @description While open, an account bound under the from pair also binds under the
+     *     to pair by its email. Its from binding stays. A window from a pair to
+     *     itself is for a change of subject claim: an account bound there before
+     *     the window opened has its subject replaced once, found by its email or
+     *     by the new subject under another audience.
+     */
+    IdentityMigrationWindowCreate: {
+      /**
+       * Closes At
+       * Format: date-time
+       * @description When the window closes: in the future, at most 30 days ahead.
+       */
+      closes_at: string;
+      /** From Audience */
+      from_audience: string;
+      /** From Issuer */
+      from_issuer: string;
+      /** To Audience */
+      to_audience: string;
+      /** To Issuer */
+      to_issuer: string;
+    };
+    /** IdentityMigrationWindowPublic */
+    IdentityMigrationWindowPublic: {
+      /**
+       * Closes At
+       * Format: date-time
+       */
+      closes_at: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /** From Audience */
+      from_audience: string;
+      /** From Issuer */
+      from_issuer: string;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** To Audience */
+      to_audience: string;
+      /** To Issuer */
+      to_issuer: string;
+    };
+    /** IdentityRebindingAllowance */
+    IdentityRebindingAllowance: {
+      /**
+       * Allowed Until
+       * Format: date-time
+       * @description When the allowance ends: in the future, at most 30 days ahead.
+       */
+      allowed_until: string;
+    };
     /** ImageModelPublic */
     ImageModelPublic: {
       /**
@@ -34012,29 +34224,6 @@ export interface components {
        */
       step_id: string;
     };
-    /** OpenIdConnectLogin */
-    OpenIdConnectLogin: {
-      /** Client Id */
-      client_id: string;
-      /** Code */
-      code: string;
-      /** Code Verifier */
-      code_verifier: string;
-      /**
-       * Grant Type
-       * @default authorization_code
-       */
-      grant_type?: string;
-      /** Nonce */
-      nonce?: string | null;
-      /** Redirect Uri */
-      redirect_uri: string;
-      /**
-       * Scope
-       * @default openid
-       */
-      scope?: string;
-    };
     /** OrganizationSkillPublic */
     OrganizationSkillPublic: {
       /** Content Digest */
@@ -35640,6 +35829,14 @@ export interface components {
        */
       discovery_endpoint?: string | null;
       /**
+       * Email Verified Claims
+       * @description Claims that say the email is verified, in order; the first one present decides. Omitted: ['email_verified', 'xms_edov'].
+       * @example [
+       *       "email_verified"
+       *     ]
+       */
+      email_verified_claims?: string[] | null;
+      /**
        * Provider
        * @description Identity provider label (e.g., 'mobilityguard', 'entra_id', 'okta', 'auth0')
        */
@@ -35650,6 +35847,21 @@ export interface components {
        * @example /auth/callback
        */
       redirect_path?: string | null;
+      /**
+       * Signing Algorithms
+       * @description ID token signing algorithms to accept. Omitted: the ones the provider's discovery lists, else RS256. Symmetric algorithms and 'none' are refused.
+       * @example [
+       *       "RS256",
+       *       "ES256"
+       *     ]
+       */
+      signing_algorithms?: string[] | null;
+      /**
+       * Subject Claim
+       * @description The token claim an account is bound to, stored as claims_mapping.subject: an immutable id the provider never gives to another person, never the email claim. Changing it after people are bound needs a migration window from each issuer and audience to itself first. Omitted, the stored claim is kept.
+       * @example oid
+       */
+      subject_claim?: string | null;
     };
     /** PayloadPreview */
     PayloadPreview: {
@@ -37985,6 +38197,14 @@ export interface components {
        */
       discovery_endpoint: string;
       /**
+       * Email Verified Claims
+       * @description Claims that say the email is verified, in order; the first one present decides. Omitted: ['email_verified', 'xms_edov'].
+       * @example [
+       *       "email_verified"
+       *     ]
+       */
+      email_verified_claims?: string[] | null;
+      /**
        * Provider
        * @description Identity provider label (e.g., 'mobilityguard', 'entra_id', 'okta', 'auth0')
        */
@@ -37995,6 +38215,21 @@ export interface components {
        * @example /auth/callback
        */
       redirect_path?: string | null;
+      /**
+       * Signing Algorithms
+       * @description ID token signing algorithms to accept. Omitted: the ones the provider's discovery lists, else RS256. Symmetric algorithms and 'none' are refused.
+       * @example [
+       *       "RS256",
+       *       "ES256"
+       *     ]
+       */
+      signing_algorithms?: string[] | null;
+      /**
+       * Subject Claim
+       * @description The token claim an account is bound to, stored as claims_mapping.subject: an immutable id the provider never gives to another person, never the email claim. Changing it after people are bound needs a migration window from each issuer and audience to itself first. Omitted, PUT stores 'sub': send the current claim to keep it.
+       * @example oid
+       */
+      subject_claim?: string | null;
     };
     /**
      * SetFederationResponse
@@ -39995,8 +40230,8 @@ export interface components {
      * @description What an org admin may change in their tenant's registered IdP.
      *
      *     Every other field (the authorization server and its endpoints, redirect
-     *     topology, scopes, claim mapping, token auth method) is operator-owned and
-     *     refused as an unknown field.
+     *     topology, scopes, the rest of the claim mapping, token auth method) is
+     *     operator-owned and refused as an unknown field.
      */
     TenantAdminFederationPatch: {
       /**
@@ -40028,6 +40263,12 @@ export interface components {
        * @description The revision from GET that this change was made against. A save against an older revision is refused with 409.
        */
       revision: string;
+      /**
+       * Subject Claim
+       * @description The token claim an account is bound to, stored as claims_mapping.subject: an immutable id the provider never gives to another person, never the email claim. Changing it after people are bound needs a migration window from each issuer and audience to itself first. Omitted, the stored claim is kept.
+       * @example oid
+       */
+      subject_claim?: string;
     };
     /**
      * TenantAppTestResult
@@ -40369,6 +40610,12 @@ export interface components {
       revision?: string | null;
       /** Scopes */
       scopes?: string[];
+      /**
+       * Subject Claim
+       * @description The token claim an account is bound to
+       * @default sub
+       */
+      subject_claim?: string;
       /** Token Endpoint Auth Method */
       token_endpoint_auth_method?: string | null;
     };
@@ -46685,6 +46932,153 @@ export interface operations {
       };
     };
   };
+  list_identity_migration_windows_api_v1_admin_identity_migration_windows_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["IdentityMigrationWindowPublic"][];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  open_identity_migration_window_api_v1_admin_identity_migration_windows_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["IdentityMigrationWindowCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["IdentityMigrationWindowPublic"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  close_identity_migration_window_api_v1_admin_identity_migration_windows__id__delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["IdentityMigrationWindowPublic"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
   list_providers_api_v1_admin_model_providers__get: {
     parameters: {
       query?: never;
@@ -52217,6 +52611,184 @@ export interface operations {
       };
     };
   };
+  get_user_identity_api_v1_admin_users__user_id__identity_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        user_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AccountIdentity"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  allow_user_identity_rebinding_api_v1_admin_users__user_id__identity_rebinding_put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        user_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["IdentityRebindingAllowance"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AccountIdentity"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  withdraw_user_identity_rebinding_api_v1_admin_users__user_id__identity_rebinding_delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        user_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AccountIdentity"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
   delete_user_api_v1_admin_users__username__delete: {
     parameters: {
       query?: never;
@@ -53561,6 +54133,15 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Gone */
+      410: {
         headers: {
           [name: string]: unknown;
         };
@@ -56776,6 +57357,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Gone */
+      410: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -57307,6 +57897,15 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Gone */
+      410: {
         headers: {
           [name: string]: unknown;
         };
@@ -58276,36 +58875,53 @@ export interface operations {
           "application/json": components["schemas"]["AccessTokenResponse"];
         };
       };
-      /** @description Invalid or expired state */
+      /** @description Invalid or expired state, or a binding_verifier that does not match the sign-in (oidc_transaction_invalid) */
       400: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Token validation failed */
       401: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
-      /** @description Domain not allowed, inactive tenant, or user missing */
+      /** @description Domain not allowed, inactive tenant or user missing; or `identity_conflict` (9082): the account is bound to another sign-in identity */
       403: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Tenant or user not found */
       404: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Validation Error */
       422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Sign-in store unavailable (oidc_login_unavailable) */
+      503: {
         headers: {
           [name: string]: unknown;
         };
@@ -58344,6 +58960,8 @@ export interface operations {
         state?: string | null;
         /** @description Optional redirect URI override. Must exactly match a configured redirect URI for the tenant. */
         redirect_uri?: string | null;
+        /** @description Optional base64url S256 hash of a secret the client keeps (RFC 7636 4.2). The callback then needs that secret as binding_verifier. Create the secret from at least 32 random bytes. */
+        binding_challenge?: string | null;
       };
       header?: never;
       path?: never;
@@ -58392,6 +59010,13 @@ export interface operations {
       };
       /** @description Federation or redirect configuration missing */
       500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Sign-in store unavailable (oidc_login_unavailable) */
+      503: {
         headers: {
           [name: string]: unknown;
         };
@@ -60266,6 +60891,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Gone */
+      410: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -60382,6 +61016,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Gone */
+      410: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -60450,6 +61093,15 @@ export interface operations {
       };
       /** @description Conflict */
       409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Gone */
+      410: {
         headers: {
           [name: string]: unknown;
         };
@@ -60531,6 +61183,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Gone */
+      410: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Request Entity Too Large */
       413: {
         headers: {
@@ -60596,6 +61257,15 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Gone */
+      410: {
         headers: {
           [name: string]: unknown;
         };
@@ -60840,6 +61510,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Gone */
+      410: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -60891,6 +61570,15 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Gone */
+      410: {
         headers: {
           [name: string]: unknown;
         };
@@ -60972,6 +61660,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Gone */
+      410: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -61044,6 +61741,15 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Gone */
+      410: {
         headers: {
           [name: string]: unknown;
         };
@@ -70286,6 +70992,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Gone */
+      410: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -72033,6 +72748,15 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Gone */
+      410: {
         headers: {
           [name: string]: unknown;
         };
@@ -83604,6 +84328,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Bad Gateway */
+      502: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   delete_tenant_federation_api_v1_sysadmin_tenants__tenant_id__federation_delete: {
@@ -83715,6 +84448,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Bad Gateway */
+      502: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   test_tenant_federation_api_v1_sysadmin_tenants__tenant_id__federation_test_post: {
@@ -83773,8 +84515,8 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Internal Server Error */
-      500: {
+      /** @description Bad Gateway */
+      502: {
         headers: {
           [name: string]: unknown;
         };
@@ -85675,84 +86417,6 @@ export interface operations {
       };
     };
   };
-  login_with_mobilityguard_api_v1_users_login_openid_connect_mobilityguard__post: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["OpenIdConnectLogin"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["AccessToken"];
-        };
-      };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Forbidden */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Internal Server Error */
-      500: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Bad Gateway */
-      502: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-    };
-  };
   Login_api_v1_users_login_token__post: {
     parameters: {
       query?: never;
@@ -85813,6 +86477,33 @@ export interface operations {
       };
       /** @description Internal Server Error */
       500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  Sign_out_api_v1_users_logout__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Service Unavailable */
+      503: {
         headers: {
           [name: string]: unknown;
         };

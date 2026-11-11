@@ -33,6 +33,22 @@ const ACTION_MESSAGES = {
     name: m.audit_action_session_extended,
     description: m.audit_action_session_extended_description
   },
+  identity_bound: {
+    name: m.audit_action_identity_bound,
+    description: m.audit_action_identity_bound_description
+  },
+  identity_conflict: {
+    name: m.audit_action_identity_conflict,
+    description: m.audit_action_identity_conflict_description
+  },
+  identity_rebinding_updated: {
+    name: m.audit_action_identity_rebinding_updated,
+    description: m.audit_action_identity_rebinding_updated_description
+  },
+  identity_migration_window_updated: {
+    name: m.audit_action_identity_migration_window_updated,
+    description: m.audit_action_identity_migration_window_updated_description
+  },
   role_created: {
     name: m.audit_action_role_created,
     description: m.audit_action_role_created_description
@@ -812,6 +828,18 @@ const ACTION_MESSAGES = {
   retention_policy_applied: {
     name: m.audit_action_retention_policy_applied,
     description: m.audit_action_retention_policy_applied_description
+  },
+  data_retention_batch: {
+    name: m.audit_action_data_retention_batch,
+    description: m.audit_action_data_retention_batch_description
+  },
+  data_retention_run: {
+    name: m.audit_action_data_retention_run,
+    description: m.audit_action_data_retention_run_description
+  },
+  data_retention_skipped: {
+    name: m.audit_action_data_retention_skipped,
+    description: m.audit_action_data_retention_skipped_description
   },
   encryption_key_rotated: {
     name: m.audit_action_encryption_key_rotated,

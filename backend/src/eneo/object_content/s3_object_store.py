@@ -78,6 +78,14 @@ class ObjectStoreProbeCleanupError(ObjectStoreError):
     pass
 
 
+class ObjectStoreKeepsVersionsError(ObjectStoreError):
+    """The bucket keeps old versions, so deleted bytes stay readable."""
+
+
+class ObjectStorePermissionError(ObjectStoreError):
+    """The credentials lack a permission the store needs; the message names it."""
+
+
 class ObjectStoreFailureKind(StrEnum):
     AUTHENTICATION = "authentication"
     TLS = "tls"
@@ -125,6 +133,8 @@ class MultipartUploadPage:
 
 MultipartStarted = Callable[[str], Awaitable[None]]
 _MutationResultT = TypeVar("_MutationResultT")
+# Error codes for an upload that no longer exists.
+_NO_SUCH_UPLOAD = frozenset({"404", "NoSuchUpload", "NotFound"})
 
 
 async def _run_mutation(
@@ -308,6 +318,81 @@ class S3ObjectStore:
                 MaxKeys=1,
             )
         except (BotoCoreError, ClientError) as error:
+            raise ObjectStoreUnavailableError(
+                "Object content storage is not ready"
+            ) from error
+        await self._refuse_kept_versions()
+
+    async def _refuse_kept_versions(self) -> None:
+        """Refuse a bucket in which a deleted object stays readable.
+
+        With versioning enabled or suspended, or with Object Lock, a delete
+        only hides the object behind a delete marker and its bytes stay
+        readable as an old version, so a removal could never be confirmed.
+        Old versions are never deleted by version id here: the operator moves
+        to a bucket that never kept versions. Each read also proves that the
+        credentials hold the permission it needs.
+        """
+        bucket = self._settings.bucket
+        versioning = await self._read_bucket_setting(
+            "s3:GetBucketVersioning",
+            lambda: self._readiness_client.get_bucket_versioning(Bucket=bucket),
+        )
+        if versioning.get("Status") in {"Enabled", "Suspended"}:
+            raise ObjectStoreKeepsVersionsError(
+                f"Object content storage bucket {bucket!r} has versioning "
+                "enabled or suspended"
+            )
+        lock = await self._read_bucket_setting(
+            "s3:GetBucketObjectLockConfiguration",
+            lambda: self._readiness_client.get_object_lock_configuration(Bucket=bucket),
+            absent={"ObjectLockConfigurationNotFoundError"},
+        )
+        configuration = lock.get("ObjectLockConfiguration")
+        if (
+            isinstance(configuration, Mapping)
+            and cast(Mapping[str, object], configuration).get("ObjectLockEnabled")
+            == "Enabled"
+        ):
+            raise ObjectStoreKeepsVersionsError(
+                f"Object content storage bucket {bucket!r} has Object Lock enabled"
+            )
+        await self._read_bucket_setting(
+            "s3:ListBucketVersions",
+            lambda: self._readiness_client.list_object_versions(
+                Bucket=bucket, Prefix=self._settings.object_key_prefix, MaxKeys=1
+            ),
+        )
+
+    async def _read_bucket_setting(
+        self,
+        permission: str,
+        read: Callable[[], Mapping[str, object]],
+        *,
+        absent: frozenset[str] | set[str] = frozenset(),
+    ) -> Mapping[str, object]:
+        """One readiness read; an error code in `absent` reads as no setting."""
+        bucket = self._settings.bucket
+        try:
+            return await asyncio.to_thread(read)
+        except ClientError as error:
+            code = _client_error_code(error)
+            if code in absent:
+                return {}
+            if code in {"403", "AccessDenied"}:
+                raise ObjectStorePermissionError(
+                    f"Object content storage bucket {bucket!r} needs the "
+                    f"{permission} permission"
+                ) from error
+            if code in {"501", "NotImplemented"}:
+                raise ObjectStoreKeepsVersionsError(
+                    f"Object content storage bucket {bucket!r} cannot show "
+                    f"whether it keeps old versions ({permission} is not supported)"
+                ) from error
+            raise ObjectStoreUnavailableError(
+                "Object content storage is not ready"
+            ) from error
+        except BotoCoreError as error:
             raise ObjectStoreUnavailableError(
                 "Object content storage is not ready"
             ) from error
@@ -1074,12 +1159,52 @@ class S3ObjectStore:
                     await operation_checkpoint()
                 await self.head(key)
             except ObjectStoreNotFoundError:
+                await self._require_no_version_left(key, operation_checkpoint)
                 return
             if monotonic() >= deadline:
                 raise ObjectStoreUnavailableError(
                     "Object deletion was not visible before the configured deadline"
                 )
             await asyncio.sleep(self._settings.delete_poll_interval_seconds)
+
+    async def _require_no_version_left(
+        self, key: str, operation_checkpoint: OperationCheckpoint | None
+    ) -> None:
+        """Confirm a delete only when no old version keeps the bytes.
+
+        Readiness refuses a versioned bucket, but versioning can be turned on
+        while Eneo runs. The delete then stays unconfirmed and is retried;
+        the old version is not deleted by version id. Each retried delete
+        adds a delete marker, so a page cut short counts as unconfirmed, and
+        so does a listing that does not say it is complete or a version it
+        does not name.
+        """
+        try:
+            if operation_checkpoint is not None:
+                await operation_checkpoint()
+            result = await asyncio.to_thread(
+                self._client.list_object_versions,
+                Bucket=self._settings.bucket,
+                Prefix=key,
+            )
+        except (BotoCoreError, ClientError) as error:
+            raise ObjectStoreUnavailableError(
+                "Object deletion could not be confirmed"
+            ) from error
+        listing = cast(Mapping[str, object], result)
+        versions = listing.get("Versions", [])
+        if listing.get("IsTruncated") is not False or not isinstance(versions, list):
+            raise ObjectStoreUnavailableError("Object deletion could not be confirmed")
+        names = [
+            cast(Mapping[str, object], version).get("Key")
+            if isinstance(version, Mapping)
+            else None
+            for version in cast(list[object], versions)
+        ]
+        if any(not isinstance(name, str) or name == key for name in names):
+            raise ObjectStoreUnavailableError(
+                "Object deletion left an old version of the object"
+            )
 
     async def list_object_page(
         self,
@@ -1263,11 +1388,51 @@ class S3ObjectStore:
                 ),
             )
         except ClientError as error:
-            if _client_error_code(error) in {"404", "NoSuchUpload", "NotFound"}:
+            if _client_error_code(error) in _NO_SUCH_UPLOAD:
                 return
             raise ObjectStoreUnavailableError("Multipart abort failed") from error
         except BotoCoreError as error:
             raise ObjectStoreUnavailableError("Multipart abort failed") from error
+        await self._require_no_part_left(key, upload_id, operation_checkpoint)
+
+    async def _require_no_part_left(
+        self,
+        key: str,
+        upload_id: str,
+        operation_checkpoint: OperationCheckpoint | None,
+    ) -> None:
+        """Confirm an abort only when the upload keeps no part.
+
+        A part upload in flight during the abort can still complete and keep
+        its bytes; the S3 API documents listing the parts to confirm an
+        abort. A part left, or a listing that does not say it is complete,
+        keeps the abort unconfirmed, and reconciliation aborts it again later.
+        """
+        try:
+            if operation_checkpoint is not None:
+                await operation_checkpoint()
+            result = await asyncio.to_thread(
+                self._client.list_parts,
+                Bucket=self._settings.bucket,
+                Key=key,
+                UploadId=upload_id,
+                MaxParts=1,
+            )
+        except ClientError as error:
+            if _client_error_code(error) in _NO_SUCH_UPLOAD:
+                return
+            raise ObjectStoreUnavailableError(
+                "Multipart abort could not be confirmed"
+            ) from error
+        except BotoCoreError as error:
+            raise ObjectStoreUnavailableError(
+                "Multipart abort could not be confirmed"
+            ) from error
+        listing = cast(Mapping[str, object], result)
+        if listing.get("Parts") or listing.get("IsTruncated") is not False:
+            raise ObjectStoreUnavailableError(
+                "Multipart abort left a part of the upload"
+            )
 
     def _require_owned_key(self, key: str) -> None:
         prefix = self._settings.object_key_prefix

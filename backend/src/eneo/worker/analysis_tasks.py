@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 from uuid import UUID
 
@@ -5,6 +6,7 @@ from eneo.analysis.analysis_job_manager import AnalysisJobManager
 from eneo.jobs.task_models import AnalyzeConversationInsightsTask
 from eneo.main.container.container import Container
 from eneo.main.logging import get_logger
+from eneo.observability.error_log import log_error
 
 logger = get_logger(__name__)
 
@@ -18,12 +20,17 @@ async def analyze_conversation_insights_task(
     parsed_job_id = job_id
     user = container.user()
     manager = AnalysisJobManager(container.redis_client())
-    await manager.mark_processing(tenant_id=user.tenant_id, job_id=parsed_job_id)
+    job = await manager.mark_processing(tenant_id=user.tenant_id, job_id=parsed_job_id)
 
     try:
+        # The question is read from the job record, never from the queued
+        # payload, so the job queue holds no copy of it. Without a record
+        # there is nothing to answer.
+        if job is None or not job.question:
+            raise ValueError("Analysis job record has no question")
         service = container.analysis_service()
         answer = await service.generate_unified_analysis_answer(
-            question=params.question,
+            question=job.question,
             assistant_id=params.assistant_id,
             group_chat_id=params.group_chat_id,
             from_date=datetime.fromisoformat(params.from_date),
@@ -31,8 +38,11 @@ async def analyze_conversation_insights_task(
             include_followup=params.include_followups,
         )
     except Exception as exc:
-        logger.exception(
+        log_error(
+            logger,
+            logging.ERROR,
             "Async conversation insights job failed",
+            error=exc,
             extra={"job_id": str(job_id), "tenant_id": str(user.tenant_id)},
         )
         await manager.mark_failed(

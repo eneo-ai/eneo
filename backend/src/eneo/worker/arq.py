@@ -1,10 +1,17 @@
+import logging
+
+from typing_extensions import override
+
 from eneo.apps.app_runs.api.app_run_worker import worker as app_worker
+from eneo.authentication.browser_session_cleanup_worker import (
+    worker as browser_session_cleanup_worker,
+)
 from eneo.completion_models.infrastructure.model_cleanup_worker import (
     worker as model_cleanup_worker,
 )
 from eneo.crawler.python_engine import cleanup_orphaned_crawl_directories
-from eneo.data_retention.infrastructure.data_retention_worker import (
-    worker as data_retention_worker,
+from eneo.data_retention.infrastructure.retention_worker import (
+    worker as retention_worker,
 )
 from eneo.embedding_models.infrastructure.embedding_model_cleanup_worker import (
     worker as embedding_model_cleanup_worker,
@@ -18,6 +25,7 @@ from eneo.integration.infrastructure.sharepoint_subscription_worker import (
 from eneo.integration.tasks.integration_task import worker as integration_worker
 from eneo.jobs.job_manager import CRAWLER_QUEUE_NAME, DEFAULT_QUEUE_NAME
 from eneo.main.logging import get_logger
+from eneo.observability.error_log import error_facts
 from eneo.rerank_models.infrastructure.rerank_model_cleanup_worker import (
     worker as rerank_model_cleanup_worker,
 )
@@ -30,17 +38,55 @@ from eneo.worker.worker import ARQContext, Worker
 
 logger = get_logger(__name__)
 
+# arq's own lines for a job it starts and a job that fails (arq 0.28,
+# Worker.run_job). The first prints the job's arguments, the second the
+# exception's message and traceback; both can quote what the job works on,
+# which retention removes. `log_results` below keeps the result out of the
+# line for a finished job.
+ARQ_JOB_STARTED = "%6.2fs → %s(%s)%s"
+ARQ_JOB_FAILED = "%6.2fs ! %s failed, %s: %s"
+
+
+class _ArqJobLogFilter(logging.Filter):
+    """Keeps the job reference and timing of arq's job lines, not the job's
+    arguments or error message."""
+
+    @override
+    def filter(self, record: logging.LogRecord) -> bool:
+        if not isinstance(record.args, tuple):
+            return True
+        if record.msg == ARQ_JOB_STARTED:
+            waited, ref, _arguments, extra = record.args
+            record.args = (waited, ref, "…", extra)
+        elif record.msg == ARQ_JOB_FAILED:
+            took, ref, _type_name, error = record.args
+            facts = (
+                error_facts(error)
+                if isinstance(error, BaseException)
+                else {"error_type": type(error).__name__, "error_at": None}
+            )
+            record.msg = "%6.2fs ! %s failed, %s at %s"
+            record.args = (took, ref, facts["error_type"], facts["error_at"])
+            record.exc_info = None
+            record.exc_text = None
+            record.__dict__.update(facts)
+        return True
+
+
+logging.getLogger("arq.worker").addFilter(_ArqJobLogFilter())
+
 worker = Worker()
 worker.include_subworker(sub_worker)
 worker.include_subworker(app_worker)
 worker.include_subworker(integration_worker)
-worker.include_subworker(data_retention_worker)
+worker.include_subworker(retention_worker)
 worker.include_subworker(sharepoint_subscription_worker)
 worker.include_subworker(model_cleanup_worker)
 worker.include_subworker(transcription_model_cleanup_worker)
 worker.include_subworker(embedding_model_cleanup_worker)
 worker.include_subworker(image_model_cleanup_worker)
 worker.include_subworker(rerank_model_cleanup_worker)
+worker.include_subworker(browser_session_cleanup_worker)
 
 
 def _arq_settings(runtime: Worker, *, queue_name: str) -> dict[str, object]:
@@ -61,6 +107,7 @@ def _arq_settings(runtime: Worker, *, queue_name: str) -> dict[str, object]:
         "allow_abort_jobs": runtime.allow_abort_jobs,
         "job_completion_wait": runtime.job_completion_wait,
         "after_job_end": runtime.after_job_end,
+        "log_results": False,
         "queue_name": queue_name,
     }
 

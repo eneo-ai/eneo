@@ -15,10 +15,14 @@ from httpx import AsyncClient
 from eneo.database.database import sessionmanager
 from eneo.main.config import get_settings, set_settings
 from eneo.tenants.tenant_repo import TenantRepository
+from tests.integration.test_federation_tenant_admin import _audit_rows, _store
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 SECRET = "super-secret"
+TEMPLATED_ISSUER_GUIDANCE = (
+    "The provider's issuer is a template; use your own directory's discovery endpoint"
+)
 
 
 def _idp(slug: str) -> dict[str, str]:
@@ -107,7 +111,12 @@ async def test_put_get_patch_test_delete_answer_as_before(
         "client_id": f"client-{slug}",
         "scopes": ["openid", "email", "profile"],
         "allowed_domains": [f"{slug}.gov"],
-        "claims_mapping": {"email": "email", "username": "sub", "name": "name"},
+        "claims_mapping": {
+            "email": "email",
+            "subject": "sub",
+            "username": "sub",
+            "name": "name",
+        },
         "issuer": idp["issuer"],
         "authorization_endpoint": idp["authorization_endpoint"],
         "token_endpoint": idp["token_endpoint"],
@@ -132,6 +141,9 @@ async def test_put_get_patch_test_delete_answer_as_before(
         "issuer": idp["issuer"],
         "allowed_domains": [f"{slug}.gov"],
         "additional_redirect_uris": [],
+        "signing_algorithms": None,
+        "email_verified_claims": None,
+        "subject_claim": "sub",
         "encryption_status": "encrypted",
     }
 
@@ -165,6 +177,90 @@ async def test_put_get_patch_test_delete_answer_as_before(
     assert await _stored(tenant["id"]) == {}
 
 
+async def test_optional_provider_keys_round_trip(
+    client: AsyncClient,
+    super_admin_token: str,
+    oidc_mock,
+    mock_transcription_models,
+):
+    slug = f"fed-keys-{uuid4().hex[:6]}"
+    tenant = await _tenant(client, super_admin_token, slug)
+    idp = _idp(slug)
+    oidc_mock(discovery=_discovery(idp))
+    headers = {"X-API-Key": super_admin_token}
+    url = f"/api/v1/sysadmin/tenants/{tenant['id']}/federation"
+    keys = {
+        "signing_algorithms": ["ES256", "RS256"],
+        "email_verified_claims": ["email_verified"],
+    }
+
+    put = await client.put(url, json={**_put_body(slug, idp), **keys}, headers=headers)
+    assert put.status_code == 200, put.text
+    stored = await _stored(tenant["id"])
+    assert {key: stored[key] for key in keys} == keys
+    get = await client.get(url, headers=headers)
+    assert {key: get.json()[key] for key in keys} == keys
+
+    patch = await client.patch(
+        url,
+        json={"signing_algorithms": ["PS256"], "email_verified_claims": None},
+        headers=headers,
+    )
+    assert patch.status_code == 200, patch.text
+    patched = await _stored(tenant["id"])
+    assert patched["signing_algorithms"] == ["PS256"]
+    assert "email_verified_claims" not in patched
+    get = await client.get(url, headers=headers)
+    assert get.json()["signing_algorithms"] == ["PS256"]
+    assert get.json()["email_verified_claims"] is None
+
+
+async def test_the_subject_claim_is_set_by_put_and_patch(
+    client: AsyncClient,
+    super_admin_token: str,
+    oidc_mock,
+    mock_transcription_models,
+):
+    slug = f"fed-subject-{uuid4().hex[:6]}"
+    tenant = await _tenant(client, super_admin_token, slug)
+    idp = _idp(slug)
+    oidc_mock(discovery=_discovery(idp))
+    headers = {"X-API-Key": super_admin_token}
+    url = f"/api/v1/sysadmin/tenants/{tenant['id']}/federation"
+
+    put = await client.put(
+        url, json={**_put_body(slug, idp), "subject_claim": "oid"}, headers=headers
+    )
+    assert put.status_code == 200, put.text
+    assert (await _stored(tenant["id"]))["claims_mapping"] == {
+        "email": "email",
+        "subject": "oid",
+        "username": "sub",
+        "name": "name",
+    }
+    assert (await client.get(url, headers=headers)).json()["subject_claim"] == "oid"
+
+    patch = await client.patch(
+        url, json={"subject_claim": "employee_id"}, headers=headers
+    )
+    assert patch.status_code == 200, patch.text
+    stored = await _stored(tenant["id"])
+    assert stored["claims_mapping"] == {
+        "email": "email",
+        "subject": "employee_id",
+        "username": "sub",
+        "name": "name",
+    }
+
+    for refused in ({"subject_claim": "email"}, {"subject_claim": None}):
+        response = await client.patch(url, json=refused, headers=headers)
+        assert response.status_code == 422, (refused, response.text)
+        assert await _stored(tenant["id"]) == stored
+    unchanged = await client.patch(url, json={"client_id": "next"}, headers=headers)
+    assert unchanged.status_code == 200, unchanged.text
+    assert (await _stored(tenant["id"]))["claims_mapping"] == stored["claims_mapping"]
+
+
 async def test_operator_errors_answer_as_before(
     client: AsyncClient,
     super_admin_token: str,
@@ -190,9 +286,9 @@ async def test_operator_errors_answer_as_before(
     assert missing_patch.json()["detail"] == "No federation config found for tenant"
 
     bad_discovery = await client.put(url, json=_put_body(slug, idp), headers=headers)
-    assert bad_discovery.status_code == 400
+    assert bad_discovery.status_code == 502
     assert (
-        bad_discovery.json()["detail"] == "Failed to fetch discovery endpoint: HTTP 500"
+        bad_discovery.json()["detail"] == "Failed to fetch discovery document: HTTP 500"
     )
     assert await _stored(tenant["id"]) == {}
 
@@ -214,3 +310,240 @@ async def test_operator_errors_answer_as_before(
         set_settings(original)
     assert disabled.status_code == 404
     assert disabled.json()["detail"] == "Federation is not enabled"
+
+
+async def test_a_templated_issuer_is_refused_before_it_is_saved(
+    client: AsyncClient,
+    super_admin_token: str,
+    oidc_mock,
+    mock_transcription_models,
+):
+    """A multi-tenant discovery document (Entra ``common``) names an issuer
+    template no ID token can match: the save is refused, not the sign-in."""
+    slug = f"fed-golden-tpl-{uuid4().hex[:6]}"
+    tenant = await _tenant(client, super_admin_token, slug)
+    idp = _idp(slug)
+    template = "https://login.microsoftonline.com/{tenantid}/v2.0"
+    headers = {"X-API-Key": super_admin_token}
+    url = f"/api/v1/sysadmin/tenants/{tenant['id']}/federation"
+
+    oidc_mock(discovery=_discovery({**idp, "issuer": template}))
+    refused_put = await client.put(url, json=_put_body(slug, idp), headers=headers)
+    assert refused_put.status_code == 400
+    assert refused_put.json()["detail"] == TEMPLATED_ISSUER_GUIDANCE
+    assert await _stored(tenant["id"]) == {}
+
+    oidc_mock(discovery=_discovery(idp))
+    saved = await client.put(url, json=_put_body(slug, idp), headers=headers)
+    assert saved.status_code == 200, saved.text
+    stored = await _stored(tenant["id"])
+    common = _idp(f"{slug}-common")
+    oidc_mock(discovery=_discovery({**common, "issuer": template}))
+    refused_patch = await client.patch(
+        url, json={"discovery_endpoint": common["discovery_endpoint"]}, headers=headers
+    )
+    assert refused_patch.status_code == 400
+    assert refused_patch.json()["detail"] == TEMPLATED_ISSUER_GUIDANCE
+    assert await _stored(tenant["id"]) == stored
+    assert len(await _audit_rows(tenant["id"])) == 1  # only the accepted PUT
+
+    # A stored issuer wins over discovery at sign-in; a config moved from the
+    # OIDC_* settings stores none and signs in with discovery's.
+    await _store(
+        tenant["id"],
+        {key: value for key, value in stored.items() if key not in DISCOVERY_KEYS},
+    )
+    oidc_mock(discovery=_discovery({**idp, "issuer": template}))
+    probe = await client.post(f"{url}/test", headers=headers)
+    assert probe.status_code == 400
+    assert probe.json()["detail"] == TEMPLATED_ISSUER_GUIDANCE
+
+
+NO_ALLOWED_ALGORITHM = "The provider signs with no algorithm Eneo accepts"
+# What discovery decides, as a save stores it.
+DISCOVERY_KEYS = (
+    "issuer",
+    "authorization_endpoint",
+    "token_endpoint",
+    "userinfo_endpoint",
+    "jwks_uri",
+    "token_endpoint_auth_method",
+    "token_endpoint_auth_methods_supported",
+)
+
+
+async def _registered(
+    client: AsyncClient, key: str, oidc_mock, prefix: str
+) -> tuple[dict, dict[str, str], str, dict[str, str]]:
+    slug = f"{prefix}-{uuid4().hex[:6]}"
+    tenant = await _tenant(client, key, slug)
+    idp = _idp(slug)
+    headers = {"X-API-Key": key}
+    url = f"/api/v1/sysadmin/tenants/{tenant['id']}/federation"
+    oidc_mock(discovery=_discovery(idp))
+    saved = await client.put(url, json=_put_body(slug, idp), headers=headers)
+    assert saved.status_code == 200, saved.text
+    return tenant, idp, url, headers
+
+
+def _signing_only_with(idp: dict[str, str], *algorithms: str) -> dict:
+    discovery = _discovery(idp)
+    discovery[idp["discovery_endpoint"]] = {
+        **discovery[idp["discovery_endpoint"]],
+        "id_token_signing_alg_values_supported": list(algorithms),
+    }
+    return discovery
+
+
+async def test_the_operator_test_refuses_a_provider_that_signs_with_no_allowed_algorithm(
+    client: AsyncClient, super_admin_token: str, oidc_mock, mock_transcription_models
+):
+    _, idp, url, headers = await _registered(
+        client, super_admin_token, oidc_mock, "fed-test-alg"
+    )
+    oidc_mock(discovery=_signing_only_with(idp, "HS256"))
+
+    probe = await client.post(f"{url}/test", headers=headers)
+
+    assert probe.status_code == 400
+    assert probe.json()["detail"] == NO_ALLOWED_ALGORITHM
+
+
+async def test_the_operator_test_answers_502_when_discovery_is_unreachable(
+    client: AsyncClient, super_admin_token: str, oidc_mock, mock_transcription_models
+):
+    _, idp, url, headers = await _registered(
+        client, super_admin_token, oidc_mock, "fed-test-down"
+    )
+    oidc_mock(discovery={idp["discovery_endpoint"]: ({}, 503)})
+
+    probe = await client.post(f"{url}/test", headers=headers)
+
+    assert probe.status_code == 502
+    assert probe.json()["detail"] == "Failed to fetch discovery document: HTTP 503"
+
+
+async def test_a_put_refuses_a_provider_that_signs_with_no_allowed_algorithm(
+    client: AsyncClient, super_admin_token: str, oidc_mock, mock_transcription_models
+):
+    slug = f"fed-put-alg-{uuid4().hex[:6]}"
+    tenant = await _tenant(client, super_admin_token, slug)
+    idp = _idp(slug)
+    oidc_mock(discovery=_signing_only_with(idp, "HS256"))
+
+    refused = await client.put(
+        f"/api/v1/sysadmin/tenants/{tenant['id']}/federation",
+        json=_put_body(slug, idp),
+        headers={"X-API-Key": super_admin_token},
+    )
+
+    assert refused.status_code == 400
+    assert refused.json()["detail"] == NO_ALLOWED_ALGORITHM
+    assert await _stored(tenant["id"]) == {}
+
+
+async def test_a_patch_to_a_new_discovery_stores_its_issuer_endpoints_and_a_usable_auth_method(
+    client: AsyncClient, super_admin_token: str, oidc_mock, mock_transcription_models
+):
+    tenant, idp, url, headers = await _registered(
+        client, super_admin_token, oidc_mock, "fed-patch-move"
+    )
+    moved = _idp(f"moved-{uuid4().hex[:6]}")
+    discovery = _discovery(moved)
+    discovery[moved["discovery_endpoint"]] = {
+        **discovery[moved["discovery_endpoint"]],
+        "token_endpoint_auth_methods_supported": ["private_key_jwt"],
+    }
+    oidc_mock(discovery={**_discovery(idp), **discovery})
+
+    patch = await client.patch(
+        url, json={"discovery_endpoint": moved["discovery_endpoint"]}, headers=headers
+    )
+
+    assert patch.status_code == 200, patch.text
+    stored = await _stored(tenant["id"])
+    assert {key: stored.get(key) for key in DISCOVERY_KEYS} == {
+        "issuer": moved["issuer"],
+        "authorization_endpoint": moved["authorization_endpoint"],
+        "token_endpoint": moved["token_endpoint"],
+        "userinfo_endpoint": None,
+        "jwks_uri": moved["jwks_uri"],
+        # The method sign-in uses when the provider lists neither post nor basic.
+        "token_endpoint_auth_method": "client_secret_post",
+        "token_endpoint_auth_methods_supported": ["private_key_jwt"],
+    }
+
+
+async def test_a_patch_to_a_moved_config_fetches_nothing(
+    client: AsyncClient, super_admin_token: str, oidc_mock, mock_transcription_models
+):
+    # A config moved from the OIDC_* settings stores no issuer or endpoints:
+    # sign-in reads them from discovery. Editing it needs no provider.
+    tenant, idp, url, headers = await _registered(
+        client, super_admin_token, oidc_mock, "fed-patch-moved"
+    )
+    moved = {
+        key: value
+        for key, value in (await _stored(tenant["id"])).items()
+        if key not in DISCOVERY_KEYS
+    }
+    await _store(tenant["id"], moved)
+    oidc_mock(discovery={idp["discovery_endpoint"]: ({}, 503)})
+
+    patch = await client.patch(url, json={"client_id": "renamed"}, headers=headers)
+
+    assert patch.status_code == 200, patch.text
+    assert await _stored(tenant["id"]) == {**moved, "client_id": "renamed"}
+
+
+async def test_a_patch_over_a_config_sign_in_cannot_use_is_refused_unchanged(
+    client: AsyncClient, super_admin_token: str, oidc_mock, mock_transcription_models
+):
+    # Stored by hand: the subject claim is the email claim, which sign-in
+    # refuses. A save over it stores nothing until the config is usable.
+    tenant, _, url, headers = await _registered(
+        client, super_admin_token, oidc_mock, "fed-patch-unusable"
+    )
+    unusable = {
+        **await _stored(tenant["id"]),
+        "claims_mapping": {"email": "upn", "subject": "upn"},
+    }
+    await _store(tenant["id"], unusable)
+
+    refused = await client.patch(url, json={"client_id": "renamed"}, headers=headers)
+
+    assert refused.status_code == 400
+    assert refused.json()["detail"] == (
+        "The claims mapping names the email claim as the subject claim"
+    )
+    assert await _stored(tenant["id"]) == unusable
+
+
+@pytest.mark.parametrize("methods", [["client_secret_basic"], ["client_secret_post"]])
+async def test_a_put_stores_the_auth_method_the_provider_lists(
+    client: AsyncClient,
+    super_admin_token: str,
+    oidc_mock,
+    mock_transcription_models,
+    methods,
+):
+    slug = f"fed-put-method-{uuid4().hex[:6]}"
+    tenant = await _tenant(client, super_admin_token, slug)
+    idp = _idp(slug)
+    discovery = _discovery(idp)
+    discovery[idp["discovery_endpoint"]] = {
+        **discovery[idp["discovery_endpoint"]],
+        "token_endpoint_auth_methods_supported": methods,
+    }
+    oidc_mock(discovery=discovery)
+
+    saved = await client.put(
+        f"/api/v1/sysadmin/tenants/{tenant['id']}/federation",
+        json=_put_body(slug, idp),
+        headers={"X-API-Key": super_admin_token},
+    )
+
+    assert saved.status_code == 200, saved.text
+    stored = await _stored(tenant["id"])
+    assert stored["token_endpoint_auth_method"] == methods[0]
+    assert stored["token_endpoint_auth_methods_supported"] == methods

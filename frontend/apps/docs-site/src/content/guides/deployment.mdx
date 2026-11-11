@@ -362,20 +362,20 @@ value and a comment.
       **Glossary:** IdP = Identity Provider (Entra ID, MobilityGuard, Auth0). OIDC = OpenID Connect protocol.
 
       **Choose one mode:**
-      - **Single-Tenant via env vars** (`FEDERATION_ENABLED=false`): Configure `OIDC_DISCOVERY_ENDPOINT`, `OIDC_CLIENT_ID`, and `OIDC_CLIENT_SECRET` in `env_backend.env`. Requires a restart to change settings. Simplest for single-organization deployments.
-      - **Federation via API** (`FEDERATION_ENABLED=true`): Configure IdP via sysadmin API. Changes take effect immediately (no restart). Use for multi-tenant deployments OR single-tenant with dynamic configuration.
+      - **Settings stored in Eneo** (`FEDERATION_ENABLED=true`, recommended for new installations): also set `ENCRYPTION_KEY` and `ENEO_SUPER_API_KEY`, restart, and register the IdP once with the sysadmin API (`PUT`, then `/test`). Administrators then change the client ID, client secret and allowed email domains under **Administration › Sign-in (SSO)**, without a restart, and every change is audited. The `OIDC_*` sign-in variables are ignored, never a fallback.
+      - **Settings in the server configuration** (`FEDERATION_ENABLED=false`, the template value): set `OIDC_DISCOVERY_ENDPOINT`, `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET` in `env_backend.env`, for configuration as code. Every change needs a restart, and administrators cannot change anything in Eneo.
 
-      `FEDERATION_PER_TENANT_ENABLED` is a deprecated alias of `FEDERATION_ENABLED`; the backend logs a warning when it is used.
+      The backend reads `FEDERATION_ENABLED` at startup. Existing installations keep their mode on upgrade; to switch, [move the settings into Eneo](/guides/oidc-federation/single-tenant#move-the-settings-into-eneo). `FEDERATION_PER_TENANT_ENABLED` is a deprecated alias of `FEDERATION_ENABLED`; the backend logs a warning when it is used.
     </Callout>
 
     | Variable | Template value | Description |
     |----------|----------------|-------------|
-    | `OIDC_DISCOVERY_ENDPOINT` | empty | IdP discovery URL (`.../.well-known/openid-configuration`) for single-tenant mode |
+    | `OIDC_DISCOVERY_ENDPOINT` | empty | IdP discovery URL (`.../.well-known/openid-configuration`) for the server-configuration mode |
     | `OIDC_CLIENT_ID` | empty | OIDC client ID |
     | `OIDC_CLIENT_SECRET` | empty | OIDC client secret |
-    | `OIDC_TENANT_ID` | empty | Eneo tenant UUID required by the global OIDC/MobilityGuard login endpoint |
+    | `OIDC_TENANT_ID` | empty | Eneo tenant UUID for access tokens accepted with `OIDC_RESOURCE_SERVER_ENABLED`; without it the first active tenant |
     | `OIDC_ALLOWED_DOMAINS` | `[]` | Global OIDC email-domain restriction (JSON array); required for JIT account creation |
-    | `FEDERATION_ENABLED` | `false` | Enable per-tenant IdP configuration via API |
+    | `FEDERATION_ENABLED` | `false` | `true` stores the IdP settings in Eneo (recommended for new installations); read at startup |
     | `ENCRYPTION_KEY` | empty | 44-char base64 Fernet key (required for credentials & federation) |
     | `ENEO_SUPER_API_KEY` | empty | Super admin API access (sent as `X-API-Key`) |
 
@@ -542,9 +542,8 @@ value and a comment.
     | `JWT_SECRET` | empty | Listed for parity with the backend; the web app does not read it |
 
     OIDC and federation settings are read by the backend, so set them in
-    `env_backend.env`. The frontend template lists the same
-    `OIDC_*`/federation keys so the two files can be kept in sync; the web app
-    itself needs only `PUBLIC_ORIGIN` for the login flow.
+    `env_backend.env`. The web app itself needs only `PUBLIC_ORIGIN` for the
+    login flow.
 
     **Optional:** the web app reads the UI flag `SHOW_HELP_CENTER`, plus
     `HELP_CENTER_URL` and `REQUEST_INTEGRATION_FORM_URL`. The remaining commented lines in
@@ -1263,6 +1262,19 @@ For the upgrade to 2.3, also stop every backend and worker replica before
 its migrations and the old Scrapy worker cannot run side by side. Returning to
 2.2 requires restoring the backup taken in the next step.
 
+For the release that empties stored question logs, stop every backend and
+worker of the earlier version before `db-init` as well. Only the new version
+checks for a removal before it stores a log, so a log that an earlier backend or
+worker stores while the migration runs keeps its content. Stop them, then check
+that the second command lists no container:
+
+```bash
+docker compose --env-file .env --env-file release.env stop backend worker
+docker compose --env-file .env --env-file release.env ps --status running backend worker
+```
+
+Stop replicas that run on other hosts the same way.
+
 ### Take the stopped-writer recovery point
 
 After the drain is verified and every old writer is stopped, create the database
@@ -1434,6 +1446,24 @@ per process, while `CRAWL_JOB_CONCURRENCY_LIMIT` and
 `CRAWL_JOB_TENANT_CONCURRENCY_LIMIT` cap running crawls across all crawler
 workers. Set `CRAWL_JOB_TENANT_CONCURRENCY_LIMIT` to the same value on the
 backend and every worker.
+
+### Temporary files
+
+Each backend and worker process keeps the files it works on (a file uploaded
+to a conversation before it is stored, audio being converted or transcribed,
+crawled pages and SharePoint files being read) in a directory of its own,
+`eneo-scratch/proc-<id>` under `UPLOAD_TMP_DIR` (default `/tmp`), and removes
+it when it stops. A process that crashes leaves its directory; the next process
+to start on the same volume removes it once the crashed process is gone. At
+start, the crawler worker also removes the `eneo-crawl-*` directories that
+earlier versions left in the system temporary directory; nothing else is
+removed at start. The owner check uses a file lock, so `UPLOAD_TMP_DIR` must be
+a local filesystem; a volume shared between hosts over a network filesystem is
+not supported.
+
+Knowledge and transcription uploads that wait for their job are kept in
+`job-staging/` under `UPLOAD_TMP_DIR` instead. A file there is removed once its
+job has finished, or after an hour when no job holds it.
 
 ---
 

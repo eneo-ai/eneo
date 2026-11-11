@@ -17,7 +17,12 @@ export const loginNotices = new Map<string, { status: "info" | "warning"; messag
   ]
 ]);
 const OIDC_FORBIDDEN_CODES = new Set(["access_denied", "forbidden", "oidc_forbidden"]);
-const OIDC_UNAUTHORIZED_CODES = new Set(["unauthorized", "invalid_grant", "oidc_unauthorized"]);
+const OIDC_UNAUTHORIZED_CODES = new Set([
+  "unauthorized",
+  "invalid_grant",
+  "oidc_unauthorized",
+  "oidc_response_not_verified"
+]);
 
 function appendIfPresent(params: URLSearchParams, key: string, value: string | undefined) {
   if (value) params.set(key, value.slice(0, 1000));
@@ -53,7 +58,10 @@ export function loginDiagnosticMessageKey(diagnostics: LoginDiagnostics): string
   const code = diagnostics.detailCode ?? diagnostics.message ?? diagnostics.info;
   if (code && OIDC_FORBIDDEN_CODES.has(code)) return "oidc_error_forbidden";
   if (code && OIDC_UNAUTHORIZED_CODES.has(code)) return "oidc_error_unauthorized";
-  if (code === "invalid_login_attempt") return "oidc_error_attempt_rejected";
+  if (code === "invalid_login_attempt" || code === "oidc_transaction_invalid")
+    return "oidc_error_attempt_rejected";
+  if (code === "oidc_login_unavailable") return "oidc_error_login_unavailable";
+  if (code === "identity_conflict") return "oidc_error_identity_conflict";
   if (code === "identity_provider_error") return "authentication_service_error";
   if (code === "no_code_received" || code === "no_state_received")
     return "authentication_incomplete";

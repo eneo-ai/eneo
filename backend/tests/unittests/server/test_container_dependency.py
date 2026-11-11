@@ -366,7 +366,7 @@ async def test_websocket_user_authenticates_on_its_own_session_in_a_transaction(
 ) -> None:
     session = _Session()
     # A token that is not a browser session's: those cannot open a socket.
-    user = SimpleNamespace(browser_session=None)
+    user = SimpleNamespace(credential=None)
     seen: list[tuple[bool, bool, str]] = []
 
     @asynccontextmanager

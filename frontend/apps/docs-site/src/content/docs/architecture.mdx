@@ -408,8 +408,13 @@ async def log_audit_event(
 ```
 
 ```python
-# backend/src/eneo/data_retention/infrastructure/data_retention_worker.py
-@worker.cron_job(hour=3, minute=0)  # Run daily at 3 AM
+# backend/src/eneo/data_retention/infrastructure/retention_worker.py
+@worker.cron_job(
+    hour=_settings.retention_cron_hour,  # 03:30 by default
+    minute=_settings.retention_cron_minute,
+    manages_own_session=True,
+)
+async def run_retention(container: Container) -> list[RetentionRunReport]:
 ```
 
 **Web Crawling:**

@@ -25,11 +25,13 @@ from eneo.flows.runtime.flow_runtime_health import (
     flow_runtime_health_probe_failure_response,
     load_flow_runtime_health_snapshot,
 )
+from eneo.data_retention.application.retention_health import RetentionHealthStatus
 from eneo.internal_mcp import internal_mcp_mounts
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
 from eneo.main.models import GeneralError
 from eneo.main.observability import init_observability, instrument_fastapi
+from eneo.main.retention_tasks import retention_health
 from eneo.object_content.runtime import (
     ObjectContentReadinessCode,
     object_content_runtime,
@@ -600,6 +602,7 @@ def get_application():
         # Get worker health status
         worker_health = await get_worker_health()
         object_content = await object_content_runtime.readiness()
+        retention = await retention_health(get_settings())
 
         # Backend is always healthy if we can respond
         backend_status = "HEALTHY"
@@ -614,6 +617,11 @@ def get_application():
             overall_status = (
                 "DEGRADED"
                 if object_content.code is ObjectContentReadinessCode.STORE_DEGRADED
+                or retention.status
+                in (
+                    RetentionHealthStatus.DEGRADED,
+                    RetentionHealthStatus.UNKNOWN,
+                )
                 else "HEALTHY"
             )
             status_code = 200
@@ -652,6 +660,7 @@ def get_application():
                     "status": object_content_status,
                     "code": object_content.code.value,
                 },
+                "retention": retention.model_dump(mode="json"),
             }
         }
 

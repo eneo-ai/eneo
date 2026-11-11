@@ -25,7 +25,6 @@ import pytest
 import sqlalchemy as sa
 from httpx import AsyncClient
 
-from eneo.authentication.auth_service import AuthService
 from eneo.database.database import sessionmanager
 from eneo.database.tables.tenant_table import Tenants
 from eneo.tenants.tenant_repo import TenantRepository
@@ -158,14 +157,22 @@ async def _callback(client: AsyncClient, *, code: str, state: str):
     )
 
 
+def _idp(fake_idp, slug: str):
+    """The organisation's provider, at the addresses its federation config names."""
+    return fake_idp(
+        issuer=f"https://idp.{slug}.local",
+        client_id=f"client-{slug}",
+        client_secret="super-secret",
+    )
+
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_federation_config_drift_rejected_with_zero_grace(
     client: AsyncClient,
     super_admin_token: str,
     patch_auth_service_jwt,
-    oidc_mock,
-    jwks_mock,
+    fake_idp,
     monkeypatch,
     mock_transcription_models,
     test_settings,
@@ -195,23 +202,7 @@ async def test_federation_config_drift_rejected_with_zero_grace(
     jwks_uri = f"https://idp.{slug}.local/jwks"
 
     # Set up mock BEFORE configuring federation
-    oidc_mock(
-        discovery={
-            discovery_endpoint: {
-                "issuer": f"https://idp.{slug}.local",
-                "authorization_endpoint": authorization_endpoint,
-                "token_endpoint": token_endpoint,
-                "jwks_uri": jwks_uri,
-            }
-        },
-        tokens={
-            (token_endpoint, "code-drift"): {
-                "id_token": "id-token-drift",
-                "access_token": "access-token-drift",
-            }
-        },
-    )
-    jwks_mock()
+    provider = _idp(fake_idp, slug)
 
     allowed_email = f"user@{slug}.gov"
     await _create_user(
@@ -220,12 +211,6 @@ async def test_federation_config_drift_rejected_with_zero_grace(
         tenant["id"],
         allowed_email,
         password="ValidPassw0rd123!",
-    )
-
-    monkeypatch.setattr(
-        AuthService,
-        "get_payload_from_openid_jwt",
-        lambda *_, **__: {"email": allowed_email},
     )
 
     runtime_settings = override_runtime_settings(
@@ -266,7 +251,9 @@ async def test_federation_config_drift_rejected_with_zero_grace(
         # Attempt callback with state from origin A
         response = await _callback(
             client,
-            code="code-drift",
+            code=provider.authorize(
+                state_payload["authorization_url"], email=allowed_email
+            ).code,
             state=state_token,
         )
 
@@ -289,8 +276,7 @@ async def test_federation_grace_period_allows_recent_config_change(
     client: AsyncClient,
     super_admin_token: str,
     patch_auth_service_jwt,
-    oidc_mock,
-    jwks_mock,
+    fake_idp,
     monkeypatch,
     mock_transcription_models,
     test_settings,
@@ -319,23 +305,7 @@ async def test_federation_grace_period_allows_recent_config_change(
     token_endpoint = f"https://idp.{slug}.local/token"
     jwks_uri = f"https://idp.{slug}.local/jwks"
 
-    oidc_mock(
-        discovery={
-            discovery_endpoint: {
-                "issuer": f"https://idp.{slug}.local",
-                "authorization_endpoint": authorization_endpoint,
-                "token_endpoint": token_endpoint,
-                "jwks_uri": jwks_uri,
-            }
-        },
-        tokens={
-            (token_endpoint, "code-grace"): {
-                "id_token": "id-token-grace",
-                "access_token": "access-token-grace",
-            }
-        },
-    )
-    jwks_mock()
+    provider = _idp(fake_idp, slug)
 
     allowed_email = f"user@{slug}.gov"
     await _create_user(
@@ -344,12 +314,6 @@ async def test_federation_grace_period_allows_recent_config_change(
         tenant["id"],
         allowed_email,
         password="ValidPassw0rd123!",
-    )
-
-    monkeypatch.setattr(
-        AuthService,
-        "get_payload_from_openid_jwt",
-        lambda *_, **__: {"email": allowed_email},
     )
 
     # Store original settings
@@ -389,7 +353,13 @@ async def test_federation_grace_period_allows_recent_config_change(
         )
 
         # Callback should succeed (within grace period)
-        response = await _callback(client, code="code-grace", state=state_token)
+        response = await _callback(
+            client,
+            code=provider.authorize(
+                state_payload["authorization_url"], email=allowed_email
+            ).code,
+            state=state_token,
+        )
 
         assert response.status_code == 200, (
             f"Expected 200 (grace period), got {response.status_code}: {response.text}"
@@ -516,8 +486,7 @@ async def test_tenant_deleted_during_oidc_flow_returns_404(
     client: AsyncClient,
     super_admin_token: str,
     patch_auth_service_jwt,
-    oidc_mock,
-    jwks_mock,
+    fake_idp,
     monkeypatch,
     mock_transcription_models,
     test_settings,
@@ -545,23 +514,7 @@ async def test_tenant_deleted_during_oidc_flow_returns_404(
     token_endpoint = f"https://idp.{slug}.local/token"
     jwks_uri = f"https://idp.{slug}.local/jwks"
 
-    oidc_mock(
-        discovery={
-            discovery_endpoint: {
-                "issuer": f"https://idp.{slug}.local",
-                "authorization_endpoint": authorization_endpoint,
-                "token_endpoint": token_endpoint,
-                "jwks_uri": jwks_uri,
-            }
-        },
-        tokens={
-            (token_endpoint, "code-deleted"): {
-                "id_token": "id-token-deleted",
-                "access_token": "access-token-deleted",
-            }
-        },
-    )
-    jwks_mock()
+    provider = _idp(fake_idp, slug)
 
     allowed_email = f"user@{slug}.gov"
     await _create_user(
@@ -570,12 +523,6 @@ async def test_tenant_deleted_during_oidc_flow_returns_404(
         tenant["id"],
         allowed_email,
         password="ValidPassw0rd123!",
-    )
-
-    monkeypatch.setattr(
-        AuthService,
-        "get_payload_from_openid_jwt",
-        lambda *_, **__: {"email": allowed_email},
     )
 
     # Configure federation
@@ -609,7 +556,13 @@ async def test_tenant_deleted_during_oidc_flow_returns_404(
             await session.execute(sa.delete(Tenants).where(Tenants.id == tenant_id))
 
     # Attempt callback
-    response = await _callback(client, code="code-deleted", state=state_token)
+    response = await _callback(
+        client,
+        code=provider.authorize(
+            state_payload["authorization_url"], email=allowed_email
+        ).code,
+        state=state_token,
+    )
 
     # Should return 404 (tenant not found)
     assert response.status_code in {404, 400}, (
@@ -623,8 +576,7 @@ async def test_state_token_tampering_rejected(
     client: AsyncClient,
     super_admin_token: str,
     patch_auth_service_jwt,
-    oidc_mock,
-    jwks_mock,
+    fake_idp,
     monkeypatch,
     mock_transcription_models,
     test_settings,
@@ -656,23 +608,7 @@ async def test_state_token_tampering_rejected(
     token_endpoint = f"https://idp.{slug_a}.local/token"
     jwks_uri = f"https://idp.{slug_a}.local/jwks"
 
-    oidc_mock(
-        discovery={
-            discovery_endpoint: {
-                "issuer": f"https://idp.{slug_a}.local",
-                "authorization_endpoint": authorization_endpoint,
-                "token_endpoint": token_endpoint,
-                "jwks_uri": jwks_uri,
-            }
-        },
-        tokens={
-            (token_endpoint, "code-tamper"): {
-                "id_token": "id-token-tamper",
-                "access_token": "access-token-tamper",
-            }
-        },
-    )
-    jwks_mock()
+    provider = _idp(fake_idp, slug_a)
 
     allowed_email = f"user@{slug_a}.gov"
     await _create_user(
@@ -681,12 +617,6 @@ async def test_state_token_tampering_rejected(
         tenant_a["id"],
         allowed_email,
         password="ValidPassw0rd123!",
-    )
-
-    monkeypatch.setattr(
-        AuthService,
-        "get_payload_from_openid_jwt",
-        lambda *_, **__: {"email": allowed_email},
     )
 
     # Configure federation for Tenant A
@@ -719,7 +649,13 @@ async def test_state_token_tampering_rejected(
     tampered_state = jwt.encode(decoded, test_settings.jwt_secret, algorithm="HS256")
 
     # Attempt callback with tampered state
-    response = await _callback(client, code="code-tamper", state=tampered_state)
+    response = await _callback(
+        client,
+        code=provider.authorize(
+            state_payload["authorization_url"], email=allowed_email
+        ).code,
+        state=tampered_state,
+    )
 
     # Should reject (tenant mismatch or not found)
     assert response.status_code in {400, 404}, (
@@ -733,8 +669,7 @@ async def test_grace_period_boundary_exact_ttl_minus_grace(
     client: AsyncClient,
     super_admin_token: str,
     patch_auth_service_jwt,
-    oidc_mock,
-    jwks_mock,
+    fake_idp,
     monkeypatch,
     mock_transcription_models,
     test_settings,
@@ -764,23 +699,7 @@ async def test_grace_period_boundary_exact_ttl_minus_grace(
     token_endpoint = f"https://idp.{slug}.local/token"
     jwks_uri = f"https://idp.{slug}.local/jwks"
 
-    oidc_mock(
-        discovery={
-            discovery_endpoint: {
-                "issuer": f"https://idp.{slug}.local",
-                "authorization_endpoint": authorization_endpoint,
-                "token_endpoint": token_endpoint,
-                "jwks_uri": jwks_uri,
-            }
-        },
-        tokens={
-            (token_endpoint, "code-boundary"): {
-                "id_token": "id-token-boundary",
-                "access_token": "access-token-boundary",
-            }
-        },
-    )
-    jwks_mock()
+    provider = _idp(fake_idp, slug)
 
     allowed_email = f"user@{slug}.gov"
     await _create_user(
@@ -789,12 +708,6 @@ async def test_grace_period_boundary_exact_ttl_minus_grace(
         tenant["id"],
         allowed_email,
         password="ValidPassw0rd123!",
-    )
-
-    monkeypatch.setattr(
-        AuthService,
-        "get_payload_from_openid_jwt",
-        lambda *_, **__: {"email": allowed_email},
     )
 
     # Note: This test documents the expected behavior at boundary conditions
@@ -830,7 +743,11 @@ async def test_grace_period_boundary_exact_ttl_minus_grace(
         # Initiate and callback immediately (no time drift)
         state_payload = await _initiate(client, tenant["slug"])
         response = await _callback(
-            client, code="code-boundary", state=state_payload["state"]
+            client,
+            code=provider.authorize(
+                state_payload["authorization_url"], email=allowed_email
+            ).code,
+            state=state_payload["state"],
         )
 
         # Should succeed (no config drift yet)

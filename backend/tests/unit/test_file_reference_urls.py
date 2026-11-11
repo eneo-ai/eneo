@@ -32,6 +32,7 @@ from eneo.completion_models.infrastructure.context_builder import (
 from eneo.files.file_models import (
     FILE_ORIGINAL_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS,
     ContentDisposition,
+    File,
     FileType,
 )
 from eneo.files.file_reference import (
@@ -442,6 +443,23 @@ class TestCompletionMintAudit:
         assert kwargs["action"] == ActionType.FILE_SIGNED_URL_MINTED
         assert kwargs["entity_id"] == minted.id
         assert kwargs["metadata"]["extra"]["source"] == "completion"
+
+    @pytest.mark.asyncio
+    async def test_mint_is_audited_without_the_file_name(self):
+        name = "Utredning Anna Svensson.pdf"
+        audit_service = AsyncMock()
+        service = self._service(audit_service)
+        minted = File.model_construct(id=uuid4(), name=name)
+
+        await service._audit_file_reference_mints(
+            files=[minted],
+            file_reference_urls={minted.id: "https://x/dl"},
+            session=SimpleNamespace(id=uuid4()),
+        )
+
+        kwargs = audit_service.log_async.await_args.kwargs
+        assert name not in kwargs["description"]
+        assert name not in json.dumps(kwargs["metadata"], default=str)
 
     @pytest.mark.asyncio
     async def test_skipped_without_user(self):

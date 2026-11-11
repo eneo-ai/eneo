@@ -4,6 +4,10 @@ Set up OIDC authentication where each tenant (organization, municipality, compan
 
 import { Callout, Steps, Tabs } from "nextra/components";
 
+<Callout type="warning">
+  Single-tenant is the recommended setup. Support for several organisations in one installation will be phased out and is basic only. It does not guarantee that the organisations' data is kept apart, because they share the same database.
+</Callout>
+
 ---
 
 ## Overview
@@ -27,7 +31,7 @@ Multi-tenant federation allows each tenant in your Eneo deployment to authentica
 Before starting, ensure you have:
 
 - [ ] Eneo backend deployed and running
-- [ ] Redis running (recommended - it caches auth state for tamper detection; the login flow still works on the signed state alone if Redis is unavailable)
+- [ ] Redis running (required: each sign-in is a one-time transaction stored there)
 - [ ] Super Admin API key (`ENEO_SUPER_API_KEY` configured)
 - [ ] HTTPS enabled on every origin users reach Eneo through
 - [ ] For each tenant, the public origin its users will use (the same origin for all tenants, or a dedicated hostname per tenant - Eneo does not derive the tenant from the hostname)
@@ -137,7 +141,7 @@ If a tenant is reached through more than one origin (for example a proxy URL and
 
 ### Configure the tenant via API
 
-Use the federation API to provide the tenant's OIDC configuration. `PUT` is the full-definition endpoint for a new federation setup or a full replacement of the current one. The backend fetches the discovery document immediately and rejects the request with `400` if it is unreachable or incomplete.
+Use the federation API to provide the tenant's OIDC configuration. `PUT` is the full-definition endpoint for a new federation setup or a full replacement of the current one. The backend fetches the discovery document immediately and checks the configuration with the rules sign-in uses. It rejects the request with `502` if the document cannot be read, and with `400`, naming the reason, if sign-in could not use the configuration.
 
 <Tabs items={['Azure Entra ID', 'MobilityGuard']}>
   <Tabs.Tab>
@@ -183,6 +187,8 @@ Use the federation API to provide the tenant's OIDC configuration. `PUT` is the 
 | `canonical_public_origin` | No | The URL where this tenant's users access Eneo; used to build the redirect URI. Falls back to the backend's `PUBLIC_ORIGIN` when omitted |
 | `redirect_path` | No | Callback path, default `/login/callback` |
 | `additional_redirect_uris` | No | Extra fully-qualified callback URLs accepted for this tenant (each must also be registered in the IdP) |
+| `signing_algorithms` | No | ID token algorithms to accept; default from discovery, else `RS256`. See the [provider contract](/guides/oidc-federation#provider-contract) |
+| `email_verified_claims` | No | Claims that say the email is verified, in order; default `["email_verified", "xms_edov"]` |
 
 Scopes are fixed to `openid email profile` and cannot be set through the API.
 
@@ -196,15 +202,12 @@ curl -X POST "https://eneo.your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/f
 ```
 
 This test:
-
-- Fetches the IdP's discovery document from the stored `discovery_endpoint`
-- Verifies the required OIDC fields are present (`issuer`, `authorization_endpoint`, `token_endpoint`, `jwks_uri`)
+- Fetches the IdP's discovery document from the stored `discovery_endpoint` (`502` if it cannot be read)
+- Checks the stored configuration against it with the rules sign-in uses: issuer and endpoints, signing algorithms and claims mapping (`400`, naming the reason, if sign-in could not use it)
 - Returns `{"success": true, "message": "Federation config is valid and IdP is reachable", "issuer": "…"}`
 
 <Callout type="info">
-  The test does **not** fetch the JWKS, attempt actual authentication or
-  validate client credentials - it only checks that the discovery endpoint is
-  reachable and complete.
+  The test does **not** fetch the JWKS, attempt actual authentication or validate client credentials - it only checks that sign-in could use the configuration with the provider's discovery document.
 </Callout>
 
 ### Test login
@@ -235,7 +238,7 @@ Eneo does **not** resolve tenants from subdomains or hostnames. A dedicated host
 
 ### Tenant Selector
 
-With federation enabled, the selector lists **active tenants that have a slug and an IdP configuration** with a client ID and discovery endpoint. Tenants without an IdP are omitted. When only one tenant is eligible, it is selected automatically. Configure an organisation's IdP before directing its users to the selector.
+With federation enabled, the selector lists **active tenants that have a slug and an IdP configuration** with a discovery endpoint, a client ID and a client secret. Tenants without an IdP are omitted. When only one tenant is eligible, it is selected automatically. Configure an organisation's IdP before directing its users to the selector.
 
 ---
 
@@ -248,7 +251,7 @@ curl "https://eneo.your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/federatio
   -H "X-API-Key: your-super-admin-api-key"
 ```
 
-The response contains `provider`, `client_id`, `masked_secret`, `issuer`, `allowed_domains`, `additional_redirect_uris`, `configured_at` and `encryption_status`.
+The response contains `provider`, `client_id`, `masked_secret`, `issuer`, `allowed_domains`, `additional_redirect_uris`, `signing_algorithms`, `email_verified_claims`, `configured_at` and `encryption_status`. The two optional provider keys are `null` when not set, so the defaults apply.
 
 <Callout type="info">
   Client secrets are always masked in responses for security.
@@ -267,7 +270,9 @@ curl -X PATCH "https://eneo.your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/
   }'
 ```
 
-`PATCH` requires an existing configuration (`404 No federation config found for tenant` otherwise) and does not accept `null` for `provider`, `discovery_endpoint`, `client_id` or `client_secret`. Changing `discovery_endpoint` re-fetches the discovery document. To replace the whole federation definition, continue to use `PUT` and send the full required payload.
+Each tenant's administrators can also change its display name, client ID, client secret and allowed email domains themselves under **Administration › Sign-in (SSO)**, as described in [Change the settings in Eneo](/guides/oidc-federation/single-tenant#change-the-settings-in-eneo).
+
+`PATCH` requires an existing configuration (`404 No federation config found for tenant` otherwise) and does not accept `null` for `provider`, `discovery_endpoint`, `client_id` or `client_secret`. Changing `discovery_endpoint` re-fetches the discovery document and stores the new provider's issuer, endpoints and client authentication method; any other change is checked with the same rules without contacting the provider. To replace the whole federation definition, continue to use `PUT` and send the full required payload.
 
 ### Remove tenant federation
 
@@ -325,19 +330,31 @@ The user authenticated successfully with the IdP but doesn't exist in Eneo and t
 
 ### "Authorization session is invalid or has expired"
 
-Redis is reachable but the cached state for this login was not found: the callback was replayed, or Redis was restarted or evicted the key mid-flow (`400`). A state older than 10 minutes is rejected earlier with `400 Authorization session expired. Please try logging in again.`
+The sign-in's one-time transaction was not found or no longer fits the configuration (`400`, code `oidc_transaction_invalid`): the callback was replayed, Redis was restarted or evicted the key mid-flow, or the provider's issuer changed during the sign-in (the backend logs `oidc_transaction_refused` with `issuer_changed`). A state older than 10 minutes is rejected earlier with `400 Authorization session expired. Please try logging in again.`, and a sign-in started before an upgrade with `400 Invalid state parameter`.
 
 **Fix:** Start the sign-in flow again. If it recurs, check the Redis logs and the `oidc_state_ttl_seconds` setting.
 
-### Redis connection problems
+### "Sign-in is temporarily unavailable"
 
-Auth state caching is best-effort. When Redis is down the backend logs `Failed to persist OIDC state in Redis` / `Failed to retrieve cached OIDC state` warnings and continues on the signed state alone, without tamper detection.
+Redis could not store or return the sign-in transaction, or did not answer within 2 seconds (`503`, code `oidc_login_unavailable`). Sign-in is refused rather than continued without it, and no session or user row is written. The backend logs `oidc_transaction_store_failed`.
 
 **Fix:** Verify Redis is running and accessible:
 
 ```bash
 redis-cli ping
 ```
+
+### "The sign-in response could not be verified"
+
+The provider's response failed a check of the [provider contract](/guides/oidc-federation#provider-contract) (`401`, code `oidc_response_not_verified`). The backend logs `oidc_response_refused` with the reason, for example `issuer_mismatch`, `nonce_mismatch` or `algorithm_not_allowed`.
+
+**Fix:** Search the logs for the correlation ID. For `issuer_mismatch`, compare the ID token's `iss` with the `issuer` in the provider's discovery document: a placeholder such as `{tenantid}` there means the discovery URL is a shared one, so set `discovery_endpoint` to your organisation's own. Otherwise check the token's `aud` against the configured `client_id`, the provider's signing algorithm against `signing_algorithms`, and that the server clocks agree.
+
+### "The provider signs with no algorithm Eneo accepts"
+
+Sign-in answers `500` when none of the algorithms Eneo would accept for this provider is allowed: the configured `signing_algorithms`, else the provider's `id_token_signing_alg_values_supported`, else `RS256`. Only the algorithms in the [provider contract](/guides/oidc-federation#provider-contract) are allowed.
+
+**Fix:** Set `signing_algorithms` through the federation API to an allowed algorithm the provider signs with, or have the provider sign with one.
 
 ### Debug mode
 
@@ -403,60 +420,22 @@ docker compose logs backend | grep "correlation_id.*a1b2c3d4e5f67890"
 
 ---
 
-## Redis State Cache
+## Sign-in Transactions in Redis
 
-Authentication state is cached in Redis to validate callbacks and detect tampering. The cache is best-effort: the signed state JWT is always verified, and the cached copy adds a second check when Redis is available.
+Each sign-in stores a one-time transaction in Redis under `oidc:transaction:{id}`. It holds the `nonce`, the PKCE verifier, the server-computed `redirect_uri` and the tenant with its configuration version. The signed `state` only names it.
 
-### Cache Key Format
+- It expires after `oidc_state_ttl_seconds` (10 minutes by default).
+- The callback removes it as it reads it, so a callback cannot be replayed.
+- A missing transaction ends the sign-in with `400`; an unreachable Redis with `503`.
 
-State is stored using the nonce as the key identifier:
-
-```
-oidc:state:{nonce}
-```
-
-Where `{nonce}` is a 32-character hexadecimal string generated per authentication request.
-
-### Cached Data
-
-Each state entry contains:
-
-| Field            | Description                                               |
-| ---------------- | --------------------------------------------------------- |
-| `tenant_id`      | UUID of the tenant initiating authentication              |
-| `tenant_slug`    | Tenant slug for validation on callback                    |
-| `redirect_uri`   | Server-computed redirect URI                              |
-| `config_version` | Tenant configuration version (for stale config detection) |
-| `iat`            | Issued-at timestamp                                       |
-
-### TTL Configuration
-
-State tokens expire after 10 minutes by default (controlled by `oidc_state_ttl_seconds`). After expiration:
-
-- The Redis key is automatically deleted
-- Callback attempts with expired state will fail
-- Users must restart the authentication flow
-
-The key is also deleted as soon as a callback has been processed, so a state cannot be replayed while Redis is available.
-
-### Debugging State Issues
-
-To inspect cached state (requires Redis CLI access):
+To see how many sign-ins are in progress (requires Redis CLI access):
 
 ```bash
-# List all active OIDC states
-redis-cli KEYS "oidc:state:*"
-
-# Inspect a specific state entry
-redis-cli GET "oidc:state:{nonce}"
-
-# Check TTL remaining
-redis-cli TTL "oidc:state:{nonce}"
+redis-cli --scan --pattern "oidc:transaction:*" | wc -l
 ```
 
 <Callout type="warning">
-  Never manually delete or modify state entries in production. This could cause
-  active authentication flows to fail.
+  Never modify or copy transaction entries: they contain the PKCE verifier. Deleting one ends that user's sign-in.
 </Callout>
 
 ---
@@ -478,7 +457,7 @@ Always configure `allowed_domains` for each tenant. This ensures only users from
 
 ### State Token Protection
 
-Authentication requests use signed state tokens (JWT with HS256) to prevent CSRF attacks. Tokens expire after 10 minutes.
+Authentication requests use signed state tokens (JWT with HS256) to prevent CSRF attacks. Tokens expire after 10 minutes. Each request also carries a `nonce` and a PKCE `S256` challenge, which bind the ID token and the authorization code to this one sign-in.
 
 ---
 

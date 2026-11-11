@@ -5,13 +5,18 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
+from fastapi import HTTPException
 from pydantic import ValidationError
 
 from eneo.main.config import Settings
 from eneo.tenants.masking import looks_masked
 from eneo.tenants.tenant import TenantInDB, TenantState
 from eneo.tenants.tenant_federation_service import (
+    PatchFederationRequest,
+    SetFederationRequest,
     TenantAdminFederationPatch,
+    _build_full_federation_config,
+    _merge_federation_config,
     build_admin_view,
     federation_changes,
     federation_revision,
@@ -134,6 +139,8 @@ class TestTenantAdminPatch:
             "email_claim",
             "claims_mapping",
             "token_endpoint_auth_method",
+            "signing_algorithms",
+            "email_verified_claims",
             "tenant_id",
         ],
     )
@@ -142,7 +149,8 @@ class TestTenantAdminPatch:
             TenantAdminFederationPatch.model_validate({"revision": "r", field: "x"})
 
     @pytest.mark.parametrize(
-        "field", ["provider", "client_id", "client_secret", "allowed_domains"]
+        "field",
+        ["provider", "client_id", "client_secret", "allowed_domains", "subject_claim"],
     )
     def test_refuses_null(self, field: str):
         with pytest.raises(ValidationError):
@@ -245,6 +253,25 @@ class TestAdminView:
         assert view.redirect_uris == []
         assert view.redirect_uris_problem == "unresolvable"
 
+    def test_the_admin_view_lists_stored_redirect_uris_in_env_mode(
+        self, settings: Settings
+    ):
+        # The view shows the stored config, in either mode: in env mode it is
+        # what a move to stored mode would sign in with.
+        env_mode = settings.model_copy(
+            update={
+                "federation_enabled": False,
+                "oidc_discovery_endpoint": None,
+                "oidc_client_id": None,
+                "oidc_client_secret": None,
+            }
+        )
+
+        view = build_admin_view(_tenant(_config()), env_mode)
+
+        assert view.redirect_uris == ["https://org.eneo.test/login/callback"]
+        assert view.redirect_uris_problem is None
+
     @pytest.mark.parametrize(
         "config", [{}, {"canonical_public_origin": "https://org.eneo.test"}]
     )
@@ -256,3 +283,176 @@ class TestAdminView:
         assert view.configured is False
         assert view.revision is None
         assert view.client_secret_set is False
+
+
+class TestOperatorProviderKeys:
+    """The operator may name the provider's signing algorithms and the claims
+    that say an email is verified; absent keys keep the built-in defaults."""
+
+    BODY = {
+        "provider": "example",
+        "discovery_endpoint": "https://idp.example/.well-known/openid-configuration",
+        "client_id": "eneo-client",
+        "client_secret": "operator-secret",
+    }
+
+    def _put(self, **keys: object) -> dict[str, object]:
+        return _build_full_federation_config(
+            SetFederationRequest.model_validate({**self.BODY, **keys}),
+            encrypted_secret=CIPHERTEXT,
+        )
+
+    def test_absent_keys_are_not_stored(self):
+        config = self._put()
+
+        assert "signing_algorithms" not in config
+        assert "email_verified_claims" not in config
+
+    def test_given_keys_are_stored(self):
+        config = self._put(
+            signing_algorithms=["ES256", "RS256"],
+            email_verified_claims=["email_verified"],
+        )
+
+        assert config["signing_algorithms"] == ["ES256", "RS256"]
+        assert config["email_verified_claims"] == ["email_verified"]
+
+    @pytest.mark.parametrize(
+        "keys",
+        [
+            {"signing_algorithms": []},
+            {"signing_algorithms": ["HS256"]},
+            {"signing_algorithms": ["none"]},
+            {"signing_algorithms": ["RS256", "HS256"]},
+            {"email_verified_claims": []},
+            {"email_verified_claims": [""]},
+        ],
+    )
+    def test_refuses_keys_that_weaken_or_empty_the_check(self, keys: dict[str, object]):
+        with pytest.raises(ValidationError):
+            SetFederationRequest.model_validate({**self.BODY, **keys})
+
+    def test_patch_sets_and_null_clears(self):
+        stored = _config(signing_algorithms=["RS256"])
+
+        def patch(**keys: object) -> dict[str, object]:
+            request = PatchFederationRequest.model_validate(keys)
+            return _merge_federation_config(
+                stored,
+                request.model_dump(exclude_unset=True),
+                encrypted_secret=None,
+            )
+
+        assert patch(email_verified_claims=["xms_edov"])["email_verified_claims"] == [
+            "xms_edov"
+        ]
+        assert "signing_algorithms" not in patch(signing_algorithms=None)
+        assert patch(client_id="other")["signing_algorithms"] == ["RS256"]
+
+
+class TestSubjectClaim:
+    """Both doors may name the claim an account is bound to; it is stored as
+    claims_mapping.subject and is never the email claim."""
+
+    BODY = TestOperatorProviderKeys.BODY
+
+    def _put(self, **keys: object) -> dict[str, object]:
+        return _build_full_federation_config(
+            SetFederationRequest.model_validate({**self.BODY, **keys}),
+            encrypted_secret=CIPHERTEXT,
+        )
+
+    @staticmethod
+    def _patch(stored: dict[str, object], request: object) -> dict[str, object]:
+        assert isinstance(request, (PatchFederationRequest, TenantAdminFederationPatch))
+        return _merge_federation_config(
+            stored,
+            request.model_dump(exclude_unset=True, exclude={"revision"}),
+            encrypted_secret=None,
+        )
+
+    def test_put_stores_the_default_or_the_given_claim(self):
+        assert self._put()["claims_mapping"] == {
+            "email": "email",
+            "subject": "sub",
+            "username": "sub",
+            "name": "name",
+        }
+        claims = self._put(subject_claim=" oid ")["claims_mapping"]
+        assert isinstance(claims, dict)
+        assert claims["subject"] == "oid"
+        assert claims["email"] == "email"
+
+    def test_put_refuses_the_email_claim(self):
+        with pytest.raises(HTTPException) as refused:
+            self._put(subject_claim="email")
+        assert refused.value.status_code == 422
+
+    @pytest.mark.parametrize(
+        "model", [PatchFederationRequest, TenantAdminFederationPatch]
+    )
+    def test_patch_changes_only_the_subject_and_keeps_the_mapping(self, model):
+        stored = _config()
+
+        merged = self._patch(
+            stored, model.model_validate({"revision": "r", "subject_claim": "oid"})
+        )
+
+        assert merged["claims_mapping"] == {
+            "email": "upn",
+            "subject": "oid",
+            "username": "sub",
+            "name": "name",
+        }
+        assert stored["claims_mapping"] == {
+            "email": "upn",
+            "username": "sub",
+            "name": "name",
+        }
+
+    @pytest.mark.parametrize(
+        "model", [PatchFederationRequest, TenantAdminFederationPatch]
+    )
+    def test_patch_without_the_claim_keeps_the_stored_one(self, model):
+        stored = _config(
+            claims_mapping={"email": "upn", "subject": "oid", "name": "name"}
+        )
+
+        merged = self._patch(
+            stored, model.model_validate({"revision": "r", "client_id": "other"})
+        )
+
+        assert merged["claims_mapping"] == stored["claims_mapping"]
+
+    @pytest.mark.parametrize(
+        "model", [PatchFederationRequest, TenantAdminFederationPatch]
+    )
+    def test_patch_refuses_the_stored_email_claim(self, model):
+        with pytest.raises(HTTPException) as refused:
+            self._patch(
+                _config(),
+                model.model_validate({"revision": "r", "subject_claim": "upn"}),
+            )
+        assert refused.value.status_code == 422
+
+    @pytest.mark.parametrize("claim", ["", "   "])
+    def test_put_refuses_an_empty_claim(self, claim: str):
+        with pytest.raises(ValidationError):
+            SetFederationRequest.model_validate({**self.BODY, "subject_claim": claim})
+
+    @pytest.mark.parametrize("claim", ["", "   ", None])
+    def test_the_operator_patch_refuses_an_empty_or_null_claim(self, claim):
+        with pytest.raises(ValidationError):
+            PatchFederationRequest.model_validate({"subject_claim": claim})
+
+    @pytest.mark.parametrize("claim", ["", "   "])
+    def test_the_admin_door_refuses_an_empty_claim(self, claim: str):
+        with pytest.raises(ValidationError):
+            TenantAdminFederationPatch.model_validate(
+                {"revision": "r", "subject_claim": claim}
+            )
+
+    def test_the_admin_view_shows_the_effective_claim(self, settings: Settings):
+        assert build_admin_view(_tenant(_config()), settings).subject_claim == "sub"
+        configured = _config(claims_mapping={"email": "upn", "subject": "oid"})
+        assert build_admin_view(_tenant(configured), settings).subject_claim == "oid"

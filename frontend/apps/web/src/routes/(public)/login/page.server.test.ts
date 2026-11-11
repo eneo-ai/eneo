@@ -1,29 +1,23 @@
 import { DEFAULT_LANDING_PAGE } from "$lib/core/constants";
+import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getBackendUrl: vi.fn(() => "https://eneo.example"),
   loginWithEneo: vi.fn(),
   loginWithOidc: vi.fn(),
-  getMobilityguardLink: vi.fn(),
   getZitadelLink: vi.fn(),
-  clearMobilityguardCookie: vi.fn(),
   clearZitadelCookie: vi.fn(),
-  loginWithMobilityguard: vi.fn(),
-  loginWithZitadel: vi.fn()
+  loginWithZitadel: vi.fn(),
+  privateEnv: {} as Record<string, string | undefined>
 }));
 
-vi.mock("$env/dynamic/private", () => ({ env: {} }));
+vi.mock("$env/dynamic/private", () => ({ env: mocks.privateEnv }));
 vi.mock("$lib/core/environment.server", () => ({
   getBackendUrl: mocks.getBackendUrl
 }));
 vi.mock("$lib/features/auth/eneo.server", () => ({
   loginWithEneo: mocks.loginWithEneo
-}));
-vi.mock("$lib/features/auth/mobilityguard.server", () => ({
-  getMobilityguardLink: mocks.getMobilityguardLink,
-  clearMobilityguardCookie: mocks.clearMobilityguardCookie,
-  loginWithMobilityguard: mocks.loginWithMobilityguard
 }));
 vi.mock("$lib/features/auth/zitadel.server", () => ({
   getZitadelLink: mocks.getZitadelLink,
@@ -89,6 +83,7 @@ async function initiate(event: ReturnType<typeof loginEvent>, ttl = 600) {
       { status: 200, headers: { "Content-Type": "application/json" } }
     );
   });
+  // The redirect is exactly the backend's authorization URL, nothing added.
   await expect(actions.oidc!(event as never)).rejects.toMatchObject({
     status: 303,
     location: "https://idp.example/authorize"
@@ -100,7 +95,6 @@ describe("login resume", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getBackendUrl.mockReturnValue("https://eneo.example");
-    mocks.getMobilityguardLink.mockResolvedValue(undefined);
     mocks.getZitadelLink.mockResolvedValue(undefined);
   });
 
@@ -128,6 +122,35 @@ describe("login resume", () => {
     expect(event.cookies.set).not.toHaveBeenCalled();
     expect(event.cookies.delete).not.toHaveBeenCalled();
   });
+
+  test.each([
+    { oldSetting: true, global: false, multi: false, zitadel: false, unavailable: true },
+    { oldSetting: true, global: true, multi: false, zitadel: false, unavailable: false },
+    { oldSetting: true, global: false, multi: true, zitadel: false, unavailable: false },
+    { oldSetting: true, global: false, multi: false, zitadel: true, unavailable: false },
+    { oldSetting: false, global: false, multi: false, zitadel: false, unavailable: false }
+  ])(
+    "says organisation sign-in is unavailable only where the removed setting is the sole one: %o",
+    async (mode) => {
+      mocks.privateEnv.MOBILITY_GUARD_AUTH = mode.oldSetting ? "https://idp.example/authorize" : "";
+      mocks.getZitadelLink.mockResolvedValue("https://zitadel.example/oauth/v2/authorize");
+      const event = loginEvent();
+      event.locals.featureFlags.newAuth = mode.zitadel;
+      event.locals.featureFlags.federationStatus = {
+        has_single_tenant_federation: false,
+        has_global_oidc_config: mode.global,
+        has_multi_tenant_federation: mode.multi
+      };
+      try {
+        const result = await load(event as never);
+        expect(result.organisationSignInUnavailable).toBe(mode.unavailable);
+        expect(result).not.toHaveProperty("mobilityguardLink");
+        expect(event.cookies.set).not.toHaveBeenCalled();
+      } finally {
+        delete mocks.privateEnv.MOBILITY_GUARD_AUTH;
+      }
+    }
+  );
 
   test("username/password preserves nested encoding without a second decode", async () => {
     const destination = "/module-login?state=a%2526b%253Dc";
@@ -293,6 +316,13 @@ describe("login resume", () => {
       const result = await initiate(event);
       const initiateUrl = new URL(String(event.fetch.mock.calls[0][0]));
       expect(initiateUrl.pathname).toBe("/api/v1/auth/initiate");
+      // Only the S256 hash leaves the server; the secret stays in the HttpOnly cookie.
+      const { bindingVerifier } = JSON.parse(event.cookies.get(ATTEMPT_COOKIE) ?? "{}");
+      expect(bindingVerifier).toMatch(/^[A-Za-z0-9_-]{43}$/);
+      expect(initiateUrl.searchParams.get("binding_challenge")).toBe(
+        createHash("sha256").update(bindingVerifier).digest("base64url")
+      );
+      expect(initiateUrl.href).not.toContain(bindingVerifier);
       expect(initiateUrl.searchParams.get("tenant")).toBe(tenant);
       expect(initiateUrl.searchParams.get("state")).toBe(result.frontendState);
       const frontendState = JSON.parse(result.frontendState);
@@ -310,7 +340,8 @@ describe("login resume", () => {
       expect(attempt).toEqual({
         attemptId: frontendState.attemptId,
         destination,
-        expiresAt: expect.any(Number)
+        expiresAt: expect.any(Number),
+        bindingVerifier
       });
     }
   );
@@ -326,7 +357,8 @@ describe("login resume", () => {
     expect(attempt).toEqual({
       attemptId: frontendState.attemptId,
       destination: null,
-      expiresAt: expect.any(Number)
+      expiresAt: expect.any(Number),
+      bindingVerifier: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/)
     });
     expect(event.cookies.set).toHaveBeenCalledWith(
       ATTEMPT_COOKIE,
@@ -353,6 +385,7 @@ describe("login resume", () => {
     now += 11 * 60 * 1000;
 
     const result = await initiate(event);
+    const { bindingVerifier } = JSON.parse(event.cookies.get(ATTEMPT_COOKIE) ?? "{}");
     now += 9 * 60 * 1000;
     mocks.loginWithOidc.mockResolvedValue({ frontendState: result.frontendState });
     const url = new URL("https://eneo.example/login/callback");
@@ -362,7 +395,13 @@ describe("login resume", () => {
       status: 302,
       location: DEFAULT_LANDING_PAGE
     });
-    expect(mocks.loginWithOidc).toHaveBeenCalledWith("new-code", result.state, event.fetch);
+    expect(mocks.loginWithOidc).toHaveBeenCalledWith(
+      "new-code",
+      result.state,
+      bindingVerifier,
+      event.fetch,
+      null
+    );
   });
 
   test.each(["mismatch", "no-code", "no-state", "provider-error"])(
@@ -428,6 +467,25 @@ describe("login resume", () => {
       expect(event.cookies.set).not.toHaveBeenCalled();
     }
   );
+
+  test("an initiation refused because sign-in is unavailable says so", async () => {
+    const event = loginEvent();
+    event.fetch.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          message: "Unavailable.",
+          eneo_error_code: 9077,
+          code: "oidc_login_unavailable"
+        }),
+        { status: 503 }
+      )
+    );
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const result = await actions.oidc!(event as never);
+
+    expect(result).toMatchObject({ status: 503, data: { oidcFailed: true, unavailable: true } });
+  });
 
   test("rejects an invalid tenant without contacting the backend or replacing an attempt", async () => {
     const form = new FormData();

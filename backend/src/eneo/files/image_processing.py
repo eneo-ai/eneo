@@ -108,7 +108,7 @@ def downscale_image(blob: bytes, mimetype: str | None) -> ProcessedImage:
 
             processed = buffer.getvalue()
     except Exception as e:
-        logger.warning(f"Could not process image for downscaling: {e}")
+        logger.warning("Could not process image for downscaling (%s)", type(e).__name__)
         return ProcessedImage(blob=blob, mimetype=mimetype or "image/png")
 
     if not needs_resize and not needs_conversion and len(processed) >= len(blob):
@@ -217,8 +217,8 @@ def extract_images_from_pdf(
             for page in pdf.pages:
                 if len(extracted) >= max_images:
                     logger.info(
-                        f"Page-image cap ({max_images}) reached for "
-                        f"'{filepath.name}'; later pages were not scanned"
+                        f"Page-image cap ({max_images}) reached; "
+                        "later pages were not scanned"
                     )
                     break
                 if (
@@ -226,8 +226,8 @@ def extract_images_from_pdf(
                     and page.page_number > max_scanned_pages
                 ):
                     logger.info(
-                        f"Page-scan cap ({max_scanned_pages}) reached for "
-                        f"'{filepath.name}'; later pages were not scanned"
+                        f"Page-scan cap ({max_scanned_pages}) reached; "
+                        "later pages were not scanned"
                     )
                     break
                 try:
@@ -238,15 +238,16 @@ def extract_images_from_pdf(
                         extracted.append(rendered)
                 except Exception as e:
                     logger.warning(
-                        f"Skipping unrenderable page {page.page_number} "
-                        f"of '{filepath.name}': {e}"
+                        "Skipping unrenderable page %s (%s)",
+                        page.page_number,
+                        type(e).__name__,
                     )
                 finally:
                     # Parsed page objects stay cached until released, so a
                     # long scan would otherwise grow by megabytes per page.
                     page.close()
     except Exception as e:
-        logger.warning(f"PDF image extraction failed for '{filepath.name}': {e}")
+        logger.warning("PDF image extraction failed (%s)", type(e).__name__)
 
     return extracted
 
@@ -268,6 +269,9 @@ def extract_images_from_office(
 
     Vector media (EMF/WMF) and anything else Pillow cannot decode is
     skipped. Never raises: extraction is best-effort enrichment.
+
+    A media entry's name is part of the document, which retention removes, so
+    logs give its position and size, never its name or a parser's message.
     """
     media_dir = _OFFICE_MEDIA_DIRS.get(mimetype)
     if media_dir is None:
@@ -284,17 +288,18 @@ def extract_images_from_office(
                 ),
                 key=lambda info: _natural_sort_key(info.filename),
             )
-            for entry in entries:
+            for position, entry in enumerate(entries, start=1):
                 if len(extracted) >= max_images:
                     logger.info(
-                        f"Embedded-image cap ({max_images}) reached for "
-                        f"'{filepath.name}'; later media entries were skipped"
+                        f"Embedded-image cap ({max_images}) reached; "
+                        "later media entries were skipped"
                     )
                     break
                 if entry.file_size > _MAX_EMBEDDED_MEDIA_BYTES:
                     logger.warning(
-                        f"Skipping oversized media entry '{entry.filename}' "
-                        f"({entry.file_size} bytes) in '{filepath.name}'"
+                        "Skipping oversized media entry %s (%s bytes)",
+                        position,
+                        entry.file_size,
                     )
                     continue
 
@@ -311,6 +316,6 @@ def extract_images_from_office(
 
                 extracted.append(downscale_image(blob, media_mimetype))
     except Exception as e:
-        logger.warning(f"Office image extraction failed for '{filepath.name}': {e}")
+        logger.warning("Office image extraction failed (%s)", type(e).__name__)
 
     return extracted

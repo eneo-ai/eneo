@@ -3,6 +3,7 @@
 from sqlalchemy import TIMESTAMP, Boolean, Column, ForeignKey, Integer
 from sqlalchemy.dialects.postgresql import UUID
 
+from eneo.audit.domain.constants import DEFAULT_RETENTION_DAYS
 from eneo.database.tables.base_class import BaseWithTableName, TimestampMixin
 
 
@@ -20,7 +21,7 @@ class AuditRetentionPolicy(TimestampMixin, BaseWithTableName):
     )
 
     # Audit Log Retention Configuration
-    retention_days = Column(Integer, nullable=False, default=365)
+    retention_days = Column(Integer, nullable=False, default=DEFAULT_RETENTION_DAYS)
 
     # Conversation History Retention Configuration
     conversation_retention_enabled = Column(Boolean, nullable=False, default=False)

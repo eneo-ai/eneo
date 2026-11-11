@@ -5,10 +5,13 @@ API-key header rules the session cookie out. Otherwise the cookie counts, but
 only with BROWSER_SESSION_ENABLED on and when the Sec-Fetch-Site gate allows.
 """
 
+import base64
+import hashlib
 import logging
 from collections.abc import Iterator
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 from dependency_injector import providers
@@ -218,6 +221,27 @@ async def test_a_renewed_session_keeps_its_generation_and_another_does_not():
     assert session_generation(auth.add_session_id(first, odd)) != session_generation(
         auth.add_session_id(second, odd)
     )
+
+
+def test_a_session_is_named_by_its_stable_id_and_old_tokens_keep_their_name():
+    auth = AuthService()
+    token = auth.create_access_token_for_user(TEST_USER)
+    ref = uuid4()
+
+    # A token issued before sessions had a stable id keeps the generation its
+    # pages were loaded with: the hash of its sid, as before.
+    issued_before = auth.add_session_id(token, "a" * 43)
+    digest = hashlib.sha256(("sid:" + "a" * 43).encode()).digest()[:16]
+    assert session_generation(issued_before) == (
+        base64.urlsafe_b64encode(digest).decode().rstrip("=")
+    )
+    # A session with a stable id is named by that id, whatever its sid, so a
+    # new sid for the same session does not change the page's generation.
+    named = session_generation(auth.add_session_id(token, "a" * 43, ref))
+    assert named == session_generation(auth.add_session_id(token, "b" * 43, ref))
+    assert named != session_generation(issued_before)
+    assert named != session_generation(auth.add_session_id(token, "a" * 43, uuid4()))
+    assert str(ref) not in named and ref.hex not in named
 
 
 @pytest.mark.parametrize(

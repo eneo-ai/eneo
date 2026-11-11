@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import logging
 import os
 from functools import wraps
 from typing import Any, Awaitable, Callable, cast
@@ -15,6 +16,7 @@ from dependency_injector import providers
 from opentelemetry import trace
 
 from eneo.database.database import AsyncSession, sessionmanager
+from eneo.jobs.job_models import failure_code_for_exception
 from eneo.jobs.job_serialization import deserialize_job, serialize_job
 from eneo.jobs.task_models import ResourceTaskParams
 from eneo.main.config import Settings, get_settings
@@ -22,7 +24,7 @@ from eneo.main.container.container import Container, SessionProxy
 from eneo.main.container.container_overrides import override_user
 from eneo.main.logging import get_logger
 from eneo.main.models import ChannelType, Status
-from eneo.observability.error_text import user_visible_error
+from eneo.observability.error_log import log_error
 from eneo.redis.connection import build_arq_redis_settings
 from eneo.server.dependencies import lifespan
 from eneo.worker.task_manager import TaskManager, WorkerConfig
@@ -271,8 +273,11 @@ class Worker:
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             @wraps(func)
             async def wrapper(ctx: ARQContext, params: object) -> Any:
+                # A job's parameters can carry text that retention removes,
+                # such as a file's name in an audit event: name the job only.
                 logger.debug(
-                    f"Executing {func.__name__} with context {ctx} and params {params}"
+                    f"Executing {func.__name__}",
+                    extra={"job_id": str(ctx.get("job_id"))},
                 )
 
                 async with sessionmanager.session() as session, session.begin():
@@ -533,12 +538,17 @@ class Worker:
         self,
         with_user: bool = True,
         channel_type: ChannelType | None = None,
+        *,
+        keep_result: int | None = None,
     ):
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             @wraps(func)
             async def wrapper(ctx: ARQContext, params: ResourceTaskParams) -> Any:
+                # A job's parameters can carry text that retention removes:
+                # name the job only.
                 logger.debug(
-                    f"Executing {func.__name__} with context {ctx} and params {params}"
+                    f"Executing {func.__name__}",
+                    extra={"job_id": str(ctx.get("job_id"))},
                 )
 
                 job_id = _job_id_from_ctx(ctx)
@@ -575,7 +585,12 @@ class Worker:
 
                 return success
 
-            self.functions.append(traced_job("job", wrapper))
+            traced = traced_job("job", wrapper)
+            self.functions.append(
+                arq_func(traced, keep_result=keep_result)
+                if keep_result is not None
+                else traced
+            )
             return wrapper
 
         return decorator
@@ -584,18 +599,23 @@ class Worker:
         self, job_id: UUID, user_id: UUID | None, exc: BaseException
     ) -> None:
         """Record the failure in a fresh session so the job is not left pending
-        until the reaper finds it."""
-        # JobPublic serves the result of a failed integration task as its
-        # failure message; a commit error carries SQL with bound values.
-        message = user_visible_error(exc)
+        until the reaper finds it.
+
+        Like a task's own failure it is stored as its code: a commit error
+        carries SQL with bound values.
+        """
+        code = failure_code_for_exception(exc)
         try:
             async with sessionmanager.session() as session, session.begin():
                 container = await self._create_container(session, user_id=user_id)
-                await container.job_service().fail_job(job_id, message)
-        except Exception:
-            logger.exception(
+                await container.job_service().fail_job(job_id, failure_code=code)
+        except Exception as error:
+            log_error(
+                logger,
+                logging.ERROR,
                 "Could not record job failure after a commit error",
-                extra={"job_id": str(job_id)},
+                error=error,
+                extra={"job_id": str(job_id), "failure_code": code.value},
             )
 
     def cron_job(self, *, manages_own_session: bool = False, **decorator_kwargs: Any):

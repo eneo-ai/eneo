@@ -29,7 +29,7 @@
     description={m.chat_history_rename_description()}
     label={m.chat_history_name_label()}
     initial={conversation?.name ?? ""}
-    placeholder={conversation?.name ?? untitled}
+    placeholder={conversation?.name || untitled}
     submitLabel={m.save()}
     pendingLabel={m.saving()}
     onSubmit={(name) => chat.renameConversation(conversation, name)}
@@ -54,7 +54,7 @@
     {/snippet}
     {#snippet description()}
       {m.do_you_really_want_to_delete()}
-      <span class="italic">{(conversation?.name ?? untitled).slice(0, 200)}</span>?
+      <span class="italic">{(conversation?.name || untitled).slice(0, 200)}</span>?
     {/snippet}
   </ConfirmDialog>
 </div>

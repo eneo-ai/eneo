@@ -9,6 +9,8 @@ from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from eneo.audit.domain.constants import DEFAULT_RETENTION_DAYS
+from eneo.data_retention.constants import MAX_RETENTION_DAYS, MIN_RETENTION_DAYS
 from eneo.database.tables.audit_retention_policy_table import AuditRetentionPolicy
 
 
@@ -68,7 +70,7 @@ class RetentionService:
         """
         await self.session.execute(
             pg_insert(AuditRetentionPolicy)
-            .values(tenant_id=tenant_id, retention_days=365)
+            .values(tenant_id=tenant_id, retention_days=DEFAULT_RETENTION_DAYS)
             .on_conflict_do_nothing(index_elements=["tenant_id"])
         )
         result = await self.session.execute(
@@ -101,16 +103,16 @@ class RetentionService:
             ValueError: If retention_days is out of valid range
         """
         # Validate retention period
-        if retention_days < 1:
+        if retention_days < MIN_RETENTION_DAYS:
             raise ValueError("Minimum retention period is 1 day")
-        if retention_days > 2555:  # ~7 years
+        if retention_days > MAX_RETENTION_DAYS:
             raise ValueError("Maximum retention period is 2555 days (7 years)")
 
         # Validate conversation retention
         if conversation_retention_days is not None:
-            if conversation_retention_days < 1:
+            if conversation_retention_days < MIN_RETENTION_DAYS:
                 raise ValueError("Minimum conversation retention period is 1 day")
-            if conversation_retention_days > 2555:
+            if conversation_retention_days > MAX_RETENTION_DAYS:
                 raise ValueError("Maximum conversation retention period is 2555 days")
 
         # Build update values
