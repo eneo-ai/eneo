@@ -20298,7 +20298,7 @@ export interface components {
       allowed_domains?: string[] | null;
       /**
        * Allowed Endpoint Hosts
-       * @description Hosts other than the discovery endpoint's that the provider's token endpoint and JWKS may be on, as host names (no scheme, port or path). Omitted: only the discovery host.
+       * @description Hosts other than the discovery endpoint's that the provider's token endpoint and JWKS may be on, as host names or IP addresses (IPv6 with or without brackets; no scheme, port or path). Omitted: only the discovery host.
        * @example [
        *       "oauth2.googleapis.com",
        *       "www.googleapis.com"
@@ -21975,7 +21975,7 @@ export interface components {
       allowed_domains?: string[];
       /**
        * Allowed Endpoint Hosts
-       * @description Hosts other than the discovery endpoint's that the provider's token endpoint and JWKS may be on, as host names (no scheme, port or path). Omitted: only the discovery host.
+       * @description Hosts other than the discovery endpoint's that the provider's token endpoint and JWKS may be on, as host names or IP addresses (IPv6 with or without brackets; no scheme, port or path). Omitted: only the discovery host.
        * @example [
        *       "oauth2.googleapis.com",
        *       "www.googleapis.com"

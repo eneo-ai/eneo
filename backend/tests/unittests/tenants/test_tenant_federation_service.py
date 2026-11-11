@@ -605,6 +605,33 @@ class TestProviderEndpoints:
         _usable({**config, "allowed_endpoint_hosts": request.allowed_endpoint_hosts})
 
     @pytest.mark.parametrize(
+        ("listed", "endpoint"),
+        [
+            ("169.254.169.254", "https://169.254.169.254/token"),
+            ("[::ffff:169.254.169.254]", "https://[::ffff:169.254.169.254]/token"),
+            ("[fe80::1]", "https://[fe80::1]/token"),
+            ("127.0.0.1", "https://127.0.0.1/token"),
+        ],
+    )
+    def test_a_listed_address_no_request_may_go_to_is_still_refused(
+        self, in_environment, listed: str, endpoint: str
+    ):
+        """The list moves the host rule, never the address rules."""
+        in_environment("production")
+        request = SetFederationRequest.model_validate(
+            {**self.BODY, "allowed_endpoint_hosts": [listed]}
+        )
+        config = _config(
+            token_endpoint=endpoint,
+            allowed_endpoint_hosts=request.allowed_endpoint_hosts,
+        )
+
+        with pytest.raises(HTTPException) as refused:
+            _usable(config)
+        assert refused.value.status_code == 400
+        assert "the provider's address is not allowed" in refused.value.detail
+
+    @pytest.mark.parametrize(
         "endpoint",
         [
             "https://idp.example:bad/token",

@@ -160,8 +160,9 @@ class FederationRequestBase(BaseModel):
         None,
         description=(
             "Hosts other than the discovery endpoint's that the provider's "
-            "token endpoint and JWKS may be on, as host names (no scheme, port "
-            "or path). Omitted: only the discovery host."
+            "token endpoint and JWKS may be on, as host names or IP addresses "
+            "(IPv6 with or without brackets; no scheme, port or path). Omitted: "
+            "only the discovery host."
         ),
         examples=[["oauth2.googleapis.com", "www.googleapis.com"]],
     )
