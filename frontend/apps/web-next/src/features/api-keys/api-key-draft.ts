@@ -16,9 +16,15 @@ import type {
  * key policy (api_key_policy.py) is what enforces them.
  */
 
+/**
+ * Every resource type the backend's `ResourcePermissions` takes; a type test
+ * holds the two equal, so a new one cannot be dropped when a key is saved.
+ */
 export const RESOURCE_KEYS = [
   "assistants",
   "apps",
+  "flows",
+  "flow_evidence",
   "spaces",
   "knowledge",
   "conversations",
@@ -43,8 +49,8 @@ const SCOPE_RESOURCE_KEYS: Record<ApiKeyScopeType, readonly ResourceKey[]> = {
   app: ["apps", "files"]
 };
 
-/** Public keys never reach jobs or prompts (the backend refuses them). */
-const PUBLIC_KEY_HIDDEN: ReadonlySet<ResourceKey> = new Set(["jobs", "prompts"]);
+/** Public keys never reach jobs, prompts or Flow evidence (the backend refuses them). */
+const PUBLIC_KEY_HIDDEN: ReadonlySet<ResourceKey> = new Set(["jobs", "prompts", "flow_evidence"]);
 
 /** A key scoped to one assistant or app always reaches that assistant or app. */
 function requiredResource(scopeType: ApiKeyScopeType): ResourceKey | null {
@@ -72,8 +78,10 @@ export type ApiKeyDraft = {
   rateLimit: string;
 };
 
+/** Every resource type at one level, except Flow evidence: that is granted on its own. */
 function allAt(level: ResourcePermissionLevel): ResourcePermissions {
-  return Object.fromEntries(RESOURCE_KEYS.map((key) => [key, level])) as ResourcePermissions;
+  const permissions = Object.fromEntries(RESOURCE_KEYS.map((key) => [key, level]));
+  return { ...permissions, flow_evidence: "none" } as ResourcePermissions;
 }
 
 /** A public key starts out reading assistants and apps only. */
@@ -134,7 +142,7 @@ export function draftFromApiKey(key: ApiKey): ApiKeyDraft {
   };
 }
 
-function levelOf(value: string | undefined): ResourcePermissionLevel {
+function levelOf(value: string | null | undefined): ResourcePermissionLevel {
   return RESOURCE_LEVELS.includes(value as ResourcePermissionLevel)
     ? (value as ResourcePermissionLevel)
     : "none";
