@@ -262,18 +262,25 @@ async def test_a_disabled_frequent_task_is_left_to_the_nightly_run(
     asks no probe and writes no row, skip row or audit event; the nightly run
     records the skip once a day.
 
-    Mutant: the frequent cron records a skip on every tick."""
+    Mutants: the frequent cron records a skip on every tick; it builds and
+    runs a task whose switch is off."""
     now = await _database_now()
     await _items("tests.off", 1, finished=now - 2 * _AFTER)
+    built: list[str] = []
+
+    def build(session: AsyncSession) -> _DueItems:
+        built.append("tests.off")
+        return _DueItems(session, "tests.off", now=now)
 
     def registrations(
         settings: Settings, *, now: datetime | None = None
     ) -> tuple[RetentionTaskRegistration, ...]:
-        return (_frequent("tests.off", _raises, enabled=False),)
+        return (_frequent("tests.off", build, enabled=False),)
 
     monkeypatch.setattr(retention_worker, "retention_task_registrations", registrations)
     reports = await _frequent_cron()
 
+    assert built == []
     assert reports == []
     assert await _job_rows("tests.off") == []
     assert await _retention_audits() == 0
@@ -328,8 +335,7 @@ async def test_a_due_item_is_removed_by_the_first_tick_after_its_time(
     """The tick reads the database's clock once at its start and builds the
     task with it.
 
-    Mutants: the tick takes the worker's clock; the tick removes an item
-    before its time."""
+    Mutant: the tick removes an item before its time."""
     now = await _database_now()
     await _items("tests.soon", 1, finished=now - _AFTER + timedelta(minutes=10))
 
@@ -530,7 +536,9 @@ async def test_overlapping_ticks_never_run_the_same_task_at_once(test_tenant) ->
 
     first = asyncio.create_task(tick())
     await inside.wait()
-    second = await tick()
+    # A second tick that entered the chunk would wait on `release` forever.
+    async with asyncio.timeout(30):
+        second = await tick()
     release.set()
     first_reports = await first
 
@@ -588,14 +596,18 @@ async def test_the_nightly_run_runs_a_frequent_task_without_its_probe(
 ) -> None:
     """Every task runs in the nightly run, frequent ones included, and that
     run asks no probe: it writes a row a day, keeps the stale rule meaningful
-    and records the skip of one that is turned off.
+    and records the skip of one that is turned off. A frequent task with
+    nothing due still gets its row, so a quiet task does not read stale.
 
-    Mutant: the nightly run leaves frequent tasks out, or asks their probe."""
+    Mutants: the nightly run leaves frequent tasks out, asks their probe, or
+    runs a frequent task only when its probe finds work."""
     now = await _database_now()
     await _items("tests.nightly", 1, finished=now - 2 * _AFTER)
+    # Recorded, not raised: the frequent path runs a task whose probe raises.
+    asked: list[str] = []
 
     def unasked() -> None:
-        raise AssertionError("The nightly run asked the probe.")
+        asked.append("probe")
 
     async with sessionmanager.session() as session:
         reports = await run_registered_tasks(
@@ -605,6 +617,12 @@ async def test_the_nightly_run_runs_a_frequent_task_without_its_probe(
                     "tests.nightly",
                     lambda s: _DueItems(s, "tests.nightly", now=now, probe=unasked),
                 ),
+                _frequent(
+                    "tests.nightly_quiet",
+                    lambda s: _DueItems(
+                        s, "tests.nightly_quiet", now=now, probe=unasked
+                    ),
+                ),
                 _frequent("tests.nightly_off", _raises, enabled=False),
             ],
             _runner_for(session),
@@ -612,9 +630,14 @@ async def test_the_nightly_run_runs_a_frequent_task_without_its_probe(
 
     assert [(report.task, report.outcome) for report in reports] == [
         ("tests.nightly", RetentionJobOutcome.SUCCEEDED),
+        ("tests.nightly_quiet", RetentionJobOutcome.SUCCEEDED),
         ("tests.nightly_off", RetentionJobOutcome.SKIPPED),
     ]
     assert await _left("tests.nightly") == 0
+    assert await _job_rows("tests.nightly_quiet") == [
+        ("tests.nightly_quiet", "succeeded")
+    ]
+    assert asked == []
 
 
 def _health_of(
@@ -671,6 +694,74 @@ async def test_a_frequent_task_reads_overdue_an_hour_past_its_time(
     assert (health.status, task.status) == (expected, expected)
     assert task.overdue is (expected is RetentionHealthStatus.DEGRADED)
     assert task.no_execution
+
+
+@pytest.mark.parametrize(
+    "rows,late,expected",
+    [
+        pytest.param(
+            [("succeeded", timedelta(0), timedelta(0))],
+            None,
+            RetentionHealthStatus.HEALTHY,
+            id="fresh-run",
+        ),
+        pytest.param(
+            [("succeeded", timedelta(0), timedelta(0))],
+            timedelta(minutes=70),
+            RetentionHealthStatus.DEGRADED,
+            id="fresh-run-overdue",
+        ),
+        pytest.param(
+            [("succeeded", timedelta(days=3), timedelta(days=3))],
+            None,
+            RetentionHealthStatus.DEGRADED,
+            id="three-days-old",
+        ),
+        pytest.param(
+            [
+                ("succeeded", timedelta(hours=3), timedelta(hours=3)),
+                ("running", timedelta(hours=2), timedelta(hours=2)),
+            ],
+            None,
+            RetentionHealthStatus.UNKNOWN,
+            id="abandoned",
+        ),
+    ],
+)
+async def test_a_frequent_task_with_runs_reads_its_rows_and_its_probe(
+    test_tenant,
+    monkeypatch: pytest.MonkeyPatch,
+    rows: list[tuple[str, timedelta, timedelta]],
+    late: timedelta | None,
+    expected: RetentionHealthStatus,
+) -> None:
+    """After its first nightly run a frequent task has rows: a fresh run and
+    nothing overdue is healthy, overdue work degrades it, the two-day rule
+    applies to it as to every task, and an abandoned run is unknown.
+
+    Mutants: a frequent task with a probe reads healthy whatever its rows say,
+    so the stale and abandoned rules skip it; health asks only its rows and
+    misses the probe's overdue work."""
+    now = await _database_now()
+    async with _committed() as session:
+        for outcome, started_ago, beat_ago in rows:
+            done = outcome != "running"
+            session.add(
+                RetentionJobRuns(
+                    task="tests.health",
+                    outcome=outcome,
+                    started_at=now - started_ago,
+                    heartbeat_at=now - beat_ago,
+                    finished_at=now - started_ago if done else None,
+                )
+            )
+    if late is not None:
+        await _items("tests.health", 1, finished=now - _AFTER - late)
+    _health_of(monkeypatch, lambda s, at: _DueItems(s, "tests.health", now=at))
+
+    [task] = (await _health()).tasks
+
+    assert task.status is expected
 
 
 async def test_a_claim_timeout_with_nothing_overdue_reads_healthy(

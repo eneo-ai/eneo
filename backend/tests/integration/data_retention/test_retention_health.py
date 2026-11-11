@@ -4,9 +4,9 @@ run, with the composition root's registrations and each process's own settings."
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from uuid import UUID
 
 import pytest
+import sqlalchemy as sa
 
 from eneo.data_retention.application.conversation_history_retention_task import (
     CONVERSATION_HISTORY_TASK,
@@ -17,10 +17,6 @@ from eneo.data_retention.application.empty_session_retention_task import (
 from eneo.data_retention.application.retention_health import (
     RetentionHealth,
     RetentionHealthStatus,
-)
-from eneo.data_retention.application.retention_runner import (
-    RetentionOverdueReporter,
-    RetentionRunner,
 )
 from eneo.data_retention.domain.retention import (
     RetentionErrorCode,
@@ -160,26 +156,22 @@ async def test_a_failed_task_degrades_health_beside_a_disabled_one(
 async def test_every_way_to_run_retention_measures_overdue_work(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """The scheduled run and the readback's rounds both end a task through the
-    runner, which reads its overdue work before it records the outcome, so a
-    completed run without a measurement means the read failed.
+    """The scheduled run and the readback's rounds both end a task with its
+    overdue work measured, so a completed run without a measurement means the
+    read failed.
 
     Mutant: a path finishes a run without trying to measure it."""
-    measured: list[str] = []
-    record_overdue = RetentionRunner._record_overdue
-
-    async def spy(
-        self: RetentionRunner,
-        name: str,
-        reporter: RetentionOverdueReporter,
-        job_run_id: UUID,
-    ) -> None:
-        measured.append(name)
-        await record_overdue(self, name, reporter, job_run_id)
-
-    monkeypatch.setattr(RetentionRunner, "_record_overdue", spy)
-
     await run_nightly_retention(monkeypatch, get_settings())
     await run_retention_at(await database_now())
 
-    assert measured == [CONVERSATION_HISTORY_TASK, CONVERSATION_HISTORY_TASK]
+    async with sessionmanager.session() as session, session.begin():
+        observed = (
+            await session.scalars(
+                sa.select(RetentionJobRuns.overdue_observed_at)
+                .where(RetentionJobRuns.task == CONVERSATION_HISTORY_TASK)
+                .order_by(RetentionJobRuns.started_at)
+            )
+        ).all()
+
+    assert len(observed) == 2
+    assert None not in observed

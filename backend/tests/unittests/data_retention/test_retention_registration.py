@@ -9,6 +9,18 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from eneo.data_retention.application.conversation_history_retention_task import (
+    CONVERSATION_HISTORY_TASK,
+)
+from eneo.data_retention.application.derived_copy_retention_task import (
+    DERIVED_COPIES_TASK,
+)
+from eneo.data_retention.application.empty_session_retention_task import (
+    EMPTY_SESSIONS_TASK,
+)
+from eneo.data_retention.application.job_history_retention_task import (
+    JOB_HISTORY_TASK,
+)
 from eneo.data_retention.application.retention_health import (
     RetentionHealth,
     RetentionHealthStatus,
@@ -30,6 +42,7 @@ from eneo.data_retention.domain.rules import (
 )
 from eneo.database import database
 from eneo.database.database import DatabaseSessionManager
+from eneo.files.unused_file_retention_task import UNUSED_FILES_TASK
 from eneo.main.config import Settings, get_settings
 from eneo.main.retention_tasks import (
     EXISTING_WITHOUT_CHOICE,
@@ -396,12 +409,33 @@ def _registration(
     )
 
 
-def test_every_registration_runs_daily_unless_it_says_otherwise():
-    """Mutant: the default cadence makes today's tasks frequent."""
-    assert {
-        registration.every
+_CORE_TASKS = (
+    CONVERSATION_HISTORY_TASK,
+    DERIVED_COPIES_TASK,
+    EMPTY_SESSIONS_TASK,
+    UNUSED_FILES_TASK,
+    JOB_HISTORY_TASK,
+)
+
+
+def test_a_registration_runs_daily_unless_it_says_otherwise():
+    """Mutants: the default cadence is frequent; one of the five core tasks
+    runs frequently. Tasks added later may run frequently."""
+    unsaid = RetentionTaskRegistration(
+        name="tests.cadence",
+        enabled=True,
+        budget=RetentionBudget(rows=10, files=10, seconds=60),
+        build=_Probed,
+    )
+    cadences = {
+        registration.name: registration.every
         for registration in retention_task_registrations(get_settings())
-    } == {"daily"}
+    }
+
+    assert unsaid.every == "daily"
+    assert {name: cadences[name] for name in _CORE_TASKS} == dict.fromkeys(
+        _CORE_TASKS, "daily"
+    )
 
 
 def test_a_frequent_task_needs_a_due_probe_and_reports_no_overdue_work():
